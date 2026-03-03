@@ -45,28 +45,28 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("AllowedCommands are stored in allowed map", func(t *testing.T) {
-		srv, err := New(Config{TownRoot: t.TempDir(), AllowedCommands: []string{"gt", "bd"}, Logger: discardLogger()}, nil)
+		srv, err := New(Config{TownRoot: t.TempDir(), AllowedCommands: []string{"echo", "true"}, Logger: discardLogger()}, nil)
 		require.NoError(t, err)
-		assert.True(t, srv.allowed["gt"])
-		assert.True(t, srv.allowed["bd"])
+		assert.True(t, srv.allowed["echo"])
+		assert.True(t, srv.allowed["true"])
 		assert.False(t, srv.allowed["curl"])
 	})
 
 	t.Run("isAllowed reflects allowed map", func(t *testing.T) {
-		srv, err := New(Config{TownRoot: t.TempDir(), AllowedCommands: []string{"gt", "bd"}, Logger: discardLogger()}, nil)
+		srv, err := New(Config{TownRoot: t.TempDir(), AllowedCommands: []string{"echo", "true"}, Logger: discardLogger()}, nil)
 		require.NoError(t, err)
-		assert.True(t, srv.isAllowed("gt"))
-		assert.True(t, srv.isAllowed("bd"))
+		assert.True(t, srv.isAllowed("echo"))
+		assert.True(t, srv.isAllowed("true"))
 		assert.False(t, srv.isAllowed("curl"))
 		assert.False(t, srv.isAllowed(""))
 	})
 
 	t.Run("AllowedCommands with path separators are rejected", func(t *testing.T) {
-		srv, err := New(Config{TownRoot: t.TempDir(), AllowedCommands: []string{"/usr/bin/gt", "bd", `C:\gt.exe`}, Logger: discardLogger()}, nil)
+		srv, err := New(Config{TownRoot: t.TempDir(), AllowedCommands: []string{"/usr/bin/echo", "true", `C:\echo.exe`}, Logger: discardLogger()}, nil)
 		require.NoError(t, err)
-		assert.False(t, srv.isAllowed("/usr/bin/gt"), "absolute path should be rejected")
-		assert.True(t, srv.isAllowed("bd"), "plain name should be accepted")
-		assert.False(t, srv.isAllowed(`C:\gt.exe`), "windows path should be rejected")
+		assert.False(t, srv.isAllowed("/usr/bin/echo"), "absolute path should be rejected")
+		assert.True(t, srv.isAllowed("true"), "plain name should be accepted")
+		assert.False(t, srv.isAllowed(`C:\echo.exe`), "windows path should be rejected")
 	})
 }
 
