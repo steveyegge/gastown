@@ -11,6 +11,9 @@
 
 FROM golang:1.26-alpine
 
+ARG DOLT_VERSION=1.82.4
+ARG BD_VERSION=v0.57.0
+
 # Install dependencies including CGO build requirements for beads daemon
 # procps and lsof are required by gt dolt start for process verification
 RUN apk add --no-cache \
@@ -25,12 +28,22 @@ RUN apk add --no-cache \
     tmux
 
 # Install beads daemon (bd)
-RUN go install github.com/steveyegge/beads/cmd/bd@v0.55.4
+RUN for i in 1 2 3; do \
+      go install github.com/steveyegge/beads/cmd/bd@${BD_VERSION} && break; \
+      if [ "$i" -eq 3 ]; then exit 1; fi; \
+      sleep 2; \
+    done
 
-# Install Dolt (required for beads database server)
-RUN git clone --depth 1 https://github.com/dolthub/dolt /tmp/dolt && \
-    cd /tmp/dolt/go && go install ./cmd/dolt && \
-    rm -rf /tmp/dolt
+# Install Dolt (required for beads database server), pinned for stability
+RUN for i in 1 2 3; do \
+      rm -rf /tmp/dolt && \
+      git clone --depth 1 --branch v${DOLT_VERSION} https://github.com/dolthub/dolt /tmp/dolt && \
+      cd /tmp/dolt/go && go install ./cmd/dolt && \
+      cd / && rm -rf /tmp/dolt && \
+      break; \
+      if [ "$i" -eq 3 ]; then exit 1; fi; \
+      sleep 2; \
+    done
 
 # Configure git and dolt identity (required for gt install --git and dolt init)
 RUN git config --global user.name "Test User" && \
@@ -44,7 +57,11 @@ WORKDIR /app
 
 # Copy go.mod and go.sum first for better layer caching
 COPY go.mod go.sum ./
-RUN go mod download
+RUN for i in 1 2 3; do \
+      go mod download && break; \
+      if [ "$i" -eq 3 ]; then exit 1; fi; \
+      sleep 2; \
+    done
 
 # Copy source code
 COPY . .

@@ -1,8 +1,14 @@
-.PHONY: build install clean test test-e2e-container check-up-to-date
+.PHONY: build desktop-build desktop-run install clean test test-e2e-container check-up-to-date
 
 BINARY := gt
+BINARY_DESKTOP := gt-desktop
 BUILD_DIR := .
 INSTALL_DIR := $(HOME)/.local/bin
+E2E_IMAGE ?= gastown-test
+E2E_BUILD_FLAGS ?=
+E2E_RUN_FLAGS ?= --rm
+E2E_BUILD_RETRIES ?= 1
+E2E_RUN_RETRIES ?= 1
 
 # Get version info for ldflags
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -31,6 +37,16 @@ ifeq ($(shell uname),Darwin)
 	@codesign -s - -f $(BUILD_DIR)/$(BINARY) 2>/dev/null || true
 	@echo "Signed $(BINARY) for macOS"
 endif
+
+desktop-build:
+	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_DESKTOP) ./cmd/gt-desktop
+ifeq ($(shell uname),Darwin)
+	@codesign -s - -f $(BUILD_DIR)/$(BINARY_DESKTOP) 2>/dev/null || true
+	@echo "Signed $(BINARY_DESKTOP) for macOS"
+endif
+
+desktop-run:
+	go run ./cmd/gt-desktop
 
 check-up-to-date:
 ifndef SKIP_UPDATE_CHECK
@@ -79,5 +95,24 @@ test:
 
 # Run e2e tests in isolated container (the only supported way to run them)
 test-e2e-container:
-	docker build -f Dockerfile.e2e -t gastown-test .
-	docker run --rm gastown-test
+ifeq ($(OS),Windows_NT)
+	@powershell -NoProfile -Command "$$max=$(E2E_BUILD_RETRIES); for($$i=1; $$i -le $$max; $$i++){ docker build $(E2E_BUILD_FLAGS) -f Dockerfile.e2e -t $(E2E_IMAGE) .; if($$LASTEXITCODE -eq 0){ break }; if($$i -eq $$max){ exit 1 }; Write-Host ('docker build failed (attempt ' + $$i + '), retrying...'); Start-Sleep -Seconds 2 }"
+	@powershell -NoProfile -Command "$$max=$(E2E_RUN_RETRIES); for($$i=1; $$i -le $$max; $$i++){ docker run $(E2E_RUN_FLAGS) $(E2E_IMAGE); if($$LASTEXITCODE -eq 0){ break }; if($$i -eq $$max){ exit 1 }; Write-Host ('docker run failed (attempt ' + $$i + '), retrying...'); Start-Sleep -Seconds 2 }"
+else
+	@attempt=1; \
+	while [ $$attempt -le $(E2E_BUILD_RETRIES) ]; do \
+		docker build $(E2E_BUILD_FLAGS) -f Dockerfile.e2e -t $(E2E_IMAGE) . && break; \
+		if [ $$attempt -eq $(E2E_BUILD_RETRIES) ]; then exit 1; fi; \
+		echo "docker build failed (attempt $$attempt), retrying..."; \
+		attempt=$$((attempt+1)); \
+		sleep 2; \
+	done
+	@attempt=1; \
+	while [ $$attempt -le $(E2E_RUN_RETRIES) ]; do \
+		docker run $(E2E_RUN_FLAGS) $(E2E_IMAGE) && break; \
+		if [ $$attempt -eq $(E2E_RUN_RETRIES) ]; then exit 1; fi; \
+		echo "docker run failed (attempt $$attempt), retrying..."; \
+		attempt=$$((attempt+1)); \
+		sleep 2; \
+	done
+endif

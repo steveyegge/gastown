@@ -19,6 +19,9 @@
 {"issue_id":"gt-6oio","label":"result:success"}
 {"issue_id":"gt-6oio","label":"rig:gastown"}
 {"issue_id":"gt-7w6cq","label":"desire-path"}
+{"issue_id":"gt-87s6","label":"plugin:rebuild-gt"}
+{"issue_id":"gt-87s6","label":"result:success"}
+{"issue_id":"gt-87s6","label":"rig:gastown"}
 {"issue_id":"gt-8ik","label":"reconciliation"}
 {"issue_id":"gt-8ik","label":"zfc"}
 {"issue_id":"gt-8l3w","label":"formula"}
@@ -33,6 +36,7 @@
 {"issue_id":"gt-crew-role","label":"migrated-to:hq-crew-role"}
 {"issue_id":"gt-d9ed","label":"zfc-violation"}
 {"issue_id":"gt-deacon","label":"migrated-to:hq-deacon"}
+{"issue_id":"gt-edu3","label":"zfc"}
 {"issue_id":"gt-ef2t","label":"enhancement"}
 {"issue_id":"gt-eo8d","label":"flaky"}
 {"issue_id":"gt-eo8d","label":"pre-existing"}
