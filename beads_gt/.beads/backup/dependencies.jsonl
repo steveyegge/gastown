@@ -1,0 +1,19 @@
+{"created_at":"2026-03-03T13:09:42Z","created_by":"mayor","depends_on_id":"external:meety_me:mm-m9p","issue_id":"hq-cv-32dny","type":"tracks"}
+{"created_at":"2026-03-03T13:03:56Z","created_by":"mayor","depends_on_id":"external:rally_tavern:rt-4i3","issue_id":"hq-cv-t7q","type":"tracks"}
+{"created_at":"2026-03-03T13:11:00Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-rir3","issue_id":"hq-wisp-4bua","type":"parent-child"}
+{"created_at":"2026-03-03T13:11:00Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-vfpr","issue_id":"hq-wisp-4bua","type":"blocks"}
+{"created_at":"2026-03-03T13:08:02Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-c42o","issue_id":"hq-wisp-b9t6","type":"parent-child"}
+{"created_at":"2026-03-03T13:11:00Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-nqo4","issue_id":"hq-wisp-f10o","type":"parent-child"}
+{"created_at":"2026-03-03T13:11:00Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-f10o","issue_id":"hq-wisp-joba","type":"blocks"}
+{"created_at":"2026-03-03T13:11:00Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-nqo4","issue_id":"hq-wisp-joba","type":"parent-child"}
+{"created_at":"2026-03-03T13:11:00Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-4bua","issue_id":"hq-wisp-kp11","type":"blocks"}
+{"created_at":"2026-03-03T13:11:00Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-rir3","issue_id":"hq-wisp-kp11","type":"parent-child"}
+{"created_at":"2026-03-03T13:08:02Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-c42o","issue_id":"hq-wisp-la2d","type":"parent-child"}
+{"created_at":"2026-03-03T13:08:02Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-thsh","issue_id":"hq-wisp-la2d","type":"blocks"}
+{"created_at":"2026-03-03T13:11:00Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-joba","issue_id":"hq-wisp-lyxt","type":"blocks"}
+{"created_at":"2026-03-03T13:11:00Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-nqo4","issue_id":"hq-wisp-lyxt","type":"parent-child"}
+{"created_at":"2026-03-03T13:08:02Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-b9t6","issue_id":"hq-wisp-thsh","type":"blocks"}
+{"created_at":"2026-03-03T13:08:02Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-c42o","issue_id":"hq-wisp-thsh","type":"parent-child"}
+{"created_at":"2026-03-03T13:11:00Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-kp11","issue_id":"hq-wisp-v5jq","type":"blocks"}
+{"created_at":"2026-03-03T13:11:00Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-rir3","issue_id":"hq-wisp-v5jq","type":"parent-child"}
+{"created_at":"2026-03-03T13:11:00Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-rir3","issue_id":"hq-wisp-vfpr","type":"parent-child"}
