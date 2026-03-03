@@ -624,8 +624,14 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			return fmt.Errorf("cannot determine source issue from branch '%s'; use --issue to specify", branch)
 		}
 
-		// Initialize beads
-		bd := beads.New(beads.ResolveBeadsDir(cwd))
+		// Initialize beads — warn if resolved to a local .beads/ (no redirect).
+		// Without a redirect, MR beads are invisible to the Refinery.
+		resolvedBeads := beads.ResolveBeadsDir(cwd)
+		if beads.IsLocalBeadsDir(cwd, resolvedBeads) {
+			fmt.Fprintf(os.Stderr, "WARNING: beads resolved to local dir %s (no shared-beads redirect)\n", resolvedBeads)
+			fmt.Fprintf(os.Stderr, "  MR beads written here will be invisible to the Refinery — run 'gt polecat repair' to fix\n")
+		}
+		bd := beads.New(resolvedBeads)
 
 		// Check for no_merge flag - if set, skip merge queue and notify for review
 		sourceIssueForNoMerge, err := bd.Show(issueID)

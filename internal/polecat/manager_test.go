@@ -403,6 +403,20 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 		t.Fatalf("git update-ref: %v\n%s", err, out)
 	}
 
+	// Create rig-level .beads directory with redirect to mayor/rig/.beads
+	rigBeads := filepath.Join(root, ".beads")
+	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		t.Fatalf("mkdir rig .beads: %v", err)
+	}
+	mayorBeads := filepath.Join(mayorRig, ".beads")
+	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig/.beads: %v", err)
+	}
+	rigRedirect := filepath.Join(rigBeads, "redirect")
+	if err := os.WriteFile(rigRedirect, []byte("mayor/rig/.beads\n"), 0644); err != nil {
+		t.Fatalf("write rig redirect: %v", err)
+	}
+
 	// Create rig pointing to root
 	r := &rig.Rig{
 		Name: "rig",

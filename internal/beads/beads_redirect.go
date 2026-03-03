@@ -317,3 +317,13 @@ func SetupRedirect(townRoot, worktreePath string) error {
 
 	return nil
 }
+
+// IsLocalBeadsDir returns true if resolvedPath is the cwd's own .beads/ directory
+// (i.e., no redirect was followed). This indicates the beads client will write to
+// a local database that other agents (e.g., the Refinery) will never read.
+func IsLocalBeadsDir(cwd, resolvedPath string) bool {
+	localBeads := filepath.Join(cwd, ".beads")
+	cleanResolved, _ := filepath.Abs(resolvedPath)
+	cleanLocal, _ := filepath.Abs(localBeads)
+	return cleanResolved == cleanLocal
+}
