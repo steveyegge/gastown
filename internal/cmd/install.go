@@ -380,14 +380,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
 		} else {
 			fmt.Printf("   ✓ Initialized .beads/ (town-level beads with hq- prefix)\n")
+		}
 
-			// Provision embedded formulas to .beads/formulas/
-			if count, err := formula.ProvisionFormulas(absPath); err != nil {
-				// Non-fatal: formulas are optional, just convenience
-				fmt.Printf("   %s Could not provision formulas: %v\n", style.Dim.Render("⚠"), err)
-			} else if count > 0 {
-				fmt.Printf("   ✓ Provisioned %d formulas\n", count)
-			}
+		// Provision embedded formulas to .beads/formulas/ even when beads init emitted
+		// warnings. Formula files are static assets and don't require a healthy DB.
+		if count, err := formula.ProvisionFormulas(absPath); err != nil {
+			// Non-fatal: formulas are optional, just convenience
+			fmt.Printf("   %s Could not provision formulas: %v\n", style.Dim.Render("⚠"), err)
+		} else if count > 0 {
+			fmt.Printf("   ✓ Provisioned %d formulas\n", count)
 		}
 
 		// Create town-level agent beads (Mayor, Deacon).

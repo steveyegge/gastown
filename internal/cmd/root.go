@@ -137,7 +137,7 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 	touchPolecatHeartbeat()
 
 	// Skip beads check for exempt commands
-	if beadsExemptCommands[cmdName] {
+	if beadsExemptCommands[cmdName] || isRoleCommand(cmd) {
 		return nil
 	}
 
@@ -148,6 +148,18 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "   Run %s for details.\n\n", style.Dim.Render("gt doctor"))
 	}
 	return nil
+}
+
+// isRoleCommand returns true when the invoked command belongs to the `gt role` tree.
+// Role introspection commands are often used in scripts and tests that expect clean
+// output; beads version warnings are unrelated noise for these commands.
+func isRoleCommand(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Name() == "role" {
+			return true
+		}
+	}
+	return false
 }
 
 // initCLITheme initializes the CLI color theme based on settings and environment.

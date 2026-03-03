@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,7 +115,7 @@ exit /b 0
 
 	// Test the helper function directly
 	extraVars := []string{"branch=polecat/furiosa/gt-abc123"}
-	result, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "Test Bug Fix", "", townRoot, false, extraVars)
+	result, err := InstantiateFormulaOnBead(context.Background(), "mol-polecat-work", "gt-abc123", "Test Bug Fix", "", townRoot, false, extraVars)
 	if err != nil {
 		t.Fatalf("InstantiateFormulaOnBead failed: %v", err)
 	}
@@ -211,7 +212,7 @@ exit /b 0
 	_ = os.Chdir(townRoot)
 
 	// Test with skipCook=true
-	_, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-test", "Test", "", townRoot, true, nil)
+	_, err := InstantiateFormulaOnBead(context.Background(), "mol-polecat-work", "gt-test", "Test", "", townRoot, true, nil)
 	if err != nil {
 		t.Fatalf("InstantiateFormulaOnBead failed: %v", err)
 	}
@@ -403,7 +404,7 @@ exit /b 0
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
 	_ = os.Chdir(townRoot)
 
-	_, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "My Cool Feature", "", townRoot, false, nil)
+	_, err := InstantiateFormulaOnBead(context.Background(), "mol-polecat-work", "gt-abc123", "My Cool Feature", "", townRoot, false, nil)
 	if err != nil {
 		t.Fatalf("InstantiateFormulaOnBead: %v", err)
 	}
@@ -527,7 +528,7 @@ exit /b 0
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
 	_ = os.Chdir(townRoot)
 
-	result, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "My Cool Feature", "", townRoot, false, nil)
+	result, err := InstantiateFormulaOnBead(context.Background(), "mol-polecat-work", "gt-abc123", "My Cool Feature", "", townRoot, false, nil)
 	if err != nil {
 		t.Fatalf("InstantiateFormulaOnBead: %v", err)
 	}
@@ -689,7 +690,7 @@ exit /b 0
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
 	_ = os.Chdir(townRoot)
 
-	result, err := InstantiateFormulaOnBead("mol-polecat-work", "oag-npeat", "Fix formula bug", "", townRoot, false, nil)
+	result, err := InstantiateFormulaOnBead(context.Background(), "mol-polecat-work", "oag-npeat", "Fix formula bug", "", townRoot, false, nil)
 	if err != nil {
 		t.Fatalf("InstantiateFormulaOnBead: %v", err)
 	}
@@ -809,7 +810,7 @@ exit /b 0
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
 	_ = os.Chdir(townRoot)
 
-	result, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-test", "Test cleanup", "", townRoot, false, nil)
+	result, err := InstantiateFormulaOnBead(context.Background(), "mol-polecat-work", "gt-test", "Test cleanup", "", townRoot, false, nil)
 	if err != nil {
 		t.Fatalf("InstantiateFormulaOnBead: %v", err)
 	}
@@ -914,7 +915,7 @@ exit /b 0
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
 	_ = os.Chdir(townRoot)
 
-	_, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "My Feature", "", townRoot, false, nil)
+	_, err := InstantiateFormulaOnBead(context.Background(), "mol-polecat-work", "gt-abc123", "My Feature", "", townRoot, false, nil)
 	if err == nil {
 		t.Fatal("expected error when bond returns non-JSON and fallback fails, got nil")
 	}

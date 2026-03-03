@@ -3548,3 +3548,69 @@ func TestDBCache_ReturnsCopy(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectDatabaseOwners_HQOnly(t *testing.T) {
+	townRoot := t.TempDir()
+
+	setupRigMetadata(t, townRoot, "hq", "hq")
+	setupRigsJSON(t, townRoot, []string{})
+
+	owners := CollectDatabaseOwners(townRoot)
+	if owners["hq"] != "town beads" {
+		t.Errorf("expected 'hq' owner to be 'town beads', got %q", owners["hq"])
+	}
+	if len(owners) != 1 {
+		t.Errorf("expected 1 owner, got %d: %v", len(owners), owners)
+	}
+}
+
+func TestCollectDatabaseOwners_MultipleRigs(t *testing.T) {
+	townRoot := t.TempDir()
+
+	setupRigsJSON(t, townRoot, []string{"gastown", "beads"})
+	setupRigMetadata(t, townRoot, "hq", "hq")
+	setupRigMetadata(t, townRoot, "gastown", "gt")
+	setupRigMetadata(t, townRoot, "beads", "beads")
+
+	owners := CollectDatabaseOwners(townRoot)
+	if owners["hq"] != "town beads" {
+		t.Errorf("expected 'hq' owner 'town beads', got %q", owners["hq"])
+	}
+	if owners["gt"] != "gastown rig beads" {
+		t.Errorf("expected 'gt' owner 'gastown rig beads', got %q", owners["gt"])
+	}
+	if owners["beads"] != "beads rig beads" {
+		t.Errorf("expected 'beads' owner 'beads rig beads', got %q", owners["beads"])
+	}
+	if len(owners) != 3 {
+		t.Errorf("expected 3 owners, got %d: %v", len(owners), owners)
+	}
+}
+
+func TestCollectDatabaseOwners_CustomDatabaseName(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Rig name differs from dolt_database name (like gastown → gt)
+	setupRigsJSON(t, townRoot, []string{"myrig"})
+	setupRigMetadata(t, townRoot, "myrig", "custom_db")
+
+	owners := CollectDatabaseOwners(townRoot)
+	if owners["custom_db"] != "myrig rig beads" {
+		t.Errorf("expected 'custom_db' owner 'myrig rig beads', got %q", owners["custom_db"])
+	}
+	if _, exists := owners["myrig"]; exists {
+		t.Error("rig name 'myrig' should not be a key in owners (only dolt_database value)")
+	}
+}
+
+func TestCollectDatabaseOwners_UnknownDB(t *testing.T) {
+	townRoot := t.TempDir()
+
+	setupRigsJSON(t, townRoot, []string{})
+	setupRigMetadata(t, townRoot, "hq", "hq")
+
+	owners := CollectDatabaseOwners(townRoot)
+	if _, exists := owners["unknown_db"]; exists {
+		t.Error("unknown_db should not have an owner")
+	}
+}

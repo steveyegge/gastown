@@ -20,8 +20,12 @@ type RotateResult struct {
 
 // RotatePlan describes what the rotator will do.
 type RotatePlan struct {
-	// LimitedSessions are sessions detected as rate-limited.
+	// LimitedSessions are sessions detected as hard rate-limited.
 	LimitedSessions []ScanResult
+
+	// NearLimitSessions are sessions approaching their rate limit.
+	// Only populated when PlanOpts.IncludeNearLimit is true.
+	NearLimitSessions []ScanResult `json:"near_limit_sessions,omitempty"`
 
 	// AvailableAccounts are accounts that can be rotated to.
 	AvailableAccounts []string
@@ -39,12 +43,25 @@ type RotatePlan struct {
 	SkippedAccounts map[string]string `json:"skipped_accounts,omitempty"`
 }
 
+// PlanOpts configures the rotation planning behavior.
+type PlanOpts struct {
+	// FromAccount targets all sessions using this account regardless of
+	// rate-limit status (preemptive rotation). Empty string = default behavior.
+	FromAccount string
+
+	// IncludeNearLimit includes sessions approaching their rate limit
+	// (not just hard-limited sessions) as rotation candidates.
+	IncludeNearLimit bool
+}
+
 // PlanRotation scans for limited sessions and plans account assignments.
-// When fromAccount is non-empty, it targets all sessions using that account
-// regardless of rate-limit status (preemptive rotation).
+// The opts parameter controls targeting behavior:
+//   - opts.FromAccount: targets all sessions using that account regardless of limit status
+//   - opts.IncludeNearLimit: also targets sessions approaching their limit
+//
 // Returns a plan that can be reviewed before execution.
-func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig, fromAccount string) (*RotatePlan, error) {
-	// Scan for rate-limited sessions
+func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig, opts PlanOpts) (*RotatePlan, error) {
+	// Scan for rate-limited and near-limit sessions
 	results, err := scanner.ScanAll()
 	if err != nil {
 		return nil, fmt.Errorf("scanning sessions: %w", err)
@@ -61,20 +78,29 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 	// become available for rotation.
 	mgr.ClearExpired(state)
 
-	// Find target sessions: either rate-limited (default) or by account (preemptive).
+	// Find target sessions based on opts.
 	var limitedSessions []ScanResult
+	var nearLimitSessions []ScanResult
 	for _, r := range results {
-		if fromAccount != "" {
+		if opts.FromAccount != "" {
 			// Preemptive: target all sessions using the specified account
-			if r.AccountHandle == fromAccount {
+			if r.AccountHandle == opts.FromAccount {
 				limitedSessions = append(limitedSessions, r)
 			}
 		} else {
-			// Reactive: target rate-limited sessions only
+			// Reactive: target rate-limited sessions
 			if r.RateLimited {
 				limitedSessions = append(limitedSessions, r)
+			} else if r.NearLimit {
+				nearLimitSessions = append(nearLimitSessions, r)
 			}
 		}
+	}
+
+	// Combine limited + near-limit sessions for assignment planning
+	targetSessions := limitedSessions
+	if opts.IncludeNearLimit {
+		targetSessions = append(targetSessions, nearLimitSessions...)
 	}
 
 	// Available accounts come from persisted state only — NOT from scan
@@ -92,7 +118,7 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 	skipped := make(map[string]string)
 	var validAvailable []string
 	for _, handle := range available {
-		if handle == fromAccount {
+		if handle == opts.FromAccount {
 			continue // rotating away from this account, not a candidate
 		}
 		acct, ok := acctCfg.Accounts[handle]
@@ -108,7 +134,7 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 	}
 	available = validAvailable
 
-	// Collect unique config dirs from limited sessions.
+	// Collect unique config dirs from target sessions.
 	// Multiple sessions can share the same config dir (via the same account).
 	// We only need one keychain swap per config dir.
 	// Sessions with unknown accounts are included if they have a CLAUDE_CONFIG_DIR.
@@ -117,7 +143,7 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 		accountHandle string // the limited account using this config dir (may be empty)
 	}
 	uniqueConfigDirs := make(map[string]*configDirInfo) // configDir -> info
-	for _, r := range limitedSessions {
+	for _, r := range targetSessions {
 		var configDir string
 		if r.AccountHandle != "" {
 			acct, ok := acctCfg.Accounts[r.AccountHandle]
@@ -160,7 +186,7 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 
 	// Expand config dir assignments to session-level assignments.
 	assignments := make(map[string]string)
-	for _, r := range limitedSessions {
+	for _, r := range targetSessions {
 		var configDir string
 		if r.AccountHandle != "" {
 			acct, ok := acctCfg.Accounts[r.AccountHandle]
@@ -180,6 +206,7 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 
 	return &RotatePlan{
 		LimitedSessions:   limitedSessions,
+		NearLimitSessions: nearLimitSessions,
 		AvailableAccounts: available,
 		Assignments:       assignments,
 		ConfigDirSwaps:    configDirSwaps,

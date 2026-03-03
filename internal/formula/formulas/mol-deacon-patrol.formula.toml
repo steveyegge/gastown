@@ -35,7 +35,7 @@ No WITNESS_PING mail is sent. Witnesses observe the Deacon's last_activity
 timestamp instead, and only send an alert to the Mayor if the Deacon appears
 unresponsive (>5 minutes stale). This avoids heartbeat mail spam."""
 formula = "mol-deacon-patrol"
-version = 12
+version = 13
 
 [vars]
 [vars.wisp_type]
@@ -573,9 +573,88 @@ gt mail send mayor/ -s "Health: <rig> <component> unresponsive" \\
 Reset unresponsive_cycles to 0 when component responds normally."""
 
 [[steps]]
+id = "dolt-health"
+title = "Run Dolt data-plane health check"
+needs = ["health-scan"]
+description = """
+Run `gt health --json` to inspect the Dolt data plane and flag anomalies.
+
+This step surfaces problems that individual patrol steps won't catch:
+commit bloat (compactor dog may have failed), stale backups (backup dog
+may have failed), orphan databases, and zombie Dolt server processes.
+
+**Step 1: Run the health check**
+```bash
+gt health --json
+```
+
+Parse the JSON output (HealthReport schema):
+- `server`: running, pid, port, latency_ms, connections, disk_usage_human
+- `databases[]`: name, issues, open_issues, wisps, open_wisps, commits
+- `backups`: dolt_stale, dolt_freshness, jsonl_stale, jsonl_freshness
+- `processes`: zombie_count, zombie_pids
+- `orphans[]`: name, size
+- `pollution[]`: database, id, title, pattern
+
+**Step 2: Evaluate thresholds**
+
+| Signal | Threshold | Meaning |
+|--------|-----------|---------|
+| `server.running == false` | — | Dolt server is down (CRITICAL) |
+| `server.latency_ms > 5000` | 5 s | Server may be overloaded |
+| `databases[].commits > 50000` | 50 k | Compactor dog may have stalled |
+| `backups.dolt_stale == true` | >30 min | Backup dog may have failed |
+| `backups.jsonl_stale == true` | >30 min | JSONL backup may have failed |
+| `processes.zombie_count > 0` | any | Zombie Dolt servers detected |
+| `orphans` non-empty | any | Orphan databases accumulating |
+| `pollution` non-empty | any | Test pollution in production DBs |
+
+**Step 3: React to alerts**
+
+**Server down (CRITICAL):**
+```bash
+gt escalate -s CRITICAL "Dolt server is down"
+```
+
+**Commit bloat (commits > 50k in any DB):**
+The compactor dog (`mol-dog-compactor`) may have failed. Dispatch a compactor:
+```bash
+gt dog dispatch --formula mol-dog-compactor --var db=<db_name>
+```
+If no idle dogs, log for next cycle.
+
+**Stale backups:**
+The backup dog (`mol-dog-backup`) may have failed. Dispatch a backup:
+```bash
+gt dog dispatch --formula mol-dog-backup
+```
+
+**Zombie processes:**
+Log the PIDs. The zombie-scan step (next) handles polecat zombies;
+this catches zombie *Dolt server* processes. Kill them:
+```bash
+gt dolt kill-imposters
+```
+
+**Orphan DBs:**
+Dispatch cleanup:
+```bash
+gt dolt cleanup
+```
+
+**Pollution:**
+Log for awareness. Pollution cleanup is handled by the test-pollution-cleanup
+step earlier in the patrol, so just note any remaining items.
+
+**If everything is healthy:**
+Log `Dolt health: OK` and move on.
+
+**Exit criteria:** Health check run, alerts handled or escalated."""
+
+[[steps]]
 id = "zombie-scan"
 title = "Detect zombie polecats (NO KILL AUTHORITY)"
-needs = ["health-scan"]
+needs = ["dolt-health"]
 description = """
 Defense-in-depth DETECTION of zombie polecats that Witness should have cleaned.
 

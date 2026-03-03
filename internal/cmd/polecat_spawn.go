@@ -4,6 +4,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -468,8 +469,9 @@ func IsRigName(target string) (string, bool) {
 	return target, true
 }
 
-// verifyWorktreeExists checks that a git worktree was actually created at the given path.
-// Returns an error if the worktree is missing or invalid.
+// verifyWorktreeExists checks that a git worktree was actually created at the given path
+// and that it is a functional git repository. Returns an error if the worktree is missing,
+// has a broken .git reference, or fails basic git validation. (GH#2056)
 func verifyWorktreeExists(clonePath string) error {
 	// Check if directory exists
 	info, err := os.Stat(clonePath)
@@ -485,17 +487,35 @@ func verifyWorktreeExists(clonePath string) error {
 
 	// Check for .git file (worktrees have a .git file, not a .git directory)
 	gitPath := filepath.Join(clonePath, ".git")
-	gitInfo, err := os.Stat(gitPath)
-	if err != nil {
+	if _, err := os.Stat(gitPath); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("worktree missing .git file (not a valid git worktree): %s", clonePath)
 		}
 		return fmt.Errorf("checking .git: %w", err)
 	}
 
-	// .git should be a file for worktrees (contains "gitdir: ..." pointer)
-	// or a directory for regular clones - either is valid
-	_ = gitInfo // Both file and directory are acceptable
+	// For worktree .git files, verify the gitdir reference points to a valid path.
+	// A broken reference (e.g., from os.Rename instead of git worktree move) causes
+	// "fatal: not a git repository" for every git operation.
+	gitContent, err := os.ReadFile(gitPath)
+	if err == nil {
+		content := strings.TrimSpace(string(gitContent))
+		if strings.HasPrefix(content, "gitdir: ") {
+			gitdirPath := strings.TrimPrefix(content, "gitdir: ")
+			if !filepath.IsAbs(gitdirPath) {
+				gitdirPath = filepath.Join(clonePath, gitdirPath)
+			}
+			if _, err := os.Stat(gitdirPath); err != nil {
+				return fmt.Errorf("worktree .git references nonexistent gitdir %s: %w", gitdirPath, err)
+			}
+		}
+	}
+
+	// Final validation: run git rev-parse to confirm the worktree is functional
+	cmd := exec.Command("git", "-C", clonePath, "rev-parse", "--git-dir")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("worktree at %s is not a valid git repository: %s", clonePath, strings.TrimSpace(string(output)))
+	}
 
 	return nil
 }

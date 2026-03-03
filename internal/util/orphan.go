@@ -355,7 +355,7 @@ type OrphanedProcess struct {
 	Age int // Age in seconds
 }
 
-// FindOrphanedClaudeProcesses finds claude/codex processes without a controlling terminal.
+// FindOrphanedClaudeProcesses finds claude/codex/opencode processes without a controlling terminal.
 // These are typically subagent processes spawned by Claude Code's Task tool that didn't
 // clean up properly after completion.
 //
@@ -402,9 +402,9 @@ func FindOrphanedClaudeProcesses() ([]OrphanedProcess, error) {
 			continue
 		}
 
-		// Match claude or codex command names
+		// Match claude, codex, or opencode command names
 		cmdLower := strings.ToLower(cmd)
-		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" {
+		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" && cmdLower != "opencode" {
 			continue
 		}
 
@@ -507,9 +507,9 @@ func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
 		cmd := fields[2]
 		etimeStr := fields[3]
 
-		// Match claude or codex command names
+		// Match claude, codex, or opencode command names
 		cmdLower := strings.ToLower(cmd)
-		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" {
+		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" && cmdLower != "opencode" {
 			continue
 		}
 

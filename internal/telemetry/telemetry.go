@@ -85,6 +85,14 @@ func (p *Provider) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// IsActive reports whether OTel telemetry is configured in the current process.
+// Returns true when at least one of GT_OTEL_METRICS_URL or GT_OTEL_LOGS_URL is set.
+// Used to gate side-effectful operations (env var injection, tmux session updates)
+// that only make sense when telemetry is collecting data.
+func IsActive() bool {
+	return os.Getenv(EnvMetricsURL) != "" || os.Getenv(EnvLogsURL) != ""
+}
+
 // Init initializes OTel metric and log providers.
 //
 // Idempotent: subsequent calls (same or different arguments) return the

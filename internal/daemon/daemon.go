@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/google/uuid"
 	beadsdk "github.com/steveyegge/beads"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -1068,6 +1069,23 @@ func (d *Daemon) ensureWitnessesRunning() {
 	}
 }
 
+// hasPendingEvents checks if there are pending .event files in the given channel directory.
+// Used to gate agent spawning: don't burn API credits starting a Claude session when
+// there's nothing to process. The agent's await-event handles the actual consumption.
+func (d *Daemon) hasPendingEvents(channel string) bool {
+	eventDir := filepath.Join(d.config.TownRoot, "events", channel)
+	entries, err := os.ReadDir(eventDir)
+	if err != nil {
+		return false // Directory doesn't exist or unreadable = no pending events
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".event") {
+			return true
+		}
+	}
+	return false
+}
+
 // ensureWitnessRunning ensures the witness for a specific rig is running.
 // Discover, don't track: uses Manager.Start() which checks tmux directly (gt-zecmc).
 func (d *Daemon) ensureWitnessRunning(rigName string) {
@@ -1127,6 +1145,23 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	if operational, reason := d.isRigOperational(rigName); !operational {
 		d.logger.Printf("Skipping refinery auto-start for %s: %s", rigName, reason)
 		return
+	}
+
+	// Event gate: don't spawn a new Claude session when there's nothing to process.
+	// If a refinery session is already running, Start() returns ErrAlreadyRunning (cheap).
+	// But spawning a NEW session with an empty queue burns API credits for nothing.
+	// The refinery formula uses await-event internally, so it will wake when events appear.
+	if !d.hasPendingEvents("refinery") {
+		// Check if session already exists before skipping — let running sessions continue
+		r := &rig.Rig{
+			Name: rigName,
+			Path: filepath.Join(d.config.TownRoot, rigName),
+		}
+		mgr := refinery.NewManager(r)
+		if running, _ := mgr.IsRunning(); !running {
+			d.logger.Printf("No pending refinery events and no session running for %s, skipping spawn", rigName)
+			return
+		}
 	}
 
 	// Manager.Start() handles: zombie detection, session creation, env vars, theming,
@@ -1919,16 +1954,25 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	// Pre-sync workspace (ensure beads are current)
 	d.syncWorkspace(workDir)
 
+	// Generate a fresh run ID for this restart so all telemetry from the
+	// crash-restarted session is correlated under a new GASTA root span.
+	runID := uuid.New().String()
+
 	// Build startup command BEFORE creating the session so we can use
 	// NewSessionWithCommand (command as initial pane process). This eliminates
 	// the race condition in the old EnsureSessionFresh + SendKeys pattern where
 	// the shell might not be ready to receive keystrokes, producing empty windows.
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:      "polecat",
-		Rig:       rigName,
-		AgentName: polecatName,
-		TownRoot:  d.config.TownRoot,
+		Role:        "polecat",
+		Rig:         rigName,
+		AgentName:   polecatName,
+		TownRoot:    d.config.TownRoot,
+		SessionName: sessionName,
 	})
+	// Inject GT_RUN into envVars before BuildStartupCommand so the startup
+	// command includes it (exec env …) and the loop below propagates it to
+	// the tmux session environment.
+	envVars["GT_RUN"] = runID
 	rc := config.ResolveRoleAgentConfig("polecat", d.config.TownRoot, rigPath)
 	startCmd := config.BuildStartupCommand(envVars, rigPath, "")
 

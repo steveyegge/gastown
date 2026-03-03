@@ -206,16 +206,16 @@ func TestRigSettingsWithCustomMergeQueue(t *testing.T) {
 		Type:    "rig-settings",
 		Version: 1,
 		MergeQueue: &MergeQueueConfig{
-			Enabled:              true,
+			Enabled:                          true,
 			IntegrationBranchPolecatEnabled:  boolPtr(false),
 			IntegrationBranchRefineryEnabled: boolPtr(false),
-			OnConflict:           OnConflictAutoRebase,
-			RunTests:             boolPtr(true),
-			TestCommand:          "make test",
-			DeleteMergedBranches: boolPtr(false),
-			RetryFlakyTests:      3,
-			PollInterval:         "1m",
-			MaxConcurrent:        2,
+			OnConflict:                       OnConflictAutoRebase,
+			RunTests:                         boolPtr(true),
+			TestCommand:                      "make test",
+			DeleteMergedBranches:             boolPtr(false),
+			RetryFlakyTests:                  3,
+			PollInterval:                     "1m",
+			MaxConcurrent:                    2,
 		},
 	}
 
@@ -974,6 +974,13 @@ func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
 			rc:           &RuntimeConfig{Command: "aider", Args: []string{}, InitialPrompt: "/help"},
 			prompt:       "custom prompt",
 			wantContains: []string{"aider", `"custom prompt"`},
+			isClaudeCmd:  false,
+		},
+		{
+			name:         "copilot uses -i flag for prompt",
+			rc:           &RuntimeConfig{Command: "copilot", Args: []string{"--yolo"}, PromptMode: "arg"},
+			prompt:       "test prompt",
+			wantContains: []string{"copilot", "--yolo", "-i", `"test prompt"`},
 			isClaudeCmd:  false,
 		},
 	}
@@ -4541,11 +4548,11 @@ func TestMergeQueueConfig_PartialJSON_BoolDefaults(t *testing.T) {
 		name string
 		json string
 		// Expected accessor results when *bool fields are omitted (nil)
-		wantRunTests               bool
-		wantDeleteMerged           bool
-		wantPolecatIntegration     bool
-		wantRefineryIntegration    bool
-		wantAutoLand               bool
+		wantRunTests            bool
+		wantDeleteMerged        bool
+		wantPolecatIntegration  bool
+		wantRefineryIntegration bool
+		wantAutoLand            bool
 	}{
 		{
 			name: "minimal config — all *bool fields omitted",

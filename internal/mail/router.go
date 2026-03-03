@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -1134,6 +1136,16 @@ func (r *Router) sendToSingle(msg *Message) error {
 	ctx, cancel := bdWriteCtx()
 	defer cancel()
 	_, err := runBdCommand(ctx, args, filepath.Dir(beadsDir), beadsDir)
+	telemetry.RecordMailMessage(context.Background(), "send", telemetry.MailMessageInfo{
+		ID:       msg.ID,
+		From:     msg.From,
+		To:       msg.To,
+		Subject:  msg.Subject,
+		Body:     msg.Body,
+		ThreadID: msg.ThreadID,
+		Priority: string(msg.Priority),
+		MsgType:  string(msg.Type),
+	}, err)
 	if err != nil {
 		return fmt.Errorf("sending message: %w", err)
 	}

@@ -528,10 +528,11 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.RoleConfig, parsed *ParsedIdentity) {
 	// Use centralized AgentEnv for base environment variables
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:      parsed.RoleType,
-		Rig:       parsed.RigName,
-		AgentName: parsed.AgentName,
-		TownRoot:  d.config.TownRoot,
+		Role:        parsed.RoleType,
+		Rig:         parsed.RigName,
+		AgentName:   parsed.AgentName,
+		TownRoot:    d.config.TownRoot,
+		SessionName: sessionName,
 	})
 	for k, v := range envVars {
 		_ = d.tmux.SetEnvironment(sessionName, k, v)

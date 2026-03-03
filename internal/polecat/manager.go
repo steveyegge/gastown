@@ -1418,8 +1418,13 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Prune stale worktree entries (non-fatal: cleanup only)
 	_ = repoGit.WorktreePrune()
 
-	// Move temp worktree to final location
-	if err := os.Rename(tmpClonePath, newClonePath); err != nil {
+	// Move temp worktree to final location using git worktree move.
+	// os.Rename breaks worktrees: the .git file and registry gitdir still
+	// reference the old temp path, leaving a broken worktree. (GH#2056)
+	if err := repoGit.WorktreeMove(tmpClonePath, newClonePath); err != nil {
+		// Clean up temp worktree if move fails
+		_ = repoGit.WorktreeRemove(tmpClonePath, true)
+		_ = os.RemoveAll(tmpClonePath)
 		return nil, fmt.Errorf("moving repaired worktree to final path: %w", err)
 	}
 

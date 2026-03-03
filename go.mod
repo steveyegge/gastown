@@ -132,5 +132,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/dolthub/dolt/go => github.com/zfogg/dolt/go v0.40.5-0.20260220031545-86d23ffebae2

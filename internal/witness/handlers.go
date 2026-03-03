@@ -811,7 +811,11 @@ func AutoNukeIfClean(workDir, rigName, polecatName string) *NukePolecatResult {
 //   - true, nil: commit is verified on default branch
 //   - false, nil: commit is NOT on default branch (don't nuke!)
 //   - false, error: couldn't verify (treat as unsafe)
-func verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
+//
+// This is a package-level var so tests can override it.
+var verifyCommitOnMain = _verifyCommitOnMain
+
+func _verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 	// Find town root from workDir
 	townRoot, err := workspace.Find(workDir)
 	if err != nil || townRoot == "" {
@@ -1173,6 +1177,17 @@ func detectZombieDeadSession(bd *BdCli, workDir, rigName, polecatName, agentBead
 		return ZombieResult{}, false
 	}
 
+	// GH#2036: Spawning polecats have hook_bead assigned but no tmux session yet.
+	// This is expected during worktree creation and session startup. Skip zombie
+	// detection if the polecat has been spawning for less than SpawnGracePeriod.
+	if typedState == beads.AgentStateSpawning {
+		spawnAge := getAgentBeadAge(bd, workDir, agentBeadID)
+		if spawnAge < SpawnGracePeriod {
+			return ZombieResult{}, false
+		}
+		// Spawning for too long — fall through to zombie handling
+	}
+
 	// A polecat whose hook bead is already CLOSED completed its work
 	// successfully. The dead session is expected (gt done kills it).
 	// Don't flag as zombie or trigger re-dispatch. (gt-sy8)
@@ -1297,6 +1312,14 @@ func handleZombieRestart(bd *BdCli, workDir, rigName, polecatName, hookBead, cle
 // and dead sessions (died during gt done). A single constant prevents threshold
 // drift between the two detection paths (gt-y230).
 const DoneIntentGracePeriod = 60 * time.Second
+
+// SpawnGracePeriod is how long to wait before treating a spawning polecat as a
+// potential zombie. Polecats in agent_state=spawning have hook_bead assigned but
+// no tmux session yet — this is expected during worktree creation and session
+// startup. On large repos (80k+ commits, 4.8GB+) sling can take several minutes.
+// Without this guard, the witness classifies spawning polecats as zombies and
+// nukes them before they finish starting up. See GH#2036.
+const SpawnGracePeriod = 5 * time.Minute
 
 // StartupStallThreshold is the minimum session age before a session with no
 // recent tmux activity is considered stalled at startup. Sessions younger than
@@ -1651,6 +1674,34 @@ func getAgentBeadState(bd *BdCli, workDir, agentBeadID string) (agentState, hook
 	return issues[0].AgentState, issues[0].HookBead
 }
 
+// getAgentBeadAge returns the time since the agent bead was last updated.
+// Used to determine how long a polecat has been in its current state (e.g.,
+// spawning). Returns a large duration if the bead can't be queried, so callers
+// don't accidentally skip zombie detection on query failure. See GH#2036.
+func getAgentBeadAge(bd *BdCli, workDir, agentBeadID string) time.Duration {
+	output, err := bd.Exec(workDir, "show", agentBeadID, "--json")
+	if err != nil || output == "" {
+		return 24 * time.Hour // Fail open: treat as old so zombie detection proceeds
+	}
+
+	var issues []struct {
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.Unmarshal([]byte(output), &issues); err != nil || len(issues) == 0 {
+		return 24 * time.Hour
+	}
+
+	updatedAt, err := time.Parse(time.RFC3339, issues[0].UpdatedAt)
+	if err != nil {
+		// Try common alternative formats
+		updatedAt, err = time.Parse("2006-01-02 15:04:05", issues[0].UpdatedAt)
+		if err != nil {
+			return 24 * time.Hour
+		}
+	}
+	return time.Since(updatedAt)
+}
+
 // getBeadStatus returns the status of a bead (e.g., "open", "closed", "hooked").
 // Returns empty string if the bead doesn't exist or can't be queried.
 func getBeadStatus(bd *BdCli, workDir, beadID string) string {
@@ -1672,6 +1723,8 @@ func getBeadStatus(bd *BdCli, workDir, beadID string) string {
 
 // resetAbandonedBead resets a dead polecat's hooked bead so it can be re-dispatched.
 // If the bead is in "hooked" or "in_progress" status, it:
+// 0. Checks if the polecat's work is already on main — if so, closes
+//    the bead instead of resetting (prevents re-dispatch of completed work)
 // 1. Records the respawn in the witness spawn-count ledger
 // 2. Resets status to open
 // 3. Clears assignee
@@ -1690,6 +1743,17 @@ func resetAbandonedBead(bd *BdCli, workDir, rigName, hookBead, polecatName strin
 	// Dedup guard (GH#2203): if another live polecat already has this bead,
 	// don't reset it — the bead is actively being worked on.
 	if IsBeadActivelyWorked(workDir, rigName, hookBead, polecatName) {
+		return false
+	}
+
+	// Guard: if the polecat's commit is already on the default branch,
+	// the work is done — close the bead instead of resetting for re-dispatch.
+	// This prevents the spawn-storm / duplicate-work loop described in #2036.
+	if onMain, err := verifyCommitOnMain(workDir, rigName, polecatName); err == nil && onMain {
+		reason := fmt.Sprintf("Work already on main (verified by witness, polecat %s)", polecatName)
+		if err := bd.Run(workDir, "close", hookBead, "-r", reason); err != nil {
+			fmt.Fprintf(os.Stderr, "witness: failed to close bead %s (work already on main): %v\n", hookBead, err)
+		}
 		return false
 	}
 

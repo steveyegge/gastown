@@ -1083,18 +1083,25 @@ func Start(townRoot string) error {
 		return err
 	}
 
-	// Start dolt sql-server with --data-dir to serve all databases
-	// Note: --user flag is deprecated in newer Dolt; authentication is handled
-	// via privilege system. Default is root user with no password for localhost.
-	args := []string{"sql-server",
-		"--port", strconv.Itoa(config.Port),
-		"--data-dir", config.DataDir,
-	}
-	if config.MaxConnections > 0 {
-		args = append(args, "--max-connections", strconv.Itoa(config.MaxConnections))
-	}
-	if config.LogLevel != "" {
-		args = append(args, "--loglevel", config.LogLevel)
+	// Start dolt sql-server. If a config.yaml exists in the data directory,
+	// pass --config to enable config-only features like auto_gc_behavior.
+	// When --config is used, all other CLI flags are ignored by dolt, so the
+	// config file must contain the full server configuration.
+	var args []string
+	configPath := filepath.Join(config.DataDir, "config.yaml")
+	if _, err := os.Stat(configPath); err == nil {
+		args = []string{"sql-server", "--config", configPath}
+	} else {
+		args = []string{"sql-server",
+			"--port", strconv.Itoa(config.Port),
+			"--data-dir", config.DataDir,
+		}
+		if config.MaxConnections > 0 {
+			args = append(args, "--max-connections", strconv.Itoa(config.MaxConnections))
+		}
+		if config.LogLevel != "" {
+			args = append(args, "--loglevel", config.LogLevel)
+		}
 	}
 	cmd := exec.Command("dolt", args...)
 	cmd.Stdout = logFile
@@ -2047,6 +2054,88 @@ func collectReferencedDatabases(townRoot string) map[string]bool {
 	return referenced
 }
 
+// CollectDatabaseOwners returns a map from database name to a human-readable
+// owner description (e.g., "gastown rig beads", "town beads"). This is used by
+// gt dolt status to annotate each database with its rig owner, preventing
+// accidental drops of production databases. (GH#2252)
+func CollectDatabaseOwners(townRoot string) map[string]string {
+	owners := make(map[string]string)
+
+	// Check town-level beads (hq)
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if db := readExistingDoltDatabase(townBeadsDir); db != "" {
+		owners[db] = "town beads"
+	}
+
+	// Check all rigs from rigs.json
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	data, err := os.ReadFile(rigsPath)
+	if err == nil {
+		var config struct {
+			Rigs map[string]interface{} `json:"rigs"`
+		}
+		if err := json.Unmarshal(data, &config); err == nil {
+			for rigName := range config.Rigs {
+				beadsDir := FindRigBeadsDir(townRoot, rigName)
+				if beadsDir == "" {
+					continue
+				}
+				if db := readExistingDoltDatabase(beadsDir); db != "" {
+					owners[db] = rigName + " rig beads"
+				}
+			}
+		}
+	}
+
+	// Also check routes.jsonl
+	routesPath := filepath.Join(townRoot, ".beads", "routes.jsonl")
+	if routesData, readErr := os.ReadFile(routesPath); readErr == nil {
+		for _, line := range strings.Split(string(routesData), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			var route struct {
+				Prefix string `json:"prefix"`
+				Path   string `json:"path"`
+			}
+			if json.Unmarshal([]byte(line), &route) != nil || route.Path == "" {
+				continue
+			}
+			beadsDir := filepath.Join(townRoot, route.Path, ".beads")
+			if db := readExistingDoltDatabase(beadsDir); db != "" {
+				if _, already := owners[db]; !already {
+					// Derive a name from the route path
+					parts := strings.Split(route.Path, "/")
+					owners[db] = parts[0] + " rig beads"
+				}
+			}
+		}
+	}
+
+	// Scan top-level directories for any .beads/metadata.json
+	if entries, readErr := os.ReadDir(townRoot); readErr == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() || entry.Name() == ".beads" || entry.Name() == "mayor" {
+				continue
+			}
+			dirName := entry.Name()
+			if db := readExistingDoltDatabase(filepath.Join(townRoot, dirName, ".beads")); db != "" {
+				if _, already := owners[db]; !already {
+					owners[db] = dirName + " rig beads"
+				}
+			}
+			if db := readExistingDoltDatabase(filepath.Join(townRoot, dirName, "mayor", "rig", ".beads")); db != "" {
+				if _, already := owners[db]; !already {
+					owners[db] = dirName + " rig beads"
+				}
+			}
+		}
+	}
+
+	return owners
+}
+
 // RemoveDatabase removes an orphaned database directory from .dolt-data/.
 // The caller should verify the database is actually orphaned before calling this.
 // If the Dolt server is running, it will DROP the database first.
@@ -2266,14 +2355,29 @@ func EnsureMetadata(townRoot, rigName string) error {
 		_ = json.Unmarshal(data, &existing) // best effort
 	}
 
-	// Patch dolt server fields. Only set fields that are gastown's responsibility
-	// (ensuring server mode). dolt_database is owned by bd init — only set it as
-	// a fallback when bd init hasn't run yet (no existing value).
-	existing["database"] = "dolt"
-	existing["backend"] = "dolt"
-	existing["dolt_mode"] = "server"
+	// Patch dolt server fields. Only write when values actually change so tracked
+	// metadata.json files in source repos stay clean.
+	changed := false
+	if existing["database"] != "dolt" {
+		existing["database"] = "dolt"
+		changed = true
+	}
+	if existing["backend"] != "dolt" {
+		existing["backend"] = "dolt"
+		changed = true
+	}
+	if existing["dolt_mode"] != "server" {
+		existing["dolt_mode"] = "server"
+		changed = true
+	}
 	if existing["dolt_database"] == nil || existing["dolt_database"] == "" {
 		existing["dolt_database"] = rigName
+		changed = true
+	}
+
+	// Fast path: avoid rewriting metadata.json when already correct.
+	if !changed {
+		return nil
 	}
 
 	data, err := json.MarshalIndent(existing, "", "  ")

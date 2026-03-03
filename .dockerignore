@@ -1,0 +1,12 @@
+.git
+.cursor
+.claude
+.beads
+dist
+bin
+node_modules
+*.exe
+gt
+gt-desktop
+*.log
+*.tmp

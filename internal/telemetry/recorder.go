@@ -7,8 +7,11 @@ package telemetry
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"go.opentelemetry.io/otel"
@@ -18,6 +21,56 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
+// runIDKey is the context key for the GASTOWN run identifier.
+type runIDKey struct{}
+
+// WithRunID returns a context carrying the given run ID.
+// The run ID is automatically injected into every telemetry event emitted
+// with that context, enabling waterfall correlation across all events in a
+// single agent session (GASTOWN run).
+func WithRunID(ctx context.Context, runID string) context.Context {
+	return context.WithValue(ctx, runIDKey{}, runID)
+}
+
+// RunIDFromCtx extracts the run ID from ctx. Falls back to the GT_RUN
+// environment variable so that subprocess telemetry (bd, mail, …) is
+// correlated even when the ctx has no injected run ID.
+func RunIDFromCtx(ctx context.Context) string {
+	if v, ok := ctx.Value(runIDKey{}).(string); ok && v != "" {
+		return v
+	}
+	return os.Getenv("GT_RUN")
+}
+
+// instanceID derives a human-readable Gastown instance identifier from the
+// town root path and the machine hostname.
+// Format: "<hostname>:<basename(townRoot)>" (e.g. "laptop:gt").
+// Falls back to basename alone when hostname is unavailable.
+func instanceID(townRoot string) string {
+	base := filepath.Base(townRoot)
+	if base == "." || base == "" {
+		base = townRoot
+	}
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		return base
+	}
+	return hostname + ":" + base
+}
+
+// MailMessageInfo carries enriched mail message metadata for telemetry.
+// All fields are optional; pass zero values for unknown fields.
+type MailMessageInfo struct {
+	ID       string // message ID
+	From     string // sender address
+	To       string // recipient address(es), comma-separated
+	Subject  string // message subject
+	Body     string // message body — logged only when GT_LOG_MAIL_BODY=true (truncated to 256 bytes)
+	ThreadID string // thread / conversation ID
+	Priority string // "high", "normal", "low"
+	MsgType  string // message type label (e.g. "work", "notify", "queue")
+}
+
 const (
 	meterRecorderName = "github.com/steveyegge/gastown"
 	loggerName        = "gastown"
@@ -26,23 +79,29 @@ const (
 // recorderInstruments holds all lazy-initialized OTel metric instruments.
 type recorderInstruments struct {
 	// Counters
-	bdTotal             metric.Int64Counter
-	sessionTotal        metric.Int64Counter
-	sessionStopTotal    metric.Int64Counter
-	promptTotal         metric.Int64Counter
-	paneReadTotal       metric.Int64Counter
-	paneOutputTotal     metric.Int64Counter
-	primeTotal         metric.Int64Counter
-	agentStateTotal    metric.Int64Counter
-	polecatTotal       metric.Int64Counter
-	polecatRemoveTotal metric.Int64Counter
-	slingTotal         metric.Int64Counter
-	mailTotal          metric.Int64Counter
-	nudgeTotal         metric.Int64Counter
-	doneTotal          metric.Int64Counter
-	daemonRestartTotal metric.Int64Counter
-	formulaTotal       metric.Int64Counter
-	convoyTotal        metric.Int64Counter
+	bdTotal               metric.Int64Counter
+	sessionTotal          metric.Int64Counter
+	sessionStopTotal      metric.Int64Counter
+	promptTotal           metric.Int64Counter
+	paneOutputTotal       metric.Int64Counter
+	agentEventTotal       metric.Int64Counter
+	agentInstantiateTotal metric.Int64Counter
+	primeTotal            metric.Int64Counter
+	agentStateTotal       metric.Int64Counter
+	polecatTotal          metric.Int64Counter
+	polecatRemoveTotal    metric.Int64Counter
+	slingTotal            metric.Int64Counter
+	mailTotal             metric.Int64Counter
+	nudgeTotal            metric.Int64Counter
+	doneTotal             metric.Int64Counter
+	daemonRestartTotal    metric.Int64Counter
+	formulaTotal          metric.Int64Counter
+	convoyTotal           metric.Int64Counter
+	molCookTotal          metric.Int64Counter
+	molWispTotal          metric.Int64Counter
+	molSquashTotal        metric.Int64Counter
+	molBurnTotal          metric.Int64Counter
+	beadCreateTotal       metric.Int64Counter
 
 	// Histograms
 	bdDurationHist metric.Float64Histogram
@@ -52,6 +111,33 @@ var (
 	instOnce sync.Once
 	inst     recorderInstruments
 )
+
+// contentLimits caches configurable truncation limits parsed from env at first use.
+// Env vars are read once — changing them at runtime has no effect.
+var (
+	limitsOnce       sync.Once
+	agentContentLim  int // GT_LOG_AGENT_CONTENT_LIMIT, default 512
+	bdContentLim     int // GT_LOG_BD_CONTENT_LIMIT, default 2048
+	paneContentLim   int // GT_LOG_PANE_CONTENT_LIMIT, default 8192
+)
+
+func initContentLimits() {
+	limitsOnce.Do(func() {
+		agentContentLim = envInt("GT_LOG_AGENT_CONTENT_LIMIT", 512)
+		bdContentLim = envInt("GT_LOG_BD_CONTENT_LIMIT", 2048)
+		paneContentLim = envInt("GT_LOG_PANE_CONTENT_LIMIT", 8192)
+	})
+}
+
+// envInt returns the integer value of the named env var, or defaultVal if unset or unparseable.
+func envInt(key string, defaultVal int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return defaultVal
+}
 
 // initInstruments registers all recorder metric instruments against the current
 // global MeterProvider. Must be called after telemetry.Init so the real
@@ -73,11 +159,14 @@ func initInstruments() {
 		inst.promptTotal, _ = m.Int64Counter("gastown.prompt.sends.total",
 			metric.WithDescription("Total tmux SendKeys prompt dispatches"),
 		)
-		inst.paneReadTotal, _ = m.Int64Counter("gastown.pane.reads.total",
-			metric.WithDescription("Total tmux CapturePane calls"),
-		)
 		inst.paneOutputTotal, _ = m.Int64Counter("gastown.pane.output.total",
 			metric.WithDescription("Total pane output chunks emitted to VictoriaLogs"),
+		)
+		inst.agentEventTotal, _ = m.Int64Counter("gastown.agent.events.total",
+			metric.WithDescription("Total agent conversation events emitted to VictoriaLogs"),
+		)
+		inst.agentInstantiateTotal, _ = m.Int64Counter("gastown.agent.instantiations.total",
+			metric.WithDescription("Total agent session instantiations (one per agent spawn)"),
 		)
 		inst.primeTotal, _ = m.Int64Counter("gastown.prime.total",
 			metric.WithDescription("Total gt prime invocations"),
@@ -112,6 +201,21 @@ func initInstruments() {
 		inst.convoyTotal, _ = m.Int64Counter("gastown.convoy.creates.total",
 			metric.WithDescription("Total auto-convoy creations"),
 		)
+		inst.molCookTotal, _ = m.Int64Counter("gastown.mol.cooks.total",
+			metric.WithDescription("Total formula cook operations (formula → proto)"),
+		)
+		inst.molWispTotal, _ = m.Int64Counter("gastown.mol.wisps.total",
+			metric.WithDescription("Total molecule wisp creations (proto → wisp)"),
+		)
+		inst.molSquashTotal, _ = m.Int64Counter("gastown.mol.squashes.total",
+			metric.WithDescription("Total molecule squash operations (mol → digest)"),
+		)
+		inst.molBurnTotal, _ = m.Int64Counter("gastown.mol.burns.total",
+			metric.WithDescription("Total molecule burn operations (destroy)"),
+		)
+		inst.beadCreateTotal, _ = m.Int64Counter("gastown.bead.creates.total",
+			metric.WithDescription("Total bead creations from molecule instantiation"),
+		)
 
 		// Histograms
 		inst.bdDurationHist, _ = m.Float64Histogram("gastown.bd.duration_ms",
@@ -129,13 +233,24 @@ func statusStr(err error) string {
 	return "ok"
 }
 
+// addRunID injects the run.id attribute from ctx (or GT_RUN env) into r.
+// Called by emit and RecordAgentEvent so every telemetry event carries the
+// GASTOWN run identifier for waterfall correlation.
+func addRunID(ctx context.Context, r *otellog.Record) {
+	if runID := RunIDFromCtx(ctx); runID != "" {
+		r.AddAttributes(otellog.String("run.id", runID))
+	}
+}
+
 // emit sends an OTel log event with the given body and key-value attributes.
+// Automatically injects run.id from ctx when present.
 func emit(ctx context.Context, body string, sev otellog.Severity, attrs ...otellog.KeyValue) {
 	logger := global.GetLoggerProvider().Logger(loggerName)
 	var r otellog.Record
 	r.SetBody(otellog.StringValue(body))
 	r.SetSeverity(sev)
 	r.AddAttributes(attrs...)
+	addRunID(ctx, &r)
 	logger.Emit(ctx, r)
 }
 
@@ -155,17 +270,11 @@ func severity(err error) otellog.Severity {
 	return otellog.SeverityInfo
 }
 
-const (
-	// maxStdoutLog is the maximum number of bytes of stdout captured in logs.
-	maxStdoutLog = 2048
-	// maxStderrLog is the maximum number of bytes of stderr captured in logs.
-	maxStderrLog = 1024
-)
-
 // truncateOutput trims s to max bytes and appends "…" when truncated.
 // Avoids splitting multi-byte UTF-8 characters at the boundary.
+// Pass max ≤ 0 to disable truncation entirely.
 func truncateOutput(s string, max int) string {
-	if len(s) <= max {
+	if max <= 0 || len(s) <= max {
 		return s
 	}
 	// Walk back from the cut point to avoid splitting a multi-byte rune.
@@ -204,11 +313,13 @@ func RecordBDCall(ctx context.Context, args []string, durationMs float64, err er
 		otellog.String("status", status),
 		errKV(err),
 	}
-	// stdout/stderr are opt-in: they may contain tokens or PII returned by bd.
+	// stdout/stderr are opt-in (may contain tokens or PII returned by bd).
+	// Truncated to GT_LOG_BD_CONTENT_LIMIT bytes (default 2048).
 	if os.Getenv("GT_LOG_BD_OUTPUT") == "true" {
+		initContentLimits()
 		kvs = append(kvs,
-			otellog.String("stdout", truncateOutput(string(stdout), maxStdoutLog)),
-			otellog.String("stderr", truncateOutput(stderr, maxStderrLog)),
+			otellog.String("stdout", truncateOutput(string(stdout), bdContentLim)),
+			otellog.String("stderr", truncateOutput(stderr, bdContentLim)),
 		)
 	}
 	emit(ctx, "bd.call", severity(err), kvs...)
@@ -247,35 +358,112 @@ func RecordSessionStop(ctx context.Context, sessionID string, err error) {
 }
 
 // RecordPromptSend records a tmux SendKeys prompt dispatch (metrics + log event).
+// keys content is opt-in: set GT_LOG_PROMPT_KEYS=true to include it (truncated
+// to 256 bytes). Default off because prompts may contain secrets or PII.
 func RecordPromptSend(ctx context.Context, session, keys string, debounceMs int, err error) {
 	initInstruments()
 	status := statusStr(err)
 	inst.promptTotal.Add(ctx, 1,
 		metric.WithAttributes(attribute.String("status", status)),
 	)
-	emit(ctx, "prompt.send", severity(err),
+	kvs := []otellog.KeyValue{
 		otellog.String("session", session),
 		otellog.Int64("keys_len", int64(len(keys))),
 		otellog.Int64("debounce_ms", int64(debounceMs)),
 		otellog.String("status", status),
 		errKV(err),
+	}
+	if os.Getenv("GT_LOG_PROMPT_KEYS") == "true" {
+		kvs = append(kvs, otellog.String("keys", truncateOutput(keys, 256)))
+	}
+	emit(ctx, "prompt.send", severity(err), kvs...)
+}
+
+// AgentInstantiateInfo carries all fields for the root agent.instantiate event.
+// All fields except RunID, AgentType, Role, AgentName, SessionID, and TownRoot
+// are optional; pass empty strings for unknown fields.
+type AgentInstantiateInfo struct {
+	// RunID is the GASTOWN run UUID (GT_RUN), the waterfall primary key.
+	RunID string
+	// AgentType is the runtime adapter name ("claudecode", "opencode", …).
+	AgentType string
+	// Role is the Gastown agent role ("polecat", "witness", "mayor", "refinery",
+	// "crew", "deacon", "dog", "boot").
+	Role string
+	// AgentName is the specific agent name within its role (e.g. "wyvern-Toast").
+	// For singletons (mayor, deacon) this equals the role name.
+	AgentName string
+	// SessionID is the tmux session name (TIMOX pane).
+	SessionID string
+	// RigName is the rig name; empty for town-level agents (mayor, deacon).
+	RigName string
+	// TownRoot is the absolute path to the Gastown town root (~/gt); used to
+	// derive the instance identifier "hostname:basename(townRoot)".
+	TownRoot string
+	// IssueID is the bead ID of the work item assigned to this agent.
+	// Empty for agents not started with an explicit issue (witness, mayor, …).
+	IssueID string
+	// GitBranch is the current git branch of the working directory at spawn time.
+	GitBranch string
+	// GitCommit is the HEAD commit SHA of the working directory at spawn time.
+	GitCommit string
+}
+
+// RecordAgentInstantiate records the creation of a new agent session — the
+// root GASTOWN event that anchors all downstream waterfall telemetry.
+func RecordAgentInstantiate(ctx context.Context, info AgentInstantiateInfo) {
+	initInstruments()
+	inst.agentInstantiateTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("agent_type", info.AgentType),
+			attribute.String("role", info.Role),
+			attribute.String("rig", info.RigName),
+		),
+	)
+	emit(ctx, "agent.instantiate", otellog.SeverityInfo,
+		otellog.String("run.id", info.RunID),
+		otellog.String("instance", instanceID(info.TownRoot)),
+		otellog.String("town_root", info.TownRoot),
+		otellog.String("agent_type", info.AgentType),
+		otellog.String("role", info.Role),
+		otellog.String("agent_name", info.AgentName),
+		otellog.String("session_id", info.SessionID),
+		otellog.String("rig", info.RigName),
+		otellog.String("issue_id", info.IssueID),
+		otellog.String("git_branch", info.GitBranch),
+		otellog.String("git_commit", info.GitCommit),
 	)
 }
 
-// RecordPaneRead records a tmux CapturePane call (metrics + log event).
-func RecordPaneRead(ctx context.Context, session string, lines, contentLen int, err error) {
+// RecordMailMessage records a mail send/read/archive operation.
+// All MailMessageInfo fields are optional; pass zero values for unknown fields.
+// msg.body is opt-in: set GT_LOG_MAIL_BODY=true to include it (truncated to
+// 256 bytes). Default off because mail bodies may contain secrets or PII.
+func RecordMailMessage(ctx context.Context, operation string, msg MailMessageInfo, err error) {
 	initInstruments()
 	status := statusStr(err)
-	inst.paneReadTotal.Add(ctx, 1,
-		metric.WithAttributes(attribute.String("status", status)),
+	inst.mailTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("status", status),
+			attribute.String("operation", operation),
+		),
 	)
-	emit(ctx, "pane.read", severity(err),
-		otellog.String("session", session),
-		otellog.Int64("lines_requested", int64(lines)),
-		otellog.Int64("content_len", int64(contentLen)),
+	kvs := []otellog.KeyValue{
+		otellog.String("operation", operation),
+		otellog.String("msg.id", msg.ID),
+		otellog.String("msg.from", msg.From),
+		otellog.String("msg.to", msg.To),
+		otellog.String("msg.subject", msg.Subject),
+		otellog.String("msg.thread_id", msg.ThreadID),
+		otellog.String("msg.priority", msg.Priority),
+		otellog.String("msg.type", msg.MsgType),
 		otellog.String("status", status),
 		errKV(err),
-	)
+	}
+	if os.Getenv("GT_LOG_MAIL_BODY") == "true" {
+		kvs = append(kvs, otellog.String("msg.body", truncateOutput(msg.Body, 256)))
+	}
+	emit(ctx, "mail", severity(err), kvs...)
 }
 
 // RecordPrime records a gt prime invocation (metrics + log event).
@@ -298,12 +486,11 @@ func RecordPrime(ctx context.Context, role string, hookMode bool, err error) {
 }
 
 // RecordPrimeContext logs the formula/context rendered by gt prime.
-// This lets operators see exactly what context each agent started with,
-// correlated to the Claude API calls that follow. Only emits when telemetry
-// is active (no-op otherwise). The formula may be empty for compact/resume primes
-// or when the fallback (non-template) path is used.
+// Opt-in: set GT_LOG_PRIME_CONTEXT=true to enable. Default off because the
+// rendered formula may contain secrets injected by gt prime (API keys, tokens).
+// Only emits when telemetry is active and the env var is set.
 func RecordPrimeContext(ctx context.Context, formula, role string, hookMode bool) {
-	if formula == "" {
+	if formula == "" || os.Getenv("GT_LOG_PRIME_CONTEXT") != "true" {
 		return
 	}
 	initInstruments()
@@ -318,7 +505,10 @@ func RecordPrimeContext(ctx context.Context, formula, role string, hookMode bool
 func RecordAgentStateChange(ctx context.Context, agentID, newState string, hookBead *string, err error) {
 	initInstruments()
 	status := statusStr(err)
-	hasHookBead := hookBead != nil && *hookBead != ""
+	hookBeadID := ""
+	if hookBead != nil {
+		hookBeadID = *hookBead
+	}
 	inst.agentStateTotal.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String("status", status),
@@ -328,7 +518,7 @@ func RecordAgentStateChange(ctx context.Context, agentID, newState string, hookB
 	emit(ctx, "agent.state_change", severity(err),
 		otellog.String("agent_id", agentID),
 		otellog.String("new_state", newState),
-		otellog.Bool("has_hook_bead", hasHookBead),
+		otellog.String("hook_bead", hookBeadID),
 		otellog.String("status", status),
 		errKV(err),
 	)
@@ -470,17 +660,174 @@ func RecordConvoyCreate(ctx context.Context, beadID string, err error) {
 	)
 }
 
-const maxPaneOutputLog = 8192
+// RecordAgentTokenUsage emits a token usage event for an assistant turn.
+// Called once per assistant message (not per content block) to avoid double-counting.
+// inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens map directly to
+// the Claude API usage fields: input_tokens, output_tokens,
+// cache_read_input_tokens, cache_creation_input_tokens.
+func RecordAgentTokenUsage(ctx context.Context, sessionID, nativeSessionID string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int) {
+	initInstruments()
+	inst.agentEventTotal.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("session", sessionID),
+		attribute.String("event_type", "usage"),
+		attribute.String("role", "assistant"),
+	))
+	logger := global.GetLoggerProvider().Logger(loggerName)
+	var r otellog.Record
+	r.SetBody(otellog.StringValue("agent.usage"))
+	r.SetSeverity(otellog.SeverityInfo)
+	r.AddAttributes(
+		otellog.String("session", sessionID),
+		otellog.String("native_session_id", nativeSessionID),
+		otellog.Int64("input_tokens", int64(inputTokens)),
+		otellog.Int64("output_tokens", int64(outputTokens)),
+		otellog.Int64("cache_read_tokens", int64(cacheReadTokens)),
+		otellog.Int64("cache_creation_tokens", int64(cacheCreationTokens)),
+	)
+	addRunID(ctx, &r)
+	logger.Emit(ctx, r)
+}
+
+// RecordMolCook records a formula cook operation (formula → proto).
+func RecordMolCook(ctx context.Context, formulaName string, err error) {
+	initInstruments()
+	status := statusStr(err)
+	inst.molCookTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("status", status),
+			attribute.String("formula", formulaName),
+		),
+	)
+	emit(ctx, "mol.cook", severity(err),
+		otellog.String("formula_name", formulaName),
+		otellog.String("status", status),
+		errKV(err),
+	)
+}
+
+// RecordMolWisp records a molecule wisp creation (proto → wisp).
+// beadID is the base bead the wisp is bonded to; empty for standalone formula slinging.
+func RecordMolWisp(ctx context.Context, formulaName, wispRootID, beadID string, err error) {
+	initInstruments()
+	status := statusStr(err)
+	inst.molWispTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("status", status),
+			attribute.String("formula", formulaName),
+		),
+	)
+	emit(ctx, "mol.wisp", severity(err),
+		otellog.String("formula_name", formulaName),
+		otellog.String("wisp_root_id", wispRootID),
+		otellog.String("bead_id", beadID),
+		otellog.String("status", status),
+		errKV(err),
+	)
+}
+
+// RecordMolSquash records a molecule squash operation (mol → digest).
+// doneSteps/totalSteps describe execution progress; digestCreated indicates
+// whether a digest bead was produced (false when --no-digest is set).
+func RecordMolSquash(ctx context.Context, molID string, doneSteps, totalSteps int, digestCreated bool, err error) {
+	initInstruments()
+	status := statusStr(err)
+	inst.molSquashTotal.Add(ctx, 1,
+		metric.WithAttributes(attribute.String("status", status)),
+	)
+	emit(ctx, "mol.squash", severity(err),
+		otellog.String("mol_id", molID),
+		otellog.Int64("done_steps", int64(doneSteps)),
+		otellog.Int64("total_steps", int64(totalSteps)),
+		otellog.Bool("digest_created", digestCreated),
+		otellog.String("status", status),
+		errKV(err),
+	)
+}
+
+// RecordMolBurn records a molecule burn (destroy) operation.
+// childrenClosed is the number of descendant step beads closed in the process.
+func RecordMolBurn(ctx context.Context, molID string, childrenClosed int, err error) {
+	initInstruments()
+	status := statusStr(err)
+	inst.molBurnTotal.Add(ctx, 1,
+		metric.WithAttributes(attribute.String("status", status)),
+	)
+	emit(ctx, "mol.burn", severity(err),
+		otellog.String("mol_id", molID),
+		otellog.Int64("children_closed", int64(childrenClosed)),
+		otellog.String("status", status),
+		errKV(err),
+	)
+}
+
+// RecordBeadCreate records the creation of a child bead during molecule instantiation.
+// parentID is the base/wisp bead the child is attached to;
+// molSource is the molecule template (proto) ID that drove the instantiation.
+func RecordBeadCreate(ctx context.Context, beadID, parentID, molSource string) {
+	initInstruments()
+	inst.beadCreateTotal.Add(ctx, 1,
+		metric.WithAttributes(attribute.String("mol_source", molSource)),
+	)
+	emit(ctx, "bead.create", otellog.SeverityInfo,
+		otellog.String("bead_id", beadID),
+		otellog.String("parent_id", parentID),
+		otellog.String("mol_source", molSource),
+	)
+}
 
 // RecordPaneOutput emits a chunk of raw pane output (ANSI already stripped) to VictoriaLogs.
 // Opt-in: only called when GT_LOG_PANE_OUTPUT=true.
+// Content is truncated to GT_LOG_PANE_CONTENT_LIMIT bytes (default 8192).
 func RecordPaneOutput(ctx context.Context, sessionID, content string) {
 	initInstruments()
+	initContentLimits()
 	inst.paneOutputTotal.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("session", sessionID),
 	))
 	emit(ctx, "pane.output", otellog.SeverityInfo,
 		otellog.String("session", sessionID),
-		otellog.String("content", truncateOutput(content, maxPaneOutputLog)),
+		otellog.String("content", truncateOutput(content, paneContentLim)),
 	)
+}
+
+// RecordAgentEvent emits a structured agent conversation event.
+// Opt-in: requires GT_LOG_AGENT_OUTPUT=true (enforced here so callers can't bypass it).
+//
+// agentType is the adapter name ("claudecode", "opencode", …).
+// eventType is one of "text", "tool_use", "tool_result", "thinking".
+// role is "assistant" or "user".
+// nativeSessionID is the agent-native session UUID (e.g. Claude Code JSONL filename UUID).
+// ts is the original timestamp from the conversation log.
+// content is truncated to 512 bytes to limit PII exposure; set
+// GT_LOG_AGENT_CONTENT_LIMIT=0 to disable truncation (experts only).
+func RecordAgentEvent(ctx context.Context, sessionID, agentType, eventType, role, content, nativeSessionID string, ts time.Time) {
+	if os.Getenv("GT_LOG_AGENT_OUTPUT") != "true" {
+		return
+	}
+	initInstruments()
+	inst.agentEventTotal.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("session", sessionID),
+		attribute.String("event_type", eventType),
+		attribute.String("role", role),
+	))
+	logger := global.GetLoggerProvider().Logger(loggerName)
+	var r otellog.Record
+	r.SetBody(otellog.StringValue("agent.event"))
+	r.SetSeverity(otellog.SeverityInfo)
+	if !ts.IsZero() {
+		r.SetTimestamp(ts)
+	}
+	// Truncate content to limit PII/secret exposure in telemetry backends.
+	// Limit is cached at first call; default 512 bytes. GT_LOG_AGENT_CONTENT_LIMIT=0 disables.
+	initContentLimits()
+	r.AddAttributes(
+		otellog.String("session", sessionID),
+		otellog.String("agent_type", agentType),
+		otellog.String("event_type", eventType),
+		otellog.String("role", role),
+		otellog.String("content", truncateOutput(content, agentContentLim)),
+		otellog.String("native_session_id", nativeSessionID),
+	)
+	addRunID(ctx, &r)
+	logger.Emit(ctx, r)
 }

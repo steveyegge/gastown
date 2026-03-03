@@ -421,11 +421,30 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 			WHERE blocker.status IN ('open', 'in_progress')
 		)`, dbName, dbName, dbName, dbName)
 
-	if dryRun {
-		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.issues i WHERE %s", dbName, whereClause)
-		if err := db.QueryRowContext(ctx, countQuery, staleCutoff).Scan(&result.Closed); err != nil {
-			return nil, fmt.Errorf("count stale: %w", err)
+	// Two-step SELECT-then-UPDATE to avoid self-referencing subquery in UPDATE,
+	// which is not valid MySQL (Error 1093) and fragile in Dolt (dolthub/dolt#10600).
+	selectQuery := fmt.Sprintf("SELECT i.id FROM `%s`.issues i WHERE %s", dbName, whereClause)
+	rows, err := db.QueryContext(ctx, selectQuery, staleCutoff)
+	if err != nil {
+		return nil, fmt.Errorf("select stale: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan stale id: %w", err)
 		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+
+	if dryRun {
+		result.Closed = len(ids)
+		return result, nil
+	}
+
+	if len(ids) == 0 {
 		return result, nil
 	}
 
@@ -436,18 +455,23 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 		_, _ = db.ExecContext(context.Background(), "SET @@autocommit = 1")
 	}()
 
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
 	updateQuery := fmt.Sprintf(
-		"UPDATE `%s`.issues i SET i.status = 'closed', i.closed_at = NOW() WHERE %s", dbName, whereClause)
-	sqlResult, err := db.ExecContext(ctx, updateQuery, staleCutoff)
-	if err != nil {
+		"UPDATE `%s`.issues SET status = 'closed', closed_at = NOW() WHERE id IN (%s)",
+		dbName, strings.Join(placeholders, ","))
+	if _, err := db.ExecContext(ctx, updateQuery, args...); err != nil {
 		return nil, fmt.Errorf("auto-close: %w", err)
 	}
 
-	closed, _ := sqlResult.RowsAffected()
-	result.Closed = int(closed)
+	result.Closed = len(ids)
 
-	if closed > 0 {
-		commitMsg := fmt.Sprintf("reaper: auto-close %d stale issues in %s", closed, dbName)
+	if len(ids) > 0 {
+		commitMsg := fmt.Sprintf("reaper: auto-close %d stale issues in %s", len(ids), dbName)
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
 			result.Anomalies = append(result.Anomalies, Anomaly{
 				Type:    "dolt_commit_failed",

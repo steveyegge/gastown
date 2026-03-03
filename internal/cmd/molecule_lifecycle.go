@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,11 +12,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // runMoleculeBurn burns (destroys) the current molecule attachment.
-func runMoleculeBurn(cmd *cobra.Command, args []string) error {
+func runMoleculeBurn(cmd *cobra.Command, args []string) (retErr error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting current directory: %w", err)
@@ -85,6 +87,13 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) error {
 	// Recursively close all descendant step issues before detaching
 	// This prevents orphaned step issues from accumulating (gt-psj76.1)
 	childrenClosed := closeDescendants(b, moleculeID)
+	defer func() {
+		ctx := context.Background()
+		if cmd != nil {
+			ctx = cmd.Context()
+		}
+		telemetry.RecordMolBurn(ctx, moleculeID, childrenClosed, retErr)
+	}()
 
 	// Detach the molecule with audit logging (this "burns" it by removing the attachment)
 	_, err = b.DetachMoleculeWithAudit(handoff.ID, beads.DetachOptions{
@@ -127,7 +136,7 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) error {
 }
 
 // runMoleculeSquash squashes the current molecule into a digest.
-func runMoleculeSquash(cmd *cobra.Command, args []string) error {
+func runMoleculeSquash(cmd *cobra.Command, args []string) (retErr error) {
 	// Parse jitter early so invalid flags fail fast, but defer the sleep
 	// until after workspace/attachment validation so no-op invocations
 	// (wrong directory, no attached molecule) don't wait unnecessarily.
@@ -209,6 +218,11 @@ func runMoleculeSquash(cmd *cobra.Command, args []string) error {
 
 	moleculeID := attachment.AttachedMolecule
 
+	var doneSteps, totalSteps int
+	defer func() {
+		telemetry.RecordMolSquash(cmd.Context(), moleculeID, doneSteps, totalSteps, !moleculeNoDigest, retErr)
+	}()
+
 	// Apply jitter before acquiring any Dolt locks.
 	// Multiple patrol agents (deacon, witness, refinery) squash concurrently at
 	// cycle end, causing exclusive-lock contention. A random pre-sleep
@@ -249,6 +263,8 @@ squashed_at: %s
 		}
 
 		if progress != nil {
+			doneSteps = progress.DoneSteps
+			totalSteps = progress.TotalSteps
 			digestDesc += fmt.Sprintf(`
 ## Execution Summary
 - Steps: %d/%d completed

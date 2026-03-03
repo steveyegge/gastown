@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -687,7 +688,7 @@ exit /b 0
 		}
 	}
 
-	err = runSlingFormula([]string{"mol-anything", "gastown"})
+	err = runSlingFormula(context.Background(), []string{"mol-anything", "gastown"})
 	if err == nil {
 		t.Fatalf("expected error from runSlingFormula")
 	}

@@ -1122,6 +1122,14 @@ func (g *Git) WorktreeRemove(path string, force bool) error {
 	return err
 }
 
+// WorktreeMove moves a worktree to a new path, updating all git references.
+// This is the correct way to relocate a worktree — using os.Rename breaks
+// the .git file and worktree registry references. (GH#2056)
+func (g *Git) WorktreeMove(oldPath, newPath string) error {
+	_, err := g.run("worktree", "move", oldPath, newPath)
+	return err
+}
+
 // WorktreePrune removes worktree entries for deleted paths.
 func (g *Git) WorktreePrune() error {
 	_, err := g.run("worktree", "prune")

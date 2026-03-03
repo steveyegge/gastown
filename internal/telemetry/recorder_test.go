@@ -90,12 +90,13 @@ func TestRecordBDCall(t *testing.T) {
 	RecordBDCall(ctx, nil, 0, nil, nil, "")
 }
 
-func TestRecordBDCall_TruncatesLongOutput(t *testing.T) {
+func TestRecordBDCall_LargeOutput(t *testing.T) {
 	resetInstruments(t)
 	ctx := context.Background()
 
-	bigStdout := make([]byte, maxStdoutLog+100)
-	bigStderr := string(make([]byte, maxStderrLog+100))
+	// Content is no longer truncated; verify large payloads are accepted.
+	bigStdout := make([]byte, 100_000)
+	bigStderr := string(make([]byte, 50_000))
 	RecordBDCall(ctx, []string{"cmd"}, 1.0, nil, bigStdout, bigStderr)
 }
 
@@ -123,12 +124,38 @@ func TestRecordPromptSend(t *testing.T) {
 	RecordPromptSend(ctx, "sess-def", "", 0, errors.New("err"))
 }
 
-func TestRecordPaneRead(t *testing.T) {
+func TestWithRunID_RoundTrip(t *testing.T) {
+	ctx := WithRunID(context.Background(), "run-abc-123")
+	if got := RunIDFromCtx(ctx); got != "run-abc-123" {
+		t.Errorf("RunIDFromCtx = %q, want %q", got, "run-abc-123")
+	}
+}
+
+func TestRunIDFromCtx_Empty(t *testing.T) {
+	// No run ID in context and GT_RUN not set → empty string.
+	if got := RunIDFromCtx(context.Background()); got != "" {
+		t.Errorf("RunIDFromCtx on bare context = %q, want empty (GT_RUN not set)", got)
+	}
+}
+
+func TestRecordAgentInstantiate(t *testing.T) {
 	resetInstruments(t)
 	ctx := context.Background()
 
-	RecordPaneRead(ctx, "sess-abc", 50, 4096, nil)
-	RecordPaneRead(ctx, "sess-def", 0, 0, errors.New("read error"))
+	RecordAgentInstantiate(ctx, AgentInstantiateInfo{
+		RunID: "run-id-1", AgentType: "claudecode", Role: "polecat",
+		AgentName: "wyvern-Toast", SessionID: "gt-wyvern-Toast", RigName: "wyvern",
+		TownRoot: "/Users/pa/gt", IssueID: "GT-123", GitBranch: "feat/foo", GitCommit: "abc1234",
+	})
+	RecordAgentInstantiate(ctx, AgentInstantiateInfo{
+		RunID: "run-id-2", AgentType: "opencode", Role: "witness",
+		AgentName: "witness", SessionID: "mol-witness", RigName: "mol",
+		TownRoot: "/Users/pa/gt",
+	})
+	RecordAgentInstantiate(ctx, AgentInstantiateInfo{
+		RunID: "run-id-3", AgentType: "claudecode", Role: "mayor",
+		AgentName: "mayor", SessionID: "hq-mayor", TownRoot: "/Users/pa/gt",
+	})
 }
 
 func TestRecordPrime(t *testing.T) {
@@ -224,4 +251,45 @@ func TestRecordConvoyCreate(t *testing.T) {
 
 	RecordConvoyCreate(ctx, "bead-abc", nil)
 	RecordConvoyCreate(ctx, "bead-def", errors.New("convoy error"))
+}
+
+func TestRecordMolCook(t *testing.T) {
+	resetInstruments(t)
+	ctx := context.Background()
+
+	RecordMolCook(ctx, "mol-polecat-work", nil)
+	RecordMolCook(ctx, "bad-formula", errors.New("cook error"))
+}
+
+func TestRecordMolWisp(t *testing.T) {
+	resetInstruments(t)
+	ctx := context.Background()
+
+	RecordMolWisp(ctx, "mol-polecat-work", "gt-abc12", "bead-456", nil)
+	RecordMolWisp(ctx, "mol-polecat-work", "", "", errors.New("wisp error"))
+	RecordMolWisp(ctx, "formula-standalone", "gt-abc12", "", nil) // standalone (no bead)
+}
+
+func TestRecordMolSquash(t *testing.T) {
+	resetInstruments(t)
+	ctx := context.Background()
+
+	RecordMolSquash(ctx, "gt-abc12", 3, 5, true, nil)
+	RecordMolSquash(ctx, "gt-def34", 0, 0, false, errors.New("squash error"))
+}
+
+func TestRecordMolBurn(t *testing.T) {
+	resetInstruments(t)
+	ctx := context.Background()
+
+	RecordMolBurn(ctx, "gt-abc12", 3, nil)
+	RecordMolBurn(ctx, "gt-def34", 0, errors.New("burn error"))
+}
+
+func TestRecordBeadCreate(t *testing.T) {
+	resetInstruments(t)
+	ctx := context.Background()
+
+	RecordBeadCreate(ctx, "gt-abc12.s01", "gt-abc12", "mol-polecat-work")
+	RecordBeadCreate(ctx, "gt-def34.s01", "gt-def34", "mol-review")
 }

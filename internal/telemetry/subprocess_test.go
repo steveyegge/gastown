@@ -12,10 +12,27 @@ func TestBuildGTResourceAttrs_Empty(t *testing.T) {
 	t.Setenv("BD_ACTOR", "")
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_WORK_RIG", "")
+	t.Setenv("GT_WORK_BEAD", "")
+	t.Setenv("GT_WORK_MOL", "")
 
 	result := buildGTResourceAttrs()
 	if result != "" {
 		t.Errorf("expected empty string, got %q", result)
+	}
+}
+
+func TestBuildGTResourceAttrs_Session(t *testing.T) {
+	t.Setenv("GT_ROLE", "deacon")
+	t.Setenv("GT_RIG", "")
+	t.Setenv("BD_ACTOR", "deacon")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_SESSION", "hq-deacon")
+
+	result := buildGTResourceAttrs()
+	if !strings.Contains(result, "gt.session=hq-deacon") {
+		t.Errorf("expected gt.session in result, got %q", result)
 	}
 }
 
@@ -25,6 +42,7 @@ func TestBuildGTResourceAttrs_AllVars(t *testing.T) {
 	t.Setenv("BD_ACTOR", "mol/witness")
 	t.Setenv("GT_POLECAT", "furiosa")
 	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_SESSION", "")
 
 	result := buildGTResourceAttrs()
 	for _, want := range []string{"gt.role=mol/witness", "gt.rig=mol", "gt.actor=mol/witness", "gt.agent=furiosa"} {
@@ -60,6 +78,46 @@ func TestBuildGTResourceAttrs_CrewFallback(t *testing.T) {
 	result := buildGTResourceAttrs()
 	if !strings.Contains(result, "gt.agent=mayor") {
 		t.Errorf("expected gt.agent=mayor from GT_CREW, got %q", result)
+	}
+}
+
+func TestBuildGTResourceAttrs_WorkContext(t *testing.T) {
+	t.Setenv("GT_ROLE", "")
+	t.Setenv("GT_RIG", "")
+	t.Setenv("BD_ACTOR", "")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_WORK_RIG", "gastown")
+	t.Setenv("GT_WORK_BEAD", "sg-05iq")
+	t.Setenv("GT_WORK_MOL", "mol-polecat-work")
+
+	result := buildGTResourceAttrs()
+	for _, want := range []string{"gt.work_rig=gastown", "gt.work_bead=sg-05iq", "gt.work_mol=mol-polecat-work"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected %q in result, got %q", want, result)
+		}
+	}
+}
+
+func TestBuildGTResourceAttrs_WorkContextPartial(t *testing.T) {
+	t.Setenv("GT_ROLE", "")
+	t.Setenv("GT_RIG", "")
+	t.Setenv("BD_ACTOR", "")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_WORK_RIG", "")
+	t.Setenv("GT_WORK_BEAD", "sg-05iq")
+	t.Setenv("GT_WORK_MOL", "")
+
+	result := buildGTResourceAttrs()
+	if !strings.Contains(result, "gt.work_bead=sg-05iq") {
+		t.Errorf("expected gt.work_bead in result, got %q", result)
+	}
+	if strings.Contains(result, "gt.work_rig") {
+		t.Errorf("gt.work_rig should not appear when empty, got %q", result)
+	}
+	if strings.Contains(result, "gt.work_mol") {
+		t.Errorf("gt.work_mol should not appear when empty, got %q", result)
 	}
 }
 

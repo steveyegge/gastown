@@ -25,6 +25,23 @@ func buildGTResourceAttrs() string {
 	} else if v := os.Getenv("GT_CREW"); v != "" {
 		attrs = append(attrs, "gt.agent="+v)
 	}
+	if v := os.Getenv("GT_SESSION"); v != "" {
+		attrs = append(attrs, "gt.session="+v)
+	}
+	if v := os.Getenv("GT_RUN"); v != "" {
+		attrs = append(attrs, "gt.run_id="+v)
+	}
+	// Work context — set by gt prime via injectWorkContext; identifies the rig,
+	// bead, and molecule the agent is currently processing.
+	if v := os.Getenv("GT_WORK_RIG"); v != "" {
+		attrs = append(attrs, "gt.work_rig="+v)
+	}
+	if v := os.Getenv("GT_WORK_BEAD"); v != "" {
+		attrs = append(attrs, "gt.work_bead="+v)
+	}
+	if v := os.Getenv("GT_WORK_MOL"); v != "" {
+		attrs = append(attrs, "gt.work_mol="+v)
+	}
 	return strings.Join(attrs, ",")
 }
 
@@ -75,6 +92,9 @@ func OTELEnvForSubprocess() []string {
 	env = append(env, "BD_OTEL_METRICS_URL="+metricsURL)
 	if logsURL := os.Getenv(EnvLogsURL); logsURL != "" {
 		env = append(env, "BD_OTEL_LOGS_URL="+logsURL)
+	}
+	if runID := os.Getenv("GT_RUN"); runID != "" {
+		env = append(env, "GT_RUN="+runID)
 	}
 	return env
 }

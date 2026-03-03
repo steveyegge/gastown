@@ -801,7 +801,27 @@ func LoadRigConfig(rigPath string) (*RigConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	warnDeprecatedRigConfigKeys(data, configPath)
 	return &cfg, nil
+}
+
+// warnDeprecatedRigConfigKeys detects merge_queue keys in rig root config.json
+// that are silently ignored by json.Unmarshal (RigConfig has no merge_queue field).
+// Without this warning, users can set merge_queue.target_branch believing it
+// controls MR targets, while gt mq submit / gt done actually use default_branch.
+func warnDeprecatedRigConfigKeys(data []byte, path string) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return
+	}
+	if mq, ok := raw["merge_queue"]; ok {
+		var mqMap map[string]json.RawMessage
+		if json.Unmarshal(mq, &mqMap) == nil {
+			if _, has := mqMap["target_branch"]; has {
+				fmt.Fprintf(os.Stderr, "WARNING: %s: merge_queue.target_branch is deprecated and ignored — set default_branch instead\n", path)
+			}
+		}
+	}
 }
 
 // InitBeads initializes the beads database at rig level.
