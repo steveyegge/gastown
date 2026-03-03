@@ -112,7 +112,7 @@ func BuildCommand(args ...string) *exec.Cmd {
 	return BuildCommandContext(context.Background(), args...)
 }
 
-// BuildCommandContext is like BuildCommand but honours a context for cancellation.
+// BuildCommandContext is like BuildCommand but honors a context for cancellation.
 func BuildCommandContext(ctx context.Context, args ...string) *exec.Cmd {
 	allArgs := []string{"-u"}
 	if sock := GetDefaultSocket(); sock != "" {

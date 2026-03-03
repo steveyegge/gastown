@@ -167,7 +167,7 @@ func discoverAllowedSubcmds() string {
 	return result
 }
 
-// buildAllowedSubcmds serialises a map[string][]string back into the semicolon-separated
+// buildAllowedSubcmds serializes a map[string][]string back into the semicolon-separated
 // "cmd:sub1,sub2,..." format expected by parseAllowedSubcmds.
 func buildAllowedSubcmds(m map[string][]string) string {
 	parts := make([]string, 0, len(m))

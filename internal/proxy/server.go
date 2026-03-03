@@ -201,7 +201,7 @@ func (s *Server) DenyCert(serial *big.Int) {
 	s.denyList.Deny(serial)
 }
 
-// Start begins listening and serving. Blocks until ctx is cancelled.
+// Start begins listening and serving. Blocks until ctx is canceled.
 func (s *Server) Start(ctx context.Context) error {
 	pool := x509.NewCertPool()
 	pool.AddCert(s.ca.Cert)
