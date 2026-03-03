@@ -124,13 +124,19 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// subForLog returns argv[1] if present, otherwise "".
+// subForLog returns a truncated argv[1] if present, otherwise "".
 // Used for audit logging to capture the subcommand without logging full argv.
+// Truncates to 128 bytes to prevent oversized log lines from exceeding
+// go test -json's scanner buffer (64 KiB), which causes CI hangs.
 func subForLog(argv []string) string {
-	if len(argv) >= 2 {
-		return argv[1]
+	if len(argv) < 2 {
+		return ""
 	}
-	return ""
+	s := argv[1]
+	if len(s) > 128 {
+		return s[:128] + "..."
+	}
+	return s
 }
 
 // extractIdentity parses the client cert CN "gt-<rig>-<name>" into "<rig>/<name>".
