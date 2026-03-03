@@ -653,6 +653,11 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string, title strin
 		return "", fmt.Errorf("ensuring custom types: %w", err)
 	}
 
+	// Ensure custom statuses (staged_ready, staged_warnings) are registered.
+	if err := beads.EnsureCustomStatuses(townBeads); err != nil {
+		return "", fmt.Errorf("ensuring custom statuses: %w", err)
+	}
+
 	// Generate convoy ID.
 	convoyID := fmt.Sprintf("hq-cv-%s", generateShortID())
 

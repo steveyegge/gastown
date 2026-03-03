@@ -725,3 +725,133 @@ func (c *CustomTypesCheck) Fix(ctx *CheckContext) error {
 	}
 	return nil
 }
+
+// CustomStatusesCheck verifies Gas Town custom statuses are registered with beads.
+type CustomStatusesCheck struct {
+	FixableCheck
+	missingStatuses []string // Cached during Run for use in Fix
+	townRoot        string   // Cached during Run for use in Fix
+}
+
+// NewCustomStatusesCheck creates a new custom statuses check.
+func NewCustomStatusesCheck() *CustomStatusesCheck {
+	return &CustomStatusesCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "beads-custom-statuses",
+				CheckDescription: "Check that Gas Town custom statuses are registered with beads",
+				CheckCategory:    CategoryConfig,
+			},
+		},
+	}
+}
+
+// Run checks if custom statuses are properly configured.
+func (c *CustomStatusesCheck) Run(ctx *CheckContext) *CheckResult {
+	if _, err := exec.LookPath("bd"); err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "beads not installed (skipped)",
+		}
+	}
+
+	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
+	if _, err := os.Stat(townBeadsDir); os.IsNotExist(err) {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No beads database (skipped)",
+		}
+	}
+
+	// Get current custom statuses configuration
+	cmd := exec.Command("bd", "config", "get", "status.custom")
+	cmd.Dir = ctx.TownRoot
+	output, err := cmd.Output()
+	if err != nil {
+		c.townRoot = ctx.TownRoot
+		c.missingStatuses = constants.BeadsCustomStatusesList()
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: "Custom statuses not configured",
+			Details: []string{
+				"Gas Town custom statuses (staged_ready, staged_warnings) are not registered",
+				"Convoy staging will fail without these statuses",
+			},
+			FixHint: "Run 'gt doctor --fix' or 'bd config set status.custom \"" + constants.BeadsCustomStatuses + "\"'",
+		}
+	}
+
+	configuredStatuses := parseConfigOutput(output)
+	configuredSet := make(map[string]bool)
+	for _, s := range strings.Split(configuredStatuses, ",") {
+		configuredSet[strings.TrimSpace(s)] = true
+	}
+
+	var missing []string
+	for _, required := range constants.BeadsCustomStatusesList() {
+		if !configuredSet[required] {
+			missing = append(missing, required)
+		}
+	}
+
+	if len(missing) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "All custom statuses registered",
+		}
+	}
+
+	c.townRoot = ctx.TownRoot
+	c.missingStatuses = missing
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("%d custom status(es) missing", len(missing)),
+		Details: []string{
+			fmt.Sprintf("Missing statuses: %s", strings.Join(missing, ", ")),
+			fmt.Sprintf("Configured: %s", configuredStatuses),
+			fmt.Sprintf("Required: %s", constants.BeadsCustomStatuses),
+		},
+		FixHint: "Run 'gt doctor --fix' to register missing statuses",
+	}
+}
+
+// Fix registers the missing custom statuses by merging with existing ones.
+func (c *CustomStatusesCheck) Fix(ctx *CheckContext) error {
+	// Read existing statuses
+	getCmd := exec.Command("bd", "config", "get", "status.custom")
+	getCmd.Dir = c.townRoot
+	existingOutput, _ := getCmd.Output()
+
+	// Build merged set
+	statusSet := make(map[string]bool)
+	if existing := strings.TrimSpace(string(existingOutput)); existing != "" {
+		for _, s := range strings.Split(parseConfigOutput(existingOutput), ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				statusSet[s] = true
+			}
+		}
+	}
+	for _, s := range constants.BeadsCustomStatusesList() {
+		statusSet[s] = true
+	}
+
+	var merged []string
+	for s := range statusSet {
+		merged = append(merged, s)
+	}
+
+	cmd := exec.Command("bd", "config", "set", "status.custom", strings.Join(merged, ","))
+	cmd.Dir = c.townRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("bd config set status.custom: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}

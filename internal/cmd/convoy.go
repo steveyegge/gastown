@@ -478,6 +478,11 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ensuring custom types: %w", err)
 	}
 
+	// Ensure custom statuses (staged_ready, staged_warnings) are registered.
+	if err := beads.EnsureCustomStatuses(townBeads); err != nil {
+		return fmt.Errorf("ensuring custom statuses: %w", err)
+	}
+
 	// Create convoy issue in town beads
 	description := fmt.Sprintf("Convoy tracking %d issues", len(trackedIssues))
 

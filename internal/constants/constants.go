@@ -169,6 +169,23 @@ func BeadsCustomTypesList() []string {
 	return []string{"agent", "role", "rig", "convoy", "slot", "queue", "event", "message", "molecule", "gate", "merge-request"}
 }
 
+// Beads custom status configuration constants.
+const (
+	// BeadsCustomStatuses is the comma-separated list of custom issue statuses
+	// that Gas Town registers with beads. Convoy staging uses staged_ready and
+	// staged_warnings to track convoy readiness before launch.
+	//
+	// Status origins:
+	//   staged_ready    - Convoy staged with no warnings (ready to launch)
+	//   staged_warnings - Convoy staged with warnings (requires --force to launch)
+	BeadsCustomStatuses = "staged_ready,staged_warnings"
+)
+
+// BeadsCustomStatusesList returns the custom statuses as a slice.
+func BeadsCustomStatusesList() []string {
+	return []string{"staged_ready", "staged_warnings"}
+}
+
 // Git branch names.
 const (
 	// BranchMain is the default main branch name.
