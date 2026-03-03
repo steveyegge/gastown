@@ -41,6 +41,9 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
   name: appName
   location: location
   kind: 'functionapp,linux'
+  tags: {
+    'azd-service-name': 'api'
+  }
   // System-assigned managed identity lets the app resolve @Microsoft.KeyVault(...) references
   identity: {
     type: 'SystemAssigned'
