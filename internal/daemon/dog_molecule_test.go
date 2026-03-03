@@ -68,49 +68,6 @@ func TestStripANSI(t *testing.T) {
 	}
 }
 
-func TestExtractJSONField(t *testing.T) {
-	tests := []struct {
-		name  string
-		line  string
-		field string
-		want  string
-	}{
-		{
-			name:  "simple field",
-			line:  `{"id":"gt-wisp-abc","title":"Scan databases"}`,
-			field: "id",
-			want:  "gt-wisp-abc",
-		},
-		{
-			name:  "field with space after colon",
-			line:  `{"id": "gt-wisp-abc", "title": "Scan databases"}`,
-			field: "title",
-			want:  "Scan databases",
-		},
-		{
-			name:  "missing field",
-			line:  `{"id":"gt-wisp-abc"}`,
-			field: "title",
-			want:  "",
-		},
-		{
-			name:  "empty line",
-			line:  "",
-			field: "id",
-			want:  "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractJSONField(tt.line, tt.field)
-			if got != tt.want {
-				t.Errorf("extractJSONField(%q, %q) = %q, want %q", tt.line, tt.field, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestDogMolGracefulDegradation(t *testing.T) {
 	// A dogMol with empty rootID should be a no-op for all operations.
 	dm := &dogMol{

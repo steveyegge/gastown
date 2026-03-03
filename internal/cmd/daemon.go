@@ -106,6 +106,41 @@ Examples:
 	RunE: runDaemonEnableSupervisor,
 }
 
+var daemonRotateLogsCmd = &cobra.Command{
+	Use:   "rotate-logs",
+	Short: "Rotate daemon log files",
+	Long: `Rotate all daemon-managed log files.
+
+Uses copytruncate for Dolt server logs (safe for processes with open fds).
+daemon.log uses automatic lumberjack rotation and is skipped.
+
+By default, only rotates logs exceeding 100MB. Use --force to rotate all.
+
+Examples:
+  gt daemon rotate-logs           # Rotate logs > 100MB
+  gt daemon rotate-logs --force   # Rotate all logs regardless of size`,
+	RunE: runDaemonRotateLogs,
+}
+
+var daemonRotateLogsForce bool
+
+var daemonClearBackoffCmd = &cobra.Command{
+	Use:   "clear-backoff <agent>",
+	Short: "Clear crash loop backoff for an agent",
+	Long: `Clear the crash loop and restart backoff state for an agent.
+
+When an agent crashes repeatedly, the daemon enters crash loop mode and
+stops restarting it. Use this command to reset the crash loop counter so
+the daemon will resume restarting the agent.
+
+The agent name is the session identity (e.g., "deacon", "mayor").
+
+Examples:
+  gt daemon clear-backoff deacon   # Reset deacon crash loop`,
+	Args: cobra.ExactArgs(1),
+	RunE: runDaemonClearBackoff,
+}
+
 var (
 	daemonLogLines  int
 	daemonLogFollow bool
@@ -118,9 +153,12 @@ func init() {
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonRunCmd)
 	daemonCmd.AddCommand(daemonEnableSupervisorCmd)
+	daemonCmd.AddCommand(daemonClearBackoffCmd)
+	daemonCmd.AddCommand(daemonRotateLogsCmd)
 
 	daemonLogsCmd.Flags().IntVarP(&daemonLogLines, "lines", "n", 50, "Number of lines to show")
 	daemonLogsCmd.Flags().BoolVarP(&daemonLogFollow, "follow", "f", false, "Follow log output")
+	daemonRotateLogsCmd.Flags().BoolVar(&daemonRotateLogsForce, "force", false, "Rotate all logs regardless of size")
 
 	rootCmd.AddCommand(daemonCmd)
 }
@@ -331,5 +369,70 @@ func runDaemonEnableSupervisor(cmd *cobra.Command, args []string) error {
 		fmt.Println("  systemctl --user stop gastown-daemon.service")
 		fmt.Println("  systemctl --user disable gastown-daemon.service")
 	}
+	return nil
+}
+
+func runDaemonClearBackoff(cmd *cobra.Command, args []string) error {
+	agentID := args[0]
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Clear the crash loop state on disk
+	if err := daemon.ClearAgentBackoff(townRoot, agentID); err != nil {
+		return fmt.Errorf("clearing backoff for %s: %w", agentID, err)
+	}
+
+	// Signal the daemon to reload its in-memory restart tracker
+	running, pid, err := daemon.IsRunning(townRoot)
+	if err != nil {
+		return fmt.Errorf("checking daemon status: %w", err)
+	}
+	if running {
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			return fmt.Errorf("finding daemon process: %w", err)
+		}
+		if err := signalDaemonReload(process); err != nil {
+			return fmt.Errorf("signaling daemon to reload: %w", err)
+		}
+		fmt.Printf("%s Cleared backoff for %s (daemon reloaded)\n", style.Bold.Render("✓"), agentID)
+	} else {
+		fmt.Printf("%s Cleared backoff for %s (daemon not running, will take effect on next start)\n",
+			style.Bold.Render("✓"), agentID)
+	}
+
+	return nil
+}
+
+func runDaemonRotateLogs(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	var result *daemon.RotateLogsResult
+	if daemonRotateLogsForce {
+		result = daemon.ForceRotateLogs(townRoot)
+	} else {
+		result = daemon.RotateLogs(townRoot)
+	}
+
+	for _, path := range result.Rotated {
+		fmt.Printf("%s Rotated %s\n", style.Bold.Render("✓"), path)
+	}
+	for _, path := range result.Skipped {
+		fmt.Printf("  %s %s (below threshold)\n", style.Dim.Render("·"), path)
+	}
+	for _, err := range result.Errors {
+		fmt.Printf("  %s %v\n", style.Warning.Render("⚠"), err)
+	}
+
+	if len(result.Rotated) == 0 && len(result.Errors) == 0 {
+		fmt.Printf("%s No logs needed rotation\n", style.Bold.Render("✓"))
+	}
+
 	return nil
 }

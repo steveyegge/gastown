@@ -7,9 +7,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // Default parameters for feed-stranded rate limiting.
+// Configurable via operational.deacon.max_feeds_per_cycle and
+// operational.deacon.feed_cooldown in settings/config.json.
 const (
 	// DefaultMaxFeedsPerCycle is the maximum number of convoys to feed in one invocation.
 	// Prevents spawning too many dogs at once.
@@ -44,10 +48,11 @@ type ConvoyFeedState struct {
 
 // StrandedConvoy holds info about a stranded convoy from `gt convoy stranded --json`.
 type StrandedConvoy struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	ReadyCount  int      `json:"ready_count"`
-	ReadyIssues []string `json:"ready_issues"`
+	ID           string   `json:"id"`
+	Title        string   `json:"title"`
+	TrackedCount int      `json:"tracked_count"`
+	ReadyCount   int      `json:"ready_count"`
+	ReadyIssues  []string `json:"ready_issues"`
 }
 
 // FeedResult describes the outcome of a feed-stranded invocation.
@@ -61,6 +66,11 @@ type FeedResult struct {
 	// Skipped is the number of convoys skipped (cooldown).
 	Skipped int `json:"skipped"`
 
+	// NeedsAttention is the number of convoys with tracked issues but no ready
+	// issues. These require agent judgment — Go surfaces the raw data but does
+	// not classify or act on them.
+	NeedsAttention int `json:"needs_attention"`
+
 	// Errors is the number of convoys that failed to process.
 	Errors int `json:"errors"`
 
@@ -70,9 +80,11 @@ type FeedResult struct {
 
 // FeedConvoyResult describes the outcome for a single convoy.
 type FeedConvoyResult struct {
-	ConvoyID string `json:"convoy_id"`
-	Action   string `json:"action"` // "fed", "closed", "cooldown", "error", "limit"
-	Message  string `json:"message"`
+	ConvoyID     string `json:"convoy_id"`
+	Action       string `json:"action"` // "fed", "closed", "cooldown", "error", "limit", "needs_attention"
+	Message      string `json:"message"`
+	TrackedCount int    `json:"tracked_count,omitempty"` // Raw data for agent inspection
+	ReadyCount   int    `json:"ready_count,omitempty"`   // Raw data for agent inspection
 }
 
 // FeedStrandedStateFile returns the path to the feed-stranded state file.
@@ -184,8 +196,10 @@ func FindStrandedConvoys(townRoot string) ([]StrandedConvoy, error) {
 	return stranded, nil
 }
 
-// FeedStranded detects stranded convoys and dispatches dogs to feed them.
-// Empty convoys are auto-closed directly. Feedable convoys get a dog dispatched.
+// FeedStranded detects stranded convoys and takes mechanical actions where safe.
+// Empty convoys (0 tracked) are auto-closed. Feedable convoys get a dog dispatched.
+// Convoys with tracked-but-not-ready issues are surfaced as "needs_attention" with
+// raw data (tracked_count, ready_count) for the deacon agent to inspect and decide.
 // Rate limits by maxPerCycle and per-convoy cooldown.
 func FeedStranded(townRoot string, maxPerCycle int, cooldown time.Duration) *FeedResult {
 	result := &FeedResult{}
@@ -226,8 +240,24 @@ func FeedStranded(townRoot string, maxPerCycle int, cooldown time.Duration) *Fee
 	fedCount := 0
 
 	for _, convoy := range stranded {
-		// Handle empty convoys (auto-close) — no rate limit needed
+		// Handle convoys with no ready issues.
 		if convoy.ReadyCount == 0 {
+			// Convoy has tracked issues but none are ready — surface raw data
+			// for the deacon agent to inspect. Go does not classify WHY issues
+			// aren't ready (dependency resolution, external block, etc.).
+			if convoy.TrackedCount > 0 {
+				result.NeedsAttention++
+				result.Details = append(result.Details, FeedConvoyResult{
+					ConvoyID:     convoy.ID,
+					Action:       "needs_attention",
+					Message:      fmt.Sprintf("%d tracked issues, 0 ready — requires agent review", convoy.TrackedCount),
+					TrackedCount: convoy.TrackedCount,
+					ReadyCount:   0,
+				})
+				continue
+			}
+
+			// Truly empty convoy (0 tracked issues) — auto-close
 			if err := closeEmptyConvoy(townRoot, convoy.ID); err != nil {
 				result.Errors++
 				result.Details = append(result.Details, FeedConvoyResult{
@@ -312,7 +342,7 @@ func closeEmptyConvoy(townRoot, convoyID string) error {
 
 // dispatchFeedDog dispatches a dog to feed a stranded convoy via gt sling.
 func dispatchFeedDog(townRoot, convoyID string) error {
-	cmd := exec.Command("gt", "sling", "mol-convoy-feed", "deacon/dogs",
+	cmd := exec.Command("gt", "sling", constants.MolConvoyFeed, "deacon/dogs",
 		"--var", fmt.Sprintf("convoy=%s", convoyID))
 	cmd.Dir = townRoot
 	cmd.Stdout = os.Stdout

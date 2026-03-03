@@ -12,6 +12,7 @@ import (
 
 	"github.com/gofrs/flock"
 
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
 )
@@ -38,7 +39,7 @@ func (b *Beads) lockAgentBead(id string) (*flock.Flock, error) {
 type AgentFields struct {
 	RoleType          string // polecat, witness, refinery, deacon, mayor
 	Rig               string // Rig name (empty for global agents like mayor/deacon)
-	AgentState        string // spawning, working, done, stuck
+	AgentState        string // spawning, working, done, stuck, escalated, idle, running, nuked
 	HookBead          string // Currently pinned work bead ID
 	CleanupStatus     string // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
 	ActiveMR          string // Currently active merge request bead ID (for traceability)
@@ -46,6 +47,15 @@ type AgentFields struct {
 	Mode              string // Execution mode: "" (normal) or "ralph" (Ralph Wiggum loop)
 	// Note: RoleBead field removed - role definitions are now config-based.
 	// See internal/config/roles/*.toml and config-based-roles.md.
+
+	// Completion metadata fields (gt-x7t9).
+	// Written by gt done, read by witness survey-workers to discover
+	// completion state from beads instead of POLECAT_DONE mail.
+	ExitType       string // COMPLETED, ESCALATED, DEFERRED, PHASE_COMPLETE (see witness.ExitType*)
+	MRID           string // MR bead ID (if MR was created)
+	Branch         string // Polecat working branch name
+	MRFailed       bool   // True when MR creation was attempted but failed
+	CompletionTime string // RFC3339 timestamp of when gt done was called
 }
 
 // Notification level constants
@@ -104,6 +114,23 @@ func FormatAgentDescription(title string, fields *AgentFields) string {
 		lines = append(lines, fmt.Sprintf("mode: %s", fields.Mode))
 	}
 
+	// Completion metadata fields (gt-x7t9)
+	if fields.ExitType != "" {
+		lines = append(lines, fmt.Sprintf("exit_type: %s", fields.ExitType))
+	}
+	if fields.MRID != "" {
+		lines = append(lines, fmt.Sprintf("mr_id: %s", fields.MRID))
+	}
+	if fields.Branch != "" {
+		lines = append(lines, fmt.Sprintf("branch: %s", fields.Branch))
+	}
+	if fields.MRFailed {
+		lines = append(lines, "mr_failed: true")
+	}
+	if fields.CompletionTime != "" {
+		lines = append(lines, fmt.Sprintf("completion_time: %s", fields.CompletionTime))
+	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -147,6 +174,17 @@ func ParseAgentFields(description string) *AgentFields {
 			fields.NotificationLevel = value
 		case "mode":
 			fields.Mode = value
+		// Completion metadata fields (gt-x7t9)
+		case "exit_type":
+			fields.ExitType = value
+		case "mr_id":
+			fields.MRID = value
+		case "branch":
+			fields.Branch = value
+		case "mr_failed":
+			fields.MRFailed = value == "true"
+		case "completion_time":
+			fields.CompletionTime = value
 		}
 	}
 
@@ -381,7 +419,13 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 	fields.HookBead = ""      // Clear hook_bead
 	fields.ActiveMR = ""      // Clear active_mr
 	fields.CleanupStatus = "" // Clear cleanup_status
-	fields.AgentState = "nuked"
+	fields.AgentState = string(AgentStateNuked)
+	// Clear completion metadata (gt-x7t9)
+	fields.ExitType = ""
+	fields.MRID = ""
+	fields.Branch = ""
+	fields.MRFailed = false
+	fields.CompletionTime = ""
 
 	// Update description with cleared fields
 	description := FormatAgentDescription(issue.Title, fields)
@@ -489,6 +533,12 @@ type AgentFieldUpdates struct {
 	ActiveMR          *string
 	NotificationLevel *string
 	Mode              *string
+	// Completion metadata fields (gt-x7t9)
+	ExitType       *string
+	MRID           *string
+	Branch         *string
+	MRFailed       *bool
+	CompletionTime *string
 }
 
 // UpdateAgentDescriptionFields atomically updates one or more agent description
@@ -532,6 +582,22 @@ func (b *Beads) UpdateAgentDescriptionFields(id string, updates AgentFieldUpdate
 	if updates.Mode != nil {
 		fields.Mode = *updates.Mode
 	}
+	// Completion metadata fields (gt-x7t9)
+	if updates.ExitType != nil {
+		fields.ExitType = *updates.ExitType
+	}
+	if updates.MRID != nil {
+		fields.MRID = *updates.MRID
+	}
+	if updates.Branch != nil {
+		fields.Branch = *updates.Branch
+	}
+	if updates.MRFailed != nil {
+		fields.MRFailed = *updates.MRFailed
+	}
+	if updates.CompletionTime != nil {
+		fields.CompletionTime = *updates.CompletionTime
+	}
 
 	description := FormatAgentDescription(issue.Title, fields)
 	return b.Update(id, UpdateOptions{Description: &description})
@@ -556,6 +622,46 @@ func (b *Beads) UpdateAgentActiveMR(id string, activeMR string) error {
 // Pass empty string to reset to default (normal).
 func (b *Beads) UpdateAgentNotificationLevel(id string, level string) error {
 	return b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{NotificationLevel: &level})
+}
+
+// CompletionMetadata holds the fields written by gt done to record
+// polecat work completion on the agent bead. The witness survey-workers
+// step reads these fields to discover completion state from beads
+// instead of POLECAT_DONE mail (nudge-over-mail redesign, gt-x7t9).
+type CompletionMetadata struct {
+	ExitType       string // COMPLETED, ESCALATED, DEFERRED, PHASE_COMPLETE
+	MRID           string // MR bead ID (empty if no MR)
+	Branch         string // Polecat working branch
+	HookBead       string // The work bead ID
+	MRFailed       bool   // True when MR creation was attempted but failed
+	CompletionTime string // RFC3339 timestamp
+}
+
+// UpdateAgentCompletion atomically writes all completion metadata fields
+// to an agent bead. Called by gt done to record completion state.
+func (b *Beads) UpdateAgentCompletion(id string, meta *CompletionMetadata) error {
+	mrFailed := meta.MRFailed
+	return b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{
+		ExitType:       &meta.ExitType,
+		MRID:           &meta.MRID,
+		Branch:         &meta.Branch,
+		MRFailed:       &mrFailed,
+		CompletionTime: &meta.CompletionTime,
+	})
+}
+
+// ClearAgentCompletion removes all completion metadata fields from an agent bead.
+// Called when a polecat is re-slung with new work (resets stale completion state).
+func (b *Beads) ClearAgentCompletion(id string) error {
+	empty := ""
+	notFailed := false
+	return b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{
+		ExitType:       &empty,
+		MRID:           &empty,
+		Branch:         &empty,
+		MRFailed:       &notFailed,
+		CompletionTime: &empty,
+	})
 }
 
 // GetAgentNotificationLevel returns the notification level for an agent.
@@ -596,39 +702,48 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 // ListAgentBeads returns all agent beads in a single query.
 // Returns a map of agent bead ID to Issue.
 //
-// Queries both the wisps table (primary, for migrated agent beads) and
-// the issues table (backward compat during migration). Wisps take
-// precedence for duplicate IDs.
+// Queries both the issues table (authoritative metadata source) and the
+// wisps table (fallback existence source). Issues take precedence for duplicate
+// IDs so labels/type are preserved for doctor validation.
 func (b *Beads) ListAgentBeads() (map[string]*Issue, error) {
-	result := make(map[string]*Issue)
-
-	// Query wisps table first (primary source after agent bead migration).
-	// Gracefully ignore errors — wisps table may not exist yet.
-	if wispBeads, _ := b.ListAgentBeadsFromWisps(); len(wispBeads) > 0 {
-		for id, issue := range wispBeads {
-			result[id] = issue
-		}
-	}
-
-	// Also query issues table (backward compat during migration).
+	// Query issues table first. Issues include labels and type metadata used by
+	// doctor checks (for example, validating gt:agent labels).
 	// Agent beads are type=agent (infrastructure), hidden by bd list default filter.
 	// Use --include-infra so they appear in results.
 	out, err := b.run("list", "--label=gt:agent", "--include-infra", "--json")
-	if err != nil && len(result) == 0 {
+	if err != nil {
 		return nil, err
 	}
-	if err == nil {
-		var issues []*Issue
-		if jsonErr := json.Unmarshal(out, &issues); jsonErr == nil {
-			for _, issue := range issues {
-				if _, exists := result[issue.ID]; !exists {
-					result[issue.ID] = issue
-				}
-			}
+	issuesByID := make(map[string]*Issue)
+	var issues []*Issue
+	if jsonErr := json.Unmarshal(out, &issues); jsonErr == nil {
+		for _, issue := range issues {
+			issuesByID[issue.ID] = issue
 		}
 	}
 
-	return result, nil
+	// Query wisps table as a fallback source.
+	// Keep issues-table entries when both exist for the same ID so richer
+	// metadata (labels/type) is preserved.
+	wispBeads, _ := b.ListAgentBeadsFromWisps()
+
+	return mergeAgentBeadSources(issuesByID, wispBeads), nil
+}
+
+// mergeAgentBeadSources merges issue-backed and wisp-backed agent bead maps.
+// Issues are authoritative because they carry full metadata (labels/type),
+// while wisps are treated as a fallback existence source.
+func mergeAgentBeadSources(issuesByID, wispsByID map[string]*Issue) map[string]*Issue {
+	merged := make(map[string]*Issue, len(issuesByID)+len(wispsByID))
+	for id, issue := range issuesByID {
+		merged[id] = issue
+	}
+	for id, issue := range wispsByID {
+		if _, exists := merged[id]; !exists {
+			merged[id] = issue
+		}
+	}
+	return merged
 }
 
 // ListAgentBeadsFromWisps queries the wisps table for agent beads.
@@ -681,7 +796,7 @@ func isAgentBeadByID(id string) bool {
 	// collapsed-form (role at parts[1]) agent bead IDs.
 	for _, part := range parts[1:] {
 		switch part {
-		case "witness", "refinery", "crew", "polecat", "deacon", "mayor":
+		case constants.RoleWitness, constants.RoleRefinery, constants.RoleCrew, constants.RolePolecat, constants.RoleDeacon, constants.RoleMayor:
 			return true
 		}
 	}

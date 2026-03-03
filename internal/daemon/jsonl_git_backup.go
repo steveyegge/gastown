@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 const (
@@ -23,7 +25,7 @@ const (
 	gitPushTimeout                = 120 * time.Second
 	gitCmdTimeout                 = 30 * time.Second
 	maxConsecutivePushFailures    = 3
-	defaultSpikeThreshold         = 0.20 // 20% delta triggers halt
+	defaultSpikeThreshold         = 0.50 // 50% delta triggers halt (was 20%, too sensitive for bulk ops)
 )
 
 // testPollutionPatterns matches issue IDs or titles that indicate test data leaked
@@ -34,6 +36,10 @@ var testPollutionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^bd-[0-9]{1,2}$`),                              // id: bd-1, bd-99 (suspiciously short IDs)
 	regexp.MustCompile(`^bd-[a-z]{3,5}[0-9]{1,2}$`),                   // id: bd-abc12 (test-style IDs)
 	regexp.MustCompile(`^(testdb_|beads_t|beads_pt|doctest_)`),         // id prefixes from test databases
+	regexp.MustCompile(`(?i)^--help`),                                  // title: "--help" CLI artifacts
+	regexp.MustCompile(`(?i)^Usage:\s`),                                // title: "Usage: ..." CLI help output
+	regexp.MustCompile(`^offlinebrew-`),                                // id: offlinebrew-* test prefixes
+	regexp.MustCompile(`-wisp-`),                                       // id: wisp-pattern IDs leaked into issues table
 }
 
 // validDBName matches safe database names (alphanumeric + underscore only).
@@ -43,6 +49,7 @@ var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 // Kept separate from Sprintf to avoid %% confusion.
 // The query selects only durable work product (bugs, features, tasks, epics, chores).
 const scrubWhereClause = ` WHERE (ephemeral IS NULL OR ephemeral != 1)` +
+	` AND status != 'tombstone'` +
 	` AND issue_type NOT IN ('message', 'event', 'agent', 'convoy', 'molecule', 'role', 'merge-request', 'rig')` +
 	` AND id NOT LIKE '%-wisp-%'` +
 	` AND id NOT LIKE '%-cv-%'` +
@@ -50,6 +57,9 @@ const scrubWhereClause = ` WHERE (ephemeral IS NULL OR ephemeral != 1)` +
 	` AND id NOT LIKE 'beads\_t%'` +
 	` AND id NOT LIKE 'beads\_pt%'` +
 	` AND id NOT LIKE 'doctest\_%'` +
+	` AND id NOT LIKE 'offlinebrew-%'` +
+	` AND title NOT LIKE '--%'` +
+	` AND title NOT LIKE 'Usage: %'` +
 	` ORDER BY id`
 
 // jsonlGitBackupInterval returns the configured interval, or the default (15m).
@@ -73,7 +83,7 @@ func (d *Daemon) syncJsonlGitBackup() {
 	}
 
 	// Pour molecule for observability (nil-safe — all methods are no-ops on nil).
-	mol := d.pourDogMolecule("mol-dog-jsonl", nil)
+	mol := d.pourDogMolecule(constants.MolDogJSONL, nil)
 	defer mol.close()
 
 	config := d.patrolConfig.Patrols.JsonlGitBackup
@@ -152,6 +162,14 @@ func (d *Daemon) syncJsonlGitBackup() {
 		recountAfterFilter(gitRepo, databases, counts)
 	}
 
+	// Post-scrub verification: re-scan output for any remaining pollution.
+	if remaining := d.verifyNoPollution(gitRepo, databases); remaining > 0 {
+		d.logger.Printf("jsonl_git_backup: WARNING: %d suspicious record(s) survived scrub+filter", remaining)
+		d.escalate("jsonl_git_backup", fmt.Sprintf("post-scrub verification found %d suspicious records — review JSONL exports", remaining))
+	}
+
+	mol.closeStep("verify")
+
 	// Phase D: Spike detection — compare current counts to previous commit.
 	threshold := spikeThreshold(config)
 	spikes := d.verifyExportCounts(gitRepo, databases, counts, threshold)
@@ -226,7 +244,7 @@ func (d *Daemon) exportDatabaseToJsonl(db, gitRepo, dataDir string, scrub bool) 
 	} else {
 		query = "SELECT * FROM `" + db + "`.issues ORDER BY id"
 	}
-	n, err := d.exportTableToJsonl(db, "issues", query, dbDir, dataDir)
+	n, err := d.exportTableToJsonl("issues", query, dbDir, dataDir)
 	if err != nil {
 		return 0, fmt.Errorf("issues: %w", err)
 	}
@@ -243,7 +261,7 @@ func (d *Daemon) exportDatabaseToJsonl(db, gitRepo, dataDir string, scrub bool) 
 	// 2. Export supplemental tables (no scrub, full export).
 	for _, table := range supplementalTables {
 		tQuery := fmt.Sprintf("SELECT * FROM `%s`.`%s` ORDER BY 1", db, table)
-		tn, err := d.exportTableToJsonl(db, table, tQuery, dbDir, dataDir)
+		tn, err := d.exportTableToJsonl(table, tQuery, dbDir, dataDir)
 		if err != nil {
 			// Non-fatal for supplemental tables — log and continue.
 			d.logger.Printf("jsonl_git_backup: %s/%s: export failed (non-fatal): %v", db, table, err)
@@ -258,7 +276,7 @@ func (d *Daemon) exportDatabaseToJsonl(db, gitRepo, dataDir string, scrub bool) 
 
 // exportTableToJsonl runs a query and writes the result as JSONL to {dir}/{table}.jsonl.
 // Returns the number of records exported.
-func (d *Daemon) exportTableToJsonl(db, table, query, dir, dataDir string) (int, error) {
+func (d *Daemon) exportTableToJsonl(table, query, dir, dataDir string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), jsonlExportTimeout)
 	defer cancel()
 
@@ -344,13 +362,44 @@ func (d *Daemon) commitAndPushJsonlBackup(gitRepo string, databases []string, co
 		return fmt.Errorf("git commit: %w", err)
 	}
 
-	// Push — use longer timeout since push involves network I/O.
-	if err := d.runGitCmd(gitRepo, gitPushTimeout, "push", "origin", "main"); err != nil {
-		return fmt.Errorf("git push: %w", err)
+	// Push — only if a remote is configured. Skip gracefully if not.
+	if d.hasGitRemote(gitRepo, "origin") {
+		// Detect current branch name for push (master vs main).
+		branch := d.currentGitBranch(gitRepo)
+		if branch == "" {
+			branch = "main" // fallback
+		}
+		if err := d.runGitCmd(gitRepo, gitPushTimeout, "push", "origin", branch); err != nil {
+			return fmt.Errorf("git push: %w", err)
+		}
+		d.logger.Printf("jsonl_git_backup: committed and pushed: %s", msg)
+	} else {
+		d.logger.Printf("jsonl_git_backup: committed (no remote configured, skipping push): %s", msg)
 	}
-
-	d.logger.Printf("jsonl_git_backup: committed and pushed: %s", msg)
 	return nil
+}
+
+// hasGitRemote checks if the named remote exists in the git repo.
+func (d *Daemon) hasGitRemote(gitRepo, name string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "-C", gitRepo, "remote", "get-url", name)
+	return cmd.Run() == nil
+}
+
+// currentGitBranch returns the current branch name, or empty string on error.
+func (d *Daemon) currentGitBranch(gitRepo string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "-C", gitRepo, "rev-parse", "--abbrev-ref", "HEAD")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(stdout.String())
 }
 
 // runGitCmd runs a git command in the specified directory with the given timeout.
@@ -455,7 +504,7 @@ func previousCommitLineCount(gitRepo, relPath string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "git", "-C", gitRepo, "show", "HEAD:"+relPath)
+	cmd := exec.CommandContext(ctx, "git", "-C", gitRepo, "show", "HEAD:"+filepath.ToSlash(relPath))
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	// stderr intentionally not captured — "does not exist" is an expected case.
@@ -485,7 +534,14 @@ type spikeInfo struct {
 // verifyExportCounts compares current export line counts against the previous
 // commit for each database. Returns a list of anomalies that exceed the spike
 // threshold. On first export (no baseline), verification is skipped.
+//
+// Asymmetric thresholds: drops (possible data loss) use the configured threshold;
+// increases (new issues filed) use 2x the threshold since growth is normal.
+// Small absolute changes (<20 records) are always allowed to avoid false alarms
+// on small databases.
 func (d *Daemon) verifyExportCounts(gitRepo string, databases []string, counts map[string]int, threshold float64) []spikeInfo {
+	const minAbsoluteDelta = 20 // ignore changes smaller than this many records
+
 	var spikes []spikeInfo
 
 	for _, db := range databases {
@@ -506,14 +562,32 @@ func (d *Daemon) verifyExportCounts(gitRepo string, databases []string, counts m
 			continue
 		}
 
-		delta := math.Abs(float64(currentCount-prevCount)) / float64(prevCount)
-		if delta > threshold {
+		absDelta := currentCount - prevCount
+		if absDelta < 0 {
+			absDelta = -absDelta
+		}
+		// Small absolute changes are always fine — avoids false alarms on
+		// small databases where a few issues cause large percentage swings.
+		if absDelta < minAbsoluteDelta {
+			continue
+		}
+
+		fractionalDelta := math.Abs(float64(currentCount-prevCount)) / float64(prevCount)
+
+		// Asymmetric: increases are less suspicious than drops.
+		// New issues being filed is normal growth; losing issues suggests data loss.
+		effectiveThreshold := threshold
+		if currentCount > prevCount {
+			effectiveThreshold = threshold * 2 // 2x tolerance for growth
+		}
+
+		if fractionalDelta > effectiveThreshold {
 			spike := spikeInfo{
 				DB:       db,
 				File:     relPath,
 				Previous: prevCount,
 				Current:  currentCount,
-				Delta:    delta,
+				Delta:    fractionalDelta,
 			}
 			spikes = append(spikes, spike)
 
@@ -522,7 +596,7 @@ func (d *Daemon) verifyExportCounts(gitRepo string, databases []string, counts m
 				direction = "drop"
 			}
 			d.logger.Printf("jsonl_git_backup: SPIKE DETECTED: %s: %s from %d to %d (%.1f%% %s, threshold %.1f%%)",
-				db, direction, prevCount, currentCount, delta*100, direction, threshold*100)
+				db, direction, prevCount, currentCount, fractionalDelta*100, direction, effectiveThreshold*100)
 		}
 	}
 	return spikes
@@ -604,6 +678,39 @@ func (d *Daemon) applyPollutionFilter(gitRepo string, databases []string) int {
 		}
 	}
 	return totalRemoved
+}
+
+// verifyNoPollution re-scans all exported issues.jsonl files for any remaining
+// suspicious records that survived both the SQL scrub and the regex filter.
+// Returns the total number of suspicious records found across all databases.
+func (d *Daemon) verifyNoPollution(gitRepo string, databases []string) int {
+	total := 0
+	for _, db := range databases {
+		issuesPath := filepath.Join(gitRepo, db, "issues.jsonl")
+		data, err := os.ReadFile(issuesPath)
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(bytes.NewReader(data))
+		scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			var record map[string]interface{}
+			if err := json.Unmarshal(line, &record); err != nil {
+				continue
+			}
+			if isTestPollution(record) {
+				id, _ := record["id"].(string)
+				title, _ := record["title"].(string)
+				d.logger.Printf("jsonl_git_backup: VERIFY FAIL: %s: suspicious record id=%q title=%q", db, id, title)
+				total++
+			}
+		}
+	}
+	return total
 }
 
 // parseLineCount parses a line count from `wc -l` style output or plain integer.

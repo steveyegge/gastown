@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -73,7 +75,7 @@ func verifyFormulaExists(formulaName string) error {
 
 // runSlingFormula handles standalone formula slinging.
 // Flow: cook → wisp → attach to hook → nudge
-func runSlingFormula(args []string) error {
+func runSlingFormula(ctx context.Context, args []string) error {
 	formulaName := args[0]
 
 	// Get town root early - needed for BEADS_DIR when running bd commands
@@ -114,7 +116,7 @@ func runSlingFormula(args []string) error {
 			return
 		}
 		fmt.Printf("%s Rolling back spawned polecat %s...\n", style.Warning.Render("⚠"), resolved.NewPolecatInfo.PolecatName)
-		rollbackSlingArtifactsFn(resolved.NewPolecatInfo, beadID, formulaWorkDir)
+		rollbackSlingArtifactsFn(resolved.NewPolecatInfo, beadID, formulaWorkDir, "")
 	}
 
 	if slingDryRun {
@@ -139,9 +141,11 @@ func runSlingFormula(args []string) error {
 		Dir(formulaWorkDir).
 		WithGTRoot(townRoot).
 		Run(); err != nil {
+		telemetry.RecordMolCook(ctx, formulaName, err)
 		rollbackSpawned("")
 		return fmt.Errorf("cooking formula: %w", err)
 	}
+	telemetry.RecordMolCook(ctx, formulaName, nil)
 
 	// Step 2: Create wisp instance (ephemeral)
 	fmt.Printf("  Creating wisp...\n")
@@ -164,9 +168,11 @@ func runSlingFormula(args []string) error {
 	// Parse wisp output to get the root ID
 	wispRootID, err := parseWispIDFromJSON(wispOut)
 	if err != nil {
+		telemetry.RecordMolWisp(ctx, formulaName, "", "", err)
 		rollbackSpawned("")
 		return fmt.Errorf("parsing wisp output: %w", err)
 	}
+	telemetry.RecordMolWisp(ctx, formulaName, wispRootID, "", nil)
 
 	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
 
@@ -220,7 +226,7 @@ func runSlingFormula(args []string) error {
 		pane, err := resolved.NewPolecatInfo.StartSession()
 		if err != nil {
 			// Rollback: unhook wisp, delete Dolt branch, clean up polecat worktree/agent bead
-			rollbackSlingArtifactsFn(resolved.NewPolecatInfo, wispRootID, "")
+			rollbackSlingArtifactsFn(resolved.NewPolecatInfo, wispRootID, "", "")
 			return fmt.Errorf("starting polecat session: %w", err)
 		}
 		targetPane = pane

@@ -79,6 +79,49 @@ func TestIsPatrolEnabled_DoltRemotes(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadPatrolConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	threshold := 500
+	config := &DaemonPatrolConfig{
+		Type:    "daemon-patrol-config",
+		Version: 1,
+		Patrols: &PatrolsConfig{
+			ScheduledMaintenance: &ScheduledMaintenanceConfig{
+				Enabled:   true,
+				Window:    "03:00",
+				Interval:  "daily",
+				Threshold: &threshold,
+			},
+		},
+	}
+
+	// Save
+	if err := SavePatrolConfig(tmpDir, config); err != nil {
+		t.Fatalf("SavePatrolConfig failed: %v", err)
+	}
+
+	// Load back
+	loaded := LoadPatrolConfig(tmpDir)
+	if loaded == nil {
+		t.Fatal("expected config to be loaded")
+	}
+
+	if !IsPatrolEnabled(loaded, "scheduled_maintenance") {
+		t.Error("expected scheduled_maintenance to be enabled")
+	}
+	sm := loaded.Patrols.ScheduledMaintenance
+	if sm.Window != "03:00" {
+		t.Errorf("expected window 03:00, got %q", sm.Window)
+	}
+	if sm.Interval != "daily" {
+		t.Errorf("expected interval daily, got %q", sm.Interval)
+	}
+	if sm.Threshold == nil || *sm.Threshold != 500 {
+		t.Errorf("expected threshold 500, got %v", sm.Threshold)
+	}
+}
+
 func TestDoltRemotesInterval(t *testing.T) {
 	// Default interval
 	if got := doltRemotesInterval(nil); got != defaultDoltRemotesInterval {

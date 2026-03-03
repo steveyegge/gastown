@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,9 @@ import (
 // typesSentinel is a marker file indicating custom types have been configured.
 // This persists across CLI invocations to avoid redundant bd config calls.
 const typesSentinel = ".gt-types-configured"
+
+// statusesSentinel is a marker file indicating custom statuses have been configured.
+const statusesSentinel = ".gt-statuses-configured"
 
 // ensuredDirs tracks which beads directories have been ensured this session.
 // This provides fast in-memory caching for multiple creates in the same CLI run.
@@ -146,6 +150,93 @@ func EnsureCustomTypes(beadsDir string) error {
 	_ = os.WriteFile(sentinelPath, []byte(typesList+"\n"), 0644)
 
 	ensuredDirs[beadsDir] = true
+	return nil
+}
+
+// EnsureCustomStatuses ensures the target beads directory has custom statuses configured.
+// Uses the same two-level caching strategy as EnsureCustomTypes:
+//   - In-memory cache for multiple operations in the same CLI invocation
+//   - Sentinel file on disk for persistence across CLI invocations
+//
+// This function is thread-safe and idempotent.
+func EnsureCustomStatuses(beadsDir string) error {
+	if beadsDir == "" {
+		return fmt.Errorf("empty beads directory")
+	}
+
+	statusesList := strings.Join(constants.BeadsCustomStatusesList(), ",")
+
+	ensuredMu.Lock()
+	defer ensuredMu.Unlock()
+
+	cacheKey := beadsDir + ":statuses"
+
+	// Fast path: in-memory cache (same CLI invocation)
+	if ensuredDirs[cacheKey] {
+		return nil
+	}
+
+	// Fast path: sentinel file matches current statuses list
+	sentinelPath := filepath.Join(beadsDir, statusesSentinel)
+	if data, err := os.ReadFile(sentinelPath); err == nil {
+		if strings.TrimSpace(string(data)) == statusesList {
+			ensuredDirs[cacheKey] = true
+			return nil
+		}
+		// Sentinel exists but is stale — fall through to re-configure
+	}
+
+	// Verify beads directory exists
+	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+		return fmt.Errorf("beads directory does not exist: %s", beadsDir)
+	}
+
+	// Check if database exists and initialize if needed
+	if err := ensureDatabaseInitialized(beadsDir); err != nil {
+		return fmt.Errorf("ensure database initialized: %w", err)
+	}
+
+	// Read current custom statuses and merge with required ones
+	getCmd := exec.Command("bd", "config", "get", "status.custom")
+	getCmd.Dir = beadsDir
+	getCmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
+	existingOutput, _ := getCmd.Output()
+
+	// Build merged set: existing + required
+	statusSet := make(map[string]bool)
+	if existing := strings.TrimSpace(string(existingOutput)); existing != "" {
+		for _, s := range strings.Split(existing, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				statusSet[s] = true
+			}
+		}
+	}
+	for _, s := range constants.BeadsCustomStatusesList() {
+		statusSet[s] = true
+	}
+
+	// Build merged list (sorted for deterministic output)
+	var merged []string
+	for s := range statusSet {
+		merged = append(merged, s)
+	}
+	sort.Strings(merged)
+	mergedStr := strings.Join(merged, ",")
+
+	// Configure custom statuses via bd CLI
+	cmd := exec.Command("bd", "config", "set", "status.custom", mergedStr)
+	cmd.Dir = beadsDir
+	cmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("configure custom statuses in %s: %s: %w",
+			beadsDir, strings.TrimSpace(string(output)), err)
+	}
+
+	// Write sentinel file
+	_ = os.WriteFile(sentinelPath, []byte(statusesList+"\n"), 0644)
+
+	ensuredDirs[cacheKey] = true
 	return nil
 }
 

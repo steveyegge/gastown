@@ -21,6 +21,8 @@ Witness                    Refinery                      Git
    │                          │                           │
    │                    (run tests)                       │
    │                          │                           │
+   │                    (quality review, if enabled)      │
+   │                          │                           │
    │                    (if pass)                         │
    │                          │ merge & push              │
    │                          │──────────────────────────>│
@@ -57,6 +59,8 @@ source of truth.
 | build_command | (empty) | Build command (e.g., `go build ./...`). Empty = skip. |
 | target_branch | main | Default target branch for merges |
 | delete_merged_branches | true | Whether to delete source branches after merge |
+| judgment_enabled | false | Enable quality review for merges (true/false) |
+| review_depth | standard | Review depth: quick, standard, or deep |
 
 ## Target Resolution Rule
 
@@ -77,7 +81,7 @@ resolve that placeholder with this rule:
 You MUST process steps in strict DAG order. Walk through each step sequentially,
 unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 8
+version = 9
 
 [vars]
 [vars.wisp_type]
@@ -123,6 +127,14 @@ default = "main"
 [vars.delete_merged_branches]
 description = "Whether to delete source branches after merge"
 default = "true"
+
+[vars.judgment_enabled]
+description = "Enable quality review for merges (true/false)"
+default = "false"
+
+[vars.review_depth]
+description = "Review depth: quick, standard, or deep"
+default = "standard"
 
 [[steps]]
 id = "inbox-check"
@@ -347,9 +359,81 @@ If run_tests = "true":
 Track results: pass count, fail count, specific failures."""
 
 [[steps]]
+id = "quality-review"
+title = "Quality review merge diff"
+needs = ["run-tests"]
+description = """
+**Config: judgment_enabled = {{judgment_enabled}}**
+**Config: review_depth = {{review_depth}}**
+
+Review the merge diff for quality issues. This step is measurement-only (Phase 1):
+reviews are recorded but do NOT gate merges.
+
+**Step 1: Check if quality review is enabled**
+
+If judgment_enabled is not "true", skip this step entirely and proceed to
+handle-failures. Log: "Quality review skipped (judgment_enabled=false)"
+
+**Step 2: Get the merge diff**
+
+```bash
+git diff origin/main...temp
+```
+
+If the diff is empty, skip with: "No diff to review"
+
+**Step 3: Review the diff**
+
+Review the diff yourself using your judgment. Assess:
+
+1. **Correctness**: Logic errors, off-by-one, nil/null handling, race conditions
+2. **Security**: Injection, auth bypass, secrets in code, unsafe deserialization
+3. **Clarity**: Naming, structure, comments where non-obvious
+4. **Style**: Consistency with surrounding code, idiomatic patterns
+
+Depth is controlled by review_depth:
+- `quick`: Focus on correctness and security only. Skim for obvious issues.
+- `standard`: All four categories. Moderate detail.
+- `deep`: Thorough line-by-line review. Flag even minor style issues.
+
+**Step 4: Score and recommend**
+
+Assign a score from 0.0 to 1.0:
+- 0.9-1.0: Excellent — no issues or only trivial nits
+- 0.7-0.89: Good — minor issues only
+- 0.45-0.69: Needs work — significant issues found
+- 0.0-0.44: Breach — critical issues (security, correctness)
+
+Recommendation:
+- `approve`: Score >= 0.45
+- `request_changes`: Score < 0.45
+
+**Step 5: Record the result as a wisp**
+
+Record the quality review result. This is fail-open: if the command fails,
+log the error and continue — never block the merge.
+
+```bash
+bd create "quality-review: Score <score>, <recommendation>" -t chore --ephemeral \\
+  -l type:plugin-run,plugin:quality-review-result,worker:<polecat-name>,rig:<rig-name>,score:<score>,recommendation:<approve|request_changes>,result:success \\
+  -d "Score: <score>, <recommendation>. Issues: <count> (<summary>)" \\
+  --silent 2>/dev/null || true
+```
+
+**Step 6: Handle breach scores (measurement-only)**
+
+If score < 0.45 (breach threshold):
+- Add a note to your merge summary: "Warning: Quality review breach (score: X.XX)"
+- List the critical/major issues found
+- Do NOT block the merge — Phase 1 is measurement-only
+- Proceed to handle-failures normally
+
+Track: review score, recommendation, issue count, duration."""
+
+[[steps]]
 id = "handle-failures"
 title = "Handle quality check or test failures"
-needs = ["run-tests"]
+needs = ["quality-review"]
 description = """
 **VERIFICATION GATE**: This step enforces the Beads Promise.
 
@@ -384,7 +468,13 @@ If any check or test FAILED:
    - Archive the MERGE_READY message
    - Skip to loop-check
 3. If pre-existing on the target branch:
-   - File a bead: bd create --type=bug --priority=1 --title="..."
+   - **DUPLICATE CHECK (MANDATORY)**: Before filing a new bug, search for existing open bugs:
+     ```bash
+     bd search "<failure description>" --status open --label gt:bug --limit 5
+     ```
+     If an existing open bug covers the same failure, do NOT create a duplicate.
+     Instead, note the existing bead ID and proceed.
+   - Only if NO existing bug matches: bd create --type=bug --priority=1 --title="Pre-existing failure: <description>"
    - FORBIDDEN: Writing code to fix quality check or test failures. You merge branches, you do not develop.
    - Proceed with the merge if the failure is pre-existing (not caused by the branch).
 
@@ -397,7 +487,7 @@ If any check or test FAILED:
 
 **GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
 - All quality checks and tests passing, OR
-- Bead filed for the pre-existing failure
+- Bead filed (or existing duplicate confirmed) for the pre-existing failure
 
 FORBIDDEN: Writing application code, exploring polecat implementations, or
 re-implementing fixes. You are a mechanical merge processor.
@@ -458,20 +548,13 @@ Merged-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 This signals the Witness to nuke the polecat worktree. WITHOUT THIS NOTIFICATION,
 POLECAT WORKTREES ACCUMULATE INDEFINITELY AND THE LIFECYCLE BREAKS.
 
-**Step 3: Close MR Bead (REQUIRED - DO THIS IMMEDIATELY)**
+**Step 3: Post-merge cleanup (REQUIRED — single command)**
 
-⚠️ **VERIFICATION BEFORE CLOSING**: Confirm the work is actually on the merge target:
-```bash
-# Get the commit message/issue from the branch
-git log origin/<merge-target> --oneline | grep "<issue-id>"
-# OR verify the commit SHA is on the target:
-git branch --contains <commit-sha> | grep <merge-target>
-```
-
-If work is NOT on the merge target, DO NOT close the MR bead. Investigate first.
+This single command handles closing the MR bead, closing the source issue, and
+deleting the remote polecat branch (respects delete_merged_branches config):
 
 ```bash
-bd close <mr-bead-id> --reason "Merged to <merge-target> at $(git rev-parse --short HEAD)"
+gt mq post-merge <rig> <mr-bead-id>
 ```
 
 The MR bead ID was in the MERGE_READY message or find via:
@@ -479,33 +562,7 @@ The MR bead ID was in the MERGE_READY message or find via:
 bd list --type=merge-request --status=open | grep <polecat-name>
 ```
 
-**VALIDATION**: The MR bead's source_issue should be a valid bead ID (gt-xxxxx),
-not a branch name. If source_issue contains a branch name, flag for investigation.
-
-**Step 3.5: Close source issue (REQUIRED)**
-
-The source issue is the original work bead that the polecat was assigned. Closing it
-signals convoy completion — without this, the convoy stays open indefinitely and the
-Mayor is never notified. This mirrors the Go Engineer behavior (engineer.go:896-904).
-
-```bash
-# The source issue ID was in the MERGE_READY message body (Issue: <id>)
-# You tracked it during inbox-check
-bd close <source-issue-id> --reason "Merged in <mr-bead-id>"
-```
-
-**If the source issue ID is not available** from your tracked data, extract it from the MR bead:
-```bash
-bd show <mr-bead-id> --json | jq -r '.[0].source_issue'
-```
-
-**VALIDATION**: Verify the close succeeded:
-```bash
-bd show <source-issue-id> --json | jq -r '.[0].status'
-# Must show "closed"
-```
-
-If close fails, log the warning but continue — do not block the rest of the pipeline.
+Verify the command output shows all steps succeeded (✓ for each).
 
 **Step 4: Archive the MERGE_READY mail (REQUIRED)**
 ```bash
@@ -513,24 +570,14 @@ gt mail archive <merge-ready-message-id>
 ```
 The message ID was tracked when you processed inbox-check.
 
-**Step 5: Cleanup (only after Steps 2-4 confirmed)**
+**Step 5: Cleanup temp branch**
 ```bash
 git branch -d temp
 ```
 
-delete_merged_branches (see config above) controls whether to delete the remote source branch.
-
-If delete_merged_branches is "true":
-```bash
-git push origin --delete <polecat-branch>
-```
-
-If delete_merged_branches is "false": Leave the remote branch intact.
-
 **VERIFICATION GATE**: You CANNOT proceed to loop-check without:
 - [x] MERGED mail sent to witness
-- [x] MR bead closed
-- [x] Source issue closed
+- [x] Post-merge cleanup completed (MR closed, source issue closed, branch deleted)
 - [x] MERGE_READY mail archived
 
 If you skipped notifications or archiving, GO BACK AND DO THEM NOW.

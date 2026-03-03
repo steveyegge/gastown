@@ -163,6 +163,29 @@ Examples:
 	RunE: runMQReject,
 }
 
+// Post-merge flags
+var mqPostMergeSkipBranchDelete bool
+
+var mqPostMergeCmd = &cobra.Command{
+	Use:   "post-merge <rig> <mr-id>",
+	Short: "Run post-merge cleanup (close MR, delete branch)",
+	Long: `Perform post-merge cleanup after a successful merge.
+
+This command consolidates post-merge steps into a single atomic operation:
+  1. Close the MR bead (status: merged)
+  2. Close the source issue
+  3. Delete the remote polecat branch (unless --skip-branch-delete)
+
+Designed for use by the refinery formula after a successful merge to main.
+The branch name is read from the MR bead, so no manual branch argument is needed.
+
+Examples:
+  gt mq post-merge gastown gt-mr-abc123
+  gt mq post-merge gastown gt-mr-abc123 --skip-branch-delete`,
+	Args: cobra.ExactArgs(2),
+	RunE: runMQPostMerge,
+}
+
 var mqStatusCmd = &cobra.Command{
 	Use:   "status <id>",
 	Short: "Show detailed merge request status",
@@ -305,12 +328,16 @@ func init() {
 	// Status flags
 	mqStatusCmd.Flags().BoolVar(&mqStatusJSON, "json", false, "Output as JSON")
 
+	// Post-merge flags
+	mqPostMergeCmd.Flags().BoolVar(&mqPostMergeSkipBranchDelete, "skip-branch-delete", false, "Skip remote branch deletion")
+
 	// Add subcommands
 	mqCmd.AddCommand(mqSubmitCmd)
 	mqCmd.AddCommand(mqRetryCmd)
 	mqCmd.AddCommand(mqListCmd)
 	mqCmd.AddCommand(mqRejectCmd)
 	mqCmd.AddCommand(mqStatusCmd)
+	mqCmd.AddCommand(mqPostMergeCmd)
 
 	// Integration branch subcommands
 	mqIntegrationCreateCmd.Flags().StringVar(&mqIntegrationCreateBranch, "branch", "", "Override branch name template (supports {title}, {epic}, {prefix}, {user})")
@@ -465,6 +492,85 @@ func runMQReject(cmd *cobra.Command, args []string) error {
 
 	if mqRejectNotify {
 		fmt.Printf("  %s\n", style.Dim.Render("Worker notified via mail"))
+	}
+
+	return nil
+}
+
+func runMQPostMerge(_ *cobra.Command, args []string) error {
+	rigName := args[0]
+	mrID := args[1]
+
+	mgr, r, _, err := getRefineryManager(rigName)
+	if err != nil {
+		return err
+	}
+
+	// Run beads-level cleanup (close MR bead + source issue)
+	result, err := mgr.PostMerge(mrID)
+	if err != nil {
+		return fmt.Errorf("post-merge cleanup: %w", err)
+	}
+
+	mr := result.MR
+	fmt.Printf("%s Post-merge: %s\n", style.Bold.Render("✓"), mr.ID)
+	fmt.Printf("  Branch: %s\n", mr.Branch)
+	fmt.Printf("  Worker: %s\n", mr.Worker)
+
+	if result.MRClosed {
+		fmt.Printf("  %s MR closed (merged)\n", style.Success.Render("✓"))
+	}
+	if result.SourceIssueClosed {
+		fmt.Printf("  %s Source issue closed: %s\n", style.Success.Render("✓"), result.SourceIssueID)
+	} else if result.SourceIssueNotFound {
+		fmt.Printf("  %s Source issue: %s %s\n", style.Dim.Render("○"), result.SourceIssueID, style.Dim.Render("(already closed or not found)"))
+	}
+
+	// Delete remote branch unless skipped
+	if mr.Branch == "" {
+		fmt.Printf("  %s No branch name in MR (skipping branch delete)\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	if mqPostMergeSkipBranchDelete {
+		fmt.Printf("  %s Branch delete skipped (--skip-branch-delete)\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	// Check rig config for delete_merged_branches setting
+	settingsPath := filepath.Join(r.Path, "settings", "config.json")
+	deleteEnabled := true // default: delete merged branches
+	if settings, err := config.LoadRigSettings(settingsPath); err == nil {
+		if settings.MergeQueue != nil {
+			deleteEnabled = settings.MergeQueue.IsDeleteMergedBranchesEnabled()
+		}
+	}
+
+	if !deleteEnabled {
+		fmt.Printf("  %s Branch delete disabled by config\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	// Get git client for the rig
+	rigGit, err := getRigGit(r.Path)
+	if err != nil {
+		fmt.Printf("  %s branch delete: %v\n", style.Warning.Render("⚠"), err)
+		return nil // non-fatal: beads cleanup succeeded
+	}
+
+	// Delete remote branch
+	if err := rigGit.DeleteRemoteBranch("origin", mr.Branch); err != nil {
+		fmt.Printf("  %s remote branch delete: %v\n", style.Warning.Render("⚠"), err)
+	} else {
+		fmt.Printf("  %s Deleted remote branch: %s\n", style.Success.Render("✓"), mr.Branch)
+	}
+
+	// Also clean up the local tracking ref if it exists
+	if err := rigGit.DeleteBranch(mr.Branch, true); err != nil {
+		// Not a warning — local branch often doesn't exist
+		_ = err
+	} else {
+		fmt.Printf("  %s Deleted local branch: %s\n", style.Success.Render("✓"), mr.Branch)
 	}
 
 	return nil

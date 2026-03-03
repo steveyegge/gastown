@@ -8,6 +8,7 @@ import (
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/copilot"
 	"github.com/steveyegge/gastown/internal/gemini"
 	"github.com/steveyegge/gastown/internal/omp"
@@ -147,7 +148,7 @@ func RunStartupFallback(t *tmux.Tmux, sessionID, role string, rc *config.Runtime
 // have automatic mail injection to avoid confusion.
 func isAutonomousRole(role string) bool {
 	switch role {
-	case "polecat", "witness", "refinery", "deacon", "boot":
+	case constants.RolePolecat, constants.RoleWitness, constants.RoleRefinery, constants.RoleDeacon, "boot":
 		return true
 	default:
 		return false

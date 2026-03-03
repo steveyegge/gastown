@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -117,7 +118,7 @@ var roleDefCmd = &cobra.Command{
 
 Role configuration is layered:
   1. Built-in defaults (embedded in binary)
-  2. Town-level overrides (~/.gt/roles/<role>.toml)
+  2. Town-level overrides (<town>/roles/<role>.toml)
   3. Rig-level overrides (<rig>/roles/<role>.toml)
 
 Examples:
@@ -339,9 +340,9 @@ func parseRoleString(s string) (Role, string, string) {
 
 	// Simple roles
 	switch s {
-	case "mayor":
+	case constants.RoleMayor:
 		return RoleMayor, "", ""
-	case "deacon":
+	case constants.RoleDeacon:
 		return RoleDeacon, "", ""
 	case "boot":
 		return RoleBoot, "", ""
@@ -365,16 +366,16 @@ func parseRoleString(s string) (Role, string, string) {
 			return RoleBoot, "", ""
 		}
 		return Role(s), "", ""
-	case "witness":
+	case constants.RoleWitness:
 		return RoleWitness, rig, ""
-	case "refinery":
+	case constants.RoleRefinery:
 		return RoleRefinery, rig, ""
 	case "polecats":
 		if len(parts) >= 3 {
 			return RolePolecat, rig, parts[2]
 		}
 		return RolePolecat, rig, ""
-	case "crew":
+	case constants.RoleCrew:
 		if len(parts) >= 3 {
 			return RoleCrew, rig, parts[2]
 		}
@@ -738,6 +739,9 @@ func runRoleDef(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  consecutive_failures = %d\n", def.Health.ConsecutiveFailures)
 	fmt.Printf("  kill_cooldown        = %q\n", def.Health.KillCooldown.String())
 	fmt.Printf("  stuck_threshold      = %q\n", def.Health.StuckThreshold.String())
+	if def.Health.HungSessionThreshold.Duration != 0 {
+		fmt.Printf("  hung_session_threshold = %q\n", def.Health.HungSessionThreshold.String())
+	}
 	fmt.Println()
 
 	// Prompts

@@ -857,9 +857,9 @@ func TestConvoyMergeStrategyNotification(t *testing.T) {
 	}
 }
 
-// TestParseConvoyMergeStrategy verifies that parseConvoyMergeStrategy correctly
-// extracts the merge strategy from convoy descriptions.
-func TestParseConvoyMergeStrategy(t *testing.T) {
+// TestConvoyMergeFromFields verifies that convoyMergeFromFields correctly
+// extracts the merge strategy from convoy descriptions using typed ConvoyFields.
+func TestConvoyMergeFromFields(t *testing.T) {
 	tests := []struct {
 		name        string
 		description string
@@ -899,9 +899,9 @@ func TestParseConvoyMergeStrategy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseConvoyMergeStrategy(tt.description)
+			got := convoyMergeFromFields(tt.description)
 			if got != tt.want {
-				t.Errorf("parseConvoyMergeStrategy() = %q, want %q", got, tt.want)
+				t.Errorf("convoyMergeFromFields() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -1196,6 +1196,36 @@ func TestConvoyInfoFallbackChain(t *testing.T) {
 			}
 			if convoyInfo.MergeStrategy != tt.wantMerge {
 				t.Errorf("MergeStrategy = %q, want %q", convoyInfo.MergeStrategy, tt.wantMerge)
+			}
+		})
+	}
+}
+
+// TestHookedBeadCloseNotRestrictedToHookedStatus verifies the gt-pftz fix:
+// gt done must close the hooked bead regardless of its current status (hooked,
+// in_progress, open), not only when status == "hooked". Polecats update their
+// work bead to in_progress during work, so the old exact-match check skipped
+// closing and caused infinite dispatch loops.
+func TestHookedBeadCloseNotRestrictedToHookedStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     string
+		wantClose  bool
+	}{
+		{"status hooked → close", "hooked", true},
+		{"status in_progress → close", "in_progress", true},
+		{"status open → close", "open", true},
+		{"status blocked → close", "blocked", true},
+		{"status closed → skip (terminal)", "closed", false},
+		{"status tombstone → skip (terminal)", "tombstone", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Replicate the guard condition from updateAgentStateOnDone (gt-pftz fix)
+			shouldClose := !beads.IssueStatus(tt.status).IsTerminal()
+			if shouldClose != tt.wantClose {
+				t.Errorf("shouldClose for status %q = %v, want %v", tt.status, shouldClose, tt.wantClose)
 			}
 		})
 	}

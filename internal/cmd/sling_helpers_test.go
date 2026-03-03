@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/session"
 )
 
@@ -135,6 +136,75 @@ func TestIsDeferredBead(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := isDeferredBead(tt.info); got != tt.want {
 				t.Errorf("isDeferredBead(%+v) = %v, want %v", tt.info, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCollectExistingMoleculesFiltersClosedMolecules(t *testing.T) {
+	tests := []struct {
+		name string
+		info *beadInfo
+		want []string
+	}{
+		{
+			name: "open molecule is collected",
+			info: &beadInfo{
+				Dependencies: []beads.IssueDep{
+					{ID: "bd-wisp-abc", Status: "open"},
+				},
+			},
+			want: []string{"bd-wisp-abc"},
+		},
+		{
+			name: "closed molecule is skipped",
+			info: &beadInfo{
+				Dependencies: []beads.IssueDep{
+					{ID: "bd-wisp-abc", Status: "closed"},
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "tombstone molecule is skipped",
+			info: &beadInfo{
+				Dependencies: []beads.IssueDep{
+					{ID: "bd-wisp-abc", Status: "tombstone"},
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "mixed: open kept, closed skipped",
+			info: &beadInfo{
+				Dependencies: []beads.IssueDep{
+					{ID: "bd-wisp-dead", Status: "closed"},
+					{ID: "bd-wisp-live", Status: "in_progress"},
+				},
+			},
+			want: []string{"bd-wisp-live"},
+		},
+		{
+			name: "non-wisp dependency ignored regardless of status",
+			info: &beadInfo{
+				Dependencies: []beads.IssueDep{
+					{ID: "bd-regular-dep", Status: "open"},
+				},
+			},
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := collectExistingMolecules(tt.info)
+			if len(got) != len(tt.want) {
+				t.Fatalf("collectExistingMolecules() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("collectExistingMolecules()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
 			}
 		})
 	}

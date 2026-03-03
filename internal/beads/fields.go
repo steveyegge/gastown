@@ -221,6 +221,165 @@ func SetAttachmentFields(issue *Issue, fields *AttachmentFields) string {
 	return formatted + "\n\n" + strings.Join(otherLines, "\n")
 }
 
+// ConvoyFields holds the structured fields for a convoy bead.
+// These fields are stored as key: value lines in the issue description.
+type ConvoyFields struct {
+	Owner      string // Convoy owner address (e.g., "mayor/")
+	Notify     string // Additional notification address
+	Molecule   string // Associated molecule/swarm ID
+	Merge      string // Merge strategy
+}
+
+// ParseConvoyFields extracts convoy fields from an issue's description.
+// Returns nil if no convoy fields found.
+func ParseConvoyFields(issue *Issue) *ConvoyFields {
+	if issue == nil || issue.Description == "" {
+		return nil
+	}
+
+	fields := &ConvoyFields{}
+	hasFields := false
+
+	for _, line := range strings.Split(issue.Description, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		colonIdx := strings.Index(line, ":")
+		if colonIdx == -1 {
+			continue
+		}
+
+		key := strings.TrimSpace(line[:colonIdx])
+		value := strings.TrimSpace(line[colonIdx+1:])
+		if value == "" {
+			continue
+		}
+
+		switch strings.ToLower(key) {
+		case "owner":
+			fields.Owner = value
+			hasFields = true
+		case "notify":
+			fields.Notify = value
+			hasFields = true
+		case "molecule":
+			fields.Molecule = value
+			hasFields = true
+		case "merge":
+			fields.Merge = value
+			hasFields = true
+		}
+	}
+
+	if !hasFields {
+		return nil
+	}
+	return fields
+}
+
+// NotificationAddresses returns deduplicated notification addresses from convoy fields.
+func (f *ConvoyFields) NotificationAddresses() []string {
+	if f == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var addrs []string
+	for _, addr := range []string{f.Owner, f.Notify} {
+		if addr != "" && !seen[addr] {
+			addrs = append(addrs, addr)
+			seen[addr] = true
+		}
+	}
+	return addrs
+}
+
+// FormatConvoyFields formats ConvoyFields as a string suitable for an issue description.
+// Only non-empty fields are included.
+func FormatConvoyFields(fields *ConvoyFields) string {
+	if fields == nil {
+		return ""
+	}
+
+	var lines []string
+	if fields.Owner != "" {
+		lines = append(lines, "Owner: "+fields.Owner)
+	}
+	if fields.Notify != "" {
+		lines = append(lines, "Notify: "+fields.Notify)
+	}
+	if fields.Merge != "" {
+		lines = append(lines, "Merge: "+fields.Merge)
+	}
+	if fields.Molecule != "" {
+		lines = append(lines, "Molecule: "+fields.Molecule)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// SetConvoyFields updates an issue's description with the given convoy fields.
+// Existing convoy field lines are replaced; other content is preserved.
+// Returns the new description string.
+func SetConvoyFields(issue *Issue, fields *ConvoyFields) string {
+	if issue == nil {
+		return FormatConvoyFields(fields)
+	}
+
+	// Known convoy field keys (lowercase)
+	convoyKeys := map[string]bool{
+		"owner":    true,
+		"notify":   true,
+		"merge":    true,
+		"molecule": true,
+	}
+
+	// Collect non-convoy lines from existing description
+	var otherLines []string
+	if issue.Description != "" {
+		for _, line := range strings.Split(issue.Description, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				otherLines = append(otherLines, line)
+				continue
+			}
+
+			colonIdx := strings.Index(trimmed, ":")
+			if colonIdx == -1 {
+				otherLines = append(otherLines, line)
+				continue
+			}
+
+			key := strings.ToLower(strings.TrimSpace(trimmed[:colonIdx]))
+			if !convoyKeys[key] {
+				otherLines = append(otherLines, line)
+			}
+		}
+	}
+
+	// Build new description: other content first, then convoy fields
+	formatted := FormatConvoyFields(fields)
+
+	// Trim trailing blank lines from other content
+	for len(otherLines) > 0 && strings.TrimSpace(otherLines[len(otherLines)-1]) == "" {
+		otherLines = otherLines[:len(otherLines)-1]
+	}
+	// Trim leading blank lines from other content
+	for len(otherLines) > 0 && strings.TrimSpace(otherLines[0]) == "" {
+		otherLines = otherLines[1:]
+	}
+
+	if len(otherLines) == 0 {
+		return formatted
+	}
+	if formatted == "" {
+		return strings.Join(otherLines, "\n")
+	}
+
+	return strings.Join(otherLines, "\n") + "\n" + formatted
+}
+
 // MRFields holds the structured fields for a merge-request issue.
 // These fields are stored as key: value lines in the issue description.
 type MRFields struct {
@@ -241,6 +400,13 @@ type MRFields struct {
 	// Convoy tracking (for priority scoring - convoy starvation prevention)
 	ConvoyID        string // Parent convoy ID if part of a convoy
 	ConvoyCreatedAt string // Convoy creation time (ISO 8601) for starvation prevention
+
+	// Pre-verification fields (Phase 3: polecat-owned rebasing)
+	// When a polecat rebases onto the target and runs gates before submission,
+	// these fields allow the refinery to fast-path merge without re-running gates.
+	PreVerified     bool   // Polecat ran full gates after rebasing onto target
+	PreVerifiedAt   string // ISO 8601 timestamp when verification completed
+	PreVerifiedBase string // Target branch SHA at verification time
 }
 
 // ParseMRFields extracts structured merge-request fields from an issue's description.
@@ -315,6 +481,15 @@ func ParseMRFields(issue *Issue) *MRFields {
 		case "convoy_created_at", "convoy-created-at", "convoycreatedat":
 			fields.ConvoyCreatedAt = value
 			hasFields = true
+		case "pre_verified", "pre-verified", "preverified":
+			fields.PreVerified = strings.ToLower(value) == "true"
+			hasFields = true
+		case "pre_verified_at", "pre-verified-at", "preverifiedat":
+			fields.PreVerifiedAt = value
+			hasFields = true
+		case "pre_verified_base", "pre-verified-base", "preverifiedbase":
+			fields.PreVerifiedBase = value
+			hasFields = true
 		}
 	}
 
@@ -379,6 +554,15 @@ func FormatMRFields(fields *MRFields) string {
 	if fields.ConvoyCreatedAt != "" {
 		lines = append(lines, "convoy_created_at: "+fields.ConvoyCreatedAt)
 	}
+	if fields.PreVerified {
+		lines = append(lines, "pre_verified: true")
+	}
+	if fields.PreVerifiedAt != "" {
+		lines = append(lines, "pre_verified_at: "+fields.PreVerifiedAt)
+	}
+	if fields.PreVerifiedBase != "" {
+		lines = append(lines, "pre_verified_base: "+fields.PreVerifiedBase)
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -425,6 +609,15 @@ func SetMRFields(issue *Issue, fields *MRFields) string {
 		"convoy_created_at":  true,
 		"convoy-created-at":  true,
 		"convoycreatedat":    true,
+		"pre_verified":       true,
+		"pre-verified":       true,
+		"preverified":        true,
+		"pre_verified_at":    true,
+		"pre-verified-at":    true,
+		"preverifiedat":      true,
+		"pre_verified_base":  true,
+		"pre-verified-base":  true,
+		"preverifiedbase":    true,
 	}
 
 	// Collect non-MR lines from existing description

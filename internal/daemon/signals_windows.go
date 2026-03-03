@@ -17,3 +17,7 @@ func daemonSignals() []os.Signal {
 func isLifecycleSignal(sig os.Signal) bool {
 	return false
 }
+
+func isReloadRestartSignal(sig os.Signal) bool {
+	return false
+}

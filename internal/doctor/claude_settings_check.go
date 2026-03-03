@@ -786,21 +786,20 @@ func fileExists(path string) bool {
 	return !info.IsDir()
 }
 
-// isIdentityAnchor checks if a CLAUDE.md file is the short identity anchor
-// created by the priming system. These files are intentional - they contain
-// a brief message telling agents to run "gt prime" for their role-specific context.
-// They should NOT be flagged as "wrong location" since they don't contain
-// Mayor-specific instructions that would pollute other agents.
+// isIdentityAnchor checks if a CLAUDE.md file is the Gas Town town-root
+// identity file. This includes both the minimal bootstrap anchor (<20 lines)
+// and the expanded version with operational norms (Dolt awareness,
+// communication hygiene, etc.). Both formats are intentional Gas Town files
+// and should NOT be flagged as "wrong location".
 //
-// An identity anchor is identified by:
-// - Being small (<20 lines)
-// - Containing "gt prime" (the recovery instruction)
+// A Gas Town CLAUDE.md is identified by:
+// - Starting with "# Gas Town" (the standard header)
+// - Containing "prime" (the recovery instruction)
 func isIdentityAnchor(path string) bool {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
 	content := string(data)
-	lines := strings.Count(content, "\n") + 1
-	return lines < 20 && strings.Contains(content, "gt prime")
+	return strings.HasPrefix(content, "# Gas Town") && strings.Contains(content, "prime")
 }

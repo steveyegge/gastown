@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/dog"
 )
 
@@ -295,7 +296,7 @@ func TestDogClear_WorkingToIdle(t *testing.T) {
 	state := &dog.DogState{
 		Name:       "alpha",
 		State:      dog.StateWorking,
-		Work:       "mol-convoy-feed",
+		Work:       constants.MolConvoyFeed,
 		LastActive: now,
 		CreatedAt:  now,
 		UpdatedAt:  now,

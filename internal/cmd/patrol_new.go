@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 var patrolNewRole string
@@ -51,21 +52,21 @@ func runPatrolNew(cmd *cobra.Command, args []string) error {
 	case RoleDeacon:
 		cfg = PatrolConfig{
 			RoleName:      "deacon",
-			PatrolMolName: "mol-deacon-patrol",
+			PatrolMolName: constants.MolDeaconPatrol,
 			BeadsDir:      roleInfo.TownRoot,
 			Assignee:      "deacon",
 		}
 	case RoleWitness:
 		cfg = PatrolConfig{
 			RoleName:      "witness",
-			PatrolMolName: "mol-witness-patrol",
+			PatrolMolName: constants.MolWitnessPatrol,
 			BeadsDir:      roleInfo.WorkDir,
 			Assignee:      roleInfo.Rig + "/witness",
 		}
 	case RoleRefinery:
 		cfg = PatrolConfig{
 			RoleName:      "refinery",
-			PatrolMolName: "mol-refinery-patrol",
+			PatrolMolName: constants.MolRefineryPatrol,
 			BeadsDir:      roleInfo.WorkDir,
 			Assignee:      roleInfo.Rig + "/refinery",
 			ExtraVars:     buildRefineryPatrolVars(roleInfo),

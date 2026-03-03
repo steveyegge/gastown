@@ -195,6 +195,129 @@ refinery/rig/.beads/redirect   → ../../mayor/rig/.beads
 `ResolveBeadsDir()` follows redirect chains (max depth 3) with circular detection.
 This ensures all agents in a rig share a single beads database via the Dolt server.
 
+## Merge Queue: Batch-then-Bisect
+
+The refinery processes MRs through a batch-then-bisect merge queue (Bors-style).
+This is a core capability, not a pluggable strategy.
+
+### How It Works
+
+```
+MRs waiting:  [A, B, C, D]
+                    ↓
+Batch:        Rebase A..D as a stack on main
+                    ↓
+Test tip:     Run tests on D (tip of stack)
+                    ↓
+If PASS:      Fast-forward merge all 4 → done
+If FAIL:      Binary bisect → test B (midpoint)
+                    ↓
+              If B passes: C or D broke it → bisect [C,D]
+              If B fails:  A or B broke it → bisect [A,B]
+```
+
+### Implementation Phases
+
+| Phase | Bead | What | Status |
+|-------|------|------|--------|
+| 1: GatesParallel | gt-8b2i | Run test + lint concurrently per MR | In progress |
+| 2: Batch-then-bisect | gt-i2vm | Bors-style batching with binary bisect | Blocked by Phase 1 |
+| 3: Pre-verification | gt-lu84 | Polecats run tests before MR submission | Blocked by Phase 2 |
+
+Gates (test command, lint, etc.) are pluggable. The batching strategy is core.
+
+Design doc: produced by gt-yxx0 review.
+
+## Polecat Lifecycle: Self-Managed Completion
+
+Polecats manage their own lifecycle end-to-end. The Witness observes but does NOT
+gate completion. This prevents the Witness from becoming a bottleneck.
+
+### Polecat Completion Flow
+
+```
+Polecat finishes work
+  → Push branch to remote
+  → Submit MR (bd update --mr-ready)
+  → Update bead status
+  → Tear down worktree
+  → Go idle (available for next assignment)
+```
+
+The Witness monitors for stuck/zombie polecats (no activity for extended period)
+and nudges or escalates. It does NOT process completion — that's the polecat's job.
+
+Design bead: gt-0wkk.
+
+## Data Plane Lifecycle
+
+All beads data flows through a six-stage lifecycle managed by Dogs:
+
+```
+CREATE → LIVE → CLOSE → DECAY → COMPACT → FLATTEN
+  │        │       │        │        │          │
+  Dolt   active   done   DELETE   REBASE     SQUASH
+  commit  work    bead    rows    commits    all history
+                         >7-30d  together   to 1 commit
+```
+
+Stages 1-3 are automated today. Stages 4-6 are being shipped via Dog automation
+(gt-at0i Reaper DELETE, gt-l8dc Compactor REBASE, gt-emm4 Doctor gc).
+
+See [dolt-storage.md](dolt-storage.md) for full details.
+
+## Deployment Artifacts
+
+Gas Town and Beads are distributed through multiple channels. Tag pushes (`v*`)
+trigger GitHub Actions release workflows that build and publish everything.
+
+### Gas Town (`gt`)
+
+| Channel | Artifact | Trigger |
+|---------|----------|---------|
+| **GitHub Releases** | Platform binaries (darwin/linux/windows, amd64/arm64) + checksums | GoReleaser on tag push |
+| **Homebrew** | `brew install steveyegge/gastown/gt` — formula auto-updated on release | `update-homebrew` job pushes to `steveyegge/homebrew-gastown` |
+| **npm** | `npx @gastown/gt` — wrapper that downloads the correct binary | OIDC trusted publishing (no token) |
+| **Local build** | `go build -o $(go env GOPATH)/bin/gt ./cmd/gt` | Manual |
+
+### Beads (`bd`)
+
+| Channel | Artifact | Trigger |
+|---------|----------|---------|
+| **GitHub Releases** | Platform binaries + checksums | GoReleaser on tag push |
+| **Homebrew** | `brew install steveyegge/beads/bd` | `update-homebrew` job |
+| **npm** | `npx @beads/bd` — wrapper that downloads the correct binary | OIDC trusted publishing (no token) |
+| **PyPI** | `beads-mcp` — MCP server integration | `publish-pypi` job with `PYPI_API_TOKEN` secret |
+| **Local build** | `go build -o $(go env GOPATH)/bin/bd ./cmd/bd` | Manual |
+
+### npm Authentication
+
+Both repos use **OIDC trusted publishing** — no `NPM_TOKEN` secret needed.
+Authentication is handled by GitHub's OIDC provider. The workflow needs:
+
+```yaml
+permissions:
+  id-token: write  # Required for npm trusted publishing
+```
+
+Configure on npmjs.com: Package Settings → Trusted Publishers → link to the
+GitHub repo and `release.yml` workflow file.
+
+### What the binary embeds
+
+The Go binary is the primary distribution vehicle. It embeds:
+- **Role templates** — Agent priming context, served by `gt prime`
+- **Formula definitions** — Workflow molecules, served by `bd mol`
+- **Doctor checks** — Health diagnostics, including migration checks
+- **Default configs** — `daemon.json` lifecycle defaults, operational thresholds
+
+This means upgrading the binary automatically propagates most fixes. Files that
+are NOT embedded (and require `gt doctor` or `gt upgrade` to update):
+- Town-root `CLAUDE.md` (created at `gt install` time)
+- `daemon.json` patrol entries (created at install, extended by `EnsureLifecycleDefaults`)
+- Claude Code hooks (`.claude/settings.json` managed sections)
+- Dolt schema (migrations run on first `bd` command after upgrade)
+
 ## See Also
 
 - [dolt-storage.md](dolt-storage.md) - Dolt storage architecture

@@ -227,6 +227,126 @@ func TestEnsureCustomTypes(t *testing.T) {
 	})
 }
 
+func TestEnsureCustomStatuses(t *testing.T) {
+	ResetEnsuredDirs()
+
+	t.Run("empty beads dir returns error", func(t *testing.T) {
+		err := EnsureCustomStatuses("")
+		if err == nil {
+			t.Error("expected error for empty beads dir")
+		}
+	})
+
+	t.Run("non-existent beads dir returns error", func(t *testing.T) {
+		err := EnsureCustomStatuses("/nonexistent/path/.beads")
+		if err == nil {
+			t.Error("expected error for non-existent beads dir")
+		}
+	})
+
+	t.Run("sentinel file triggers cache hit", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		beadsDir := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create sentinel file with current statuses list
+		currentStatuses := strings.Join(constants.BeadsCustomStatusesList(), ",")
+		sentinelPath := filepath.Join(beadsDir, statusesSentinel)
+		if err := os.WriteFile(sentinelPath, []byte(currentStatuses+"\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		ResetEnsuredDirs()
+
+		// This should succeed without running bd (sentinel matches)
+		err := EnsureCustomStatuses(beadsDir)
+		if err != nil {
+			t.Errorf("expected success with sentinel file, got: %v", err)
+		}
+	})
+
+	t.Run("stale sentinel triggers re-configuration", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		beadsDir := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create sentinel file with old/stale content
+		sentinelPath := filepath.Join(beadsDir, statusesSentinel)
+		if err := os.WriteFile(sentinelPath, []byte("old_status\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		ResetEnsuredDirs()
+
+		// Should NOT cache-hit — sentinel is stale. Will attempt bd config set,
+		// which may fail in test env (no bd), but it should NOT return nil
+		// from the sentinel check.
+		cacheKey := beadsDir + ":statuses"
+		err := EnsureCustomStatuses(beadsDir)
+		if ensuredDirs[cacheKey] && err != nil {
+			t.Error("should not cache a failed re-configuration")
+		}
+	})
+
+	t.Run("in-memory cache prevents repeated calls", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		beadsDir := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create sentinel with current statuses to avoid bd call
+		currentStatuses := strings.Join(constants.BeadsCustomStatusesList(), ",")
+		sentinelPath := filepath.Join(beadsDir, statusesSentinel)
+		if err := os.WriteFile(sentinelPath, []byte(currentStatuses+"\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		ResetEnsuredDirs()
+
+		// First call
+		if err := EnsureCustomStatuses(beadsDir); err != nil {
+			t.Fatal(err)
+		}
+
+		// Remove sentinel - second call should still succeed due to in-memory cache
+		os.Remove(sentinelPath)
+
+		if err := EnsureCustomStatuses(beadsDir); err != nil {
+			t.Errorf("expected cache hit, got: %v", err)
+		}
+	})
+
+	t.Run("cache key does not collide with types cache", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		beadsDir := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		ResetEnsuredDirs()
+
+		// Manually set the types cache entry (simulating EnsureCustomTypes ran)
+		ensuredMu.Lock()
+		ensuredDirs[beadsDir] = true
+		ensuredMu.Unlock()
+
+		// Statuses cache should NOT be hit — different key
+		cacheKey := beadsDir + ":statuses"
+		ensuredMu.Lock()
+		cached := ensuredDirs[cacheKey]
+		ensuredMu.Unlock()
+
+		if cached {
+			t.Error("statuses cache key should not collide with types cache key")
+		}
+	})
+}
+
 func TestEnsureDatabaseInitialized(t *testing.T) {
 	t.Run("dolt dir exists — skip init", func(t *testing.T) {
 		beadsDir := filepath.Join(t.TempDir(), ".beads")

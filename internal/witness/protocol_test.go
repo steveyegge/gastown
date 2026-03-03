@@ -1,10 +1,13 @@
 package witness
 
 import (
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestClassifyMessage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		subject  string
 		expected ProtocolType
@@ -38,6 +41,7 @@ func TestClassifyMessage(t *testing.T) {
 }
 
 func TestParsePolecatDone(t *testing.T) {
+	t.Parallel()
 	subject := "POLECAT_DONE nux"
 	body := `Exit: MERGED
 Issue: gt-abc123
@@ -67,6 +71,7 @@ Branch: feature-branch`
 }
 
 func TestParsePolecatDone_MinimalBody(t *testing.T) {
+	t.Parallel()
 	subject := "POLECAT_DONE ace"
 	body := "Exit: DEFERRED"
 
@@ -87,6 +92,7 @@ func TestParsePolecatDone_MinimalBody(t *testing.T) {
 }
 
 func TestParsePolecatDone_InvalidSubject(t *testing.T) {
+	t.Parallel()
 	_, err := ParsePolecatDone("Invalid subject", "body")
 	if err == nil {
 		t.Error("ParsePolecatDone() expected error for invalid subject")
@@ -94,6 +100,7 @@ func TestParsePolecatDone_InvalidSubject(t *testing.T) {
 }
 
 func TestParsePolecatDone_MRFailed(t *testing.T) {
+	t.Parallel()
 	subject := "POLECAT_DONE nux"
 	body := `Exit: COMPLETED
 Issue: gt-abc123
@@ -118,6 +125,7 @@ Errors: MR bead creation failed: connection refused`
 }
 
 func TestParsePolecatDone_MRFailedAbsent(t *testing.T) {
+	t.Parallel()
 	// When MRFailed is not in the body, it should default to false
 	subject := "POLECAT_DONE nux"
 	body := `Exit: COMPLETED
@@ -136,6 +144,7 @@ Branch: polecat/nux-abc123`
 }
 
 func TestParseHelp(t *testing.T) {
+	t.Parallel()
 	subject := "HELP: Tests failing on CI"
 	body := `Agent: gastown/polecats/nux
 Issue: gt-abc123
@@ -165,6 +174,7 @@ Tried: Increased timeout, checked for deadlocks`
 }
 
 func TestParseHelp_InvalidSubject(t *testing.T) {
+	t.Parallel()
 	_, err := ParseHelp("Not a help message", "body")
 	if err == nil {
 		t.Error("ParseHelp() expected error for invalid subject")
@@ -172,6 +182,7 @@ func TestParseHelp_InvalidSubject(t *testing.T) {
 }
 
 func TestParseMerged(t *testing.T) {
+	t.Parallel()
 	subject := "MERGED nux"
 	body := `Branch: feature-nux
 Issue: gt-abc123
@@ -197,6 +208,7 @@ Merged-At: 2025-12-30T10:30:00Z`
 }
 
 func TestParseMerged_InvalidSubject(t *testing.T) {
+	t.Parallel()
 	_, err := ParseMerged("Not merged", "body")
 	if err == nil {
 		t.Error("ParseMerged() expected error for invalid subject")
@@ -204,6 +216,7 @@ func TestParseMerged_InvalidSubject(t *testing.T) {
 }
 
 func TestParseMergeFailed(t *testing.T) {
+	t.Parallel()
 	subject := "MERGE_FAILED nux"
 	body := `Branch: feature-nux
 Issue: gt-abc123
@@ -236,6 +249,7 @@ Error: unit tests failed with 3 errors`
 }
 
 func TestParseMergeFailed_MinimalBody(t *testing.T) {
+	t.Parallel()
 	subject := "MERGE_FAILED ace"
 	body := "FailureType: build"
 
@@ -256,6 +270,7 @@ func TestParseMergeFailed_MinimalBody(t *testing.T) {
 }
 
 func TestParseMergeFailed_InvalidSubject(t *testing.T) {
+	t.Parallel()
 	_, err := ParseMergeFailed("Not a merge failed", "body")
 	if err == nil {
 		t.Error("ParseMergeFailed() expected error for invalid subject")
@@ -263,6 +278,7 @@ func TestParseMergeFailed_InvalidSubject(t *testing.T) {
 }
 
 func TestParseMergeReady(t *testing.T) {
+	t.Parallel()
 	subject := "MERGE_READY nux"
 	body := `Branch: polecat/nux/gt-abc123
 Issue: gt-abc123
@@ -293,6 +309,7 @@ Verified: clean git state`
 }
 
 func TestParseMergeReady_MinimalBody(t *testing.T) {
+	t.Parallel()
 	subject := "MERGE_READY ace"
 	body := "Branch: feature-ace"
 
@@ -313,6 +330,7 @@ func TestParseMergeReady_MinimalBody(t *testing.T) {
 }
 
 func TestParseMergeReady_InvalidSubject(t *testing.T) {
+	t.Parallel()
 	_, err := ParseMergeReady("Not a merge ready", "body")
 	if err == nil {
 		t.Error("ParseMergeReady() expected error for invalid subject")
@@ -320,6 +338,7 @@ func TestParseMergeReady_InvalidSubject(t *testing.T) {
 }
 
 func TestParseSwarmStart(t *testing.T) {
+	t.Parallel()
 	body := `SwarmID: batch-123
 Beads: bd-a, bd-b, bd-c
 Total: 3`
@@ -350,6 +369,7 @@ Total: 3`
 }
 
 func TestParseSwarmStart_MinimalBody(t *testing.T) {
+	t.Parallel()
 	body := "SwarmID: batch-456"
 
 	payload, err := ParseSwarmStart(body)
@@ -369,6 +389,7 @@ func TestParseSwarmStart_MinimalBody(t *testing.T) {
 }
 
 func TestCleanupWispLabels(t *testing.T) {
+	t.Parallel()
 	labels := CleanupWispLabels("nux", "pending")
 
 	expected := []string{"cleanup", "polecat:nux", "state:pending"}
@@ -383,79 +404,120 @@ func TestCleanupWispLabels(t *testing.T) {
 	}
 }
 
-func TestAssessHelpRequest_GitConflict(t *testing.T) {
+func TestFormatHelpSummary_FullPayload(t *testing.T) {
+	t.Parallel()
+	ts := time.Date(2026, 2, 28, 12, 0, 0, 0, time.UTC)
 	payload := &HelpPayload{
-		Topic:   "Git issue",
-		Problem: "Merge conflict in main.go",
+		Agent:       "gastown/polecats/nux",
+		IssueID:     "gt-1234",
+		Topic:       "Git conflict",
+		Problem:     "Merge conflict in main.go",
+		Tried:       "Attempted rebase, still conflicts",
+		RequestedAt: ts,
 	}
 
-	assessment := AssessHelpRequest(payload)
+	summary := FormatHelpSummary(payload)
 
-	if assessment.CanHelp {
-		t.Error("Should not be able to help with git conflicts")
+	if !strings.Contains(summary, "HELP REQUEST from gastown/polecats/nux") {
+		t.Errorf("summary should contain agent name, got: %s", summary)
 	}
-	if !assessment.NeedsEscalation {
-		t.Error("Git conflicts should need escalation")
+	if !strings.Contains(summary, "(issue: gt-1234)") {
+		t.Errorf("summary should contain issue ID, got: %s", summary)
+	}
+	if !strings.Contains(summary, "Topic: Git conflict") {
+		t.Errorf("summary should contain topic, got: %s", summary)
+	}
+	if !strings.Contains(summary, "Problem: Merge conflict in main.go") {
+		t.Errorf("summary should contain problem, got: %s", summary)
+	}
+	if !strings.Contains(summary, "Tried: Attempted rebase") {
+		t.Errorf("summary should contain tried, got: %s", summary)
+	}
+	if !strings.Contains(summary, "Requested: 2026-02-28") {
+		t.Errorf("summary should contain timestamp, got: %s", summary)
 	}
 }
 
-func TestAssessHelpRequest_GitPush(t *testing.T) {
+func TestFormatHelpSummary_MinimalPayload(t *testing.T) {
+	t.Parallel()
 	payload := &HelpPayload{
-		Topic:   "Git push failing",
-		Problem: "Cannot push to remote",
-	}
-
-	assessment := AssessHelpRequest(payload)
-
-	if !assessment.CanHelp {
-		t.Error("Should be able to help with git push issues")
-	}
-	if assessment.HelpAction == "" {
-		t.Error("HelpAction should not be empty")
-	}
-}
-
-func TestAssessHelpRequest_TestFailures(t *testing.T) {
-	payload := &HelpPayload{
-		Topic:   "Test failures",
+		Agent:   "gastown/polecats/furiosa",
 		Problem: "Tests fail on CI",
 	}
 
-	assessment := AssessHelpRequest(payload)
+	summary := FormatHelpSummary(payload)
 
-	if assessment.CanHelp {
-		t.Error("Should not be able to help with test failures")
+	if !strings.Contains(summary, "HELP REQUEST from gastown/polecats/furiosa") {
+		t.Errorf("summary should contain agent name, got: %s", summary)
 	}
-	if !assessment.NeedsEscalation {
-		t.Error("Test failures should need escalation")
+	if strings.Contains(summary, "issue:") {
+		t.Errorf("summary should not contain issue line when empty, got: %s", summary)
 	}
-}
-
-func TestAssessHelpRequest_RequirementsUnclear(t *testing.T) {
-	payload := &HelpPayload{
-		Topic:   "Requirements unclear",
-		Problem: "Don't understand the requirements for this task",
+	if strings.Contains(summary, "Topic:") {
+		t.Errorf("summary should not contain topic line when empty, got: %s", summary)
 	}
-
-	assessment := AssessHelpRequest(payload)
-
-	if assessment.CanHelp {
-		t.Error("Should not be able to help with unclear requirements")
+	if !strings.Contains(summary, "Problem: Tests fail on CI") {
+		t.Errorf("summary should contain problem, got: %s", summary)
 	}
-	if !assessment.NeedsEscalation {
-		t.Error("Unclear requirements should need escalation")
+	if strings.Contains(summary, "Tried:") {
+		t.Errorf("summary should not contain tried line when empty, got: %s", summary)
+	}
+	if strings.Contains(summary, "Requested:") {
+		t.Errorf("summary should not contain timestamp when zero, got: %s", summary)
 	}
 }
 
-func TestAssessHelpRequest_BuildIssues(t *testing.T) {
-	payload := &HelpPayload{
-		Topic:   "Build failing",
-		Problem: "Cannot compile the project",
+// --- Agent state and exit type constants (gt-x7t9) ---
+
+func TestAgentStateConstants(t *testing.T) {
+	t.Parallel()
+	// Verify all expected agent states are defined
+	states := map[AgentState]string{
+		AgentStateRunning:   "running",
+		AgentStateIdle:      "idle",
+		AgentStateDone:      "done",
+		AgentStateStuck:     "stuck",
+		AgentStateEscalated: "escalated",
+		AgentStateSpawning:  "spawning",
+		AgentStateWorking:   "working",
+		AgentStateNuked:     "nuked",
 	}
+	for state, expected := range states {
+		if string(state) != expected {
+			t.Errorf("AgentState %q = %q, want %q", expected, string(state), expected)
+		}
+	}
+}
 
-	assessment := AssessHelpRequest(payload)
+func TestExitTypeConstants(t *testing.T) {
+	t.Parallel()
+	// Verify all expected exit types are defined and match PolecatDonePayload.Exit values
+	types := map[ExitType]string{
+		ExitTypeCompleted:     "COMPLETED",
+		ExitTypeEscalated:     "ESCALATED",
+		ExitTypeDeferred:      "DEFERRED",
+		ExitTypePhaseComplete: "PHASE_COMPLETE",
+	}
+	for exitType, expected := range types {
+		if string(exitType) != expected {
+			t.Errorf("ExitType %q = %q, want %q", expected, string(exitType), expected)
+		}
+	}
+}
 
-	if !assessment.CanHelp {
-		t.Error("Should be able to help with build issues")
+func TestExitTypeMatchesPolecatDonePayload(t *testing.T) {
+	t.Parallel()
+	// The ExitType constants must match values parsed by ParsePolecatDone
+	subject := "POLECAT_DONE nux"
+
+	for _, exit := range []ExitType{ExitTypeCompleted, ExitTypeEscalated, ExitTypeDeferred, ExitTypePhaseComplete} {
+		body := "Exit: " + string(exit)
+		payload, err := ParsePolecatDone(subject, body)
+		if err != nil {
+			t.Fatalf("ParsePolecatDone() for exit %q: %v", exit, err)
+		}
+		if payload.Exit != string(exit) {
+			t.Errorf("ParsePolecatDone Exit = %q, want %q", payload.Exit, string(exit))
+		}
 	}
 }

@@ -223,7 +223,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 
 	cfg := PatrolConfig{
 		RoleName:        "deacon",
-		PatrolMolName:   "mol-deacon-patrol",
+		PatrolMolName:   constants.MolDeaconPatrol,
 		BeadsDir:        ctx.TownRoot, // Town-level role uses town root beads
 		Assignee:        "deacon",
 		HeaderEmoji:     "🔄",
@@ -234,7 +234,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 		},
 	}
 	outputPatrolContext(cfg)
-	showFormulaSteps("mol-deacon-patrol", "Patrol Steps")
+	showFormulaSteps(constants.MolDeaconPatrol, "Patrol Steps")
 }
 
 // outputWitnessPatrolContext shows patrol molecule status for the Witness.
@@ -242,7 +242,7 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 func outputWitnessPatrolContext(ctx RoleContext) {
 	cfg := PatrolConfig{
 		RoleName:        "witness",
-		PatrolMolName:   "mol-witness-patrol",
+		PatrolMolName:   constants.MolWitnessPatrol,
 		BeadsDir:        ctx.WorkDir,
 		Assignee:        ctx.Rig + "/witness",
 		HeaderEmoji:     constants.EmojiWitness,
@@ -253,7 +253,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 		},
 	}
 	outputPatrolContext(cfg)
-	showFormulaSteps("mol-witness-patrol", "Patrol Steps")
+	showFormulaSteps(constants.MolWitnessPatrol, "Patrol Steps")
 }
 
 // outputRefineryPatrolContext shows patrol molecule status for the Refinery.
@@ -261,7 +261,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 func outputRefineryPatrolContext(ctx RoleContext) {
 	cfg := PatrolConfig{
 		RoleName:        "refinery",
-		PatrolMolName:   "mol-refinery-patrol",
+		PatrolMolName:   constants.MolRefineryPatrol,
 		BeadsDir:        ctx.WorkDir,
 		Assignee:        ctx.Rig + "/refinery",
 		HeaderEmoji:     "🔧",
@@ -273,7 +273,7 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 		},
 	}
 	outputPatrolContext(cfg)
-	showFormulaSteps("mol-refinery-patrol", "Patrol Steps")
+	showFormulaSteps(constants.MolRefineryPatrol, "Patrol Steps")
 }
 
 // buildRefineryPatrolVars loads rig MQ settings and returns --var key=value

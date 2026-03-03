@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-03-01
+
+### Added
+
+- **Batch-then-bisect merge queue** — Bors-style MQ batches MRs, runs tests on
+  the tip, and binary-bisects on failure. GatesParallel runs test + lint
+  concurrently per MR.
+- **Persistent polecats** — Polecat identity and sandbox survive across work
+  assignments. Sessions are ephemeral; identity accumulates forever. `gt done`
+  transitions to idle instead of nuking.
+- **Compactor Dog** — Daily Dolt commit history flattening via `DOLT_RESET --soft`.
+  Runs on live server, no downtime. Configurable threshold. Includes surgical
+  interactive rebase for advanced use.
+- **Doctor Dog** — Automated health monitoring patrol for Dolt server. Detects
+  zombies, orphan databases, and stale locks. Reports structured data for agent
+  decision-making (ZFC-compliant).
+- **JSONL Dog** — Spike detection and pollution firewall for JSONL backup exports.
+  Scrubs test artifacts before git commit.
+- **Wisp Reaper Dog** — Automated wisp GC with DELETE of closed wisps >7d, auto-close
+  of stale issues >30d, and mail purge >7d.
+- **Root-only wisps** — Formula steps no longer materialized as individual database
+  rows. Single root wisp per formula. Cuts ~6,000 ephemeral rows/day from Dolt.
+- **Six-stage data lifecycle** — CREATE, LIVE, CLOSE, DECAY, COMPACT, FLATTEN,
+  all automated via Dogs. `EnsureLifecycleDefaults()` auto-populates daemon.json
+  on startup.
+- **`gt maintain`** — One-command Dolt maintenance (flatten + gc).
+- **`gt vitals`** — Unified health dashboard command.
+- **`gt upgrade`** — Post-binary migration command for config propagation.
+- **`gt convoy stage`** — Stage convoys with `--title` flag and smart defaults.
+- **`gt mol await-signal`** — Alias for step-level signal awaiting.
+- **`gt daemon clear-backoff`** — Reset exponential backoff on daemon restarts.
+- **`gt mq post-merge`** — Branch cleanup after refinery merge.
+- **`gt mail drain`** — Drain inbox command.
+- **Sandbox sync** — Branch-only polecat reuse with `pool-init`.
+- **Per-worker agent selection** — `worker_agents` config for crew members.
+- **Dangerous-command guard hook** — Blocks `cp -i`, `mv -i`, `rm -i` in agent sessions.
+- **Log rotation** — Daemon and Dolt server logs now rotate with gzip compression.
+- **Did-you-mean suggestions** — Unknown subcommands suggest closest match.
+- **`gt version --verbose/--short`** — Version display options.
+- **Town-root CLAUDE.md version check** — `gt doctor` detects stale CLAUDE.md files.
+- **Lifecycle defaults doctor check** — Detects missing daemon.json patrol entries.
+
+### Changed
+
+- **OperationalConfig for config-driven thresholds (ZFC)** — Hardcoded thresholds
+  for hung sessions, stale claims, max retries, GUPP violations, and crash-loop
+  backoff are now in `operational.json`. Go code reads config; agents set values.
+- **Nudge-first communication** — Protocol messages (LIFECYCLE, WORK_DONE,
+  merge notifications) changed from permanent mail to ephemeral wisps or nudges.
+  Reduces Dolt commit volume by ~80% for patrol traffic.
+- **Default Dolt log level** changed from debug to info.
+- **Convoy IDs** shortened from 5 chars to 3.
+- **Mail purge age** reduced from 30 days to 7 days.
+- **Compactor threshold** bumped from 500 to 10,000 commits.
+- **Default max Dolt connections** bumped from 200 to 1,000.
+- **Dolt flatten runs on live server** — No maintenance window needed.
+
+### Fixed
+
+- **Mail delivery** — Fixed `--id` flag breaking all mail creation paths. Fixed
+  recipient validation to include pinned and inactive agents. Added auto-nudge
+  on mail delivery to idle agents.
+- **Witness patrol** — Stopped nuking idle polecats. Stopped auto-closing permanent
+  issues (ZFC violation). Replaced screen-scraping with structured signals for
+  stalled polecat detection.
+- **Polecat lifecycle** — Prevent sleepwalking completions with zero commits. Normalize
+  CWD to git root before beads resolution. Preserve remote branches when MR pending.
+  Close orphan step wisps before closing root molecule.
+- **Refinery** — Removed dead `findTownRoot` filesystem inference (ZFC). Removed
+  hardcoded severity/priority logic. Made stale-claim thresholds config-driven.
+  Extracted typed `ConvoyFields` accessor.
+- **Boot triage** — Removed ZFC-violating decision engine from degraded boot triage.
+- **PID detection** — Replaced PID signal probing with heartbeat-based liveness.
+  Replaced ps string matching with nonce-based PID files. Replaced per-PID pgrep
+  with single ps-based process tree scan.
+- **tmux** — Use default socket instead of per-town socket. Set `window-size=latest`
+  on detached sessions. Auto-dismiss workspace trust dialog blocking agent sessions.
+- **Convoy** — Prevent auto-close of stuck convoys. Recovery sweep after Dolt
+  reconnect. Check parked AND docked rigs in dispatch. Prevent double-spawn from
+  stale feed. Idempotent close handling.
+- **Doctor** — Fixed silent failure for agent-beads and misclassified-wisps checks.
+  Repair beads redirect targets with missing config.yaml. Handle worktree branch
+  conflicts. Skip rig dirs whose .beads symlinks to town root.
+- **Test isolation** — Migrate test infrastructure to testcontainers. Ephemeral Dolt
+  server per test suite. `BEADS_TEST_MODE=1` enforcement. Dropped 45 zombie test
+  servers (7GB RAM).
+- **Rig lifecycle** — Enforce dock/park across all startup, patrol, and sling paths.
+  Dogs correctly use plugin lookup. Formula lookup falls back to embedded for
+  non-gastown rigs.
+- **Handoff** — Deterministic git state in handoff context. Fix socket confusion
+  using caller socket. Preserve conversation context on PreCompact cycle.
+- **Windows** — Cross-compilation fixes for `syscall.Flock`, `syscall.SIGUSR2`,
+  bash-dependent tests, `GOPATH/bin` creation, batch mock caret escaping.
+- **Hardcoded strings** — Replaced ~50 hardcoded state/status string comparisons
+  with typed enums across witness, refinery, and beads packages.
+- **CI** — Fixed lint errors (errcheck, misspell) and integration test port collision.
+
 ## [0.8.0] - 2026-02-23
 
 ### Added

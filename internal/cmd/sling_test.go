@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -445,7 +446,7 @@ exit /b 0
 	}
 
 	rollbackCalled := false
-	rollbackSlingArtifactsFn = func(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir string) {
+	rollbackSlingArtifactsFn = func(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir, convoyID string) {
 		rollbackCalled = true
 		if spawnInfo == nil || spawnInfo.PolecatName != "Toast" {
 			t.Fatalf("unexpected spawnInfo in rollback: %+v", spawnInfo)
@@ -547,7 +548,7 @@ exit /b 0
 	rollbackSlingArtifacts(&SpawnedPolecatInfo{
 		RigName:     "gastown",
 		PolecatName: "Toast",
-	}, "gt-abc123", "")
+	}, "gt-abc123", "", "")
 
 	if !burnCalled {
 		t.Fatalf("expected rollbackSlingArtifacts to burn attached molecules")
@@ -674,7 +675,7 @@ exit /b 0
 	}
 
 	rollbackCalled := false
-	rollbackSlingArtifactsFn = func(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir string) {
+	rollbackSlingArtifactsFn = func(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir, convoyID string) {
 		rollbackCalled = true
 		if spawnInfo == nil || spawnInfo.PolecatName != "Toast" {
 			t.Fatalf("unexpected spawnInfo in rollback: %+v", spawnInfo)
@@ -687,7 +688,7 @@ exit /b 0
 		}
 	}
 
-	err = runSlingFormula([]string{"mol-anything", "gastown"})
+	err = runSlingFormula(context.Background(), []string{"mol-anything", "gastown"})
 	if err == nil {
 		t.Fatalf("expected error from runSlingFormula")
 	}

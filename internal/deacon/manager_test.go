@@ -21,16 +21,9 @@ type mockTmux struct {
 	sessionInfoErr   error
 	sendKeysErr      error
 
-	// Dead pane detection (for respawn-instead-of-kill behavior)
-	paneDead               bool  // true if pane is dead (remain-on-exit)
-	respawnErr             error // error from RespawnPaneDefault
-	agentAliveAfterRespawn bool  // IsAgentAlive result after respawn
-
 	// Call tracking
 	killCalls       []string
 	newSessionCalls int
-	respawnCalls    int
-	respawnChecked  bool // tracks if IsPaneDead was checked
 }
 
 func (m *mockTmux) HasSession(name string) (bool, error) {
@@ -38,21 +31,7 @@ func (m *mockTmux) HasSession(name string) (bool, error) {
 }
 
 func (m *mockTmux) IsAgentAlive(_ string) bool {
-	// After respawn, return the post-respawn result
-	if m.respawnChecked && m.agentAliveAfterRespawn {
-		return true
-	}
 	return m.agentAlive
-}
-
-func (m *mockTmux) IsPaneDead(_ string) bool {
-	return m.paneDead
-}
-
-func (m *mockTmux) RespawnPaneDefault(_ string) error {
-	m.respawnCalls++
-	m.respawnChecked = true
-	return m.respawnErr
 }
 
 func (m *mockTmux) KillSessionWithProcesses(name string) error {
@@ -65,8 +44,9 @@ func (m *mockTmux) NewSessionWithCommand(_, _, _ string) error {
 	return m.newSessionErr
 }
 
-func (m *mockTmux) SetRemainOnExit(_ string, _ bool) error { return nil }
-func (m *mockTmux) SetEnvironment(_, _, _ string) error     { return nil }
+func (m *mockTmux) SetRemainOnExit(_ string, _ bool) error    { return nil }
+func (m *mockTmux) SetEnvironment(_, _, _ string) error       { return nil }
+func (m *mockTmux) GetPaneID(_ string) (string, error)        { return "%0", nil }
 func (m *mockTmux) ConfigureGasTownSession(_ string, _ tmux.Theme, _, _, _ string) error {
 	return nil
 }
@@ -266,97 +246,6 @@ func TestStart_WaitForCommandFails(t *testing.T) {
 	}
 	// If config failed before reaching NewSessionWithCommand, that's
 	// acceptable - the WaitForCommand path isn't reachable in test env.
-}
-
-// TestStart_DeadPane_RespawnsInsteadOfKill verifies that when the deacon
-// session exists but the pane is dead (process exited with remain-on-exit on),
-// Start() respawns the pane instead of killing the entire session and
-// creating a new one. This is critical for the daemon's crash loop detection:
-// respawning returns ErrAlreadyRunning, which makes the daemon call
-// RecordSuccess() instead of RecordRestart().
-//
-// Regression test for the deacon crash loop: the deacon exits cleanly
-// after each patrol cycle (~3 min), but the daemon heartbeat (also ~3 min)
-// finds the dead pane, kills the "zombie", creates a new session, and
-// increments the restart counter. After 5 restarts -> crash loop.
-func TestStart_DeadPane_RespawnsInsteadOfKill(t *testing.T) {
-	mock := &mockTmux{
-		hasSessionResult:       true,
-		agentAlive:             false, // agent not running (pane dead)
-		paneDead:               true,  // pane is dead, not a zombie shell
-		respawnErr:             nil,   // respawn succeeds
-		agentAliveAfterRespawn: true,  // agent comes back after respawn
-	}
-	m := newTestManager(t.TempDir(), mock)
-
-	err := m.Start("")
-
-	// Should return ErrAlreadyRunning because respawn recovered the session
-	if !errors.Is(err, ErrAlreadyRunning) {
-		t.Errorf("Start() = %v, want ErrAlreadyRunning (respawn should recover dead pane)", err)
-	}
-
-	// Should NOT have killed the session
-	if len(mock.killCalls) > 0 {
-		t.Errorf("Start() killed session %v — should have respawned instead", mock.killCalls)
-	}
-
-	// Should NOT have created a new session
-	if mock.newSessionCalls > 0 {
-		t.Errorf("Start() created %d new sessions — should have respawned existing pane", mock.newSessionCalls)
-	}
-
-	// Should have called RespawnPaneDefault
-	if mock.respawnCalls == 0 {
-		t.Error("Start() did not call RespawnPaneDefault — dead pane should be respawned")
-	}
-}
-
-// TestStart_DeadPane_RespawnFails_FallsThrough verifies that when respawn
-// fails, Start() falls through to the kill+recreate path.
-func TestStart_DeadPane_RespawnFails_FallsThrough(t *testing.T) {
-	mock := &mockTmux{
-		hasSessionResult: true,
-		agentAlive:       false,
-		paneDead:         true,
-		respawnErr:       errors.New("respawn-pane failed"),
-	}
-	m := newTestManager(t.TempDir(), mock)
-
-	// Start will fall through to kill+recreate, then hit config resolution
-	// which may fail in test env. We just verify the fallthrough behavior.
-	_ = m.Start("")
-
-	// Respawn was attempted
-	if mock.respawnCalls == 0 {
-		t.Error("Start() did not attempt RespawnPaneDefault before falling through to kill")
-	}
-
-	// Should have fallen through to kill
-	if len(mock.killCalls) == 0 {
-		t.Error("Start() should fall through to kill when respawn fails")
-	}
-}
-
-// TestStart_ZombieShell_StillKills verifies that a true zombie (shell
-// running but agent dead) is still handled with kill+recreate, not respawn.
-func TestStart_ZombieShell_StillKills(t *testing.T) {
-	mock := &mockTmux{
-		hasSessionResult: true,
-		agentAlive:       false,
-		paneDead:         false, // NOT a dead pane -- zombie shell still running
-	}
-	m := newTestManager(t.TempDir(), mock)
-
-	_ = m.Start("")
-
-	// Zombie shell should be killed, not respawned
-	if len(mock.killCalls) == 0 {
-		t.Error("Start() should kill zombie shell sessions")
-	}
-	if mock.respawnCalls > 0 {
-		t.Error("Start() should not respawn zombie shell -- only dead panes")
-	}
 }
 
 func TestStop_NotRunning(t *testing.T) {

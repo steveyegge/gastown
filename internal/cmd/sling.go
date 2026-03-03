@@ -16,13 +16,15 @@ import (
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
+	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var slingCmd = &cobra.Command{
-	Use:     "sling <bead-or-formula> [target]",
-	GroupID: GroupWork,
-	Short:   "Assign work to an agent (THE unified work dispatch command)",
+	Use:         "sling <bead-or-formula> [target]",
+	GroupID:     GroupWork,
+	Annotations: map[string]string{AnnotationPolecatSafe: "true"},
+	Short:       "Assign work to an agent (THE unified work dispatch command)",
 	Long: `Sling work onto an agent's hook and start working immediately.
 
 This is THE command for assigning work in Gas Town. It handles:
@@ -155,10 +157,40 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingRalph, "ralph", false, "Enable Ralph Wiggum loop mode (fresh context per step, for multi-step workflows)")
 	slingCmd.Flags().StringVar(&slingFormula, "formula", "", "Formula to apply (default: mol-polecat-work for polecat targets)")
 
+	slingCmd.AddCommand(slingRespawnResetCmd)
 	rootCmd.AddCommand(slingCmd)
 }
 
+var slingRespawnResetCmd = &cobra.Command{
+	Use:   "respawn-reset <bead-id>",
+	Short: "Reset the respawn counter for a bead",
+	Long: `Reset the per-bead respawn counter so it can be slung again.
+
+When a bead hits the respawn limit (3 attempts), gt sling blocks further
+dispatches to prevent spawn storms. After investigating the root cause,
+use this command to allow re-dispatch.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSlingRespawnReset,
+}
+
+func runSlingRespawnReset(_ *cobra.Command, args []string) error {
+	beadID := args[0]
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+	if err := witness.ResetBeadRespawnCount(townRoot, beadID); err != nil {
+		return fmt.Errorf("resetting respawn count for %s: %w", beadID, err)
+	}
+	fmt.Printf("Reset respawn counter for %s. It can be slung again.\n", beadID)
+	return nil
+}
+
 func runSling(cmd *cobra.Command, args []string) (retErr error) {
+	ctx := context.Background()
+	if cmd != nil {
+		ctx = cmd.Context()
+	}
 	defer func() {
 		bead, target := "", ""
 		if len(args) > 0 {
@@ -167,7 +199,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		if len(args) > 1 {
 			target = args[1]
 		}
-		telemetry.RecordSling(context.Background(), bead, target, retErr)
+		telemetry.RecordSling(ctx, bead, target, retErr)
 	}()
 	// Polecats cannot sling - check early before writing anything.
 	// Check GT_ROLE first: coordinators (mayor, witness, etc.) may have a stale
@@ -491,7 +523,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 				// Standalone formula mode: gt sling <formula> [target]
 				// Standalone formula: deferred dispatch is handled above (formula-on-bead),
 				// so no scheduler check needed here.
-				return runSlingFormula(args)
+				return runSlingFormula(ctx, args)
 			}
 			// Not a formula either - check if it looks like a bead ID (routing issue workaround).
 			// Accept it and let the actual bd update fail later if the bead doesn't exist.
@@ -754,10 +786,16 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	if formulaName != "" {
 		existingMolecules := collectExistingMolecules(info)
 		if len(existingMolecules) > 0 {
+			// Auto-burn when bead is unassigned (molecules are definitionally stale),
+			// or when the assigned agent's session is dead. `force` already includes
+			// dead-agent auto-force from the status check above.
+			stale := force ||
+				(info.Assignee == "" && (info.Status == "open" || info.Status == "in_progress")) ||
+				(info.Assignee != "" && isHookedAgentDeadFn(info.Assignee))
 			if slingDryRun {
 				fmt.Printf("  Would burn %d stale molecule(s): %s\n",
 					len(existingMolecules), strings.Join(existingMolecules, ", "))
-			} else if force {
+			} else if stale {
 				fmt.Printf("  %s Burning %d stale molecule(s) from previous assignment: %s\n",
 					style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
 				if err := burnExistingMolecules(existingMolecules, beadID, townRoot); err != nil {
@@ -803,14 +841,14 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 			slingVars = append(rigCmdVars, slingVars...)
 		}
 
-		result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, false, slingVars)
+		result, err := InstantiateFormulaOnBead(ctx, formulaName, beadID, info.Title, hookWorkDir, townRoot, false, slingVars)
 		if err != nil {
 			// If we spawned a fresh polecat (rig target), rollback the partial artifacts.
 			// Otherwise, a wisp creation failure (e.g., missing required vars) leaves an orphaned polecat.
 			if newPolecatInfo != nil {
 				fmt.Printf("%s Formula instantiation failed, rolling back spawned polecat %s...\n",
 					style.Warning.Render("⚠"), newPolecatInfo.PolecatName)
-				rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir)
+				rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir, "")
 				// Under --force, if this bead was previously pinned, rollback's unhook would otherwise
 				// clear the pinned state. Restore pinned state so we don't lose the original hook.
 				if force && originalStatus == "pinned" {
@@ -903,7 +941,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 			// Rollback: session failed, clean up zombie artifacts (worktree, hooked bead).
 			// Without rollback, next sling attempt fails with "bead already hooked" (gt-jn40ft).
 			fmt.Printf("%s Session failed, rolling back spawned polecat %s...\n", style.Warning.Render("⚠"), newPolecatInfo.PolecatName)
-			rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir)
+			rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir, "")
 			return fmt.Errorf("starting polecat session: %w", err)
 		}
 		targetPane = pane
@@ -1022,7 +1060,7 @@ func tryAcquireSlingBeadLock(townRoot, beadID string) (func(), error) {
 // rollbackSlingArtifacts cleans up artifacts left by a partial sling when session start fails.
 // This prevents zombie polecats that block subsequent sling attempts with "bead already hooked".
 // Cleanup is best-effort: each step logs warnings but continues to clean as much as possible.
-func rollbackSlingArtifacts(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir string) {
+func rollbackSlingArtifacts(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir, convoyID string) {
 	townRoot, err := workspace.FindFromCwdOrError()
 
 	// 1. Burn any attached molecules from partial formula instantiation.
@@ -1060,6 +1098,6 @@ func rollbackSlingArtifacts(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir s
 		}
 	}
 
-	// 2. Clean up the spawned polecat (worktree, agent bead, etc.)
-	cleanupSpawnedPolecat(spawnInfo, spawnInfo.RigName)
+	// 3. Clean up the spawned polecat (worktree, agent bead, convoy, etc.)
+	cleanupSpawnedPolecat(spawnInfo, spawnInfo.RigName, convoyID)
 }

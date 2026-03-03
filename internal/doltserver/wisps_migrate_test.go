@@ -8,16 +8,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/steveyegge/gastown/internal/testutil"
 )
 
 // setupBdWorkDir creates a beads-compatible working directory pointing at an
 // isolated Dolt server. It creates a .beads/metadata.json with the server port
 // and initialises a minimal beads database with an issues table so that the
 // bd CLI can operate against it.
-func setupBdWorkDir(t *testing.T, srv *isolatedServer) string {
+func setupBdWorkDir(t *testing.T, port int) string {
 	t.Helper()
 
 	workDir := t.TempDir()
@@ -26,13 +28,13 @@ func setupBdWorkDir(t *testing.T, srv *isolatedServer) string {
 		t.Fatalf("creating .beads dir: %v", err)
 	}
 
-	metadata := fmt.Sprintf(`{"backend":"dolt","database":"beads_test","dolt_mode":"server","dolt_server_host":"127.0.0.1","dolt_server_port":%d}`, srv.Port)
+	metadata := fmt.Sprintf(`{"backend":"dolt","database":"beads_test","dolt_mode":"server","dolt_server_host":"127.0.0.1","dolt_server_port":%d}`, port)
 	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
 		t.Fatalf("writing metadata.json: %v", err)
 	}
 
 	// Create the database and a minimal issues table on the isolated server.
-	dsn := fmt.Sprintf("root@tcp(127.0.0.1:%d)/", srv.Port)
+	dsn := fmt.Sprintf("root@tcp(127.0.0.1:%d)/", port)
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		t.Fatalf("connecting to isolated server: %v", err)
@@ -62,12 +64,13 @@ func setupBdWorkDir(t *testing.T, srv *isolatedServer) string {
 // TestMigrateWisps_TableCreation verifies that the wisps table and auxiliary
 // tables are created when they don't exist.
 func TestMigrateWisps_TableCreation(t *testing.T) {
-	srv := startIsolatedDoltServer(t)
+	portStr := testutil.StartIsolatedDoltContainer(t)
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skip("bd not found in PATH — skipping integration test")
 	}
 
-	workDir := setupBdWorkDir(t, srv)
+	port, _ := strconv.Atoi(portStr)
+	workDir := setupBdWorkDir(t, port)
 
 	// Verify we can talk to the database.
 	err := bdSQL(workDir, "SELECT 1")
@@ -99,12 +102,13 @@ func TestMigrateWisps_TableCreation(t *testing.T) {
 
 // TestBdSQLCount verifies the count helper works.
 func TestBdSQLCount(t *testing.T) {
-	srv := startIsolatedDoltServer(t)
+	portStr := testutil.StartIsolatedDoltContainer(t)
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skip("bd not found in PATH — skipping integration test")
 	}
 
-	workDir := setupBdWorkDir(t, srv)
+	port, _ := strconv.Atoi(portStr)
+	workDir := setupBdWorkDir(t, port)
 
 	cnt, err := bdSQLCount(workDir, "SELECT COUNT(*) as cnt FROM issues")
 	if err != nil {

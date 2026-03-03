@@ -35,7 +35,7 @@ No WITNESS_PING mail is sent. Witnesses observe the Deacon's last_activity
 timestamp instead, and only send an alert to the Mayor if the Deacon appears
 unresponsive (>5 minutes stale). This avoids heartbeat mail spam."""
 formula = "mol-deacon-patrol"
-version = 12
+version = 13
 
 [vars]
 [vars.wisp_type]
@@ -196,20 +196,13 @@ live processes.
 
 **1. Rogue dolt servers**
 
-Any `dolt sql-server` process NOT on port 3307 (the shared server) is a leaked
-test server. Kill and log.
+Any `dolt sql-server` process that holds this workspace's configured port
+(set via `GT_DOLT_PORT`, default 3307) but uses a different data directory
+is an "imposter" — a leaked server from another workspace. Kill and log.
 
 ```bash
-# Find all dolt sql-server processes
-ps aux | grep 'dolt sql-server' | grep -v grep | while read -r line; do
-  PID=$(echo "$line" | awk '{print $2}')
-  # Check if this is the shared server (port 3307)
-  if echo "$line" | grep -q -- '--port 3307'; then
-    continue  # Skip the shared server
-  fi
-  # Kill rogue server
-  kill "$PID" 2>/dev/null && echo "Killed rogue dolt server PID=$PID"
-done
+# Use gt dolt kill-imposters which checks data-dir — safe for multi-workspace setups
+gt dolt kill-imposters 2>/dev/null || true
 ```
 
 **2. Stale test temp dirs**
@@ -283,7 +276,7 @@ Test pollution cleanup: rogue_dolt=N stale_dirs=N stale_pids=N dead_worktrees=N
 If all counts are 0, log "Test pollution cleanup: clean" and move on.
 
 **Safety:**
-- NEVER kill the shared dolt server (port 3307)
+- NEVER kill this workspace's own legitimate dolt server (checked via data-dir)
 - NEVER remove dirs where lsof shows active file handles
 - NEVER remove PID files where the PID is still alive
 - NEVER prune worktrees for dogs with live tmux sessions
@@ -580,9 +573,88 @@ gt mail send mayor/ -s "Health: <rig> <component> unresponsive" \\
 Reset unresponsive_cycles to 0 when component responds normally."""
 
 [[steps]]
+id = "dolt-health"
+title = "Run Dolt data-plane health check"
+needs = ["health-scan"]
+description = """
+Run `gt health --json` to inspect the Dolt data plane and flag anomalies.
+
+This step surfaces problems that individual patrol steps won't catch:
+commit bloat (compactor dog may have failed), stale backups (backup dog
+may have failed), orphan databases, and zombie Dolt server processes.
+
+**Step 1: Run the health check**
+```bash
+gt health --json
+```
+
+Parse the JSON output (HealthReport schema):
+- `server`: running, pid, port, latency_ms, connections, disk_usage_human
+- `databases[]`: name, issues, open_issues, wisps, open_wisps, commits
+- `backups`: dolt_stale, dolt_freshness, jsonl_stale, jsonl_freshness
+- `processes`: zombie_count, zombie_pids
+- `orphans[]`: name, size
+- `pollution[]`: database, id, title, pattern
+
+**Step 2: Evaluate thresholds**
+
+| Signal | Threshold | Meaning |
+|--------|-----------|---------|
+| `server.running == false` | — | Dolt server is down (CRITICAL) |
+| `server.latency_ms > 5000` | 5 s | Server may be overloaded |
+| `databases[].commits > 50000` | 50 k | Compactor dog may have stalled |
+| `backups.dolt_stale == true` | >30 min | Backup dog may have failed |
+| `backups.jsonl_stale == true` | >30 min | JSONL backup may have failed |
+| `processes.zombie_count > 0` | any | Zombie Dolt servers detected |
+| `orphans` non-empty | any | Orphan databases accumulating |
+| `pollution` non-empty | any | Test pollution in production DBs |
+
+**Step 3: React to alerts**
+
+**Server down (CRITICAL):**
+```bash
+gt escalate -s CRITICAL "Dolt server is down"
+```
+
+**Commit bloat (commits > 50k in any DB):**
+The compactor dog (`mol-dog-compactor`) may have failed. Dispatch a compactor:
+```bash
+gt dog dispatch --formula mol-dog-compactor --var db=<db_name>
+```
+If no idle dogs, log for next cycle.
+
+**Stale backups:**
+The backup dog (`mol-dog-backup`) may have failed. Dispatch a backup:
+```bash
+gt dog dispatch --formula mol-dog-backup
+```
+
+**Zombie processes:**
+Log the PIDs. The zombie-scan step (next) handles polecat zombies;
+this catches zombie *Dolt server* processes. Kill them:
+```bash
+gt dolt kill-imposters
+```
+
+**Orphan DBs:**
+Dispatch cleanup:
+```bash
+gt dolt cleanup
+```
+
+**Pollution:**
+Log for awareness. Pollution cleanup is handled by the test-pollution-cleanup
+step earlier in the patrol, so just note any remaining items.
+
+**If everything is healthy:**
+Log `Dolt health: OK` and move on.
+
+**Exit criteria:** Health check run, alerts handled or escalated."""
+
+[[steps]]
 id = "zombie-scan"
 title = "Detect zombie polecats (NO KILL AUTHORITY)"
-needs = ["health-scan"]
+needs = ["dolt-health"]
 description = """
 Defense-in-depth DETECTION of zombie polecats that Witness should have cleaned.
 
@@ -958,31 +1030,22 @@ needs = ["patrol-digest"]
 description = """
 Maintain daemon logs and state files.
 
-**Step 1: Check daemon.log size**
+**Step 1: Rotate oversized logs**
+
+The daemon automatically rotates logs every heartbeat (3 min), but the deacon
+can trigger a force-rotation to ensure cleanup happens during patrol:
 ```bash
-# Get log file size
-ls -la ~/.beads/daemon*.log 2>/dev/null || ls -la $GT_ROOT/.beads/daemon*.log 2>/dev/null
+gt daemon rotate-logs
 ```
 
-If daemon.log exceeds 10MB:
-```bash
-# Rotate with date suffix and gzip
-LOGFILE="$GT_ROOT/.beads/daemon.log"
-if [ -f "$LOGFILE" ] && [ $(stat -f%z "$LOGFILE" 2>/dev/null || stat -c%s "$LOGFILE") -gt 10485760 ]; then
-    DATE=$(date +%Y-%m-%dT%H-%M-%S)
-    mv "$LOGFILE" "${LOGFILE%.log}-${DATE}.log"
-    gzip "${LOGFILE%.log}-${DATE}.log"
-fi
-```
+This rotates Dolt server logs (dolt.log, dolt-server.log, rig-level dolt-server.log)
+using copytruncate (safe for child processes with open fds). daemon.log uses
+lumberjack for automatic rotation and is handled separately.
 
-**Step 2: Archive old daemon logs**
+Log locations: $GT_ROOT/daemon/dolt.log, $GT_ROOT/daemon/dolt-server.log,
+and per-rig .beads/dolt-server.log files.
 
-Clean up daemon logs older than 7 days:
-```bash
-find $GT_ROOT/.beads/ -name "daemon-*.log.gz" -mtime +7 -delete
-```
-
-**Step 3: Prune state.json of dead sessions**
+**Step 2: Prune state.json of dead sessions**
 
 The state.json tracks active sessions. Prune entries for sessions that no longer exist:
 ```bash
@@ -1084,12 +1147,18 @@ The idle counter was auto-incremented. Continue to next patrol cycle
 
 After await-signal returns (either by signal or timeout):
 1. Generate a brief summary of this patrol cycle's observations
-2. Close current patrol and start next cycle:
+2. Build a step audit: for each step in this formula, record whether you
+   executed it (OK) or skipped it (SKIP). This makes shortcutting visible
+   in the ledger. Format: comma-separated step_id:STATUS pairs.
+3. Close current patrol and start next cycle:
 ```bash
-gt patrol report --summary "<brief summary of patrol observations>"
+gt patrol report --summary "<brief summary>" \
+  --steps "heartbeat:OK,inbox-check:OK,orphan-process-cleanup:SKIP,..."
 ```
+The --steps flag is REQUIRED. List ALL 26 steps with their actual status.
+Steps you executed get OK, steps you skipped get SKIP.
 This closes the current patrol wisp and automatically creates a new one.
-3. Continue executing from the first step of the new patrol cycle
+4. Continue executing from the first step of the new patrol cycle
 
 **If context HIGH** (approaching limit):
 1. Write handoff mail with notable observations:

@@ -438,6 +438,22 @@ set `config_dir` in the preset and Gas Town will provision commands there.
 
 ---
 
+## Capability Matrix
+
+Current agent capabilities at a glance:
+
+| Agent | Hooks | Resume | Non-Interactive | Fork | Prompt Mode | Process Names |
+|-------|-------|--------|-----------------|------|-------------|---------------|
+| Claude | Yes (settings.json) | `--resume` (flag) | Native | Yes | arg | node, claude |
+| Gemini | Yes | `--resume` (flag) | `-p` | No | arg | gemini |
+| Codex | No | `resume` (subcmd) | `exec` subcmd | No | none | codex |
+| Cursor | No | `--resume` (flag) | `-p` | No | arg | cursor-agent |
+| Auggie | No | `--resume` (flag) | No | No | arg | auggie |
+| AMP | No | `threads continue` (subcmd) | No | No | arg | amp |
+| OpenCode | Yes (plugin JS) | No | `run` subcmd | No | none | opencode, node, bun |
+
+---
+
 ## Gas City Provider Contract (Forward-Looking)
 
 Gas Town is being succeeded by Gas City, which formalizes the implicit
@@ -508,6 +524,31 @@ interface AgentProvider {
 **Bottom line**: If you integrate at Tier 1 today (JSON preset), you're already
 90% of the way to the Gas City contract. The JSON fields map directly to the
 provider interface capabilities.
+
+---
+
+## Design Principles
+
+### Discover, Don't Track
+
+Agent liveness is derived from tmux state, not tracked in a database.
+Process names and ready prompts are observed, not self-reported.
+
+### ZFC: Zero Framework Cognition
+
+The agent decides what to do with instructions. Gas Town provides transport
+(tmux, hooks, nudges) but doesn't make decisions for agents. The interface
+is about communication channels, not control flow.
+
+### Graceful Degradation
+
+Every capability has a fallback:
+- No hooks? -> Startup fallback commands via tmux
+- No prompt mode? -> Nudge delivery
+- No resume? -> Fresh session with handoff mail
+- No process API? -> Tmux pane_current_command
+
+The system works (less reliably) with zero native API support.
 
 ---
 

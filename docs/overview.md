@@ -14,7 +14,8 @@ As AI agents become central to engineering workflows, teams face new challenges:
 
 Gas Town is an orchestration layer that treats AI agent work as structured data.
 Every action is attributed. Every agent has a track record. Every piece of work
-has provenance. See [Why These Features](why-these-features.md) for the full rationale.
+has provenance. See [Why These Features](why-these-features.md) for the full rationale,
+and [Glossary](glossary.md) for terminology.
 
 ## Role Taxonomy
 
@@ -154,27 +155,12 @@ gt sling bd-xyz beads
 
 ## Directory Structure
 
-```
-~/gt/                           Town root
-├── .beads/                     Town-level beads (hq-* prefix, mail)
-├── mayor/                      Mayor config
-│   └── town.json
-├── deacon/                     Deacon daemon
-│   └── dogs/                   Deacon helpers (NOT workers)
-│       └── boot/               Health triage dog
-└── <rig>/                      Project container
-    ├── config.json             Rig identity
-    ├── .beads/ → mayor/rig/.beads  (symlink or redirect)
-    ├── .repo.git/              Bare repo (shared by worktrees)
-    ├── mayor/rig/              Mayor's clone (canonical beads)
-    ├── refinery/rig/           Worktree on main
-    ├── witness/                No clone (monitors only)
-    ├── crew/                   Persistent human workspaces
-    │   ├── joe/                Local crew member
-    │   └── beads-wolf/         Cross-rig worktree (wolf from beads)
-    └── polecats/               Polecat worktrees (ephemeral sandboxes)
-        └── Toast/              Individual polecat
-```
+The town root (`~/gt/`) contains infrastructure directories (`mayor/`, `deacon/`)
+and per-project rigs. Each rig holds a bare repo (`.repo.git/`), a canonical beads
+database (`mayor/rig/.beads/`), and agent directories (`witness/`, `refinery/`,
+`crew/`, `polecats/`).
+
+> For the full directory tree, see [architecture.md](design/architecture.md).
 
 ## Identity and Attribution
 
@@ -202,24 +188,12 @@ without waiting for confirmation. Gas Town is a steam engine - agents are piston
 
 ## Model Evaluation and A/B Testing
 
-Gas Town's attribution and work history features enable objective model comparison:
+Gas Town's attribution system enables objective model comparison by tracking
+completion time, quality signals, and revision count per agent. Deploy different
+models on similar tasks and compare outcomes with `bd stats`.
 
-```bash
-# Deploy different models on similar tasks
-gt sling gt-abc gastown --model=claude-sonnet
-gt sling gt-def gastown --model=gpt-4
-
-# Compare outcomes
-bd stats --actor=gastown/polecats/* --group-by=model
-```
-
-Because every task has completion time, quality signals, and revision count,
-you can make data-driven decisions about which models to deploy where.
-
-This is particularly valuable for:
-- **Model selection:** Which model handles your codebase best?
-- **Capability mapping:** Claude for architecture, GPT for tests?
-- **Cost optimization:** When is a smaller model sufficient?
+See [Why These Features](why-these-features.md) for details on work history and
+capability-based routing.
 
 ## Common Mistakes
 

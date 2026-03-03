@@ -38,9 +38,8 @@ var cycleCmd = &cobra.Command{
 
 Session groups:
 - Town sessions: Mayor ↔ Deacon
-- Crew sessions: All crew members in the same rig (e.g., greenplace/crew/max ↔ greenplace/crew/joe)
-- Rig infra sessions: Witness ↔ Refinery (per rig)
-- Polecat sessions: All polecats in the same rig (e.g., greenplace/Toast ↔ greenplace/Nux)
+- Crew sessions: All crew members in the same rig
+- Rig ops sessions: Witness + Refinery + Polecats in the same rig
 
 The appropriate cycling is detected automatically from the session name.
 
@@ -124,29 +123,25 @@ func cycleToSession(direction int, sessionOverride, clientOverride string) error
 		return cycleCrewSession(direction, session)
 	}
 
-	// Check if it's a rig infra session (witness or refinery)
-	if rig := parseRigInfraSession(session); rig != "" {
-		return cycleRigInfraSession(direction, session, rig)
-	}
-
-	// Check if it's a polecat session (gt-<rig>-<name>, not crew/witness/refinery)
-	if rig, _, ok := parsePolecatSessionName(session); ok && rig != "" {
-		return cyclePolecatSession(direction, session)
+	// Check if it's a rig ops session (witness, refinery, or polecat).
+	// These all share one cycle group per rig.
+	if rig := parseRigOpsSession(session); rig != "" {
+		return cycleRigOpsSession(direction, session, rig)
 	}
 
 	// Unknown session type - do nothing
 	return nil
 }
 
-// parseRigInfraSession extracts rig name if this is a witness or refinery session.
-// Returns empty string if not a rig infra session.
-// Format: <prefix>-witness or <prefix>-refinery
-func parseRigInfraSession(sess string) string {
+// parseRigOpsSession extracts the rig name if this is a witness, refinery, or
+// polecat session. Returns empty string if not a rig ops session.
+func parseRigOpsSession(sess string) string {
 	identity, err := sessionpkg.ParseSessionName(sess)
 	if err != nil {
 		return ""
 	}
-	if identity.Role == sessionpkg.RoleWitness || identity.Role == sessionpkg.RoleRefinery {
+	switch identity.Role {
+	case sessionpkg.RoleWitness, sessionpkg.RoleRefinery, sessionpkg.RolePolecat:
 		return identity.Rig
 	}
 	return ""
@@ -202,11 +197,8 @@ func cycleInGroup(direction int, currentSession string, sessions []string) error
 	return tmux.BuildCommand(args...).Run()
 }
 
-// cycleRigInfraSession cycles between witness and refinery sessions for a rig.
-func cycleRigInfraSession(direction int, currentSession, rig string) error {
-	witnessSession := sessionpkg.WitnessSessionName(sessionpkg.PrefixFor(rig))
-	refinerySession := sessionpkg.RefinerySessionName(sessionpkg.PrefixFor(rig))
-
+// cycleRigOpsSession cycles between witness, refinery, and polecat sessions for a rig.
+func cycleRigOpsSession(direction int, currentSession, rig string) error {
 	allSessions, err := listTmuxSessions()
 	if err != nil {
 		return fmt.Errorf("listing sessions: %w", err)
@@ -214,7 +206,7 @@ func cycleRigInfraSession(direction int, currentSession, rig string) error {
 
 	var sessions []string
 	for _, s := range allSessions {
-		if s == witnessSession || s == refinerySession {
+		if parseRigOpsSession(s) == rig {
 			sessions = append(sessions, s)
 		}
 	}

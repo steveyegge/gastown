@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -230,16 +231,28 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	// Uses CreateAgentBead which tries --ephemeral first and falls back to
 	// non-ephemeral if the subprocess crashes (GH#1769: Dolt nil pointer
 	// dereference when wisps table doesn't exist on fresh rigs).
-	fixAgentBead := func(bd *beads.Beads, id, desc string, fields *beads.AgentFields) error {
+	// workDir is the rig directory for direct SQL fallback when bd update
+	// fails silently (e.g., legacy prefixes that can't be routed — GH#2127).
+	fixAgentBead := func(bd *beads.Beads, workDir, id, desc string, fields *beads.AgentFields) error {
 		if issue, exists := allAgentBeads[id]; exists {
 			// In issues table — ensure it has the gt:agent label.
-			// Use the scoped Beads instance (bd) so the update targets the
-			// correct database (town beads for hq-* agents, rig beads for
-			// rig-prefixed agents) instead of relying on CLI prefix routing
-			// which can send writes to the wrong database.
 			if !beads.HasLabel(issue, "gt:agent") {
-				if err := bd.Update(id, beads.UpdateOptions{AddLabels: []string{"gt:agent"}}); err != nil {
-					return fmt.Errorf("adding gt:agent label to %s: %w", id, err)
+				// Try bd update first (works for well-routed beads).
+				err := bd.Update(id, beads.UpdateOptions{AddLabels: []string{"gt:agent"}})
+				if err != nil {
+					// bd update failed explicitly — fall back to direct SQL.
+					sqlErr := addLabelSQL(workDir, id, "gt:agent")
+					if sqlErr != nil {
+						return fmt.Errorf("adding gt:agent label to %s: bd update: %w; SQL fallback: %v", id, err, sqlErr)
+					}
+				}
+				// Verify the label was actually added — bd update can exit 0
+				// without modifying beads with unroutable legacy prefixes (GH#2127).
+				if err == nil && !verifyLabelAdded(workDir, id, "gt:agent") {
+					sqlErr := addLabelSQL(workDir, id, "gt:agent")
+					if sqlErr != nil {
+						return fmt.Errorf("adding gt:agent label to %s: bd update was no-op, SQL fallback: %w", id, sqlErr)
+					}
 				}
 			}
 			return nil
@@ -256,7 +269,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	}
 
 	deaconID := beads.DeaconBeadIDTown()
-	if err := fixAgentBead(townBd, deaconID,
+	if err := fixAgentBead(townBd, townBeadsPath, deaconID,
 		"Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring.",
 		&beads.AgentFields{RoleType: "deacon", AgentState: "idle"},
 	); err != nil {
@@ -264,7 +277,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	}
 
 	mayorID := beads.MayorBeadIDTown()
-	if err := fixAgentBead(townBd, mayorID,
+	if err := fixAgentBead(townBd, townBeadsPath, mayorID,
 		"Mayor - global coordinator, handles cross-rig communication and escalations.",
 		&beads.AgentFields{RoleType: "mayor", AgentState: "idle"},
 	); err != nil {
@@ -319,7 +332,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		rigName := info.name
 
 		witnessID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
-		if err := fixAgentBead(bd, witnessID,
+		if err := fixAgentBead(bd, rigBeadsPath, witnessID,
 			fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName),
 			&beads.AgentFields{RoleType: "witness", Rig: rigName, AgentState: "idle"},
 		); err != nil {
@@ -327,7 +340,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		}
 
 		refineryID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
-		if err := fixAgentBead(bd, refineryID,
+		if err := fixAgentBead(bd, rigBeadsPath, refineryID,
 			fmt.Sprintf("Refinery for %s - processes merge queue.", rigName),
 			&beads.AgentFields{RoleType: "refinery", Rig: rigName, AgentState: "idle"},
 		); err != nil {
@@ -337,7 +350,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		crewWorkers := listCrewWorkers(ctx.TownRoot, rigName)
 		for _, workerName := range crewWorkers {
 			crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, workerName)
-			if err := fixAgentBead(bd, crewID,
+			if err := fixAgentBead(bd, rigBeadsPath, crewID,
 				fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", workerName, rigName),
 				&beads.AgentFields{RoleType: "crew", Rig: rigName, AgentState: "idle"},
 			); err != nil {
@@ -364,6 +377,32 @@ func listCrewWorkers(townRoot, rigName string) []string {
 		}
 	}
 	return workers
+}
+
+// addLabelSQL adds a label to a bead via direct SQL INSERT.
+// This bypasses bd's prefix routing, which silently fails for beads with
+// legacy/unroutable prefixes (GH#2127).
+func addLabelSQL(workDir, beadID, label string) error {
+	escapedID := strings.ReplaceAll(beadID, "'", "''")
+	escapedLabel := strings.ReplaceAll(label, "'", "''")
+	query := fmt.Sprintf("INSERT IGNORE INTO labels (issue_id, label) VALUES ('%s', '%s')", escapedID, escapedLabel)
+	return execBdSQLWrite(workDir, query)
+}
+
+// verifyLabelAdded checks whether a label exists on a bead by querying labels table.
+// Returns false if the label is not found or the query fails.
+func verifyLabelAdded(workDir, beadID, label string) bool {
+	escapedID := strings.ReplaceAll(beadID, "'", "''")
+	escapedLabel := strings.ReplaceAll(label, "'", "''")
+	query := fmt.Sprintf("SELECT 1 FROM labels WHERE issue_id = '%s' AND label = '%s' LIMIT 1", escapedID, escapedLabel)
+	cmd := exec.Command("bd", "sql", query) //nolint:gosec // G204: query uses escaped internal values
+	cmd.Dir = workDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+	// bd sql returns header + data rows; if we got more than just a header, the label exists
+	return strings.Contains(string(output), "1")
 }
 
 // listPolecats returns the names of polecat directories in a rig.

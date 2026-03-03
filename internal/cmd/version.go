@@ -14,7 +14,7 @@ import (
 
 // Version information - set at build time via ldflags
 var (
-	Version = "0.8.0"
+	Version = "0.9.0"
 	// Build can be set via ldflags at compile time
 	Build = "dev"
 	// Commit and Branch - the git revision the binary was built from (optional ldflag)
@@ -29,9 +29,10 @@ var versionVerbose bool
 var versionShort bool
 
 var versionCmd = &cobra.Command{
-	Use:     "version",
-	GroupID: GroupDiag,
-	Short:   "Print version information",
+	Use:         "version",
+	GroupID:     GroupDiag,
+	Annotations: map[string]string{AnnotationPolecatSafe: "true"},
+	Short:       "Print version information",
 	Long: `Print the gt version, build type, git branch, and commit hash.
 
 Output includes the semantic version, whether this is a dev or release build,

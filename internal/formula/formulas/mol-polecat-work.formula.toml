@@ -20,11 +20,16 @@ nuke your sandbox, and exit. There is no idle state. Done means gone.
 when you run `gt prime` — there are no separate step beads to close. Work through
 the checklist, then run `gt done`.
 
+**Speed principle:** You run the full gate suite AFTER rebasing onto the target
+branch (pre-verify step). This enables the refinery to fast-path merge your MR
+in ~5 seconds instead of re-running gates. If pre-verification is skipped or
+stale, the refinery falls through to normal gate execution.
+
 **You do NOT:**
 - Push directly to main (Refinery merges from MQ)
 - Close your own issue (Refinery closes after merge)
 - Wait for merge (you're gone after `gt done`)
-- Handle rebase conflicts (Refinery spawns fresh polecats for that)
+- Fix pre-existing failures on main (Refinery owns main health)
 
 ## Variables
 
@@ -42,12 +47,12 @@ the checklist, then run `gt done`.
 
 | Situation | Action |
 |-----------|--------|
-| Tests fail | Fix them. Do not proceed with failures. |
+| Build fails | Fix it. Do not proceed if it won't compile. |
 | Blocked on external | Mail Witness for help, mark yourself stuck |
 | Context filling | Use gt handoff to cycle to fresh session |
 | Unsure what to do | Mail Witness, don't guess |"""
 formula = "mol-polecat-work"
-version = 6
+version = 8
 
 [[steps]]
 id = "load-context"
@@ -140,7 +145,6 @@ git rebase origin/{{base_branch}}      # Get latest, rebase your branch
 
 If rebase conflicts:
 - Resolve them carefully
-- Test after resolution
 - If stuck, mail Witness
 
 **5. Run project setup (if configured):**
@@ -150,83 +154,15 @@ If setup_command is set, run it to install dependencies:
 {{setup_command}}
 ```
 
-This ensures dependencies are installed before pre-flight checks.
+This ensures dependencies are installed before you start work.
 Empty setup_command means "not configured" — skip this step.
 
 **Exit criteria:** You're on a clean feature branch, rebased on latest {{base_branch}}, dependencies installed."""
 
 [[steps]]
-id = "preflight-tests"
-title = "Verify pre-flights pass on base branch"
-needs = ["branch-setup"]
-description = """
-Check if the codebase is healthy BEFORE starting your work.
-
-**The Scotty Principle:** Don't walk past a broken warp core. But also don't
-let someone else's mess consume your entire mission.
-
-**1. Run pre-flights on {{base_branch}}:**
-
-Your branch was just created from or rebased on `origin/{{base_branch}}` with no
-implementation changes yet — you're already at the base branch state.
-
-Run each configured check, then tests:
-
-If typecheck_command is set: `{{typecheck_command}}`
-If lint_command is set: `{{lint_command}}`
-If test_command is set: `{{test_command}}`
-
-```bash
-{{typecheck_command}}       # Check for type errors (if command set)
-{{lint_command}}            # Check for lint errors (if command set)
-{{test_command}}            # Run tests (if command set)
-```
-
-Empty commands mean "not configured" — skip silently.
-
-**2. If pre-flights pass:**
-
-Continue to implement step.
-
-**3. If pre-flights fail on {{base_branch}}:**
-
-File a bead and proceed. Do NOT fix pre-existing failures yourself — that is
-not your assignment. Your job is to fix the issue on your hook, not {{base_branch}}.
-
-| Situation | Action |
-|-----------|--------|
-| Any pre-existing failure | File bead, proceed with your work |
-
-FORBIDDEN: Pushing to {{base_branch}}. FORBIDDEN: Fixing pre-existing failures.
-You work on YOUR feature branch only. `gt done` handles push/MR.
-
-**File and proceed path:**
-```bash
-bd create --title "Pre-existing failure: <description>" \
-  --type bug --priority 1
-
-gt mail send <rig>/witness -s "NOTICE: {{base_branch}} has failing pre-flights" \
-  -m "Found pre-existing failures on {{base_branch}}.
-Filed: <bead-id>
-Proceeding with my assigned work ({{issue}})."
-```
-
-**Context consideration:**
-If investigating pre-existing failures consumed significant context:
-```bash
-gt handoff -s "Investigated pre-existing failures, ready for assigned work" \
-  -m "Issue: {{issue}}
-Found: <what failed>
-Ready to start: implement step"
-```
-Fresh session continues from implement.
-
-**Exit criteria:** Pre-flights pass on {{base_branch}} (or issue filed), ready to implement."""
-
-[[steps]]
 id = "implement"
 title = "Implement the solution"
-needs = ["preflight-tests"]
+needs = ["branch-setup"]
 description = """
 Do the actual implementation work.
 
@@ -288,7 +224,7 @@ id = "self-review"
 title = "Self-review changes"
 needs = ["implement"]
 description = """
-Review your own changes before running tests.
+Review your own changes before the build check.
 
 **1. Review the diff:**
 ```bash
@@ -317,79 +253,67 @@ git diff --stat origin/{{base_branch}}...HEAD
 
 If you accidentally modified unrelated files, remove those changes.
 
-**Exit criteria:** Changes are clean, reviewed, and ready for testing."""
+**Exit criteria:** Changes are clean, reviewed, and ready for build check."""
 
 [[steps]]
-id = "run-tests"
-title = "Run quality checks and tests"
+id = "build-check"
+title = "Build and sanity check"
 needs = ["self-review"]
 description = """
-Verify your changes don't break anything and are properly tested.
+Verify your changes compile and pass basic sanity checks. The Refinery's
+bisecting merge queue runs the full test suite — your job is to catch
+obvious problems fast so you don't waste the MQ's time.
 
-**1. Run quality checks (skip any that are not configured):**
+**1. Build (REQUIRED — must pass):**
 
-If setup_command is set: `{{setup_command}}`
-If typecheck_command is set: `{{typecheck_command}}`
-If lint_command is set: `{{lint_command}}`
-If build_command is set: `{{build_command}}`
-
+If build_command is set:
 ```bash
-{{setup_command}}           # Make sure all newly added dependencies are installed (if command set)
-{{typecheck_command}}       # Check for type errors (if command set)
-{{lint_command}}            # Check for lint errors (if command set)
-{{build_command}}            # Make sure it builds (if command set)
+{{build_command}}
 ```
 
-Empty commands mean "not configured for this project" — skip silently.
-
-**2. If quality checks fail:**
-- Read the failure output carefully
-- Determine if your change caused it:
-  - If yes: Fix it. Return to implement step if needed.
-  - If no (pre-existing): File a bead, but still must pass for your PR
-
+If setup_command is set (ensure new deps are installed):
 ```bash
-# Check if failure exists on {{base_branch}}:
-git stash
-git checkout origin/{{base_branch}}
-# Re-run the failing command(s)
-git checkout -
-git stash pop
+{{setup_command}}
 ```
 
-**3. Run the full test suite:**
+If typecheck_command is set:
 ```bash
-{{test_command}}            # Run tests (configured per-rig)
+{{typecheck_command}}
 ```
 
-**ALL TESTS MUST PASS.** Do not proceed with failures.
+Empty commands mean "not configured" — skip silently.
 
-**4. If tests fail:**
-- Read the failure output carefully
-- Determine if your change caused it:
-  - If yes: Fix it. Return to implement step if needed.
-  - If no (pre-existing): File a bead, but still must pass for your PR
+**2. If build fails:**
+- Fix it. Return to implement step if needed.
+- Do NOT submit broken code to the merge queue.
+
+**3. Targeted tests (OPTIONAL — run if fast and relevant):**
+
+If you modified or added test files, run those specific tests to catch
+obvious regressions. Do NOT run the full test suite — that's the
+Refinery's job.
 
 ```bash
-# Check if failure exists on {{base_branch}}:
-git stash
-git checkout origin/{{base_branch}}
-{{test_command}}
-git checkout -
-git stash pop
+# Example: run only tests in packages you changed
+go test ./internal/pkg/you/changed/...
+# Or for JS: npx jest --testPathPattern="changed-file"
 ```
 
-**5. Verify test coverage for new code:**
-- New features should have tests
-- Bug fixes should have regression tests
-- If you added significant code without tests, add them now
+If you're unsure which tests are relevant, skip this — the MQ will catch it.
 
-**Exit criteria:** All quality checks and tests pass, new code has appropriate test coverage."""
+**4. Lint (OPTIONAL — run if configured and fast):**
+
+If lint_command is set:
+```bash
+{{lint_command}}
+```
+
+**Exit criteria:** Code compiles. Obvious regressions caught. Ready to submit."""
 
 [[steps]]
 id = "commit-changes"
 title = "Commit all implementation changes"
-needs = ["run-tests"]
+needs = ["build-check"]
 description = """
 Ensure ALL implementation work is committed before cleanup.
 
@@ -438,95 +362,69 @@ handles the no-commit case for report-only tasks.
 **Exit criteria:** Working tree clean AND either (a) at least 1 commit ahead of origin/{{base_branch}}, or (b) report-only task with findings persisted to bead."""
 
 [[steps]]
-id = "cleanup-workspace"
-title = "Clean up workspace"
+id = "pre-verify"
+title = "Pre-merge rebase verification"
 needs = ["commit-changes"]
 description = """
-Ensure workspace is pristine before handoff.
+Rebase onto the target branch and run the full gate suite. This enables the
+refinery to fast-path merge your MR without re-running gates (~5s merge
+instead of minutes).
 
-**IMPORTANT: Do NOT run `git push`. That is `gt done`'s job (next step).**
-**IMPORTANT: Do NOT discard implementation changes. They must already be committed.**
-
-**0. GATE: Verify no uncommitted changes exist (HARD GATE):**
+**1. Fetch and rebase onto target:**
 ```bash
-git diff --stat
-git diff --cached --stat
-```
-If EITHER shows output, you have uncommitted changes. Do NOT proceed.
-Go back to the commit-changes step and commit them. NEVER discard implementation
-work with `git checkout -- .` or `git restore .` during cleanup.
-
-**1. Check for untracked files:**
-```bash
-git status --porcelain
-```
-Should be empty. If not:
-- Add to .gitignore if appropriate
-- Remove if temporary: `rm <file>`
-- Commit if needed: `git add <file> && git commit -m "chore: add <file>"`
-
-**2. Check stash:**
-```bash
-git stash list
-```
-Should be empty. If not:
-- Pop and commit: `git stash pop && git add -A && git commit -m "chore: unstash work ({{issue}})"`
-- Or drop if truly garbage: `git stash drop`
-
-**3. Verify clean state and commits (HARD GATE):**
-```bash
-git status                  # Must show "working tree clean"
-git stash list              # Must be empty
-git log origin/{{base_branch}}..HEAD --oneline  # MUST show at least 1 commit
+git fetch origin {{base_branch}}
+git rebase origin/{{base_branch}}
 ```
 
-If `git log origin/{{base_branch}}..HEAD` shows NOTHING:
-- For code tasks: Do NOT close this step. Go back to implement step.
-- For report-only tasks (audits, reviews, research): Verify findings are persisted
-  to bead (`bd show {{issue}}`). If findings exist, proceed — `gt done --cleanup-status clean`
-  handles no-commit report tasks.
-- If neither code nor findings exist: run `gt done --status DEFERRED`.
+If rebase conflicts:
+- Resolve them carefully
+- Re-run the build to ensure the resolution is correct
+- If stuck, mail Witness
 
-**Exit criteria:** Workspace clean, no cruft, all work committed, AND either (a) at least 1 commit ahead of origin/{{base_branch}}, or (b) report-only task with findings on bead. Do NOT push — `gt done` handles that."""
+**2. Run the full gate suite on the rebased result:**
 
-[[steps]]
-id = "prepare-for-review"
-title = "Prepare work for review"
-needs = ["cleanup-workspace"]
-description = """
-Verify work is complete and ready for merge queue.
+Run ALL configured gates (not just targeted tests — this is the full verification):
 
-**Note:** Do NOT close the issue. The Refinery will close it after successful merge.
-This enables conflict-resolution retries without reopening closed issues.
-
-**1. Verify the issue shows your work:**
+If build_command is set:
 ```bash
-bd show {{issue}}
-# Status should still be 'in_progress' (you're working on it)
+{{build_command}}
 ```
 
-**2. Add completion notes (if not already persisted during implementation):**
+If typecheck_command is set:
 ```bash
-bd update {{issue}} --notes "Implemented: <brief summary of what was done>"
+{{typecheck_command}}
 ```
 
-For report-only tasks, verify your findings are already on the bead:
+If lint_command is set:
 ```bash
-bd show {{issue}}    # Check that --notes or --design has your findings
-```
-If not, persist them NOW — this is your last chance before `gt done`.
-
-**3. Sync beads:**
-```bash
-bd sync
+{{lint_command}}
 ```
 
-**Exit criteria:** Issue updated with completion notes, beads synced."""
+If test_command is set:
+```bash
+{{test_command}}
+```
+
+Empty commands mean "not configured" — skip silently.
+
+**3. If any gate fails after rebase:**
+- Fix the issue, commit, and re-run from step 1
+- Do NOT proceed with --pre-verified if gates failed
+
+**4. If all gates pass:**
+You will use `gt done --pre-verified` in the next step. This tells the refinery
+that you ran the full gate suite on a rebased branch, enabling fast-path merge.
+
+**Note:** If this step takes too long or the gates are not configured for this
+project, you may skip this step and use `gt done` without --pre-verified.
+The refinery will run gates normally (slower but still correct).
+
+**Exit criteria:** Branch rebased onto latest origin/{{base_branch}}, all configured gates pass."""
 
 [[steps]]
 id = "submit-and-exit"
 title = "Submit work and self-clean"
-needs = ["prepare-for-review"]
+needs = ["pre-verify"]
 description = """
 Submit your work and clean up. You cease to exist after this step.
 
@@ -546,7 +444,10 @@ This MUST show at least 1 commit. If it shows nothing, do NOT run `gt done`.
 
 **Run gt done:**
 ```bash
-# For code tasks (has commits):
+# For code tasks with pre-verification (recommended — enables fast-path merge):
+gt done --pre-verified
+
+# For code tasks without pre-verification (gates skipped or failed):
 gt done
 
 # For report-only tasks (no commits — audits, reviews, research):
@@ -565,10 +466,11 @@ You should see output like:
 ```
 
 **What happens next (not your concern):**
-- Refinery processes your MR from the queue
-- Refinery rebases and merges to {{base_branch}}
-- Refinery closes the issue
-- If conflicts: Refinery spawns a FRESH polecat to re-implement
+- Refinery batches MRs and runs gates on the merged stack
+- If green: all MRs in the batch merge to {{base_branch}} at once
+- If red: Refinery bisects to isolate the culprit, merges the good ones
+- Refinery fixes failures itself (inline or via helper polecats)
+- Refinery closes your issue after successful merge
 
 You are NOT involved in any of that. You're gone. Done means gone.
 

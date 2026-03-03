@@ -12,10 +12,11 @@ const (
 
 // PatrolReceiptEvidence captures the primary evidence fields for a verdict.
 type PatrolReceiptEvidence struct {
-	AgentState    string `json:"agent_state,omitempty"`
-	HookBead      string `json:"hook_bead,omitempty"`
-	BeadRecovered bool   `json:"bead_recovered"`
-	Error         string `json:"error,omitempty"`
+	AgentState     string               `json:"agent_state,omitempty"`
+	Classification ZombieClassification `json:"classification,omitempty"` // Typed zombie reason (gt-tsut)
+	HookBead       string               `json:"hook_bead,omitempty"`
+	BeadRecovered  bool                 `json:"bead_recovered"`
+	Error          string               `json:"error,omitempty"`
 }
 
 // PatrolReceipt is a machine-readable witness patrol verdict with recommended action.
@@ -27,21 +28,21 @@ type PatrolReceipt struct {
 	Evidence          PatrolReceiptEvidence `json:"evidence"`
 }
 
+// receiptVerdictForZombie derives the patrol verdict from the zombie's typed
+// Classification field rather than re-deriving from raw strings. Falls back to
+// WasActive for forward-compatibility with unknown classifications. See gt-tsut.
 func receiptVerdictForZombie(z ZombieResult) PatrolVerdict {
-	if strings.TrimSpace(z.HookBead) != "" {
-		return PatrolVerdictStale
-	}
-	// All states from DetectZombiePolecats that indicate a polecat was recently
-	// active are classified as stale. States without evidence of recent work
-	// (e.g. "idle") fall through to orphan.
-	switch z.AgentState {
-	case "working", "running", "spawning",
-		"stuck-in-done", "agent-dead-in-session",
-		"bead-closed-still-running", "done-intent-dead":
-		return PatrolVerdictStale
-	default:
+	if z.Classification != "" {
+		if z.Classification.ImpliesActiveWork() {
+			return PatrolVerdictStale
+		}
 		return PatrolVerdictOrphan
 	}
+	// Fallback for ZombieResults without Classification (forward-compat)
+	if z.WasActive {
+		return PatrolVerdictStale
+	}
+	return PatrolVerdictOrphan
 }
 
 // BuildPatrolReceipt projects a zombie patrol result into a stable JSON-ready receipt.
@@ -57,9 +58,10 @@ func BuildPatrolReceipt(rigName string, z ZombieResult) PatrolReceipt {
 		Verdict:           receiptVerdictForZombie(z),
 		RecommendedAction: action,
 		Evidence: PatrolReceiptEvidence{
-			AgentState:    z.AgentState,
-			HookBead:      z.HookBead,
-			BeadRecovered: z.BeadRecovered,
+			AgentState:     z.AgentState,
+			Classification: z.Classification,
+			HookBead:       z.HookBead,
+			BeadRecovered:  z.BeadRecovered,
 		},
 	}
 

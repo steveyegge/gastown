@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/dog"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -94,9 +95,9 @@ func TestDetectStaleWorkingDogs_ClearsStaleWorkers(t *testing.T) {
 	sm := dog.NewSessionManager(tm, townRoot, mgr)
 
 	// Dog working for 3 hours with no activity — should be cleared.
-	testSetupWorkingDogState(t, townRoot, "stale", "mol-convoy-feed", time.Now().Add(-3*time.Hour))
+	testSetupWorkingDogState(t, townRoot, "stale", constants.MolConvoyFeed, time.Now().Add(-3*time.Hour))
 
-	d.detectStaleWorkingDogs(mgr, sm)
+	d.detectStaleWorkingDogs(mgr, sm, &config.DaemonThresholds{})
 
 	dg, err := mgr.Get("stale")
 	if err != nil {
@@ -120,9 +121,9 @@ func TestDetectStaleWorkingDogs_SkipsRecentWorkers(t *testing.T) {
 	sm := dog.NewSessionManager(tm, townRoot, mgr)
 
 	// Dog working for 30 minutes — should NOT be cleared.
-	testSetupWorkingDogState(t, townRoot, "active", "mol-convoy-feed", time.Now().Add(-30*time.Minute))
+	testSetupWorkingDogState(t, townRoot, "active", constants.MolConvoyFeed, time.Now().Add(-30*time.Minute))
 
-	d.detectStaleWorkingDogs(mgr, sm)
+	d.detectStaleWorkingDogs(mgr, sm, &config.DaemonThresholds{})
 
 	dg, err := mgr.Get("active")
 	if err != nil {
@@ -131,8 +132,8 @@ func TestDetectStaleWorkingDogs_SkipsRecentWorkers(t *testing.T) {
 	if dg.State != dog.StateWorking {
 		t.Errorf("active dog state = %q, want working", dg.State)
 	}
-	if dg.Work != "mol-convoy-feed" {
-		t.Errorf("active dog work = %q, want mol-convoy-feed", dg.Work)
+	if dg.Work != constants.MolConvoyFeed {
+		t.Errorf("active dog work = %q, want %s", dg.Work, constants.MolConvoyFeed)
 	}
 }
 
@@ -148,7 +149,7 @@ func TestDetectStaleWorkingDogs_SkipsIdleDogs(t *testing.T) {
 	// Idle dog with old last_active — should NOT be touched by this function.
 	testSetupDogState(t, townRoot, "idle-old", dog.StateIdle, time.Now().Add(-5*time.Hour))
 
-	d.detectStaleWorkingDogs(mgr, sm)
+	d.detectStaleWorkingDogs(mgr, sm, &config.DaemonThresholds{})
 
 	dg, err := mgr.Get("idle-old")
 	if err != nil {
@@ -169,7 +170,7 @@ func TestDetectStaleWorkingDogs_EmptyKennel(t *testing.T) {
 	sm := dog.NewSessionManager(tm, townRoot, mgr)
 
 	// Should not panic or error with empty kennel.
-	d.detectStaleWorkingDogs(mgr, sm)
+	d.detectStaleWorkingDogs(mgr, sm, &config.DaemonThresholds{})
 }
 
 func TestDetectStaleWorkingDogs_Constants(t *testing.T) {
@@ -190,7 +191,7 @@ func TestReapIdleDogs_SkipsWorkingDogs(t *testing.T) {
 	// Create a working dog with old LastActive — should NOT be reaped.
 	testSetupDogState(t, townRoot, "worker", dog.StateWorking, time.Now().Add(-5*time.Hour))
 
-	d.reapIdleDogs(mgr, sm)
+	d.reapIdleDogs(mgr, sm, &config.DaemonThresholds{})
 
 	if !testDogExists(townRoot, "worker") {
 		t.Error("working dog should not be removed by reapIdleDogs")
@@ -212,7 +213,7 @@ func TestReapIdleDogs_SkipsRecentlyActiveDogs(t *testing.T) {
 		testSetupDogState(t, townRoot, name, dog.StateIdle, time.Now().Add(-30*time.Minute))
 	}
 
-	d.reapIdleDogs(mgr, sm)
+	d.reapIdleDogs(mgr, sm, &config.DaemonThresholds{})
 
 	// All dogs should still exist.
 	dogs, err := mgr.List()
@@ -245,7 +246,7 @@ func TestReapIdleDogs_RemovesLongIdleDogsWhenPoolOversized(t *testing.T) {
 	testSetupDogState(t, townRoot, "old-1", dog.StateIdle, time.Now().Add(-5*time.Hour))
 	testSetupDogState(t, townRoot, "old-2", dog.StateIdle, time.Now().Add(-6*time.Hour))
 
-	d.reapIdleDogs(mgr, sm)
+	d.reapIdleDogs(mgr, sm, &config.DaemonThresholds{})
 
 	// Long-idle dogs should be removed, recent ones kept.
 	dogs, err := mgr.List()
@@ -282,7 +283,7 @@ func TestReapIdleDogs_DoesNotRemoveWhenPoolAtMaxSize(t *testing.T) {
 		testSetupDogState(t, townRoot, name, dog.StateIdle, time.Now().Add(-5*time.Hour))
 	}
 
-	d.reapIdleDogs(mgr, sm)
+	d.reapIdleDogs(mgr, sm, &config.DaemonThresholds{})
 
 	dogs, err := mgr.List()
 	if err != nil {
@@ -312,7 +313,7 @@ func TestReapIdleDogs_StopsRemovingAtMaxPoolSize(t *testing.T) {
 		testSetupDogState(t, townRoot, name, dog.StateIdle, time.Now().Add(-5*time.Hour))
 	}
 
-	d.reapIdleDogs(mgr, sm)
+	d.reapIdleDogs(mgr, sm, &config.DaemonThresholds{})
 
 	dogs, err := mgr.List()
 	if err != nil {
@@ -346,7 +347,7 @@ func TestReapIdleDogs_MixedStates(t *testing.T) {
 	testSetupDogState(t, townRoot, "old-a", dog.StateIdle, time.Now().Add(-5*time.Hour))
 	testSetupDogState(t, townRoot, "old-b", dog.StateIdle, time.Now().Add(-6*time.Hour))
 
-	d.reapIdleDogs(mgr, sm)
+	d.reapIdleDogs(mgr, sm, &config.DaemonThresholds{})
 
 	// Working dogs must survive.
 	if !testDogExists(townRoot, "worker-a") {
@@ -380,7 +381,7 @@ func TestReapIdleDogs_EmptyKennel(t *testing.T) {
 	sm := dog.NewSessionManager(tm, townRoot, mgr)
 
 	// Should not panic or error with empty kennel.
-	d.reapIdleDogs(mgr, sm)
+	d.reapIdleDogs(mgr, sm, &config.DaemonThresholds{})
 }
 
 func TestReapIdleDogs_Constants(t *testing.T) {

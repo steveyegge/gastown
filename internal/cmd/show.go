@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -47,15 +48,56 @@ func runShow(cmd *cobra.Command, args []string) error {
 }
 
 // execBdShow replaces the current process with 'bd show'.
+// Resolves the correct rig directory from the bead's prefix via routes.jsonl
+// so that rig-prefixed beads (e.g., myproject-abc) are found in their rig
+// database rather than only the town-level hq database. (GH#2126)
 func execBdShow(args []string) error {
 	bdPath, err := exec.LookPath("bd")
 	if err != nil {
 		return fmt.Errorf("bd not found in PATH: %w", err)
 	}
 
+	// Resolve the rig directory for the bead's prefix so bd runs from the
+	// correct working directory. Without this, bd may query the wrong database
+	// when inherited BEADS_DIR is set or when bd's routing doesn't handle
+	// cross-rig lookups from the town root.
+	if beadID := extractBeadIDFromArgs(args); beadID != "" {
+		if dir := resolveBeadDir(beadID); dir != "" && dir != "." {
+			_ = os.Chdir(dir)
+		}
+	}
+
+	// Strip BEADS_DIR from the environment so bd discovers the database from
+	// its working directory rather than using an inherited value that may point
+	// to the wrong (e.g., town-level) database.
+	env := stripEnvKey(os.Environ(), "BEADS_DIR")
+
 	// Build args: bd show <all-args>
 	// argv[0] must be the program name for exec
 	fullArgs := append([]string{"bd", "show"}, args...)
 
-	return syscall.Exec(bdPath, fullArgs, os.Environ())
+	return syscall.Exec(bdPath, fullArgs, env)
+}
+
+// extractBeadIDFromArgs returns the first non-flag argument, which is the bead ID.
+// Returns empty string if no non-flag argument is found.
+func extractBeadIDFromArgs(args []string) string {
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, "-") {
+			return arg
+		}
+	}
+	return ""
+}
+
+// stripEnvKey removes all entries matching the given key from an environment slice.
+func stripEnvKey(env []string, key string) []string {
+	prefix := key + "="
+	result := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			result = append(result, e)
+		}
+	}
+	return result
 }

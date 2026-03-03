@@ -272,7 +272,7 @@ Valid transitions:
 | Category | Trigger |
 |----------|---------|
 | `orphan` | Slingable task with no blocking deps in either direction (epic input only) |
-| `parked-rig` | Bead's rig name contains "parked" (case-insensitive) |
+| `blocked-rig` | Bead targets a parked or docked rig |
 | `cross-rig` | Bead on a different rig than the majority |
 | `capacity` | A wave has more than 5 tasks |
 | `missing-branch` | Sub-epic with children but no integration branch |

@@ -211,16 +211,26 @@ func runCompact(cmd *cobra.Command, args []string) error {
 		ttl := getTTL(ttls, w.WispType)
 		shouldPromote := hasComments(w) || hasKeepLabel(w)
 
+		// Molecule step wisps (those with a Parent) should never be promoted.
+		// They are subordinate steps of a molecule and should be deleted when
+		// past TTL, not elevated to permanent beads. This prevents patrol
+		// molecule steps from polluting the issues table.
+		isMoleculeStep := w.Parent != ""
+
 		if w.Status != "closed" {
 			// Non-closed wisps
-			if shouldPromote {
+			if shouldPromote && !isMoleculeStep {
 				promoteWisp(bd, w, "proven value", result)
 			} else if age > ttl {
-				reason := "open past TTL"
-				if w.Status == "in_progress" {
-					reason = "stuck in_progress past TTL"
+				if isMoleculeStep {
+					deleteWisp(bd, w, "molecule step past TTL", result)
+				} else {
+					reason := "open past TTL"
+					if w.Status == "in_progress" {
+						reason = "stuck in_progress past TTL"
+					}
+					promoteWisp(bd, w, reason, result)
 				}
-				promoteWisp(bd, w, reason, result)
 			} else {
 				result.Skipped++
 				if compactVerbose && !compactJSON {
@@ -230,7 +240,7 @@ func runCompact(cmd *cobra.Command, args []string) error {
 			}
 		} else {
 			// Closed wisps
-			if shouldPromote {
+			if shouldPromote && !isMoleculeStep {
 				promoteWisp(bd, w, "proven value", result)
 			} else if age > ttl {
 				deleteWisp(bd, w, "TTL expired", result)

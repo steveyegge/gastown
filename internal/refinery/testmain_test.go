@@ -9,6 +9,6 @@ import (
 
 func TestMain(m *testing.M) {
 	code := m.Run()
-	testutil.CleanupDoltServer()
+	testutil.TerminateDoltContainer()
 	os.Exit(code)
 }

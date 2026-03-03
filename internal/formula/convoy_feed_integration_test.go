@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // TestConvoyFeedWorkflow_Integration is a high-level integration test that verifies
@@ -20,7 +22,7 @@ import (
 // 3. The convoy input variable is marked as required
 // 4. Computed variables have empty defaults (not required as inputs)
 func TestConvoyFeedWorkflow_Integration(t *testing.T) {
-	formulaPath := filepath.Join("formulas", "mol-convoy-feed.formula.toml")
+	formulaPath := filepath.Join("formulas", constants.MolConvoyFeed+".formula.toml")
 	data, err := os.ReadFile(formulaPath)
 	if err != nil {
 		t.Skipf("Formula file not found: %v", err)
@@ -102,8 +104,8 @@ func TestConvoyFeedWorkflow_Integration(t *testing.T) {
 // - Defined in [vars] with a default value
 func TestAllDogFormulas_CanBeWisped(t *testing.T) {
 	dogFormulas := []string{
-		"mol-convoy-feed",
-		"mol-convoy-cleanup",
+		constants.MolConvoyFeed,
+		constants.MolConvoyCleanup,
 		"mol-dep-propagate",
 		"mol-digest-generate",
 		"mol-orphan-scan",

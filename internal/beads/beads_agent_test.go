@@ -46,3 +46,52 @@ func TestIsAgentBeadByID(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeAgentBeadSources(t *testing.T) {
+	t.Run("issues override duplicate wisp ids", func(t *testing.T) {
+		issuesByID := map[string]*Issue{
+			"hq-deacon": {ID: "hq-deacon", Type: "agent", Labels: []string{"gt:agent"}},
+		}
+		wispsByID := map[string]*Issue{
+			"hq-deacon": {ID: "hq-deacon"},
+		}
+
+		merged := mergeAgentBeadSources(issuesByID, wispsByID)
+		if len(merged) != 1 {
+			t.Fatalf("len(merged) = %d, want 1", len(merged))
+		}
+		if merged["hq-deacon"].Type != "agent" {
+			t.Fatalf("merged issue type = %q, want %q", merged["hq-deacon"].Type, "agent")
+		}
+		if len(merged["hq-deacon"].Labels) != 1 || merged["hq-deacon"].Labels[0] != "gt:agent" {
+			t.Fatalf("merged labels = %v, want [gt:agent]", merged["hq-deacon"].Labels)
+		}
+	})
+
+	t.Run("wisps are included when missing from issues", func(t *testing.T) {
+		issuesByID := map[string]*Issue{
+			"hq-mayor": {ID: "hq-mayor", Type: "agent", Labels: []string{"gt:agent"}},
+		}
+		wispsByID := map[string]*Issue{
+			"bom-bti_ops_match-witness": {ID: "bom-bti_ops_match-witness"},
+		}
+
+		merged := mergeAgentBeadSources(issuesByID, wispsByID)
+		if len(merged) != 2 {
+			t.Fatalf("len(merged) = %d, want 2", len(merged))
+		}
+		if _, ok := merged["hq-mayor"]; !ok {
+			t.Fatalf("expected hq-mayor in merged set")
+		}
+		if _, ok := merged["bom-bti_ops_match-witness"]; !ok {
+			t.Fatalf("expected bom-bti_ops_match-witness in merged set")
+		}
+	})
+
+	t.Run("handles nil maps", func(t *testing.T) {
+		merged := mergeAgentBeadSources(nil, nil)
+		if len(merged) != 0 {
+			t.Fatalf("len(merged) = %d, want 0", len(merged))
+		}
+	})
+}

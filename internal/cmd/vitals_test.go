@@ -6,25 +6,6 @@ import (
 	"testing"
 )
 
-func TestVitalsFlag(t *testing.T) {
-	tests := []struct {
-		cmdLine string
-		flag    string
-		want    string
-	}{
-		{"dolt sql-server --port 3307", "--port", "3307"},
-		{"dolt sql-server --port=52879 --data-dir=/tmp", "--port", "52879"},
-		{"dolt sql-server --data-dir /tmp", "--port", ""},
-		{"dolt sql-server", "--port", ""},
-	}
-	for _, tt := range tests {
-		got := vitalsFlag(tt.cmdLine, tt.flag)
-		if got != tt.want {
-			t.Errorf("vitalsFlag(%q, %q) = %q, want %q", tt.cmdLine, tt.flag, got, tt.want)
-		}
-	}
-}
-
 func TestVitalsFormatCount(t *testing.T) {
 	tests := []struct {
 		n    int

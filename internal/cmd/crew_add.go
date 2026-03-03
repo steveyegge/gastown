@@ -14,6 +14,32 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+// agentBeadUpserter captures the subset of bead operations needed by crew add.
+// Using a narrow interface allows deterministic unit tests of crew bead creation
+// behavior without requiring a live bd backend.
+type agentBeadUpserter interface {
+	CreateOrReopenAgentBead(id, title string, fields *beads.AgentFields) (*beads.Issue, error)
+}
+
+// upsertCrewAgentBead ensures the crew agent bead exists with expected metadata.
+// It uses CreateOrReopenAgentBead instead of a Show()+Create sequence so existing
+// beads in alternate stores (issues/wisps) do not trigger false "issue not found"
+// warnings during crew creation.
+func upsertCrewAgentBead(bd agentBeadUpserter, townRoot, rigName, crewName string) (string, error) {
+	prefix := beads.GetPrefixForRig(townRoot, rigName)
+	crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, crewName)
+	fields := &beads.AgentFields{
+		RoleType:   "crew",
+		Rig:        rigName,
+		AgentState: "idle",
+	}
+	desc := fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", crewName, rigName)
+	if _, err := bd.CreateOrReopenAgentBead(crewID, desc, fields); err != nil {
+		return "", err
+	}
+	return crewID, nil
+}
+
 func runCrewAdd(cmd *cobra.Command, args []string) error {
 	// Deduplicate args to handle cases like "gt crew add foo --branch foo"
 	// where "foo" appears twice because --branch is a boolean flag.
@@ -110,22 +136,12 @@ func runCrewAdd(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Path: %s\n", worker.ClonePath)
 		fmt.Printf("  Branch: %s\n", worker.Branch)
 
-		// Create agent bead for the crew worker
-		prefix := beads.GetPrefixForRig(townRoot, rigName)
-		crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, name)
-		if _, err := bd.Show(crewID); err != nil {
-			// Agent bead doesn't exist, create it
-			fields := &beads.AgentFields{
-				RoleType:   "crew",
-				Rig:        rigName,
-				AgentState: "idle",
-			}
-			desc := fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", name, rigName)
-			if _, err := bd.CreateAgentBead(crewID, desc, fields); err != nil {
-				style.PrintWarning("could not create agent bead for %s: %v", name, err)
-			} else {
-				fmt.Printf("  Agent bead: %s\n", crewID)
-			}
+		// Create (or reopen/update) agent bead for the crew worker.
+		crewID, err := upsertCrewAgentBead(bd, townRoot, rigName, name)
+		if err != nil {
+			style.PrintWarning("could not create agent bead for %s: %v", name, err)
+		} else {
+			fmt.Printf("  Agent bead: %s\n", crewID)
 		}
 
 		created = append(created, name)

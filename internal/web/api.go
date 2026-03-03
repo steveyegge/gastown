@@ -16,6 +16,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // CommandRequest is the JSON request body for /api/run.
@@ -1757,7 +1758,7 @@ func (h *APIHandler) handleCrew(w http.ResponseWriter, r *http.Request) {
 // Returns: state (spinning/finished/questions/ready), lastActive string, session status
 func (h *APIHandler) detectCrewState(ctx context.Context, sessionName, hook string) (string, string, string) {
 	// Check if tmux session exists and get activity
-	cmd := exec.CommandContext(ctx, "tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}|#{session_attached}")
+	cmd := tmux.BuildCommandContext(ctx, "list-sessions", "-F", "#{session_name}|#{window_activity}|#{session_attached}")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {

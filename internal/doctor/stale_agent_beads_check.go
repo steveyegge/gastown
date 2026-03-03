@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // StaleAgentBeadsCheck detects agent beads that exist in the database but have
@@ -98,8 +99,8 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 		// Polecat: prefix-rig-polecat-name (or prefix-polecat-name when prefix == rig)
 		// Use AgentBeadIDWithPrefix to get the correct prefix, handling the
 		// collapsed form when prefix == rigName (GH#1877).
-		crewPrefix := beads.AgentBeadIDWithPrefix(prefix, rigName, "crew", "") + "-"
-		polecatPrefix := beads.AgentBeadIDWithPrefix(prefix, rigName, "polecat", "") + "-"
+		crewPrefix := beads.AgentBeadIDWithPrefix(prefix, rigName, constants.RoleCrew, "") + "-"
+		polecatPrefix := beads.AgentBeadIDWithPrefix(prefix, rigName, constants.RolePolecat, "") + "-"
 		allBeads, err := bd.List(beads.ListOptions{
 			Status:   "open",
 			Priority: -1,
@@ -176,8 +177,8 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 			// Phase 1 may miss these if the beads are in hq rather than the rig DB.
 			if info, exists := prefixToRig[idPrefix]; exists {
 				switch role {
-				case "crew":
-					workerName := parseCrewOrPolecatFromID(id, idPrefix, info.name, "crew")
+				case constants.RoleCrew:
+					workerName := parseCrewOrPolecatFromID(id, idPrefix, info.name, constants.RoleCrew)
 					if workerName != "" {
 						crewWorkers := listCrewWorkers(ctx.TownRoot, info.name)
 						found := false
@@ -191,8 +192,8 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 							stale = append(stale, id)
 						}
 					}
-				case "polecat":
-					workerName := parseCrewOrPolecatFromID(id, idPrefix, info.name, "polecat")
+				case constants.RolePolecat:
+					workerName := parseCrewOrPolecatFromID(id, idPrefix, info.name, constants.RolePolecat)
 					if workerName != "" {
 						polecats := listPolecats(ctx.TownRoot, info.name)
 						found := false

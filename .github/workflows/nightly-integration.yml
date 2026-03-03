@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Set up Go
-        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version: '1.26'
           cache: true
@@ -39,6 +39,9 @@ jobs:
         run: |
           curl -sL https://github.com/dolthub/dolt/releases/latest/download/dolt-linux-amd64.tar.gz | tar xz
           mv dolt-linux-amd64/bin/dolt ~/go/bin/dolt
+
+      - name: Pre-pull Dolt Docker image
+        run: docker pull dolthub/dolt-sql-server:1.83.0
 
       - name: Add to PATH
         run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH

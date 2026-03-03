@@ -1209,6 +1209,46 @@ func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
 	return withRoleSettingsFlag(rc, role, rigPath)
 }
 
+// ResolveWorkerAgentConfig resolves the agent configuration for a named crew worker.
+// Resolution order:
+//  1. Rig's WorkerAgents[workerName] — per-worker override
+//  2. Falls back to ResolveRoleAgentConfig("crew", ...) for remaining resolution
+//
+// workerName is the crew member name (e.g., "denali").
+func ResolveWorkerAgentConfig(workerName, townRoot, rigPath string) *RuntimeConfig {
+	resolveConfigMu.Lock()
+	defer resolveConfigMu.Unlock()
+
+	// Check rig's WorkerAgents
+	if workerName != "" && rigPath != "" {
+		if rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath)); err == nil && rigSettings != nil {
+			if agentName, ok := rigSettings.WorkerAgents[workerName]; ok && agentName != "" {
+				townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+				if err != nil {
+					townSettings = NewTownSettings()
+				}
+				_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
+				_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
+				if rc := lookupCustomAgentConfig(agentName, townSettings, rigSettings); rc != nil {
+					rc.ResolvedAgent = agentName
+					return withRoleSettingsFlag(rc, "crew", rigPath)
+				}
+				if err := ValidateAgentConfig(agentName, townSettings, rigSettings); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: worker_agents[%s]=%s - %v, falling back\n", workerName, agentName, err)
+				} else {
+					rc := lookupAgentConfig(agentName, townSettings, rigSettings)
+					rc.ResolvedAgent = agentName
+					return withRoleSettingsFlag(rc, "crew", rigPath)
+				}
+			}
+		}
+	}
+
+	// Fall back to crew role resolution (already holds lock; use core function)
+	rc := resolveRoleAgentConfigCore("crew", townRoot, rigPath)
+	return withRoleSettingsFlag(rc, "crew", rigPath)
+}
+
 // isClaudeAgent returns true if the RuntimeConfig represents a Claude agent.
 // When Provider is explicitly set, it's authoritative. When empty, the Command
 // is checked: bare "claude", a path ending in "/claude" (or "\claude" on Windows),
@@ -1263,9 +1303,9 @@ func withRoleSettingsFlag(rc *RuntimeConfig, role, rigPath string) *RuntimeConfi
 // roles where settings and session directory are the same (mayor, deacon).
 func RoleSettingsDir(role, rigPath string) string {
 	switch role {
-	case "crew", "witness", "refinery":
+	case constants.RoleCrew, constants.RoleWitness, constants.RoleRefinery:
 		return filepath.Join(rigPath, role)
-	case "polecat":
+	case constants.RolePolecat:
 		return filepath.Join(rigPath, "polecats")
 	default:
 		return ""
@@ -1803,7 +1843,7 @@ func ExtractSimpleRole(gtRole string) string {
 		// "rig/crew/name" → "crew", "rig/polecats/name" → "polecat"
 		role := parts[1]
 		if role == "polecats" {
-			return "polecat"
+			return constants.RolePolecat
 		}
 		return role
 	default:
@@ -1832,7 +1872,10 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	if rigPath != "" {
 		// Derive town root from rig path
 		townRoot = filepath.Dir(rigPath)
-		if role != "" {
+		if role == "crew" && envVars["GT_CREW"] != "" {
+			// Per-worker agent resolution: check worker_agents before role_agents
+			rc = ResolveWorkerAgentConfig(envVars["GT_CREW"], townRoot, rigPath)
+		} else if role != "" {
 			// Use role-based agent resolution for per-role model selection
 			rc = ResolveRoleAgentConfig(role, townRoot, rigPath)
 		} else {
@@ -1991,6 +2034,9 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 			if err != nil {
 				return "", err
 			}
+		} else if role == "crew" && envVars["GT_CREW"] != "" {
+			// Per-worker agent resolution: check worker_agents before role_agents
+			rc = ResolveWorkerAgentConfig(envVars["GT_CREW"], townRoot, rigPath)
 		} else if role != "" {
 			// No override, use role-based agent resolution
 			rc = ResolveRoleAgentConfig(role, townRoot, rigPath)
@@ -2133,7 +2179,7 @@ func BuildPolecatStartupCommand(rigName, polecatName, rigPath, prompt string) st
 		townRoot = filepath.Dir(rigPath)
 	}
 	envVars := AgentEnv(AgentEnvConfig{
-		Role:      "polecat",
+		Role:      constants.RolePolecat,
 		Rig:       rigName,
 		AgentName: polecatName,
 		TownRoot:  townRoot,
@@ -2149,7 +2195,7 @@ func BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, rigPath, 
 		townRoot = filepath.Dir(rigPath)
 	}
 	envVars := AgentEnv(AgentEnvConfig{
-		Role:      "polecat",
+		Role:      constants.RolePolecat,
 		Rig:       rigName,
 		AgentName: polecatName,
 		TownRoot:  townRoot,
@@ -2166,7 +2212,7 @@ func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt string) string {
 		townRoot = filepath.Dir(rigPath)
 	}
 	envVars := AgentEnv(AgentEnvConfig{
-		Role:      "crew",
+		Role:      constants.RoleCrew,
 		Rig:       rigName,
 		AgentName: crewName,
 		TownRoot:  townRoot,
@@ -2182,7 +2228,7 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 		townRoot = filepath.Dir(rigPath)
 	}
 	envVars := AgentEnv(AgentEnvConfig{
-		Role:      "crew",
+		Role:      constants.RoleCrew,
 		Rig:       rigName,
 		AgentName: crewName,
 		TownRoot:  townRoot,

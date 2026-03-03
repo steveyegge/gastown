@@ -17,6 +17,7 @@ type bdCmd struct {
 	stderr     io.Writer
 	autoCommit bool
 	gtRoot     string
+	beadsDir   string
 }
 
 // BdCmd creates a new bd command builder with the given arguments.
@@ -50,9 +51,27 @@ func (b *bdCmd) WithGTRoot(root string) *bdCmd {
 	return b
 }
 
+// WithBeadsDir sets BEADS_DIR explicitly in the environment.
+// This prevents inherited BEADS_DIR from the parent process from causing
+// bd to write to the wrong database. The dir should be the resolved
+// .beads directory path (e.g., from beads.ResolveBeadsDir).
+func (b *bdCmd) WithBeadsDir(dir string) *bdCmd {
+	b.beadsDir = dir
+	return b
+}
+
 // Dir sets the working directory for the command.
 func (b *bdCmd) Dir(dir string) *bdCmd {
 	b.dir = dir
+	return b
+}
+
+// StripBeadsDir removes any inherited BEADS_DIR from the environment.
+// Use this when the command relies on Dir() for routing and an inherited
+// BEADS_DIR would incorrectly override the working-directory-based database
+// discovery. This fixes rig-prefixed bead resolution (GH#2126).
+func (b *bdCmd) StripBeadsDir() *bdCmd {
+	b.env = filterEnvKey(b.env, "BEADS_DIR")
 	return b
 }
 
@@ -94,6 +113,14 @@ func (b *bdCmd) buildEnv() []string {
 	if b.gtRoot != "" {
 		env = filterEnvKey(env, "GT_ROOT")
 		env = append(env, "GT_ROOT="+b.gtRoot)
+	}
+
+	// Add BEADS_DIR if specified.
+	// This prevents inherited BEADS_DIR from causing bd to target the wrong
+	// database (e.g., HQ instead of rig). See gt-ctir.
+	if b.beadsDir != "" {
+		env = filterEnvKey(env, "BEADS_DIR")
+		env = append(env, "BEADS_DIR="+b.beadsDir)
 	}
 
 	return env

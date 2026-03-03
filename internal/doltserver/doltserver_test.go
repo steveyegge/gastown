@@ -3498,3 +3498,119 @@ func TestWaitForReady_ServerBecomesReady(t *testing.T) {
 	}
 }
 
+func TestInvalidateDBCache(t *testing.T) {
+	// Ensure InvalidateDBCache clears cached data so subsequent calls re-query.
+	InvalidateDBCache()
+
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	setupDoltDB(t, dataDir, "cachetestdb")
+
+	// First call populates.
+	dbs1, err := ListDatabases(townRoot)
+	if err != nil {
+		t.Fatalf("first ListDatabases: %v", err)
+	}
+	if len(dbs1) != 1 || dbs1[0] != "cachetestdb" {
+		t.Fatalf("expected [cachetestdb], got %v", dbs1)
+	}
+
+	// Add another database on disk.
+	setupDoltDB(t, dataDir, "cachetestdb2")
+
+	// Without invalidation, local path re-scans filesystem (no caching for local).
+	dbs2, err := ListDatabases(townRoot)
+	if err != nil {
+		t.Fatalf("second ListDatabases: %v", err)
+	}
+	if len(dbs2) != 2 {
+		t.Fatalf("expected 2 databases after adding cachetestdb2, got %d: %v", len(dbs2), dbs2)
+	}
+}
+
+func TestDBCache_ReturnsCopy(t *testing.T) {
+	// Verify that callers get a defensive copy, not the cached slice.
+	InvalidateDBCache()
+
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	setupDoltDB(t, dataDir, "copytest")
+
+	dbs1, _ := ListDatabases(townRoot)
+	if len(dbs1) > 0 {
+		dbs1[0] = "MUTATED"
+	}
+
+	dbs2, _ := ListDatabases(townRoot)
+	for _, db := range dbs2 {
+		if db == "MUTATED" {
+			t.Fatal("ListDatabases returned shared slice — callers can corrupt the cache")
+		}
+	}
+}
+
+func TestCollectDatabaseOwners_HQOnly(t *testing.T) {
+	townRoot := t.TempDir()
+
+	setupRigMetadata(t, townRoot, "hq", "hq")
+	setupRigsJSON(t, townRoot, []string{})
+
+	owners := CollectDatabaseOwners(townRoot)
+	if owners["hq"] != "town beads" {
+		t.Errorf("expected 'hq' owner to be 'town beads', got %q", owners["hq"])
+	}
+	if len(owners) != 1 {
+		t.Errorf("expected 1 owner, got %d: %v", len(owners), owners)
+	}
+}
+
+func TestCollectDatabaseOwners_MultipleRigs(t *testing.T) {
+	townRoot := t.TempDir()
+
+	setupRigsJSON(t, townRoot, []string{"gastown", "beads"})
+	setupRigMetadata(t, townRoot, "hq", "hq")
+	setupRigMetadata(t, townRoot, "gastown", "gt")
+	setupRigMetadata(t, townRoot, "beads", "beads")
+
+	owners := CollectDatabaseOwners(townRoot)
+	if owners["hq"] != "town beads" {
+		t.Errorf("expected 'hq' owner 'town beads', got %q", owners["hq"])
+	}
+	if owners["gt"] != "gastown rig beads" {
+		t.Errorf("expected 'gt' owner 'gastown rig beads', got %q", owners["gt"])
+	}
+	if owners["beads"] != "beads rig beads" {
+		t.Errorf("expected 'beads' owner 'beads rig beads', got %q", owners["beads"])
+	}
+	if len(owners) != 3 {
+		t.Errorf("expected 3 owners, got %d: %v", len(owners), owners)
+	}
+}
+
+func TestCollectDatabaseOwners_CustomDatabaseName(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Rig name differs from dolt_database name (like gastown → gt)
+	setupRigsJSON(t, townRoot, []string{"myrig"})
+	setupRigMetadata(t, townRoot, "myrig", "custom_db")
+
+	owners := CollectDatabaseOwners(townRoot)
+	if owners["custom_db"] != "myrig rig beads" {
+		t.Errorf("expected 'custom_db' owner 'myrig rig beads', got %q", owners["custom_db"])
+	}
+	if _, exists := owners["myrig"]; exists {
+		t.Error("rig name 'myrig' should not be a key in owners (only dolt_database value)")
+	}
+}
+
+func TestCollectDatabaseOwners_UnknownDB(t *testing.T) {
+	townRoot := t.TempDir()
+
+	setupRigsJSON(t, townRoot, []string{})
+	setupRigMetadata(t, townRoot, "hq", "hq")
+
+	owners := CollectDatabaseOwners(townRoot)
+	if _, exists := owners["unknown_db"]; exists {
+		t.Error("unknown_db should not have an owner")
+	}
+}

@@ -1,20 +1,22 @@
 package refinery
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -173,6 +175,9 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("building startup command: %w", err)
 	}
 
+	// Generate the GASTA run ID for this refinery session.
+	runID := uuid.New().String()
+
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := t.NewSessionWithCommand(sessionID, refineryRigDir, command); err != nil {
@@ -182,10 +187,11 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "refinery",
-		Rig:      m.rig.Name,
-		TownRoot: townRoot,
-		Agent:    agentOverride,
+		Role:        "refinery",
+		Rig:         m.rig.Name,
+		TownRoot:    townRoot,
+		Agent:       agentOverride,
+		SessionName: sessionID,
 	})
 	envVars = session.MergeRuntimeLivenessEnv(envVars, runtimeConfig)
 
@@ -196,6 +202,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
 	}
+	_ = t.SetEnvironment(sessionID, "GT_RUN", runID)
 
 	// Apply theme (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(m.rig.Name)
@@ -214,6 +221,17 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	}
 
 	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)
+
+	// Stream refinery's Claude Code JSONL conversation log to VictoriaLogs (opt-in).
+	if os.Getenv("GT_LOG_AGENT_OUTPUT") == "true" && os.Getenv("GT_OTEL_LOGS_URL") != "" {
+		if err := session.ActivateAgentLogging(sessionID, refineryRigDir, runID); err != nil {
+			log.Printf("warning: agent log watcher setup failed for %s: %v", sessionID, err)
+		}
+	}
+
+	// Record the agent instantiation event (GASTA root span).
+	session.RecordAgentInstantiateFromDir(context.Background(), runID, runtimeConfig.ResolvedAgent,
+		"refinery", "refinery", sessionID, m.rig.Name, townRoot, "", refineryRigDir)
 
 	return nil
 }
@@ -424,8 +442,8 @@ func (m *Manager) FindMR(idOrBranch string) (*MergeRequest, error) {
 		if constants.BranchPolecatPrefix+idOrBranch == item.MR.Branch {
 			return item.MR, nil
 		}
-		// Match by worker name (partial match for convenience)
-		if strings.Contains(item.MR.ID, idOrBranch) {
+		// Match by ID prefix (partial match for convenience)
+		if strings.HasPrefix(item.MR.ID, idOrBranch) {
 			return item.MR, nil
 		}
 	}
@@ -483,49 +501,72 @@ func (m *Manager) RejectMR(idOrBranch string, reason string, notify bool) (*Merg
 	return mr, nil
 }
 
+// PostMergeResult holds the result of a post-merge cleanup operation.
+type PostMergeResult struct {
+	MR                  *MergeRequest
+	MRClosed            bool
+	SourceIssueClosed   bool
+	SourceIssueID       string
+	SourceIssueNotFound bool // true if source issue doesn't exist (already closed or invalid)
+}
+
+// PostMerge performs post-merge cleanup for a successfully merged MR.
+// It closes the MR bead and its source issue. Branch deletion is handled
+// by the caller since the Manager doesn't have git access.
+func (m *Manager) PostMerge(idOrBranch string) (*PostMergeResult, error) {
+	mr, err := m.FindMR(idOrBranch)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &PostMergeResult{
+		MR:            mr,
+		SourceIssueID: mr.IssueID,
+	}
+
+	b := beads.New(m.rig.BeadsPath())
+
+	// Close the MR bead
+	if mr.IsClosed() {
+		_, _ = fmt.Fprintf(m.output, "  %s MR already closed\n", style.Dim.Render("—"))
+		result.MRClosed = true
+	} else {
+		if err := b.CloseWithReason("merged", mr.ID); err != nil {
+			return result, fmt.Errorf("closing MR bead: %w", err)
+		}
+		if closeErr := mr.Close(CloseReasonMerged); closeErr != nil {
+			_, _ = fmt.Fprintf(m.output, "Warning: failed to update MR state: %v\n", closeErr)
+		}
+		result.MRClosed = true
+	}
+
+	// Close the source issue
+	if mr.IssueID != "" {
+		if err := b.Close(mr.IssueID); err != nil {
+			// Source issue may already be closed or not exist
+			_, _ = fmt.Fprintf(m.output, "  %s source issue close: %v\n", style.Dim.Render("○"), err)
+			result.SourceIssueNotFound = true
+		} else {
+			result.SourceIssueClosed = true
+		}
+	}
+
+	return result, nil
+}
+
 // notifyWorkerRejected sends a rejection notification to a polecat.
 func (m *Manager) notifyWorkerRejected(mr *MergeRequest, reason string) {
-	router := mail.NewRouter(m.workDir)
-	msg := &mail.Message{
-		From:    fmt.Sprintf("%s/refinery", m.rig.Name),
-		To:      fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
-		Subject: "Merge request rejected",
-		Body: fmt.Sprintf(`Your merge request has been rejected.
-
-Branch: %s
-Issue: %s
-Reason: %s
-
-Please review the feedback and address the issues before resubmitting.`,
-			mr.Branch, mr.IssueID, reason),
-		Priority: mail.PriorityNormal,
-	}
-	if err := router.Send(msg); err != nil {
-		log.Printf("warning: notifying worker of rejection for %s: %v", mr.IssueID, err)
+	// Nudge polecat about rejection instead of sending permanent mail.
+	polecatName := strings.TrimPrefix(mr.Worker, "polecats/")
+	target := fmt.Sprintf("%s/%s", m.rig.Name, polecatName)
+	nudgeMsg := fmt.Sprintf("MR rejected: branch=%s issue=%s reason=%s — review feedback and resubmit with 'gt done'",
+		mr.Branch, mr.IssueID, reason)
+	nudgeCmd := exec.Command("gt", "nudge", target, nudgeMsg)
+	nudgeCmd.Dir = m.workDir
+	if err := nudgeCmd.Run(); err != nil {
+		log.Printf("warning: nudging worker about rejection for %s: %v", mr.IssueID, err)
 	}
 }
 
-// findTownRoot walks up directories to find the town root.
-func findTownRoot(startPath string) string {
-	path := startPath
-	for {
-		// Check for mayor/ subdirectory (indicates town root)
-		if _, err := os.Stat(filepath.Join(path, "mayor")); err == nil {
-			return path
-		}
-		// Check for config.json with type: workspace
-		configPath := filepath.Join(path, "config.json")
-		if data, err := os.ReadFile(configPath); err == nil {
-			if strings.Contains(string(data), `"type": "workspace"`) {
-				return path
-			}
-		}
-
-		parent := filepath.Dir(path)
-		if parent == path {
-			break // Reached root
-		}
-		path = parent
-	}
-	return ""
-}
+// Town root is computed in Start() as filepath.Dir(m.rig.Path) and passed
+// through to callers — no filesystem-inference function needed (ZFC gt-qago).

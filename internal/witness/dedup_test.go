@@ -7,7 +7,8 @@ import (
 )
 
 func TestMessageDeduplicator_BasicDedup(t *testing.T) {
-	d := NewMessageDeduplicator(100)
+	t.Parallel()
+	d := NewMessageDeduplicator()
 
 	// First time: not a duplicate
 	if d.AlreadyProcessed("msg-001") {
@@ -26,7 +27,8 @@ func TestMessageDeduplicator_BasicDedup(t *testing.T) {
 }
 
 func TestMessageDeduplicator_EmptyID(t *testing.T) {
-	d := NewMessageDeduplicator(100)
+	t.Parallel()
+	d := NewMessageDeduplicator()
 
 	// Empty IDs should always return false (can't deduplicate)
 	if d.AlreadyProcessed("") {
@@ -38,7 +40,8 @@ func TestMessageDeduplicator_EmptyID(t *testing.T) {
 }
 
 func TestMessageDeduplicator_Size(t *testing.T) {
-	d := NewMessageDeduplicator(100)
+	t.Parallel()
+	d := NewMessageDeduplicator()
 
 	if d.Size() != 0 {
 		t.Errorf("Size() = %d, want 0", d.Size())
@@ -53,39 +56,30 @@ func TestMessageDeduplicator_Size(t *testing.T) {
 	}
 }
 
-func TestMessageDeduplicator_MaxSize(t *testing.T) {
-	d := NewMessageDeduplicator(3)
+func TestMessageDeduplicator_ManyMessages(t *testing.T) {
+	t.Parallel()
+	d := NewMessageDeduplicator()
 
-	d.AlreadyProcessed("msg-001")
-	d.AlreadyProcessed("msg-002")
-	d.AlreadyProcessed("msg-003")
-
-	// At capacity — new messages should still be allowed (not deduped)
-	if d.AlreadyProcessed("msg-004") {
-		t.Error("at capacity, new messages should be allowed through")
+	// Add many messages
+	for i := 0; i < 100; i++ {
+		id := fmt.Sprintf("msg-%03d", i)
+		if d.AlreadyProcessed(id) {
+			t.Errorf("first call for %s should return false", id)
+		}
 	}
 
-	// But existing ones should still be detected
-	if !d.AlreadyProcessed("msg-001") {
-		t.Error("existing message should still be detected as duplicate")
-	}
-}
-
-func TestMessageDeduplicator_DefaultMaxSize(t *testing.T) {
-	d := NewMessageDeduplicator(0)
-
-	if d.maxSize != 10000 {
-		t.Errorf("maxSize = %d, want 10000 for zero input", d.maxSize)
-	}
-
-	d2 := NewMessageDeduplicator(-5)
-	if d2.maxSize != 10000 {
-		t.Errorf("maxSize = %d, want 10000 for negative input", d2.maxSize)
+	// All should be tracked as duplicates
+	for i := 0; i < 100; i++ {
+		id := fmt.Sprintf("msg-%03d", i)
+		if !d.AlreadyProcessed(id) {
+			t.Errorf("second call for %s should return true", id)
+		}
 	}
 }
 
 func TestMessageDeduplicator_Concurrent(t *testing.T) {
-	d := NewMessageDeduplicator(1000)
+	t.Parallel()
+	d := NewMessageDeduplicator()
 	var wg sync.WaitGroup
 
 	// Spawn 100 goroutines, each processing 10 unique messages

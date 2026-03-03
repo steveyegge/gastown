@@ -794,6 +794,39 @@ func TestAgentEnv_IncludesClaudeCodeClearing(t *testing.T) {
 	}
 }
 
+func TestAgentEnv_DisablesBdBackup(t *testing.T) {
+	t.Parallel()
+	// Verify AgentEnv always includes BD_BACKUP_ENABLED=false regardless of role.
+	// In Gas Town, Dolt is the persistent data store and the daemon provides
+	// centralized backup patrols (dolt_backup, jsonl_git_backup). bd's per-repo
+	// auto-backup is redundant and pollutes rig git history via git add -f.
+	// See: https://github.com/steveyegge/beads/issues/2241
+	roles := []struct {
+		role      string
+		rig       string
+		agentName string
+	}{
+		{"mayor", "", ""},
+		{"deacon", "", ""},
+		{"boot", "", ""},
+		{"witness", "myrig", ""},
+		{"refinery", "myrig", ""},
+		{"polecat", "myrig", "Toast"},
+		{"crew", "myrig", "emma"},
+	}
+	for _, r := range roles {
+		t.Run(r.role, func(t *testing.T) {
+			env := AgentEnv(AgentEnvConfig{
+				Role:      r.role,
+				Rig:       r.rig,
+				AgentName: r.agentName,
+				TownRoot:  "/town",
+			})
+			assertEnv(t, env, "BD_BACKUP_ENABLED", "false")
+		})
+	}
+}
+
 func TestBuildStartupCommandWithEnv_IncludesNodeOptions(t *testing.T) {
 	t.Parallel()
 	// Integration test: verify BuildStartupCommandWithEnv output includes NODE_OPTIONS=

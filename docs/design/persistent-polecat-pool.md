@@ -19,7 +19,7 @@ Consequences:
 - 219 stale remote branches from destroyed worktrees
 - Slow dispatch (~5s worktree creation per assignment)
 - Lost capability record (CV, completion history)
-- "Idle Polecat Heresy" — treating idle polecats as waste
+- Idle polecats were treated as waste and nuked
 
 ## Design
 
@@ -119,9 +119,8 @@ The polecat doesn't care — it already moved to main locally during DONE → ID
 
 ### Witness Integration
 
-Witness patrol changes:
-- **Current:** Sees idle polecat → may nuke
-- **New:** Sees idle polecat → healthy state, skip
+Witness patrol behavior (shipped):
+- Sees idle polecat → healthy state, skip
 - **Stuck detection:** Polecat in WORKING state for too long → escalate (don't nuke)
 - **Dead session detection:** Session died but state=WORKING → restart session (not nuke polecat)
 
@@ -155,8 +154,8 @@ git branch -r | grep 'origin/polecat/' | grep -v 'furiosa/gt-ziiu' | grep -v 'nu
 
 ## Implementation Phases
 
-### Phase 1: Stop the bleeding
-- Witness stops nuking idle polecats (remove the heresy)
+### Phase 1: Stop the bleeding (SHIPPED)
+- Witness no longer nukes idle polecats
 - `gt polecat done` transitions to IDLE instead of triggering nuke
 - Refinery deletes remote branch after merge
 

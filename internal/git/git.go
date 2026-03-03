@@ -368,6 +368,13 @@ func (g *Git) Checkout(ref string) error {
 	return err
 }
 
+// CheckoutNewBranch creates a new branch from startPoint and checks it out.
+// Equivalent to: git checkout -b <branch> <startPoint>
+func (g *Git) CheckoutNewBranch(branch, startPoint string) error {
+	_, err := g.run("checkout", "-b", branch, startPoint)
+	return err
+}
+
 // Fetch fetches from the remote.
 func (g *Git) Fetch(remote string) error {
 	_, err := g.run("fetch", remote)
@@ -598,6 +605,60 @@ func (g *Git) SetRemoteURL(name, url string) (string, error) {
 	return g.run("remote", "set-url", name, url)
 }
 
+// AddUpstreamRemote adds or updates the 'upstream' git remote.
+// This is idempotent - if the remote already exists with the same URL, it's a no-op.
+// If the remote exists with a different URL, it's updated.
+func (g *Git) AddUpstreamRemote(upstreamURL string) error {
+	has, err := g.HasUpstreamRemote()
+	if err != nil {
+		return err
+	}
+	if has {
+		current, err := g.GetUpstreamURL()
+		if err != nil {
+			return err
+		}
+		if current == upstreamURL {
+			return nil
+		}
+		_, err = g.run("remote", "set-url", "upstream", upstreamURL)
+		return err
+	}
+	_, err = g.run("remote", "add", "upstream", upstreamURL)
+	return err
+}
+
+// GetUpstreamURL returns the URL of the upstream remote.
+// Returns empty string if upstream remote doesn't exist.
+func (g *Git) GetUpstreamURL() (string, error) {
+	out, err := g.run("remote", "get-url", "upstream")
+	if err != nil {
+		if strings.Contains(err.Error(), "No such remote") {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// HasUpstreamRemote returns true if an upstream remote is configured.
+func (g *Git) HasUpstreamRemote() (bool, error) {
+	_, err := g.run("remote", "get-url", "upstream")
+	if err != nil {
+		if strings.Contains(err.Error(), "No such remote") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// FetchUpstream fetches from the upstream remote.
+func (g *Git) FetchUpstream() error {
+	_, err := g.run("fetch", "upstream")
+	return err
+}
+
 // Remotes returns the list of configured remote names.
 func (g *Git) Remotes() ([]string, error) {
 	out, err := g.run("remote")
@@ -630,6 +691,14 @@ func (g *Git) Merge(branch string) error {
 // MergeNoFF merges the given branch with --no-ff flag and a custom message.
 func (g *Git) MergeNoFF(branch, message string) error {
 	_, err := g.run("merge", "--no-ff", "-m", message, branch)
+	return err
+}
+
+// MergeFFOnly performs a fast-forward-only merge of the given ref into the current branch.
+// This ensures what you tested is exactly what lands — no merge commits are created.
+// Returns an error if the merge cannot be performed as a fast-forward.
+func (g *Git) MergeFFOnly(ref string) error {
+	_, err := g.run("merge", "--ff-only", ref)
 	return err
 }
 
@@ -690,6 +759,21 @@ func (g *Git) ListRemoteRefs(remote, prefix string) ([]string, error) {
 		}
 	}
 	return refs, nil
+}
+
+// ListPushRemoteRefs lists remote refs from the push URL when it differs from
+// the fetch URL. With a fork-based workflow (pushurl configured), branches are
+// pushed to the fork but ls-remote reads from the fetch URL (upstream). This
+// method queries the push URL so cleanup can find branches that were pushed.
+// Falls back to ListRemoteRefs if no custom push URL is configured.
+func (g *Git) ListPushRemoteRefs(remote, prefix string) ([]string, error) {
+	fetchURL, fetchErr := g.RemoteURL(remote)
+	pushURL, pushErr := g.GetPushURL(remote)
+	if fetchErr != nil || pushErr != nil || pushURL == fetchURL {
+		return g.ListRemoteRefs(remote, prefix)
+	}
+	// Query the push URL directly
+	return g.ListRemoteRefs(pushURL, prefix)
 }
 
 // Rebase rebases the current branch onto the given ref.
@@ -1035,6 +1119,14 @@ func (g *Git) WorktreeRemove(path string, force bool) error {
 		args = append(args, "--force")
 	}
 	_, err := g.run(args...)
+	return err
+}
+
+// WorktreeMove moves a worktree to a new path, updating all git references.
+// This is the correct way to relocate a worktree — using os.Rename breaks
+// the .git file and worktree registry references. (GH#2056)
+func (g *Git) WorktreeMove(oldPath, newPath string) error {
+	_, err := g.run("worktree", "move", oldPath, newPath)
 	return err
 }
 

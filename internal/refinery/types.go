@@ -120,9 +120,6 @@ func ValidatePhaseTransition(from, to MRPhase) error {
 // DefaultClaimTTLMinutes is the default TTL for MR claims.
 const DefaultClaimTTLMinutes = 30
 
-// MaxRetryCount is the maximum number of retries before escalation to Mayor.
-const MaxRetryCount = 5
-
 // CloseReason indicates why a merge request was closed.
 type CloseReason string
 

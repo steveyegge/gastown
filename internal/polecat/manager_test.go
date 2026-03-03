@@ -403,6 +403,20 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 		t.Fatalf("git update-ref: %v\n%s", err, out)
 	}
 
+	// Create rig-level .beads directory with redirect to mayor/rig/.beads
+	rigBeads := filepath.Join(root, ".beads")
+	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		t.Fatalf("mkdir rig .beads: %v", err)
+	}
+	mayorBeads := filepath.Join(mayorRig, ".beads")
+	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig/.beads: %v", err)
+	}
+	rigRedirect := filepath.Join(rigBeads, "redirect")
+	if err := os.WriteFile(rigRedirect, []byte("mayor/rig/.beads\n"), 0644); err != nil {
+		t.Fatalf("write rig redirect: %v", err)
+	}
+
 	// Create rig pointing to root
 	r := &rig.Rig{
 		Name: "rig",
@@ -840,8 +854,8 @@ func TestAddWithOptions_NoPrimeMDCreatedLocally(t *testing.T) {
 	// Use real bd if available; fall back to a mock for environments (like
 	// Windows CI) where bd is not installed.
 	if _, err := exec.LookPath("bd"); err == nil {
-		testutil.RequireDoltServer(t)
-		port, _ := strconv.Atoi(testutil.DoltTestPort())
+		testutil.RequireDoltContainer(t)
+		port, _ := strconv.Atoi(testutil.DoltContainerPort())
 		bd := beads.NewIsolatedWithPort(mayorRig, port)
 		if err := bd.Init("gt"); err != nil {
 			t.Fatalf("bd init: %v", err)
@@ -954,8 +968,8 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 	// Use real bd if available; fall back to a mock for environments (like
 	// Windows CI) where bd is not installed.
 	if _, err := exec.LookPath("bd"); err == nil {
-		testutil.RequireDoltServer(t)
-		port, _ := strconv.Atoi(testutil.DoltTestPort())
+		testutil.RequireDoltContainer(t)
+		port, _ := strconv.Atoi(testutil.DoltContainerPort())
 		bd := beads.NewIsolatedWithPort(mayorRig, port)
 		if err := bd.Init("gt"); err != nil {
 			t.Fatalf("bd init: %v", err)
@@ -1100,8 +1114,8 @@ func TestAddWithOptions_SettingsInstalledInPolecatsDir(t *testing.T) {
 	// Use real bd if available; fall back to a mock for environments (like
 	// Windows CI) where bd is not installed.
 	if _, err := exec.LookPath("bd"); err == nil {
-		testutil.RequireDoltServer(t)
-		port, _ := strconv.Atoi(testutil.DoltTestPort())
+		testutil.RequireDoltContainer(t)
+		port, _ := strconv.Atoi(testutil.DoltContainerPort())
 		bd := beads.NewIsolatedWithPort(mayorRig, port)
 		if err := bd.Init("gt"); err != nil {
 			t.Fatalf("bd init: %v", err)
@@ -1557,6 +1571,80 @@ esac
 			if strings.Contains(line, clonePath) {
 				t.Errorf("stale worktree entry for %s still registered in git after rollback", clonePath)
 			}
+		}
+	}
+}
+
+// TestAllocateAndAdd_NoDuplicateNames verifies that concurrent AllocateAndAdd
+// calls never produce duplicate polecat names (GH#2215). Each goroutine will
+// fail at worktree creation (no origin/main), but the allocated names must
+// all be unique — the race condition would show as duplicate names.
+func TestAllocateAndAdd_NoDuplicateNames(t *testing.T) {
+	const concurrency = 20
+	root := t.TempDir()
+
+	// Create mayor/rig directory structure
+	mayorRig := filepath.Join(root, "mayor", "rig")
+	if err := os.MkdirAll(mayorRig, 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Initialize git repo with origin remote (will fail fetch, that's expected)
+	cmdInit := exec.Command("git", "init")
+	cmdInit.Dir = mayorRig
+	if out, err := cmdInit.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(mayorRig, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	mayorGit := git.NewGit(mayorRig)
+	if err := mayorGit.Add("."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := mayorGit.Commit("Initial commit"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	cmdRemote := exec.Command("git", "remote", "add", "origin", "/nonexistent/repo")
+	cmdRemote.Dir = mayorRig
+	if out, err := cmdRemote.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+
+	r := &rig.Rig{
+		Name: "rig",
+		Path: root,
+	}
+	m := NewManager(r, git.NewGit(root), nil)
+
+	// Launch concurrent AllocateAndAdd calls. They will fail at worktree
+	// creation (no origin/main), but the names they attempt must be unique.
+	type result struct {
+		name string
+		err  error
+	}
+	results := make(chan result, concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			name, _, err := m.AllocateAndAdd(AddOptions{})
+			results <- result{name: name, err: err}
+		}()
+	}
+
+	// Collect results
+	seen := make(map[string]int)
+	for i := 0; i < concurrency; i++ {
+		r := <-results
+		if r.name != "" {
+			seen[r.name]++
+		}
+	}
+
+	// Verify no duplicate names
+	for name, count := range seen {
+		if count > 1 {
+			t.Errorf("name %q allocated %d times — race condition (GH#2215)", name, count)
 		}
 	}
 }

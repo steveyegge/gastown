@@ -55,12 +55,14 @@ This command:
 1. Clears your work assignment
 2. Sets your state back to "idle"
 3. Makes you available for the next dispatch
+4. **Auto-terminates your tmux session** (after a 3-second delay)
 
 **Without `{{ cmd }} dog done`**, you will be stuck in "working" state forever, and the
 Deacon cannot assign you new work.
 
 The command auto-detects your dog name from your working directory, so just run
-`{{ cmd }} dog done` with no arguments.
+`{{ cmd }} dog done` with no arguments. Your session ends automatically — do NOT
+idle at the prompt after running this command.
 
 ## Prefix-Based Routing
 
@@ -105,7 +107,7 @@ Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`. Debug with: `BD_DEBUG_R
 
 ```
 [ ] Complete all formula steps
-[ ] gt dog done              (CRITICAL - return to idle)
+[ ] gt dog done              (CRITICAL - clears work + auto-terminates session)
 ```
 
 ---

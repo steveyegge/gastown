@@ -81,10 +81,18 @@ SELECT COUNT(*) FROM information_schema.PROCESSLIST;
 ```
 Warn if >= 80% of max connections (1000).
 
-**2. Disk usage:**
+**2. Disk usage (.dolt-data/):**
 Check data directory size. Warn if exceeding configured threshold.
 
-**3. Database count (orphan detection):**
+**3. Daemon directory disk usage:**
+Check total daemon/ directory size:
+```bash
+du -sh <townRoot>/daemon/
+```
+Warn if > 500MB (the disk budget threshold). The Go-side `CleanDaemonDir()` runs
+on heartbeat to enforce this, but report the current state for visibility.
+
+**4. Database count (orphan detection):**
 ```sql
 SHOW DATABASES;
 ```
@@ -94,13 +102,14 @@ If orphan count > threshold, recommend cleanup:
 gt dolt cleanup
 ```
 
-**4. Backup freshness:**
+**5. Backup freshness:**
 Check modification time of backup files. Warn if backups are stale
 (older than 2x the configured backup interval).
 
-**5. Record all findings:**
+**6. Record all findings:**
 - Connection count and utilization percentage
-- Disk usage
+- Data directory disk usage
+- Daemon directory disk usage (warn if > 500MB)
 - Orphan database count and names
 - Backup freshness per database
 

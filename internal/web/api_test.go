@@ -455,7 +455,14 @@ func TestGetCommandList(t *testing.T) {
 }
 
 func TestAPIHandler_Crew(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+	handler := &APIHandler{
+		gtPath:            "false", // fast-failing stub — crew handler gracefully returns empty on error
+		workDir:           t.TempDir(),
+		defaultRunTimeout: 5 * time.Second,
+		maxRunTimeout:     10 * time.Second,
+		cmdSem:            make(chan struct{}, maxConcurrentCommands),
+		csrfToken:         "test-token",
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/crew", nil)
 	w := httptest.NewRecorder()
@@ -481,7 +488,14 @@ func TestAPIHandler_Crew(t *testing.T) {
 }
 
 func TestAPIHandler_Ready(t *testing.T) {
-	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+	handler := &APIHandler{
+		gtPath:            "false", // fast-failing stub — ready handler gracefully returns empty on error
+		workDir:           t.TempDir(),
+		defaultRunTimeout: 5 * time.Second,
+		maxRunTimeout:     10 * time.Second,
+		cmdSem:            make(chan struct{}, maxConcurrentCommands),
+		csrfToken:         "test-token",
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
 	w := httptest.NewRecorder()

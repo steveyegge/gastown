@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
@@ -68,6 +69,9 @@ var beadsExemptCommands = map[string]bool{
 	"metrics":       true, // Metrics reads local JSONL, no beads needed
 	"krc":           true, // KRC doesn't require beads
 	"run-migration":       true, // Migration orchestrator handles its own beads checks
+	"health":              true, // Health check doesn't require beads
+	"upgrade":             true, // Post-install migration orchestrator
+	"heartbeat":           true, // Heartbeat state update — must be fast and dependency-free
 }
 
 // Commands exempt from the town root branch warning.
@@ -79,6 +83,7 @@ var branchCheckExemptCommands = map[string]bool{
 	"doctor":     true, // Used to fix the problem
 	"install":    true, // Initial setup
 	"git-init":   true, // Git setup
+	"upgrade":    true, // Post-install migration
 }
 
 // persistentPreRun runs before every command.
@@ -103,8 +108,11 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 	logCommandUsage(cmd, args)
 
 	// Initialize session prefix registry and agent registry from town root.
-	// Best-effort: if town root not found, the default "gt" prefix is used.
-	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+	// Try CWD detection first, then fall back to GT_TOWN_ROOT / GT_ROOT env vars.
+	// Env var fallback ensures commands invoked from outside the town directory
+	// (e.g., "gt agents menu" via a cross-socket tmux binding) still connect to
+	// the correct town socket rather than silently using the wrong server.
+	if townRoot := detectTownRootFromCwd(); townRoot != "" {
 		if err := session.InitRegistry(townRoot); err != nil {
 			fmt.Fprintf(os.Stderr, "WARNING: failed to initialize town registry: %v\n", err)
 		}
@@ -123,8 +131,14 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 		warnIfTownRootOffMain()
 	}
 
+	// Touch polecat session heartbeat on every gt command (gt-qjtq: ZFC liveness fix).
+	// This is best-effort and non-blocking — the heartbeat file signals that the agent
+	// is alive and actively running gt commands. Used by isSessionProcessDead to
+	// determine liveness without PID signal probing.
+	touchPolecatHeartbeat()
+
 	// Skip beads check for exempt commands
-	if beadsExemptCommands[cmdName] {
+	if beadsExemptCommands[cmdName] || isRoleCommand(cmd) {
 		return nil
 	}
 
@@ -135,6 +149,18 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "   Run %s for details.\n\n", style.Dim.Render("gt doctor"))
 	}
 	return nil
+}
+
+// isRoleCommand returns true when the invoked command belongs to the `gt role` tree.
+// Role introspection commands are often used in scripts and tests that expect clean
+// output; beads version warnings are unrelated noise for these commands.
+func isRoleCommand(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Name() == "role" {
+			return true
+		}
+	}
+	return false
 }
 
 // initCLITheme initializes the CLI color theme based on settings and environment.
@@ -151,6 +177,34 @@ func initCLITheme() {
 	// Initialize theme with config value (env var takes precedence inside InitTheme)
 	ui.InitTheme(configTheme)
 	ui.ApplyThemeMode()
+}
+
+// touchPolecatHeartbeat touches the session heartbeat file for polecat agents.
+// Called from persistentPreRun on every gt command. The heartbeat signals that
+// the agent process is alive and actively running gt commands. Used by
+// isSessionProcessDead to determine liveness without PID signal probing (gt-qjtq).
+//
+// This is best-effort: errors are silently ignored. Non-polecat sessions and
+// sessions without GT_SESSION are skipped silently.
+func touchPolecatHeartbeat() {
+	sessionName := os.Getenv("GT_SESSION")
+	if sessionName == "" {
+		return
+	}
+
+	// Only polecats, crew, and dogs need heartbeats — they're the ones checked
+	// by isSessionProcessDead for stale session detection.
+	role := os.Getenv("GT_ROLE")
+	if !strings.Contains(role, "polecat") && !strings.Contains(role, "crew") && !strings.Contains(role, "dog") {
+		return
+	}
+
+	townRoot := detectTownRootFromCwd()
+	if townRoot == "" {
+		return
+	}
+
+	polecat.TouchSessionHeartbeat(townRoot, sessionName)
 }
 
 // warnIfTownRootOffMain prints a warning if the town root is not on main branch.
@@ -308,8 +362,22 @@ func requireSubcommand(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("requires a subcommand\n\nRun '%s --help' for usage", buildCommandPath(cmd))
 	}
-	return fmt.Errorf("unknown command %q for %q\n\nRun '%s --help' for available commands",
-		args[0], buildCommandPath(cmd), buildCommandPath(cmd))
+	unknown := args[0]
+	errMsg := fmt.Sprintf("unknown command %q for %q", unknown, buildCommandPath(cmd))
+	// Use cobra's suggestion engine (Levenshtein + SuggestFor lists)
+	if suggestions := cmd.SuggestionsFor(unknown); len(suggestions) > 0 {
+		errMsg += "\n\nDid you mean"
+		if len(suggestions) == 1 {
+			errMsg += " this?\n"
+		} else {
+			errMsg += " one of these?\n"
+		}
+		for _, s := range suggestions {
+			errMsg += fmt.Sprintf("\t%s %s\n", buildCommandPath(cmd), s)
+		}
+	}
+	errMsg += fmt.Sprintf("\nRun '%s --help' for available commands", buildCommandPath(cmd))
+	return fmt.Errorf("%s", errMsg)
 }
 
 // checkHelpFlag checks if --help or -h is the first argument and shows help if so.

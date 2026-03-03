@@ -6,7 +6,7 @@ import (
 )
 
 func TestWispReaperInterval(t *testing.T) {
-	// Default
+	// Default (now 1h after Dog-driven refactor)
 	if got := wispReaperInterval(nil); got != defaultWispReaperInterval {
 		t.Errorf("expected default %v, got %v", defaultWispReaperInterval, got)
 	}
@@ -16,12 +16,12 @@ func TestWispReaperInterval(t *testing.T) {
 		Patrols: &PatrolsConfig{
 			WispReaper: &WispReaperConfig{
 				Enabled:     true,
-				IntervalStr: "1h",
+				IntervalStr: "2h",
 			},
 		},
 	}
-	if got := wispReaperInterval(config); got != time.Hour {
-		t.Errorf("expected 1h, got %v", got)
+	if got := wispReaperInterval(config); got != 2*time.Hour {
+		t.Errorf("expected 2h, got %v", got)
 	}
 
 	// Invalid falls back to default
@@ -67,53 +67,9 @@ func TestWispDeleteAge(t *testing.T) {
 	}
 }
 
-func TestStaleIssueAge(t *testing.T) {
-	// Default: 30 days
-	if got := staleIssueAge(nil); got != defaultStaleIssueAge {
-		t.Errorf("expected default %v, got %v", defaultStaleIssueAge, got)
-	}
-
-	// Custom: 60 days
-	config := &DaemonPatrolConfig{
-		Patrols: &PatrolsConfig{
-			WispReaper: &WispReaperConfig{
-				Enabled:          true,
-				StaleIssueAgeStr: "1440h",
-			},
-		},
-	}
-	if got := staleIssueAge(config); got != 60*24*time.Hour {
-		t.Errorf("expected 1440h (60 days), got %v", got)
-	}
-
-	// Invalid falls back to default
-	config.Patrols.WispReaper.StaleIssueAgeStr = "bad"
-	if got := staleIssueAge(config); got != defaultStaleIssueAge {
-		t.Errorf("expected default for invalid, got %v", got)
-	}
-
-	// Zero falls back to default
-	config.Patrols.WispReaper.StaleIssueAgeStr = "0s"
-	if got := staleIssueAge(config); got != defaultStaleIssueAge {
-		t.Errorf("expected default for zero, got %v", got)
-	}
-}
-
-func TestJoinStrings(t *testing.T) {
-	tests := []struct {
-		parts []string
-		sep   string
-		want  string
-	}{
-		{nil, ",", ""},
-		{[]string{"a"}, ",", "a"},
-		{[]string{"a", "b", "c"}, ",", "a,b,c"},
-		{[]string{"?", "?", "?"}, ",", "?,?,?"},
-	}
-	for _, tt := range tests {
-		got := joinStrings(tt.parts, tt.sep)
-		if got != tt.want {
-			t.Errorf("joinStrings(%v, %q) = %q, want %q", tt.parts, tt.sep, got, tt.want)
-		}
+func TestDefaultReaperIntervalIsOneHour(t *testing.T) {
+	// Verify the default changed from 30m to 1h per issue gt-caf7.
+	if defaultWispReaperInterval != 1*time.Hour {
+		t.Errorf("expected default interval 1h, got %v", defaultWispReaperInterval)
 	}
 }

@@ -2,17 +2,78 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 )
 
+// RestartTrackerConfig holds configurable parameters for restart tracking.
+// All fields have sensible defaults if zero-valued.
+type RestartTrackerConfig struct {
+	// InitialBackoff is the delay before the first retry (default 30s).
+	InitialBackoff time.Duration `json:"initial_backoff,omitempty"`
+
+	// MaxBackoff is the maximum backoff delay (default 10m).
+	MaxBackoff time.Duration `json:"max_backoff,omitempty"`
+
+	// BackoffMultiplier scales the backoff on each retry (default 2.0).
+	BackoffMultiplier float64 `json:"backoff_multiplier,omitempty"`
+
+	// CrashLoopWindow is the time window for counting crash-loop restarts (default 15m).
+	CrashLoopWindow time.Duration `json:"crash_loop_window,omitempty"`
+
+	// CrashLoopCount is how many restarts within the window trigger crash-loop state (default 5).
+	CrashLoopCount int `json:"crash_loop_count,omitempty"`
+
+	// StabilityPeriod is how long an agent must run without restarting
+	// before its backoff resets (default 30m).
+	StabilityPeriod time.Duration `json:"stability_period,omitempty"`
+}
+
+// DefaultRestartTrackerConfig returns the default restart tracker configuration.
+func DefaultRestartTrackerConfig() RestartTrackerConfig {
+	return RestartTrackerConfig{
+		InitialBackoff:    30 * time.Second,
+		MaxBackoff:        10 * time.Minute,
+		BackoffMultiplier: 2.0,
+		CrashLoopWindow:   15 * time.Minute,
+		CrashLoopCount:    5,
+		StabilityPeriod:   30 * time.Minute,
+	}
+}
+
+// withDefaults returns a config with zero fields filled from defaults.
+func (c RestartTrackerConfig) withDefaults() RestartTrackerConfig {
+	d := DefaultRestartTrackerConfig()
+	if c.InitialBackoff <= 0 {
+		c.InitialBackoff = d.InitialBackoff
+	}
+	if c.MaxBackoff <= 0 {
+		c.MaxBackoff = d.MaxBackoff
+	}
+	if c.BackoffMultiplier <= 0 {
+		c.BackoffMultiplier = d.BackoffMultiplier
+	}
+	if c.CrashLoopWindow <= 0 {
+		c.CrashLoopWindow = d.CrashLoopWindow
+	}
+	if c.CrashLoopCount <= 0 {
+		c.CrashLoopCount = d.CrashLoopCount
+	}
+	if c.StabilityPeriod <= 0 {
+		c.StabilityPeriod = d.StabilityPeriod
+	}
+	return c
+}
+
 // RestartTracker tracks agent restart attempts with exponential backoff.
 // This prevents runaway restart loops when an agent keeps crashing.
 type RestartTracker struct {
 	mu       sync.RWMutex
 	townRoot string
+	config   RestartTrackerConfig
 	state    *RestartState
 }
 
@@ -29,20 +90,12 @@ type AgentRestartInfo struct {
 	CrashLoopSince time.Time `json:"crash_loop_since,omitempty"`
 }
 
-// Backoff parameters
-const (
-	initialBackoff    = 30 * time.Second
-	maxBackoff        = 10 * time.Minute
-	backoffMultiplier = 2.0
-	crashLoopWindow   = 15 * time.Minute
-	crashLoopCount    = 5
-	stabilityPeriod   = 30 * time.Minute
-)
-
-// NewRestartTracker creates a new restart tracker.
-func NewRestartTracker(townRoot string) *RestartTracker {
+// NewRestartTracker creates a new restart tracker with the given config.
+// Zero-valued config fields are filled with defaults.
+func NewRestartTracker(townRoot string, cfg RestartTrackerConfig) *RestartTracker {
 	return &RestartTracker{
 		townRoot: townRoot,
+		config:   cfg.withDefaults(),
 		state:    &RestartState{Agents: make(map[string]*AgentRestartInfo)},
 	}
 }
@@ -113,7 +166,7 @@ func (rt *RestartTracker) RecordRestart(agentID string) {
 	}
 
 	// Check if previous restart was stable (long ago)
-	if !info.LastRestart.IsZero() && now.Sub(info.LastRestart) > stabilityPeriod {
+	if !info.LastRestart.IsZero() && now.Sub(info.LastRestart) > rt.config.StabilityPeriod {
 		// Reset backoff - agent was stable
 		info.RestartCount = 0
 		info.CrashLoopSince = time.Time{}
@@ -123,18 +176,18 @@ func (rt *RestartTracker) RecordRestart(agentID string) {
 	info.RestartCount++
 
 	// Calculate backoff with exponential increase
-	backoffDuration := initialBackoff
-	for i := 1; i < info.RestartCount && backoffDuration < maxBackoff; i++ {
-		backoffDuration = time.Duration(float64(backoffDuration) * backoffMultiplier)
+	backoffDuration := rt.config.InitialBackoff
+	for i := 1; i < info.RestartCount && backoffDuration < rt.config.MaxBackoff; i++ {
+		backoffDuration = time.Duration(float64(backoffDuration) * rt.config.BackoffMultiplier)
 	}
-	if backoffDuration > maxBackoff {
-		backoffDuration = maxBackoff
+	if backoffDuration > rt.config.MaxBackoff {
+		backoffDuration = rt.config.MaxBackoff
 	}
 	info.BackoffUntil = now.Add(backoffDuration)
 
 	// Check for crash loop
-	if info.RestartCount >= crashLoopCount {
-		windowStart := now.Add(-crashLoopWindow)
+	if info.RestartCount >= rt.config.CrashLoopCount {
+		windowStart := now.Add(-rt.config.CrashLoopWindow)
 		if info.LastRestart.After(windowStart) {
 			info.CrashLoopSince = now
 		}
@@ -153,7 +206,7 @@ func (rt *RestartTracker) RecordSuccess(agentID string) {
 	}
 
 	// If agent has been stable for the stability period, reset tracking
-	if time.Since(info.LastRestart) > stabilityPeriod {
+	if time.Since(info.LastRestart) > rt.config.StabilityPeriod {
 		info.RestartCount = 0
 		info.CrashLoopSince = time.Time{}
 		info.BackoffUntil = time.Time{}
@@ -200,4 +253,16 @@ func (rt *RestartTracker) ClearCrashLoop(agentID string) {
 		info.RestartCount = 0
 		info.BackoffUntil = time.Time{}
 	}
+}
+
+// ClearAgentBackoff clears the crash loop and backoff state for an agent on disk.
+// Used by 'gt daemon clear-backoff' to reset an agent stuck in crash loop.
+// The daemon reloads this on next heartbeat (or immediately on SIGUSR2).
+func ClearAgentBackoff(townRoot, agentID string) error {
+	rt := NewRestartTracker(townRoot, RestartTrackerConfig{})
+	if err := rt.Load(); err != nil {
+		return fmt.Errorf("loading restart state: %w", err)
+	}
+	rt.ClearCrashLoop(agentID)
+	return rt.Save()
 }

@@ -8,13 +8,15 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var (
-	namepoolListFlag  bool
-	namepoolThemeFlag string
+	namepoolListFlag     bool
+	namepoolThemeFlag    string
+	namepoolFromFileFlag string
 )
 
 var namepoolCmd = &cobra.Command{
@@ -78,13 +80,43 @@ or remove custom names from the configuration.`,
 	RunE: runNamepoolReset,
 }
 
+var namepoolCreateCmd = &cobra.Command{
+	Use:   "create <name> [names...]",
+	Short: "Create a custom theme",
+	Long: `Create a custom namepool theme stored as a text file.
+
+The theme is saved to <town>/settings/themes/<name>.txt and can be
+used with 'gt namepool set <name>'. Names can be provided as arguments
+or read from a file with --from-file.
+
+Examples:
+  gt namepool create tolkien aragorn legolas gimli gandalf frodo samwise
+  gt namepool create tolkien --from-file ~/tolkien-names.txt`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: runNamepoolCreate,
+}
+
+var namepoolDeleteCmd = &cobra.Command{
+	Use:   "delete <name>",
+	Short: "Delete a custom theme",
+	Long: `Delete a custom namepool theme file.
+
+Built-in themes cannot be deleted. If a rig is currently using the
+theme, a warning is shown but deletion proceeds.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runNamepoolDelete,
+}
+
 func init() {
 	rootCmd.AddCommand(namepoolCmd)
 	namepoolCmd.AddCommand(namepoolThemesCmd)
 	namepoolCmd.AddCommand(namepoolSetCmd)
 	namepoolCmd.AddCommand(namepoolAddCmd)
 	namepoolCmd.AddCommand(namepoolResetCmd)
+	namepoolCmd.AddCommand(namepoolCreateCmd)
+	namepoolCmd.AddCommand(namepoolDeleteCmd)
 	namepoolCmd.Flags().BoolVarP(&namepoolListFlag, "list", "l", false, "List available themes")
+	namepoolCreateCmd.Flags().StringVar(&namepoolFromFileFlag, "from-file", "", "Read names from file instead of arguments")
 }
 
 func runNamepool(cmd *cobra.Command, args []string) error {
@@ -129,9 +161,14 @@ func runNamepool(cmd *cobra.Command, args []string) error {
 
 	// Show pool status
 	fmt.Printf("Rig: %s\n", rigName)
-	fmt.Printf("Theme: %s\n", pool.GetTheme())
+	theme := pool.GetTheme()
+	if polecat.IsBuiltinTheme(theme) {
+		fmt.Printf("Theme: %s (built-in)\n", theme)
+	} else {
+		fmt.Printf("Theme: %s (custom)\n", theme)
+	}
 	fmt.Printf("Polecats: %d\n", pool.ActiveCount())
-	
+
 	activeNames := pool.ActiveNames()
 	if len(activeNames) > 0 {
 		fmt.Printf("In use: %s\n", strings.Join(activeNames, ", "))
@@ -146,32 +183,55 @@ func runNamepool(cmd *cobra.Command, args []string) error {
 }
 
 func runNamepoolThemes(cmd *cobra.Command, args []string) error {
-	themes := polecat.ListThemes()
+	// Find town root for custom theme discovery
+	townRoot, _ := workspace.FindFromCwd()
 
 	if len(args) == 0 {
-		// List all themes
+		// List all themes (built-in + custom)
+		themes := polecat.ListAllThemes(townRoot)
 		fmt.Println("Available themes:")
-		for _, theme := range themes {
-			names, _ := polecat.GetThemeNames(theme)
-			fmt.Printf("\n  %s (%d names):\n", theme, len(names))
-			// Show first 10 names
-			preview := names
-			if len(preview) > 10 {
-				preview = preview[:10]
+		for _, t := range themes {
+			label := ""
+			if t.IsCustom {
+				label = "custom, "
 			}
-			fmt.Printf("    %s...\n", strings.Join(preview, ", "))
+			fmt.Printf("\n  %s (%s%d names):\n", t.Name, label, t.Count)
+			// Show name preview
+			var names []string
+			if t.IsCustom && townRoot != "" {
+				names, _ = polecat.ResolveThemeNames(townRoot, t.Name)
+			} else {
+				names, _ = polecat.GetThemeNames(t.Name)
+			}
+			if len(names) > 0 {
+				preview := names
+				if len(preview) > 10 {
+					preview = preview[:10]
+				}
+				fmt.Printf("    %s...\n", strings.Join(preview, ", "))
+			}
 		}
 		return nil
 	}
 
 	// Show specific theme names
 	theme := args[0]
-	names, err := polecat.GetThemeNames(theme)
+	var names []string
+	var err error
+	if townRoot != "" {
+		names, err = polecat.ResolveThemeNames(townRoot, theme)
+	} else {
+		names, err = polecat.GetThemeNames(theme)
+	}
 	if err != nil {
-		return fmt.Errorf("unknown theme: %s (available: %s)", theme, strings.Join(themes, ", "))
+		return fmt.Errorf("unknown theme: %s (use 'gt namepool themes' to list available themes)", theme)
 	}
 
-	fmt.Printf("Theme: %s (%d names)\n\n", theme, len(names))
+	label := ""
+	if !polecat.IsBuiltinTheme(theme) {
+		label = " (custom)"
+	}
+	fmt.Printf("Theme: %s%s (%d names)\n\n", theme, label, len(names))
 	for i, name := range names {
 		if i > 0 && i%5 == 0 {
 			fmt.Println()
@@ -186,35 +246,33 @@ func runNamepoolThemes(cmd *cobra.Command, args []string) error {
 func runNamepoolSet(cmd *cobra.Command, args []string) error {
 	theme := args[0]
 
-	// Validate theme
-	themes := polecat.ListThemes()
-	valid := false
-	for _, t := range themes {
-		if t == theme {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		return fmt.Errorf("unknown theme: %s (available: %s)", theme, strings.Join(themes, ", "))
-	}
-
 	// Get rig
 	rigName, rigPath := detectCurrentRigWithPath()
 	if rigName == "" {
 		return fmt.Errorf("not in a rig directory")
 	}
 
+	// Find town root for custom theme resolution
+	townRoot, _ := workspace.FindFromCwd()
+
+	// Validate theme: check built-in first, then custom
+	if _, err := polecat.ResolveThemeNames(townRoot, theme); err != nil {
+		return fmt.Errorf("unknown theme: %s (use 'gt namepool themes' to list available themes)", theme)
+	}
+
 	// Update pool
 	pool := polecat.NewNamePool(rigPath, rigName)
+	if townRoot != "" {
+		pool.SetTownRoot(townRoot)
+	}
 	if err := pool.Load(); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("loading pool: %w", err)
 	}
-	
+
 	if err := pool.SetTheme(theme); err != nil {
 		return err
 	}
-	
+
 	if err := pool.Save(); err != nil {
 		return fmt.Errorf("saving pool: %w", err)
 	}
@@ -240,7 +298,12 @@ func runNamepoolSet(cmd *cobra.Command, args []string) error {
 }
 
 func runNamepoolAdd(cmd *cobra.Command, args []string) error {
-	name := args[0]
+	name := strings.ToLower(args[0])
+
+	// Validate name
+	if err := polecat.ValidatePoolName(name); err != nil {
+		return err
+	}
 
 	rigName, rigPath := detectCurrentRigWithPath()
 	if rigName == "" {
@@ -263,7 +326,27 @@ func runNamepoolAdd(cmd *cobra.Command, args []string) error {
 		settings.Namepool = config.DefaultNamepoolConfig()
 	}
 
-	// Check if name already exists
+	// If the rig uses a custom theme (not built-in) and has no per-rig name
+	// overrides, append to the theme file instead of the rig config.
+	// This prevents a single `add` from shadowing the entire custom theme.
+	style := settings.Namepool.Style
+	if style != "" && !polecat.IsBuiltinTheme(style) && len(settings.Namepool.Names) == 0 {
+		townRoot, _ := workspace.FindFromCwd()
+		if townRoot != "" {
+			alreadyExists, err := polecat.AppendToCustomTheme(townRoot, style, name)
+			if err != nil {
+				return fmt.Errorf("appending to custom theme %q: %w", style, err)
+			}
+			if alreadyExists {
+				fmt.Printf("Name '%s' already in theme '%s'\n", name, style)
+			} else {
+				fmt.Printf("Added '%s' to custom theme '%s'\n", name, style)
+			}
+			return nil
+		}
+	}
+
+	// Built-in theme or per-rig override: add to rig config as before
 	for _, n := range settings.Namepool.Names {
 		if n == name {
 			fmt.Printf("Name '%s' already in pool\n", name)
@@ -278,10 +361,6 @@ func runNamepoolAdd(cmd *cobra.Command, args []string) error {
 	if err := config.SaveRigSettings(settingsPath, settings); err != nil {
 		return fmt.Errorf("saving settings: %w", err)
 	}
-
-	// Note: No need to update runtime pool state - the settings file is the source
-	// of truth for custom names. The pool state file only persists OverflowNext/MaxSize.
-	// New managers will load custom names from settings/config.json.
 
 	fmt.Printf("Added '%s' to the name pool\n", name)
 	return nil
@@ -330,11 +409,84 @@ func detectCurrentRigWithPath() (string, string) {
 
 	// Extract first path component (rig name)
 	parts := strings.Split(rel, string(filepath.Separator))
-	if len(parts) > 0 && parts[0] != "." && parts[0] != "mayor" && parts[0] != "deacon" {
+	if len(parts) > 0 && parts[0] != "." && parts[0] != constants.RoleMayor && parts[0] != constants.RoleDeacon {
 		return parts[0], filepath.Join(townRoot, parts[0])
 	}
 
 	return "", ""
+}
+
+func runNamepoolCreate(cmd *cobra.Command, args []string) error {
+	themeName := args[0]
+
+	// Validate theme name
+	if polecat.IsBuiltinTheme(themeName) {
+		return fmt.Errorf("cannot create custom theme %q: conflicts with built-in theme", themeName)
+	}
+	if err := polecat.ValidatePoolName(themeName); err != nil {
+		return fmt.Errorf("invalid theme name: %w", err)
+	}
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return err
+	}
+
+	var names []string
+	if namepoolFromFileFlag != "" {
+		// Read from file
+		names, err = polecat.ParseThemeFile(namepoolFromFileFlag)
+		if err != nil {
+			return fmt.Errorf("reading names from file: %w", err)
+		}
+	} else {
+		// Read from arguments
+		if len(args) < 2 {
+			return fmt.Errorf("provide names as arguments or use --from-file")
+		}
+		for _, name := range args[1:] {
+			name = strings.ToLower(name)
+			if err := polecat.ValidatePoolName(name); err != nil {
+				return err
+			}
+			names = append(names, name)
+		}
+	}
+
+	if err := polecat.SaveCustomTheme(townRoot, themeName, names); err != nil {
+		return err
+	}
+
+	fmt.Printf("Created custom theme '%s' with %d names\n", themeName, len(names))
+	fmt.Printf("Use 'gt namepool set %s' to activate it for a rig.\n", themeName)
+	return nil
+}
+
+func runNamepoolDelete(cmd *cobra.Command, args []string) error {
+	themeName := args[0]
+
+	// Validate theme name to prevent path traversal (e.g., "../../etc/foo")
+	if err := polecat.ValidatePoolName(themeName); err != nil {
+		return fmt.Errorf("invalid theme name: %w", err)
+	}
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return err
+	}
+
+	// Check if any rigs are using this theme and warn
+	if using := polecat.FindRigsUsingTheme(townRoot, themeName); len(using) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: theme '%s' is currently used by: %s\n", themeName, strings.Join(using, ", "))
+		fmt.Fprintf(os.Stderr, "  Those rigs will fall back to the default theme (%s).\n", polecat.DefaultTheme)
+	}
+
+	if err := polecat.DeleteCustomTheme(townRoot, themeName); err != nil {
+		return err
+	}
+
+	fmt.Printf("Deleted custom theme '%s'\n", themeName)
+	return nil
 }
 
 // saveRigNamepoolConfig saves the namepool config to rig settings.

@@ -3,13 +3,19 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
-var patrolReportSummary string
+var (
+	patrolReportSummary string
+	patrolReportSteps   string
+)
 
 var patrolReportCmd = &cobra.Command{
 	Use:   "report",
@@ -22,15 +28,18 @@ This replaces the old squash+new pattern with a single command that:
   2. Creates a new patrol wisp for the next cycle
 
 The summary is stored on the patrol root wisp for audit purposes.
+The --steps flag records which patrol steps were executed vs skipped,
+making shortcutting visible in the ledger.
 
 Examples:
-  gt patrol report --summary "All clear, no issues"
+  gt patrol report --summary "All clear, no issues" --steps "heartbeat:OK,inbox-check:OK,health-scan:OK"
   gt patrol report --summary "Dolt latency elevated, filed escalation"`,
 	RunE: runPatrolReport,
 }
 
 func init() {
 	patrolReportCmd.Flags().StringVar(&patrolReportSummary, "summary", "", "Brief summary of patrol observations (required)")
+	patrolReportCmd.Flags().StringVar(&patrolReportSteps, "steps", "", "Step audit: comma-separated step:STATUS pairs (e.g., heartbeat:OK,inbox-check:OK)")
 	_ = patrolReportCmd.MarkFlagRequired("summary")
 }
 
@@ -49,21 +58,21 @@ func runPatrolReport(cmd *cobra.Command, args []string) error {
 	case RoleDeacon:
 		cfg = PatrolConfig{
 			RoleName:      "deacon",
-			PatrolMolName: "mol-deacon-patrol",
+			PatrolMolName: constants.MolDeaconPatrol,
 			BeadsDir:      roleInfo.TownRoot,
 			Assignee:      "deacon",
 		}
 	case RoleWitness:
 		cfg = PatrolConfig{
 			RoleName:      "witness",
-			PatrolMolName: "mol-witness-patrol",
+			PatrolMolName: constants.MolWitnessPatrol,
 			BeadsDir:      roleInfo.WorkDir,
 			Assignee:      roleInfo.Rig + "/witness",
 		}
 	case RoleRefinery:
 		cfg = PatrolConfig{
 			RoleName:      "refinery",
-			PatrolMolName: "mol-refinery-patrol",
+			PatrolMolName: constants.MolRefineryPatrol,
 			BeadsDir:      roleInfo.WorkDir,
 			Assignee:      roleInfo.Rig + "/refinery",
 			ExtraVars:     buildRefineryPatrolVars(roleInfo),
@@ -84,12 +93,26 @@ func runPatrolReport(cmd *cobra.Command, args []string) error {
 	// Close the current patrol root with the summary
 	b := beads.New(cfg.BeadsDir)
 
-	// Update the description with the patrol summary
-	desc := fmt.Sprintf("Patrol report: %s", patrolReportSummary)
+	// Build step audit checklist
+	stepAudit := buildStepAudit(cfg.PatrolMolName, patrolReportSteps)
+
+	// Update the description with the patrol summary and step audit
+	desc := fmt.Sprintf("Patrol report: %s\n\n%s", patrolReportSummary, stepAudit)
 	if err := b.Update(patrolID, beads.UpdateOptions{
 		Description: &desc,
 	}); err != nil {
 		style.PrintWarning("could not update patrol summary: %v", err)
+	}
+
+	// Print the step audit for visibility
+	fmt.Println(stepAudit)
+
+	// Close all descendant wisps first (recursive), then the patrol root.
+	// Without this, every patrol cycle leaks ~10 orphan wisps into the DB.
+	// If descendants can't be closed, abort so patrol retries next cycle (gt-7lx3).
+	closed, closeDescErr := forceCloseDescendants(b, patrolID)
+	if closeDescErr != nil {
+		return fmt.Errorf("closing descendants of patrol %s (closed %d): %w", patrolID, closed, closeDescErr)
 	}
 
 	// Close the patrol root
@@ -112,4 +135,76 @@ func runPatrolReport(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Started new patrol: %s\n", style.Success.Render("✓"), newPatrolID)
 	return nil
+}
+
+// buildStepAudit builds a step checklist from the formula's steps and the
+// reported step results. Format:
+//
+//	Steps: heartbeat OK | inbox-check OK | orphan-cleanup SKIP | ... (14/25)
+//
+// If stepsFlag is empty, returns a line indicating the audit was not reported.
+func buildStepAudit(formulaName string, stepsFlag string) string {
+	// Load the formula to get the canonical step list
+	content, err := formula.GetEmbeddedFormulaContent(formulaName)
+	if err != nil {
+		if stepsFlag == "" {
+			return "Steps: NOT REPORTED (formula not found)"
+		}
+		// Can't validate without the formula, but still show what was reported
+		return fmt.Sprintf("Steps: %s (unvalidated — formula not found)", stepsFlag)
+	}
+
+	f, err := formula.Parse(content)
+	if err != nil {
+		if stepsFlag == "" {
+			return "Steps: NOT REPORTED (formula parse error)"
+		}
+		return fmt.Sprintf("Steps: %s (unvalidated — formula parse error)", stepsFlag)
+	}
+
+	allStepIDs := f.GetAllIDs()
+	if len(allStepIDs) == 0 {
+		return ""
+	}
+
+	if stepsFlag == "" {
+		return fmt.Sprintf("Steps: NOT REPORTED (?/%d)", len(allStepIDs))
+	}
+
+	// Parse the reported step results
+	reported := parseStepResults(stepsFlag)
+
+	// Build the audit line: map each formula step to its reported status
+	var parts []string
+	okCount := 0
+	for _, stepID := range allStepIDs {
+		status, ok := reported[stepID]
+		if !ok {
+			status = "SKIP"
+		}
+		if status == "OK" {
+			okCount++
+		}
+		parts = append(parts, stepID+" "+status)
+	}
+
+	return fmt.Sprintf("Steps: %s (%d/%d)", strings.Join(parts, " | "), okCount, len(allStepIDs))
+}
+
+// parseStepResults parses a comma-separated string of step:STATUS pairs.
+// Returns a map of step ID to uppercase status.
+// Example input: "heartbeat:OK,inbox-check:OK,orphan-cleanup:SKIP"
+func parseStepResults(stepsFlag string) map[string]string {
+	results := make(map[string]string)
+	for _, entry := range strings.Split(stepsFlag, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		parts := strings.SplitN(entry, ":", 2)
+		if len(parts) == 2 {
+			results[strings.TrimSpace(parts[0])] = strings.ToUpper(strings.TrimSpace(parts[1]))
+		}
+	}
+	return results
 }

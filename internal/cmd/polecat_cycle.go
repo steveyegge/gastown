@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 )
 
@@ -53,7 +54,7 @@ func parsePolecatSessionName(sessionName string) (rigName, polecatName string, o
 	// Mayor/deacon use hq- prefix in practice, but gt-<rig>-mayor/deacon
 	// patterns should still be excluded defensively.
 	switch identity.Name {
-	case "mayor", "deacon":
+	case constants.RoleMayor, constants.RoleDeacon:
 		return "", "", false
 	}
 	return identity.Rig, identity.Name, true

@@ -428,8 +428,8 @@ func requireBd(t *testing.T) {
 
 func setupPatrolTestDB(t *testing.T) (string, *beads.Beads) {
 	t.Helper()
-	testutil.RequireDoltServer(t)
-	port, _ := strconv.Atoi(testutil.DoltTestPort())
+	testutil.RequireDoltContainer(t)
+	port, _ := strconv.Atoi(testutil.DoltContainerPort())
 	tmpDir := t.TempDir()
 	b := beads.NewIsolatedWithPort(tmpDir, port)
 	// Use a unique prefix per test run to avoid cross-run contamination
@@ -447,7 +447,7 @@ func setupPatrolTestDB(t *testing.T) (string, *beads.Beads) {
 	// beads_pt* databases on the shared Dolt server.
 	dbName := "beads_" + prefix
 	t.Cleanup(func() {
-		dsn := fmt.Sprintf("root:@tcp(127.0.0.1:%s)/", testutil.DoltTestPort())
+		dsn := fmt.Sprintf("root:@tcp(127.0.0.1:%s)/", testutil.DoltContainerPort())
 		db, err := sql.Open("mysql", dsn)
 		if err != nil {
 			t.Logf("cleanup: failed to connect to dolt server to drop %s: %v", dbName, err)
@@ -681,5 +681,92 @@ func TestFindActivePatrolMultiple(t *testing.T) {
 	}
 	if issue.Status != beads.StatusHooked {
 		t.Errorf("active patrol status = %q, want %q", issue.Status, beads.StatusHooked)
+	}
+}
+
+func TestBurnPreviousPatrolWisps(t *testing.T) {
+	requireBd(t)
+	tmpDir, b := setupPatrolTestDB(t)
+
+	molName := "mol-test-patrol"
+	assignee := "testrig/witness"
+
+	// Create 3 hooked patrol wisps (simulating accumulated orphans)
+	id1 := createHookedPatrol(t, b, molName, assignee, true)
+	id2 := createHookedPatrol(t, b, molName, assignee, false)
+	id3 := createHookedPatrol(t, b, molName, assignee, true)
+
+	cfg := PatrolConfig{
+		PatrolMolName: molName,
+		BeadsDir:      tmpDir,
+		Assignee:      assignee,
+		Beads:         b,
+	}
+
+	burnPreviousPatrolWisps(cfg)
+
+	// All 3 patrols should now be closed
+	for _, id := range []string{id1, id2, id3} {
+		issue, err := b.Show(id)
+		if err != nil {
+			t.Fatalf("show %s: %v", id, err)
+		}
+		if issue.Status != "closed" {
+			t.Errorf("patrol %s status = %q, want %q after burn", id, issue.Status, "closed")
+		}
+	}
+}
+
+func TestBurnPreviousPatrolWisps_IgnoresOtherBeads(t *testing.T) {
+	requireBd(t)
+	tmpDir, b := setupPatrolTestDB(t)
+
+	molName := "mol-test-patrol"
+	assignee := "testrig/witness"
+
+	// Create a patrol wisp (should be burned)
+	patrolID := createHookedPatrol(t, b, molName, assignee, true)
+
+	// Create a non-patrol hooked bead (should NOT be burned)
+	other, err := b.Create(beads.CreateOptions{
+		Title:    "some-other-work",
+		Priority: -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooked := beads.StatusHooked
+	if err := b.Update(other.ID, beads.UpdateOptions{
+		Status:   &hooked,
+		Assignee: &assignee,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := PatrolConfig{
+		PatrolMolName: molName,
+		BeadsDir:      tmpDir,
+		Assignee:      assignee,
+		Beads:         b,
+	}
+
+	burnPreviousPatrolWisps(cfg)
+
+	// Patrol should be closed
+	issue, err := b.Show(patrolID)
+	if err != nil {
+		t.Fatalf("show patrol: %v", err)
+	}
+	if issue.Status != "closed" {
+		t.Errorf("patrol status = %q, want %q", issue.Status, "closed")
+	}
+
+	// Non-patrol bead should still be hooked
+	otherIssue, err := b.Show(other.ID)
+	if err != nil {
+		t.Fatalf("show other: %v", err)
+	}
+	if otherIssue.Status != beads.StatusHooked {
+		t.Errorf("non-patrol bead status = %q, want %q (should not be burned)", otherIssue.Status, beads.StatusHooked)
 	}
 }

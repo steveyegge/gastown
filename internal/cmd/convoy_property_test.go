@@ -122,7 +122,7 @@ func TestRandomDAG_CyclicHasCycle(t *testing.T) {
 func TestRandomDAG_WavesTerminate(t *testing.T) {
 	for seed := int64(0); seed < 50; seed++ {
 		dag := randomAcyclicDAG(seed, 15, 20)
-		waves, err := computeWaves(dag)
+		waves, _, err := computeWaves(dag)
 		if err != nil {
 			t.Fatalf("seed %d: computeWaves error: %v", seed, err)
 		}
@@ -140,8 +140,8 @@ func TestRandomDAG_Deterministic(t *testing.T) {
 	for seed := int64(0); seed < 20; seed++ {
 		dag1 := randomAcyclicDAG(seed, 10, 15)
 		dag2 := randomAcyclicDAG(seed, 10, 15)
-		waves1, _ := computeWaves(dag1)
-		waves2, _ := computeWaves(dag2)
+		waves1, _, _ := computeWaves(dag1)
+		waves2, _, _ := computeWaves(dag2)
 
 		if len(waves1) != len(waves2) {
 			t.Fatalf("seed %d: different wave counts: %d vs %d", seed, len(waves1), len(waves2))
@@ -184,7 +184,7 @@ func TestProperty_WaveComputationTerminates(t *testing.T) {
 		edges := nodes * 2
 		dag := randomAcyclicDAG(seed, nodes, edges)
 
-		waves, err := computeWaves(dag)
+		waves, _, err := computeWaves(dag)
 		if err != nil {
 			t.Fatalf("REPRODUCE: seed=%d nodes=%d edges=%d — computeWaves error: %v", seed, nodes, edges, err)
 		}
@@ -205,7 +205,7 @@ func TestProperty_EveryTaskInExactlyOneWave(t *testing.T) {
 		edges := nodes * 2
 		dag := randomAcyclicDAG(seed, nodes, edges)
 
-		waves, err := computeWaves(dag)
+		waves, _, err := computeWaves(dag)
 		if err != nil {
 			t.Fatalf("REPRODUCE: seed=%d — computeWaves error: %v", seed, err)
 		}
@@ -260,7 +260,7 @@ func TestProperty_NoTaskBeforeBlocker(t *testing.T) {
 		edges := nodes * 3 // higher edge count for denser graphs
 		dag := randomAcyclicDAG(seed, nodes, edges)
 
-		waves, err := computeWaves(dag)
+		waves, _, err := computeWaves(dag)
 		if err != nil {
 			t.Fatalf("REPRODUCE: seed=%d — computeWaves error: %v", seed, err)
 		}
@@ -349,8 +349,8 @@ func TestProperty_DeterministicWaveAssignment(t *testing.T) {
 		dag1 := randomAcyclicDAG(seed, nodes, edges)
 		dag2 := randomAcyclicDAG(seed, nodes, edges)
 
-		waves1, err1 := computeWaves(dag1)
-		waves2, err2 := computeWaves(dag2)
+		waves1, _, err1 := computeWaves(dag1)
+		waves2, _, err2 := computeWaves(dag2)
 
 		if (err1 == nil) != (err2 == nil) {
 			t.Fatalf("REPRODUCE: seed=%d — error mismatch: %v vs %v", seed, err1, err2)
@@ -393,7 +393,7 @@ func TestProperty_ParentChildDoesNotAffectWaves(t *testing.T) {
 
 		// Generate a base DAG (slingable tasks only, no parent-child).
 		dag1 := randomAcyclicDAG(seed, nodes, edges)
-		waves1, err := computeWaves(dag1)
+		waves1, _, err := computeWaves(dag1)
 		if err != nil {
 			t.Fatalf("REPRODUCE: seed=%d — computeWaves (no parents) error: %v", seed, err)
 		}
@@ -431,7 +431,7 @@ func TestProperty_ParentChildDoesNotAffectWaves(t *testing.T) {
 			}
 		}
 
-		waves2, err := computeWaves(dag2)
+		waves2, _, err := computeWaves(dag2)
 		if err != nil {
 			t.Fatalf("REPRODUCE: seed=%d — computeWaves (with parents) error: %v", seed, err)
 		}

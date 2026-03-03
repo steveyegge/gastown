@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,8 +13,10 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -29,7 +32,7 @@ var ErrUnknownAnnounce = errors.New("unknown announce channel")
 
 // DefaultIdleNotifyTimeout is how long the router waits for a recipient's
 // session to become idle before falling back to a queued nudge.
-const DefaultIdleNotifyTimeout = 1 * time.Second
+const DefaultIdleNotifyTimeout = 3 * time.Second
 
 // Router handles message delivery via beads.
 // It routes messages to the correct beads database based on address:
@@ -217,7 +220,7 @@ func (r *Router) ensureCustomTypes(beadsDir string) error {
 // isTownLevelAddress returns true if the address is for a town-level agent or the overseer.
 func isTownLevelAddress(address string) bool {
 	addr := strings.TrimSuffix(address, "/")
-	return addr == "mayor" || addr == "deacon" || addr == "overseer"
+	return addr == constants.RoleMayor || addr == constants.RoleDeacon || addr == "overseer"
 }
 
 // isGroupAddress returns true if the address is a @group address.
@@ -271,13 +274,13 @@ func parseGroupAddress(address string) *ParsedGroup {
 	case "town":
 		return &ParsedGroup{Type: GroupTypeTown, Original: address}
 	case "witnesses":
-		return &ParsedGroup{Type: GroupTypeRole, RoleType: "witness", Original: address}
+		return &ParsedGroup{Type: GroupTypeRole, RoleType: constants.RoleWitness, Original: address}
 	case "dogs":
 		return &ParsedGroup{Type: GroupTypeRole, RoleType: "dog", Original: address}
 	case "refineries":
-		return &ParsedGroup{Type: GroupTypeRole, RoleType: "refinery", Original: address}
+		return &ParsedGroup{Type: GroupTypeRole, RoleType: constants.RoleRefinery, Original: address}
 	case "deacons":
-		return &ParsedGroup{Type: GroupTypeRole, RoleType: "deacon", Original: address}
+		return &ParsedGroup{Type: GroupTypeRole, RoleType: constants.RoleDeacon, Original: address}
 	}
 
 	// Parse patterns with slashes: @rig/<name>, @crew/<rig>, @polecats/<rig>
@@ -291,10 +294,10 @@ func parseGroupAddress(address string) *ParsedGroup {
 	switch prefix {
 	case "rig":
 		return &ParsedGroup{Type: GroupTypeRig, Rig: qualifier, Original: address}
-	case "crew":
-		return &ParsedGroup{Type: GroupTypeRigRole, RoleType: "crew", Rig: qualifier, Original: address}
+	case constants.RoleCrew:
+		return &ParsedGroup{Type: GroupTypeRigRole, RoleType: constants.RoleCrew, Rig: qualifier, Original: address}
 	case "polecats":
-		return &ParsedGroup{Type: GroupTypeRigRole, RoleType: "polecat", Rig: qualifier, Original: address}
+		return &ParsedGroup{Type: GroupTypeRigRole, RoleType: constants.RolePolecat, Rig: qualifier, Original: address}
 	default:
 		return nil // Unknown group type
 	}
@@ -360,11 +363,11 @@ func agentBeadToAddress(bead *agentBead) string {
 	// Scan from right for known role markers
 	for i := len(parts) - 1; i >= 1; i-- {
 		switch parts[i] {
-		case "witness", "refinery":
+		case constants.RoleWitness, constants.RoleRefinery:
 			// Singleton role: rig is everything before the role
 			rig := strings.Join(parts[:i], "-")
 			return rig + "/" + parts[i]
-		case "crew", "polecat":
+		case constants.RoleCrew, constants.RolePolecat:
 			// Named role: rig is before role, name is after (skip role in address)
 			rig := strings.Join(parts[:i], "-")
 			if i+1 < len(parts) {
@@ -415,7 +418,7 @@ func parseRigAgentAddress(bead *agentBead) string {
 	}
 
 	// For singleton roles (witness, refinery), address is rig/role
-	if roleType == "witness" || roleType == "refinery" {
+	if roleType == constants.RoleWitness || roleType == constants.RoleRefinery {
 		return rig + "/" + roleType
 	}
 
@@ -447,9 +450,9 @@ func parseRigAgentAddress(bead *agentBead) string {
 // Keep role lists in sync with beads.RigLevelRoles and beads.NamedRoles.
 func parseRigAgentAddressFromID(id string) string {
 	// Singleton roles: no name segment allowed
-	singletonRoles := []string{"witness", "refinery"}
+	singletonRoles := []string{constants.RoleWitness, constants.RoleRefinery}
 	// Named roles: require a name segment
-	namedRoles := []string{"crew", "polecat"}
+	namedRoles := []string{constants.RoleCrew, constants.RolePolecat}
 
 	for _, role := range namedRoles {
 		marker := "-" + role + "-"
@@ -789,13 +792,18 @@ func (r *Router) shouldBeWisp(msg *Message) bool {
 	if msg.Wisp {
 		return true
 	}
-	// Auto-detect lifecycle messages by subject prefix
+	// Auto-detect protocol/lifecycle messages by subject prefix
 	subjectLower := strings.ToLower(msg.Subject)
 	wispPrefixes := []string{
 		"polecat_started",
 		"polecat_done",
+		"work_done",
 		"start_work",
 		"nudge",
+		"lifecycle:",
+		"merged",
+		"merge_ready",
+		"merge_failed",
 	}
 	for _, prefix := range wispPrefixes {
 		if strings.HasPrefix(subjectLower, prefix) {
@@ -888,6 +896,23 @@ func (r *Router) validateRecipient(identity string) error {
 		return nil
 	}
 
+	// Well-known town-level singletons always valid
+	switch identity {
+	case "mayor", "mayor/", "deacon", "deacon/":
+		return nil
+	}
+
+	// Well-known rig-level singletons (rig/witness, rig/refinery) always
+	// valid — these agents are ephemeral and may not have an active session,
+	// but mail queues for the next session that starts.
+	parts := strings.SplitN(identity, "/", 3)
+	if len(parts) == 2 {
+		switch parts[1] {
+		case "witness", "refinery":
+			return nil
+		}
+	}
+
 	// Query agents from town-level beads
 	agents := r.queryAgents("")
 
@@ -957,6 +982,11 @@ func (r *Router) validateAgentWorkspace(identity string) bool {
 				return true
 			}
 		}
+	case 3:
+		// Dog addresses: deacon/dogs/<name>
+		if dirExists(filepath.Join(r.townRoot, parts[0], parts[1], parts[2])) {
+			return true
+		}
 	}
 
 	return false
@@ -968,11 +998,68 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
+// resolveCrewShorthand expands "crew/name" or "polecats/name" shorthand addresses
+// to fully-qualified "rig/name" form by scanning the town filesystem.
+//
+// When gt agents displays crew workers, it shows them as "crew/bob" (without rig).
+// This function enables "gt mail send crew/bob" to work by finding the rig.
+//
+// Returns the normalized identity if exactly one rig contains the crew member,
+// or the original identity unchanged if zero or multiple rigs match (to let
+// validation fail with an informative error).
+func (r *Router) resolveCrewShorthand(identity string) string {
+	if r.townRoot == "" {
+		return identity
+	}
+
+	parts := strings.Split(identity, "/")
+	if len(parts) != 2 {
+		return identity
+	}
+
+	roleDir, name := parts[0], parts[1]
+	// Only handle crew and polecats shorthand (not real rig names)
+	if roleDir != constants.RoleCrew && roleDir != "polecats" {
+		return identity
+	}
+
+	// Check if "crew" or "polecats" is actually a real rig directory
+	if fi, err := os.Stat(filepath.Join(r.townRoot, roleDir)); err == nil && fi.IsDir() {
+		// It's a real rig, not a shorthand - let normal validation handle it
+		return identity
+	}
+
+	// Scan rig directories for a crew/polecats member with this name
+	entries, err := os.ReadDir(r.townRoot)
+	if err != nil {
+		return identity
+	}
+
+	var matches []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		rig := entry.Name()
+		agentDir := filepath.Join(r.townRoot, rig, roleDir, name)
+		if fi, err2 := os.Stat(agentDir); err2 == nil && fi.IsDir() {
+			matches = append(matches, rig+"/"+name)
+		}
+	}
+
+	if len(matches) == 1 {
+		return matches[0] // Unambiguous: expand to rig/name
+	}
+
+	return identity // Ambiguous or not found: let validation handle it
+}
+
 // sendToSingle sends a message to a single recipient.
 func (r *Router) sendToSingle(msg *Message) error {
-	// Ensure message has an ID (callers may omit it; bd create doesn't generate one)
+	// Ensure message has an ID for in-memory tracking (notifications, logging).
+	// We no longer pass --id to bd create; bd auto-generates the correct prefix.
 	if msg.ID == "" {
-		msg.ID = generateID()
+		msg.ID = GenerateID()
 	}
 
 	// Validate message before sending
@@ -982,6 +1069,8 @@ func (r *Router) sendToSingle(msg *Message) error {
 
 	// Convert addresses to beads identities
 	toIdentity := AddressToIdentity(msg.To)
+	// Expand crew/polecats shorthand (e.g., "crew/bob" → "pata/bob")
+	toIdentity = r.resolveCrewShorthand(toIdentity)
 
 	// Validate recipient exists
 	if err := r.validateRecipient(toIdentity); err != nil {
@@ -1008,6 +1097,7 @@ func (r *Router) sendToSingle(msg *Message) error {
 	// Build command: bd create --assignee=<recipient> -d <body> --labels=gt:message,... -- <subject>
 	// Flags go first, then -- to end flag parsing, then the positional subject.
 	// This prevents subjects like "--help" from being parsed as flags (see web/api.go).
+	// Let bd auto-generate the ID with the correct database prefix.
 	args := []string{"create",
 		"--assignee", toIdentity,
 		"-d", msg.Body,
@@ -1025,6 +1115,11 @@ func (r *Router) sendToSingle(msg *Message) error {
 	// Add actor for attribution (sender identity)
 	args = append(args, "--actor", msg.From)
 
+	// Do NOT pass --id to bd create. The msg.ID (msg-xxx prefix) is for
+	// in-memory tracking only. bd auto-generates IDs with the correct
+	// database prefix (e.g., hq-wisp-xxx). Passing --id causes prefix
+	// mismatch errors when the msg- prefix does not match the database.
+
 	// Add --ephemeral flag for ephemeral messages (wisps, not synced to git)
 	if r.shouldBeWisp(msg) {
 		args = append(args, "--ephemeral")
@@ -1041,6 +1136,16 @@ func (r *Router) sendToSingle(msg *Message) error {
 	ctx, cancel := bdWriteCtx()
 	defer cancel()
 	_, err := runBdCommand(ctx, args, filepath.Dir(beadsDir), beadsDir)
+	telemetry.RecordMailMessage(context.Background(), "send", telemetry.MailMessageInfo{
+		ID:       msg.ID,
+		From:     msg.From,
+		To:       msg.To,
+		Subject:  msg.Subject,
+		Body:     msg.Body,
+		ThreadID: msg.ThreadID,
+		Priority: string(msg.Priority),
+		MsgType:  string(msg.Type),
+	}, err)
 	if err != nil {
 		return fmt.Errorf("sending message: %w", err)
 	}
@@ -1488,24 +1593,14 @@ func (r *Router) notifyRecipient(msg *Message) error {
 
 		notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
 
-		// Always enqueue mail notifications for cooperative delivery.
-		// Mail is not urgent enough to justify immediate NudgeSession,
-		// which risks a TOCTOU race: WaitForIdle may detect a brief
-		// inter-tool-call idle flash, then NudgeSession's Escape key
-		// disrupts the session that has resumed Cerebrating, leaving
-		// the notification text stuck in the input buffer with Enter
-		// never firing. See: https://github.com/steveyegge/gastown/issues/2032
-		if r.townRoot != "" {
-			return nudge.Enqueue(r.townRoot, sessionID, nudge.QueuedNudge{
-				Sender:  msg.From,
-				Message: notification,
-			})
-		}
-		// Fallback to idle-aware nudge if town root unavailable.
-		// This preserves the original behavior for edge cases where
-		// cooperative delivery isn't possible.
+		// Wait-idle-first delivery: try direct nudge if the agent is idle,
+		// fall back to cooperative queue if busy. The 3s timeout with 200ms
+		// polling (~15 polls) distinguishes a genuine idle prompt (persists
+		// indefinitely) from brief inter-tool-call gaps (~500ms).
+		// See: https://github.com/steveyegge/gastown/issues/2032
 		waitErr := r.tmux.WaitForIdle(sessionID, timeout)
 		if waitErr == nil {
+			// Agent is idle — deliver directly for immediate wakeup.
 			if err := r.tmux.NudgeSession(sessionID, notification); err == nil {
 				return nil
 			} else if errors.Is(err, tmux.ErrSessionNotFound) {
@@ -1513,11 +1608,19 @@ func (r *Router) notifyRecipient(msg *Message) error {
 			} else if errors.Is(err, tmux.ErrNoServer) {
 				return nil
 			}
-		} else if errors.Is(waitErr, tmux.ErrNoServer) {
-			return nil
 		} else if errors.Is(waitErr, tmux.ErrSessionNotFound) {
 			continue
+		} else if errors.Is(waitErr, tmux.ErrNoServer) {
+			return nil
+		} else if r.townRoot != "" {
+			// Timeout (agent busy) — queue for cooperative delivery
+			// at the next turn boundary.
+			return nudge.Enqueue(r.townRoot, sessionID, nudge.QueuedNudge{
+				Sender:  msg.From,
+				Message: notification,
+			})
 		}
+		// No town root available — last resort direct delivery.
 		return r.tmux.NudgeSession(sessionID, notification)
 	}
 
@@ -1558,9 +1661,9 @@ func addressToAgentBeadID(address string) string {
 	switch {
 	case address == "overseer":
 		return "" // Overseer is a human, no agent bead
-	case strings.HasPrefix(address, "mayor"):
+	case strings.HasPrefix(address, constants.RoleMayor):
 		return session.MayorSessionName()
-	case strings.HasPrefix(address, "deacon"):
+	case strings.HasPrefix(address, constants.RoleDeacon):
 		return session.DeaconSessionName()
 	}
 
@@ -1575,9 +1678,9 @@ func addressToAgentBeadID(address string) string {
 	rigPrefix := session.PrefixFor(rig)
 
 	switch {
-	case target == "witness":
+	case target == constants.RoleWitness:
 		return session.WitnessSessionName(rigPrefix)
-	case target == "refinery":
+	case target == constants.RoleRefinery:
 		return session.RefinerySessionName(rigPrefix)
 	case strings.HasPrefix(target, "crew/"):
 		crewName := strings.TrimPrefix(target, "crew/")
@@ -1604,12 +1707,12 @@ func AddressToSessionIDs(address string) []string {
 	}
 
 	// Mayor address: "mayor/" or "mayor"
-	if strings.HasPrefix(address, "mayor") {
+	if strings.HasPrefix(address, constants.RoleMayor) {
 		return []string{session.MayorSessionName()}
 	}
 
 	// Deacon address: "deacon/" or "deacon"
-	if strings.HasPrefix(address, "deacon") {
+	if strings.HasPrefix(address, constants.RoleDeacon) {
 		return []string{session.DeaconSessionName()}
 	}
 
@@ -1635,10 +1738,10 @@ func AddressToSessionIDs(address string) []string {
 	}
 
 	// Special cases that don't need crew variant
-	if target == "witness" {
+	if target == constants.RoleWitness {
 		return []string{session.WitnessSessionName(rigPrefix)}
 	}
-	if target == "refinery" {
+	if target == constants.RoleRefinery {
 		return []string{session.RefinerySessionName(rigPrefix)}
 	}
 

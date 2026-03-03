@@ -205,8 +205,8 @@ func getConvoyInfoForIssue(issueID string) *ConvoyInfo {
 		}
 	}
 
-	// Parse merge strategy from description
-	info.MergeStrategy = parseConvoyMergeStrategy(convoys[0].Description)
+	// Parse merge strategy from description using typed accessor
+	info.MergeStrategy = convoyMergeFromFields(convoys[0].Description)
 
 	return info
 }
@@ -335,10 +335,10 @@ func createBatchConvoy(beadIDs []string, rigName string, owned bool, mergeStrate
 	convoyID := fmt.Sprintf("hq-cv-%s", slingGenerateShortID())
 
 	convoyTitle := fmt.Sprintf("Batch: %d beads to %s", len(beadIDs), rigName)
-	description := fmt.Sprintf("Auto-created convoy tracking %d beads", len(beadIDs))
-	if mergeStrategy != "" {
-		description += fmt.Sprintf("\nMerge: %s", mergeStrategy)
-	}
+	prose := fmt.Sprintf("Auto-created convoy tracking %d beads", len(beadIDs))
+	description := beads.SetConvoyFields(&beads.Issue{Description: prose}, &beads.ConvoyFields{
+		Merge: mergeStrategy,
+	})
 
 	createArgs := []string{
 		"create",
@@ -400,10 +400,10 @@ func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy string
 
 	// Create convoy with title "Work: <issue-title>"
 	convoyTitle := fmt.Sprintf("Work: %s", beadTitle)
-	description := fmt.Sprintf("Auto-created convoy tracking %s", beadID)
-	if mergeStrategy != "" {
-		description += fmt.Sprintf("\nMerge: %s", mergeStrategy)
-	}
+	prose := fmt.Sprintf("Auto-created convoy tracking %s", beadID)
+	description := beads.SetConvoyFields(&beads.Issue{Description: prose}, &beads.ConvoyFields{
+		Merge: mergeStrategy,
+	})
 
 	createArgs := []string{
 		"create",

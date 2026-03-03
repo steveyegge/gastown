@@ -102,10 +102,10 @@ func bdUpdateStatus(beadID, status string) error {
 	return nil
 }
 
-// collectParkedRigsInDAG returns a map of parked rig names to the bead IDs
-// that target them. Only considers slingable nodes. (gt-4owfd.1)
-func collectParkedRigsInDAG(dag *ConvoyDAG, townRoot string) map[string][]string {
-	parkedRigBeads := make(map[string][]string)
+// collectBlockedRigsInDAG returns a map of parked/docked rig names to the
+// bead IDs that target them. Only considers slingable nodes. (gt-4owfd.1)
+func collectBlockedRigsInDAG(dag *ConvoyDAG, townRoot string) map[string][]string {
+	blockedRigBeads := make(map[string][]string)
 	for _, node := range dag.Nodes {
 		if !isSlingableType(node.Type) {
 			continue
@@ -113,32 +113,32 @@ func collectParkedRigsInDAG(dag *ConvoyDAG, townRoot string) map[string][]string
 		if node.Rig == "" {
 			continue
 		}
-		if IsRigParked(townRoot, node.Rig) {
-			parkedRigBeads[node.Rig] = append(parkedRigBeads[node.Rig], node.ID)
+		if blocked, _ := IsRigParkedOrDocked(townRoot, node.Rig); blocked {
+			blockedRigBeads[node.Rig] = append(blockedRigBeads[node.Rig], node.ID)
 		}
 	}
-	return parkedRigBeads
+	return blockedRigBeads
 }
 
-// checkParkedRigsForLaunch checks if any target rigs are parked.
-// Returns an error listing all parked rigs if any are found and force is false.
+// checkBlockedRigsForLaunch checks if any target rigs are parked or docked.
+// Returns an error listing all blocked rigs if any are found and force is false.
 // (gt-4owfd.1)
-func checkParkedRigsForLaunch(dag *ConvoyDAG, townRoot string, force bool) error {
-	parkedRigBeads := collectParkedRigsInDAG(dag, townRoot)
-	if len(parkedRigBeads) == 0 {
+func checkBlockedRigsForLaunch(dag *ConvoyDAG, townRoot string, force bool) error {
+	blockedRigBeads := collectBlockedRigsInDAG(dag, townRoot)
+	if len(blockedRigBeads) == 0 {
 		return nil
 	}
 
-	// Build sorted list of parked rigs for deterministic output
+	// Build sorted list of blocked rigs for deterministic output
 	var rigs []string
-	for rig := range parkedRigBeads {
+	for rig := range blockedRigBeads {
 		rigs = append(rigs, rig)
 	}
 	sort.Strings(rigs)
 
 	if force {
 		// Warn but proceed
-		fmt.Printf("Warning: %d parked rig(s) in convoy: %s\n", len(rigs), strings.Join(rigs, ", "))
+		fmt.Printf("Warning: %d non-operational rig(s) in convoy: %s\n", len(rigs), strings.Join(rigs, ", "))
 		fmt.Printf("  Proceeding with --force (tasks may fail)\n")
 		return nil
 	}
@@ -146,13 +146,13 @@ func checkParkedRigsForLaunch(dag *ConvoyDAG, townRoot string, force bool) error
 	// Build detailed error message
 	var details []string
 	for _, rig := range rigs {
-		beadIDs := parkedRigBeads[rig]
+		beadIDs := blockedRigBeads[rig]
 		sort.Strings(beadIDs)
 		details = append(details, fmt.Sprintf("  %s: %s", rig, strings.Join(beadIDs, ", ")))
 	}
 
-	return fmt.Errorf("cannot launch: %d target rig(s) are parked:\n%s\n\nUnpark with: gt rig unpark %s\nOr use --force to proceed anyway",
-		len(rigs), strings.Join(details, "\n"), strings.Join(rigs, " "))
+	return fmt.Errorf("cannot launch: %d target rig(s) are parked or docked:\n%s\n\nUse 'gt rig unpark' or 'gt rig undock' to restore, or --force to proceed anyway",
+		len(rigs), strings.Join(details, "\n"))
 }
 
 // dispatchWave1 dispatches all tasks in Wave 1 of the computed waves.
@@ -298,7 +298,7 @@ func runConvoyLaunch(cmd *cobra.Command, args []string) error {
 			}
 
 			dag := buildConvoyDAG(beads, deps)
-			waves, err := computeWaves(dag)
+			waves, _, err := computeWaves(dag)
 			if err != nil {
 				return fmt.Errorf("compute waves for dispatch: %w", err)
 			}
@@ -308,8 +308,8 @@ func runConvoyLaunch(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("resolve town root for dispatch: %w", err)
 			}
 
-			// Check for parked rigs before dispatch (gt-4owfd.1)
-			if err := checkParkedRigsForLaunch(dag, townRoot, convoyLaunchForce); err != nil {
+			// Check for parked/docked rigs before dispatch (gt-4owfd.1, #2120)
+			if err := checkBlockedRigsForLaunch(dag, townRoot, convoyLaunchForce); err != nil {
 				return err
 			}
 

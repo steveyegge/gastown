@@ -263,6 +263,146 @@ func TestSetAttachmentFieldsPreservesConvoy(t *testing.T) {
 	}
 }
 
+// --- FormatConvoyFields / SetConvoyFields ---
+
+func TestFormatConvoyFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields *ConvoyFields
+		want   string
+	}{
+		{
+			name:   "nil fields",
+			fields: nil,
+			want:   "",
+		},
+		{
+			name:   "empty fields",
+			fields: &ConvoyFields{},
+			want:   "",
+		},
+		{
+			name:   "all fields",
+			fields: &ConvoyFields{Owner: "mayor/", Notify: "witness/", Merge: "direct", Molecule: "gt-wisp-abc"},
+			want:   "Owner: mayor/\nNotify: witness/\nMerge: direct\nMolecule: gt-wisp-abc",
+		},
+		{
+			name:   "only merge",
+			fields: &ConvoyFields{Merge: "mr"},
+			want:   "Merge: mr",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatConvoyFields(tt.fields)
+			if got != tt.want {
+				t.Errorf("FormatConvoyFields() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetConvoyFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		issue  *Issue
+		fields *ConvoyFields
+		want   string
+	}{
+		{
+			name:   "nil issue",
+			issue:  nil,
+			fields: &ConvoyFields{Owner: "mayor/", Merge: "direct"},
+			want:   "Owner: mayor/\nMerge: direct",
+		},
+		{
+			name:   "preserves prose",
+			issue:  &Issue{Description: "Convoy tracking 3 issues"},
+			fields: &ConvoyFields{Owner: "mayor/", Merge: "mr"},
+			want:   "Convoy tracking 3 issues\nOwner: mayor/\nMerge: mr",
+		},
+		{
+			name:   "replaces existing fields",
+			issue:  &Issue{Description: "Convoy tracking 3 issues\nOwner: old/\nMerge: local"},
+			fields: &ConvoyFields{Owner: "mayor/", Merge: "direct"},
+			want:   "Convoy tracking 3 issues\nOwner: mayor/\nMerge: direct",
+		},
+		{
+			name:   "empty fields removes field lines",
+			issue:  &Issue{Description: "Convoy tracking 3 issues\nOwner: mayor/\nMerge: direct"},
+			fields: &ConvoyFields{},
+			want:   "Convoy tracking 3 issues",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SetConvoyFields(tt.issue, tt.fields)
+			if got != tt.want {
+				t.Errorf("SetConvoyFields() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConvoyFieldsParseFormatRoundTrip(t *testing.T) {
+	original := &ConvoyFields{
+		Owner:    "mayor/",
+		Notify:   "witness/",
+		Merge:    "direct",
+		Molecule: "gt-wisp-abc",
+	}
+	formatted := FormatConvoyFields(original)
+	parsed := ParseConvoyFields(&Issue{Description: formatted})
+	if parsed == nil {
+		t.Fatal("round-trip parse returned nil")
+	}
+	if parsed.Owner != original.Owner {
+		t.Errorf("Owner: got %q, want %q", parsed.Owner, original.Owner)
+	}
+	if parsed.Notify != original.Notify {
+		t.Errorf("Notify: got %q, want %q", parsed.Notify, original.Notify)
+	}
+	if parsed.Merge != original.Merge {
+		t.Errorf("Merge: got %q, want %q", parsed.Merge, original.Merge)
+	}
+	if parsed.Molecule != original.Molecule {
+		t.Errorf("Molecule: got %q, want %q", parsed.Molecule, original.Molecule)
+	}
+}
+
+func TestSetConvoyFieldsWithMixedContent(t *testing.T) {
+	issue := &Issue{Description: "Convoy tracking 3 issues\nOwner: old/\nSome prose line\nMerge: local\nAnother line"}
+	fields := &ConvoyFields{Owner: "new/", Merge: "direct", Molecule: "gt-mol-xyz"}
+	got := SetConvoyFields(issue, fields)
+
+	// Should preserve non-convoy prose
+	if !strings.Contains(got, "Some prose line") {
+		t.Errorf("lost prose line, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Another line") {
+		t.Errorf("lost another line, got:\n%s", got)
+	}
+	// Should have new fields
+	if !strings.Contains(got, "Owner: new/") {
+		t.Errorf("missing new Owner, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Merge: direct") {
+		t.Errorf("missing Merge, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Molecule: gt-mol-xyz") {
+		t.Errorf("missing Molecule, got:\n%s", got)
+	}
+	// Should NOT have old fields
+	if strings.Contains(got, "Owner: old/") {
+		t.Errorf("still has old Owner, got:\n%s", got)
+	}
+	if strings.Contains(got, "Merge: local") {
+		t.Errorf("still has old Merge, got:\n%s", got)
+	}
+}
+
 // --- ParseAgentFields (not covered in beads_test.go) ---
 
 func TestParseAgentFields_AllFields(t *testing.T) {
@@ -288,5 +428,122 @@ func TestParseAgentFields_AllFields(t *testing.T) {
 	}
 	if got.NotificationLevel != "verbose" {
 		t.Errorf("NotificationLevel = %q, want %q", got.NotificationLevel, "verbose")
+	}
+}
+
+// --- Completion metadata fields (gt-x7t9) ---
+
+func TestAgentFieldsCompletionMetadataRoundTrip(t *testing.T) {
+	original := &AgentFields{
+		RoleType:       "polecat",
+		Rig:            "gastown",
+		AgentState:     "done",
+		HookBead:       "gt-abc",
+		ExitType:       "COMPLETED",
+		MRID:           "gt-mr-xyz",
+		Branch:         "polecat/nux/gt-abc@hash",
+		MRFailed:       false,
+		CompletionTime: "2026-02-28T01:00:00Z",
+	}
+
+	formatted := FormatAgentDescription("Polecat nux", original)
+
+	// Verify all completion fields are present
+	if !strings.Contains(formatted, "exit_type: COMPLETED") {
+		t.Errorf("missing exit_type in formatted output:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "mr_id: gt-mr-xyz") {
+		t.Errorf("missing mr_id in formatted output:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "branch: polecat/nux/gt-abc@hash") {
+		t.Errorf("missing branch in formatted output:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "completion_time: 2026-02-28T01:00:00Z") {
+		t.Errorf("missing completion_time in formatted output:\n%s", formatted)
+	}
+	// mr_failed=false should NOT appear
+	if strings.Contains(formatted, "mr_failed") {
+		t.Errorf("mr_failed should not appear when false:\n%s", formatted)
+	}
+
+	// Parse and verify round-trip
+	parsed := ParseAgentFields(formatted)
+	if parsed.ExitType != "COMPLETED" {
+		t.Errorf("ExitType: got %q, want %q", parsed.ExitType, "COMPLETED")
+	}
+	if parsed.MRID != "gt-mr-xyz" {
+		t.Errorf("MRID: got %q, want %q", parsed.MRID, "gt-mr-xyz")
+	}
+	if parsed.Branch != "polecat/nux/gt-abc@hash" {
+		t.Errorf("Branch: got %q, want %q", parsed.Branch, "polecat/nux/gt-abc@hash")
+	}
+	if parsed.MRFailed != false {
+		t.Errorf("MRFailed: got %v, want false", parsed.MRFailed)
+	}
+	if parsed.CompletionTime != "2026-02-28T01:00:00Z" {
+		t.Errorf("CompletionTime: got %q, want %q", parsed.CompletionTime, "2026-02-28T01:00:00Z")
+	}
+	// Verify non-completion fields survive
+	if parsed.RoleType != "polecat" {
+		t.Errorf("RoleType: got %q, want %q", parsed.RoleType, "polecat")
+	}
+	if parsed.HookBead != "gt-abc" {
+		t.Errorf("HookBead: got %q, want %q", parsed.HookBead, "gt-abc")
+	}
+}
+
+func TestAgentFieldsMRFailedTrue(t *testing.T) {
+	fields := &AgentFields{
+		RoleType:   "polecat",
+		Rig:        "gastown",
+		AgentState: "done",
+		ExitType:   "COMPLETED",
+		MRFailed:   true,
+	}
+
+	formatted := FormatAgentDescription("Polecat nux", fields)
+	if !strings.Contains(formatted, "mr_failed: true") {
+		t.Errorf("missing mr_failed: true in formatted output:\n%s", formatted)
+	}
+
+	parsed := ParseAgentFields(formatted)
+	if !parsed.MRFailed {
+		t.Errorf("MRFailed: got false, want true")
+	}
+}
+
+func TestAgentFieldsCompletionOmittedWhenEmpty(t *testing.T) {
+	fields := &AgentFields{
+		RoleType:   "polecat",
+		Rig:        "gastown",
+		AgentState: "working",
+		// All completion fields intentionally empty
+	}
+
+	formatted := FormatAgentDescription("Polecat nux", fields)
+	for _, keyword := range []string{"exit_type:", "mr_id:", "branch:", "mr_failed:", "completion_time:"} {
+		if strings.Contains(formatted, keyword) {
+			t.Errorf("empty completion field %q should not appear in output:\n%s", keyword, formatted)
+		}
+	}
+}
+
+func TestParseAgentFields_WithCompletionMetadata(t *testing.T) {
+	desc := "role_type: polecat\nrig: gastown\nagent_state: done\nhook_bead: gt-abc\nexit_type: ESCALATED\nbranch: polecat/nux/gt-abc@hash\nmr_failed: true\ncompletion_time: 2026-02-28T02:00:00Z"
+	got := ParseAgentFields(desc)
+	if got.ExitType != "ESCALATED" {
+		t.Errorf("ExitType = %q, want %q", got.ExitType, "ESCALATED")
+	}
+	if got.Branch != "polecat/nux/gt-abc@hash" {
+		t.Errorf("Branch = %q, want %q", got.Branch, "polecat/nux/gt-abc@hash")
+	}
+	if !got.MRFailed {
+		t.Errorf("MRFailed = false, want true")
+	}
+	if got.CompletionTime != "2026-02-28T02:00:00Z" {
+		t.Errorf("CompletionTime = %q, want %q", got.CompletionTime, "2026-02-28T02:00:00Z")
+	}
+	if got.MRID != "" {
+		t.Errorf("MRID = %q, want empty (not in desc)", got.MRID)
 	}
 }

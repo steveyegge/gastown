@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -103,11 +104,11 @@ func (s AgentState) Label() string {
 	}
 }
 
-// GUPP threshold constants
-const (
-	GUPPViolationMinutes    = 30
-	StalledThresholdMinutes = 15
-)
+// GUPP threshold constants.
+// GUPPViolationMinutes derives from the canonical constants.GUPPViolationTimeout.
+var GUPPViolationMinutes = int(constants.GUPPViolationTimeout.Minutes())
+
+const StalledThresholdMinutes = 15
 
 // ProblemAgent represents an agent that needs attention.
 type ProblemAgent struct {
@@ -285,17 +286,17 @@ func isRalphMode(issue *beads.Issue) bool {
 // not a rig name (e.g. "gastown"). Use session.PrefixFor(rig) to convert.
 func deriveSessionName(rig, role, name string) string {
 	switch role {
-	case "mayor":
+	case constants.RoleMayor:
 		return session.MayorSessionName()
-	case "deacon":
+	case constants.RoleDeacon:
 		return session.DeaconSessionName()
-	case "witness":
+	case constants.RoleWitness:
 		return session.WitnessSessionName(session.PrefixFor(rig))
-	case "refinery":
+	case constants.RoleRefinery:
 		return session.RefinerySessionName(session.PrefixFor(rig))
-	case "crew":
+	case constants.RoleCrew:
 		return session.CrewSessionName(session.PrefixFor(rig), name)
-	case "polecat":
+	case constants.RolePolecat:
 		return session.PolecatSessionName(session.PrefixFor(rig), name)
 	default:
 		// Fallback: construct from components

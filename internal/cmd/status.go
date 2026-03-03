@@ -37,10 +37,11 @@ var statusInterval int
 var statusVerbose bool
 
 var statusCmd = &cobra.Command{
-	Use:     "status",
-	Aliases: []string{"stat"},
-	GroupID: GroupDiag,
-	Short:   "Show overall town status",
+	Use:         "status",
+	Aliases:     []string{"stat"},
+	GroupID:     GroupDiag,
+	Annotations: map[string]string{AnnotationPolecatSafe: "true"},
+	Short:       "Show overall town status",
 	Long: `Display the current status of the Gas Town workspace.
 
 Shows town name, registered rigs, polecats, and witness status.
@@ -91,10 +92,11 @@ type DoltInfo struct {
 
 // TmuxInfo represents the tmux server status.
 type TmuxInfo struct {
-	Socket       string `json:"socket"`                  // Socket name (e.g., "mytown" or "default")
-	SocketPath   string `json:"socket_path,omitempty"`   // Full socket path
-	Running      bool   `json:"running"`                 // Is the tmux server running?
-	SessionCount int    `json:"session_count"`            // Number of sessions
+	Socket       string `json:"socket"`                // Socket name derived from town name (e.g., "gt-test")
+	SocketPath   string `json:"socket_path,omitempty"` // Full socket path (e.g., /tmp/tmux-501/gt-test)
+	Running      bool   `json:"running"`               // Is the tmux server running?
+	PID          int    `json:"pid,omitempty"`         // PID of the tmux server process
+	SessionCount int    `json:"session_count"`         // Number of sessions
 }
 
 // OverseerInfo represents the human operator's identity and status.
@@ -173,9 +175,9 @@ func resolveAgentDisplay(townSettings *config.TownSettings, role string, session
 	configRole := role
 	switch role {
 	case "coordinator":
-		configRole = "mayor"
+		configRole = constants.RoleMayor
 	case "health-check":
-		configRole = "deacon"
+		configRole = constants.RoleDeacon
 	}
 
 	// Get alias from config
@@ -783,10 +785,19 @@ func gatherStatus() (TownStatus, error) {
 		status.Dolt = &DoltInfo{Remote: true, Port: doltCfg.Port}
 	} else {
 		doltRunning, doltPid, _ := doltserver.IsRunning(townRoot)
+		port := doltCfg.Port
+		if doltRunning {
+			// Read the actual port from state — doltCfg.Port comes from
+			// DefaultConfig which reads GT_DOLT_PORT from the shell env,
+			// but gt status is typically run without that env var set.
+			if state, err := doltserver.LoadState(townRoot); err == nil && state.Port > 0 {
+				port = state.Port
+			}
+		}
 		doltInfo := &DoltInfo{
 			Running: doltRunning,
 			PID:     doltPid,
-			Port:    doltCfg.Port,
+			Port:    port,
 			DataDir: doltCfg.DataDir,
 		}
 		// Check if port is held by another town's Dolt
@@ -814,6 +825,7 @@ func gatherStatus() (TownStatus, error) {
 	tmuxInfo.SocketPath = filepath.Join(tmux.SocketDir(), socketLabel)
 	if _, err := os.Stat(tmuxInfo.SocketPath); err == nil {
 		tmuxInfo.Running = true
+		tmuxInfo.PID = tmux.NewTmux().ServerPID()
 	}
 	status.Tmux = tmuxInfo
 
@@ -954,7 +966,11 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 			if status.Dolt.Remote {
 				parts = append(parts, fmt.Sprintf("dolt %s", style.Dim.Render(fmt.Sprintf("(remote :%d)", status.Dolt.Port))))
 			} else if status.Dolt.Running {
-				parts = append(parts, fmt.Sprintf("dolt %s", style.Dim.Render(fmt.Sprintf("(PID %d, :%d)", status.Dolt.PID, status.Dolt.Port))))
+				dataDir := status.Dolt.DataDir
+				if home, err := os.UserHomeDir(); err == nil {
+					dataDir = strings.Replace(dataDir, home, "~", 1)
+				}
+				parts = append(parts, fmt.Sprintf("dolt %s", style.Dim.Render(fmt.Sprintf("(PID %d, :%d, %s)", status.Dolt.PID, status.Dolt.Port, dataDir))))
 			} else if status.Dolt.PortConflict {
 				parts = append(parts, fmt.Sprintf("dolt %s", style.Bold.Render(fmt.Sprintf("(stopped, :%d ⚠ port used by %s)", status.Dolt.Port, status.Dolt.ConflictOwner))))
 			} else {
@@ -963,7 +979,7 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 		}
 		if status.Tmux != nil {
 			if status.Tmux.Running {
-				parts = append(parts, fmt.Sprintf("tmux %s", style.Dim.Render(fmt.Sprintf("(-L %s, %d sessions)", status.Tmux.Socket, status.Tmux.SessionCount))))
+				parts = append(parts, fmt.Sprintf("tmux %s", style.Dim.Render(fmt.Sprintf("(-L %s, PID %d, %d sessions, %s)", status.Tmux.Socket, status.Tmux.PID, status.Tmux.SessionCount, status.Tmux.SocketPath))))
 			} else {
 				parts = append(parts, fmt.Sprintf("tmux %s", style.Dim.Render(fmt.Sprintf("(-L %s, no server)", status.Tmux.Socket))))
 			}
@@ -1018,13 +1034,13 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 		var witnesses, refineries, crews, polecats []AgentRuntime
 		for _, agent := range r.Agents {
 			switch agent.Role {
-			case "witness":
+			case constants.RoleWitness:
 				witnesses = append(witnesses, agent)
-			case "refinery":
+			case constants.RoleRefinery:
 				refineries = append(refineries, agent)
-			case "crew":
+			case constants.RoleCrew:
 				crews = append(crews, agent)
-			case "polecat":
+			case constants.RolePolecat:
 				polecats = append(polecats, agent)
 			}
 		}
@@ -1032,14 +1048,14 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 		// Witness
 		if len(witnesses) > 0 {
 			if statusVerbose {
-				fmt.Fprintf(w, "%s %s\n", roleIcons["witness"], style.Bold.Render("Witness"))
+				fmt.Fprintf(w, "%s %s\n", roleIcons[constants.RoleWitness], style.Bold.Render("Witness"))
 				for _, agent := range witnesses {
 					renderAgentDetails(w, agent, "   ", r.Hooks, status.Location)
 				}
 				fmt.Fprintln(w)
 			} else {
 				for _, agent := range witnesses {
-					renderAgentCompact(w, agent, roleIcons["witness"]+" ", r.Hooks, status.Location)
+					renderAgentCompact(w, agent, roleIcons[constants.RoleWitness]+" ", r.Hooks, status.Location)
 				}
 			}
 		}
@@ -1047,7 +1063,7 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 		// Refinery
 		if len(refineries) > 0 {
 			if statusVerbose {
-				fmt.Fprintf(w, "%s %s\n", roleIcons["refinery"], style.Bold.Render("Refinery"))
+				fmt.Fprintf(w, "%s %s\n", roleIcons[constants.RoleRefinery], style.Bold.Render("Refinery"))
 				for _, agent := range refineries {
 					renderAgentDetails(w, agent, "   ", r.Hooks, status.Location)
 				}
@@ -1069,7 +1085,7 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 							mqSuffix = "  " + mqStr
 						}
 					}
-					renderAgentCompactWithSuffix(w, agent, roleIcons["refinery"]+" ", r.Hooks, status.Location, mqSuffix)
+					renderAgentCompactWithSuffix(w, agent, roleIcons[constants.RoleRefinery]+" ", r.Hooks, status.Location, mqSuffix)
 				}
 			}
 		}
@@ -1077,13 +1093,13 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 		// Crew
 		if len(crews) > 0 {
 			if statusVerbose {
-				fmt.Fprintf(w, "%s %s (%d)\n", roleIcons["crew"], style.Bold.Render("Crew"), len(crews))
+				fmt.Fprintf(w, "%s %s (%d)\n", roleIcons[constants.RoleCrew], style.Bold.Render("Crew"), len(crews))
 				for _, agent := range crews {
 					renderAgentDetails(w, agent, "   ", r.Hooks, status.Location)
 				}
 				fmt.Fprintln(w)
 			} else {
-				fmt.Fprintf(w, "%s %s (%d)\n", roleIcons["crew"], style.Bold.Render("Crew"), len(crews))
+				fmt.Fprintf(w, "%s %s (%d)\n", roleIcons[constants.RoleCrew], style.Bold.Render("Crew"), len(crews))
 				for _, agent := range crews {
 					renderAgentCompact(w, agent, "   ", r.Hooks, status.Location)
 				}
@@ -1093,13 +1109,13 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 		// Polecats
 		if len(polecats) > 0 {
 			if statusVerbose {
-				fmt.Fprintf(w, "%s %s (%d)\n", roleIcons["polecat"], style.Bold.Render("Polecats"), len(polecats))
+				fmt.Fprintf(w, "%s %s (%d)\n", roleIcons[constants.RolePolecat], style.Bold.Render("Polecats"), len(polecats))
 				for _, agent := range polecats {
 					renderAgentDetails(w, agent, "   ", r.Hooks, status.Location)
 				}
 				fmt.Fprintln(w)
 			} else {
-				fmt.Fprintf(w, "%s %s (%d)\n", roleIcons["polecat"], style.Bold.Render("Polecats"), len(polecats))
+				fmt.Fprintf(w, "%s %s (%d)\n", roleIcons[constants.RolePolecat], style.Bold.Render("Polecats"), len(polecats))
 				for _, agent := range polecats {
 					renderAgentCompact(w, agent, "   ", r.Hooks, status.Location)
 				}
@@ -1161,11 +1177,11 @@ func renderAgentDetails(w io.Writer, agent AgentRuntime, indent string, hooks []
 		} else if len(parts) >= 2 {
 			rig := parts[0]
 			prefix := beads.GetPrefixForRig(townRoot, rig)
-			if parts[1] == "crew" && len(parts) >= 3 {
+			if parts[1] == constants.RoleCrew && len(parts) >= 3 {
 				agentBeadID = beads.CrewBeadIDWithPrefix(prefix, rig, parts[2])
-			} else if parts[1] == "witness" {
+			} else if parts[1] == constants.RoleWitness {
 				agentBeadID = beads.WitnessBeadIDWithPrefix(prefix, rig)
-			} else if parts[1] == "refinery" {
+			} else if parts[1] == constants.RoleRefinery {
 				agentBeadID = beads.RefineryBeadIDWithPrefix(prefix, rig)
 			} else if len(parts) == 2 {
 				// polecat: rig/name
@@ -1433,25 +1449,25 @@ func discoverRigHooks(r *rig.Rig, crews []string) []AgentHookInfo {
 
 	// Check polecats
 	for _, name := range r.Polecats {
-		hook := getAgentHook(b, name, r.Name+"/"+name, "polecat")
+		hook := getAgentHook(b, name, r.Name+"/"+name, constants.RolePolecat)
 		hooks = append(hooks, hook)
 	}
 
 	// Check crew workers
 	for _, name := range crews {
-		hook := getAgentHook(b, name, r.Name+"/crew/"+name, "crew")
+		hook := getAgentHook(b, name, r.Name+"/crew/"+name, constants.RoleCrew)
 		hooks = append(hooks, hook)
 	}
 
 	// Check witness
 	if r.HasWitness {
-		hook := getAgentHook(b, "witness", r.Name+"/witness", "witness")
+		hook := getAgentHook(b, constants.RoleWitness, r.Name+"/witness", constants.RoleWitness)
 		hooks = append(hooks, hook)
 	}
 
 	// Check refinery
 	if r.HasRefinery {
-		hook := getAgentHook(b, "refinery", r.Name+"/refinery", "refinery")
+		hook := getAgentHook(b, constants.RoleRefinery, r.Name+"/refinery", constants.RoleRefinery)
 		hooks = append(hooks, hook)
 	}
 
@@ -1477,8 +1493,8 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 		role    string
 		beadID  string
 	}{
-		{"mayor", "mayor/", mayorSession, "coordinator", beads.MayorBeadIDTown()},
-		{"deacon", "deacon/", deaconSession, "health-check", beads.DeaconBeadIDTown()},
+		{constants.RoleMayor, constants.RoleMayor + "/", mayorSession, "coordinator", beads.MayorBeadIDTown()},
+		{constants.RoleDeacon, constants.RoleDeacon + "/", deaconSession, "health-check", beads.DeaconBeadIDTown()},
 	}
 
 	agents := make([]AgentRuntime, len(agentDefs))
@@ -1581,10 +1597,10 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 	// Witness
 	if r.HasWitness {
 		defs = append(defs, agentDef{
-			name:    "witness",
+			name:    constants.RoleWitness,
 			address: r.Name + "/witness",
 			session: witnessSessionName(r.Name),
-			role:    "witness",
+			role:    constants.RoleWitness,
 			beadID:  beads.WitnessBeadIDWithPrefix(prefix, r.Name),
 		})
 	}
@@ -1592,10 +1608,10 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 	// Refinery
 	if r.HasRefinery {
 		defs = append(defs, agentDef{
-			name:    "refinery",
+			name:    constants.RoleRefinery,
 			address: r.Name + "/refinery",
 			session: session.RefinerySessionName(session.PrefixFor(r.Name)),
-			role:    "refinery",
+			role:    constants.RoleRefinery,
 			beadID:  beads.RefineryBeadIDWithPrefix(prefix, r.Name),
 		})
 	}
@@ -1606,7 +1622,7 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 			name:    name,
 			address: r.Name + "/" + name,
 			session: session.PolecatSessionName(session.PrefixFor(r.Name), name),
-			role:    "polecat",
+			role:    constants.RolePolecat,
 			beadID:  beads.PolecatBeadIDWithPrefix(prefix, r.Name, name),
 		})
 	}
@@ -1617,7 +1633,7 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 			name:    name,
 			address: r.Name + "/crew/" + name,
 			session: crewSessionName(r.Name, name),
-			role:    "crew",
+			role:    constants.RoleCrew,
 			beadID:  beads.CrewBeadIDWithPrefix(prefix, r.Name, name),
 		})
 	}

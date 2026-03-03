@@ -735,6 +735,100 @@ func TestConfigSetGet(t *testing.T) {
 	})
 }
 
+func TestConfigMaintenanceSetGet(t *testing.T) {
+	t.Run("set and get maintenance.window", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Set maintenance window
+		err := setMaintenanceConfig(townRoot, "maintenance.window", "03:00")
+		if err != nil {
+			t.Fatalf("setMaintenanceConfig failed: %v", err)
+		}
+
+		// Get it back
+		err = getMaintenanceConfig(townRoot, "maintenance.window")
+		if err != nil {
+			t.Fatalf("getMaintenanceConfig failed: %v", err)
+		}
+	})
+
+	t.Run("set maintenance.window validates format", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		// Valid windows
+		for _, w := range []string{"03:00", "00:00", "23:59", "12:30"} {
+			if err := setMaintenanceConfig(townRoot, "maintenance.window", w); err != nil {
+				t.Errorf("setMaintenanceConfig(%q) unexpected error: %v", w, err)
+			}
+		}
+
+		// Invalid windows
+		for _, w := range []string{"25:00", "12:60", "abc", "12", ""} {
+			if err := setMaintenanceConfig(townRoot, "maintenance.window", w); err == nil {
+				t.Errorf("setMaintenanceConfig(%q) expected error", w)
+			}
+		}
+	})
+
+	t.Run("set and get maintenance.interval", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		for _, interval := range []string{"daily", "weekly", "monthly", "48h"} {
+			if err := setMaintenanceConfig(townRoot, "maintenance.interval", interval); err != nil {
+				t.Errorf("setMaintenanceConfig(interval=%q) unexpected error: %v", interval, err)
+			}
+		}
+
+		// Invalid interval
+		if err := setMaintenanceConfig(townRoot, "maintenance.interval", "whenever"); err == nil {
+			t.Error("expected error for invalid interval 'whenever'")
+		}
+	})
+
+	t.Run("set and get maintenance.threshold", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		if err := setMaintenanceConfig(townRoot, "maintenance.threshold", "500"); err != nil {
+			t.Fatalf("setMaintenanceConfig(threshold=500) failed: %v", err)
+		}
+
+		// Invalid thresholds
+		if err := setMaintenanceConfig(townRoot, "maintenance.threshold", "0"); err == nil {
+			t.Error("expected error for threshold 0")
+		}
+		if err := setMaintenanceConfig(townRoot, "maintenance.threshold", "abc"); err == nil {
+			t.Error("expected error for non-numeric threshold")
+		}
+	})
+
+	t.Run("maintenance config routes through runConfigSet", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		cmd := &cobra.Command{}
+		err := runConfigSet(cmd, []string{"maintenance.window", "04:00"})
+		if err != nil {
+			t.Fatalf("runConfigSet(maintenance.window) failed: %v", err)
+		}
+
+		err = runConfigGet(cmd, []string{"maintenance.window"})
+		if err != nil {
+			t.Fatalf("runConfigGet(maintenance.window) failed: %v", err)
+		}
+	})
+}
+
 func TestParseBool(t *testing.T) {
 	tests := []struct {
 		input string

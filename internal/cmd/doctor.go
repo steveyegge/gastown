@@ -84,6 +84,12 @@ Routing checks (fixable):
   - prefix-mismatch          Detect rigs.json vs routes.jsonl prefix mismatches (fixable)
   - database-prefix          Detect database vs routes.jsonl prefix mismatches (fixable)
 
+Lifecycle checks (fixable):
+  - lifecycle-defaults          Ensure daemon.json has all lifecycle patrol entries (fixable)
+
+Migration checks:
+  - town-claude-md           Check town-root CLAUDE.md matches embedded version (fixable)
+
 Session hook checks:
   - session-hooks            Check settings.json use session-start.sh
   - claude-settings          Check Claude settings.json match templates (fixable)
@@ -165,9 +171,11 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// start with missing PATH exports. See gt-99u.
 	d.Register(doctor.NewClaudeSettingsCheck())
 	d.Register(doctor.NewDaemonCheck())
+	d.Register(doctor.NewTmuxGlobalEnvCheck())
 	d.Register(doctor.NewBootHealthCheck())
 	d.Register(doctor.NewTownBeadsConfigCheck())
 	d.Register(doctor.NewCustomTypesCheck())
+	d.Register(doctor.NewCustomStatusesCheck())
 	d.Register(doctor.NewRoleLabelCheck())
 	d.Register(doctor.NewFormulaCheck())
 	d.Register(doctor.NewPrefixConflictCheck())
@@ -223,6 +231,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// Priming subsystem check
 	d.Register(doctor.NewPrimingCheck())
 
+	// Town-root CLAUDE.md version check (migration check for behavioral norms)
+	d.Register(doctor.NewTownCLAUDEmdCheck())
+
 	// Crew workspace checks
 	d.Register(doctor.NewCrewStateCheck())
 	d.Register(doctor.NewCrewWorktreeCheck())
@@ -230,6 +241,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Lifecycle hygiene checks
 	d.Register(doctor.NewLifecycleHygieneCheck())
+	d.Register(doctor.NewLifecycleDefaultsCheck())
 
 	// Hook attachment checks
 	d.Register(doctor.NewHookAttachmentValidCheck())

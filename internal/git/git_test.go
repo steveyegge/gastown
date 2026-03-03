@@ -265,6 +265,39 @@ func TestCheckout(t *testing.T) {
 	}
 }
 
+func TestCheckoutNewBranch(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// Get current HEAD ref
+	head, err := g.run("rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+
+	// Create and checkout a new branch from HEAD
+	if err := g.CheckoutNewBranch("feature-new", strings.TrimSpace(head)); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+
+	branch, _ := g.CurrentBranch()
+	if branch != "feature-new" {
+		t.Errorf("branch = %q, want feature-new", branch)
+	}
+
+	// Verify it fails if branch already exists
+	if err := g.Checkout("main"); err != nil {
+		// Try master for older git
+		if err := g.Checkout("master"); err != nil {
+			t.Fatalf("Checkout main/master: %v", err)
+		}
+	}
+	err = g.CheckoutNewBranch("feature-new", "HEAD")
+	if err == nil {
+		t.Error("expected error creating duplicate branch, got nil")
+	}
+}
+
 func TestNotARepo(t *testing.T) {
 	dir := t.TempDir() // Empty dir, not a git repo
 	g := NewGit(dir)

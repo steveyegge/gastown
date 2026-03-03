@@ -27,7 +27,6 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -151,6 +150,15 @@ func runUp(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Ensure lifecycle defaults are configured. On first run this creates
+	// mayor/daemon.json with sensible defaults for the six-stage Dolt lifecycle.
+	// On subsequent runs it fills in any newly added patrols without touching
+	// existing config. Errors are non-fatal — the town can run without lifecycle
+	// automation, it just won't have automated maintenance.
+	if err := daemon.EnsureLifecycleConfigFile(townRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not configure lifecycle defaults: %v\n", err)
 	}
 
 	// Load daemon.json env vars so services (Dolt, etc.) use the right config.
@@ -364,12 +372,6 @@ func runUp(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
-
-	// Ensure keybindings (prefix+g, prefix+a) work on all tmux sockets.
-	// Agent sessions live on the town socket (e.g., -L gt), but the user may be
-	// attached to the default socket. Without this, prefix+g only works on the
-	// town socket where gt prime set it during session decoration.
-	ensureCrossSocketBindings()
 
 	// Log boot event for both JSON and text paths
 	if allOK {
@@ -603,12 +605,15 @@ func startRigAgentsWithPrefetch(rigNames []string, prefetchedRigs map[string]*ri
 func upStartWitness(rigName string, r *rig.Rig) agentStartResult {
 	name := "Witness (" + rigName + ")"
 
-	// Check if rig is parked or docked
-	townRoot := filepath.Dir(r.Path)
-	cfg := wisp.NewConfig(townRoot, rigName)
-	status := cfg.GetString("status")
-	if status == "parked" || status == "docked" {
-		return agentStartResult{name: name, ok: true, detail: fmt.Sprintf("skipped (rig %s)", status)}
+	// Check if rig is parked or docked (wisp + bead labels).
+	// Skip the check if auto_start_on_up is set — that overrides dock status.
+	// Also check deprecated auto_start_on_boot for backwards compatibility with
+	// rigs that still have the old key in their config.
+	if !r.GetBoolConfig("auto_start_on_up") && !r.GetBoolConfig("auto_start_on_boot") {
+		townRoot := filepath.Dir(r.Path)
+		if blocked, reason := IsRigParkedOrDocked(townRoot, rigName); blocked {
+			return agentStartResult{name: name, ok: true, detail: fmt.Sprintf("skipped (rig %s)", reason)}
+		}
 	}
 
 	mgr := witness.NewManager(r)
@@ -626,12 +631,15 @@ func upStartWitness(rigName string, r *rig.Rig) agentStartResult {
 func upStartRefinery(rigName string, r *rig.Rig) agentStartResult {
 	name := "Refinery (" + rigName + ")"
 
-	// Check if rig is parked or docked
-	townRoot := filepath.Dir(r.Path)
-	cfg := wisp.NewConfig(townRoot, rigName)
-	status := cfg.GetString("status")
-	if status == "parked" || status == "docked" {
-		return agentStartResult{name: name, ok: true, detail: fmt.Sprintf("skipped (rig %s)", status)}
+	// Check if rig is parked or docked (wisp + bead labels).
+	// Skip the check if auto_start_on_up is set — that overrides dock status.
+	// Also check deprecated auto_start_on_boot for backwards compatibility with
+	// rigs that still have the old key in their config.
+	if !r.GetBoolConfig("auto_start_on_up") && !r.GetBoolConfig("auto_start_on_boot") {
+		townRoot := filepath.Dir(r.Path)
+		if blocked, reason := IsRigParkedOrDocked(townRoot, rigName); blocked {
+			return agentStartResult{name: name, ok: true, detail: fmt.Sprintf("skipped (rig %s)", reason)}
+		}
 	}
 
 	mgr := refinery.NewManager(r)
@@ -881,26 +889,6 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 	return started, errors
 }
 
-// ensureCrossSocketBindings sets GT keybindings on tmux sockets other than the
-// town socket. This allows prefix+g (agent menu) and prefix+a (feed) to work
-// when the user is attached to the default tmux server.
-//
-// The town socket's bindings are set by gt prime (during session decoration).
-// This function handles all other running tmux servers.
-func ensureCrossSocketBindings() {
-	townSocket := tmux.GetDefaultSocket()
-	if townSocket == "" {
-		return // no multi-socket isolation
-	}
-
-	// Always ensure bindings on the "default" socket since that's where
-	// users typically have their interactive terminal sessions.
-	// EnsureBindingsOnSocket is idempotent and safe if default == town.
-	if townSocket != "default" {
-		_ = tmux.EnsureBindingsOnSocket("default")
-	}
-}
-
 // doltReadyTimeout is how long gt up waits for the Dolt SQL server to accept
 // connections before proceeding with witness/refinery startup. 10 seconds is
 // generous: doltserver.Start() already retries for 5s, so this covers the case
@@ -916,3 +904,4 @@ func waitForDoltReady(townRoot string) {
 		fmt.Fprintf(os.Stderr, "Warning: %v (agents may see connection errors)\n", err)
 	}
 }
+

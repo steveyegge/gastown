@@ -617,6 +617,7 @@ func TestGetPaneCommand_MultiPane(t *testing.T) {
 }
 
 func TestHasDescendantWithNames(t *testing.T) {
+	t.Parallel()
 	// Test the hasDescendantWithNames helper function directly
 
 	// Test with a definitely nonexistent PID
@@ -625,26 +626,30 @@ func TestHasDescendantWithNames(t *testing.T) {
 		t.Error("hasDescendantWithNames should return false for nonexistent PID")
 	}
 
+	// Use current PID instead of PID 1 to avoid walking the entire process tree
+	selfPID := fmt.Sprintf("%d", os.Getpid())
+
 	// Test with empty names slice - should always return false
-	got = hasDescendantWithNames("1", []string{}, 0)
+	got = hasDescendantWithNames(selfPID, []string{}, 0)
 	if got {
 		t.Error("hasDescendantWithNames should return false for empty names slice")
 	}
 
 	// Test with nil names slice - should always return false
-	got = hasDescendantWithNames("1", nil, 0)
+	got = hasDescendantWithNames(selfPID, nil, 0)
 	if got {
 		t.Error("hasDescendantWithNames should return false for nil names slice")
 	}
 
-	// Test with PID 1 (init/launchd) - should have children but not specific agent processes
-	got = hasDescendantWithNames("1", []string{"node", "claude"}, 0)
+	// Test with current process - should have children but not specific agent processes
+	got = hasDescendantWithNames(selfPID, []string{"node", "claude"}, 0)
 	if got {
-		t.Logf("hasDescendantWithNames(\"1\", [node,claude]) = true - init has matching child?")
+		t.Logf("hasDescendantWithNames(%q, [node,claude]) = true - process has matching child?", selfPID)
 	}
 }
 
 func TestGetAllDescendants(t *testing.T) {
+	t.Parallel()
 	// Test the getAllDescendants helper function
 
 	// Test with nonexistent PID - should return empty slice
@@ -653,11 +658,10 @@ func TestGetAllDescendants(t *testing.T) {
 		t.Errorf("getAllDescendants(nonexistent) = %v, want empty slice", got)
 	}
 
-	// Test with PID 1 (init/launchd) - should find some descendants
-	// Note: We can't test exact PIDs, just that the function doesn't panic
-	// and returns reasonable results
-	descendants := getAllDescendants("1")
-	t.Logf("getAllDescendants(\"1\") found %d descendants", len(descendants))
+	// Use current PID instead of PID 1 to avoid walking the entire process tree
+	selfPID := fmt.Sprintf("%d", os.Getpid())
+	descendants := getAllDescendants(selfPID)
+	t.Logf("getAllDescendants(%q) found %d descendants", selfPID, len(descendants))
 
 	// Verify returned PIDs are all numeric strings
 	for _, pid := range descendants {
@@ -1048,6 +1052,7 @@ func TestCleanupOrphanedSessions_NoSessions(t *testing.T) {
 }
 
 func TestCollectReparentedGroupMembers(t *testing.T) {
+	t.Parallel()
 	// Test that collectReparentedGroupMembers correctly filters group members.
 	// Only processes reparented to init (PPID == 1) that aren't in the known set
 	// should be returned.
@@ -1077,6 +1082,7 @@ func TestCollectReparentedGroupMembers(t *testing.T) {
 }
 
 func TestGetParentPID(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("getParentPID returns empty string on Windows (no /proc or ps)")
 	}
@@ -1454,6 +1460,7 @@ func TestFindAgentPane_NonexistentSession(t *testing.T) {
 }
 
 func TestValidateSessionName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		session string
@@ -1601,6 +1608,7 @@ func TestNewSessionWithCommandAndEnvEmpty(t *testing.T) {
 }
 
 func TestIsTransientSendKeysError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		err  error
@@ -1699,6 +1707,7 @@ func TestNudgeSession_WithRetry(t *testing.T) {
 // character, but the default ReadyPromptPrefix uses a regular space.
 // Regression test for https://github.com/steveyegge/gastown/issues/1387.
 func TestMatchesPromptPrefix(t *testing.T) {
+	t.Parallel()
 	const (
 		nbsp          = "\u00a0" // non-breaking space
 		regularPrefix = "❯ "     // default: ❯ + regular space
@@ -1776,6 +1785,7 @@ func TestWaitForIdle_Timeout(t *testing.T) {
 }
 
 func TestDefaultReadyPromptPrefix(t *testing.T) {
+	t.Parallel()
 	// Verify the constant is set correctly
 	if DefaultReadyPromptPrefix == "" {
 		t.Error("DefaultReadyPromptPrefix should not be empty")
@@ -1900,9 +1910,7 @@ func TestNewSessionSet_Nil(t *testing.T) {
 
 func TestSessionPrefixPattern_AlwaysIncludesGTAndHQ(t *testing.T) {
 	// Even without GT_ROOT, the pattern should include gt and hq as safe defaults.
-	orig := os.Getenv("GT_ROOT")
 	t.Setenv("GT_ROOT", "")
-	defer func() { os.Setenv("GT_ROOT", orig) }()
 
 	pattern := sessionPrefixPattern()
 	if !strings.Contains(pattern, "gt") {
@@ -2089,6 +2097,7 @@ func TestSessionPrefixPattern_WithTownRoot(t *testing.T) {
 }
 
 func TestZombieStatusString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		status   ZombieStatus
 		expected string

@@ -14,9 +14,10 @@ const (
 )
 
 // Thresholds for activity color coding.
+// Configurable via operational.session thresholds or worker_status in settings/config.json.
 const (
-	ThresholdActive = 5 * time.Minute   // Green threshold
-	ThresholdStale  = 10 * time.Minute  // Yellow threshold (beyond this is red)
+	ThresholdActive = 5 * time.Minute  // Green threshold
+	ThresholdStale  = 10 * time.Minute // Yellow threshold (beyond this is red)
 )
 
 // Info holds activity information for display.

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -119,14 +120,14 @@ type PatrolsConfig struct {
 	Deacon         *PatrolConfig          `json:"deacon,omitempty"`
 	Handler        *PatrolConfig          `json:"handler,omitempty"`
 	DoltServer     *DoltServerConfig      `json:"dolt_server,omitempty"`
-	DoltTestServer *DoltServerConfig      `json:"dolt_test_server,omitempty"`
 	DoltRemotes    *DoltRemotesConfig     `json:"dolt_remotes,omitempty"`
 	DoltBackup     *DoltBackupConfig      `json:"dolt_backup,omitempty"`
 	JsonlGitBackup *JsonlGitBackupConfig  `json:"jsonl_git_backup,omitempty"`
 	WispReaper     *WispReaperConfig      `json:"wisp_reaper,omitempty"`
 	DoctorDog      *DoctorDogConfig       `json:"doctor_dog,omitempty"`
-	JanitorDog     *JanitorDogConfig      `json:"janitor_dog,omitempty"`
-	CompactorDog   *CompactorDogConfig    `json:"compactor_dog,omitempty"`
+	CompactorDog           *CompactorDogConfig            `json:"compactor_dog,omitempty"`
+	ScheduledMaintenance   *ScheduledMaintenanceConfig    `json:"scheduled_maintenance,omitempty"`
+	RestartTracker         *RestartTrackerConfig          `json:"restart_tracker,omitempty"`
 }
 
 // DoltRemotesConfig holds configuration for the dolt_remotes patrol.
@@ -204,7 +205,7 @@ type DaemonPatrolConfig struct {
 
 // PatrolConfigFile returns the path to the patrol config file.
 func PatrolConfigFile(townRoot string) string {
-	return filepath.Join(townRoot, "mayor", "daemon.json")
+	return filepath.Join(townRoot, constants.RoleMayor, "daemon.json")
 }
 
 // LoadPatrolConfig loads patrol configuration from mayor/daemon.json.
@@ -223,6 +224,18 @@ func LoadPatrolConfig(townRoot string) *DaemonPatrolConfig {
 		return nil
 	}
 	return &config
+}
+
+// SavePatrolConfig saves patrol configuration to mayor/daemon.json.
+func SavePatrolConfig(townRoot string, config *DaemonPatrolConfig) error {
+	configFile := PatrolConfigFile(townRoot)
+
+	// Ensure mayor directory exists
+	if err := os.MkdirAll(filepath.Dir(configFile), 0755); err != nil {
+		return err
+	}
+
+	return util.AtomicWriteJSON(configFile, config)
 }
 
 // IsPatrolEnabled checks if a patrol is enabled in the config.
@@ -262,17 +275,17 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 		}
 		return config.Patrols.DoctorDog.Enabled
 	}
-	if patrol == "janitor_dog" {
-		if config == nil || config.Patrols == nil || config.Patrols.JanitorDog == nil {
-			return false
-		}
-		return config.Patrols.JanitorDog.Enabled
-	}
 	if patrol == "compactor_dog" {
 		if config == nil || config.Patrols == nil || config.Patrols.CompactorDog == nil {
 			return false
 		}
 		return config.Patrols.CompactorDog.Enabled
+	}
+	if patrol == "scheduled_maintenance" {
+		if config == nil || config.Patrols == nil || config.Patrols.ScheduledMaintenance == nil {
+			return false
+		}
+		return config.Patrols.ScheduledMaintenance.Enabled
 	}
 
 	if config == nil || config.Patrols == nil {
@@ -280,15 +293,15 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 	}
 
 	switch patrol {
-	case "refinery":
+	case constants.RoleRefinery:
 		if config.Patrols.Refinery != nil {
 			return config.Patrols.Refinery.Enabled
 		}
-	case "witness":
+	case constants.RoleWitness:
 		if config.Patrols.Witness != nil {
 			return config.Patrols.Witness.Enabled
 		}
-	case "deacon":
+	case constants.RoleDeacon:
 		if config.Patrols.Deacon != nil {
 			return config.Patrols.Deacon.Enabled
 		}
@@ -307,11 +320,11 @@ func GetPatrolRigs(config *DaemonPatrolConfig, patrol string) []string {
 	}
 
 	switch patrol {
-	case "refinery":
+	case constants.RoleRefinery:
 		if config.Patrols.Refinery != nil {
 			return config.Patrols.Refinery.Rigs
 		}
-	case "witness":
+	case constants.RoleWitness:
 		if config.Patrols.Witness != nil {
 			return config.Patrols.Witness.Rigs
 		}

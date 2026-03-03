@@ -1,284 +1,10 @@
-# PRD: Convoy Manager
-
-> Daemon-resident event-driven convoy completion and stranded convoy recovery.
-
-**Status**: Implementation complete (all stories DONE)  
-**Owner**: Daemon subsystem  
-**Related**: [convoy-lifecycle.md](convoy-lifecycle.md) | [testing.md](testing.md) | [convoy-manager.md](../daemon/convoy-manager.md)
-
----
-
-## 1. Introduction / Overview
-
-Convoys group work but do not autonomously converge on completion unless observers
-trigger checks and feed follow-on work. The system now uses a daemon-resident
-manager with two loops:
-
-- Event poll loop (`GetAllEventsSince` every 5s) to react to close events.
-- Stranded scan loop (`gt convoy stranded --json` every 30s) to recover missed work.
-
-This PRD reformats and clarifies the specification for AI-agent execution,
-preserving historical story status while tracking corrective follow-ups explicitly.
-
----
-
-## 2. Goals
-
-- Ensure convoy completion is event-driven via multi-rig daemon event polling.
-- Ensure stranded convoys are recovered without manual intervention.
-- Preserve idempotent behavior across repeated observer triggers.
-- Make story acceptance criteria explicit and verifiable.
-- Track documentation corrections without rewriting delivery history.
-
----
-
-## 3. Quality Gates
-
-These commands must pass for every implementation story:
-
-- `go test ./...`
-- `golangci-lint run`
-
-No browser verification is required for this PRD pass (documentation + backend scope).
-
----
-
-## 4. User Stories
-
-### US-001: Event-Driven Convoy Completion
-**Description:** As a daemon operator, I want closed issues to trigger convoy checks automatically so convoys do not stall waiting for patrol.
-
-**Acceptance Criteria:**
-- [x] Event poll runs every 5 seconds using `GetAllEventsSince`.
-- [x] `EventClosed` and closed `EventStatusChanged` events trigger convoy check.
-- [x] Non-close events do not trigger close-path logic.
-- [x] High-water mark advances monotonically.
-- [x] Poll errors are logged and retried on next interval.
-- [x] Nil store disables event poll loop safely.
-
-### US-002: Stranded Convoy Recovery
-**Description:** As a maintainer, I want stranded convoys scanned periodically so ready work is fed and empty convoys are auto-closed.
-
-**Acceptance Criteria:**
-- [x] Stranded scan runs on startup, then at configured interval (default 30s).
-- [x] Ready convoy issues dispatch via `gt sling <id> <rig> --no-boot`.
-- [x] Empty stranded convoys run `gt convoy check <id>`.
-- [x] Unknown prefix/rig are skipped with logs, scan continues.
-- [x] Dispatch failure on one convoy does not halt scan.
-
-### US-003: Shared Observer Behavior
-**Description:** As an observer implementation owner, I want a shared convoy check function so the daemon event poll uses consistent behavior.
-
-**Acceptance Criteria:**
-- [x] Shared observer finds `tracks` dependents and excludes `blocks`.
-- [x] Already-closed convoys are skipped safely.
-- [x] Open convoys run `gt convoy check`.
-- [x] If convoy remains open, first ready issue is fed via `gt sling`.
-- [x] Wrapper issue IDs (`external:prefix:id`) are normalized.
-- [x] Function remains idempotent across duplicate triggers.
-
-### US-004: Witness Observer Integration [REMOVED]
-**Description:** Witness convoy observer removed. The daemon's multi-rig event poll
-(watching all rig databases + hq) provides event-driven coverage. The stranded scan
-(30s) provides backup. The witness's core responsibility is polecat lifecycle
-management (observing work, confirming merges, cleaning zombies, managing merge
-queues) -- convoy tracking is an orthogonal concern that belongs in the daemon.
-
-**History:** Originally had 6 `CheckConvoysForIssueWithAutoStore` call sites in
-`handlers.go` (1 post-merge, 5 zombie paths). All were pure side-effect notification
-hooks that didn't influence witness control flow. Removed when daemon gained
-multi-rig event polling, eliminating the need for redundant observers.
-
-### US-005: Refinery Observer Integration [REMOVED]
-**Description:** Refinery convoy observer removed. See S-05 for rationale.
-
-### US-006: Daemon Lifecycle Integration
-**Description:** As a daemon operator, I want convoy manager startup/shutdown to be bounded and correctly ordered.
-
-**Acceptance Criteria:**
-- [x] Beads store opens at daemon start (or gracefully degrades).
-- [x] Resolved `gtPath` and `bdPath` are passed into manager.
-- [x] Manager starts after feed curator initialization.
-- [x] Manager stops before store closure.
-- [x] Stop path completes within bounded time in tests.
-
-### US-007: Convoy Metadata in MR Fields
-**Description:** As refinery scheduler logic, I want convoy metadata in MR fields so convoy-aware prioritization prevents starvation.
-
-**Acceptance Criteria:**
-- [x] `convoy_id` and `convoy_created_at` parse and format correctly.
-- [x] Underscore/hyphen/camel variants are accepted.
-- [x] Refinery scoring can consume parsed convoy metadata.
-
-### US-008: Lifecycle Safety Guardrails
-**Description:** As a runtime maintainer, I want manager lifecycle methods to be safe under repeated calls.
-
-**Acceptance Criteria:**
-- [x] `Stop()` is idempotent.
-- [x] `Stop()` before `Start()` is safe.
-- [x] `Start()` double-call guard exists (`atomic.Bool` with `CompareAndSwap`).
-
-### US-009: Context-Aware Subprocess Cancellation
-**Description:** As an operator, I want subprocess calls tied to context so shutdown does not hang on stuck child processes.
-
-**Acceptance Criteria:**
-- [x] Convoy manager subprocesses use `exec.CommandContext`.
-- [x] Observer subprocesses accept and propagate context.
-- [x] Shutdown remains bounded even if subprocesses hang.
-- [x] No orphan child processes remain on cancellation.
-
-### US-010: Observer Resolved Binary Paths
-**Description:** As a maintainer, I want observer subprocess execution to use resolved binary paths to avoid PATH-dependent behavior drift.
-
-**Acceptance Criteria:**
-- [x] Observer check/dispatch use resolved `gt` path or explicit fallback strategy.
-- [x] Callers thread path or resolve at a single safe boundary.
-- [x] Daemon integration paths use resolved binary paths.
-
-### US-011: High-Risk Test Gap Closure
-**Description:** As QA, I want high blast-radius invariants covered with explicit assertions so regressions are caught early.
-
-**Acceptance Criteria:**
-- [x] Multi-ready issue dispatches only first issue.
-- [x] Unknown prefix and unknown rig skips are tested.
-- [x] Empty `ReadyIssues` with positive count is safe no-op.
-- [x] Non-close event path has negative subprocess assertions.
-
-### US-012: Error-Path Test Gap Closure
-**Description:** As QA, I want explicit coverage for error handling branches so operational recovery behavior is proven.
-
-**Acceptance Criteria:**
-- [x] `gt convoy stranded` failure path is tested.
-- [x] Invalid JSON parsing path is tested.
-- [x] `findStranded` failure in scan loop is tested.
-- [x] Event poll store error retry behavior is tested.
-
-### US-013: Lifecycle Edge-Case Tests
-**Description:** As QA, I want lifecycle edge scenarios covered so start/stop behavior remains reliable.
-
-**Acceptance Criteria:**
-- [x] Mid-iteration cancellation exits cleanly.
-- [x] Mixed ready+empty stranded lists route correctly.
-- [x] `Start()` double-call guard test exists.
-
-### US-014: Test Harness Improvements
-**Description:** As a test maintainer, I want reduced setup duplication and stronger negative observability so tests are easier to maintain and trust.
-
-**Acceptance Criteria:**
-- [x] Shared scan-test mock builder is extracted and reused.
-- [x] All mock scripts emit side-effect call logs.
-- [x] Assertion-free convoy manager tests are eliminated.
-
-### US-015: Documentation Consistency Sweep
-**Description:** As a maintainer, I want convoy design docs to match current code so implementation work starts from accurate context.
-
-**Acceptance Criteria:**
-- [x] `docs/design/daemon/convoy-manager.md` reflects SDK poll architecture.
-- [x] `docs/design/convoy/testing.md` stale stream/backoff wording corrected.
-- [x] `docs/design/convoy/convoy-lifecycle.md` observer/manual-close drift corrected.
-- [x] Broken relative links corrected.
-- [x] `spec.md` file map and command inventory corrected.
-
-### US-016: Corrective Follow-Up for Completed Stories
-**Description:** As a maintainer, I want corrections to completed stories tracked explicitly so historical status remains stable.
-
-**Acceptance Criteria:**
-- [x] Corrective notes added to affected completed stories.
-- [x] No completed story downgraded only due to documentation drift.
-- [x] Line-number brittle references replaced with semantic references where practical.
-
-### US-017: Refinery Root-Path Verification
-**Description:** As a maintainer, I want `CheckConvoysForIssueWithAutoStore` root-path behavior verified in refinery integration to prevent hidden cross-rig visibility bugs.
-
-**Acceptance Criteria:**
-- [x] Expected root behavior is documented (town root vs rig path).
-- [x] If current behavior is correct, add rationale note near call site/spec.
-- [x] If incorrect, create implementation follow-up and link it here -> S-18 in spec.
-
----
-
-## 5. Functional Requirements
-
-- **FR-1:** The daemon must poll events via SDK every 5s and process close events only.
-- **FR-2:** Stranded scan must run independently on a periodic interval and recover missed work.
-- **FR-3:** Shared observer logic must remain idempotent and safe under repeated invocation.
-- **FR-4:** Witness and refinery integration must call shared observer after completion-relevant events.
-- **FR-5:** Manager lifecycle must support safe start/stop under cancellation and repeated calls.
-- **FR-6:** Subprocess execution in long-running loops must be context-cancellable.
-- **FR-7:** Test suite must cover high-risk invariants, error paths, and lifecycle edge cases.
-- **FR-8:** Spec and related design docs must remain internally consistent and code-accurate.
-
----
-
-## 6. Non-Goals (Out of Scope)
-
-- Convoy owner/requester notification feature expansion (beyond existing behavior).
-- Convoy timeout/SLA (`due_at`) design/implementation.
-- Explicit `gt convoy reopen` command (implicit reopen via add remains acceptable).
-- Test clock injection and broader time-abstraction framework.
-
----
-
-## 7. Technical Considerations
-
-- Event poll loop and stranded scan loop are intentionally separate goroutines.
-- High-water mark state must remain monotonic and race-safe.
-- Observer subprocess calls currently use bare `gt` in some paths; path resolution is pending.
-- Refinery path semantics (`townRoot` vs rig path) require explicit verification.
-
----
-
-## 8. Success Metrics
-
-- Convoys close or progress without relying solely on patrol loops.
-- Daemon shutdown remains bounded even under subprocess failure scenarios.
-- High-priority convoy invariants have direct test coverage.
-- Documentation drift findings can be mapped directly to story IDs.
-- New agent sessions can execute backlog items without rediscovery.
-
----
-
-## 9. Open Questions
-
-- ~~Should S-16 be marked DONE now that acceptance criteria are satisfied?~~ **Resolved**: Yes, marked DONE.
-- ~~Is refinery `e.rig.Path` the correct root for observer store access in all deployments?~~ **Resolved (S-17)**: No. `e.rig.Path` is a rig path, not town root. Fix tracked in S-18.
-- Should S-10 resolve `gt` path at observer entrypoints or thread it from all callers?
-
----
-
-## 10. Findings-to-Story Mapping
-
-| Finding | Story |
-|---------|-------|
-| Stream-model doc drift | US-015 |
-| Testing doc stale invariants/rows | US-015 |
-| Lifecycle observer/manual close drift | US-015 |
-| Completed-story corrections needed | US-016 |
-| Refinery root-path ambiguity | US-017 |
-| Refinery root-path fix (from S-17 finding) | S-18 |
-
----
-
-## 11. Priority Order
-
-| Priority | Story | Effort | Risk Mitigated |
-|----------|-------|--------|----------------|
-| **P0** | US-009: Context-aware subprocess cancellation | Small | Shutdown hangs |
-| **P0** | US-008: Start() double-call guard | Trivial | Duplicate goroutines |
-| **P1** | US-011: High-risk test gap closure | Medium | Invariant regressions |
-| **P1** | US-014: Test harness improvements | Medium | Test reliability/maintainability |
-| **P1** | US-017: Refinery root-path verification | Small | Cross-rig convoy visibility |
-| **P2** | US-010: Observer resolved binary paths | Small | PATH reliability |
-| **P2** | US-012: Error-path tests | Small | Recovery behavior confidence |
-| **P2** | US-016: Corrective follow-up for completed stories | Small | Historical/spec drift |
-| **P3** | US-013: Lifecycle edge-case tests | Small | Additional robustness |
 # Convoy Manager Specification
 
 > Daemon-resident event-driven completion and stranded convoy recovery.
 
 **Status**: Implementation complete (all stories DONE)
 **Owner**: Daemon subsystem
-**Related**: [convoy-lifecycle.md](convoy-lifecycle.md) | [testing.md](testing.md) | [convoy-manager.md](../daemon/convoy-manager.md)
+**Related**: [convoy-lifecycle.md](convoy-lifecycle.md) | [convoy-manager.md](../daemon/convoy-manager.md)
 
 ---
 
@@ -855,8 +581,7 @@ before calling `CheckConvoysForIssueWithAutoStore`, matching the witness pattern
 | File | Contents |
 |------|----------|
 | `docs/design/convoy/convoy-lifecycle.md` | Problem statement, design principles, flow diagram |
-| `docs/design/convoy/testing.md` | Test plan, failure modes, invariants, harness scorecard |
-| `docs/design/convoy/spec.md` | This document |
+| `docs/design/convoy/spec.md` | This document (includes test harness scorecard and remaining gaps) |
 | `docs/design/daemon/convoy-manager.md` | ConvoyManager architecture diagram (SDK polling + stranded scan) |
 
 ---
@@ -875,24 +600,7 @@ before calling `CheckConvoysForIssueWithAutoStore`, matching the witness pattern
 
 ---
 
-## 8. Priority Order
-
-| Priority | Story | Effort | Risk Mitigated |
-|----------|-------|--------|----------------|
-| **P0** | S-09: Subprocess context cancellation | Small | Shutdown hangs (DONE) |
-| **P0** | S-08: Start() double-call guard | Trivial | Duplicate goroutines (DONE) |
-| **P1** | S-11: Test gap P1 (high blast-radius) | Medium | Unknown prefix/rig, batch overflow (DONE) |
-| **P1** | S-14: Test infrastructure | Medium | Maintainability, negative assertions (DONE) |
-| **P1** | S-17: Refinery observer root-path verification | Small | Cross-rig convoy visibility correctness (DONE) |
-| **P1** | S-18: Fix refinery convoy observer town-root path | Trivial | Refinery convoy observer silently disabled (DONE) |
-| **P2** | S-10: Resolved gt path in observer | Small | PATH reliability in daemon (DONE) |
-| **P2** | S-12: Test gap P2 (error paths) | Small | Untested error recovery (DONE) |
-| **P2** | S-16: Corrective follow-up for DONE stories | Small | Historical drift in completed stories (DONE) |
-| **P3** | S-13: Test gap P3 (lifecycle edges) | Small | Edge case coverage (DONE) |
-
----
-
-## 9. Non-Goals (This Spec)
+## 8. Non-Goals (This Spec)
 
 These are documented in convoy-lifecycle.md as future work but are **not** in
 scope for this spec:
@@ -900,4 +608,33 @@ scope for this spec:
 - Convoy owner/requester field and targeted notifications (P2 in lifecycle doc)
 - Convoy timeout/SLA (`due_at` field, overdue surfacing) (P3 in lifecycle doc)
 - Convoy reopen command (implicit via add, explicit command deferred)
-- Test clock injection for ConvoyManager (P3 in testing.md -- useful but not blocking)
+- Test clock injection for ConvoyManager (P3 -- useful but not blocking)
+
+---
+
+## Test Harness & Remaining Gaps
+
+### Harness Scorecard
+
+| Dimension | Score (1-5) | Key Gap |
+|-----------|-------------|---------|
+| Fixtures & Setup | 4 | `mockGtForScanTest` shared builder covers scan tests; processLine path has own setup |
+| Isolation | 4 | Temp dirs + `t.Setenv(PATH)` is solid; Windows correctly skipped; no shared state |
+| Observability | 4 | All mock scripts emit call logs; negative tests assert log files absent/empty |
+| Speed | 4 | All convoy-manager tests run quickly; no long-running interval waits in current suite |
+| Determinism | 4 | No real timing dependencies; ticker tests use long intervals to avoid races |
+
+### Test Clock Injection (P3)
+
+**Problem**: ConvoyManager uses `time.Ticker` with 30s default. Testing "runs at interval" requires waiting or injecting a clock.
+
+**Proposal**: Add `clock` field to ConvoyManager (interface with `NewTicker(d)`) defaulting to real time. Tests inject fake clock with immediate tick.
+
+**Compound Value**: All periodic daemon components benefit.
+
+**Status**: Not implemented. Tests use long intervals (10min) to prevent ticker firing during test.
+
+### Remaining Test Gaps
+
+- Add `TestProcessLine_EmptyIssueID` (close event with empty issue_id)
+- Expand integration test coverage for multi-rig event polling

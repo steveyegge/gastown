@@ -4,6 +4,7 @@ package style
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/steveyegge/gastown/internal/ui"
@@ -50,9 +51,10 @@ var (
 	ArrowPrefix = Info.Render("→")
 )
 
-// PrintWarning prints a warning message with consistent formatting.
+// PrintWarning prints a warning message to stderr with consistent formatting.
 // The format and args work like fmt.Printf.
+// Writes to stderr so warnings never contaminate structured (JSON) output on stdout.
 func PrintWarning(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("%s %s\n", Warning.Render(ui.IconWarn+" Warning:"), msg)
+	fmt.Fprintf(os.Stderr, "%s %s\n", Warning.Render(ui.IconWarn+" Warning:"), msg)
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -629,13 +630,13 @@ func (m *Model) attachToSelected() (tea.Model, tea.Cmd) {
 // and role shortcuts for singletons (mayor, deacon, witness, refinery).
 func nudgeTarget(agent *ProblemAgent) string {
 	switch agent.Role {
-	case "mayor", "deacon":
+	case constants.RoleMayor, constants.RoleDeacon:
 		return agent.Role
-	case "witness", "refinery":
+	case constants.RoleWitness, constants.RoleRefinery:
 		return agent.Rig + "/" + agent.Role
-	case "crew":
+	case constants.RoleCrew:
 		return agent.Rig + "/crew/" + agent.Name
-	case "polecat":
+	case constants.RolePolecat:
 		return agent.Rig + "/" + agent.Name
 	default:
 		// Fallback to session ID

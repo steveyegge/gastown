@@ -3,16 +3,20 @@ package mail
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/testutil"
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 func TestDetectTownRoot(t *testing.T) {
@@ -220,6 +224,31 @@ func TestShouldBeWisp(t *testing.T) {
 			name: "regular message",
 			msg:  &Message{Subject: "Please review this PR"},
 			want: false,
+		},
+		{
+			name: "LIFECYCLE:Shutdown subject",
+			msg:  &Message{Subject: "LIFECYCLE:Shutdown capable"},
+			want: true,
+		},
+		{
+			name: "LIFECYCLE: polecat requesting shutdown",
+			msg:  &Message{Subject: "LIFECYCLE: polecat-nux requesting shutdown"},
+			want: true,
+		},
+		{
+			name: "MERGED subject",
+			msg:  &Message{Subject: "MERGED nux"},
+			want: true,
+		},
+		{
+			name: "MERGE_READY subject",
+			msg:  &Message{Subject: "MERGE_READY nux"},
+			want: true,
+		},
+		{
+			name: "MERGE_FAILED subject",
+			msg:  &Message{Subject: "MERGE_FAILED nux"},
+			want: true,
 		},
 		{
 			name: "handoff message (not auto-wisp)",
@@ -979,10 +1008,10 @@ func TestValidateRecipient(t *testing.T) {
 		t.Skipf("bd CLI not functional, skipping test: %v (%s)", err, strings.TrimSpace(string(out)))
 	}
 
-	// Start an ephemeral Dolt server to prevent bd init from creating
+	// Start an ephemeral Dolt container to prevent bd init from creating
 	// databases on the production server (port 3307).
-	testutil.RequireDoltServer(t)
-	doltPort, _ := strconv.Atoi(testutil.DoltTestPort())
+	testutil.RequireDoltContainer(t)
+	doltPort, _ := strconv.Atoi(testutil.DoltContainerPort())
 
 	// Create isolated beads environment for testing
 	tmpDir := t.TempDir()
@@ -1035,6 +1064,14 @@ func TestValidateRecipient(t *testing.T) {
 	createAgent("gt-testrig-crew-alice", "Test crew alice")
 	createAgent("gt-testrig-polecat-bob", "Test polecat bob")
 
+	// Create dog directory for workspace fallback validation (deacon/dogs/fido).
+	// The workspace fallback handles cases where agent beads are missing or
+	// the bead DB is unavailable (e.g., after Dolt reset).
+	dogDir := filepath.Join(townRoot, "deacon", "dogs", "fido")
+	if err := os.MkdirAll(dogDir, 0755); err != nil {
+		t.Fatalf("creating dog dir: %v", err)
+	}
+
 	r := NewRouterWithTownRoot(townRoot, townRoot)
 
 	tests := []struct {
@@ -1054,6 +1091,9 @@ func TestValidateRecipient(t *testing.T) {
 		{"witness", "testrig/witness", false, ""},
 		{"crew member", "testrig/alice", false, ""},
 		{"polecat", "testrig/bob", false, ""},
+
+		// Dog agents (validated via workspace fallback: deacon/dogs/<name> directory)
+		{"dog agent", "deacon/dogs/fido", false, ""},
 
 		// Invalid addresses - should fail
 		{"bare name", "ruby", true, "no agent found"},
@@ -1075,6 +1115,37 @@ func TestValidateRecipient(t *testing.T) {
 				if err != nil {
 					t.Errorf("validateRecipient(%q) unexpected error: %v", tt.identity, err)
 				}
+			}
+		})
+	}
+}
+
+func TestValidateAgentWorkspaceDog(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create dog directory structure: deacon/dogs/fido
+	dogDir := filepath.Join(tmpDir, "deacon", "dogs", "fido")
+	if err := os.MkdirAll(dogDir, 0755); err != nil {
+		t.Fatalf("creating dog dir: %v", err)
+	}
+
+	r := &Router{townRoot: tmpDir}
+
+	tests := []struct {
+		name     string
+		identity string
+		want     bool
+	}{
+		{"dog exists", "deacon/dogs/fido", true},
+		{"dog not exists", "deacon/dogs/ghost", false},
+		{"not a dog path", "deacon/cats/fido", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := r.validateAgentWorkspace(tt.identity)
+			if got != tt.want {
+				t.Errorf("validateAgentWorkspace(%q) = %v, want %v", tt.identity, got, tt.want)
 			}
 		})
 	}
@@ -1167,5 +1238,256 @@ func TestAddressToAgentBeadID(t *testing.T) {
 				t.Errorf("addressToAgentBeadID(%q) = %q, want %q", tt.address, got, tt.expected)
 			}
 		})
+	}
+}
+
+// ============ Crew Shorthand Resolution Tests ============
+
+func TestResolveCrewShorthand(t *testing.T) {
+	// Create a realistic town directory structure
+	tmpDir := t.TempDir()
+
+	// Create pata rig with crew members
+	for _, name := range []string{"alice", "bob"} {
+		dir := filepath.Join(tmpDir, "pata", "crew", name)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Create pata polecat
+	if err := os.MkdirAll(filepath.Join(tmpDir, "pata", "polecats", "rust"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Create another rig with crew
+	if err := os.MkdirAll(filepath.Join(tmpDir, "beads", "crew", "alice"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRouterWithTownRoot(tmpDir, tmpDir)
+
+	tests := []struct {
+		name     string
+		identity string
+		want     string
+	}{
+		// crew/name shorthand: unambiguous single rig match
+		{
+			name:     "crew/bob unambiguous",
+			identity: "crew/bob",
+			want:     "pata/bob", // bob only in pata
+		},
+		// crew/name shorthand: ambiguous (in multiple rigs) - leave unchanged
+		{
+			name:     "crew/alice ambiguous",
+			identity: "crew/alice",
+			want:     "crew/alice", // alice in both pata and beads
+		},
+		// Already fully-qualified rig/name - leave unchanged
+		{
+			name:     "pata/bob already canonical",
+			identity: "pata/bob",
+			want:     "pata/bob",
+		},
+		// polecats shorthand
+		{
+			name:     "polecats/rust shorthand",
+			identity: "polecats/rust",
+			want:     "pata/rust", // rust only in pata polecats
+		},
+		// Non-crew address - leave unchanged
+		{
+			name:     "mayor/ unchanged",
+			identity: "mayor/",
+			want:     "mayor/",
+		},
+		// No town root - no resolution attempted
+		{
+			name:     "no town root",
+			identity: "crew/bob",
+			want:     "crew/bob", // tested with empty townRoot below
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := r
+			if tt.name == "no town root" {
+				router = NewRouterWithTownRoot(tmpDir, "") // empty townRoot
+			}
+			got := router.resolveCrewShorthand(tt.identity)
+			if got != tt.want {
+				t.Errorf("resolveCrewShorthand(%q) = %q, want %q", tt.identity, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateRecipientFilesystemFallback(t *testing.T) {
+	// Create a realistic town directory structure without any agent beads
+	tmpDir := t.TempDir()
+
+	// Create pata rig structure
+	for _, subpath := range []string{
+		"pata/crew/bob",
+		"pata/crew/alice",
+		"pata/polecats/rust",
+		"pata/witness",
+		"pata/refinery",
+	} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, subpath), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Create mayor/town.json marker
+	if err := os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "mayor", "town.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRouterWithTownRoot(tmpDir, tmpDir)
+
+	tests := []struct {
+		name     string
+		identity string
+		wantErr  bool
+	}{
+		// Crew members found via filesystem (no agent beads needed)
+		{"crew bob", "pata/bob", false},
+		{"crew alice", "pata/alice", false},
+		// Polecat found via filesystem
+		{"polecat rust", "pata/rust", false},
+		// Singleton roles found via filesystem
+		{"witness", "pata/witness", false},
+		{"refinery", "pata/refinery", false},
+		// Overseer always valid
+		{"overseer", "overseer", false},
+		// Non-existent agent should fail
+		{"nonexistent", "pata/nobody", true},
+		{"wrong rig", "notarig/bob", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := r.validateRecipient(tt.identity)
+			if tt.wantErr && err == nil {
+				t.Errorf("validateRecipient(%q) expected error, got nil", tt.identity)
+			} else if !tt.wantErr && err != nil {
+				t.Errorf("validateRecipient(%q) unexpected error: %v", tt.identity, err)
+			}
+		})
+	}
+}
+
+// requireNotifyTestSocket returns a per-test tmux socket and skips if tmux
+// is unavailable. The socket server is killed on test cleanup.
+func requireNotifyTestSocket(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	// Use test name for unique socket per test to prevent cleanup interference.
+	// Sanitize: tmux socket names cannot contain slashes or dots.
+	safe := strings.NewReplacer("/", "-", ".", "-").Replace(t.Name())
+	socket := fmt.Sprintf("gt-test-%s-%d", safe, os.Getpid())
+	// Pre-kill any stale server on this socket (e.g., from a crashed prior run).
+	_ = exec.Command("tmux", "-L", socket, "kill-server").Run()
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "-L", socket, "kill-server").Run()
+	})
+	return socket
+}
+
+// createNotifyTestSession creates a tmux session on the given socket and waits
+// for it to be ready.
+func createNotifyTestSession(t *testing.T, socket, sessionName, command string) {
+	t.Helper()
+	args := []string{"-L", socket, "new-session", "-d", "-s", sessionName, command}
+	out, err := exec.Command("tmux", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to create test session %q: %v\n%s", sessionName, err, out)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if exec.Command("tmux", "-L", socket, "has-session", "-t", sessionName).Run() == nil {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("session %q never appeared on socket %q", sessionName, socket)
+}
+
+// TestNotifyRecipient_IdleAgent verifies that an idle agent (prompt visible)
+// receives a direct nudge instead of a queued one.
+func TestNotifyRecipient_IdleAgent(t *testing.T) {
+	socket := requireNotifyTestSocket(t)
+	sessionName := "gt-crew-idletest"
+
+	// Create a session that displays the Claude Code prompt prefix, simulating idle.
+	// "printf" prints the prompt, then "cat" blocks keeping the session alive.
+	createNotifyTestSession(t, socket, sessionName, `sh -c 'printf "❯ \n" && cat'`)
+
+	// Wait briefly for printf output to appear in the pane.
+	time.Sleep(500 * time.Millisecond)
+
+	townRoot := t.TempDir()
+	r := &Router{
+		workDir:           t.TempDir(),
+		townRoot:          townRoot,
+		tmux:              tmux.NewTmuxWithSocket(socket),
+		IdleNotifyTimeout: 3 * time.Second,
+	}
+
+	msg := &Message{
+		From:    "gastown/crew/sender",
+		To:      "gastown/crew/idletest",
+		Subject: "test idle delivery",
+	}
+
+	err := r.notifyRecipient(msg)
+	if err != nil {
+		t.Fatalf("notifyRecipient returned error: %v", err)
+	}
+
+	// Verify no nudge was queued — delivery should have been direct.
+	pending, _ := nudge.Pending(townRoot, sessionName)
+	if pending != 0 {
+		t.Errorf("expected 0 queued nudges for idle agent, got %d", pending)
+	}
+}
+
+// TestNotifyRecipient_BusyAgent verifies that a busy agent (no prompt visible)
+// gets a queued nudge instead of an immediate one.
+func TestNotifyRecipient_BusyAgent(t *testing.T) {
+	socket := requireNotifyTestSocket(t)
+	sessionName := "gt-crew-busytest"
+
+	// Create a session running sleep — no prompt visible, simulating busy agent.
+	createNotifyTestSession(t, socket, sessionName, "sleep 300")
+
+	townRoot := t.TempDir()
+	r := &Router{
+		workDir:           t.TempDir(),
+		townRoot:          townRoot,
+		tmux:              tmux.NewTmuxWithSocket(socket),
+		IdleNotifyTimeout: 1 * time.Second, // short timeout for test speed
+	}
+
+	msg := &Message{
+		From:    "gastown/crew/sender",
+		To:      "gastown/crew/busytest",
+		Subject: "test busy delivery",
+	}
+
+	err := r.notifyRecipient(msg)
+	if err != nil {
+		t.Fatalf("notifyRecipient returned error: %v", err)
+	}
+
+	// Verify the nudge was queued since the agent was busy.
+	pending, _ := nudge.Pending(townRoot, sessionName)
+	if pending != 1 {
+		t.Errorf("expected 1 queued nudge for busy agent, got %d", pending)
 	}
 }

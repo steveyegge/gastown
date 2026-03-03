@@ -1,22 +1,44 @@
 description = """
-Flatten Dolt commit history on production databases.
+Compact Dolt commit history on production databases.
 
 Every bd mutation creates a Dolt commit. Over time, this builds an enormous
 commit graph (5,000-10,000 commits/day from wisp churn). The commit graph IS
 the storage cost — deleting rows without compaction leaves ghost commits forever.
 
-The Compactor Dog periodically flattens each database's history to a single
-commit containing all current data. This is the "Think Git, Not SQL" principle:
-treat commit history as a resource to manage, not an append-only log.
+The Compactor Dog periodically compacts each database's history. Two modes:
+
+**Flatten mode** (default): Soft-resets to root commit on main, then commits all
+data as a single commit. Safe with concurrent writes (Tim Sehn, 2026-02-28) —
+merge base shifts but diff is just the txn.
+
+**Surgical mode**: Interactive rebase that squashes old commits while preserving
+the most recent N as individual picks. NOT safe with concurrent writes — Dolt
+detects graph changes and returns an error. Retries once on collision.
+
+## ZFC Exemption
+
+This formula is used for **observability tracking only** — the Go code in
+compactor_dog.go is the executor. The compactor is exempt from agent-driven
+formula execution (ZFC) because:
+
+1. Operations require SQL connections via database/sql (agents lack SQL access)
+2. Transactional state spans multiple queries (pre-flight counts, HEAD hashes)
+3. Branch creation/deletion requires cleanup-on-failure error paths
+4. Concurrent write retry needs error classification (isConcurrentWriteError)
+5. Integrity verification compares row counts before/after compaction
+
+The daemon pours this molecule, executes the Go code, and closes/fails each
+step for observability. This IS the hybrid approach: formula defines observable
+structure, imperative Go is the executor.
 
 ## Dog Contract
 
-This is infrastructure work. You:
-1. Inspect all production databases for commit count
-2. Compact (flatten) databases exceeding the threshold
-3. Verify data integrity after compaction
-4. Report findings
-5. Return to kennel
+This is infrastructure work. The daemon:
+1. Inspects all production databases for commit count
+2. Compacts databases exceeding the threshold (flatten or surgical)
+3. Verifies data integrity after compaction
+4. Runs dolt_gc to reclaim unreferenced chunks
+5. Reports findings
 
 ## Order of Operations
 
@@ -24,12 +46,16 @@ Reaper (deletes rows) → Compactor (flattens history) → Doctor (runs gc)
 
 ## Safety
 
-Flattening is irreversible — all commit history is replaced by a single commit.
-Data is preserved (all rows intact), only the commit graph changes.
-Concurrency check: aborts if main branch moves during compaction.
+Flatten: irreversible — all commit history replaced by single commit. Data
+preserved (all rows intact), only the commit graph changes. Concurrent writes
+are safe (merge base shifts but data is preserved).
+
+Surgical: reversible via rebase abort. Preserves recent commit history.
+NOT safe with concurrent writes — retries once on graph-change errors.
+
 JSONL backups and Dolt filesystem backups provide recovery points."""
 formula = "mol-dog-compactor"
-version = 1
+version = 2
 
 [squash]
 trigger = "on_complete"
@@ -42,15 +68,18 @@ title = "Inspect databases for commit count"
 description = """
 Check each production database's commit count against the threshold.
 
+**Database discovery:** Checks compactor config first, falls back to wisp_reaper
+config, then auto-discovery via reaper.DefaultDatabases.
+
 **For each database:**
 ```sql
-SELECT COUNT(*) FROM (SELECT 1 FROM dolt_log LIMIT 10000) AS t;
+SELECT COUNT(*) FROM `<database>`.dolt_log;
 ```
 
 **Record:**
 - Database name
 - Current commit count
-- Whether it exceeds threshold (default 500)
+- Whether it exceeds threshold (configurable, default 500)
 
 **Exit criteria:** All databases inspected, candidates identified."""
 
@@ -59,39 +88,58 @@ id = "compact"
 title = "Compact databases exceeding threshold"
 needs = ["inspect"]
 description = """
-Flatten commit history on databases above the commit threshold.
+Compact commit history on databases above the commit threshold.
+Mode is configurable: "flatten" (default) or "surgical".
 
-**Algorithm per database:**
-1. Record main HEAD hash (concurrency safety)
-2. Get root (initial) commit hash
-3. Clean up any leftover gt-compaction branch
-4. Create temp branch: CALL DOLT_CHECKOUT('-b', 'gt-compaction')
-5. Soft reset to root: CALL DOLT_RESET('--soft', '<root>')
-6. Commit all data: CALL DOLT_COMMIT('-Am', 'compaction: flatten history')
-7. Switch to main: CALL DOLT_CHECKOUT('main')
-8. Verify main hasn't moved (abort if it has)
-9. Hard reset main: CALL DOLT_RESET('--hard', '<new_hash>')
-10. Delete temp branch: CALL DOLT_BRANCH('-D', 'gt-compaction')
+**Flatten mode algorithm (per database):**
+1. Record pre-flight row counts for all user tables (integrity baseline)
+2. Find root (earliest) commit hash
+3. USE database for session-scoped operations
+4. Soft-reset to root: CALL DOLT_RESET('--soft', '<root>') — moves parent
+   pointer, keeps all data staged (trivially cheap, per Tim Sehn)
+5. Commit all data: CALL DOLT_COMMIT('-Am', 'compaction: flatten history')
+6. Verify row counts match pre-flight (integrity check)
+7. Verify final commit count
 
-**Safety:** If main moves during compaction, abort and retry next cycle.
+Concurrent writes are safe — merge base shifts but diff is just the txn.
 
-**Exit criteria:** All candidate databases flattened or safely skipped."""
+**Surgical mode algorithm (per database):**
+1. Record pre-flight state (HEAD hash, row counts)
+2. Find root commit hash
+3. Clean up leftover compact-base/compact-work branches
+4. Create anchor branch at root: CALL DOLT_BRANCH('compact-base', '<root>')
+5. Create work branch from main: CALL DOLT_BRANCH('compact-work', 'main')
+6. Checkout work branch
+7. Start interactive rebase: CALL DOLT_REBASE('--interactive', 'compact-base')
+8. Read rebase plan bounds, mark old commits as squash (keep recent N)
+9. Execute rebase: CALL DOLT_REBASE('--continue')
+10. Verify row counts match pre-flight
+11. Verify HEAD hasn't moved (concurrency check)
+12. Swap branches: delete main, rename compact-work to main
+13. Clean up compact-base branch
+
+Concurrent write hazard: DOLT_REBASE fails if graph changes during execution.
+Retries once (surgicalMaxRetries=1) with 2s pause between attempts.
+
+**Post-compaction:** Runs CALL dolt_gc() to reclaim unreferenced chunks.
+
+**Exit criteria:** All candidate databases compacted or safely skipped."""
 
 [[steps]]
 id = "verify"
 title = "Verify data integrity"
 needs = ["compact"]
 description = """
-Post-compaction health check on all databases.
+Integrity verification is performed inline during compaction (row count
+comparison before/after). This step tracks the overall verification status
+across all databases.
 
-**For each database:**
-```sql
-SELECT COUNT(*) FROM issues;
-```
+**Verification performed per database during compact step:**
+- Pre-flight: record row counts for all user tables (excluding dolt_* system tables)
+- Post-compaction: re-count all tables, compare against pre-flight
+- Any mismatch → compaction error, database left in pre-compaction state
 
-Verify the count is > 0 and the table is readable. Escalate if any check fails.
-
-**Exit criteria:** All databases pass health check."""
+**Exit criteria:** All compacted databases passed integrity checks."""
 
 [[steps]]
 id = "report"
@@ -101,18 +149,27 @@ description = """
 Generate summary of compaction cycle.
 
 **Report includes:**
-- Databases inspected
-- Databases compacted (with before/after commit counts)
+- Databases inspected (total count)
+- Databases compacted (with final commit counts)
 - Databases skipped (below threshold)
 - Any failures or escalations
+- Compaction mode used (flatten or surgical)
 
 **Exit criteria:** Report logged, dog returned to kennel."""
 
 [vars]
 [vars.commit_threshold]
-description = "Minimum commit count before flattening (default 500)"
+description = "Minimum commit count before compaction triggers (default 500)"
 default = "500"
 
 [vars.databases]
-description = "Comma-separated list of databases to compact"
+description = "Comma-separated list of databases to compact (falls back to wisp_reaper config, then auto-discovery)"
 default = "hq,beads,gastown"
+
+[vars.mode]
+description = "Compaction strategy: 'flatten' (default) or 'surgical'"
+default = "flatten"
+
+[vars.keep_recent]
+description = "Number of recent commits to preserve in surgical mode (default 50)"
+default = "50"

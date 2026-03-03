@@ -802,7 +802,7 @@ func TestWaveAssert_Integration_WithComputeWaves(t *testing.T) {
 		"epic": {ID: "epic", Type: "epic"},
 	}}
 
-	waves, err := computeWaves(dag)
+	waves, _, err := computeWaves(dag)
 	if err != nil {
 		t.Fatalf("computeWaves: %v", err)
 	}
