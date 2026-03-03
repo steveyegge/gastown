@@ -84,7 +84,7 @@ The Dog uses this to understand the state before deciding what to reap.`,
 			return fmt.Errorf("invalid --stale-age: %w", err)
 		}
 
-		db, err := reaper.OpenDB("127.0.0.1", reaperPort, reaperDB, 10*time.Second, 10*time.Second)
+		db, err := reaper.OpenDB("127.0.0.1", reaperPort, reaperDB, 60*time.Second, 60*time.Second)
 		if err != nil {
 			return fmt.Errorf("connect to %s: %w", reaperDB, err)
 		}
@@ -129,7 +129,7 @@ Returns the count of reaped wisps. Use --dry-run to preview.`,
 			return fmt.Errorf("invalid --max-age: %w", err)
 		}
 
-		db, err := reaper.OpenDB("127.0.0.1", reaperPort, reaperDB, 10*time.Second, 10*time.Second)
+		db, err := reaper.OpenDB("127.0.0.1", reaperPort, reaperDB, 60*time.Second, 60*time.Second)
 		if err != nil {
 			return fmt.Errorf("connect to %s: %w", reaperDB, err)
 		}
@@ -220,7 +220,7 @@ Returns the count of closed issues. Use --dry-run to preview.`,
 			return fmt.Errorf("invalid --stale-age: %w", err)
 		}
 
-		db, err := reaper.OpenDB("127.0.0.1", reaperPort, reaperDB, 10*time.Second, 10*time.Second)
+		db, err := reaper.OpenDB("127.0.0.1", reaperPort, reaperDB, 60*time.Second, 60*time.Second)
 		if err != nil {
 			return fmt.Errorf("connect to %s: %w", reaperDB, err)
 		}
@@ -283,7 +283,7 @@ Normally the daemon dispatches a Dog to execute the mol-dog-reaper formula.`,
 				continue
 			}
 
-			db, err := reaper.OpenDB("127.0.0.1", reaperPort, dbName, 30*time.Second, 30*time.Second)
+			db, err := reaper.OpenDB("127.0.0.1", reaperPort, dbName, 60*time.Second, 60*time.Second)
 			if err != nil {
 				fmt.Printf("%s: connect error: %v\n", dbName, err)
 				continue

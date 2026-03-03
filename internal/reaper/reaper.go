@@ -122,7 +122,9 @@ type Anomaly struct {
 
 const (
 	// DefaultQueryTimeout is the timeout for individual reaper SQL queries.
-	DefaultQueryTimeout = 30 * time.Second
+	// Set to 60s to accommodate parentCheckWhere() correlated subqueries on
+	// large wisp tables (e.g. HQ with 22K+ rows / ~10 GB).
+	DefaultQueryTimeout = 60 * time.Second
 	// DefaultBatchSize is the number of rows per batch DELETE operation.
 	DefaultBatchSize = 100
 )
