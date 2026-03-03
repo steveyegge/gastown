@@ -1,0 +1,15 @@
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-7gfy","issue_id":"gt-wisp-3h86","type":"parent-child"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-yus2","issue_id":"gt-wisp-3h86","type":"blocks"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-3h86","issue_id":"gt-wisp-ha5e","type":"blocks"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-7gfy","issue_id":"gt-wisp-ha5e","type":"parent-child"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-7gfy","issue_id":"gt-wisp-k6um","type":"parent-child"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-ha5e","issue_id":"gt-wisp-k6um","type":"blocks"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-7gfy","issue_id":"gt-wisp-ofj7","type":"parent-child"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-k6um","issue_id":"gt-wisp-ofj7","type":"blocks"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-7gfy","issue_id":"gt-wisp-rfdf","type":"parent-child"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-ofj7","issue_id":"gt-wisp-rfdf","type":"blocks"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-7gfy","issue_id":"gt-wisp-sxpd","type":"parent-child"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-7gfy","issue_id":"gt-wisp-v728","type":"parent-child"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-sxpd","issue_id":"gt-wisp-v728","type":"blocks"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-7gfy","issue_id":"gt-wisp-yus2","type":"parent-child"}
+{"created_at":"2026-03-03T14:48:50Z","created_by":"mayor","depends_on_id":"gt-wisp-v728","issue_id":"gt-wisp-yus2","type":"blocks"}
