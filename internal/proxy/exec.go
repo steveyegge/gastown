@@ -79,11 +79,11 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Per-client rate limiting: identified by cert CN (or "unknown" if absent).
-	ratioKey := identity
-	if ratioKey == "" {
-		ratioKey = "unknown"
+	rateKey := identity
+	if rateKey == "" {
+		rateKey = "unknown"
 	}
-	if !s.limiterFor(ratioKey).Allow() {
+	if !s.limiterFor(rateKey).Allow() {
 		s.log.Warn("exec rate limit exceeded", "identity", identity)
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
