@@ -24,6 +24,13 @@ import {
   GitBranch,
   RefreshCw,
   Upload,
+  Database,
+  HardDrive,
+  Table2,
+  Layers,
+  Sparkles,
+  Grid3X3,
+  CloudCog,
 } from "lucide-react"
 
 interface NavItem {
@@ -92,6 +99,48 @@ export const imdeSubItems: NavItem[] = [
     badge: "Live",
     badgeColor: "bg-emerald-500/20 text-emerald-400",
     description: "Retrain from production",
+  },
+]
+
+// Data sub-navigation items
+export const dataSubItems: NavItem[] = [
+  {
+    label: "Overview",
+    href: "/data",
+    icon: Grid3X3,
+    description: "All data sources & activity",
+  },
+  {
+    label: "Azure Storage",
+    href: "/data/storage",
+    icon: HardDrive,
+    description: "Blobs, containers & files",
+  },
+  {
+    label: "Azure SQL",
+    href: "/data/sql",
+    icon: Table2,
+    description: "Databases, tables & queries",
+  },
+  {
+    label: "Cosmos DB",
+    href: "/data/cosmos",
+    icon: Database,
+    description: "NoSQL containers & items",
+  },
+  {
+    label: "Microsoft Fabric",
+    href: "/data/fabric",
+    icon: Layers,
+    description: "Lakehouses & warehouses",
+  },
+  {
+    label: "Built-in Datasets",
+    href: "/data/datasets",
+    icon: Sparkles,
+    badge: "Hub",
+    badgeColor: "bg-sky-500/20 text-sky-400",
+    description: "Curated healthcare datasets",
   },
 ]
 
@@ -296,6 +345,80 @@ function ImdeSection() {
   )
 }
 
+function DataSection() {
+  const pathname = usePathname()
+  const isData = pathname === "/data" || pathname.startsWith("/data/")
+  const Icon = Database
+  const isMainActive = pathname === "/data"
+
+  return (
+    <div className="mb-1">
+      <Link
+        href="/data"
+        className={cn(
+          "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
+          isMainActive
+            ? "bg-secondary text-foreground"
+            : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+        )}
+      >
+        <span className={cn(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors",
+          isData
+            ? "bg-sky-500/20 text-sky-400"
+            : "bg-secondary/50 text-muted-foreground group-hover:text-foreground"
+        )}>
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="truncate">Data</span>
+            <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-sky-500/20 text-sky-400">New</span>
+          </div>
+          <p className="truncate text-xs text-muted-foreground/70">Storage, SQL, Cosmos & Fabric</p>
+        </div>
+        <ChevronRight className={cn("h-4 w-4 transition-transform", isData ? "rotate-90 text-sky-400" : "text-muted-foreground/40")} />
+      </Link>
+      {isData && (
+        <ul className="mt-0.5 space-y-0.5 pl-2">
+          {dataSubItems.map((item) => {
+            const SubIcon = item.icon
+            const isActive = item.href === "/data"
+              ? pathname === "/data"
+              : pathname === item.href || pathname.startsWith(item.href + "/")
+            return (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  className={cn(
+                    "group flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-all duration-150",
+                    isActive
+                      ? "bg-sky-500/10 text-sky-300"
+                      : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+                  )}
+                >
+                  <span className={cn(
+                    "flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors",
+                    isActive ? "text-sky-400" : "text-muted-foreground group-hover:text-foreground"
+                  )}>
+                    <SubIcon className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="flex-1 truncate">{item.label}</span>
+                  {item.badge && (
+                    <span className={cn("rounded px-1 py-0.5 text-[10px] font-medium", item.badgeColor)}>
+                      {item.badge}
+                    </span>
+                  )}
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 function DevelopmentSection() {
   return (
     <div className="mb-6">
@@ -335,6 +458,14 @@ export function AppSidebar() {
       <nav className="flex-1 overflow-y-auto p-3">
         <NavSection title="Marketplaces" items={marketplaceItems} />
         <DevelopmentSection />
+        <div className="mb-6">
+          <h3 className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Data
+          </h3>
+          <ul className="space-y-1">
+            <li><DataSection /></li>
+          </ul>
+        </div>
         <NavSection title="Operations" items={governanceItems} />
       </nav>
       

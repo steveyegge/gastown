@@ -1,0 +1,27 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+
+    // ── Cosmos DB — existing cloud account (rg-ai-marketplace-dev, East US) ──
+    // Account: ai-marketplace-cosmos-p7a65r22uhdxo
+    // Get key: az cosmosdb keys list --name ai-marketplace-cosmos-p7a65r22uhdxo --resource-group rg-ai-marketplace-dev --query primaryMasterKey -o tsv
+    // If provisioningState=Failed, fix with: az cosmosdb delete --name ai-marketplace-cosmos-p7a65r22uhdxo --resource-group rg-ai-marketplace-dev --yes && azd provision
+    "COSMOS_ENDPOINT": "https://ai-marketplace-cosmos-p7a65r22uhdxo.documents.azure.com:443/",
+    "COSMOS_KEY": "<paste key from az cosmosdb keys list command above>",
+    "COSMOS_DATABASE": "ai-marketplace",
+
+    // ── Emulator fallback (uncomment + comment cloud lines above for offline dev) ──
+    // "COSMOS_ENDPOINT": "https://localhost:8081/",
+    // "COSMOS_KEY": "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMpzwuFNXCN1Yxfjg==",
+
+    // ── Application Insights (optional for local dev) ──────────────────────
+    "APPINSIGHTS_INSTRUMENTATIONKEY": "",
+    "APPLICATIONINSIGHTS_CONNECTION_STRING": "",
+
+    // ── Storage Queue for async security scan (optional for local dev) ─────
+    // Set to a real Azure Storage Queue SAS URL to enable the scan processor.
+    "AZURE_STORAGE_QUEUE_SCAN_URL": ""
+  }
+}

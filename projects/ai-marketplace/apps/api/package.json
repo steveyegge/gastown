@@ -1,0 +1,33 @@
+{
+  "name": "ai-marketplace-api",
+  "version": "1.0.0",
+  "description": "AI Asset Marketplace — Azure Functions v4 API",
+  "main": "dist/src/functions/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "start": "func start",
+    "dev": "npm run build && func start",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@azure/cosmos": "^4.2.0",
+    "@azure/functions": "^4.5.0",
+    "@azure/identity": "^4.6.0",
+    "@azure/keyvault-secrets": "^4.9.0",
+    "applicationinsights": "^3.4.0",
+    "uuid": "^11.1.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.7.0",
+    "@azure/functions": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "typescript": "^5.7.0",
+    "@azure/functions": "^4.5.0"
+  }
+}

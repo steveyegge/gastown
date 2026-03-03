@@ -109,8 +109,70 @@ resource auditLogContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/c
   properties: {
     resource: {
       id: 'audit-log'
-      partitionKey: { paths: ['/date'], kind: 'Hash' }
-      defaultTtl: 7776000  // 90 days TTL for old audit records
+      partitionKey: { paths: ['/tenantId'], kind: 'Hash' }
+      defaultTtl: 7776000  // 90 days TTL
+    }
+  }
+}
+
+resource ratingsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'ratings'
+  properties: {
+    resource: {
+      id: 'ratings'
+      partitionKey: { paths: ['/assetId'], kind: 'Hash' }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        includedPaths: [{ path: '/*' }]
+        excludedPaths: [{ path: '/"_etag"/?' }]
+      }
+    }
+  }
+}
+
+resource projectsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'projects'
+  properties: {
+    resource: {
+      id: 'projects'
+      partitionKey: { paths: ['/tenantId'], kind: 'Hash' }
+    }
+  }
+}
+
+resource versionPinsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'version-pins'
+  properties: {
+    resource: {
+      id: 'version-pins'
+      partitionKey: { paths: ['/projectId'], kind: 'Hash' }
+    }
+  }
+}
+
+resource sessionsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'sessions'
+  properties: {
+    resource: {
+      id: 'sessions'
+      partitionKey: { paths: ['/tenantId'], kind: 'Hash' }
+      defaultTtl: 86400  // 24 h — sessions expire automatically
+    }
+  }
+}
+
+// ─── User configuration (preferences, saved filters, theme, etc.) ───────────
+resource userConfigContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'user-config'
+  properties: {
+    resource: {
+      id: 'user-config'
+      partitionKey: { paths: ['/userId'], kind: 'Hash' }
     }
   }
 }

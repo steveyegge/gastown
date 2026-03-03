@@ -1,0 +1,16 @@
+[rig]
+name = "ai_marketplace"
+repo = "https://github.com/your-org/ai-marketplace.git"
+description = "Azure AI Asset Marketplace + Visual Agent Orchestration"
+runtime = "claude"
+
+[rig.agents]
+witness = true
+refinery = true
+
+[rig.beads]
+prefix = "mkt"
+
+[rig.env]
+AZURE_REGION = "eastus"
+APP_NAME = "ai-marketplace"
