@@ -27,7 +27,7 @@ services:
     environment:
       IS_SANDBOX: 1
     volumes:
-      # FOLDER must be defiend in .env file, e.g. FOLDER=/home/user
+      # FOLDER must be defined in .env file, e.g. FOLDER=/home/user
       # or provided as an environment variable when running docker-compose, 
       # e.g. FOLDER=/home/user docker-compose up
       - ${FOLDER}:${FOLDER} 
