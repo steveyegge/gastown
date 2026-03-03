@@ -1113,12 +1113,12 @@ func (r *Router) sendToSingle(msg *Message) error {
 	// Add actor for attribution (sender identity)
 	args = append(args, "--actor", msg.From)
 
-	// Pass the pre-generated message ID so bd uses it instead of generating its own.
-	// Without this, the ephemeral (SQLite) insert path produces empty IDs,
-	// causing UNIQUE constraint failures on subsequent sends (#2095).
-	if msg.ID != "" {
-		args = append(args, "--id", msg.ID)
-	}
+	// NOTE: Do NOT pass --id with msg.ID here. msg.ID uses "msg-" prefix for
+	// in-memory tracking (notifications, logging), but bd create validates that
+	// IDs match the database prefix (e.g., "hq-"). Passing "msg-xxx" to --id
+	// causes prefix mismatch errors. Let bd auto-generate the correct prefixed ID.
+	// The wisp/ephemeral path in bd (wisps.go) already handles empty IDs correctly.
+	// See: #2095 (original workaround), this revert fixes the regression.
 
 	// Add --ephemeral flag for ephemeral messages (wisps, not synced to git)
 	if r.shouldBeWisp(msg) {
