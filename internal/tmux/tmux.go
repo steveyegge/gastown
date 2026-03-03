@@ -353,6 +353,110 @@ func (t *Tmux) NewSessionWithCommandAndEnv(name, workDir, command string, env ma
 	return t.checkSessionAfterCreate(name, command)
 }
 
+// NewGroupedSessionWithCommandAndEnv creates a tmux session that joins an existing
+// session's window group. All sessions in a group share the same set of windows,
+// so the overseer can see all crew windows from any attached session.
+//
+// The flow:
+//  1. Create a new session joined to groupTarget's window group (-t flag)
+//  2. Create a new window for this session's command (added to all group members)
+//  3. Run the command in the new window via respawn-pane
+//
+// Requires tmux >= 3.2 (for -e flags).
+func (t *Tmux) NewGroupedSessionWithCommandAndEnv(name, workDir, command string, env map[string]string, groupTarget string) error {
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
+	if groupTarget == "" {
+		return fmt.Errorf("groupTarget is required for grouped session creation")
+	}
+	if workDir != "" {
+		info, err := os.Stat(workDir)
+		if err != nil {
+			return fmt.Errorf("invalid work directory %q: %w", workDir, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("work directory %q is not a directory", workDir)
+		}
+	}
+
+	// Step 1: Create session joined to the group. This shares all existing
+	// windows with the group target. No new window is created yet.
+	args := []string{"new-session", "-d", "-s", name, "-t", groupTarget}
+	if workDir != "" {
+		args = append(args, "-c", workDir)
+	}
+	// Add -e flags for session-level environment (same as NewSessionWithCommandAndEnv).
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", k, env[k]))
+	}
+	if _, err := t.run(args...); err != nil {
+		return fmt.Errorf("creating grouped session %q (group %q): %w", name, groupTarget, err)
+	}
+
+	// Step 2: Create a new window for this crew member's command.
+	// The window is added to the group and visible to all sessions.
+	newWinArgs := []string{"new-window", "-t", name}
+	if workDir != "" {
+		newWinArgs = append(newWinArgs, "-c", workDir)
+	}
+	if _, err := t.run(newWinArgs...); err != nil {
+		_ = t.KillSession(name)
+		return fmt.Errorf("creating window in grouped session %q: %w", name, err)
+	}
+
+	// Step 3: Configure the new window (same as non-grouped path).
+	_, _ = t.run("set-option", "-wt", name, "window-size", "latest")
+	_, _ = t.run("set-option", "-t", name, "remain-on-exit", "on")
+
+	// Step 4: Replace the shell in the new window with the actual command.
+	respawnArgs := []string{"respawn-pane", "-k", "-t", name}
+	if workDir != "" {
+		respawnArgs = append(respawnArgs, "-c", workDir)
+	}
+	respawnArgs = append(respawnArgs, command)
+	if _, err := t.run(respawnArgs...); err != nil {
+		_ = t.KillSession(name)
+		return fmt.Errorf("failed to start command in grouped session %q: %w", name, err)
+	}
+
+	return t.checkSessionAfterCreate(name, command)
+}
+
+// KillGroupedSessionWindow kills the window owned by a grouped session before
+// destroying the session. In a window group, killing a session does NOT remove
+// its windows — they persist for other group members. This method finds and kills
+// the window that was created for the named session.
+func (t *Tmux) KillGroupedSessionWindow(sessionName string) error {
+	// Get the current window index for this session and kill it.
+	// When a grouped session is created, its current window is the one we
+	// created for it (via new-window in NewGroupedSessionWithCommandAndEnv).
+	winIdx, err := t.run("display-message", "-t", sessionName, "-p", "#{window_index}")
+	if err != nil {
+		return nil // Session may already be gone
+	}
+	idx := strings.TrimSpace(winIdx)
+	if idx == "" {
+		return nil
+	}
+	_, _ = t.run("kill-window", "-t", sessionName+":"+idx)
+	return nil
+}
+
+// IsGroupedSession checks whether a tmux session is part of a session group.
+func (t *Tmux) IsGroupedSession(sessionName string) bool {
+	group, err := t.run("display-message", "-t", sessionName, "-p", "#{session_group}")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(group) != ""
+}
+
 // checkSessionAfterCreate verifies that a newly created session's command didn't
 // fail immediately (binary not found, syntax error, etc.). Expects remain-on-exit
 // to already be enabled on the session. Checks the exit status after a brief delay.

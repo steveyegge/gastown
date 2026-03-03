@@ -60,6 +60,12 @@ type StartOptions struct {
 	// "last" means resume the most recent session (--resume with no session ID).
 	// Any other non-empty value is a specific session ID to resume.
 	ResumeSessionID string
+
+	// GroupTarget is the name of an existing tmux session whose window group this
+	// session should join. When set, the new session shares windows with the group,
+	// allowing the overseer to see all crew windows from any attached session.
+	// Empty means create a standalone session (the default / group anchor).
+	GroupTarget string
 }
 
 // validateSessionID checks that a resume session ID contains only safe characters.
@@ -826,8 +832,16 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// initial shell inherits the correct GT_ROLE (not the parent's).
 	// See: https://github.com/anthropics/gastown/issues/280 (race condition fix)
 	// See: https://github.com/steveyegge/gastown/issues/1289 (env inheritance fix)
-	if err := t.NewSessionWithCommandAndEnv(sessionID, worker.ClonePath, claudeCmd, envVars); err != nil {
-		return fmt.Errorf("creating session: %w", err)
+	if opts.GroupTarget != "" {
+		// Join an existing session's window group so all crew windows are visible
+		// from any attached session. Each crew member gets its own window in the group.
+		if err := t.NewGroupedSessionWithCommandAndEnv(sessionID, worker.ClonePath, claudeCmd, envVars, opts.GroupTarget); err != nil {
+			return fmt.Errorf("creating grouped session: %w", err)
+		}
+	} else {
+		if err := t.NewSessionWithCommandAndEnv(sessionID, worker.ClonePath, claudeCmd, envVars); err != nil {
+			return fmt.Errorf("creating session: %w", err)
+		}
 	}
 
 	// Record agent's pane_id for ZFC-compliant liveness checks (gt-qmsx).
@@ -886,6 +900,13 @@ func (m *Manager) Stop(name string) error {
 	}
 	if !running {
 		return ErrSessionNotFound
+	}
+
+	// If this session is part of a window group, kill its window first.
+	// In a group, kill-session does NOT remove the session's windows — they
+	// persist for other group members as dead panes. Clean up proactively.
+	if t.IsGroupedSession(sessionID) {
+		_ = t.KillGroupedSessionWindow(sessionID)
 	}
 
 	// Kill the session.

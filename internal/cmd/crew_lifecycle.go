@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/townlog"
@@ -346,50 +347,84 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 		KillExisting:    crewResume != "", // Resume needs to kill existing session first
 	}
 
-	// Start each crew member in parallel
+	// Determine window group target for tmux session grouping.
+	// All crew sessions in a rig share a window group so the overseer can
+	// cycle through all crew windows from any attached session.
+	groupTarget := findCrewGroupTarget(rigName, crewMgr)
+
 	type result struct {
 		name    string
 		err     error
 		skipped bool // true if session was already running
 	}
-	results := make(chan result, len(crewNames))
-	var wg sync.WaitGroup
 
 	fmt.Printf("Starting %d crew member(s) in %s...\n", len(crewNames), rigName)
 
-	for _, name := range crewNames {
-		wg.Add(1)
-		go func(crewName string) {
-			defer wg.Done()
-			err := crewMgr.Start(crewName, opts)
-			skipped := errors.Is(err, crew.ErrSessionRunning)
-			if skipped {
-				err = nil // Not an error, just already running
-			}
-			results <- result{name: crewName, err: err, skipped: skipped}
-		}(name)
-	}
-
-	// Wait for all goroutines to complete
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	// Collect results
 	var lastErr error
 	startedCount := 0
 	skippedCount := 0
-	for res := range results {
-		if res.err != nil {
-			fmt.Printf("  %s %s/%s: %v\n", style.ErrorPrefix, rigName, res.name, res.err)
-			lastErr = res.err
-		} else if res.skipped {
-			fmt.Printf("  %s %s/%s: already running\n", style.Dim.Render("○"), rigName, res.name)
+
+	// If no existing group target and we're starting multiple crew members,
+	// start the first one synchronously as the group anchor.
+	anchorIdx := 0
+	if groupTarget == "" && len(crewNames) > 1 {
+		anchorName := crewNames[0]
+		anchorOpts := opts // no GroupTarget — this is the anchor
+		err := crewMgr.Start(anchorName, anchorOpts)
+		if errors.Is(err, crew.ErrSessionRunning) {
+			fmt.Printf("  %s %s/%s: already running\n", style.Dim.Render("○"), rigName, anchorName)
 			skippedCount++
+			// Already-running session can serve as group target
+			groupTarget = crewMgr.SessionName(anchorName)
+		} else if err != nil {
+			fmt.Printf("  %s %s/%s: %v\n", style.ErrorPrefix, rigName, anchorName, err)
+			lastErr = err
+			// Anchor failed — remaining crew start without grouping
 		} else {
-			fmt.Printf("  %s %s/%s: started\n", style.SuccessPrefix, rigName, res.name)
+			fmt.Printf("  %s %s/%s: started (group anchor)\n", style.SuccessPrefix, rigName, anchorName)
 			startedCount++
+			groupTarget = crewMgr.SessionName(anchorName)
+		}
+		anchorIdx = 1 // skip first name in parallel phase
+	}
+
+	// Start remaining crew members in parallel, joined to the group.
+	remaining := crewNames[anchorIdx:]
+	if len(remaining) > 0 {
+		results := make(chan result, len(remaining))
+		var wg sync.WaitGroup
+
+		for _, name := range remaining {
+			wg.Add(1)
+			go func(crewName string) {
+				defer wg.Done()
+				startOpts := opts
+				startOpts.GroupTarget = groupTarget // may be "" if anchor failed
+				err := crewMgr.Start(crewName, startOpts)
+				skipped := errors.Is(err, crew.ErrSessionRunning)
+				if skipped {
+					err = nil
+				}
+				results <- result{name: crewName, err: err, skipped: skipped}
+			}(name)
+		}
+
+		go func() {
+			wg.Wait()
+			close(results)
+		}()
+
+		for res := range results {
+			if res.err != nil {
+				fmt.Printf("  %s %s/%s: %v\n", style.ErrorPrefix, rigName, res.name, res.err)
+				lastErr = res.err
+			} else if res.skipped {
+				fmt.Printf("  %s %s/%s: already running\n", style.Dim.Render("○"), rigName, res.name)
+				skippedCount++
+			} else {
+				fmt.Printf("  %s %s/%s: started\n", style.SuccessPrefix, rigName, res.name)
+				startedCount++
+			}
 		}
 	}
 
@@ -401,6 +436,24 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 	}
 
 	return lastErr
+}
+
+// findCrewGroupTarget finds an existing crew session to use as a tmux window
+// group target. Returns the session name if found, empty string otherwise.
+func findCrewGroupTarget(rigName string, crewMgr *crew.Manager) string {
+	t := tmux.NewTmux()
+	sessions, err := t.ListSessions()
+	if err != nil {
+		return ""
+	}
+
+	prefix := session.PrefixFor(rigName) + "-crew-"
+	for _, s := range sessions {
+		if strings.HasPrefix(s, prefix) {
+			return s
+		}
+	}
+	return ""
 }
 
 func runCrewRestart(cmd *cobra.Command, args []string) error {
