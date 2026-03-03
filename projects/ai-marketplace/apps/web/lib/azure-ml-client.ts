@@ -379,3 +379,274 @@ export function isAmlConfigured(): boolean {
     process.env.AZURE_ML_WORKSPACE
   )
 }
+
+// ── Compute management ────────────────────────────────────────────────────────
+// Azure ML Compute Instances and Compute Clusters (AmlCompute)
+
+export type ComputeInstanceState =
+  | "Running"
+  | "Stopped"
+  | "Starting"
+  | "Stopping"
+  | "Restarting"
+  | "Creating"
+  | "Updating"
+  | "Deleting"
+  | "Unknown"
+  | "UserSettingUp"
+  | "SystemSettingUp"
+  | "JobRunning"
+
+export type ComputeType = "ComputeInstance" | "AmlCompute" | "Kubernetes" | "VirtualMachine"
+
+export interface AmlComputeInstance {
+  /** ARM resource name */
+  name: string
+  /** ARM resource ID */
+  id: string
+  /** Compute type */
+  computeType: ComputeType
+  /** Provisioning state from ARM */
+  provisioningState: string
+  /** VM size (e.g. Standard_NC24ads_A100_v4) */
+  vmSize: string
+  /** Current operational state for ComputeInstance */
+  state?: ComputeInstanceState
+  /** Human-readable description */
+  description?: string
+  /** Owner (principalId or UPN) */
+  createdBy?: string
+  /** ISO datetime */
+  createdOn?: string
+  /** ISO datetime */
+  modifiedOn?: string
+  /** Number of CPU cores from VM size (derived) */
+  cpuCores?: number
+  /** Memory in GB (derived) */
+  memoryGb?: number
+  /** For AmlCompute: current / max node counts */
+  currentNodeCount?: number
+  maxNodeCount?: number
+  /** Whether GPU VM */
+  isGpu?: boolean
+  /** GPU spec string if applicable */
+  gpuSpec?: string
+  /** Subnet resource-id if VNet integrated */
+  subnetId?: string
+  /** Tags map */
+  tags?: Record<string, string>
+  /** SSH access info */
+  sshPort?: number
+  /** AML Studio URL */
+  studioUrl?: string
+}
+
+interface AmlComputeListResponse {
+  value: Array<{
+    id: string
+    name: string
+    tags?: Record<string, string>
+    properties: {
+      computeType: string
+      computeLocation?: string
+      description?: string
+      provisioningState?: string
+      resourceId?: string
+      createdOn?: string
+      modifiedOn?: string
+      createdBy?: { userObjectId?: string; userName?: string }
+      properties?: {
+        // ComputeInstance specific
+        vmSize?: string
+        state?: string
+        sshSettings?: { sshPort?: number }
+        subnet?: { id?: string }
+        // AmlCompute specific
+        currentNodeCount?: number
+        targetNodeCount?: number
+        scaleSettings?: { maxNodeCount?: number; minNodeCount?: number }
+        vmPriority?: string
+        // Kubernetes
+        clusterPurpose?: string
+      }
+    }
+  }>
+  nextLink?: string
+}
+
+/** Azure VM size to compute shape (best-effort approximation for common sizes) */
+function vmSizeToSpecs(vmSize: string): { cpu: number; memGb: number; isGpu: boolean; gpuSpec?: string } {
+  const s = vmSize.toLowerCase()
+  // GPU families
+  if (s.includes("_a100")) return { cpu: 24, memGb: 220, isGpu: true, gpuSpec: "NVIDIA A100 × 1" }
+  if (s.includes("nd96")) return { cpu: 96, memGb: 900, isGpu: true, gpuSpec: "NVIDIA A100 × 8" }
+  if (s.includes("nc24ads")) return { cpu: 24, memGb: 220, isGpu: true, gpuSpec: "NVIDIA A100 × 1" }
+  if (s.includes("nc48ads")) return { cpu: 48, memGb: 440, isGpu: true, gpuSpec: "NVIDIA A100 × 2" }
+  if (s.includes("nc6") && !s.includes("nc6s")) return { cpu: 6, memGb: 56, isGpu: true, gpuSpec: "NVIDIA Tesla K80 × 1" }
+  if (s.includes("nc6s_v3")) return { cpu: 6, memGb: 112, isGpu: true, gpuSpec: "NVIDIA V100 × 1" }
+  if (s.includes("nc12s_v3")) return { cpu: 12, memGb: 224, isGpu: true, gpuSpec: "NVIDIA V100 × 2" }
+  if (s.includes("nc24s_v3")) return { cpu: 24, memGb: 448, isGpu: true, gpuSpec: "NVIDIA V100 × 4" }
+  if (s.includes("nc6s_v2")) return { cpu: 6, memGb: 112, isGpu: true, gpuSpec: "NVIDIA P100 × 1" }
+  if (s.includes("nc12s_v2")) return { cpu: 12, memGb: 224, isGpu: true, gpuSpec: "NVIDIA P100 × 2" }
+  if (s.includes("nv") ) return { cpu: 12, memGb: 112, isGpu: true, gpuSpec: "NVIDIA M60 × 2" }
+  // CPU families
+  if (s.includes("_d2_") || s.includes("d2s")) return { cpu: 2, memGb: 8, isGpu: false }
+  if (s.includes("_d4_") || s.includes("d4s")) return { cpu: 4, memGb: 16, isGpu: false }
+  if (s.includes("_d8_") || s.includes("d8s")) return { cpu: 8, memGb: 32, isGpu: false }
+  if (s.includes("_d16_") || s.includes("d16s")) return { cpu: 16, memGb: 64, isGpu: false }
+  if (s.includes("_d32_") || s.includes("d32s")) return { cpu: 32, memGb: 128, isGpu: false }
+  if (s.includes("_d64_") || s.includes("d64s")) return { cpu: 64, memGb: 256, isGpu: false }
+  if (s.includes("_e4_") || s.includes("e4s")) return { cpu: 4, memGb: 32, isGpu: false }
+  if (s.includes("_e8_") || s.includes("e8s")) return { cpu: 8, memGb: 64, isGpu: false }
+  if (s.includes("_e16_") || s.includes("e16s")) return { cpu: 16, memGb: 128, isGpu: false }
+  if (s.includes("_e32_") || s.includes("e32s")) return { cpu: 32, memGb: 256, isGpu: false }
+  if (s.includes("ds3")) return { cpu: 4, memGb: 14, isGpu: false }
+  if (s.includes("ds4")) return { cpu: 8, memGb: 28, isGpu: false }
+  if (s.includes("ds5")) return { cpu: 16, memGb: 56, isGpu: false }
+  // Fallback
+  return { cpu: 4, memGb: 16, isGpu: false }
+}
+
+function mapComputeInstance(raw: AmlComputeListResponse["value"][number]): AmlComputeInstance {
+  const props = raw.properties
+  const inner = props?.properties ?? {}
+  const vmSize = inner.vmSize ?? "Standard_DS3_v2"
+  const specs = vmSizeToSpecs(vmSize)
+  const sub = process.env.AZURE_SUBSCRIPTION_ID ?? ""
+  const rg = process.env.AZURE_ML_RESOURCE_GROUP ?? ""
+  const ws = process.env.AZURE_ML_WORKSPACE ?? ""
+
+  const studioUrl =
+    raw.name && ws
+      ? `https://ml.azure.com/compute/${raw.name}/detail?wsid=/subscriptions/${sub}/resourceGroups/${rg}/providers/Microsoft.MachineLearningServices/workspaces/${ws}`
+      : undefined
+
+  return {
+    name: raw.name,
+    id: raw.id,
+    computeType: (props?.computeType ?? "ComputeInstance") as ComputeType,
+    provisioningState: props?.provisioningState ?? "Unknown",
+    vmSize,
+    state: (inner.state ?? (props?.provisioningState === "Succeeded" ? "Running" : "Unknown")) as ComputeInstanceState,
+    description: props?.description,
+    createdBy: props?.createdBy?.userName,
+    createdOn: props?.createdOn,
+    modifiedOn: props?.modifiedOn,
+    cpuCores: specs.cpu,
+    memoryGb: specs.memGb,
+    currentNodeCount: inner.currentNodeCount,
+    maxNodeCount: inner.scaleSettings?.maxNodeCount,
+    isGpu: specs.isGpu,
+    gpuSpec: specs.gpuSpec,
+    subnetId: inner.subnet?.id,
+    tags: raw.tags,
+    sshPort: inner.sshSettings?.sshPort,
+    studioUrl,
+  }
+}
+
+/**
+ * List all compute resources in the Azure ML workspace.
+ */
+export async function listAmlCompute(): Promise<AmlComputeInstance[]> {
+  const result = await amlFetch<AmlComputeListResponse>("/computes")
+  return (result.value ?? []).map(mapComputeInstance)
+}
+
+/**
+ * Get a single compute resource by name.
+ */
+export async function getAmlCompute(computeName: string): Promise<AmlComputeInstance> {
+  const raw = await amlFetch<AmlComputeListResponse["value"][number]>(
+    `/computes/${encodeURIComponent(computeName)}`
+  )
+  return mapComputeInstance(raw)
+}
+
+export type ComputeAction = "start" | "stop" | "restart"
+
+/**
+ * Start, stop, or restart a ComputeInstance.
+ * (AmlCompute clusters scale automatically; start/stop applies to ComputeInstance only.)
+ */
+export async function controlAmlCompute(
+  computeName: string,
+  action: ComputeAction
+): Promise<{ accepted: boolean }> {
+  await amlFetch(`/computes/${encodeURIComponent(computeName)}/${action}`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  })
+  return { accepted: true }
+}
+
+export interface ProvisionComputeInput {
+  /** Name for the new compute instance */
+  name: string
+  /** VM size, e.g. Standard_DS3_v2 */
+  vmSize: string
+  /** Optional description */
+  description?: string
+  /** Whether to enable SSH */
+  enableSsh?: boolean
+  /** Tags */
+  tags?: Record<string, string>
+}
+
+/**
+ * Provision a new ComputeInstance in the Azure ML workspace.
+ * Returns the ARM operation location header (async provision).
+ */
+export async function provisionComputeInstance(
+  input: ProvisionComputeInput
+): Promise<{ name: string; provisioningState: string }> {
+  interface CreateResponse { name: string; properties: { provisioningState?: string } }
+  const { name, vmSize, description, enableSsh = false, tags = {} } = input
+  const body = {
+    properties: {
+      computeType: "ComputeInstance",
+      description,
+      properties: {
+        vmSize,
+        applicationSharingPolicy: "Personal",
+        sshSettings: {
+          sshPublicAccess: enableSsh ? "Enabled" : "Disabled",
+        },
+      },
+    },
+    tags: {
+      "created-by": "imde-marketplace",
+      ...tags,
+    },
+  }
+  const result = await amlFetch<CreateResponse>(
+    `/computes/${encodeURIComponent(name)}`,
+    { method: "PUT", body: JSON.stringify(body) }
+  )
+  return {
+    name: result.name,
+    provisioningState: result.properties?.provisioningState ?? "Creating",
+  }
+}
+
+/**
+ * Delete a compute resource.
+ */
+export async function deleteAmlCompute(computeName: string): Promise<void> {
+  await amlFetch(`/computes/${encodeURIComponent(computeName)}?underlyingResourceAction=Delete`, {
+    method: "DELETE",
+  })
+}
+
+/** Standard VM sizes available for new compute instances */
+export const COMPUTE_VM_SIZES = [
+  { id: "Standard_DS3_v2",      label: "DS3 v2 — 4 vCPU / 14 GB",    tier: "CPU",  isGpu: false },
+  { id: "Standard_DS4_v2",      label: "DS4 v2 — 8 vCPU / 28 GB",    tier: "CPU",  isGpu: false },
+  { id: "Standard_D16s_v3",     label: "D16s v3 — 16 vCPU / 64 GB",  tier: "CPU",  isGpu: false },
+  { id: "Standard_E8s_v3",      label: "E8s v3 — 8 vCPU / 64 GB",    tier: "Memory", isGpu: false },
+  { id: "Standard_E16s_v3",     label: "E16s v3 — 16 vCPU / 128 GB", tier: "Memory", isGpu: false },
+  { id: "Standard_NC6s_v3",     label: "NC6s v3 — 6 vCPU / V100 × 1", tier: "GPU", isGpu: true },
+  { id: "Standard_NC12s_v3",    label: "NC12s v3 — 12 vCPU / V100 × 2", tier: "GPU", isGpu: true },
+  { id: "Standard_NC24s_v3",    label: "NC24s v3 — 24 vCPU / V100 × 4", tier: "GPU", isGpu: true },
+  { id: "Standard_NC24ads_A100_v4", label: "NC24ads A100 v4 — 24 vCPU / A100 × 1", tier: "GPU", isGpu: true },
+]
