@@ -55,9 +55,10 @@ func init() {
 }
 
 var nudgeCmd = &cobra.Command{
-	Use:     "nudge <target> [message]",
-	GroupID: GroupComm,
-	Short:   "Send a synchronous message to any Gas Town worker",
+	Use:         "nudge <target> [message]",
+	GroupID:     GroupComm,
+	Annotations: map[string]string{AnnotationPolecatSafe: "true"},
+	Short:       "Send a synchronous message to any Gas Town worker",
 	Long: `Universal messaging API for Gas Town worker-to-worker communication.
 
 Delivers a message to any worker's Claude Code session: polecats, crew,

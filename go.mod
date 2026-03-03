@@ -14,7 +14,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.10.2
-	github.com/steveyegge/beads v0.56.1
+	github.com/steveyegge/beads v0.57.0
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/dolt v0.40.0
 	go.opentelemetry.io/otel v1.40.0
@@ -28,6 +28,8 @@ require (
 	golang.org/x/sys v0.41.0
 	golang.org/x/term v0.40.0
 	golang.org/x/text v0.34.0
+	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (
@@ -129,7 +131,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260128011058-8636f8732409 // indirect
 	google.golang.org/grpc v1.78.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

@@ -52,10 +52,11 @@ var (
 )
 
 var mailCmd = &cobra.Command{
-	Use:     "mail",
-	GroupID: GroupComm,
-	Short:   "Agent messaging system",
-	RunE:    requireSubcommand,
+	Use:         "mail",
+	GroupID:     GroupComm,
+	Annotations: map[string]string{AnnotationPolecatSafe: "true"},
+	Short:       "Agent messaging system",
+	RunE:        requireSubcommand,
 	Long: `Send and receive messages between agents.
 
 The mail system allows Mayor, polecats, and the Refinery to communicate.

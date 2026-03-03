@@ -154,8 +154,11 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 
 	// Step 1: Force-close descendant steps before detaching. Uses force variant
 	// since burn is a destructive recovery path where prior state may be inconsistent.
+	// Best-effort — log but proceed in destructive path.
 	for _, molID := range molecules {
-		forceCloseDescendants(bd, molID)
+		if _, err := forceCloseDescendants(bd, molID); err != nil {
+			style.PrintWarning("burn: could not close descendants of %s: %v", molID, err)
+		}
 	}
 
 	// Step 2: Detach molecule from the base bead using the Go API (with audit logging
@@ -186,8 +189,11 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 	}
 
 	// Step 4: Close descendants, then force-close the orphaned wisp roots.
+	// Best-effort — log but proceed in destructive path.
 	for _, molID := range molecules {
-		forceCloseDescendants(bd, molID)
+		if _, err := forceCloseDescendants(bd, molID); err != nil {
+			style.PrintWarning("burn: could not close descendants of %s: %v", molID, err)
+		}
 	}
 	if err := bd.ForceCloseWithReason("burned: force re-sling", molecules...); err != nil {
 		fmt.Printf("  %s Could not close molecule wisp(s): %v\n",

@@ -1562,3 +1562,247 @@ func TestClearCompletionMetadata_NoBd(t *testing.T) {
 	}
 }
 
+// installMockHasSession replaces the hasSession package variable with a mock.
+// The mockFn receives a session name and returns (alive, error).
+func installMockHasSession(t *testing.T, mockFn func(sessionName string) (bool, error)) {
+	t.Helper()
+	old := hasSession
+	hasSession = mockFn
+	t.Cleanup(func() { hasSession = old })
+}
+
+func TestIsBeadActivelyWorked_EmptyBeadID(t *testing.T) {
+	t.Parallel()
+	if IsBeadActivelyWorked("/tmp", "testrig", "", "") {
+		t.Error("IsBeadActivelyWorked should return false for empty beadID")
+	}
+}
+
+func TestIsBeadActivelyWorked_NoPolecatsDir(t *testing.T) {
+	t.Parallel()
+	if IsBeadActivelyWorked("/tmp/nonexistent", "testrig", "gt-123", "") {
+		t.Error("IsBeadActivelyWorked should return false when polecats dir doesn't exist")
+	}
+}
+
+func TestIsBeadActivelyWorked_NoMatchingBead(t *testing.T) {
+	// Set up town directory with polecats
+	townRoot := t.TempDir()
+	rigName := "testrig"
+	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
+	if err := os.MkdirAll(filepath.Join(polecatsDir, "alpha"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock bd: alpha has a different bead hooked
+	installMockBd(t,
+		func(args []string) (string, error) {
+			if len(args) > 0 && args[0] == "show" {
+				return `[{"agent_state":"working","hook_bead":"gt-OTHER"}]`, nil
+			}
+			return "{}", nil
+		},
+		func(args []string) error { return nil },
+	)
+	installMockHasSession(t, func(name string) (bool, error) {
+		return true, nil // Session is alive
+	})
+
+	if IsBeadActivelyWorked(townRoot, rigName, "gt-TARGET", "") {
+		t.Error("should return false when no polecat has the target bead")
+	}
+}
+
+func TestIsBeadActivelyWorked_MatchingBeadLiveSession(t *testing.T) {
+	// Set up town directory with polecats
+	townRoot := t.TempDir()
+	rigName := "testrig"
+	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
+	if err := os.MkdirAll(filepath.Join(polecatsDir, "alpha"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock bd: alpha has the target bead hooked
+	installMockBd(t,
+		func(args []string) (string, error) {
+			if len(args) > 0 && args[0] == "show" {
+				return `[{"agent_state":"working","hook_bead":"gt-TARGET"}]`, nil
+			}
+			return "{}", nil
+		},
+		func(args []string) error { return nil },
+	)
+	installMockHasSession(t, func(name string) (bool, error) {
+		return true, nil // Session is alive
+	})
+
+	if !IsBeadActivelyWorked(townRoot, rigName, "gt-TARGET", "") {
+		t.Error("should return true when a live polecat has the target bead")
+	}
+}
+
+func TestIsBeadActivelyWorked_MatchingBeadDeadSession(t *testing.T) {
+	// Set up town directory with polecats
+	townRoot := t.TempDir()
+	rigName := "testrig"
+	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
+	if err := os.MkdirAll(filepath.Join(polecatsDir, "alpha"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock bd: alpha has the target bead hooked
+	installMockBd(t,
+		func(args []string) (string, error) {
+			if len(args) > 0 && args[0] == "show" {
+				return `[{"agent_state":"working","hook_bead":"gt-TARGET"}]`, nil
+			}
+			return "{}", nil
+		},
+		func(args []string) error { return nil },
+	)
+	installMockHasSession(t, func(name string) (bool, error) {
+		return false, nil // Session is dead
+	})
+
+	if IsBeadActivelyWorked(townRoot, rigName, "gt-TARGET", "") {
+		t.Error("should return false when polecat has the bead but session is dead")
+	}
+}
+
+func TestIsBeadActivelyWorked_ExcludesPolecat(t *testing.T) {
+	// Set up town directory with one polecat
+	townRoot := t.TempDir()
+	rigName := "testrig"
+	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
+	if err := os.MkdirAll(filepath.Join(polecatsDir, "alpha"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock bd: alpha has the target bead hooked and session is alive
+	installMockBd(t,
+		func(args []string) (string, error) {
+			if len(args) > 0 && args[0] == "show" {
+				return `[{"agent_state":"working","hook_bead":"gt-TARGET"}]`, nil
+			}
+			return "{}", nil
+		},
+		func(args []string) error { return nil },
+	)
+	installMockHasSession(t, func(name string) (bool, error) {
+		return true, nil
+	})
+
+	// Exclude "alpha" — should return false since it's the only polecat
+	if IsBeadActivelyWorked(townRoot, rigName, "gt-TARGET", "alpha") {
+		t.Error("should return false when the matching polecat is excluded")
+	}
+}
+
+func TestIsBeadActivelyWorked_MultiplePolecats(t *testing.T) {
+	// Set up town directory with multiple polecats
+	townRoot := t.TempDir()
+	rigName := "testrig"
+	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
+	for _, name := range []string{"alpha", "bravo", "charlie"} {
+		if err := os.MkdirAll(filepath.Join(polecatsDir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Mock bd: alpha dead (excluded), bravo has different bead, charlie has target
+	installMockBd(t,
+		func(args []string) (string, error) {
+			if len(args) > 0 && args[0] == "show" {
+				beadID := args[1]
+				if strings.Contains(beadID, "bravo") {
+					return `[{"agent_state":"working","hook_bead":"gt-OTHER"}]`, nil
+				}
+				if strings.Contains(beadID, "charlie") {
+					return `[{"agent_state":"working","hook_bead":"gt-TARGET"}]`, nil
+				}
+				return `[{"agent_state":"working","hook_bead":"gt-TARGET"}]`, nil
+			}
+			return "{}", nil
+		},
+		func(args []string) error { return nil },
+	)
+	installMockHasSession(t, func(name string) (bool, error) {
+		return true, nil // All sessions alive
+	})
+
+	// alpha excluded, bravo has different bead, charlie has target and is alive
+	if !IsBeadActivelyWorked(townRoot, rigName, "gt-TARGET", "alpha") {
+		t.Error("should return true: charlie has the target bead and is alive")
+	}
+}
+
+func TestIsBeadActivelyWorked_SkipsHiddenDirs(t *testing.T) {
+	townRoot := t.TempDir()
+	rigName := "testrig"
+	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
+	// Create a hidden directory that should be skipped
+	if err := os.MkdirAll(filepath.Join(polecatsDir, ".hidden"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	installMockBd(t,
+		func(args []string) (string, error) {
+			return `[{"agent_state":"working","hook_bead":"gt-TARGET"}]`, nil
+		},
+		func(args []string) error { return nil },
+	)
+	installMockHasSession(t, func(name string) (bool, error) {
+		return true, nil
+	})
+
+	if IsBeadActivelyWorked(townRoot, rigName, "gt-TARGET", "") {
+		t.Error("should return false: hidden dirs should be skipped")
+	}
+}
+
+func TestResetAbandonedBead_SkipsWhenBeadActivelyWorked(t *testing.T) {
+	// Set up town directory with two polecats: alpha (dead) and bravo (alive with same bead)
+	townRoot := t.TempDir()
+	rigName := "testrig"
+	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
+	for _, name := range []string{"alpha", "bravo"} {
+		if err := os.MkdirAll(filepath.Join(polecatsDir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resetCalled := false
+	installMockBd(t,
+		func(args []string) (string, error) {
+			if len(args) > 0 && args[0] == "show" {
+				beadID := args[1]
+				// Agent bead queries return hook_bead
+				if strings.Contains(beadID, "bravo") {
+					return `[{"agent_state":"working","hook_bead":"gt-TARGET"}]`, nil
+				}
+				// Work bead status query
+				return `[{"status":"hooked"}]`, nil
+			}
+			return "{}", nil
+		},
+		func(args []string) error {
+			if len(args) > 0 && args[0] == "update" {
+				resetCalled = true
+			}
+			return nil
+		},
+	)
+	installMockHasSession(t, func(name string) (bool, error) {
+		return true, nil // bravo's session is alive
+	})
+
+	// alpha is dead, bravo is alive with same bead — should NOT reset
+	result := resetAbandonedBead(townRoot, rigName, "gt-TARGET", "alpha", nil)
+	if result {
+		t.Error("resetAbandonedBead should return false when another live polecat has the bead")
+	}
+	if resetCalled {
+		t.Error("bd update should not have been called — bead is actively worked")
+	}
+}
+

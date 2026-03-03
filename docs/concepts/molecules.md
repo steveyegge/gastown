@@ -15,9 +15,14 @@ Protomolecule (frozen template) ─── Solid
     └─▶ bd mol wisp --root-only ──▶ Root Wisp (ephemeral) ─── Vapor
 ```
 
-**Root-only wisps**: Formula steps are NOT materialized as database rows. Only a
-single root wisp is created. Agents read steps inline from the embedded formula
-at prime time. This prevents wisp accumulation (~6,000+ rows/day → ~400/day).
+**Root-only wisps** (default): Formula steps are NOT materialized as database rows.
+Only a single root wisp is created. Agents read steps inline from the embedded
+formula at prime time. This prevents wisp accumulation (~6,000+ rows/day → ~400/day).
+
+**Poured wisps** (`pour = true`): Steps ARE materialized as sub-wisps with
+checkpoint recovery. If a session dies, completed steps remain closed and work
+resumes from the last checkpoint. Use pour for expensive, low-frequency workflows
+where losing progress would be costly (e.g., release workflows).
 
 ## Core Concepts
 
@@ -28,6 +33,7 @@ at prime time. This prevents wisp accumulation (~6,000+ rows/day → ~400/day).
 | **Molecule** | Active workflow instance (root wisp only) |
 | **Wisp** | Ephemeral molecule for patrols and polecat work (never synced) |
 | **Root-only** | Only root wisp created; steps read from embedded formula |
+| **Pour** | Formula flag (`pour = true`); steps materialized as sub-wisps with checkpoint recovery |
 
 ## How Agents See Steps
 
@@ -98,10 +104,11 @@ through each step in order.
 
 | Type | Storage | Use Case |
 |------|---------|----------|
-| **Root-only Wisp** | `.beads/` (ephemeral) | Polecat work, patrols |
+| **Root-only Wisp** (`pour = false`) | `.beads/` (ephemeral) | Polecat work, patrols — high frequency, cheap steps |
+| **Poured Wisp** (`pour = true`) | `.beads/` (sub-wisps) | Releases, long workflows — low frequency, expensive steps |
 
-All formula-based work uses root-only wisps. Steps are read from the
-embedded binary, not materialized as database rows.
+**Heuristic**: If you would curse losing the progress after a crash, set `pour = true`.
+High frequency + cheap steps = inline (default). Low frequency + expensive steps = pour.
 
 ## Patrol Workflow
 

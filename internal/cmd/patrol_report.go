@@ -95,7 +95,11 @@ func runPatrolReport(cmd *cobra.Command, args []string) error {
 
 	// Close all descendant wisps first (recursive), then the patrol root.
 	// Without this, every patrol cycle leaks ~10 orphan wisps into the DB.
-	forceCloseDescendants(b, patrolID)
+	// If descendants can't be closed, abort so patrol retries next cycle (gt-7lx3).
+	closed, closeDescErr := forceCloseDescendants(b, patrolID)
+	if closeDescErr != nil {
+		return fmt.Errorf("closing descendants of patrol %s (closed %d): %w", patrolID, closed, closeDescErr)
+	}
 
 	// Close the patrol root
 	if err := b.ForceCloseWithReason("patrol cycle complete: "+patrolReportSummary, patrolID); err != nil {

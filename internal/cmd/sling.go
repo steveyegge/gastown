@@ -21,9 +21,10 @@ import (
 )
 
 var slingCmd = &cobra.Command{
-	Use:     "sling <bead-or-formula> [target]",
-	GroupID: GroupWork,
-	Short:   "Assign work to an agent (THE unified work dispatch command)",
+	Use:         "sling <bead-or-formula> [target]",
+	GroupID:     GroupWork,
+	Annotations: map[string]string{AnnotationPolecatSafe: "true"},
+	Short:       "Assign work to an agent (THE unified work dispatch command)",
 	Long: `Sling work onto an agent's hook and start working immediately.
 
 This is THE command for assigning work in Gas Town. It handles:

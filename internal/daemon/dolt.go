@@ -1375,45 +1375,10 @@ func (m *DoltServerManager) getDoltVersion() (string, error) {
 }
 
 // listDatabases returns the list of databases in the Dolt server.
+// Delegates to doltserver.ListDatabases which caches results and deduplicates
+// concurrent queries to avoid the thundering herd problem (GH#2180).
 func (m *DoltServerManager) listDatabases() ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), doltCmdTimeout)
-	defer cancel()
-	cmd := m.buildDoltSQLCmd(ctx,
-		"-r", "json",
-		"-q", "SHOW DATABASES",
-	)
-
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse JSON output
-	var result struct {
-		Rows []struct {
-			Database string `json:"Database"`
-		} `json:"rows"`
-	}
-
-	if err := json.Unmarshal(output, &result); err != nil {
-		// Fall back to line parsing
-		var databases []string
-		for _, line := range strings.Split(string(output), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && line != "Database" && !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "|") {
-				databases = append(databases, line)
-			}
-		}
-		return databases, nil
-	}
-
-	var databases []string
-	for _, row := range result.Rows {
-		if row.Database != "" && !doltserver.IsSystemDatabase(row.Database) {
-			databases = append(databases, row.Database)
-		}
-	}
-	return databases, nil
+	return doltserver.ListDatabases(m.townRoot)
 }
 
 // CountDoltServers returns the count of running dolt sql-server processes.

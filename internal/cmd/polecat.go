@@ -1379,8 +1379,10 @@ func nukeCleanupMolecules(workBeadID string, r *rig.Rig) {
 
 	// Force-close descendant steps before detaching (prevents orphaned step beads).
 	// Uses force variant since nuke is destructive — must succeed even for beads in
-	// invalid states.
-	forceCloseDescendants(bd, moleculeID)
+	// invalid states. Best-effort — log but proceed in nuke path.
+	if _, err := forceCloseDescendants(bd, moleculeID); err != nil {
+		style.PrintWarning("nuke: could not close descendants of %s: %v", moleculeID, err)
+	}
 
 	// Detach the molecule with audit trail
 	if _, detachErr := bd.DetachMoleculeWithAudit(workBeadID, beads.DetachOptions{

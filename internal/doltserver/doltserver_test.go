@@ -3498,3 +3498,53 @@ func TestWaitForReady_ServerBecomesReady(t *testing.T) {
 	}
 }
 
+func TestInvalidateDBCache(t *testing.T) {
+	// Ensure InvalidateDBCache clears cached data so subsequent calls re-query.
+	InvalidateDBCache()
+
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	setupDoltDB(t, dataDir, "cachetestdb")
+
+	// First call populates.
+	dbs1, err := ListDatabases(townRoot)
+	if err != nil {
+		t.Fatalf("first ListDatabases: %v", err)
+	}
+	if len(dbs1) != 1 || dbs1[0] != "cachetestdb" {
+		t.Fatalf("expected [cachetestdb], got %v", dbs1)
+	}
+
+	// Add another database on disk.
+	setupDoltDB(t, dataDir, "cachetestdb2")
+
+	// Without invalidation, local path re-scans filesystem (no caching for local).
+	dbs2, err := ListDatabases(townRoot)
+	if err != nil {
+		t.Fatalf("second ListDatabases: %v", err)
+	}
+	if len(dbs2) != 2 {
+		t.Fatalf("expected 2 databases after adding cachetestdb2, got %d: %v", len(dbs2), dbs2)
+	}
+}
+
+func TestDBCache_ReturnsCopy(t *testing.T) {
+	// Verify that callers get a defensive copy, not the cached slice.
+	InvalidateDBCache()
+
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	setupDoltDB(t, dataDir, "copytest")
+
+	dbs1, _ := ListDatabases(townRoot)
+	if len(dbs1) > 0 {
+		dbs1[0] = "MUTATED"
+	}
+
+	dbs2, _ := ListDatabases(townRoot)
+	for _, db := range dbs2 {
+		if db == "MUTATED" {
+			t.Fatal("ListDatabases returned shared slice — callers can corrupt the cache")
+		}
+	}
+}

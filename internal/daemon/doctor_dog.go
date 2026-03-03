@@ -109,6 +109,7 @@ func (d *Daemon) runDoctorDog() {
 		"orphan_threshold":  strconv.Itoa(orphanCount),
 		"backup_threshold":  strconv.FormatFloat(backupStaleSec, 'f', 0, 64) + "s",
 	})
+	defer mol.close()
 
 	if mol.rootID == "" {
 		d.logger.Printf("doctor_dog: molecule pour failed (non-fatal), skipping cycle")

@@ -37,10 +37,11 @@ var statusInterval int
 var statusVerbose bool
 
 var statusCmd = &cobra.Command{
-	Use:     "status",
-	Aliases: []string{"stat"},
-	GroupID: GroupDiag,
-	Short:   "Show overall town status",
+	Use:         "status",
+	Aliases:     []string{"stat"},
+	GroupID:     GroupDiag,
+	Annotations: map[string]string{AnnotationPolecatSafe: "true"},
+	Short:       "Show overall town status",
 	Long: `Display the current status of the Gas Town workspace.
 
 Shows town name, registered rigs, polecats, and witness status.
@@ -91,10 +92,11 @@ type DoltInfo struct {
 
 // TmuxInfo represents the tmux server status.
 type TmuxInfo struct {
-	Socket       string `json:"socket"`                  // Socket name (e.g., "mytown" or "default")
-	SocketPath   string `json:"socket_path,omitempty"`   // Full socket path
-	Running      bool   `json:"running"`                 // Is the tmux server running?
-	SessionCount int    `json:"session_count"`            // Number of sessions
+	Socket       string `json:"socket"`                // Socket name derived from town name (e.g., "gt-test")
+	SocketPath   string `json:"socket_path,omitempty"` // Full socket path (e.g., /tmp/tmux-501/gt-test)
+	Running      bool   `json:"running"`               // Is the tmux server running?
+	PID          int    `json:"pid,omitempty"`         // PID of the tmux server process
+	SessionCount int    `json:"session_count"`         // Number of sessions
 }
 
 // OverseerInfo represents the human operator's identity and status.
@@ -783,10 +785,19 @@ func gatherStatus() (TownStatus, error) {
 		status.Dolt = &DoltInfo{Remote: true, Port: doltCfg.Port}
 	} else {
 		doltRunning, doltPid, _ := doltserver.IsRunning(townRoot)
+		port := doltCfg.Port
+		if doltRunning {
+			// Read the actual port from state — doltCfg.Port comes from
+			// DefaultConfig which reads GT_DOLT_PORT from the shell env,
+			// but gt status is typically run without that env var set.
+			if state, err := doltserver.LoadState(townRoot); err == nil && state.Port > 0 {
+				port = state.Port
+			}
+		}
 		doltInfo := &DoltInfo{
 			Running: doltRunning,
 			PID:     doltPid,
-			Port:    doltCfg.Port,
+			Port:    port,
 			DataDir: doltCfg.DataDir,
 		}
 		// Check if port is held by another town's Dolt
@@ -814,6 +825,7 @@ func gatherStatus() (TownStatus, error) {
 	tmuxInfo.SocketPath = filepath.Join(tmux.SocketDir(), socketLabel)
 	if _, err := os.Stat(tmuxInfo.SocketPath); err == nil {
 		tmuxInfo.Running = true
+		tmuxInfo.PID = tmux.NewTmux().ServerPID()
 	}
 	status.Tmux = tmuxInfo
 
@@ -954,7 +966,11 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 			if status.Dolt.Remote {
 				parts = append(parts, fmt.Sprintf("dolt %s", style.Dim.Render(fmt.Sprintf("(remote :%d)", status.Dolt.Port))))
 			} else if status.Dolt.Running {
-				parts = append(parts, fmt.Sprintf("dolt %s", style.Dim.Render(fmt.Sprintf("(PID %d, :%d)", status.Dolt.PID, status.Dolt.Port))))
+				dataDir := status.Dolt.DataDir
+				if home, err := os.UserHomeDir(); err == nil {
+					dataDir = strings.Replace(dataDir, home, "~", 1)
+				}
+				parts = append(parts, fmt.Sprintf("dolt %s", style.Dim.Render(fmt.Sprintf("(PID %d, :%d, %s)", status.Dolt.PID, status.Dolt.Port, dataDir))))
 			} else if status.Dolt.PortConflict {
 				parts = append(parts, fmt.Sprintf("dolt %s", style.Bold.Render(fmt.Sprintf("(stopped, :%d ⚠ port used by %s)", status.Dolt.Port, status.Dolt.ConflictOwner))))
 			} else {
@@ -963,7 +979,7 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 		}
 		if status.Tmux != nil {
 			if status.Tmux.Running {
-				parts = append(parts, fmt.Sprintf("tmux %s", style.Dim.Render(fmt.Sprintf("(-L %s, %d sessions)", status.Tmux.Socket, status.Tmux.SessionCount))))
+				parts = append(parts, fmt.Sprintf("tmux %s", style.Dim.Render(fmt.Sprintf("(-L %s, PID %d, %d sessions, %s)", status.Tmux.Socket, status.Tmux.PID, status.Tmux.SessionCount, status.Tmux.SocketPath))))
 			} else {
 				parts = append(parts, fmt.Sprintf("tmux %s", style.Dim.Render(fmt.Sprintf("(-L %s, no server)", status.Tmux.Socket))))
 			}

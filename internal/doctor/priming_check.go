@@ -12,7 +12,6 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/runtime"
 )
 
@@ -440,22 +439,10 @@ func (c *PrimingCheck) Fix(ctx *CheckContext) error {
 				errors = append(errors, fmt.Sprintf("%s: failed to remove orphaned .beads: %v", issue.location, err))
 			}
 		case "missing_prime_md":
-			// Provision PRIME.md at the appropriate location
-			var targetPath string
-
-			// Parse the location to determine where to provision
-			if strings.Contains(issue.location, "/crew/") || strings.Contains(issue.location, "/polecats/") {
-				// Worker location - use beads.ProvisionPrimeMDForWorktree
-				worktreePath := filepath.Join(ctx.TownRoot, issue.location)
-				if err := beads.ProvisionPrimeMDForWorktree(worktreePath); err != nil {
-					errors = append(errors, fmt.Sprintf("%s: %v", issue.location, err))
-				}
-			} else {
-				// Rig location - provision directly
-				targetPath = filepath.Join(ctx.TownRoot, issue.location, constants.DirBeads)
-				if err := beads.ProvisionPrimeMD(targetPath); err != nil {
-					errors = append(errors, fmt.Sprintf("%s: %v", issue.location, err))
-				}
+			// Provision PRIME.md at the appropriate location, following any beads redirect.
+			worktreePath := filepath.Join(ctx.TownRoot, issue.location)
+			if err := beads.ProvisionPrimeMDForWorktree(worktreePath); err != nil {
+				errors = append(errors, fmt.Sprintf("%s: %v", issue.location, err))
 			}
 
 		case "stale_intermediate_instructions_md":

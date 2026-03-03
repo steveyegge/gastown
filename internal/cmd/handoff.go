@@ -23,9 +23,10 @@ import (
 )
 
 var handoffCmd = &cobra.Command{
-	Use:     "handoff [bead-or-role]",
-	GroupID: GroupWork,
-	Short:   "Hand off to a fresh session, work continues from hook",
+	Use:         "handoff [bead-or-role]",
+	GroupID:     GroupWork,
+	Annotations: map[string]string{AnnotationPolecatSafe: "true"},
+	Short:       "Hand off to a fresh session, work continues from hook",
 	Long: `End watch. Hand off to a fresh agent session.
 
 This is the canonical way to end any agent session. It handles all roles:
@@ -1556,7 +1557,10 @@ func cleanupMoleculeOnHandoff() {
 
 	// Close all descendant wisps first, then the molecule root.
 	// Without this, handoff leaks orphan wisps into the DB.
-	forceCloseDescendants(b, molID)
+	// Best-effort in handoff path — log but proceed.
+	if _, err := forceCloseDescendants(b, molID); err != nil {
+		style.PrintWarning("handoff: could not close descendants of %s: %v", molID, err)
+	}
 
 	// Force-close the molecule root wisp
 	if err := b.ForceCloseWithReason("handoff", molID); err != nil {

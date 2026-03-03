@@ -418,13 +418,8 @@ func (e *Engineer) bisectBatch(ctx context.Context, batch []*MRInfo, target stri
 		// Left half is green — culprit is in right half
 		_, _ = fmt.Fprintf(e.output, "[Bisect] Left half passed, bisecting right half (%d MRs)...\n", len(right))
 
-		// Test right half in context of left (cumulative)
-		if resetErr := e.resetAndRebuildStack(batch, target); resetErr != nil {
-			_, _ = fmt.Fprintf(e.output, "[Bisect] Error rebuilding full stack: %v\n", resetErr)
-			return left, right // Assume left good, right bad
-		}
-
-		// We know the full batch fails and left passes, so bisect right
+		// bisectRight handles its own stack construction (knownGood + sub-batches),
+		// so no need to rebuild the full batch stack here first.
 		rightGood, rightCulprits := e.bisectRight(ctx, left, right, target)
 		return append(left, rightGood...), rightCulprits
 	}

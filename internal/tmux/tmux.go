@@ -109,12 +109,17 @@ func IsInSameSocket() bool {
 // BuildCommand creates an exec.Cmd for tmux with the default socket applied.
 // Use this instead of exec.Command("tmux", ...) for code outside the Tmux struct.
 func BuildCommand(args ...string) *exec.Cmd {
+	return BuildCommandContext(context.Background(), args...)
+}
+
+// BuildCommandContext is like BuildCommand but honours a context for cancellation.
+func BuildCommandContext(ctx context.Context, args ...string) *exec.Cmd {
 	allArgs := []string{"-u"}
 	if sock := GetDefaultSocket(); sock != "" {
 		allArgs = append(allArgs, "-L", sock)
 	}
 	allArgs = append(allArgs, args...)
-	return exec.Command("tmux", allArgs...)
+	return exec.CommandContext(ctx, "tmux", allArgs...)
 }
 
 // Tmux wraps tmux operations.
@@ -823,6 +828,17 @@ func (t *Tmux) KillPaneProcessesExcluding(pane string, excludePIDs []string) err
 	}
 
 	return nil
+}
+
+// ServerPID returns the PID of the tmux server process.
+// Returns 0 if the server is not running or the PID cannot be determined.
+func (t *Tmux) ServerPID() int {
+	out, err := t.run("display-message", "-p", "#{pid}")
+	if err != nil {
+		return 0
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(out))
+	return pid
 }
 
 // KillServer terminates the entire tmux server and all sessions.

@@ -1526,16 +1526,13 @@ func IsRunning(townRoot string) (bool, int, error) {
 	}
 
 	// Lock is held — daemon is running. Read PID from file.
+	// Use readPIDFile to handle the "PID\nNONCE" format introduced alongside
+	// nonce-based ownership verification. A plain Atoi on the raw file content
+	// fails when a nonce line is present, returning PID 0.
 	pidFile := filepath.Join(townRoot, "daemon", "daemon.pid")
-	data, err := os.ReadFile(pidFile)
+	pid, _, err := readPIDFile(pidFile)
 	if err != nil {
-		// Lock held but no PID file — daemon is running but we can't report PID
-		return true, 0, nil
-	}
-
-	pidStr := strings.TrimSpace(string(data))
-	pid, err := strconv.Atoi(pidStr)
-	if err != nil {
+		// Lock held but no readable PID file — daemon running, PID unknown
 		return true, 0, nil
 	}
 

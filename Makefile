@@ -34,6 +34,8 @@ endif
 
 check-up-to-date:
 ifndef SKIP_UPDATE_CHECK
+	@# Skip check on detached HEAD (tag checkouts, CI builds)
+	@if ! git symbolic-ref HEAD >/dev/null 2>&1; then exit 0; fi
 	@git fetch origin main --quiet 2>/dev/null || true
 	@LOCAL=$$(git rev-parse HEAD 2>/dev/null); \
 	REMOTE=$$(git rev-parse origin/main 2>/dev/null); \

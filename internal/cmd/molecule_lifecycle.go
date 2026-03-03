@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -343,34 +344,43 @@ squashed_at: %s
 // closeDescendants recursively closes all descendant issues of a parent.
 // Returns the count of issues closed. Logs warnings on errors but doesn't fail.
 func closeDescendants(b *beads.Beads, parentID string) int {
-	return closeDescendantsImpl(b, parentID, false)
+	count, err := closeDescendantsImpl(b, parentID, false)
+	if err != nil {
+		style.PrintWarning("closing descendants of %s: %v", parentID, err)
+	}
+	return count
 }
 
 // forceCloseDescendants is like closeDescendants but uses force-close,
-// which succeeds even for beads in invalid states. Use in destructive
-// paths (nuke, burn) where we must clean up regardless.
-func forceCloseDescendants(b *beads.Beads, parentID string) {
-	closeDescendantsImpl(b, parentID, true)
+// which succeeds even for beads in invalid states. Returns the count of
+// issues closed and any error encountered. Callers should check the error
+// to avoid closing a parent while children survive (gt-7lx3).
+func forceCloseDescendants(b *beads.Beads, parentID string) (int, error) {
+	return closeDescendantsImpl(b, parentID, true)
 }
 
-func closeDescendantsImpl(b *beads.Beads, parentID string, force bool) int {
+func closeDescendantsImpl(b *beads.Beads, parentID string, force bool) (int, error) {
 	children, err := b.List(beads.ListOptions{
 		Parent: parentID,
 		Status: "all",
 	})
 	if err != nil {
-		style.PrintWarning("could not list children of %s: %v", parentID, err)
-		return 0
+		return 0, fmt.Errorf("listing children of %s: %w", parentID, err)
 	}
 
 	if len(children) == 0 {
-		return 0
+		return 0, nil
 	}
 
 	// First, recursively close grandchildren
 	totalClosed := 0
+	var errs []error
 	for _, child := range children {
-		totalClosed += closeDescendantsImpl(b, child.ID, force)
+		closed, childErr := closeDescendantsImpl(b, child.ID, force)
+		totalClosed += closed
+		if childErr != nil {
+			errs = append(errs, childErr)
+		}
 	}
 
 	// Then close direct children
@@ -389,11 +399,14 @@ func closeDescendantsImpl(b *beads.Beads, parentID string, force bool) int {
 			closeErr = b.Close(idsToClose...)
 		}
 		if closeErr != nil {
-			style.PrintWarning("could not close children of %s: %v", parentID, closeErr)
+			errs = append(errs, fmt.Errorf("closing children of %s: %w", parentID, closeErr))
 		} else {
 			totalClosed += len(idsToClose)
 		}
 	}
 
-	return totalClosed
+	if len(errs) > 0 {
+		return totalClosed, errors.Join(errs...)
+	}
+	return totalClosed, nil
 }

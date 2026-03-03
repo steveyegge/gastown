@@ -607,6 +607,9 @@ Supported keys:
                               completion (true/false, default: false)
   cli_theme                   CLI color scheme ("dark", "light", "auto")
   default_agent               Default agent preset name
+  dolt.port                   Dolt SQL server port (default: 3307). Set this when
+                              another Gas Town instance is using the same port.
+                              Writes GT_DOLT_PORT to mayor/daemon.json env section.
   scheduler.max_polecats      Dispatch mode: -1 = direct (default), N > 0 = deferred
   scheduler.batch_size        Beads per heartbeat (default: 1)
   scheduler.spawn_delay       Delay between spawns (default: 0s)
@@ -630,6 +633,7 @@ Examples:
   gt config set convoy.notify_on_complete true
   gt config set cli_theme dark
   gt config set default_agent claude
+  gt config set dolt.port 3308
   gt config set scheduler.max_polecats 5
   gt config set maintenance.window 03:00
   gt config set maintenance.interval daily
@@ -752,11 +756,31 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	case "maintenance.window", "maintenance.interval", "maintenance.threshold":
 		return setMaintenanceConfig(townRoot, key, value)
 
+	case "dolt.port":
+		port, err := strconv.Atoi(value)
+		if err != nil || port < 1024 || port > 65535 {
+			return fmt.Errorf("invalid value for %s: expected port number 1024-65535", key)
+		}
+		patrolCfg := daemon.LoadPatrolConfig(townRoot)
+		if patrolCfg == nil {
+			patrolCfg = &daemon.DaemonPatrolConfig{Type: "daemon-patrol-config", Version: 1}
+		}
+		if patrolCfg.Env == nil {
+			patrolCfg.Env = make(map[string]string)
+		}
+		patrolCfg.Env["GT_DOLT_PORT"] = value
+		if err := daemon.SavePatrolConfig(townRoot, patrolCfg); err != nil {
+			return fmt.Errorf("saving daemon.json: %w", err)
+		}
+		fmt.Printf("Set GT_DOLT_PORT = %s in mayor/daemon.json\n", style.Bold.Render(value))
+		fmt.Printf("  %s\n", style.Dim.Render("Restart the daemon for the change to take effect: gt daemon restart"))
+		return nil
+
 	default:
 		if strings.HasPrefix(key, "lifecycle.") {
 			return setLifecycleConfig(townRoot, key, value)
 		}
-		return fmt.Errorf("unknown config key: %q\n\nSupported keys:\n  convoy.notify_on_complete\n  cli_theme\n  default_agent\n  scheduler.max_polecats\n  scheduler.batch_size\n  scheduler.spawn_delay\n  maintenance.window\n  maintenance.interval\n  maintenance.threshold\n  lifecycle.reaper.*\n  lifecycle.compactor.*\n  lifecycle.doctor.*\n  lifecycle.backup.*", key)
+		return fmt.Errorf("unknown config key: %q\n\nSupported keys:\n  convoy.notify_on_complete\n  cli_theme\n  default_agent\n  dolt.port\n  scheduler.max_polecats\n  scheduler.batch_size\n  scheduler.spawn_delay\n  maintenance.window\n  maintenance.interval\n  maintenance.threshold\n  lifecycle.reaper.*\n  lifecycle.compactor.*\n  lifecycle.doctor.*\n  lifecycle.backup.*", key)
 	}
 
 	if err := config.SaveTownSettings(settingsPath, townSettings); err != nil {
@@ -826,11 +850,22 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 	case "maintenance.window", "maintenance.interval", "maintenance.threshold":
 		return getMaintenanceConfig(townRoot, key)
 
+	case "dolt.port":
+		patrolCfg := daemon.LoadPatrolConfig(townRoot)
+		if patrolCfg != nil {
+			if v, ok := patrolCfg.Env["GT_DOLT_PORT"]; ok {
+				fmt.Println(v)
+				return nil
+			}
+		}
+		fmt.Println("3307") // DefaultPort
+		return nil
+
 	default:
 		if strings.HasPrefix(key, "lifecycle.") {
 			return getLifecycleConfig(townRoot, key)
 		}
-		return fmt.Errorf("unknown config key: %q\n\nSupported keys:\n  convoy.notify_on_complete\n  cli_theme\n  default_agent\n  scheduler.max_polecats\n  scheduler.batch_size\n  scheduler.spawn_delay\n  maintenance.window\n  maintenance.interval\n  maintenance.threshold\n  lifecycle.reaper.*\n  lifecycle.compactor.*\n  lifecycle.doctor.*\n  lifecycle.backup.*", key)
+		return fmt.Errorf("unknown config key: %q\n\nSupported keys:\n  convoy.notify_on_complete\n  cli_theme\n  default_agent\n  dolt.port\n  scheduler.max_polecats\n  scheduler.batch_size\n  scheduler.spawn_delay\n  maintenance.window\n  maintenance.interval\n  maintenance.threshold\n  lifecycle.reaper.*\n  lifecycle.compactor.*\n  lifecycle.doctor.*\n  lifecycle.backup.*", key)
 	}
 
 	fmt.Println(value)

@@ -154,9 +154,10 @@ func validateConvoyStatusTransition(currentStatus, targetStatus string) error {
 }
 
 var convoyCmd = &cobra.Command{
-	Use:     "convoy",
-	GroupID: GroupWork,
-	Short:   "Track batches of work across rigs",
+	Use:         "convoy",
+	GroupID:     GroupWork,
+	Annotations: map[string]string{AnnotationPolecatSafe: "true"},
+	Short:       "Track batches of work across rigs",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if convoyInteractive {
 			return runConvoyTUI()
