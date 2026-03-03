@@ -61,6 +61,10 @@ var dangerousPatterns = []dangerousPattern{
 		contains: []string{"git", "clean", "-f"},
 		reason:   "git clean -f deletes untracked files irreversibly",
 	},
+	{
+		contains: []string{"bd", "init", "--force"},
+		reason:   "bd init --force destroys all beads data (the great destruction)",
+	},
 }
 
 func runTapGuardDangerous(cmd *cobra.Command, args []string) error {
@@ -99,8 +103,10 @@ func runTapGuardDangerous(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// extractCommand extracts the bash command from Claude Code hook input JSON.
-// The input format is: {"tool_name": "Bash", "tool_input": {"command": "..."}}
+// extractCommand extracts the bash/shell command from Claude Code hook input JSON.
+// Supports two formats:
+//   - Bash tool:            {"tool_input": {"command": "..."}}
+//   - context-mode execute: {"tool_input": {"language": "shell", "code": "..."}}
 func extractCommand(input []byte) string {
 	if len(input) == 0 {
 		return ""
@@ -108,7 +114,9 @@ func extractCommand(input []byte) string {
 
 	var hookInput struct {
 		ToolInput struct {
-			Command string `json:"command"`
+			Command  string `json:"command"`
+			Language string `json:"language"`
+			Code     string `json:"code"`
 		} `json:"tool_input"`
 	}
 
@@ -116,7 +124,17 @@ func extractCommand(input []byte) string {
 		return ""
 	}
 
-	return hookInput.ToolInput.Command
+	// Bash tool: command field
+	if hookInput.ToolInput.Command != "" {
+		return hookInput.ToolInput.Command
+	}
+
+	// context-mode execute: only guard shell commands
+	if hookInput.ToolInput.Language == "shell" && hookInput.ToolInput.Code != "" {
+		return hookInput.ToolInput.Code
+	}
+
+	return ""
 }
 
 // matchesDangerous checks if a command matches a dangerous pattern.

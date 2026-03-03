@@ -6,28 +6,22 @@
 CREATE OR REPLACE VIEW v_all_issues AS
 SELECT 'hq' AS rig, id, title, status, priority, issue_type, assignee, created_at, closed_at FROM hq.issues
 UNION ALL
-SELECT 'sfgastown' AS rig, id, title, status, priority, issue_type, assignee, created_at, closed_at FROM sfgastown.issues
+SELECT 'st' AS rig, id, title, status, priority, issue_type, assignee, created_at, closed_at FROM st.issues
 UNION ALL
-SELECT 'lora_forge' AS rig, id, title, status, priority, issue_type, assignee, created_at, closed_at FROM lora_forge.issues
-UNION ALL
-SELECT 'sf_workflows' AS rig, id, title, status, priority, issue_type, assignee, created_at, closed_at FROM sf_workflows.issues;
+SELECT 'lora_forge' AS rig, id, title, status, priority, issue_type, assignee, created_at, closed_at FROM lora_forge.issues;
 
 -- Core view: all wisps across rigs
 CREATE OR REPLACE VIEW v_all_wisps AS
 SELECT 'hq' AS rig, id, title, status, created_at FROM hq.wisps
 UNION ALL
-SELECT 'sfgastown' AS rig, id, title, status, created_at FROM sfgastown.wisps
+SELECT 'st' AS rig, id, title, status, created_at FROM st.wisps
 UNION ALL
-SELECT 'lora_forge' AS rig, id, title, status, created_at FROM lora_forge.wisps
-UNION ALL
-SELECT 'sf_workflows' AS rig, id, title, status, created_at FROM sf_workflows.wisps;
+SELECT 'lora_forge' AS rig, id, title, status, created_at FROM lora_forge.wisps;
 
 -- Labels across rigs
 CREATE OR REPLACE VIEW v_all_labels AS
 SELECT 'hq' AS rig, issue_id, label FROM hq.labels
 UNION ALL
-SELECT 'sfgastown' AS rig, issue_id, label FROM sfgastown.labels
+SELECT 'st' AS rig, issue_id, label FROM st.labels
 UNION ALL
-SELECT 'lora_forge' AS rig, issue_id, label FROM lora_forge.labels
-UNION ALL
-SELECT 'sf_workflows' AS rig, issue_id, label FROM sf_workflows.labels;
+SELECT 'lora_forge' AS rig, issue_id, label FROM lora_forge.labels;

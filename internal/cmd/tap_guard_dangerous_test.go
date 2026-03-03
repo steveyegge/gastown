@@ -30,6 +30,16 @@ func TestExtractCommand(t *testing.T) {
 			input: `{"tool_name":"Write","tool_input":{"file_path":"/tmp/foo"}}`,
 			want:  "",
 		},
+		{
+			name:  "context-mode execute shell",
+			input: `{"tool_name":"mcp__plugin_context-mode_context-mode__execute","tool_input":{"language":"shell","code":"bd init --force"}}`,
+			want:  "bd init --force",
+		},
+		{
+			name:  "context-mode execute javascript ignored",
+			input: `{"tool_name":"mcp__plugin_context-mode_context-mode__execute","tool_input":{"language":"javascript","code":"console.log('bd init --force')"}}`,
+			want:  "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -57,7 +67,13 @@ func TestMatchesDangerous(t *testing.T) {
 		{"git clean f", "git clean -f", true},
 		{"git clean fd", "git clean -fd", true},
 
+		// Should block: bd init --force
+		{"bd init force", "bd init --force", true},
+		{"bd init force with flags", "bd init --force --server --prefix hq", true},
+
 		// Should allow
+		{"bd init no force", "bd init --server --prefix hq", false},
+		{"bd list", "bd list", false},
 		{"rm single file", "rm foo.txt", false},
 		{"rm -r relative", "rm -r ./tmp", false},
 		{"git push normal", "git push origin main", false},

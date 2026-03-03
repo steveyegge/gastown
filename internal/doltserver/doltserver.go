@@ -1027,7 +1027,24 @@ func Start(townRoot string) error {
 // These create cross-rig views used by Grafana dashboards. Errors are logged but
 // not fatal — dashboards degrade gracefully if views are missing.
 func runInitSQL(townRoot string, config *Config) {
-	// Look for init scripts in the sfgastown repo checkout.
+	// Step 1: Generate and run dynamic cross-rig views.
+	// These discover databases at runtime — no hardcoded rig names.
+	viewsSQL, err := generateCrossRigViews(config.Port)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  ⚠ Failed to generate cross-rig views: %v\n", err)
+	} else if viewsSQL != "" {
+		cmd := exec.Command("mysql", "-h", "127.0.0.1", "-P", strconv.Itoa(config.Port), "-u", "root", "hq")
+		cmd.Stdin = bytes.NewReader([]byte(viewsSQL))
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "  ⚠ Cross-rig views failed: %v: %s\n", err, stderr.String())
+		} else {
+			fmt.Fprintf(os.Stderr, "  ✓ Created cross-rig views (auto-discovered databases)\n")
+		}
+	}
+
+	// Step 2: Run any additional static init scripts (skip the old hardcoded views file).
 	patterns := []string{
 		filepath.Join(townRoot, "sfgastown", "mayor", "rig", "opentelemetry", "dolt", "init", "*.sql"),
 		filepath.Join(townRoot, "opentelemetry", "dolt", "init", "*.sql"),
@@ -1042,18 +1059,19 @@ func runInitSQL(townRoot string, config *Config) {
 		}
 	}
 
-	if len(scripts) == 0 {
-		return
-	}
-
 	for _, script := range scripts {
+		// Skip the old hardcoded views file — replaced by dynamic generation above.
+		if strings.Contains(filepath.Base(script), "create-views") {
+			continue
+		}
+
 		data, err := os.ReadFile(script)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  ⚠ Failed to read init script %s: %v\n", filepath.Base(script), err)
 			continue
 		}
 
-		cmd := exec.Command("mysql", "-h", "127.0.0.1", "-P", strconv.Itoa(config.Port), "-u", "root", "beads")
+		cmd := exec.Command("mysql", "-h", "127.0.0.1", "-P", strconv.Itoa(config.Port), "-u", "root", "hq")
 		cmd.Stdin = bytes.NewReader(data)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr

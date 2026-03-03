@@ -71,6 +71,7 @@ var beadsExemptCommands = map[string]bool{
 	"run-migration":       true, // Migration orchestrator handles its own beads checks
 	"health":              true, // Health check doesn't require beads
 	"upgrade":             true, // Post-install migration orchestrator
+	"grafana":             true, // Grafana dashboard management doesn't need beads
 }
 
 // Commands exempt from the town root branch warning.
