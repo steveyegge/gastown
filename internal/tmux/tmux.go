@@ -132,6 +132,12 @@ type Tmux struct {
 // "no server running" error instead of silently connecting to the wrong server.
 const noTownSocket = "gt-no-town-socket"
 
+// EnvAgentReady is the tmux session environment variable set by the agent's
+// SessionStart hook (gt prime --hook) to signal that the agent has started.
+// Used by WaitForCommand as a ZFC-compliant fallback for detecting wrapped
+// agents (where pane_current_command remains a shell). See gt-sk5u.
+const EnvAgentReady = "GT_AGENT_READY"
+
 // NewTmux creates a new Tmux wrapper using the initialized town socket.
 // Falls back to GT_TOWN_SOCKET env var (set by cross-socket tmux bindings),
 // then to a sentinel socket that fails clearly if neither is available.
@@ -2206,12 +2212,18 @@ func (t *Tmux) resolveSessionProcessNames(session string) []string {
 // Useful for waiting until a shell has started a new process (e.g., claude).
 // Returns nil when a non-excluded command is detected, or error on timeout.
 //
-// Fallback: when the pane command IS a shell (e.g., bash), also checks
-// IsAgentAlive to detect agents wrapped in shell scripts (e.g., c2claude wrapping
-// claude-original). This handles cases where exec env does not replace the shell
-// as the pane foreground process. GT_PROCESS_NAMES must be set in the session
-// environment (via SetEnvironment) before calling for this fallback to work.
+// ZFC fallback: when the pane command IS a shell (e.g., bash), checks for the
+// GT_AGENT_READY env var set by the agent's SessionStart hook (gt prime --hook).
+// This handles agents wrapped in shell scripts (e.g., c2claude wrapping
+// claude-original) where exec env does not replace the shell as the pane
+// foreground process. Replaces process-tree probing (IsAgentAlive) per gt-sk5u.
 func (t *Tmux) WaitForCommand(session string, excludeCommands []string, timeout time.Duration) error {
+	// ZFC: Clear agent-ready sentinel to prevent stale values from previous
+	// agent runs. The agent's SessionStart hook (gt prime --hook) sets this
+	// to "1" once the agent is running. Unsetting here ensures we only detect
+	// the NEW agent, not a leftover from a previous run.
+	_, _ = t.run("set-environment", "-u", "-t", session, EnvAgentReady)
+
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		cmd, err := t.GetPaneCommand(session)
@@ -2230,12 +2242,10 @@ func (t *Tmux) WaitForCommand(session string, excludeCommands []string, timeout 
 		if !excluded {
 			return nil
 		}
-		// Fallback: if the pane is running a shell, check whether the agent is
-		// alive as a descendant process. This handles agents wrapped in shell
-		// scripts (e.g., c2claude -> claude-original) where exec env does not
-		// replace the shell as pane_current_command. GT_PROCESS_NAMES in the
-		// tmux session environment determines which process names are expected.
-		if t.IsAgentAlive(session) {
+		// ZFC fallback: check if the agent signaled readiness via its startup
+		// hook. This replaces process-tree descendant probing (IsAgentAlive)
+		// for wrapped agents where pane_current_command remains a shell.
+		if ready, err := t.GetEnvironment(session, EnvAgentReady); err == nil && ready == "1" {
 			return nil
 		}
 		time.Sleep(constants.PollInterval)

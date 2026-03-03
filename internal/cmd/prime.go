@@ -20,6 +20,7 @@ import (
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -287,6 +288,12 @@ func handlePrimeHookMode(townRoot, cwd string) {
 	_ = os.Setenv("GT_SESSION_ID", sessionID)
 	_ = os.Setenv("CLAUDE_SESSION_ID", sessionID) // Legacy compatibility
 
+	// ZFC: Signal agent readiness via tmux env var (gt-sk5u).
+	// WaitForCommand polls for this instead of probing the process tree.
+	// This handles agents wrapped in shell scripts where pane_current_command
+	// remains "bash" even though the agent is running as a descendant.
+	signalAgentReady()
+
 	// Store source for compact/resume detection in runPrime
 	primeHookSource = source
 
@@ -295,6 +302,25 @@ func handlePrimeHookMode(townRoot, cwd string) {
 	if source != "" {
 		fmt.Printf("[source:%s]\n", source)
 	}
+}
+
+// signalAgentReady sets GT_AGENT_READY=1 in the current tmux session environment.
+// Called from the agent's SessionStart hook to signal that the agent has started.
+// WaitForCommand polls for this variable as a ZFC-compliant alternative to
+// probing the process tree via IsAgentAlive. No-op when not in a tmux session.
+func signalAgentReady() {
+	if os.Getenv("TMUX") == "" {
+		return
+	}
+	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+	if err != nil {
+		return
+	}
+	session := strings.TrimSpace(string(out))
+	if session == "" {
+		return
+	}
+	_ = exec.Command("tmux", "set-environment", "-t", session, tmux.EnvAgentReady, "1").Run()
 }
 
 // isCompactResume returns true if the current prime is running after compaction or resume.
