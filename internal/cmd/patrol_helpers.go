@@ -26,6 +26,13 @@ type PatrolConfig struct {
 	Beads         *beads.Beads // optional injected beads instance (for test isolation)
 }
 
+// maxStalePurgePerRun caps the number of stale patrol beads cleaned up in a
+// single findActivePatrol call. Without a cap, N accumulated orphans produce
+// N×K sequential Dolt queries (K = closeDescendants depth), overwhelming the
+// server when multiple patrol agents call gt patrol report concurrently (gt-18dzn6p).
+// Remaining stale beads are cleaned by burnPreviousPatrolWisps at cycle end.
+const maxStalePurgePerRun = 5
+
 // findActivePatrol finds an active patrol molecule for the role.
 // Returns the patrol ID, display line, and whether one was found.
 // Returns an error if discovery fails (e.g. transient bd failure),
@@ -36,7 +43,8 @@ type PatrolConfig struct {
 // This function looks up hooked patrols and distinguishes active ones
 // (with open/in_progress children) from stale ones (all children closed,
 // e.g. after a squash that didn't close the root). Stale patrols are
-// cleaned up automatically.
+// cleaned up incrementally (up to maxStalePurgePerRun per call); any
+// remaining stale beads are cleaned by burnPreviousPatrolWisps at cycle end.
 func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool, err error) {
 	b := cfg.Beads
 	if b == nil {
@@ -53,9 +61,10 @@ func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool
 		return "", "", false, fmt.Errorf("listing hooked beads: %w", listErr)
 	}
 
-	// First pass: identify active patrol and collect stale ones for cleanup.
-	// We process ALL hooked patrols to clean up accumulated orphans (~100
-	// stale patrols can build up over ~12 hours).
+	// Identify active patrol and collect stale ones for cleanup.
+	// Stop scanning as soon as the active patrol is found to avoid N+1
+	// checkHasOpenChildren queries when many accumulated orphans are present.
+	// Stale cleanup is capped at maxStalePurgePerRun to limit write pressure.
 	var activeBead *beads.Issue
 	var staleIDs []string
 	var skipped int // tracks patrols skipped due to child-listing errors
@@ -75,17 +84,21 @@ func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool
 		}
 
 		if !hasOpen {
-			// Stale patrol (no open children) — mark for cleanup
-			staleIDs = append(staleIDs, bead.ID)
+			// Stale patrol (no open children) — schedule for cleanup up to cap.
+			// Excess stale beads are deferred to burnPreviousPatrolWisps.
+			if len(staleIDs) < maxStalePurgePerRun {
+				staleIDs = append(staleIDs, bead.ID)
+			}
 		} else if activeBead == nil {
-			// First active patrol found — this is the one we'll resume
+			// Active patrol found — stop scanning to prevent N+1 queries.
+			// Any unvisited stale beads will be cleaned by burnPreviousPatrolWisps
+			// when the patrol cycle ends and autoSpawnPatrol is called.
 			activeBead = bead
+			break
 		}
-		// else: has open children but we already found an active patrol —
-		// leave it alone to avoid destroying a potentially running patrol
 	}
 
-	// Clean up all stale patrols
+	// Clean up stale patrols (capped at maxStalePurgePerRun)
 	for _, id := range staleIDs {
 		closeDescendants(b, id)
 		if err := b.ForceCloseWithReason("stale patrol cleanup", id); err != nil {
