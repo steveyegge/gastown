@@ -54,7 +54,7 @@ RUN echo 'export TERM="xterm-256color"' >> /etc/profile.d/term.sh && \
 # Always switch back to agent user at the end
 USER agent
 
-RUN git clone https://github.com/steveyegge/gastown.git /app/gastown
+COPY . /app/gastown
 
 RUN cd /app/gastown && make install
 
