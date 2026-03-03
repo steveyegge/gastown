@@ -147,31 +147,35 @@ func OpenDB(host string, port int, dbName string, readTimeout, writeTimeout time
 	return sql.Open("mysql", dsn)
 }
 
-// parentCheckWhere returns the SQL WHERE fragment that restricts operations to
-// wisps whose parent molecule is closed, that have no parent (orphans), or
-// whose parent was purged (dangling dependency reference).
-func parentCheckWhere(dbName string) string {
-	return fmt.Sprintf(`
-		(
-			NOT EXISTS (
-				SELECT 1 FROM `+"`%s`"+`.wisp_dependencies wd
-				WHERE wd.issue_id = w.id AND wd.type = 'parent-child'
-			)
-			OR
-			EXISTS (
-				SELECT 1 FROM `+"`%s`"+`.wisp_dependencies wd
-				JOIN `+"`%s`"+`.wisps parent ON parent.id = wd.depends_on_id
-				WHERE wd.issue_id = w.id AND wd.type = 'parent-child'
-				AND parent.status = 'closed'
-			)
-			OR
-			EXISTS (
-				SELECT 1 FROM `+"`%s`"+`.wisp_dependencies wd
-				LEFT JOIN `+"`%s`"+`.wisps parent ON parent.id = wd.depends_on_id
-				WHERE wd.issue_id = w.id AND wd.type = 'parent-child'
-				AND parent.id IS NULL
-			)
-		)`, dbName, dbName, dbName, dbName, dbName)
+// parentExcludeJoin returns a LEFT JOIN clause and WHERE condition that restricts
+// results to wisps whose parent molecule is closed, missing, or nonexistent.
+//
+// This replaces the previous parentCheckWhere() which used 3 correlated EXISTS
+// subqueries per row, causing O(n*m) query cost on large wisp tables (gt-jd1z).
+// The LEFT JOIN approach runs the subquery once and hash-joins: O(n+m).
+//
+// Semantics (unchanged from parentCheckWhere):
+//   - No parent-child dependency → eligible (orphan wisps)
+//   - Parent status is 'closed' → eligible (parent already reaped)
+//   - Parent row missing (dangling ref) → eligible (parent already purged)
+//
+// The inverse is simpler: exclude wisps that have an OPEN parent.
+//
+// Usage:
+//
+//	join, where := parentExcludeJoin(dbName)
+//	query := fmt.Sprintf("SELECT ... FROM `%s`.wisps w %s WHERE ... AND %s", dbName, join, where)
+func parentExcludeJoin(dbName string) (joinClause, whereCondition string) {
+	joinClause = fmt.Sprintf(
+		`LEFT JOIN (
+			SELECT DISTINCT wd.issue_id
+			FROM `+"`%s`"+`.wisp_dependencies wd
+			INNER JOIN `+"`%s`"+`.wisps parent ON parent.id = wd.depends_on_id
+			WHERE wd.type = 'parent-child'
+			AND parent.status IN ('open', 'hooked', 'in_progress')
+		) open_parent ON open_parent.issue_id = w.id`, dbName, dbName)
+	whereCondition = "open_parent.issue_id IS NULL"
+	return
 }
 
 // Scan counts reaper candidates in a database without modifying anything.
@@ -181,12 +185,13 @@ func Scan(db *sql.DB, dbName string, maxAge, purgeAge, mailDeleteAge, staleIssue
 
 	result := &ScanResult{Database: dbName}
 	now := time.Now().UTC()
-	parentCheck := parentCheckWhere(dbName)
+	parentJoin, parentWhere := parentExcludeJoin(dbName)
 
 	// Count reap candidates: open wisps past max_age with eligible parent status.
-	reapWhere := fmt.Sprintf(
-		"w.status IN ('open', 'hooked', 'in_progress') AND w.created_at < ? AND %s", parentCheck)
-	reapQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.wisps w WHERE %s", dbName, reapWhere)
+	// Uses LEFT JOIN anti-pattern instead of correlated EXISTS to avoid O(n*m) cost (gt-jd1z).
+	reapQuery := fmt.Sprintf(
+		"SELECT COUNT(*) FROM `%s`.wisps w %s WHERE w.status IN ('open', 'hooked', 'in_progress') AND w.created_at < ? AND %s",
+		dbName, parentJoin, parentWhere)
 	if err := db.QueryRowContext(ctx, reapQuery, now.Add(-maxAge)).Scan(&result.ReapCandidates); err != nil {
 		return nil, fmt.Errorf("count reap candidates: %w", err)
 	}
@@ -263,14 +268,14 @@ func Reap(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ReapRe
 	defer cancel()
 
 	cutoff := time.Now().UTC().Add(-maxAge)
-	parentCheck := parentCheckWhere(dbName)
+	parentJoin, parentWhere := parentExcludeJoin(dbName)
 	whereClause := fmt.Sprintf(
-		"w.status IN ('open', 'hooked', 'in_progress') AND w.created_at < ? AND %s", parentCheck)
+		"w.status IN ('open', 'hooked', 'in_progress') AND w.created_at < ? AND %s", parentWhere)
 
 	result := &ReapResult{Database: dbName, DryRun: dryRun}
 
 	if dryRun {
-		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.wisps w WHERE %s", dbName, whereClause)
+		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.wisps w %s WHERE %s", dbName, parentJoin, whereClause)
 		if err := db.QueryRowContext(ctx, countQuery, cutoff).Scan(&result.Reaped); err != nil {
 			return nil, fmt.Errorf("dry-run count: %w", err)
 		}
@@ -291,9 +296,10 @@ func Reap(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ReapRe
 
 	// Batch UPDATE: select IDs in chunks, update each chunk.
 	// This avoids holding a write lock on the entire table for minutes.
+	// Uses LEFT JOIN anti-pattern instead of correlated EXISTS to avoid O(n*m) cost (gt-jd1z).
 	idQuery := fmt.Sprintf(
-		"SELECT w.id FROM `%s`.wisps w WHERE %s LIMIT %d",
-		dbName, whereClause, DefaultBatchSize)
+		"SELECT w.id FROM `%s`.wisps w %s WHERE %s LIMIT %d",
+		dbName, parentJoin, whereClause, DefaultBatchSize)
 
 	totalReaped := 0
 	for {
