@@ -4,6 +4,7 @@
 package refinery
 
 import (
+	"log"
 	"time"
 )
 
@@ -104,10 +105,12 @@ func ScoreMR(input ScoreInput, config ScoreConfig) float64 {
 	// Priority factor: P0 (0) gets +400, P4 (4) gets +0
 	priorityBonus := 4 - input.Priority
 	if priorityBonus < 0 {
-		priorityBonus = 0 // Clamp for invalid priorities > 4
+		log.Printf("WARNING: MR priority %d out of range [0,4], clamping to P4 (lowest)", input.Priority)
+		priorityBonus = 0 // Invalid priorities > 4 → treat as lowest priority
 	}
 	if priorityBonus > 4 {
-		priorityBonus = 4 // Clamp for invalid priorities < 0
+		log.Printf("WARNING: MR priority %d out of range [0,4], clamping to P4 (lowest)", input.Priority)
+		priorityBonus = 0 // Invalid priorities < 0 (e.g. -1 sentinel) → treat as lowest priority
 	}
 	score += config.PriorityWeight * float64(priorityBonus)
 

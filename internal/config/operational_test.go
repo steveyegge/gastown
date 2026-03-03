@@ -309,3 +309,58 @@ func TestWebThresholds_Overrides(t *testing.T) {
 		t.Errorf("MaxBodyLen: got %v, want %v (default)", got, DefaultWebMaxBodyLen)
 	}
 }
+
+func TestWitnessThresholds_Defaults(t *testing.T) {
+	t.Parallel()
+
+	var op *OperationalConfig
+	wit := op.GetWitnessConfig()
+
+	if got := wit.StartupStallThresholdD(); got != DefaultWitnessStartupStallThreshold {
+		t.Errorf("StartupStallThreshold: got %v, want %v", got, DefaultWitnessStartupStallThreshold)
+	}
+	if got := wit.StartupActivityGraceD(); got != DefaultWitnessStartupActivityGrace {
+		t.Errorf("StartupActivityGrace: got %v, want %v", got, DefaultWitnessStartupActivityGrace)
+	}
+	if got := wit.MaxBeadRespawnsV(); got != DefaultWitnessMaxBeadRespawns {
+		t.Errorf("MaxBeadRespawns: got %v, want %v", got, DefaultWitnessMaxBeadRespawns)
+	}
+	if got := wit.DoneIntentStuckTimeoutD(); got != DefaultWitnessDoneIntentStuckTimeout {
+		t.Errorf("DoneIntentStuckTimeout: got %v, want %v", got, DefaultWitnessDoneIntentStuckTimeout)
+	}
+	if got := wit.DoneIntentRecentGraceD(); got != DefaultWitnessDoneIntentRecentGrace {
+		t.Errorf("DoneIntentRecentGrace: got %v, want %v", got, DefaultWitnessDoneIntentRecentGrace)
+	}
+}
+
+func TestWitnessThresholds_Overrides(t *testing.T) {
+	t.Parallel()
+
+	maxRespawns := 5
+	op := &OperationalConfig{
+		Witness: &WitnessThresholds{
+			StartupStallThreshold:  "2m",
+			StartupActivityGrace:   "45s",
+			MaxBeadRespawns:        &maxRespawns,
+			DoneIntentStuckTimeout: "90s",
+			DoneIntentRecentGrace:  "15s",
+		},
+	}
+
+	wit := op.GetWitnessConfig()
+	if got := wit.StartupStallThresholdD(); got != 2*time.Minute {
+		t.Errorf("StartupStallThreshold: got %v, want 2m", got)
+	}
+	if got := wit.StartupActivityGraceD(); got != 45*time.Second {
+		t.Errorf("StartupActivityGrace: got %v, want 45s", got)
+	}
+	if got := wit.MaxBeadRespawnsV(); got != 5 {
+		t.Errorf("MaxBeadRespawns: got %v, want 5", got)
+	}
+	if got := wit.DoneIntentStuckTimeoutD(); got != 90*time.Second {
+		t.Errorf("DoneIntentStuckTimeout: got %v, want 90s", got)
+	}
+	if got := wit.DoneIntentRecentGraceD(); got != 15*time.Second {
+		t.Errorf("DoneIntentRecentGrace: got %v, want 15s", got)
+	}
+}

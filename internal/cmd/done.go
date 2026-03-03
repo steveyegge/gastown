@@ -27,9 +27,10 @@ import (
 )
 
 var doneCmd = &cobra.Command{
-	Use:     "done",
-	GroupID: GroupWork,
-	Short:   "Signal work ready for merge queue",
+	Use:         "done",
+	GroupID:     GroupWork,
+	Annotations: map[string]string{AnnotationPolecatSafe: "true"},
+	Short:       "Signal work ready for merge queue",
 	Long: `Signal that your work is complete and ready for the merge queue.
 
 This is a convenience command for polecats that:
@@ -46,6 +47,7 @@ Exit statuses:
 
 Examples:
   gt done                              # Submit branch, notify COMPLETED, transition to IDLE
+  gt done --pre-verified               # Submit with pre-verification fast-path
   gt done --issue gt-abc               # Explicit issue ID
   gt done --status ESCALATED           # Signal blocker, skip MR
   gt done --status DEFERRED            # Pause work, skip MR`,
@@ -59,6 +61,7 @@ var (
 	doneStatus        string
 	doneCleanupStatus string
 	doneResume        bool
+	donePreVerified   bool
 )
 
 // Valid exit types for gt done
@@ -74,6 +77,7 @@ func init() {
 	doneCmd.Flags().StringVar(&doneStatus, "status", ExitCompleted, "Exit status: COMPLETED, ESCALATED, or DEFERRED")
 	doneCmd.Flags().StringVar(&doneCleanupStatus, "cleanup-status", "", "Git cleanup status: clean, uncommitted, unpushed, stash, unknown (ZFC: agent-observed)")
 	doneCmd.Flags().BoolVar(&doneResume, "resume", false, "Resume from last checkpoint (auto-detected, for Witness recovery)")
+	doneCmd.Flags().BoolVar(&donePreVerified, "pre-verified", false, "Mark MR as pre-verified (polecat ran gates after rebasing onto target)")
 
 	rootCmd.AddCommand(doneCmd)
 }
@@ -317,6 +321,14 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		if len(checkpoints) > 0 {
 			fmt.Printf("%s Resuming gt done from checkpoint (previous run was interrupted)\n", style.Bold.Render("→"))
 		}
+	}
+
+	// Write heartbeat state="exiting" (gt-3vr5: heartbeat v2).
+	// Tells the witness we're in the gt done flow — trust the agent until
+	// heartbeat goes stale. No timer-based inference needed.
+	// Parallel to done-intent label for backwards compat during migration.
+	if sessionName := os.Getenv("GT_SESSION"); sessionName != "" && townRoot != "" {
+		polecat.TouchSessionHeartbeatWithState(townRoot, sessionName, polecat.HeartbeatExiting, "gt done", issueID)
 	}
 
 	// Get configured default branch for this rig
@@ -613,8 +625,14 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			return fmt.Errorf("cannot determine source issue from branch '%s'; use --issue to specify", branch)
 		}
 
-		// Initialize beads
-		bd := beads.New(beads.ResolveBeadsDir(cwd))
+		// Initialize beads — warn if resolved to a local .beads/ (no redirect).
+		// Without a redirect, MR beads are invisible to the Refinery.
+		resolvedBeads := beads.ResolveBeadsDir(cwd)
+		if beads.IsLocalBeadsDir(cwd, resolvedBeads) {
+			fmt.Fprintf(os.Stderr, "WARNING: beads resolved to local dir %s (no shared-beads redirect)\n", resolvedBeads)
+			fmt.Fprintf(os.Stderr, "  MR beads written here will be invisible to the Refinery — run 'gt polecat repair' to fix\n")
+		}
+		bd := beads.New(resolvedBeads)
 
 		// Check for no_merge flag - if set, skip merge queue and notify for review
 		sourceIssueForNoMerge, err := bd.Show(issueID)
@@ -763,6 +781,20 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			description += "\nretry_count: 0"
 			description += "\nlast_conflict_sha: null"
 			description += "\nconflict_task_id: null"
+
+			// Phase 3: Add pre-verification metadata if polecat ran gates after rebasing.
+			// The refinery uses these fields to fast-path merge without re-running gates.
+			if donePreVerified {
+				description += "\npre_verified: true"
+				description += fmt.Sprintf("\npre_verified_at: %s", time.Now().UTC().Format(time.RFC3339))
+				// Capture current origin/target HEAD as the verified base.
+				// The polecat rebased onto this SHA before running gates.
+				if verifiedBase, baseErr := g.Rev("origin/" + target); baseErr == nil {
+					description += fmt.Sprintf("\npre_verified_base: %s", verifiedBase)
+				} else {
+					style.PrintWarning("could not resolve origin/%s for pre-verified base: %v (pre-verification data incomplete)", target, baseErr)
+				}
+			}
 
 			mrIssue, err := bd.Create(beads.CreateOptions{
 				Title:       title,
@@ -1161,8 +1193,12 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 
 	if agentBead.HookBead != "" {
 		hookedBeadID := agentBead.HookBead
-		// Only close if the hooked bead exists and is still in "hooked" status
-		if hookedBead, err := bd.Show(hookedBeadID); err == nil && hookedBead.Status == beads.StatusHooked {
+		// BUG FIX (gt-pftz): Close hooked bead unless already terminal (closed/tombstone).
+		// Previously checked hookedBead.Status == StatusHooked, but polecats update
+		// their work bead to in_progress during work. The exact-match check caused
+		// gt done to skip closing the bead, leaving it as unassigned open work after
+		// the hook was cleared — triggering infinite dispatch loops.
+		if hookedBead, err := bd.Show(hookedBeadID); err == nil && !beads.IssueStatus(hookedBead.Status).IsTerminal() {
 			// BUG FIX: Close attached molecule (wisp) BEFORE closing hooked bead.
 			// When using formula-on-bead (gt sling formula --on bead), the base bead
 			// has attached_molecule pointing to the wisp. Without this fix, gt done

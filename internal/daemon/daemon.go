@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/google/uuid"
 	beadsdk "github.com/steveyegge/beads"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -1069,6 +1070,23 @@ func (d *Daemon) ensureWitnessesRunning() {
 	}
 }
 
+// hasPendingEvents checks if there are pending .event files in the given channel directory.
+// Used to gate agent spawning: don't burn API credits starting a Claude session when
+// there's nothing to process. The agent's await-event handles the actual consumption.
+func (d *Daemon) hasPendingEvents(channel string) bool {
+	eventDir := filepath.Join(d.config.TownRoot, "events", channel)
+	entries, err := os.ReadDir(eventDir)
+	if err != nil {
+		return false // Directory doesn't exist or unreadable = no pending events
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".event") {
+			return true
+		}
+	}
+	return false
+}
+
 // ensureWitnessRunning ensures the witness for a specific rig is running.
 // Discover, don't track: uses Manager.Start() which checks tmux directly (gt-zecmc).
 func (d *Daemon) ensureWitnessRunning(rigName string) {
@@ -1128,6 +1146,23 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	if operational, reason := d.isRigOperational(rigName); !operational {
 		d.logger.Printf("Skipping refinery auto-start for %s: %s", rigName, reason)
 		return
+	}
+
+	// Event gate: don't spawn a new Claude session when there's nothing to process.
+	// If a refinery session is already running, Start() returns ErrAlreadyRunning (cheap).
+	// But spawning a NEW session with an empty queue burns API credits for nothing.
+	// The refinery formula uses await-event internally, so it will wake when events appear.
+	if !d.hasPendingEvents("refinery") {
+		// Check if session already exists before skipping — let running sessions continue
+		r := &rig.Rig{
+			Name: rigName,
+			Path: filepath.Join(d.config.TownRoot, rigName),
+		}
+		mgr := refinery.NewManager(r)
+		if running, _ := mgr.IsRunning(); !running {
+			d.logger.Printf("No pending refinery events and no session running for %s, skipping spawn", rigName)
+			return
+		}
 	}
 
 	// Manager.Start() handles: zombie detection, session creation, env vars, theming,
@@ -1527,16 +1562,13 @@ func IsRunning(townRoot string) (bool, int, error) {
 	}
 
 	// Lock is held — daemon is running. Read PID from file.
+	// Use readPIDFile to handle the "PID\nNONCE" format introduced alongside
+	// nonce-based ownership verification. A plain Atoi on the raw file content
+	// fails when a nonce line is present, returning PID 0.
 	pidFile := filepath.Join(townRoot, "daemon", "daemon.pid")
-	data, err := os.ReadFile(pidFile)
+	pid, _, err := readPIDFile(pidFile)
 	if err != nil {
-		// Lock held but no PID file — daemon is running but we can't report PID
-		return true, 0, nil
-	}
-
-	pidStr := strings.TrimSpace(string(data))
-	pid, err := strconv.Atoi(pidStr)
-	if err != nil {
+		// Lock held but no readable PID file — daemon running, PID unknown
 		return true, 0, nil
 	}
 
@@ -1558,10 +1590,10 @@ func isRunningFromPID(townRoot string) (bool, int, error) {
 	}
 
 	if !alive {
-		// Process not running, clean up stale PID file
-		if err := os.Remove(pidFile); err == nil {
-			return false, 0, fmt.Errorf("removed stale PID file (process %d not found)", pid)
-		}
+		// Process not running, clean up stale PID file.
+		// This is a successful recovery, not an error — the caller can
+		// proceed as if no daemon is running (fixes #2107).
+		os.Remove(pidFile) // best-effort cleanup
 		return false, 0, nil
 	}
 
@@ -1578,6 +1610,16 @@ func StopDaemon(townRoot string) error {
 	}
 	if !running {
 		return fmt.Errorf("daemon is not running")
+	}
+
+	if pid <= 0 {
+		// Lock is held but PID is unknown (race: daemon starting, or stale lock).
+		// Clean up the lock file so the next gt up can start fresh.
+		lockPath := filepath.Join(townRoot, "daemon", "daemon.lock")
+		_ = os.Remove(lockPath)
+		pidFile := filepath.Join(townRoot, "daemon", "daemon.pid")
+		_ = os.Remove(pidFile)
+		return nil
 	}
 
 	process, err := os.FindProcess(pid)
@@ -1913,16 +1955,25 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	// Pre-sync workspace (ensure beads are current)
 	d.syncWorkspace(workDir)
 
+	// Generate a fresh run ID for this restart so all telemetry from the
+	// crash-restarted session is correlated under a new GASTA root span.
+	runID := uuid.New().String()
+
 	// Build startup command BEFORE creating the session so we can use
 	// NewSessionWithCommand (command as initial pane process). This eliminates
 	// the race condition in the old EnsureSessionFresh + SendKeys pattern where
 	// the shell might not be ready to receive keystrokes, producing empty windows.
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:      "polecat",
-		Rig:       rigName,
-		AgentName: polecatName,
-		TownRoot:  d.config.TownRoot,
+		Role:        "polecat",
+		Rig:         rigName,
+		AgentName:   polecatName,
+		TownRoot:    d.config.TownRoot,
+		SessionName: sessionName,
 	})
+	// Inject GT_RUN into envVars before BuildStartupCommand so the startup
+	// command includes it (exec env …) and the loop below propagates it to
+	// the tmux session environment.
+	envVars["GT_RUN"] = runID
 	rc := config.ResolveRoleAgentConfig("polecat", d.config.TownRoot, rigPath)
 	startCmd := config.BuildStartupCommand(envVars, rigPath, "")
 
@@ -1956,6 +2007,11 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	// Set GT_PROCESS_NAMES for accurate liveness detection of custom agents.
 	processNames := config.ResolveProcessNames(rc.ResolvedAgent, rc.Command)
 	_ = d.tmux.SetEnvironment(sessionName, "GT_PROCESS_NAMES", strings.Join(processNames, ","))
+
+	// Record agent's pane_id for ZFC-compliant liveness checks (gt-qmsx).
+	if paneID, err := d.tmux.GetPaneID(sessionName); err == nil {
+		_ = d.tmux.SetEnvironment(sessionName, "GT_PANE_ID", paneID)
+	}
 
 	// Apply theme
 	theme := tmux.AssignTheme(rigName)

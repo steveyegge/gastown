@@ -95,6 +95,15 @@ const (
 	DefaultWebMaxBodyLen        = 100_000
 )
 
+// Witness defaults.
+const (
+	DefaultWitnessStartupStallThreshold  = 90 * time.Second
+	DefaultWitnessStartupActivityGrace   = 60 * time.Second
+	DefaultWitnessMaxBeadRespawns        = 3
+	DefaultWitnessDoneIntentStuckTimeout = 60 * time.Second
+	DefaultWitnessDoneIntentRecentGrace  = 30 * time.Second
+)
+
 // LoadOperationalConfig loads operational config from a town root.
 // Returns a valid (possibly empty) config — never nil, never errors.
 // Callers can use accessor methods that return defaults for nil sub-configs.
@@ -619,4 +628,54 @@ func (w *WebThresholds) MaxBodyLenV() int {
 		return *w.MaxBodyLen
 	}
 	return DefaultWebMaxBodyLen
+}
+
+// --- Witness accessors ---
+
+// GetWitnessConfig returns the witness thresholds, never nil.
+func (c *OperationalConfig) GetWitnessConfig() *WitnessThresholds {
+	if c != nil && c.Witness != nil {
+		return c.Witness
+	}
+	return &WitnessThresholds{}
+}
+
+// StartupStallThresholdD returns the configured or default startup stall threshold.
+func (wt *WitnessThresholds) StartupStallThresholdD() time.Duration {
+	if wt != nil {
+		return ParseDurationOrDefault(wt.StartupStallThreshold, DefaultWitnessStartupStallThreshold)
+	}
+	return DefaultWitnessStartupStallThreshold
+}
+
+// StartupActivityGraceD returns the configured or default startup activity grace.
+func (wt *WitnessThresholds) StartupActivityGraceD() time.Duration {
+	if wt != nil {
+		return ParseDurationOrDefault(wt.StartupActivityGrace, DefaultWitnessStartupActivityGrace)
+	}
+	return DefaultWitnessStartupActivityGrace
+}
+
+// MaxBeadRespawnsV returns the configured or default max bead respawns.
+func (wt *WitnessThresholds) MaxBeadRespawnsV() int {
+	if wt != nil && wt.MaxBeadRespawns != nil {
+		return *wt.MaxBeadRespawns
+	}
+	return DefaultWitnessMaxBeadRespawns
+}
+
+// DoneIntentStuckTimeoutD returns the configured or default done-intent stuck timeout.
+func (wt *WitnessThresholds) DoneIntentStuckTimeoutD() time.Duration {
+	if wt != nil {
+		return ParseDurationOrDefault(wt.DoneIntentStuckTimeout, DefaultWitnessDoneIntentStuckTimeout)
+	}
+	return DefaultWitnessDoneIntentStuckTimeout
+}
+
+// DoneIntentRecentGraceD returns the configured or default done-intent recent grace.
+func (wt *WitnessThresholds) DoneIntentRecentGraceD() time.Duration {
+	if wt != nil {
+		return ParseDurationOrDefault(wt.DoneIntentRecentGrace, DefaultWitnessDoneIntentRecentGrace)
+	}
+	return DefaultWitnessDoneIntentRecentGrace
 }

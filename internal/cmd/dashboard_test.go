@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/doltserver"
 )
 
 func TestDashboardCmd_FlagsExist(t *testing.T) {
@@ -62,5 +66,81 @@ func TestDashboardCmd_RequiresWorkspace(t *testing.T) {
 	// This test verifies the command structure is correct
 	if dashboardCmd.RunE == nil {
 		t.Error("dashboard command should have RunE set")
+	}
+}
+
+func TestEnsureDoltPortEnv_ReadsStateFile(t *testing.T) {
+	// Create a temporary town root with dolt-state.json
+	townRoot := t.TempDir()
+	daemonDir := filepath.Join(townRoot, "daemon")
+	if err := os.MkdirAll(daemonDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	state := doltserver.State{Port: 13307}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(daemonDir, "dolt-state.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Clear any existing env vars
+	t.Setenv("GT_DOLT_PORT", "")
+	t.Setenv("BEADS_DOLT_PORT", "")
+
+	ensureDoltPortEnv(townRoot)
+
+	if got := os.Getenv("GT_DOLT_PORT"); got != "13307" {
+		t.Errorf("GT_DOLT_PORT = %q, want %q", got, "13307")
+	}
+	if got := os.Getenv("BEADS_DOLT_PORT"); got != "13307" {
+		t.Errorf("BEADS_DOLT_PORT = %q, want %q", got, "13307")
+	}
+}
+
+func TestEnsureDoltPortEnv_FallsBackToDefault(t *testing.T) {
+	// Use a temp dir with no dolt-state.json
+	townRoot := t.TempDir()
+
+	t.Setenv("GT_DOLT_PORT", "")
+	t.Setenv("BEADS_DOLT_PORT", "")
+
+	ensureDoltPortEnv(townRoot)
+
+	want := "3307" // doltserver.DefaultPort
+	if got := os.Getenv("GT_DOLT_PORT"); got != want {
+		t.Errorf("GT_DOLT_PORT = %q, want %q (default)", got, want)
+	}
+	if got := os.Getenv("BEADS_DOLT_PORT"); got != want {
+		t.Errorf("BEADS_DOLT_PORT = %q, want %q (default)", got, want)
+	}
+}
+
+func TestEnsureDoltPortEnv_OverridesWrongPort(t *testing.T) {
+	// Simulate the bug: BEADS_DOLT_PORT set to dashboard HTTP port (8080)
+	t.Setenv("GT_DOLT_PORT", "8080")
+	t.Setenv("BEADS_DOLT_PORT", "8080")
+
+	// Create dolt-state.json with the correct port
+	townRoot := t.TempDir()
+	daemonDir := filepath.Join(townRoot, "daemon")
+	if err := os.MkdirAll(daemonDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	state := doltserver.State{Port: 3307}
+	data, _ := json.Marshal(state)
+	if err := os.WriteFile(filepath.Join(daemonDir, "dolt-state.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ensureDoltPortEnv(townRoot)
+
+	if got := os.Getenv("GT_DOLT_PORT"); got != "3307" {
+		t.Errorf("GT_DOLT_PORT = %q, want %q (should override wrong port)", got, "3307")
+	}
+	if got := os.Getenv("BEADS_DOLT_PORT"); got != "3307" {
+		t.Errorf("BEADS_DOLT_PORT = %q, want %q (should override wrong port)", got, "3307")
 	}
 }

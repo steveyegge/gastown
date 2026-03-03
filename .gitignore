@@ -1,5 +1,7 @@
 # Binaries
 /gt
+/gt-proxy-server
+/gt-proxy-client
 *.exe
 
 # Build

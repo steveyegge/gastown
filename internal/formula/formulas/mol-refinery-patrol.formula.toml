@@ -21,6 +21,8 @@ Witness                    Refinery                      Git
    │                          │                           │
    │                    (run tests)                       │
    │                          │                           │
+   │                    (quality review, if enabled)      │
+   │                          │                           │
    │                    (if pass)                         │
    │                          │ merge & push              │
    │                          │──────────────────────────>│
@@ -57,6 +59,8 @@ source of truth.
 | build_command | (empty) | Build command (e.g., `go build ./...`). Empty = skip. |
 | target_branch | main | Default target branch for merges |
 | delete_merged_branches | true | Whether to delete source branches after merge |
+| judgment_enabled | false | Enable quality review for merges (true/false) |
+| review_depth | standard | Review depth: quick, standard, or deep |
 
 ## Target Resolution Rule
 
@@ -77,7 +81,7 @@ resolve that placeholder with this rule:
 You MUST process steps in strict DAG order. Walk through each step sequentially,
 unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 8
+version = 9
 
 [vars]
 [vars.wisp_type]
@@ -123,6 +127,14 @@ default = "main"
 [vars.delete_merged_branches]
 description = "Whether to delete source branches after merge"
 default = "true"
+
+[vars.judgment_enabled]
+description = "Enable quality review for merges (true/false)"
+default = "false"
+
+[vars.review_depth]
+description = "Review depth: quick, standard, or deep"
+default = "standard"
 
 [[steps]]
 id = "inbox-check"
@@ -347,9 +359,81 @@ If run_tests = "true":
 Track results: pass count, fail count, specific failures."""
 
 [[steps]]
+id = "quality-review"
+title = "Quality review merge diff"
+needs = ["run-tests"]
+description = """
+**Config: judgment_enabled = {{judgment_enabled}}**
+**Config: review_depth = {{review_depth}}**
+
+Review the merge diff for quality issues. This step is measurement-only (Phase 1):
+reviews are recorded but do NOT gate merges.
+
+**Step 1: Check if quality review is enabled**
+
+If judgment_enabled is not "true", skip this step entirely and proceed to
+handle-failures. Log: "Quality review skipped (judgment_enabled=false)"
+
+**Step 2: Get the merge diff**
+
+```bash
+git diff origin/main...temp
+```
+
+If the diff is empty, skip with: "No diff to review"
+
+**Step 3: Review the diff**
+
+Review the diff yourself using your judgment. Assess:
+
+1. **Correctness**: Logic errors, off-by-one, nil/null handling, race conditions
+2. **Security**: Injection, auth bypass, secrets in code, unsafe deserialization
+3. **Clarity**: Naming, structure, comments where non-obvious
+4. **Style**: Consistency with surrounding code, idiomatic patterns
+
+Depth is controlled by review_depth:
+- `quick`: Focus on correctness and security only. Skim for obvious issues.
+- `standard`: All four categories. Moderate detail.
+- `deep`: Thorough line-by-line review. Flag even minor style issues.
+
+**Step 4: Score and recommend**
+
+Assign a score from 0.0 to 1.0:
+- 0.9-1.0: Excellent — no issues or only trivial nits
+- 0.7-0.89: Good — minor issues only
+- 0.45-0.69: Needs work — significant issues found
+- 0.0-0.44: Breach — critical issues (security, correctness)
+
+Recommendation:
+- `approve`: Score >= 0.45
+- `request_changes`: Score < 0.45
+
+**Step 5: Record the result as a wisp**
+
+Record the quality review result. This is fail-open: if the command fails,
+log the error and continue — never block the merge.
+
+```bash
+bd create "quality-review: Score <score>, <recommendation>" -t chore --ephemeral \\
+  -l type:plugin-run,plugin:quality-review-result,worker:<polecat-name>,rig:<rig-name>,score:<score>,recommendation:<approve|request_changes>,result:success \\
+  -d "Score: <score>, <recommendation>. Issues: <count> (<summary>)" \\
+  --silent 2>/dev/null || true
+```
+
+**Step 6: Handle breach scores (measurement-only)**
+
+If score < 0.45 (breach threshold):
+- Add a note to your merge summary: "Warning: Quality review breach (score: X.XX)"
+- List the critical/major issues found
+- Do NOT block the merge — Phase 1 is measurement-only
+- Proceed to handle-failures normally
+
+Track: review score, recommendation, issue count, duration."""
+
+[[steps]]
 id = "handle-failures"
 title = "Handle quality check or test failures"
-needs = ["run-tests"]
+needs = ["quality-review"]
 description = """
 **VERIFICATION GATE**: This step enforces the Beads Promise.
 

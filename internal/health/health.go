@@ -16,6 +16,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/steveyegge/gastown/internal/doltserver"
 )
 
 // TCPCheck performs a TCP connection check to host:port.
@@ -90,61 +91,26 @@ type ZombieResult struct {
 }
 
 // FindZombieServers scans for dolt sql-server processes not on any expected port.
+// Uses lsof-based port discovery instead of pgrep/ps string matching (ZFC fix: gt-fj87).
 func FindZombieServers(expectedPorts []int) ZombieResult {
 	result := ZombieResult{}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "pgrep", "-f", "dolt sql-server")
-	output, err := cmd.Output()
-	if err != nil {
+	listeners := doltserver.FindAllDoltListeners()
+	if len(listeners) == 0 {
 		return result
 	}
 
-	expectedPortStrs := make(map[string]bool, len(expectedPorts))
+	expectedSet := make(map[int]bool, len(expectedPorts))
 	for _, p := range expectedPorts {
-		expectedPortStrs[strconv.Itoa(p)] = true
+		expectedSet[p] = true
 	}
 
-	pids := strings.Fields(strings.TrimSpace(string(output)))
-	for _, pidStr := range pids {
-		pid, err := strconv.Atoi(pidStr)
-		if err != nil {
+	for _, l := range listeners {
+		if expectedSet[l.Port] {
 			continue
 		}
-
-		psCmd := exec.CommandContext(ctx, "ps", "-p", pidStr, "-o", "command=")
-		psOutput, err := psCmd.Output()
-		if err != nil {
-			continue
-		}
-
-		cmdline := strings.TrimSpace(string(psOutput))
-		if !strings.Contains(cmdline, "dolt") || !strings.Contains(cmdline, "sql-server") {
-			continue
-		}
-
-		isExpected := false
-		for portStr := range expectedPortStrs {
-			if strings.Contains(cmdline, "--port="+portStr) ||
-				strings.Contains(cmdline, "--port "+portStr) ||
-				strings.Contains(cmdline, "-p "+portStr) ||
-				strings.Contains(cmdline, "-p="+portStr) {
-				isExpected = true
-				break
-			}
-		}
-		if isExpected {
-			continue
-		}
-
-		if !strings.Contains(cmdline, "--port") && !strings.Contains(cmdline, "-p ") {
-			continue
-		}
-
 		result.Count++
-		result.PIDs = append(result.PIDs, pid)
+		result.PIDs = append(result.PIDs, l.PID)
 	}
 
 	return result

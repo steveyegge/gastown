@@ -1375,73 +1375,59 @@ func (m *DoltServerManager) getDoltVersion() (string, error) {
 }
 
 // listDatabases returns the list of databases in the Dolt server.
+// Delegates to doltserver.ListDatabases which caches results and deduplicates
+// concurrent queries to avoid the thundering herd problem (GH#2180).
 func (m *DoltServerManager) listDatabases() ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), doltCmdTimeout)
-	defer cancel()
-	cmd := m.buildDoltSQLCmd(ctx,
-		"-r", "json",
-		"-q", "SHOW DATABASES",
-	)
-
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse JSON output
-	var result struct {
-		Rows []struct {
-			Database string `json:"Database"`
-		} `json:"rows"`
-	}
-
-	if err := json.Unmarshal(output, &result); err != nil {
-		// Fall back to line parsing
-		var databases []string
-		for _, line := range strings.Split(string(output), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && line != "Database" && !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "|") {
-				databases = append(databases, line)
-			}
-		}
-		return databases, nil
-	}
-
-	var databases []string
-	for _, row := range result.Rows {
-		if row.Database != "" && !doltserver.IsSystemDatabase(row.Database) {
-			databases = append(databases, row.Database)
-		}
-	}
-	return databases, nil
+	return doltserver.ListDatabases(m.townRoot)
 }
 
 // CountDoltServers returns the count of running dolt sql-server processes.
+// Uses lsof-based listener discovery instead of pgrep string matching (ZFC fix: gt-fj87).
 func CountDoltServers() int {
-	cmd := exec.Command("sh", "-c", "pgrep -f 'dolt sql-server' 2>/dev/null | wc -l")
-	output, err := cmd.Output()
-	if err != nil {
-		return 0
-	}
-	count, _ := strconv.Atoi(strings.TrimSpace(string(output)))
-	return count
+	return len(doltserver.FindAllDoltListeners())
 }
 
 // StopAllDoltServers stops all dolt sql-server processes.
 // Returns (killed, remaining).
+// Uses lsof-based discovery and direct signal delivery instead of pkill -f (ZFC fix: gt-fj87).
 func StopAllDoltServers(force bool) (int, int) {
-	before := CountDoltServers()
-	if before == 0 {
+	listeners := doltserver.FindAllDoltListeners()
+	if len(listeners) == 0 {
 		return 0, 0
 	}
 
+	// Deduplicate PIDs (one process may listen on multiple ports).
+	seen := make(map[int]bool)
+	var pids []int
+	for _, l := range listeners {
+		if !seen[l.PID] {
+			seen[l.PID] = true
+			pids = append(pids, l.PID)
+		}
+	}
+	before := len(pids)
+
+	sig := syscall.SIGTERM
 	if force {
-		_ = exec.Command("pkill", "-9", "-f", "dolt sql-server").Run()
-	} else {
-		_ = exec.Command("pkill", "-TERM", "-f", "dolt sql-server").Run()
+		sig = syscall.SIGKILL
+	}
+
+	for _, pid := range pids {
+		if p, err := os.FindProcess(pid); err == nil {
+			_ = p.Signal(sig)
+		}
+	}
+
+	if !force {
 		time.Sleep(2 * time.Second)
-		if remaining := CountDoltServers(); remaining > 0 {
-			_ = exec.Command("pkill", "-9", "-f", "dolt sql-server").Run()
+		// Check if any survived, escalate to SIGKILL.
+		remaining := doltserver.FindAllDoltListeners()
+		if len(remaining) > 0 {
+			for _, l := range remaining {
+				if p, err := os.FindProcess(l.PID); err == nil {
+					_ = p.Signal(syscall.SIGKILL)
+				}
+			}
 		}
 	}
 

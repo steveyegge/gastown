@@ -23,10 +23,11 @@ const (
 
 // strandedConvoyInfo matches the JSON output of `gt convoy stranded --json`.
 type strandedConvoyInfo struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	ReadyCount  int      `json:"ready_count"`
-	ReadyIssues []string `json:"ready_issues"`
+	ID           string   `json:"id"`
+	Title        string   `json:"title"`
+	TrackedCount int      `json:"tracked_count"`
+	ReadyCount   int      `json:"ready_count"`
+	ReadyIssues  []string `json:"ready_issues"`
 }
 
 // ConvoyManager monitors beads events for issue closes and periodically scans for stranded convoys.
@@ -352,8 +353,13 @@ func (m *ConvoyManager) scan() {
 
 		if c.ReadyCount > 0 {
 			m.feedFirstReady(c)
-		} else {
+		} else if c.TrackedCount == 0 {
+			// Truly empty convoy — safe to auto-close mechanically.
 			m.closeEmptyConvoy(c.ID)
+		} else {
+			// Tracked issues exist but none are ready. This requires agent
+			// judgment (the deacon decides what to do). Log for visibility.
+			m.logger("Convoy %s: %d tracked issues, 0 ready — needs agent review", c.ID, c.TrackedCount)
 		}
 	}
 }

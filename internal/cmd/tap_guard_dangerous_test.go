@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -10,38 +11,13 @@ func TestExtractCommand(t *testing.T) {
 		input string
 		want  string
 	}{
-		{
-			name:  "valid hook input",
-			input: `{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/foo"}}`,
-			want:  "rm -rf /tmp/foo",
-		},
-		{
-			name:  "empty input",
-			input: "",
-			want:  "",
-		},
-		{
-			name:  "invalid json",
-			input: "not json",
-			want:  "",
-		},
-		{
-			name:  "no command field",
-			input: `{"tool_name":"Write","tool_input":{"file_path":"/tmp/foo"}}`,
-			want:  "",
-		},
-		{
-			name:  "context-mode execute shell",
-			input: `{"tool_name":"mcp__plugin_context-mode_context-mode__execute","tool_input":{"language":"shell","code":"bd init --force"}}`,
-			want:  "bd init --force",
-		},
-		{
-			name:  "context-mode execute javascript ignored",
-			input: `{"tool_name":"mcp__plugin_context-mode_context-mode__execute","tool_input":{"language":"javascript","code":"console.log('bd init --force')"}}`,
-			want:  "",
-		},
+		{"valid hook input", `{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/foo"}}`, "rm -rf /tmp/foo"},
+		{"empty input", "", ""},
+		{"invalid json", "not json", ""},
+		{"no command field", `{"tool_name":"Write","tool_input":{"file_path":"/tmp/foo"}}`, ""},
+		{"context-mode execute shell", `{"tool_name":"mcp__plugin_context-mode_context-mode__execute","tool_input":{"language":"shell","code":"bd init --force"}}`, "bd init --force"},
+		{"context-mode execute javascript ignored", `{"tool_name":"mcp__plugin_context-mode_context-mode__execute","tool_input":{"language":"javascript","code":"console.log('bd init --force')"}}`, ""},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := extractCommand([]byte(tt.input))
@@ -52,48 +28,136 @@ func TestExtractCommand(t *testing.T) {
 	}
 }
 
-func TestMatchesDangerous(t *testing.T) {
+func TestMatchesAllFragments(t *testing.T) {
+	tests := []struct {
+		name      string
+		command   string
+		fragments []string
+		want      bool
+	}{
+		{"git reset hard", "git reset --hard", []string{"git", "reset", "--hard"}, true},
+		{"git reset soft", "git reset --soft", []string{"git", "reset", "--hard"}, false},
+		{"drop table", "drop table users", []string{"drop", "table"}, true},
+		{"drop database", "drop database mydb", []string{"drop", "database"}, true},
+		{"truncate table", "truncate table logs", []string{"truncate", "table"}, true},
+		{"git clean -f", "git clean -f", []string{"git", "clean", "-f"}, true},
+		{"git clean -n", "git clean -n", []string{"git", "clean", "-f"}, false},
+		{"bd init force", "bd init --force", []string{"bd", "init", "--force"}, true},
+		{"bd init force with flags", "bd init --force --server --prefix hq", []string{"bd", "init", "--force"}, true},
+		{"bd init no force", "bd init --server --prefix hq", []string{"bd", "init", "--force"}, false},
+		{"no match", "echo hello", []string{"rm", "-rf"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchesAllFragments(tt.command, tt.fragments)
+			if got != tt.want {
+				t.Errorf("matchesAllFragments(%q, %v) = %v, want %v", tt.command, tt.fragments, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesDangerousRmRf(t *testing.T) {
 	tests := []struct {
 		name    string
 		command string
-		want    bool
+		blocked bool
 	}{
 		// Should block
-		{"rm -rf absolute", "rm -rf /tmp/important", true},
-		{"rm -rf root", "rm -rf /", true},
-		{"git push force long", "git push --force origin main", true},
-		{"git push force short", "git push -f origin main", true},
-		{"git reset hard", "git reset --hard HEAD~1", true},
-		{"git clean f", "git clean -f", true},
-		{"git clean fd", "git clean -fd", true},
+		{"rm -rf /", "rm -rf /", true},
+		{"rm -rf /*", "rm -rf /*", true},
+		{"rm -rf / with sudo", "sudo rm -rf /", true},
 
-		// Should block: bd init --force
-		{"bd init force", "bd init --force", true},
-		{"bd init force with flags", "bd init --force --server --prefix hq", true},
-
-		// Should allow
-		{"bd init no force", "bd init --server --prefix hq", false},
-		{"bd list", "bd list", false},
+		// Should allow (normal cleanup commands)
+		{"rm -rf ./build/", "rm -rf ./build/", false},
+		{"rm -rf node_modules/", "rm -rf node_modules/", false},
+		{"rm -rf /tmp/test-output/", "rm -rf /tmp/test-output/", false},
+		{"rm -rf relative dir", "rm -rf build", false},
 		{"rm single file", "rm foo.txt", false},
-		{"rm -r relative", "rm -r ./tmp", false},
-		{"git push normal", "git push origin main", false},
-		{"git reset soft", "git reset --soft HEAD~1", false},
-		{"git status", "git status", false},
-		{"ls", "ls -la", false},
-		{"empty", "", false},
+		{"rm -r no force", "rm -r /", false},
+		{"no rm at all", "echo hello", false},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			got := matchesDangerousRmRf(tt.command) != ""
+			if got != tt.blocked {
+				t.Errorf("matchesDangerousRmRf(%q) blocked=%v, want %v", tt.command, got, tt.blocked)
+			}
+		})
+	}
+}
+
+func TestMatchesDangerousGitPush(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		blocked bool
+	}{
+		// Should block
+		{"git push --force", "git push --force origin main", true},
+		{"git push -f", "git push -f origin main", true},
+		{"git push --force bare", "git push --force", true},
+
+		// Should allow (safe variants)
+		{"force-with-lease", "git push --force-with-lease origin main", false},
+		{"force-if-includes", "git push --force-if-includes origin main", false},
+		{"normal push", "git push origin main", false},
+		{"no push", "git status", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchesDangerousGitPush(tt.command) != ""
+			if got != tt.blocked {
+				t.Errorf("matchesDangerousGitPush(%q) blocked=%v, want %v", tt.command, got, tt.blocked)
+			}
+		})
+	}
+}
+
+// TestDangerousGuard_Integration tests the full pattern set end-to-end.
+func TestDangerousGuard_Integration(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		blocked bool
+	}{
+		// Blocked
+		{"rm -rf /", "rm -rf /", true},
+		{"git push --force", "git push --force origin main", true},
+		{"git reset --hard", "git reset --hard HEAD~1", true},
+		{"git clean -f", "git clean -f", true},
+		{"git clean -fd", "git clean -fd", true},
+		{"drop table", "DROP TABLE users", true},
+		{"bd init --force", "bd init --force", true},
+		{"bd init --force with flags", "bd init --force --server --prefix hq", true},
+
+		// Allowed
+		{"bd init no force", "bd init --server --prefix hq", false},
+		{"rm -rf ./build/", "rm -rf ./build/", false},
+		{"rm -rf /tmp/cache/", "rm -rf /tmp/cache/", false},
+		{"git push --force-with-lease", "git push --force-with-lease origin main", false},
+		{"git push normal", "git push origin main", false},
+		{"git reset soft", "git reset --soft HEAD~1", false},
+		{"normal command", "ls -la", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lower := strings.ToLower(tt.command)
 			blocked := false
-			for _, pattern := range dangerousPatterns {
-				if matchesDangerous(tt.command, pattern) {
-					blocked = true
-					break
+			if matchesDangerousRmRf(lower) != "" {
+				blocked = true
+			} else if matchesDangerousGitPush(lower) != "" {
+				blocked = true
+			} else {
+				for _, p := range fragmentPatterns {
+					if matchesAllFragments(lower, p.contains) {
+						blocked = true
+						break
+					}
 				}
 			}
-			if blocked != tt.want {
-				t.Errorf("matchesDangerous(%q) = %v, want %v", tt.command, blocked, tt.want)
+			if blocked != tt.blocked {
+				t.Errorf("command %q: blocked=%v, want %v", tt.command, blocked, tt.blocked)
 			}
 		})
 	}

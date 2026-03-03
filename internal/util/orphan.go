@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -128,17 +129,19 @@ func loadSignalState(filename string) map[int]signalState {
 	state := make(map[int]signalState)
 
 	path := filepath.Join(stateFileDir(), filename)
+
+	// Acquire coordination lock (serializes with saveSignalState)
+	unlock, err := lock.FlockAcquire(path + ".flock")
+	if err != nil {
+		return state
+	}
+	defer unlock()
+
 	f, err := os.Open(path)
 	if err != nil {
 		return state // File doesn't exist yet, that's fine
 	}
 	defer f.Close()
-
-	// Acquire shared lock for reading
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil {
-		return state
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -169,17 +172,19 @@ func loadSignalState(filename string) map[int]signalState {
 // Uses file locking to prevent concurrent access.
 func saveSignalState(filename string, state map[int]signalState) error {
 	path := filepath.Join(stateFileDir(), filename)
+
+	// Acquire coordination lock (serializes with loadSignalState)
+	unlock, err := lock.FlockAcquire(path + ".flock")
+	if err != nil {
+		return fmt.Errorf("acquiring lock: %w", err)
+	}
+	defer unlock()
+
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-
-	// Acquire exclusive lock for writing
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("acquiring lock: %w", err)
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
 
 	for pid, s := range state {
 		fmt.Fprintf(f, "%d %s %d\n", pid, s.Signal, s.Timestamp.Unix())
@@ -350,7 +355,7 @@ type OrphanedProcess struct {
 	Age int // Age in seconds
 }
 
-// FindOrphanedClaudeProcesses finds claude/codex processes without a controlling terminal.
+// FindOrphanedClaudeProcesses finds claude/codex/opencode processes without a controlling terminal.
 // These are typically subagent processes spawned by Claude Code's Task tool that didn't
 // clean up properly after completion.
 //
@@ -397,9 +402,9 @@ func FindOrphanedClaudeProcesses() ([]OrphanedProcess, error) {
 			continue
 		}
 
-		// Match claude or codex command names
+		// Match claude, codex, or opencode command names
 		cmdLower := strings.ToLower(cmd)
-		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" {
+		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" && cmdLower != "opencode" {
 			continue
 		}
 
@@ -502,9 +507,9 @@ func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
 		cmd := fields[2]
 		etimeStr := fields[3]
 
-		// Match claude or codex command names
+		// Match claude, codex, or opencode command names
 		cmdLower := strings.ToLower(cmd)
-		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" {
+		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" && cmdLower != "opencode" {
 			continue
 		}
 

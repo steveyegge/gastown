@@ -25,6 +25,7 @@ gt sling beads/polecats/p1 --formula beads-release --var version=0.37.0
 formula = "beads-release"
 type = "workflow"
 version = 1
+pour = true
 
 [vars.version]
 description = "The semantic version to release (e.g., 0.37.0)"

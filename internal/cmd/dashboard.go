@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"time"
 
 	"golang.org/x/term"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/web"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -63,6 +65,12 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		// In a workspace - run normal dashboard
+
+		// Set BEADS_DOLT_PORT and GT_DOLT_PORT so bd/gt subprocesses connect
+		// to the actual Dolt SQL server, not the dashboard's HTTP listen port.
+		// Without this, inherited env vars could point bd at the wrong port.
+		ensureDoltPortEnv(townRoot)
+
 		fetcher, fetchErr := web.NewLiveConvoyFetcher()
 		if fetchErr != nil {
 			return fmt.Errorf("creating convoy fetcher: %w", fetchErr)
@@ -139,6 +147,23 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		IdleTimeout:       120 * time.Second,
 	}
 	return server.ListenAndServe()
+}
+
+// ensureDoltPortEnv sets GT_DOLT_PORT and BEADS_DOLT_PORT to the actual Dolt
+// SQL server port. This prevents bd subprocesses from inheriting a stale or
+// incorrect port (e.g., the dashboard's HTTP listen port) from the environment.
+// Reads the running port from daemon/dolt-state.json; falls back to the
+// daemon.json env config; otherwise uses the Dolt default (3307).
+func ensureDoltPortEnv(townRoot string) {
+	var port int
+	if state, err := doltserver.LoadState(townRoot); err == nil && state.Port > 0 {
+		port = state.Port
+	} else {
+		port = doltserver.DefaultPort
+	}
+	portStr := strconv.Itoa(port)
+	os.Setenv("GT_DOLT_PORT", portStr)
+	os.Setenv("BEADS_DOLT_PORT", portStr)
 }
 
 // openBrowser opens the specified URL in the default browser.

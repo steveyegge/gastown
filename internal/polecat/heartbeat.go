@@ -12,9 +12,45 @@ import (
 // Configurable via operational.polecat.heartbeat_stale_threshold in settings/config.json.
 const SessionHeartbeatStaleThreshold = 3 * time.Minute
 
+// HeartbeatState represents the agent-reported state in a heartbeat v2 (gt-3vr5).
+// Agents report their own state; the witness makes exactly one inference:
+// "is the heartbeat fresh?" Everything else is agent-reported.
+type HeartbeatState string
+
+const (
+	// HeartbeatWorking means the agent is actively processing.
+	HeartbeatWorking HeartbeatState = "working"
+	// HeartbeatIdle means the agent is waiting for input.
+	HeartbeatIdle HeartbeatState = "idle"
+	// HeartbeatExiting means the agent is in the gt done flow.
+	HeartbeatExiting HeartbeatState = "exiting"
+	// HeartbeatStuck means the agent self-reports being stuck.
+	HeartbeatStuck HeartbeatState = "stuck"
+)
+
 // SessionHeartbeat represents a polecat session's heartbeat file.
+// v1: timestamp only. v2 (gt-3vr5): adds agent-reported state, context, and bead.
 type SessionHeartbeat struct {
-	Timestamp time.Time `json:"timestamp"`
+	Timestamp time.Time      `json:"timestamp"`
+	State     HeartbeatState `json:"state,omitempty"`   // v2: agent-reported state
+	Context   string         `json:"context,omitempty"` // v2: what the agent is doing
+	Bead      string         `json:"bead,omitempty"`    // v2: current hook bead ID
+}
+
+// EffectiveState returns the agent-reported state, defaulting to HeartbeatWorking
+// for v1 heartbeats without a state field (backwards compatibility). See gt-3vr5.
+func (h *SessionHeartbeat) EffectiveState() HeartbeatState {
+	if h.State == "" {
+		return HeartbeatWorking
+	}
+	return h.State
+}
+
+// IsV2 returns true if this heartbeat carries a state field (heartbeat v2).
+// Used by the witness to decide whether to use agent-reported state or fall
+// through to legacy timer-based detection.
+func (h *SessionHeartbeat) IsV2() bool {
+	return h.State != ""
 }
 
 // heartbeatsDir returns the directory for polecat session heartbeat files.
@@ -29,9 +65,17 @@ func heartbeatFile(townRoot, sessionName string) string {
 }
 
 // TouchSessionHeartbeat writes or updates the heartbeat file for a polecat session.
+// Writes state="working" by default (heartbeat v2, gt-3vr5).
 // This is best-effort: errors are silently ignored because heartbeat signals
 // are non-critical and should not interrupt gt commands.
 func TouchSessionHeartbeat(townRoot, sessionName string) {
+	TouchSessionHeartbeatWithState(townRoot, sessionName, HeartbeatWorking, "", "")
+}
+
+// TouchSessionHeartbeatWithState writes a heartbeat with explicit state information.
+// Used by gt done (state="exiting") and gt heartbeat (state="stuck"). See gt-3vr5.
+// This is best-effort: errors are silently ignored.
+func TouchSessionHeartbeatWithState(townRoot, sessionName string, state HeartbeatState, context, bead string) {
 	dir := heartbeatsDir(townRoot)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return
@@ -39,6 +83,9 @@ func TouchSessionHeartbeat(townRoot, sessionName string) {
 
 	hb := SessionHeartbeat{
 		Timestamp: time.Now().UTC(),
+		State:     state,
+		Context:   context,
+		Bead:      bead,
 	}
 
 	data, err := json.Marshal(hb)

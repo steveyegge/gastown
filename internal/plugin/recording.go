@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -138,13 +137,16 @@ func (r *Recorder) queryRuns(pluginName string, limit int, since string) ([]*Plu
 		args = append(args, fmt.Sprintf("--limit=%d", limit))
 	}
 	if since != "" {
-		// Convert duration like "1h" to created-after format
-		// bd supports relative dates with - prefix (e.g., -1h, -24h)
-		sinceArg := since
-		if !strings.HasPrefix(since, "-") {
-			sinceArg = "-" + since
+		// Parse as Go duration and compute an absolute RFC3339 cutoff.
+		// bd's compact duration uses "m" for months, but plugin gate
+		// durations use Go's time.ParseDuration where "m" means minutes.
+		// Passing an absolute timestamp avoids this unit mismatch.
+		d, err := time.ParseDuration(since)
+		if err != nil {
+			return nil, fmt.Errorf("parsing duration %q: %w", since, err)
 		}
-		args = append(args, "--created-after="+sinceArg)
+		cutoff := time.Now().Add(-d).UTC().Format(time.RFC3339)
+		args = append(args, "--created-after="+cutoff)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), constants.BdCommandTimeout)

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -20,7 +21,6 @@ import (
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -175,22 +175,23 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("building startup command: %w", err)
 	}
 
+	// Generate the GASTA run ID for this refinery session.
+	runID := uuid.New().String()
+
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := t.NewSessionWithCommand(sessionID, refineryRigDir, command); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
-	// Record session start for telemetry (waterfall visibility).
-	telemetry.RecordSessionStart(context.Background(), sessionID, "refinery", m.rig.Name, nil)
-
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "refinery",
-		Rig:      m.rig.Name,
-		TownRoot: townRoot,
-		Agent:    agentOverride,
+		Role:        "refinery",
+		Rig:         m.rig.Name,
+		TownRoot:    townRoot,
+		Agent:       agentOverride,
+		SessionName: sessionID,
 	})
 	envVars = session.MergeRuntimeLivenessEnv(envVars, runtimeConfig)
 
@@ -201,6 +202,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
 	}
+	_ = t.SetEnvironment(sessionID, "GT_RUN", runID)
 
 	// Apply theme (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(m.rig.Name)
@@ -220,26 +222,16 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 
 	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)
 
-	// For agents with prompt_mode="none" (e.g., pi-rust), the startup prompt
-	// is not embedded in the command. Send it as a nudge after the agent is ready.
-	if runtimeConfig.PromptMode == "none" {
-		// Wait for the TUI to be fully ready before sending the nudge.
-		if err := t.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
-			log.Printf("warning: agent readiness wait for %s: %v", sessionID, err)
-		}
-		// Verify the session still exists after the ready delay.
-		if ok, _ := t.HasSession(sessionID); !ok {
-			log.Printf("warning: session %s disappeared after ready wait, skipping nudge", sessionID)
-		} else {
-			if err := t.NudgeSession(sessionID, initialPrompt); err != nil {
-				log.Printf("warning: nudging refinery prompt for %s: %v", sessionID, err)
-			}
-			// Pi-rust's TUI can swallow the Enter after NudgeSession's Escape key.
-			// Send a redundant Enter as a safety net (harmless if already submitted).
-			time.Sleep(500 * time.Millisecond)
-			_ = t.SendKeysRaw(sessionID, "Enter")
+	// Stream refinery's Claude Code JSONL conversation log to VictoriaLogs (opt-in).
+	if os.Getenv("GT_LOG_AGENT_OUTPUT") == "true" && os.Getenv("GT_OTEL_LOGS_URL") != "" {
+		if err := session.ActivateAgentLogging(sessionID, refineryRigDir, runID); err != nil {
+			log.Printf("warning: agent log watcher setup failed for %s: %v", sessionID, err)
 		}
 	}
+
+	// Record the agent instantiation event (GASTA root span).
+	session.RecordAgentInstantiateFromDir(context.Background(), runID, runtimeConfig.ResolvedAgent,
+		"refinery", "refinery", sessionID, m.rig.Name, townRoot, "", refineryRigDir)
 
 	return nil
 }
@@ -450,8 +442,8 @@ func (m *Manager) FindMR(idOrBranch string) (*MergeRequest, error) {
 		if constants.BranchPolecatPrefix+idOrBranch == item.MR.Branch {
 			return item.MR, nil
 		}
-		// Match by worker name (partial match for convenience)
-		if strings.Contains(item.MR.ID, idOrBranch) {
+		// Match by ID prefix (partial match for convenience)
+		if strings.HasPrefix(item.MR.ID, idOrBranch) {
 			return item.MR, nil
 		}
 	}
@@ -488,17 +480,13 @@ func (m *Manager) RejectMR(idOrBranch string, reason string, notify bool) (*Merg
 		return nil, fmt.Errorf("%w: MR is already closed with reason: %s", ErrClosedImmutable, mr.CloseReason)
 	}
 
-	// Close the bead in storage with the rejection reason, then delete it (MR beads are ephemeral)
+	// Close the bead in storage with the rejection reason
 	b := beads.New(m.rig.BeadsPath())
 	if err := b.CloseWithReason("rejected: "+reason, mr.ID); err != nil {
 		return nil, fmt.Errorf("failed to close MR bead: %w", err)
 	}
-	// Delete the ephemeral MR bead - it's no longer needed after rejection
-	if err := b.Delete(mr.ID); err != nil {
-		_, _ = fmt.Fprintf(m.output, "Warning: failed to delete MR %s: %v\n", mr.ID, err)
-	}
 
-	// Update in-memory state for return value (note: bead is already deleted)
+	// Update in-memory state for return value
 	if err := mr.Close(CloseReasonRejected); err != nil {
 		// Non-fatal: bead is already closed, just log
 		_, _ = fmt.Fprintf(m.output, "Warning: failed to update MR state: %v\n", err)

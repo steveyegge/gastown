@@ -11,19 +11,14 @@ import "sync"
 type MessageDeduplicator struct {
 	mu        sync.Mutex
 	processed map[string]bool
-	maxSize   int
 }
 
-// NewMessageDeduplicator creates a deduplicator with the given max capacity.
-// When capacity is reached, the oldest entries are not evicted (simple set).
-// For witness sessions that process hundreds of messages at most, this is fine.
-func NewMessageDeduplicator(maxSize int) *MessageDeduplicator {
-	if maxSize <= 0 {
-		maxSize = 10000
-	}
+// NewMessageDeduplicator creates a deduplicator.
+// The map grows without bound — 10k string keys is negligible memory,
+// and correctness (no duplicate processing) matters more than a soft cap.
+func NewMessageDeduplicator() *MessageDeduplicator {
 	return &MessageDeduplicator{
 		processed: make(map[string]bool),
-		maxSize:   maxSize,
 	}
 }
 
@@ -39,11 +34,6 @@ func (d *MessageDeduplicator) AlreadyProcessed(messageID string) bool {
 
 	if d.processed[messageID] {
 		return true
-	}
-
-	// Don't grow unboundedly
-	if len(d.processed) >= d.maxSize {
-		return false // At capacity, allow processing (safe: worst case is a dup)
 	}
 
 	d.processed[messageID] = true

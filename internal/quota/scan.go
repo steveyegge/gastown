@@ -14,12 +14,13 @@ import (
 
 // ScanResult holds the result of scanning a single tmux session.
 type ScanResult struct {
-	Session       string `json:"session"`                  // tmux session name
-	AccountHandle string `json:"account_handle,omitempty"` // resolved account handle
-	ConfigDir     string `json:"config_dir,omitempty"`     // CLAUDE_CONFIG_DIR (even if account unknown)
-	RateLimited   bool   `json:"rate_limited"`             // whether rate-limit was detected
-	MatchedLine   string `json:"matched_line,omitempty"`   // the line that matched
-	ResetsAt      string `json:"resets_at,omitempty"`      // parsed reset time if available
+	Session       string    `json:"session"`                  // tmux session name
+	AccountHandle string    `json:"account_handle,omitempty"` // resolved account handle
+	ConfigDir     string    `json:"config_dir,omitempty"`     // CLAUDE_CONFIG_DIR (even if account unknown)
+	RateLimited   bool      `json:"rate_limited"`             // whether hard rate-limit was detected
+	NearLimit     bool      `json:"near_limit"`               // whether approaching-limit signal was detected
+	MatchedLine   string    `json:"matched_line,omitempty"`   // the line that matched (hard or warning)
+	ResetsAt      string    `json:"resets_at,omitempty"`      // parsed reset time if available
 }
 
 // TmuxClient is the interface for tmux operations needed by the scanner.
@@ -30,11 +31,12 @@ type TmuxClient interface {
 	GetEnvironment(session, key string) (string, error)
 }
 
-// Scanner detects rate-limited sessions by examining tmux pane content.
+// Scanner detects rate-limited and near-limit sessions by examining tmux pane content.
 type Scanner struct {
-	tmux     TmuxClient
-	patterns []*regexp.Regexp
-	accounts *config.AccountsConfig
+	tmux            TmuxClient
+	patterns        []*regexp.Regexp // hard rate-limit patterns
+	warningPatterns []*regexp.Regexp // near-limit warning patterns
+	accounts        *config.AccountsConfig
 }
 
 // NewScanner creates a scanner with the given tmux client and rate-limit patterns.
@@ -60,6 +62,25 @@ func NewScanner(tmux TmuxClient, patterns []string, accounts *config.AccountsCon
 	}, nil
 }
 
+// WithWarningPatterns enables near-limit detection via pane content patterns.
+// If patterns is nil, DefaultNearLimitPatterns are used.
+func (s *Scanner) WithWarningPatterns(patterns []string) error {
+	if patterns == nil {
+		patterns = constants.DefaultNearLimitPatterns
+	}
+
+	compiled := make([]*regexp.Regexp, 0, len(patterns))
+	for _, p := range patterns {
+		re, err := regexp.Compile("(?i)" + p)
+		if err != nil {
+			return fmt.Errorf("compiling warning pattern %q: %w", p, err)
+		}
+		compiled = append(compiled, re)
+	}
+	s.warningPatterns = compiled
+	return nil
+}
+
 // scanLines is the number of pane lines to capture for rate-limit detection.
 // We capture a generous window but only check the bottom checkLines for
 // rate-limit patterns — if the limit was resolved, subsequent output pushes
@@ -74,9 +95,8 @@ const scanLines = 30
 // rate-limit messages lingering higher in the scroll buffer.
 const checkLines = 20
 
-// ScanAll scans all Gas Town tmux sessions for rate-limit indicators.
-// Returns results only for sessions where a rate-limit was detected or
-// where an account handle could be resolved.
+// ScanAll scans all Gas Town tmux sessions for rate-limit and near-limit indicators.
+// Returns results for all Gas Town sessions.
 func (s *Scanner) ScanAll() ([]ScanResult, error) {
 	sessions, err := s.tmux.ListSessions()
 	if err != nil {
@@ -96,7 +116,7 @@ func (s *Scanner) ScanAll() ([]ScanResult, error) {
 	return results, nil
 }
 
-// scanSession examines a single tmux session for rate-limit indicators.
+// scanSession examines a single tmux session for rate-limit and near-limit indicators.
 func (s *Scanner) scanSession(session string) ScanResult {
 	result := ScanResult{Session: session}
 
@@ -130,7 +150,10 @@ func (s *Scanner) scanSession(session string) ScanResult {
 	if start < 0 {
 		start = 0
 	}
-	for _, line := range allLines[start:] {
+	bottomLines := allLines[start:]
+
+	// Check hard rate-limit patterns first
+	for _, line := range bottomLines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -141,6 +164,23 @@ func (s *Scanner) scanSession(session string) ScanResult {
 				result.MatchedLine = line
 				result.ResetsAt = parseResetTime(line)
 				return result
+			}
+		}
+	}
+
+	// No hard limit detected — check near-limit warning patterns
+	if len(s.warningPatterns) > 0 {
+		for _, line := range bottomLines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			for _, re := range s.warningPatterns {
+				if re.MatchString(line) {
+					result.NearLimit = true
+					result.MatchedLine = line
+					return result
+				}
 			}
 		}
 	}

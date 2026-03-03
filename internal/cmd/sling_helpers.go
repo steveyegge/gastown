@@ -154,8 +154,11 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 
 	// Step 1: Force-close descendant steps before detaching. Uses force variant
 	// since burn is a destructive recovery path where prior state may be inconsistent.
+	// Best-effort — log but proceed in destructive path.
 	for _, molID := range molecules {
-		forceCloseDescendants(bd, molID)
+		if _, err := forceCloseDescendants(bd, molID); err != nil {
+			style.PrintWarning("burn: could not close descendants of %s: %v", molID, err)
+		}
 	}
 
 	// Step 2: Detach molecule from the base bead using the Go API (with audit logging
@@ -186,8 +189,11 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 	}
 
 	// Step 4: Close descendants, then force-close the orphaned wisp roots.
+	// Best-effort — log but proceed in destructive path.
 	for _, molID := range molecules {
-		forceCloseDescendants(bd, molID)
+		if _, err := forceCloseDescendants(bd, molID); err != nil {
+			style.PrintWarning("burn: could not close descendants of %s: %v", molID, err)
+		}
 	}
 	if err := bd.ForceCloseWithReason("burned: force re-sling", molecules...); err != nil {
 		fmt.Printf("  %s Could not close molecule wisp(s): %v\n",
@@ -200,14 +206,13 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 }
 
 // verifyBeadExists checks that the bead exists using bd show.
-// Uses bd's native prefix-based routing via routes.jsonl - do NOT set BEADS_DIR
-// as that overrides routing and breaks resolution of rig-level beads.
-//
-// Checks bead existence using bd show.
 // Resolves the rig directory from the bead's prefix for correct dolt access.
+// StripBeadsDir prevents inherited BEADS_DIR from overriding the resolved
+// directory, which caused rig-prefixed beads to fail (GH#2126).
 func verifyBeadExists(beadID string) error {
 	out, err := BdCmd("show", beadID, "--json", "--allow-stale").
 		Dir(resolveBeadDir(beadID)).
+		StripBeadsDir().
 		Stderr(io.Discard).
 		Output()
 	if err != nil {
@@ -224,6 +229,7 @@ func verifyBeadExists(beadID string) error {
 func getBeadInfo(beadID string) (*beadInfo, error) {
 	out, err := BdCmd("show", beadID, "--json", "--allow-stale").
 		Dir(resolveBeadDir(beadID)).
+		StripBeadsDir().
 		Stderr(io.Discard).
 		Output()
 	if err != nil {
@@ -270,7 +276,8 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 		// Read the bead once
 		out, err := BdCmd("show", beadID, "--json", "--allow-stale").
 			Dir(resolveBeadDir(beadID)).
-				Stderr(io.Discard).
+			StripBeadsDir().
+			Stderr(io.Discard).
 			Output()
 		if err != nil {
 			return fmt.Errorf("fetching bead: %w", err)
@@ -336,6 +343,7 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 
 	if err := BdCmd("update", beadID, "--description="+newDesc).
 		Dir(resolveBeadDir(beadID)).
+		StripBeadsDir().
 		Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
 	}
@@ -717,8 +725,8 @@ type FormulaOnBeadResult struct {
 //   - extraVars: additional --var values supplied by the user
 //
 // Returns the wisp root ID which should be hooked.
-func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot string, skipCook bool, extraVars []string) (_ *FormulaOnBeadResult, retErr error) {
-	defer func() { telemetry.RecordFormulaInstantiate(context.Background(), formulaName, beadID, retErr) }()
+func InstantiateFormulaOnBead(ctx context.Context, formulaName, beadID, title, hookWorkDir, townRoot string, skipCook bool, extraVars []string) (_ *FormulaOnBeadResult, retErr error) {
+	defer func() { telemetry.RecordFormulaInstantiate(ctx, formulaName, beadID, retErr) }()
 	// Route bd mutations (wisp/bond) to the correct beads context for the target bead.
 	formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 
@@ -743,12 +751,15 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 					Dir(formulaWorkDir).
 					WithGTRoot(townRoot).
 					Run(); retryErr != nil {
+					telemetry.RecordMolCook(ctx, formulaName, retryErr)
 					return nil, fmt.Errorf("cooking formula %s: %w (embedded retry: %v)", formulaName, err, retryErr)
 				}
 			} else {
+				telemetry.RecordMolCook(ctx, formulaName, err)
 				return nil, fmt.Errorf("cooking formula %s: %w", formulaName, err)
 			}
 		}
+		telemetry.RecordMolCook(ctx, formulaName, nil)
 	}
 
 	// Build variable list once so both legacy and fallback paths use
@@ -779,8 +790,10 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	// Parse wisp output to get the root ID
 	wispRootID, err := parseWispIDFromJSON(wispOut)
 	if err != nil {
+		telemetry.RecordMolWisp(ctx, formulaName, "", beadID, err)
 		return nil, fmt.Errorf("parsing wisp output: %w", err)
 	}
+	telemetry.RecordMolWisp(ctx, formulaName, wispRootID, beadID, nil)
 
 	// Step 3: Bond wisp to original bead (creates compound).
 	//

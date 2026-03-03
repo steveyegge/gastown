@@ -465,6 +465,50 @@ func TestBdCmd_WithBeadsDir_Chaining(t *testing.T) {
 	}
 }
 
+func TestBdCmd_StripBeadsDir_RemovesInherited(t *testing.T) {
+	// StripBeadsDir should remove inherited BEADS_DIR from the environment
+	// so that bd discovers the database from Dir() instead (GH#2126).
+	bdc := &bdCmd{
+		args:   []string{"show", "myproject-abc", "--json"},
+		env:    []string{"PATH=/usr/bin", "BEADS_DIR=/town/.beads", "HOME=/home/user"},
+		stderr: os.Stderr,
+	}
+	bdc.Dir("/town/myproject/mayor/rig").StripBeadsDir()
+	cmd := bdc.Build()
+
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "BEADS_DIR=") {
+			t.Errorf("StripBeadsDir should remove BEADS_DIR, found: %s", e)
+		}
+	}
+
+	if cmd.Dir != "/town/myproject/mayor/rig" {
+		t.Errorf("Dir = %q, want %q", cmd.Dir, "/town/myproject/mayor/rig")
+	}
+}
+
+func TestBdCmd_StripBeadsDir_NoOpWhenAbsent(t *testing.T) {
+	// StripBeadsDir should be harmless when BEADS_DIR is not set.
+	bdc := &bdCmd{
+		args:   []string{"show", "hq-abc"},
+		env:    []string{"PATH=/usr/bin", "HOME=/home/user"},
+		stderr: os.Stderr,
+	}
+	bdc.Dir("/town").StripBeadsDir()
+	cmd := bdc.Build()
+
+	if len(cmd.Env) != 2 {
+		t.Errorf("expected 2 env entries, got %d", len(cmd.Env))
+	}
+}
+
+func TestBdCmd_StripBeadsDir_Chaining(t *testing.T) {
+	bdc := BdCmd("test")
+	if bdc.StripBeadsDir() != bdc {
+		t.Error("StripBeadsDir() should return receiver for chaining")
+	}
+}
+
 // filterEnv returns env with all entries matching the given key prefix removed.
 func filterEnv(env []string, key string) []string {
 	prefix := key + "="

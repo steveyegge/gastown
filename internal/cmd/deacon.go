@@ -319,17 +319,19 @@ This helps the Deacon understand which recovered beads need attention.`,
 var deaconFeedStrandedCmd = &cobra.Command{
 	Use:   "feed-stranded",
 	Short: "Detect and feed stranded convoys automatically",
-	Long: `Detect stranded convoys and dispatch dogs to feed them.
+	Long: `Detect stranded convoys and take mechanical actions where safe.
 
 A convoy is "stranded" when it is open AND either:
 - Has ready issues (open, unblocked, no assignee) but no workers
 - Has 0 tracked issues (empty — needs auto-close)
+- Has tracked issues but none are ready (needs agent review)
 
 This command:
 1. Runs 'gt convoy stranded --json' to find stranded convoys
 2. For feedable convoys (ready_count > 0): dispatches a dog via gt sling
-3. For empty convoys (ready_count == 0): auto-closes via gt convoy check
-4. Rate limits to avoid spawning too many dogs at once
+3. For empty convoys (tracked_count == 0): auto-closes via gt convoy check
+4. For tracked-but-not-ready convoys: surfaces raw data for deacon review
+5. Rate limits to avoid spawning too many dogs at once
 
 Rate limiting:
 - Per-cycle limit (default 3): max convoys fed per invocation
@@ -544,6 +546,11 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionName, k, v)
+	}
+
+	// Record agent's pane_id for ZFC-compliant liveness checks (gt-qmsx).
+	if paneID, err := t.GetPaneID(sessionName); err == nil {
+		_ = t.SetEnvironment(sessionName, "GT_PANE_ID", paneID)
 	}
 
 	// Apply Deacon theme (non-fatal: theming failure doesn't affect operation)
@@ -1565,6 +1572,8 @@ func runDeaconFeedStranded(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  %s %s: %s\n", style.Bold.Render("✓"), d.ConvoyID, d.Message)
 		case "closed":
 			fmt.Printf("  %s %s: %s\n", style.Bold.Render("✓"), d.ConvoyID, d.Message)
+		case "needs_attention":
+			fmt.Printf("  %s %s: %s\n", style.Warning.Render("?"), d.ConvoyID, d.Message)
 		case "cooldown":
 			fmt.Printf("  %s %s: %s\n", style.Dim.Render("○"), d.ConvoyID, d.Message)
 		case "limit":
@@ -1579,8 +1588,8 @@ func runDeaconFeedStranded(cmd *cobra.Command, args []string) error {
 	}
 
 	// Summary
-	fmt.Printf("\n%s Fed: %d, Closed: %d, Skipped: %d, Errors: %d\n",
-		style.Bold.Render("●"), result.Fed, result.Closed, result.Skipped, result.Errors)
+	fmt.Printf("\n%s Fed: %d, Closed: %d, Needs attention: %d, Skipped: %d, Errors: %d\n",
+		style.Bold.Render("●"), result.Fed, result.Closed, result.NeedsAttention, result.Skipped, result.Errors)
 
 	return nil
 }

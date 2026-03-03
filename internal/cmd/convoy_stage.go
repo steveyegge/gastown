@@ -514,9 +514,7 @@ func findOverlappingConvoys(slingableIDs []string) ([]overlappingConvoy, error) 
 	}
 
 	// List all convoys (--all includes every status).
-	listCmd := exec.Command("bd", "list", "--type=convoy", "--all", "--json")
-	listCmd.Dir = townBeads
-	out, err := listCmd.Output()
+	out, err := runBdJSON(townBeads, "list", "--type=convoy", "--all", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("listing convoys: %w", err)
 	}
@@ -658,6 +656,11 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string, title strin
 	// Ensure custom types (including 'convoy') are registered in town beads.
 	if err := beads.EnsureCustomTypes(townBeads); err != nil {
 		return "", fmt.Errorf("ensuring custom types: %w", err)
+	}
+
+	// Ensure custom statuses (staged_ready, staged_warnings) are registered.
+	if err := beads.EnsureCustomStatuses(townBeads); err != nil {
+		return "", fmt.Errorf("ensuring custom statuses: %w", err)
 	}
 
 	// Generate convoy ID.

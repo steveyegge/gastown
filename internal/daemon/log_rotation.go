@@ -6,8 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
@@ -17,13 +19,31 @@ const (
 
 	// logRotationMaxBackups is the maximum number of rotated log files to keep.
 	logRotationMaxBackups = 3
+
+	// staleArchiveMaxAge is the maximum age for timestamped archive files.
+	// Archives older than this are deleted by cleanStaleArchives.
+	staleArchiveMaxAge = 7 * 24 * time.Hour
+
+	// daemonDiskBudget is the maximum total size of the daemon/ directory in bytes.
+	// If exceeded, oldest .gz files are deleted until under budget.
+	daemonDiskBudget int64 = 500 * 1024 * 1024 // 500MB
 )
+
+// staleArchivePattern matches timestamped archive files like dolt-2026-02-28T23-19-42.log.gz
+var staleArchivePattern = regexp.MustCompile(`^.+-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.log\.gz$`)
 
 // RotateLogsResult holds the result of a log rotation run.
 type RotateLogsResult struct {
 	Rotated []string // Log files that were rotated
 	Skipped []string // Log files that were too small
 	Errors  []error  // Non-fatal errors
+}
+
+// CleanupResult holds the result of archive cleanup operations.
+type CleanupResult struct {
+	StaleRemoved  []string // Stale timestamped archives deleted
+	BudgetRemoved []string // Files deleted to meet disk budget
+	Errors        []error  // Non-fatal errors
 }
 
 // RotateLogs rotates all daemon-managed log files using copytruncate.
@@ -56,6 +76,9 @@ func RotateLogs(townRoot string) *RotateLogsResult {
 			result.Rotated = append(result.Rotated, logPath)
 		}
 	}
+
+	// Clean stale archives and enforce disk budget after rotation
+	CleanDaemonDir(townRoot)
 
 	return result
 }
@@ -185,6 +208,118 @@ func compressFile(src, dst string) error {
 		err = closeErr
 	}
 	return err
+}
+
+// CleanDaemonDir runs stale archive cleanup and disk budget enforcement.
+// Called from RotateLogs after normal rotation, and can be called independently.
+func CleanDaemonDir(townRoot string) *CleanupResult {
+	daemonDir := filepath.Join(townRoot, "daemon")
+	result := &CleanupResult{}
+
+	// Phase 1: Remove stale timestamped archives (older than 7 days)
+	stale, errs := cleanStaleArchives(daemonDir)
+	result.StaleRemoved = stale
+	result.Errors = append(result.Errors, errs...)
+
+	// Phase 2: Enforce disk budget (delete oldest .gz files until under 500MB)
+	budgetRemoved, errs := enforceDiskBudget(daemonDir)
+	result.BudgetRemoved = budgetRemoved
+	result.Errors = append(result.Errors, errs...)
+
+	return result
+}
+
+// cleanStaleArchives removes timestamped archive files older than staleArchiveMaxAge.
+// These are files like dolt-2026-02-28T23-19-42.log.gz created by manual/one-time archiving.
+func cleanStaleArchives(daemonDir string) (removed []string, errs []error) {
+	entries, err := os.ReadDir(daemonDir)
+	if err != nil {
+		return nil, []error{fmt.Errorf("reading daemon dir: %w", err)}
+	}
+
+	cutoff := time.Now().Add(-staleArchiveMaxAge)
+	for _, entry := range entries {
+		if entry.IsDir() || !staleArchivePattern.MatchString(entry.Name()) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("stat %s: %w", entry.Name(), err))
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			path := filepath.Join(daemonDir, entry.Name())
+			if err := os.Remove(path); err != nil {
+				errs = append(errs, fmt.Errorf("removing stale archive %s: %w", entry.Name(), err))
+			} else {
+				removed = append(removed, path)
+			}
+		}
+	}
+	return removed, errs
+}
+
+// enforceDiskBudget deletes oldest .gz files in daemon/ until total size is under daemonDiskBudget.
+func enforceDiskBudget(daemonDir string) (removed []string, errs []error) {
+	totalSize, gzFiles, err := collectGzFiles(daemonDir)
+	if err != nil {
+		return nil, []error{fmt.Errorf("collecting gz files: %w", err)}
+	}
+
+	if totalSize <= daemonDiskBudget {
+		return nil, nil
+	}
+
+	// Sort by modification time, oldest first
+	sort.Slice(gzFiles, func(i, j int) bool {
+		return gzFiles[i].modTime.Before(gzFiles[j].modTime)
+	})
+
+	for _, gf := range gzFiles {
+		if totalSize <= daemonDiskBudget {
+			break
+		}
+		if err := os.Remove(gf.path); err != nil {
+			errs = append(errs, fmt.Errorf("removing %s for budget: %w", filepath.Base(gf.path), err))
+			continue
+		}
+		totalSize -= gf.size
+		removed = append(removed, gf.path)
+	}
+	return removed, errs
+}
+
+type gzFileInfo struct {
+	path    string
+	size    int64
+	modTime time.Time
+}
+
+// collectGzFiles returns the total size of daemon/ and a list of .gz files with metadata.
+func collectGzFiles(daemonDir string) (totalSize int64, gzFiles []gzFileInfo, err error) {
+	entries, err := os.ReadDir(daemonDir)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		totalSize += info.Size()
+		if strings.HasSuffix(entry.Name(), ".gz") {
+			gzFiles = append(gzFiles, gzFileInfo{
+				path:    filepath.Join(daemonDir, entry.Name()),
+				size:    info.Size(),
+				modTime: info.ModTime(),
+			})
+		}
+	}
+	return totalSize, gzFiles, nil
 }
 
 // cleanOldRotations removes rotations beyond maxBackups.

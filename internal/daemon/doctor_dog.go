@@ -1,26 +1,15 @@
 package daemon
 
 import (
-	"context"
-	"database/sql"
-	"encoding/json"
-	"fmt"
-	"net"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // Operational constants — timeouts needed to perform checks.
 const (
 	defaultDoctorDogInterval = 5 * time.Minute
-	doctorDogTCPTimeout      = 5 * time.Second
-	doctorDogQueryTimeout    = 10 * time.Second
 )
 
 // Default advisory thresholds — used for recommendations in the report.
@@ -78,71 +67,6 @@ func doctorDogThresholds(config *DaemonPatrolConfig) (latencyMs float64, orphanC
 	return
 }
 
-// --- Report types: structured data for agent consumption ---
-
-// DoctorDogReport is the complete output of a doctor dog health check cycle.
-// Agents (Deacon/Mayor) consume this to make escalation decisions.
-type DoctorDogReport struct {
-	Timestamp       time.Time                    `json:"timestamp"`
-	Host            string                       `json:"host"`
-	Port            int                          `json:"port"`
-	TCPReachable    bool                         `json:"tcp_reachable"`
-	Latency         *DoctorDogLatencyReport      `json:"latency,omitempty"`
-	Databases       *DoctorDogDatabasesReport    `json:"databases,omitempty"`
-	Zombies         []DoctorDogZombieReport      `json:"zombies,omitempty"`
-	BackupAge       *DoctorDogBackupReport       `json:"backup_age,omitempty"`
-	JsonlBackupAge  *DoctorDogBackupReport       `json:"jsonl_backup_age,omitempty"`
-	DiskUsage       []DoctorDogDiskReport        `json:"disk_usage,omitempty"`
-	Recommendations []DoctorDogRecommendation    `json:"recommendations,omitempty"`
-}
-
-// DoctorDogRecommendation is an advisory finding for agents to act on.
-// The daemon reports what it observed; agents decide what to do.
-type DoctorDogRecommendation struct {
-	// Action is the suggested action (e.g., "restart_server", "escalate_latency",
-	// "run_cleanup", "sync_backup").
-	Action string `json:"action"`
-
-	// Reason explains why this recommendation was generated.
-	Reason string `json:"reason"`
-
-	// Severity: "critical" (server down), "high" (degraded), "warning" (maintenance).
-	Severity string `json:"severity"`
-}
-
-// DoctorDogLatencyReport records SELECT 1 latency.
-type DoctorDogLatencyReport struct {
-	DurationMs float64 `json:"duration_ms"`
-	Error      string  `json:"error,omitempty"`
-}
-
-// DoctorDogDatabasesReport records the databases found via SHOW DATABASES.
-type DoctorDogDatabasesReport struct {
-	Names []string `json:"names"`
-	Count int      `json:"count"`
-	Error string   `json:"error,omitempty"`
-}
-
-// DoctorDogZombieReport records a detected zombie dolt sql-server process.
-type DoctorDogZombieReport struct {
-	PID     int    `json:"pid"`
-	Cmdline string `json:"cmdline"`
-}
-
-// DoctorDogBackupReport records backup age data.
-type DoctorDogBackupReport struct {
-	AgeSeconds float64 `json:"age_seconds"`
-	Error      string  `json:"error,omitempty"`
-	Missing    bool    `json:"missing,omitempty"`
-}
-
-// DoctorDogDiskReport records disk usage for one database.
-type DoctorDogDiskReport struct {
-	Database  string `json:"database"`
-	SizeBytes int64  `json:"size_bytes"`
-	SizeMB    int64  `json:"size_mb"`
-}
-
 // doctorDogInterval returns the configured interval, or the default (5m).
 func doctorDogInterval(config *DaemonPatrolConfig) time.Duration {
 	if config != nil && config.Patrols != nil && config.Patrols.DoctorDog != nil {
@@ -165,401 +89,32 @@ func doctorDogDatabases(config *DaemonPatrolConfig) []string {
 	return []string{"hq", "beads", "gastown", "sky", "wyvern", "beads_hop"}
 }
 
-// runDoctorDog performs all health checks, generates recommendations when
-// configurable thresholds are exceeded, and writes a structured report.
-// Agents (Mayor/Deacon) read the report and decide what actions to take.
+// runDoctorDog pours a mol-dog-doctor molecule for agent execution.
+// The daemon is a thin ticker — it creates the molecule and agents (Deacon)
+// execute the formula steps (probe, inspect, report). This follows ZFC:
+// daemons schedule, agents decide and act.
 func (d *Daemon) runDoctorDog() {
 	if !IsPatrolEnabled(d.patrolConfig, "doctor_dog") {
 		return
 	}
 
-	d.logger.Printf("doctor_dog: starting health check cycle")
+	d.logger.Printf("doctor_dog: pouring molecule for agent execution")
 
 	port := d.doltServerPort()
-	host := "127.0.0.1"
+	latencyThreshold, orphanCount, backupStaleSec := doctorDogThresholds(d.patrolConfig)
 
-	report := &DoctorDogReport{
-		Timestamp: time.Now(),
-		Host:      host,
-		Port:      port,
-	}
-
-	// 1. TCP connectivity check
-	report.TCPReachable = d.doctorDogTCPCheck(host, port)
-
-	if report.TCPReachable {
-		// 2. SELECT 1 latency (only if server is reachable)
-		report.Latency = d.doctorDogLatencyReport(host, port)
-
-		// 3. SHOW DATABASES (only if server is reachable)
-		report.Databases = d.doctorDogDatabasesReport(host, port)
-	}
-
-	// 4. Zombie server detection
-	expectedPorts := []int{port}
-	report.Zombies = d.doctorDogZombieReport(expectedPorts)
-
-	// 5. Backup staleness (Dolt filesystem)
-	report.BackupAge = d.doctorDogBackupAgeReport()
-
-	// 5b. JSONL git backup freshness
-	report.JsonlBackupAge = d.doctorDogJsonlBackupAgeReport()
-
-	// 6. Disk usage per DB
-	report.DiskUsage = d.doctorDogDiskUsageReport()
-
-	// Evaluate report and generate recommendations (before writing)
-	d.doctorDogRespond(report)
-
-	// Write structured report (with recommendations) for agent consumption
-	d.writeDoctorDogReport(report)
-
-	d.logger.Printf("doctor_dog: health check cycle complete")
-}
-
-// doctorDogTCPCheck performs a TCP connection check to the Dolt server.
-// Returns true if connection succeeds.
-func (d *Daemon) doctorDogTCPCheck(host string, port int) bool {
-	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	conn, err := net.DialTimeout("tcp", addr, doctorDogTCPTimeout)
-	if err != nil {
-		d.logger.Printf("doctor_dog: TCP check failed: %v", err)
-		return false
-	}
-	conn.Close()
-	return true
-}
-
-// doctorDogLatencyReport runs SELECT 1 and returns the latency measurement.
-func (d *Daemon) doctorDogLatencyReport(host string, port int) *DoctorDogLatencyReport {
-	dsn := fmt.Sprintf("root@tcp(%s:%d)/?timeout=5s&readTimeout=10s", host, port)
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		return &DoctorDogLatencyReport{Error: fmt.Sprintf("open failed: %v", err)}
-	}
-	defer db.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), doctorDogQueryTimeout)
-	defer cancel()
-
-	start := time.Now()
-	var result int
-	if err := db.QueryRowContext(ctx, "SELECT 1").Scan(&result); err != nil {
-		return &DoctorDogLatencyReport{Error: fmt.Sprintf("query failed: %v", err)}
-	}
-	latency := time.Since(start)
-
-	d.logger.Printf("doctor_dog: latency: %v", latency)
-	return &DoctorDogLatencyReport{DurationMs: float64(latency.Microseconds()) / 1000.0}
-}
-
-// doctorDogDatabasesReport runs SHOW DATABASES and returns the list.
-func (d *Daemon) doctorDogDatabasesReport(host string, port int) *DoctorDogDatabasesReport {
-	dsn := fmt.Sprintf("root@tcp(%s:%d)/?timeout=5s&readTimeout=10s", host, port)
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		return &DoctorDogDatabasesReport{Error: fmt.Sprintf("open failed: %v", err)}
-	}
-	defer db.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), doctorDogQueryTimeout)
-	defer cancel()
-
-	rows, err := db.QueryContext(ctx, "SHOW DATABASES")
-	if err != nil {
-		return &DoctorDogDatabasesReport{Error: fmt.Sprintf("query failed: %v", err)}
-	}
-	defer rows.Close()
-
-	var databases []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			continue
-		}
-		// Skip Dolt internal databases
-		if name == "information_schema" || name == "mysql" {
-			continue
-		}
-		databases = append(databases, name)
-	}
-
-	d.logger.Printf("doctor_dog: databases: %d found", len(databases))
-	return &DoctorDogDatabasesReport{Names: databases, Count: len(databases)}
-}
-
-// doctorDogZombieReport scans for dolt sql-server processes NOT on any expected port.
-// Reports findings without taking action — agents decide what to do.
-func (d *Daemon) doctorDogZombieReport(expectedPorts []int) []DoctorDogZombieReport {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Find all dolt sql-server processes
-	cmd := exec.CommandContext(ctx, "pgrep", "-f", "dolt sql-server")
-	output, err := cmd.Output()
-	if err != nil {
-		// pgrep returns exit 1 if no matches — that's fine
-		d.logger.Printf("doctor_dog: zombie check: no dolt sql-server processes found")
-		return nil
-	}
-
-	// Build a set of expected port strings for fast lookup
-	expectedPortStrs := make(map[string]bool, len(expectedPorts))
-	for _, p := range expectedPorts {
-		expectedPortStrs[strconv.Itoa(p)] = true
-	}
-
-	pids := strings.Fields(strings.TrimSpace(string(output)))
-	var zombies []DoctorDogZombieReport
-
-	for _, pidStr := range pids {
-		pid, err := strconv.Atoi(pidStr)
-		if err != nil {
-			continue
-		}
-
-		// Check if this process is using an expected port
-		cmdlineCtx, cmdlineCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		cmdlineCmd := exec.CommandContext(cmdlineCtx, "ps", "-p", pidStr, "-o", "command=")
-		cmdlineOutput, cmdlineErr := cmdlineCmd.Output()
-		cmdlineCancel()
-
-		if cmdlineErr != nil {
-			continue
-		}
-
-		cmdline := strings.TrimSpace(string(cmdlineOutput))
-		if !strings.Contains(cmdline, "dolt") || !strings.Contains(cmdline, "sql-server") {
-			continue
-		}
-
-		// Check if this is on any expected port
-		isExpected := false
-		for portStr := range expectedPortStrs {
-			if strings.Contains(cmdline, "--port="+portStr) ||
-				strings.Contains(cmdline, "--port "+portStr) ||
-				strings.Contains(cmdline, "-p "+portStr) ||
-				strings.Contains(cmdline, "-p="+portStr) {
-				isExpected = true
-				break
-			}
-		}
-		if isExpected {
-			continue
-		}
-
-		// If no port specified explicitly, could be expected server using default config.
-		if !strings.Contains(cmdline, "--port") && !strings.Contains(cmdline, "-p ") {
-			continue
-		}
-
-		zombies = append(zombies, DoctorDogZombieReport{PID: pid, Cmdline: cmdline})
-	}
-
-	if len(zombies) > 0 {
-		d.logger.Printf("doctor_dog: zombie check: found %d zombie(s)", len(zombies))
-	} else {
-		d.logger.Printf("doctor_dog: zombie check: no zombie processes found")
-	}
-	return zombies
-}
-
-// doctorDogBackupAgeReport checks backup age and returns the data.
-func (d *Daemon) doctorDogBackupAgeReport() *DoctorDogBackupReport {
-	backupDir := filepath.Join(d.config.TownRoot, ".dolt-backup")
-	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
-		d.logger.Printf("doctor_dog: backup check: %s does not exist, skipping", backupDir)
-		return nil
-	}
-
-	var newest time.Time
-	err := filepath.Walk(backupDir, func(_ string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip unreadable entries
-		}
-		if !info.IsDir() && info.ModTime().After(newest) {
-			newest = info.ModTime()
-		}
-		return nil
+	mol := d.pourDogMolecule(constants.MolDogDoctor, map[string]string{
+		"port":              strconv.Itoa(port),
+		"latency_threshold": strconv.FormatFloat(latencyThreshold, 'f', 0, 64) + "ms",
+		"orphan_threshold":  strconv.Itoa(orphanCount),
+		"backup_threshold":  strconv.FormatFloat(backupStaleSec, 'f', 0, 64) + "s",
 	})
-	if err != nil {
-		return &DoctorDogBackupReport{Error: fmt.Sprintf("walk error: %v", err)}
-	}
-	if newest.IsZero() {
-		d.logger.Printf("doctor_dog: backup check: no files found in %s", backupDir)
-		return &DoctorDogBackupReport{Missing: true}
-	}
+	defer mol.close()
 
-	age := time.Since(newest)
-	d.logger.Printf("doctor_dog: backup check: newest file is %v old", age.Round(time.Second))
-	return &DoctorDogBackupReport{AgeSeconds: age.Seconds()}
-}
-
-// doctorDogJsonlBackupAgeReport checks JSONL git backup freshness and returns the data.
-func (d *Daemon) doctorDogJsonlBackupAgeReport() *DoctorDogBackupReport {
-	// Determine the JSONL git repo path from config or default.
-	var gitRepo string
-	if d.patrolConfig != nil && d.patrolConfig.Patrols != nil && d.patrolConfig.Patrols.JsonlGitBackup != nil {
-		gitRepo = d.patrolConfig.Patrols.JsonlGitBackup.GitRepo
-	}
-	if gitRepo == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return &DoctorDogBackupReport{Error: fmt.Sprintf("cannot determine home dir: %v", err)}
-		}
-		gitRepo = filepath.Join(homeDir, ".dolt-archive", "git")
-	}
-
-	if _, err := os.Stat(filepath.Join(gitRepo, ".git")); os.IsNotExist(err) {
-		d.logger.Printf("doctor_dog: jsonl backup check: %s not a git repo, skipping", gitRepo)
-		return nil
-	}
-
-	// Get the timestamp of the latest commit.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "git", "-C", gitRepo, "log", "-1", "--format=%ci")
-	output, err := cmd.Output()
-	if err != nil {
-		return &DoctorDogBackupReport{Error: fmt.Sprintf("git log failed: %v", err)}
-	}
-
-	commitTimeStr := strings.TrimSpace(string(output))
-	if commitTimeStr == "" {
-		d.logger.Printf("doctor_dog: jsonl backup check: no commits in %s", gitRepo)
-		return &DoctorDogBackupReport{Missing: true}
-	}
-
-	commitTime, err := time.Parse("2006-01-02 15:04:05 -0700", commitTimeStr)
-	if err != nil {
-		return &DoctorDogBackupReport{Error: fmt.Sprintf("cannot parse commit time %q: %v", commitTimeStr, err)}
-	}
-
-	age := time.Since(commitTime)
-	d.logger.Printf("doctor_dog: jsonl backup check: last commit %v ago", age.Round(time.Second))
-	return &DoctorDogBackupReport{AgeSeconds: age.Seconds()}
-}
-
-// doctorDogDiskUsageReport reports disk usage per database directory.
-func (d *Daemon) doctorDogDiskUsageReport() []DoctorDogDiskReport {
-	var dataDir string
-	if d.doltServer != nil && d.doltServer.IsEnabled() && d.doltServer.config.DataDir != "" {
-		dataDir = d.doltServer.config.DataDir
-	} else {
-		dataDir = filepath.Join(d.config.TownRoot, ".dolt-data")
-	}
-	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
-		return nil
-	}
-
-	databases := doctorDogDatabases(d.patrolConfig)
-	var results []DoctorDogDiskReport
-	for _, dbName := range databases {
-		dbDir := filepath.Join(dataDir, dbName)
-		if _, err := os.Stat(dbDir); os.IsNotExist(err) {
-			continue
-		}
-
-		size, err := dirSize(dbDir)
-		if err != nil {
-			d.logger.Printf("doctor_dog: disk check: %s: error calculating size: %v", dbName, err)
-			continue
-		}
-
-		sizeMB := size / (1024 * 1024)
-		d.logger.Printf("doctor_dog: disk check: %s: %dMB", dbName, sizeMB)
-		results = append(results, DoctorDogDiskReport{
-			Database:  dbName,
-			SizeBytes: size,
-			SizeMB:    sizeMB,
-		})
-	}
-	return results
-}
-
-// dirSize calculates the total size of files in a directory recursively.
-func dirSize(path string) (int64, error) {
-	var size int64
-	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			size += info.Size()
-		}
-		return nil
-	})
-	return size, err
-}
-
-// doctorDogRespond evaluates the health report and generates recommendations.
-// The daemon does NOT take automated actions — it reports what it observed and
-// suggests actions. Agents (Mayor/Deacon) read the report and decide what to do.
-// This follows ZFC: daemons collect metrics, agents make decisions.
-func (d *Daemon) doctorDogRespond(report *DoctorDogReport) {
-	latencyThreshold, orphanThreshold, backupThreshold := doctorDogThresholds(d.patrolConfig)
-
-	var recs []DoctorDogRecommendation
-
-	// Recommendation 1: Server unreachable
-	if !report.TCPReachable {
-		d.logger.Printf("doctor_dog: RECOMMEND: server unreachable, recommend restart")
-		recs = append(recs, DoctorDogRecommendation{
-			Action:   "restart_server",
-			Reason:   "Dolt server TCP unreachable",
-			Severity: "critical",
-		})
-	}
-
-	// Recommendation 2: High latency
-	if report.Latency != nil && report.Latency.Error == "" && report.Latency.DurationMs > latencyThreshold {
-		d.logger.Printf("doctor_dog: RECOMMEND: latency %.0fms > %.0fms threshold",
-			report.Latency.DurationMs, latencyThreshold)
-		recs = append(recs, DoctorDogRecommendation{
-			Action:   "escalate_latency",
-			Reason:   fmt.Sprintf("Dolt query latency %.0fms exceeds %.0fms threshold", report.Latency.DurationMs, latencyThreshold),
-			Severity: "high",
-		})
-	}
-
-	// Recommendation 3: Orphan database accumulation
-	if report.Databases != nil && report.Databases.Error == "" && report.Databases.Count > orphanThreshold {
-		d.logger.Printf("doctor_dog: RECOMMEND: %d databases (> %d threshold), recommend cleanup",
-			report.Databases.Count, orphanThreshold)
-		recs = append(recs, DoctorDogRecommendation{
-			Action:   "run_cleanup",
-			Reason:   fmt.Sprintf("%d databases exceeds %d threshold — run gt dolt cleanup", report.Databases.Count, orphanThreshold),
-			Severity: "warning",
-		})
-	}
-
-	// Recommendation 4: Stale backup
-	if report.BackupAge != nil && report.BackupAge.Error == "" && !report.BackupAge.Missing &&
-		report.BackupAge.AgeSeconds > backupThreshold {
-		d.logger.Printf("doctor_dog: RECOMMEND: backup %.0fs stale (> %.0fs threshold), recommend sync",
-			report.BackupAge.AgeSeconds, backupThreshold)
-		recs = append(recs, DoctorDogRecommendation{
-			Action:   "sync_backup",
-			Reason:   fmt.Sprintf("Backup %.0fs old exceeds %.0fs threshold", report.BackupAge.AgeSeconds, backupThreshold),
-			Severity: "warning",
-		})
-	}
-
-	report.Recommendations = recs
-}
-
-// writeDoctorDogReport writes the report as JSON to a well-known location.
-func (d *Daemon) writeDoctorDogReport(report *DoctorDogReport) {
-	reportPath := filepath.Join(d.config.TownRoot, ".doctor-dog-report.json")
-
-	data, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		d.logger.Printf("doctor_dog: failed to marshal report: %v", err)
+	if mol.rootID == "" {
+		d.logger.Printf("doctor_dog: molecule pour failed (non-fatal), skipping cycle")
 		return
 	}
 
-	if err := os.WriteFile(reportPath, data, 0644); err != nil {
-		d.logger.Printf("doctor_dog: failed to write report to %s: %v", reportPath, err)
-	}
+	d.logger.Printf("doctor_dog: poured %s → %s", constants.MolDogDoctor, mol.rootID)
 }

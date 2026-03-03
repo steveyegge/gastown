@@ -12,23 +12,26 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/formula"
 )
 
 // PatrolMoleculesExistCheck verifies that patrol formulas are accessible.
 // Patrols use `bd mol wisp <formula-name>` to spawn workflows, so the formulas
 // must exist in the formula search path (.beads/formulas/, ~/.beads/formulas/, or $GT_ROOT/.beads/formulas/).
 type PatrolMoleculesExistCheck struct {
-	BaseCheck
+	FixableCheck
 	missingFormulas map[string][]string // rig -> missing formula names
 }
 
 // NewPatrolMoleculesExistCheck creates a new patrol formulas exist check.
 func NewPatrolMoleculesExistCheck() *PatrolMoleculesExistCheck {
 	return &PatrolMoleculesExistCheck{
-		BaseCheck: BaseCheck{
-			CheckName:        "patrol-molecules-exist",
-			CheckDescription: "Check if patrol formulas are accessible",
-			CheckCategory:    CategoryPatrol,
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "patrol-molecules-exist",
+				CheckDescription: "Check if patrol formulas are accessible",
+				CheckCategory:    CategoryPatrol,
+			},
 		},
 	}
 }
@@ -82,7 +85,7 @@ func (c *PatrolMoleculesExistCheck) Run(ctx *CheckContext) *CheckResult {
 			Status:  StatusWarning,
 			Message: fmt.Sprintf("%d rig(s) missing patrol formulas", len(c.missingFormulas)),
 			Details: details,
-			FixHint: "Formulas should exist in .beads/formulas/ at town or rig level, or in ~/.beads/formulas/",
+			FixHint: "Run 'gt doctor --fix' to provision embedded patrol formulas",
 		}
 	}
 
@@ -125,6 +128,30 @@ func (c *PatrolMoleculesExistCheck) checkPatrolFormulas(rigPath string, townRoot
 		}
 	}
 	return missing
+}
+
+// Fix provisions missing patrol formulas from the embedded formula templates.
+// Formulas are written to each rig's .beads/formulas/ directory.
+func (c *PatrolMoleculesExistCheck) Fix(ctx *CheckContext) error {
+	if len(c.missingFormulas) == 0 {
+		return nil
+	}
+
+	var errs []string
+	for rigName := range c.missingFormulas {
+		rigPath := filepath.Join(ctx.TownRoot, rigName)
+		if _, statErr := os.Stat(rigPath); os.IsNotExist(statErr) {
+			rigPath = ctx.TownRoot
+		}
+		if _, err := formula.ProvisionFormulas(rigPath); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", rigName, err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("partial fix: %s", strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // PatrolHooksWiredCheck verifies that hooks trigger patrol execution.

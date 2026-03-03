@@ -620,6 +620,191 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 	return m.AddWithOptions(name, AddOptions{})
 }
 
+// AllocateAndAdd atomically allocates a name and creates a polecat.
+// This eliminates the TOCTOU race between AllocateName and AddWithOptions
+// (GH#2215) by holding the pool lock through directory creation, ensuring
+// no concurrent process can allocate the same name.
+func (m *Manager) AllocateAndAdd(opts AddOptions) (string, *Polecat, error) {
+	// Hold pool lock across allocation + directory creation to close the
+	// race window where a concurrent AllocateName could miss the pending
+	// marker and reallocate the same name.
+	poolLock, err := m.lockPool()
+	if err != nil {
+		return "", nil, err
+	}
+
+	m.reconcilePoolInternal()
+
+	name, err := m.namePool.Allocate()
+	if err != nil {
+		_ = poolLock.Unlock()
+		return "", nil, err
+	}
+
+	if err := m.namePool.Save(); err != nil {
+		_ = poolLock.Unlock()
+		return "", nil, fmt.Errorf("saving pool state: %w", err)
+	}
+
+	// Acquire per-polecat lock while still holding pool lock
+	polecatLock, err := m.lockPolecat(name)
+	if err != nil {
+		_ = poolLock.Unlock()
+		return "", nil, err
+	}
+
+	// Create polecat directory while holding both locks
+	polecatDir := m.polecatDir(name)
+	if err := os.MkdirAll(polecatDir, 0755); err != nil {
+		_ = polecatLock.Unlock()
+		_ = poolLock.Unlock()
+		return "", nil, fmt.Errorf("creating polecat dir: %w", err)
+	}
+
+	// Kill any lingering tmux session for this name (gt-pqf9x)
+	if m.tmux != nil {
+		sessionName := session.PolecatSessionName(session.PrefixFor(m.rig.Name), name)
+		if alive, _ := m.tmux.HasSession(sessionName); alive {
+			_ = m.tmux.KillSessionWithProcesses(sessionName)
+		}
+	}
+
+	// Directory exists — pool lock can be released. No concurrent AllocateName
+	// can reallocate this name because reconcilePoolInternal will see the directory.
+	_ = poolLock.Unlock()
+
+	// Continue with the rest of AddWithOptions under the polecat lock only.
+	// addWithOptionsLocked expects the polecat directory to already exist
+	// and the polecat lock to be held by the caller.
+	p, err := m.addWithOptionsLocked(name, opts, polecatDir)
+	_ = polecatLock.Unlock()
+	if err != nil {
+		return "", nil, err
+	}
+	return name, p, nil
+}
+
+// addWithOptionsLocked performs the expensive parts of polecat creation
+// (worktree, beads, settings) after the directory has been created.
+// Caller MUST hold the polecat lock and have already created polecatDir.
+func (m *Manager) addWithOptionsLocked(name string, opts AddOptions, polecatDir string) (_ *Polecat, retErr error) {
+	defer func() { telemetry.RecordPolecatSpawn(context.Background(), name, retErr) }()
+
+	clonePath := filepath.Join(polecatDir, m.rig.Name)
+	branchName := m.buildBranchName(name, opts.HookBead)
+
+	// Track resources created for rollback on error.
+	var worktreeCreated bool
+	cleanupOnError := func() {
+		aid := m.agentBeadID(name)
+		_ = m.beads.ResetAgentBeadForReuse(aid, "spawn rollback")
+
+		if worktreeCreated {
+			if rg, repoErr := m.repoBase(); repoErr == nil {
+				_ = rg.WorktreeRemove(clonePath, true)
+			}
+		}
+
+		_ = os.RemoveAll(polecatDir)
+
+		m.namePool.Release(name)
+		_ = m.namePool.Save()
+	}
+
+	repoGit, err := m.repoBase()
+	if err != nil {
+		cleanupOnError()
+		return nil, fmt.Errorf("finding repo base: %w", err)
+	}
+
+	if err := repoGit.Fetch("origin"); err != nil {
+		style.PrintWarning("could not fetch origin: %v", err)
+	}
+
+	var startPoint string
+	if opts.BaseBranch != "" {
+		startPoint = opts.BaseBranch
+	} else {
+		defaultBranch := "main"
+		if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
+			defaultBranch = rigCfg.DefaultBranch
+		}
+		startPoint = fmt.Sprintf("origin/%s", defaultBranch)
+	}
+
+	if exists, err := repoGit.RefExists(startPoint); err != nil {
+		cleanupOnError()
+		return nil, fmt.Errorf("checking ref %s: %w", startPoint, err)
+	} else if !exists {
+		cleanupOnError()
+		return nil, fmt.Errorf("configured default_branch not found as %s in bare repo\n\n"+
+			"Possible causes:\n"+
+			"  - Branch doesn't exist on the remote (create it there first)\n"+
+			"  - default_branch is misconfigured (check %s/config.json)\n"+
+			"  - Bare repo fetch failed (try: git -C %s fetch origin)\n\n"+
+			"Run 'gt doctor' to diagnose.",
+			startPoint, m.rig.Path, filepath.Join(m.rig.Path, ".repo.git"))
+	}
+
+	if err := repoGit.WorktreeAddFromRef(clonePath, branchName, startPoint); err != nil {
+		cleanupOnError()
+		return nil, fmt.Errorf("creating worktree from %s: %w", startPoint, err)
+	}
+	worktreeCreated = true
+
+	if err := m.setupSharedBeads(clonePath); err != nil {
+		cleanupOnError()
+		return nil, fmt.Errorf("setting up shared beads: %w (polecat cannot submit MRs without shared beads)", err)
+	}
+
+	if err := beads.ProvisionPrimeMDForWorktree(clonePath); err != nil {
+		style.PrintWarning("could not provision PRIME.md: %v", err)
+	}
+
+	if err := rig.CopyOverlay(m.rig.Path, clonePath); err != nil {
+		style.PrintWarning("could not copy overlay files: %v", err)
+	}
+
+	if err := rig.EnsureGitignorePatterns(clonePath); err != nil {
+		style.PrintWarning("could not update .gitignore: %v", err)
+	}
+
+	townRoot := filepath.Dir(m.rig.Path)
+	runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
+	polecatSettingsDir := config.RoleSettingsDir("polecat", m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(polecatSettingsDir, clonePath, "polecat", runtimeConfig); err != nil {
+		style.PrintWarning("could not install runtime settings: %v", err)
+	}
+
+	if err := rig.RunSetupHooks(m.rig.Path, clonePath); err != nil {
+		style.PrintWarning("could not run setup hooks: %v", err)
+	}
+
+	agentID := m.agentBeadID(name)
+	if err = m.createAgentBeadWithRetry(agentID, &beads.AgentFields{
+		RoleType:   "polecat",
+		Rig:        m.rig.Name,
+		AgentState: "spawning",
+		HookBead:   opts.HookBead,
+	}); err != nil {
+		cleanupOnError()
+		return nil, fmt.Errorf("agent bead required for polecat tracking: %w", err)
+	}
+
+	now := time.Now()
+	polecat := &Polecat{
+		Name:      name,
+		Rig:       m.rig.Name,
+		State:     StateWorking,
+		ClonePath: clonePath,
+		Branch:    branchName,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	return polecat, nil
+}
+
 // AddWithOptions creates a new polecat with the specified options.
 // This allows setting hook_bead atomically at creation time, avoiding
 // cross-beads routing issues when slinging work to new polecats.
@@ -738,10 +923,11 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (_ *Polecat, retE
 
 	// Set up shared beads: polecat uses rig's .beads via redirect file.
 	// This eliminates git sync overhead - all polecats share one database.
+	// Fatal: without shared beads, gt done writes MR beads to a local .beads/
+	// that the Refinery never reads, causing the merge queue to stay empty.
 	if err := m.setupSharedBeads(clonePath); err != nil {
-		// Non-fatal - polecat can still work with local beads
-		// Log warning but don't fail the spawn
-		style.PrintWarning("could not set up shared beads: %v", err)
+		cleanupOnError()
+		return nil, fmt.Errorf("setting up shared beads: %w (polecat cannot submit MRs without shared beads)", err)
 	}
 
 	// Provision PRIME.md with Gas Town context for this worker.
@@ -1234,8 +1420,13 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Prune stale worktree entries (non-fatal: cleanup only)
 	_ = repoGit.WorktreePrune()
 
-	// Move temp worktree to final location
-	if err := os.Rename(tmpClonePath, newClonePath); err != nil {
+	// Move temp worktree to final location using git worktree move.
+	// os.Rename breaks worktrees: the .git file and registry gitdir still
+	// reference the old temp path, leaving a broken worktree. (GH#2056)
+	if err := repoGit.WorktreeMove(tmpClonePath, newClonePath); err != nil {
+		// Clean up temp worktree if move fails
+		_ = repoGit.WorktreeRemove(tmpClonePath, true)
+		_ = os.RemoveAll(tmpClonePath)
 		return nil, fmt.Errorf("moving repaired worktree to final path: %w", err)
 	}
 
@@ -1243,9 +1434,11 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Only ~/gt/CLAUDE.md (town-root identity anchor) exists on disk.
 	// Full context is injected ephemerally via SessionStart hook (gt prime).
 
-	// Set up shared beads
+	// Set up shared beads — fatal during repair too, same reason as spawn.
 	if err := m.setupSharedBeads(newClonePath); err != nil {
-		style.PrintWarning("could not set up shared beads: %v", err)
+		_ = repoGit.WorktreeRemove(newClonePath, true)
+		_ = os.RemoveAll(newClonePath)
+		return nil, fmt.Errorf("setting up shared beads after repair: %w (polecat cannot submit MRs without shared beads)", err)
 	}
 
 	// Copy overlay files from .runtime/overlay/ to polecat root.

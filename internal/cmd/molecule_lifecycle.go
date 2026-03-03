@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -10,11 +12,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // runMoleculeBurn burns (destroys) the current molecule attachment.
-func runMoleculeBurn(cmd *cobra.Command, args []string) error {
+func runMoleculeBurn(cmd *cobra.Command, args []string) (retErr error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting current directory: %w", err)
@@ -84,6 +87,13 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) error {
 	// Recursively close all descendant step issues before detaching
 	// This prevents orphaned step issues from accumulating (gt-psj76.1)
 	childrenClosed := closeDescendants(b, moleculeID)
+	defer func() {
+		ctx := context.Background()
+		if cmd != nil {
+			ctx = cmd.Context()
+		}
+		telemetry.RecordMolBurn(ctx, moleculeID, childrenClosed, retErr)
+	}()
 
 	// Detach the molecule with audit logging (this "burns" it by removing the attachment)
 	_, err = b.DetachMoleculeWithAudit(handoff.ID, beads.DetachOptions{
@@ -126,7 +136,7 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) error {
 }
 
 // runMoleculeSquash squashes the current molecule into a digest.
-func runMoleculeSquash(cmd *cobra.Command, args []string) error {
+func runMoleculeSquash(cmd *cobra.Command, args []string) (retErr error) {
 	// Parse jitter early so invalid flags fail fast, but defer the sleep
 	// until after workspace/attachment validation so no-op invocations
 	// (wrong directory, no attached molecule) don't wait unnecessarily.
@@ -208,6 +218,11 @@ func runMoleculeSquash(cmd *cobra.Command, args []string) error {
 
 	moleculeID := attachment.AttachedMolecule
 
+	var doneSteps, totalSteps int
+	defer func() {
+		telemetry.RecordMolSquash(cmd.Context(), moleculeID, doneSteps, totalSteps, !moleculeNoDigest, retErr)
+	}()
+
 	// Apply jitter before acquiring any Dolt locks.
 	// Multiple patrol agents (deacon, witness, refinery) squash concurrently at
 	// cycle end, causing exclusive-lock contention. A random pre-sleep
@@ -248,6 +263,8 @@ squashed_at: %s
 		}
 
 		if progress != nil {
+			doneSteps = progress.DoneSteps
+			totalSteps = progress.TotalSteps
 			digestDesc += fmt.Sprintf(`
 ## Execution Summary
 - Steps: %d/%d completed
@@ -343,34 +360,43 @@ squashed_at: %s
 // closeDescendants recursively closes all descendant issues of a parent.
 // Returns the count of issues closed. Logs warnings on errors but doesn't fail.
 func closeDescendants(b *beads.Beads, parentID string) int {
-	return closeDescendantsImpl(b, parentID, false)
+	count, err := closeDescendantsImpl(b, parentID, false)
+	if err != nil {
+		style.PrintWarning("closing descendants of %s: %v", parentID, err)
+	}
+	return count
 }
 
 // forceCloseDescendants is like closeDescendants but uses force-close,
-// which succeeds even for beads in invalid states. Use in destructive
-// paths (nuke, burn) where we must clean up regardless.
-func forceCloseDescendants(b *beads.Beads, parentID string) {
-	closeDescendantsImpl(b, parentID, true)
+// which succeeds even for beads in invalid states. Returns the count of
+// issues closed and any error encountered. Callers should check the error
+// to avoid closing a parent while children survive (gt-7lx3).
+func forceCloseDescendants(b *beads.Beads, parentID string) (int, error) {
+	return closeDescendantsImpl(b, parentID, true)
 }
 
-func closeDescendantsImpl(b *beads.Beads, parentID string, force bool) int {
+func closeDescendantsImpl(b *beads.Beads, parentID string, force bool) (int, error) {
 	children, err := b.List(beads.ListOptions{
 		Parent: parentID,
 		Status: "all",
 	})
 	if err != nil {
-		style.PrintWarning("could not list children of %s: %v", parentID, err)
-		return 0
+		return 0, fmt.Errorf("listing children of %s: %w", parentID, err)
 	}
 
 	if len(children) == 0 {
-		return 0
+		return 0, nil
 	}
 
 	// First, recursively close grandchildren
 	totalClosed := 0
+	var errs []error
 	for _, child := range children {
-		totalClosed += closeDescendantsImpl(b, child.ID, force)
+		closed, childErr := closeDescendantsImpl(b, child.ID, force)
+		totalClosed += closed
+		if childErr != nil {
+			errs = append(errs, childErr)
+		}
 	}
 
 	// Then close direct children
@@ -389,11 +415,14 @@ func closeDescendantsImpl(b *beads.Beads, parentID string, force bool) int {
 			closeErr = b.Close(idsToClose...)
 		}
 		if closeErr != nil {
-			style.PrintWarning("could not close children of %s: %v", parentID, closeErr)
+			errs = append(errs, fmt.Errorf("closing children of %s: %w", parentID, closeErr))
 		} else {
 			totalClosed += len(idsToClose)
 		}
 	}
 
-	return totalClosed
+	if len(errs) > 0 {
+		return totalClosed, errors.Join(errs...)
+	}
+	return totalClosed, nil
 }

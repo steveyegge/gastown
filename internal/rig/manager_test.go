@@ -1303,10 +1303,11 @@ func TestAddRig_UpstreamURL(t *testing.T) {
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
 	rig, err := manager.AddRig(AddRigOptions{
-		Name:        "forkrig",
-		GitURL:      forkURL,
-		UpstreamURL: upstreamURL,
-		BeadsPrefix: "fk",
+		Name:          "forkrig",
+		GitURL:        forkURL,
+		UpstreamURL:   upstreamURL,
+		BeadsPrefix:   "fk",
+		SkipDoltCheck: true,
 	})
 	if err != nil {
 		t.Fatalf("AddRig: %v", err)

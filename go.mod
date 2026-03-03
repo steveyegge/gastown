@@ -14,7 +14,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.10.2
-	github.com/steveyegge/beads v0.56.1
+	github.com/steveyegge/beads v0.57.0
+	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/dolt v0.40.0
 	go.opentelemetry.io/otel v1.40.0
@@ -28,6 +29,7 @@ require (
 	golang.org/x/sys v0.41.0
 	golang.org/x/term v0.40.0
 	golang.org/x/text v0.34.0
+	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
@@ -108,7 +110,6 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/spf13/viper v1.21.0 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
@@ -134,5 +135,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/dolthub/dolt/go => github.com/zfogg/dolt/go v0.40.5-0.20260220031545-86d23ffebae2

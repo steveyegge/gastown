@@ -223,8 +223,10 @@ func runDown(cmd *cobra.Command, args []string) error {
 			if err := daemon.StopDaemon(townRoot); err != nil {
 				printDownStatus("Daemon", false, err.Error())
 				allOK = false
-			} else {
+			} else if pid > 0 {
 				printDownStatus("Daemon", true, fmt.Sprintf("stopped (was PID %d)", pid))
+			} else {
+				printDownStatus("Daemon", true, "stopped (stale lock cleaned)")
 			}
 		} else {
 			printDownStatus("Daemon", true, "not running")

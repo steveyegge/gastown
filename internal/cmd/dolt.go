@@ -591,9 +591,14 @@ func runDoltStatus(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  Port: %d\n", state.Port)
 			fmt.Printf("  Data dir: %s\n", state.DataDir)
 			if len(state.Databases) > 0 {
+				owners := doltserver.CollectDatabaseOwners(townRoot)
 				fmt.Printf("  Databases:\n")
 				for _, db := range state.Databases {
-					fmt.Printf("    - %s\n", db)
+					if owner, ok := owners[db]; ok {
+						fmt.Printf("    - %-20s (%s)\n", db, owner)
+					} else {
+						fmt.Printf("    - %s\n", db)
+					}
 				}
 			}
 			fmt.Printf("  Connection: %s\n", doltserver.GetConnectionString(townRoot))
@@ -656,8 +661,13 @@ func runDoltStatus(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  Initialize with: %s\n", style.Dim.Render("gt dolt init-rig <name>"))
 		} else {
 			fmt.Printf("\nAvailable databases in %s:\n", config.DataDir)
+			owners := doltserver.CollectDatabaseOwners(townRoot)
 			for _, db := range databases {
-				fmt.Printf("  - %s\n", db)
+				if owner, ok := owners[db]; ok {
+					fmt.Printf("  - %-20s (%s)\n", db, owner)
+				} else {
+					fmt.Printf("  - %s\n", db)
+				}
 			}
 			fmt.Printf("\nStart with: %s\n", style.Dim.Render("gt dolt start"))
 		}
@@ -995,10 +1005,15 @@ func runDoltList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	owners := doltserver.CollectDatabaseOwners(townRoot)
 	fmt.Printf("Rig databases in %s:\n\n", config.DataDir)
 	for _, db := range databases {
 		dbDir := doltserver.RigDatabaseDir(townRoot, db)
-		fmt.Printf("  %s\n    %s\n", style.Bold.Render(db), style.Dim.Render(dbDir))
+		if owner, ok := owners[db]; ok {
+			fmt.Printf("  %s (%s)\n    %s\n", style.Bold.Render(db), owner, style.Dim.Render(dbDir))
+		} else {
+			fmt.Printf("  %s (orphan)\n    %s\n", style.Bold.Render(db), style.Dim.Render(dbDir))
+		}
 	}
 
 	return nil

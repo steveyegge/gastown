@@ -66,8 +66,9 @@ func (m *mockTmux) NewSessionWithCommand(_, _, _ string) error {
 	return m.newSessionErr
 }
 
-func (m *mockTmux) SetRemainOnExit(_ string, _ bool) error { return nil }
-func (m *mockTmux) SetEnvironment(_, _, _ string) error     { return nil }
+func (m *mockTmux) SetRemainOnExit(_ string, _ bool) error    { return nil }
+func (m *mockTmux) SetEnvironment(_, _, _ string) error       { return nil }
+func (m *mockTmux) GetPaneID(_ string) (string, error)        { return "%0", nil }
 func (m *mockTmux) ConfigureGasTownSession(_ string, _ tmux.Theme, _, _, _ string) error {
 	return nil
 }

@@ -168,6 +168,16 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["GT_AGENT"] = cfg.Agent
 	}
 
+	// Disable bd's per-repo JSONL auto-backup for all Gas Town agents.
+	// bd auto-enables backup when a git remote exists, then force-adds
+	// .beads/backup/ files (bypassing .gitignore) and commits/pushes them
+	// to the project repo. In Gas Town, Dolt is the persistent data store
+	// and the daemon provides centralized backup patrols (dolt_backup,
+	// jsonl_git_backup), making per-repo backup redundant and harmful —
+	// it pollutes rig git history on both main and feature branches.
+	// See: https://github.com/steveyegge/beads/issues/2241
+	env["BD_BACKUP_ENABLED"] = "false"
+
 	// Clear NODE_OPTIONS to prevent debugger flags (e.g., --inspect from VSCode)
 	// from being inherited through tmux into Claude's Node.js runtime.
 	// This is the PRIMARY guard: setting it here (the single source of truth

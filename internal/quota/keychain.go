@@ -269,7 +269,7 @@ func validateTokenHTTP(token string) error {
 	if err != nil {
 		return nil // Network error → assume valid
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		return fmt.Errorf("token rejected by API (HTTP 401)")

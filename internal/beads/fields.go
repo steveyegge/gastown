@@ -400,6 +400,13 @@ type MRFields struct {
 	// Convoy tracking (for priority scoring - convoy starvation prevention)
 	ConvoyID        string // Parent convoy ID if part of a convoy
 	ConvoyCreatedAt string // Convoy creation time (ISO 8601) for starvation prevention
+
+	// Pre-verification fields (Phase 3: polecat-owned rebasing)
+	// When a polecat rebases onto the target and runs gates before submission,
+	// these fields allow the refinery to fast-path merge without re-running gates.
+	PreVerified     bool   // Polecat ran full gates after rebasing onto target
+	PreVerifiedAt   string // ISO 8601 timestamp when verification completed
+	PreVerifiedBase string // Target branch SHA at verification time
 }
 
 // ParseMRFields extracts structured merge-request fields from an issue's description.
@@ -474,6 +481,15 @@ func ParseMRFields(issue *Issue) *MRFields {
 		case "convoy_created_at", "convoy-created-at", "convoycreatedat":
 			fields.ConvoyCreatedAt = value
 			hasFields = true
+		case "pre_verified", "pre-verified", "preverified":
+			fields.PreVerified = strings.ToLower(value) == "true"
+			hasFields = true
+		case "pre_verified_at", "pre-verified-at", "preverifiedat":
+			fields.PreVerifiedAt = value
+			hasFields = true
+		case "pre_verified_base", "pre-verified-base", "preverifiedbase":
+			fields.PreVerifiedBase = value
+			hasFields = true
 		}
 	}
 
@@ -538,6 +554,15 @@ func FormatMRFields(fields *MRFields) string {
 	if fields.ConvoyCreatedAt != "" {
 		lines = append(lines, "convoy_created_at: "+fields.ConvoyCreatedAt)
 	}
+	if fields.PreVerified {
+		lines = append(lines, "pre_verified: true")
+	}
+	if fields.PreVerifiedAt != "" {
+		lines = append(lines, "pre_verified_at: "+fields.PreVerifiedAt)
+	}
+	if fields.PreVerifiedBase != "" {
+		lines = append(lines, "pre_verified_base: "+fields.PreVerifiedBase)
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -584,6 +609,15 @@ func SetMRFields(issue *Issue, fields *MRFields) string {
 		"convoy_created_at":  true,
 		"convoy-created-at":  true,
 		"convoycreatedat":    true,
+		"pre_verified":       true,
+		"pre-verified":       true,
+		"preverified":        true,
+		"pre_verified_at":    true,
+		"pre-verified-at":    true,
+		"preverifiedat":      true,
+		"pre_verified_base":  true,
+		"pre-verified-base":  true,
+		"preverifiedbase":    true,
 	}
 
 	// Collect non-MR lines from existing description

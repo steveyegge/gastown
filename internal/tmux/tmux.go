@@ -109,12 +109,17 @@ func IsInSameSocket() bool {
 // BuildCommand creates an exec.Cmd for tmux with the default socket applied.
 // Use this instead of exec.Command("tmux", ...) for code outside the Tmux struct.
 func BuildCommand(args ...string) *exec.Cmd {
+	return BuildCommandContext(context.Background(), args...)
+}
+
+// BuildCommandContext is like BuildCommand but honours a context for cancellation.
+func BuildCommandContext(ctx context.Context, args ...string) *exec.Cmd {
 	allArgs := []string{"-u"}
 	if sock := GetDefaultSocket(); sock != "" {
 		allArgs = append(allArgs, "-L", sock)
 	}
 	allArgs = append(allArgs, args...)
-	return exec.Command("tmux", allArgs...)
+	return exec.CommandContext(ctx, "tmux", allArgs...)
 }
 
 // Tmux wraps tmux operations.
@@ -823,6 +828,17 @@ func (t *Tmux) KillPaneProcessesExcluding(pane string, excludePIDs []string) err
 	}
 
 	return nil
+}
+
+// ServerPID returns the PID of the tmux server process.
+// Returns 0 if the server is not running or the PID cannot be determined.
+func (t *Tmux) ServerPID() int {
+	out, err := t.run("display-message", "-p", "#{pid}")
+	if err != nil {
+		return 0
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(out))
+	return pid
 }
 
 // KillServer terminates the entire tmux server and all sessions.
@@ -1595,17 +1611,33 @@ func (t *Tmux) GetPaneCommand(session string) (string, error) {
 
 // FindAgentPane finds the pane running an agent process within a session.
 // In multi-window/multi-pane sessions, send-keys -t <session> targets the
-// active/focused pane, which may not be the agent pane. This method enumerates
-// all panes across all windows (-s) and returns the pane ID (e.g., "%5") of
-// the one running the agent.
+// active/focused pane, which may not be the agent pane. This method returns
+// the pane ID (e.g., "%5") of the one running the agent.
 //
-// Detection checks pane_current_command, then falls back to process tree inspection
-// (same logic as IsRuntimeRunning) to handle agents started via shell wrappers.
+// ZFC (gt-qmsx): Reads declared GT_PANE_ID from session environment first.
+// Falls back to scanning all panes for legacy sessions without GT_PANE_ID.
 //
 // Returns ("", nil) if the session has only one pane (no disambiguation needed),
 // or if no agent pane can be identified (caller should fall back to session targeting).
 func (t *Tmux) FindAgentPane(session string) (string, error) {
-	// List all panes across all windows with ID, command, and PID
+	// ZFC: read declared pane identity set at session startup (gt-qmsx).
+	// This replaces process-tree inference for sessions that record GT_PANE_ID.
+	if declaredPane, err := t.GetEnvironment(session, "GT_PANE_ID"); err == nil && declaredPane != "" {
+		// Verify the pane still exists in tmux (it may have been killed/respawned).
+		if _, verifyErr := t.run("display-message", "-t", declaredPane, "-p", "#{pane_id}"); verifyErr == nil {
+			return declaredPane, nil
+		}
+		// Declared pane is gone — fall through to scan.
+	}
+
+	// Fallback: scan all panes for legacy sessions without GT_PANE_ID.
+	return t.findAgentPaneByScan(session)
+}
+
+// findAgentPaneByScan enumerates all panes across all windows (-s) and returns
+// the pane ID of the one running the agent. This is the legacy path for sessions
+// that predate GT_PANE_ID (gt-qmsx).
+func (t *Tmux) findAgentPaneByScan(session string) (string, error) {
 	out, err := t.run("list-panes", "-s", "-t", session, "-F", "#{pane_id}\t#{pane_current_command}\t#{pane_pid}")
 	if err != nil {
 		return "", err
@@ -1630,22 +1662,7 @@ func (t *Tmux) FindAgentPane(session string) (string, error) {
 		paneCmd := parts[1]
 		panePID := parts[2]
 
-		// Direct command match
-		for _, name := range processNames {
-			if paneCmd == name {
-				return paneID, nil
-			}
-		}
-
-		// Shell with agent descendant
-		for _, shell := range constants.SupportedShells {
-			if paneCmd == shell && hasDescendantWithNames(panePID, processNames, 0) {
-				return paneID, nil
-			}
-		}
-
-		// Version-as-argv[0] (e.g., "2.1.30") — check real binary name
-		if processMatchesNames(panePID, processNames) {
+		if matchesPaneRuntime(paneCmd, panePID, processNames) {
 			return paneID, nil
 		}
 	}
@@ -1902,9 +1919,7 @@ func (t *Tmux) FindSessionByWorkDir(targetDir string, processNames []string) ([]
 
 // CapturePane captures the visible content of a pane.
 func (t *Tmux) CapturePane(session string, lines int) (string, error) {
-	content, err := t.run("capture-pane", "-p", "-t", session, "-S", fmt.Sprintf("-%d", lines))
-	telemetry.RecordPaneRead(context.Background(), session, lines, len(content), err)
-	return content, err
+	return t.run("capture-pane", "-p", "-t", session, "-S", fmt.Sprintf("-%d", lines))
 }
 
 // CapturePaneAll captures all scrollback history.
@@ -2085,19 +2100,24 @@ func (t *Tmux) IsAgentRunning(session string, expectedPaneCommands ...string) bo
 }
 
 // IsRuntimeRunning checks if a runtime appears to be running in the session.
-// First checks the first window (where the agent is started) via GetPaneCommand/GetPanePID.
-// Falls back to scanning all panes across all windows for multi-window sessions.
-// This is the unified agent detection method for all agent types.
+//
+// ZFC (gt-qmsx): Reads declared GT_PANE_ID from session environment first,
+// then checks only that pane. Falls back to scanning all panes for legacy
+// sessions without GT_PANE_ID.
 func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 	if len(processNames) == 0 {
 		return false
 	}
-	// Fast path: check first window (agent's expected location)
+
+	// ZFC: check declared pane identity set at session startup (gt-qmsx).
+	if declaredPane, err := t.GetEnvironment(session, "GT_PANE_ID"); err == nil && declaredPane != "" {
+		return t.checkTargetPaneForRuntime(declaredPane, processNames)
+	}
+
+	// Legacy fallback: check first window, then scan all panes.
 	if t.checkPaneForRuntime(session, processNames) {
 		return true
 	}
-	// Fallback: scan all panes across all windows. The agent is almost always
-	// in the first window, but if it isn't, we scan everything before declaring dead.
 	out, err := t.run("list-panes", "-s", "-t", session, "-F", "#{pane_current_command}\t#{pane_pid}")
 	if err != nil {
 		return false
@@ -2113,6 +2133,17 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 		}
 	}
 	return false
+}
+
+// checkTargetPaneForRuntime checks if a specific pane (by ID, e.g., "%5") is
+// running a matching process. Used by the ZFC path when GT_PANE_ID is declared.
+func (t *Tmux) checkTargetPaneForRuntime(paneID string, processNames []string) bool {
+	cmd, err := t.run("display-message", "-t", paneID, "-p", "#{pane_current_command}")
+	if err != nil {
+		return false // pane doesn't exist
+	}
+	pid, _ := t.run("display-message", "-t", paneID, "-p", "#{pane_pid}")
+	return matchesPaneRuntime(strings.TrimSpace(cmd), strings.TrimSpace(pid), processNames)
 }
 
 // checkPaneForRuntime checks if the first window's pane is running a matching process.

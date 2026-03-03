@@ -166,6 +166,12 @@ type MRInfo struct {
 	CreatedAt       time.Time  // MR creation time
 	BlockedBy       string     // Task ID blocking this MR
 
+	// Pre-verification fields (Phase 3: polecat-owned rebasing)
+	// When set, the refinery can skip gates if VerifiedBase matches target HEAD.
+	PreVerified     bool      // Polecat ran full gates after rebasing onto target
+	PreVerifiedAt   time.Time // When verification completed
+	PreVerifiedBase string    // Target branch SHA at verification time
+
 	// Raw data for agent-side queue health analysis (ZFC: agent decides, Go transports)
 	UpdatedAt          time.Time // When the MR was last updated
 	Assignee           string    // Who claimed this MR (empty = unclaimed)
@@ -386,7 +392,7 @@ type ProcessResult struct {
 }
 
 // doMerge performs the actual git merge operation.
-func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue string) ProcessResult {
+func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue string, skipGates ...bool) ProcessResult {
 	// Step 1: Verify source branch exists locally (shared .repo.git with polecats)
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Checking local branch %s...\n", branch)
 	exists, err := e.git.BranchExists(branch)
@@ -466,8 +472,13 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Pushed %d submodule(s)\n", len(subChanges))
 	}
 
-	// Step 4: Run quality gates (or legacy tests) if configured
-	if len(e.config.Gates) > 0 {
+	// Step 4: Run quality gates (or legacy tests) if configured.
+	// Phase 3 fast-path: if skipGates is true (pre-verified MR with matching base),
+	// skip all gate execution — the polecat already ran gates after rebasing.
+	shouldSkipGates := len(skipGates) > 0 && skipGates[0]
+	if shouldSkipGates {
+		_, _ = fmt.Fprintln(e.output, "[Engineer] Skipping gates (pre-verified by polecat)")
+	} else if len(e.config.Gates) > 0 {
 		// New gates system: run configured quality gates
 		gateResult := e.runGates(ctx)
 		if !gateResult.Success {
@@ -512,6 +523,8 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 				Error:    "merge conflict during actual merge",
 			}
 		}
+		// Non-conflict failure: still need to abort to clean up dirty merge state
+		_ = e.git.AbortMerge()
 		return ProcessResult{
 			Success: false,
 			Error:   fmt.Sprintf("merge failed: %v", err),
@@ -863,8 +876,27 @@ func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult 
 	_, _ = fmt.Fprintf(e.output, "  Worker: %s\n", mr.Worker)
 	_, _ = fmt.Fprintf(e.output, "  Source: %s\n", mr.SourceIssue)
 
+	// Phase 3: Check pre-verification fast-path.
+	// If the polecat already rebased onto the target and ran gates, and the target
+	// hasn't moved since, we can skip running gates entirely (~5s merge).
+	skipGates := false
+	if mr.PreVerified && mr.PreVerifiedBase != "" {
+		_, _ = fmt.Fprintf(e.output, "  Pre-verified: yes (base=%s)\n", mr.PreVerifiedBase[:min(8, len(mr.PreVerifiedBase))])
+		// Check if target HEAD still matches the verified base
+		targetHead, err := e.git.Rev("origin/" + mr.Target)
+		if err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not resolve origin/%s HEAD: %v (falling through to normal gates)\n", mr.Target, err)
+		} else if targetHead == mr.PreVerifiedBase {
+			_, _ = fmt.Fprintln(e.output, "[Engineer] Pre-verification valid — target unchanged, skipping gates (fast-path)")
+			skipGates = true
+		} else {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Pre-verification stale — target moved (%s → %s), running gates normally\n",
+				mr.PreVerifiedBase[:min(8, len(mr.PreVerifiedBase))], targetHead[:min(8, len(targetHead))])
+		}
+	}
+
 	// Use the shared merge logic
-	return e.doMerge(ctx, mr.Branch, mr.Target, mr.SourceIssue)
+	return e.doMerge(ctx, mr.Branch, mr.Target, mr.SourceIssue, skipGates)
 }
 
 // HandleMRInfoSuccess handles a successful merge from MRInfo.
@@ -1181,6 +1213,14 @@ func issueToMRInfo(issue *beads.Issue, fields *beads.MRFields) *MRInfo {
 		}
 	}
 
+	// Parse pre-verification timestamp if present
+	var preVerifiedAt time.Time
+	if fields.PreVerifiedAt != "" {
+		if t, err := time.Parse(time.RFC3339, fields.PreVerifiedAt); err == nil {
+			preVerifiedAt = t
+		}
+	}
+
 	return &MRInfo{
 		ID:              issue.ID,
 		Branch:          fields.Branch,
@@ -1194,6 +1234,9 @@ func issueToMRInfo(issue *beads.Issue, fields *beads.MRFields) *MRInfo {
 		RetryCount:      fields.RetryCount,
 		ConvoyID:        fields.ConvoyID,
 		ConvoyCreatedAt: convoyCreatedAt,
+		PreVerified:     fields.PreVerified,
+		PreVerifiedAt:   preVerifiedAt,
+		PreVerifiedBase: fields.PreVerifiedBase,
 		CreatedAt:       createdAt,
 		UpdatedAt:       updatedAt,
 		Assignee:        issue.Assignee,

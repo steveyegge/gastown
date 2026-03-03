@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 
+	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -602,19 +602,11 @@ func SaveCustomTheme(townRoot, name string, names []string) error {
 	lockPath := themePath + ".lock"
 
 	// Acquire advisory file lock to prevent concurrent writes
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0644)
+	unlock, err := lock.FlockAcquire(lockPath)
 	if err != nil {
-		return fmt.Errorf("creating lock file: %w", err)
-	}
-	defer func() {
-		lockFile.Close()
-		os.Remove(lockPath) // best-effort cleanup
-	}()
-
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("acquiring theme file lock: %w", err)
 	}
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) //nolint:errcheck
+	defer unlock()
 
 	var sb strings.Builder
 	sb.WriteString("# Custom theme: " + name + "\n")
@@ -633,19 +625,11 @@ func AppendToCustomTheme(townRoot, theme, name string) (bool, error) {
 	lockPath := themePath + ".lock"
 
 	// Acquire lock for the entire read-modify-write
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0644)
+	unlock, err := lock.FlockAcquire(lockPath)
 	if err != nil {
-		return false, fmt.Errorf("creating lock file: %w", err)
-	}
-	defer func() {
-		lockFile.Close()
-		os.Remove(lockPath)
-	}()
-
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
 		return false, fmt.Errorf("acquiring theme file lock: %w", err)
 	}
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) //nolint:errcheck
+	defer unlock()
 
 	// Read current names
 	existing, err := ParseThemeFile(themePath)

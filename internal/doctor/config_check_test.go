@@ -450,3 +450,30 @@ func TestCustomTypesCheck_ParsesOutputWithNotePrefix(t *testing.T) {
 		t.Errorf("After parsing, missing types: %v", missing)
 	}
 }
+
+func TestCustomStatusesCheck_ParsesOutputWithNotePrefix(t *testing.T) {
+	// Verify that CustomStatusesCheck correctly handles bd output with "Note:" prefix
+	output := "Note: No git repository initialized - running without background sync\n" + constants.BeadsCustomStatuses + "\n"
+	parsed := parseConfigOutput([]byte(output))
+
+	if parsed != constants.BeadsCustomStatuses {
+		t.Errorf("parseConfigOutput failed to filter Note: prefix\ngot: %q\nwant: %q", parsed, constants.BeadsCustomStatuses)
+	}
+
+	// Verify all required statuses are found
+	configuredSet := make(map[string]bool)
+	for _, s := range strings.Split(parsed, ",") {
+		configuredSet[strings.TrimSpace(s)] = true
+	}
+
+	var missing []string
+	for _, required := range constants.BeadsCustomStatusesList() {
+		if !configuredSet[required] {
+			missing = append(missing, required)
+		}
+	}
+
+	if len(missing) > 0 {
+		t.Errorf("After parsing, missing statuses: %v", missing)
+	}
+}

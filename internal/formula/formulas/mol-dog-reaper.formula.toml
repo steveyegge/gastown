@@ -1,23 +1,18 @@
 description = """
-Reap stale wisps across all Dolt databases.
+Reap stale wisps and close stale issues across all Dolt databases.
 
-The Reaper Dog closes wisps past their retention age and purges closed wisps
-older than the purge threshold. This keeps the wisp tables from growing unbounded.
-
-Current behavior (from wisp_reaper.go):
-- Closes open/hooked/in_progress wisps older than max_age (default 24h)
-- Alerts if open wisp count exceeds threshold (500)
-
-This molecule adds a purge step: DELETE closed wisps older than 7 days.
+The Reaper Dog executes this formula to clean up wisp and issue tables.
+SQL operations are exposed via `gt reaper` CLI helpers — the Dog calls
+these commands, inspects results, and uses judgment for anomalies.
 
 ## Dog Contract
 
-This is infrastructure work. You:
-1. Scan all production databases for stale wisps
-2. Reap (close) wisps past max_age
-3. Purge (delete) closed wisps past purge_age
-4. Report findings to Deacon
-5. Return to kennel
+This is infrastructure cleanup work:
+1. Scan all production databases for candidates
+2. Reap (close) wisps past max_age whose parent is closed/missing
+3. Purge (delete) closed wisps past purge_age + old closed mail
+4. Auto-close stale issues (>stale_issue_age, not P0/P1, not epics, no active deps)
+5. Report findings and flag anomalies
 
 ## Variables
 
@@ -25,13 +20,28 @@ This is infrastructure work. You:
 |----------|--------|-------------|
 | max_age | config | Max wisp age before reaping (default 24h) |
 | purge_age | config | Max closed wisp age before purging (default 7d) |
+| stale_issue_age | config | Max issue staleness before auto-close (default 30d) |
+| mail_delete_age | config | Max closed mail age before purging (default 7d) |
+| alert_threshold | config | Open wisp count that triggers escalation (default 500) |
+| dry_run | config | If "true", report without acting |
+| databases | config | Comma-separated DB list (default: auto-discover) |
+| dolt_port | config | Dolt server port (default 3307) |
 
 ## Safety
 
 Reaping closes wisps — reversible (can reopen). Purging deletes rows — irreversible
-but only targets already-closed wisps past retention."""
+but only targets already-closed wisps past retention. Auto-close only targets
+issues that are not P0/P1, not epics, and have no active dependencies.
+
+## Anomaly Detection
+
+The Dog should watch for and flag:
+- Dangling parent references (wisps referencing purged parents)
+- Sudden spikes in reap candidates (suggests a wisp lifecycle problem)
+- Open wisp counts exceeding alert_threshold
+- Dolt commit failures (data may not be persisted)"""
 formula = "mol-dog-reaper"
-version = 1
+version = 2
 
 [squash]
 trigger = "on_complete"
@@ -40,116 +50,101 @@ include_metrics = true
 
 [[steps]]
 id = "scan"
-title = "Scan databases for stale wisps"
+title = "Scan databases for reaper candidates"
 description = """
-Discover databases and count stale wisps.
+Discover databases and count candidates for each operation.
 
-**1. Determine databases to scan:**
-Use configured databases list, or auto-discover from Dolt server.
+**1. List databases to scan:**
+```bash
+gt reaper databases --json
+```
+Or use configured database list from {{databases}} variable.
 
-**2. For each database, count wisps by status and age:**
-```sql
--- Open wisps past max_age (reap candidates)
-SELECT COUNT(*) FROM wisps
-WHERE status IN ('open', 'hooked', 'in_progress')
-AND created_at < NOW() - INTERVAL {{max_age}};
-
--- Closed wisps past purge_age (purge candidates)
-SELECT COUNT(*) FROM wisps
-WHERE status = 'closed'
-AND closed_at < NOW() - INTERVAL {{purge_age}};
-
--- Total open wisps (for alert threshold)
-SELECT COUNT(*) FROM wisps
-WHERE status IN ('open', 'hooked', 'in_progress');
+**2. Scan each database:**
+```bash
+gt reaper scan --db=<name> --port={{dolt_port}} \\
+  --max-age={{max_age}} --purge-age={{purge_age}} \\
+  --mail-age={{mail_delete_age}} --stale-age={{stale_issue_age}} \\
+  --json
 ```
 
-**3. Record scan results:**
-- Databases scanned
-- Reap candidates per database
-- Purge candidates per database
-- Total open wisp count
+**3. Inspect results for anomalies:**
+- Check the `anomalies` array in the JSON output
+- Flag any `dangling_parent_ref` anomalies — these indicate wisps with
+  parent dependency records pointing to purged/missing parents
+- If `open_wisps` exceeds {{alert_threshold}}, escalate
 
-**Exit criteria:** Scan complete, candidates identified."""
+**4. Decide whether to proceed:**
+- If no candidates found across all databases, skip remaining steps
+- If anomalies are severe, consider escalating before proceeding
+
+**Exit criteria:** Scan complete, candidates identified, anomalies flagged."""
 
 [[steps]]
 id = "reap"
 title = "Reap stale wisps"
 needs = ["scan"]
 description = """
-Close wisps past max_age.
+Close wisps past max_age whose parent molecule is closed or missing.
 
 **1. For each database with reap candidates:**
-```sql
-UPDATE wisps SET status='closed', closed_at=NOW()
-WHERE status IN ('open', 'hooked', 'in_progress')
-AND created_at < ?;
+```bash
+gt reaper reap --db=<name> --port={{dolt_port}} \\
+  --max-age={{max_age}} {{#if dry_run}}--dry-run{{/if}} --json
 ```
 
-**2. Record results:**
-- Count reaped per database
-- Any errors encountered
+**2. Inspect results:**
+- Verify reaped count matches scan expectations
+- Check for any anomalies in the response
 
 **3. Alert check:**
-If total open wisps exceed alert threshold (500), log warning.
+If total open wisps across all databases exceed {{alert_threshold}},
+log a warning and consider escalating.
 
-**Exit criteria:** All stale wisps closed."""
+**Exit criteria:** All stale wisps closed (or dry-run counts reported)."""
 
 [[steps]]
 id = "purge"
-title = "Purge old closed wisps"
+title = "Purge old closed wisps and mail"
 needs = ["reap"]
 description = """
-Delete closed wisps past purge_age (default 7 days).
+Delete closed wisps past purge_age and closed mail past mail_delete_age.
 
 **1. For each database with purge candidates:**
-```sql
-DELETE FROM wisps
-WHERE status = 'closed'
-AND closed_at < NOW() - INTERVAL {{purge_age}};
+```bash
+gt reaper purge --db=<name> --port={{dolt_port}} \\
+  --purge-age={{purge_age}} --mail-age={{mail_delete_age}} \\
+  {{#if dry_run}}--dry-run{{/if}} --json
 ```
 
-**2. Record results:**
-- Count purged per database
-- Any errors encountered
+**2. Inspect results for anomalies:**
+- Check for `dolt_commit_failed` anomalies — purged data may not be persisted
+- Verify purge counts are reasonable (not suspiciously high or low)
 
 **Safety:** Only deletes wisps that are already closed AND past the purge
-retention window. Active wisps are never touched.
+retention window. Active wisps are never touched. Reverse dependency
+references are cleaned up to prevent dangling parent refs.
 
-**Exit criteria:** Old closed wisps purged."""
+**Exit criteria:** Old closed wisps and mail purged."""
 
 [[steps]]
 id = "auto-close"
 title = "Auto-close stale issues"
 needs = ["purge"]
 description = """
-Close issues that have been open with no status change for >30 days.
+Close issues that have been open with no status change past stale_issue_age.
 
-**1. For each production database, find stale issues:**
-```sql
--- Candidates: open >30 days, not updated, not P0/P1, not epic
-SELECT id, title, updated_at FROM issues
-WHERE status IN ('open', 'in_progress')
-AND updated_at < NOW() - INTERVAL {{stale_issue_age}}
-AND priority > 1
-AND issue_type != 'epic'
-AND id NOT IN (
-  -- Exclude issues with active dependencies (blocking or blocked-by open issues)
-  SELECT DISTINCT d.issue_id FROM dependencies d
-  INNER JOIN issues i ON d.depends_on_id = i.id
-  WHERE i.status IN ('open', 'in_progress')
-  UNION
-  SELECT DISTINCT d.depends_on_id FROM dependencies d
-  INNER JOIN issues i ON d.issue_id = i.id
-  WHERE i.status IN ('open', 'in_progress')
-)
+**1. For each database with stale candidates:**
+```bash
+gt reaper auto-close --db=<name> --port={{dolt_port}} \\
+  --stale-age={{stale_issue_age}} \\
+  {{#if dry_run}}--dry-run{{/if}} --json
 ```
 
-**2. Close each candidate with reason 'stale:auto-closed by reaper'.**
-
-**3. Log each closure:** issue ID, title, age, database.
-
-**4. Record total closed for report.**
+**2. Inspect results:**
+- Review the count of closed issues
+- Verify exclusions are working (P0/P1, epics, dependency-linked issues
+  should never be auto-closed)
 
 **Exit criteria:** All eligible stale issues auto-closed."""
 
@@ -164,29 +159,21 @@ Generate summary and signal completion.
 ```markdown
 ## Reaper Dog Report
 
-**Databases scanned**: {{db_count}}
-**Wisps reaped**: {{reap_count}} (closed stale open wisps)
-**Wisps purged**: {{purge_count}} (deleted old closed wisps)
-**Issues auto-closed**: {{issues_closed}} (stale >30 days, excl. epics/P0-P1/deps)
-**Open wisps remaining**: {{open_count}}
-
-### Per Database
-{{#each db}}
-- {{name}}: reaped={{reaped}}, purged={{purged}}, open={{open}}
-{{/each}}
+**Databases scanned**: (count)
+**Wisps reaped**: (total closed stale open wisps)
+**Wisps purged**: (total deleted old closed wisps)
+**Mail purged**: (total deleted old closed mail)
+**Issues auto-closed**: (stale > stale_issue_age, excl. epics/P0-P1/deps)
+**Open wisps remaining**: (total)
+**Anomalies**: (list any anomalies found)
 ```
 
-**2. Signal completion to Deacon:**
+**2. If anomalies were found, escalate:**
 ```bash
-gt mail send deacon/ -s "DOG_DONE: reaper" -m "Task: wisp-reaper
-Reaped: {{reap_count}}
-Purged: {{purge_count}}
-Issues auto-closed: {{issues_closed}}
-Open remaining: {{open_count}}
-Status: COMPLETE"
+gt escalate "Reaper anomalies detected" -s MEDIUM -m "<anomaly details>"
 ```
 
-**Exit criteria:** Report sent, dog returned to kennel."""
+**Exit criteria:** Report generated, anomalies escalated if any."""
 
 [vars]
 [vars.max_age]
@@ -201,38 +188,22 @@ default = "168h"
 description = "Max issue staleness before auto-close (e.g., '720h' = 30 days)"
 default = "720h"
 
-[vars.db_count]
-description = "Number of databases scanned (computed during execution)"
+[vars.mail_delete_age]
+description = "Max closed mail age before purging (e.g., '168h' = 7 days)"
+default = "168h"
+
+[vars.alert_threshold]
+description = "Open wisp count that triggers escalation warning"
+default = "500"
+
+[vars.dry_run]
+description = "If 'true', report without modifying data"
 default = ""
 
-[vars.reap_count]
-description = "Total wisps reaped (computed during execution)"
+[vars.databases]
+description = "Comma-separated database names (empty = auto-discover)"
 default = ""
 
-[vars.purge_count]
-description = "Total wisps purged (computed during execution)"
-default = ""
-
-[vars.issues_closed]
-description = "Total issues auto-closed (computed during execution)"
-default = ""
-
-[vars.open_count]
-description = "Total open wisps remaining (computed during execution)"
-default = ""
-
-[vars.name]
-description = "Database name (computed during iteration)"
-default = ""
-
-[vars.reaped]
-description = "Wisps reaped for a single database (computed during iteration)"
-default = ""
-
-[vars.purged]
-description = "Wisps purged for a single database (computed during iteration)"
-default = ""
-
-[vars.open]
-description = "Open wisps remaining for a single database (computed during iteration)"
-default = ""
+[vars.dolt_port]
+description = "Dolt server port"
+default = "3307"

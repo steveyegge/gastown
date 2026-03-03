@@ -65,44 +65,21 @@ func printVitalsDoltServers(townRoot string) {
 
 type vitalsZombie struct{ pid, port string }
 
+// findVitalsZombies finds Dolt servers not on the production port.
+// Uses lsof-based port discovery instead of pgrep/ps string matching (ZFC fix: gt-fj87).
 func findVitalsZombies(prodPort int) []vitalsZombie {
-	out, err := exec.Command("pgrep", "-f", "dolt sql-server").Output()
-	if err != nil {
-		return nil
-	}
-	prodStr := fmt.Sprintf("%d", prodPort)
+	listeners := doltserver.FindAllDoltListeners()
 	var zombies []vitalsZombie
-	for _, pid := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		pid = strings.TrimSpace(pid)
-		if pid == "" {
+	for _, l := range listeners {
+		if l.Port == prodPort {
 			continue
 		}
-		cmdOut, err := exec.Command("ps", "-p", pid, "-o", "args=").Output()
-		if err != nil {
-			continue
-		}
-		line := strings.TrimSpace(string(cmdOut))
-		if !strings.Contains(line, "dolt sql-server") {
-			continue
-		}
-		port := vitalsFlag(line, "--port")
-		if port != "" && port != prodStr {
-			zombies = append(zombies, vitalsZombie{pid, port})
-		}
+		zombies = append(zombies, vitalsZombie{
+			pid:  strconv.Itoa(l.PID),
+			port: strconv.Itoa(l.Port),
+		})
 	}
 	return zombies
-}
-
-func vitalsFlag(cmdLine, flag string) string {
-	parts := strings.Fields(cmdLine)
-	for i, p := range parts {
-		if p == flag && i+1 < len(parts) {
-			return parts[i+1]
-		} else if strings.HasPrefix(p, flag+"=") {
-			return p[len(flag)+1:]
-		}
-	}
-	return ""
 }
 
 func printVitalsDatabases(townRoot string) {

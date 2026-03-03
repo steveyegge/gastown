@@ -1,31 +1,506 @@
-# Polecat Work Formula
-# 
-# This formula defines the molecule structure for polecat work assignments.
-# It includes the standard workflow plus health check and completion handling.
+description = """
+Full polecat work lifecycle from assignment through completion.
 
-[formula]
-name = "mol-polecat-work"
-description = "Standard polecat work assignment with health checks"
+This molecule guides a polecat through a complete work assignment. Each step
+has clear entry/exit criteria and specific commands to run. A polecat can
+crash after any step and resume from the last completed step.
 
-[steps.start]
-type = "agent"
-agent = "polecat"
-prompt = """
-You are assigned to work on this issue. Follow the standard Gas Town workflow:
+## Polecat Contract (Self-Cleaning Model)
 
-1. Check the issue details and understand the requirements
-2. Plan your approach
-3. Implement the solution
-4. Test your changes
-5. Submit for merge queue with `gt done`
+You are a self-cleaning worker. You:
+1. Receive work via your hook (formula checklist + issue)
+2. Work through formula steps in order (shown inline at prime time)
+3. Complete and self-clean via `gt done` (submit + nuke yourself)
+4. You are GONE - Refinery merges from MQ
 
-Remember to use proper Git practices and follow the issue acceptance criteria.
-"""
+**Self-cleaning:** When you run `gt done`, you push your work, submit to MQ,
+nuke your sandbox, and exit. There is no idle state. Done means gone.
 
-[steps.health_check]
-type = "health_check"
-check = "HEALTH_CHECK"
+**Important:** This formula defines the workflow template. Steps are shown inline
+when you run `gt prime` — there are no separate step beads to close. Work through
+the checklist, then run `gt done`.
 
-[steps.completion]
-type = "completion"
-handler = "self_managed"
+**Speed principle:** You run the full gate suite AFTER rebasing onto the target
+branch (pre-verify step). This enables the refinery to fast-path merge your MR
+in ~5 seconds instead of re-running gates. If pre-verification is skipped or
+stale, the refinery falls through to normal gate execution.
+
+**You do NOT:**
+- Push directly to main (Refinery merges from MQ)
+- Close your own issue (Refinery closes after merge)
+- Wait for merge (you're gone after `gt done`)
+- Fix pre-existing failures on main (Refinery owns main health)
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| issue | hook_bead | The issue ID you're assigned to work on |
+| base_branch | sling vars | The base branch to rebase on (default: main) |
+| setup_command | rig config | Setup/install command (e.g., `pnpm install`). Empty = skip. |
+| typecheck_command | rig config | Type check command (e.g., `tsc --noEmit`). Empty = skip. |
+| test_command | rig config | Test command. Empty = skip. Rig must configure for its language. |
+| lint_command | rig config | Lint command (e.g., `eslint .`). Empty = skip. |
+| build_command | rig config | Build command (e.g., `go build ./...`). Empty = skip. |
+
+## Failure Modes
+
+| Situation | Action |
+|-----------|--------|
+| Build fails | Fix it. Do not proceed if it won't compile. |
+| Blocked on external | Mail Witness for help, mark yourself stuck |
+| Context filling | Use gt handoff to cycle to fresh session |
+| Unsure what to do | Mail Witness, don't guess |"""
+formula = "mol-polecat-work"
+version = 8
+
+[[steps]]
+id = "load-context"
+title = "Load context and verify assignment"
+description = """
+Initialize your session and understand your assignment.
+
+**1. Prime your environment:**
+```bash
+gt prime                    # Load role context
+bd prime                    # Load beads context
+```
+
+**2. Check your hook:**
+```bash
+gt hook               # Shows your pinned molecule and hook_bead
+```
+
+The hook_bead is your assigned issue. Read it carefully:
+```bash
+bd show {{issue}}           # Full issue details
+```
+
+**3. Check inbox for additional context:**
+```bash
+gt mail inbox
+# Read any HANDOFF or assignment messages
+```
+
+**4. Understand the requirements:**
+- What exactly needs to be done?
+- What files are likely involved?
+- Are there dependencies or blockers?
+- What does "done" look like?
+
+**5. Verify you can proceed:**
+- No unresolved blockers on the issue
+- You understand what to do
+- Required resources are available
+
+If blocked or unclear, mail Witness immediately:
+```bash
+gt mail send <rig>/witness -s "HELP: Unclear requirements" -m "Issue: {{issue}}
+Question: <what you need clarified>"
+```
+
+**Exit criteria:** You understand the work and can begin implementation."""
+
+[[steps]]
+id = "branch-setup"
+title = "Set up working branch"
+needs = ["load-context"]
+description = """
+Ensure you're on a clean feature branch ready for work.
+
+**1. Check current branch state:**
+```bash
+git status
+git branch --show-current
+```
+
+**2. If not on a feature branch, create one:**
+```bash
+git fetch origin
+git checkout -b polecat/<name> origin/{{base_branch}}
+```
+
+**3. Ensure clean working state:**
+```bash
+git status                  # Should show "working tree clean"
+git stash list              # Should be empty
+```
+
+If dirty state from previous work:
+```bash
+# If changes are relevant to this issue:
+git add -A && git commit -m "WIP: <description>"
+
+# If changes are unrelated cruft:
+git stash push -m "unrelated changes before {{issue}}"
+# Or discard if truly garbage:
+git checkout -- .
+```
+
+**4. Sync with {{base_branch}}:**
+```bash
+git fetch origin
+git rebase origin/{{base_branch}}      # Get latest, rebase your branch
+```
+
+If rebase conflicts:
+- Resolve them carefully
+- If stuck, mail Witness
+
+**5. Run project setup (if configured):**
+
+If setup_command is set, run it to install dependencies:
+```bash
+{{setup_command}}
+```
+
+This ensures dependencies are installed before you start work.
+Empty setup_command means "not configured" — skip this step.
+
+**Exit criteria:** You're on a clean feature branch, rebased on latest {{base_branch}}, dependencies installed."""
+
+[[steps]]
+id = "implement"
+title = "Implement the solution"
+needs = ["branch-setup"]
+description = """
+Do the actual implementation work.
+
+**Working principles:**
+- Follow existing codebase conventions
+- Make atomic, focused commits
+- Keep changes scoped to the assigned issue
+- Don't gold-plate or scope-creep
+
+**Persist findings as you go (CRITICAL for session survival):**
+Your session can die at any time (context limit, crash, SIGKILL). Code changes
+survive in git, but analysis, findings, and decisions exist only in your context
+window. Persist them to the bead so they survive session death:
+```bash
+# After completing significant analysis or reaching conclusions:
+bd update {{issue}} --notes "Findings so far: <what you discovered>"
+# For detailed reports, use --design:
+bd update {{issue}} --design "<structured findings>"
+```
+Do this BEFORE closing molecule steps, not after. If your session dies between
+persisting and closing, the findings survive. If you close first, they're lost.
+
+**For report-only tasks** (audits, reviews, research): your findings ARE the
+deliverable. There are no code changes to commit. You MUST persist all findings
+to the bead via --notes or --design. Without this, your entire work product is
+lost when the session ends.
+
+**Commit frequently (for code tasks):**
+```bash
+# After each logical unit of work:
+git add <files>
+git commit -m "<type>: <description> ({{issue}})"
+```
+
+Commit types: feat, fix, refactor, test, docs, chore
+
+**Discovered work:**
+If you find bugs or improvements outside your scope:
+```bash
+bd create --title "Found: <description>" --type bug --priority 2
+# Note the ID, continue with your work
+```
+
+Do NOT fix unrelated issues in this branch.
+
+**If stuck:**
+Don't spin for more than 15 minutes. Mail Witness:
+```bash
+gt mail send <rig>/witness -s "HELP: Stuck on implementation" -m "Issue: {{issue}}
+Trying to: <what you're attempting>
+Problem: <what's blocking you>
+Tried: <what you've attempted>"
+```
+
+**Exit criteria:** Implementation complete. Code tasks: all changes committed. Report tasks: all findings persisted to bead."""
+
+[[steps]]
+id = "self-review"
+title = "Self-review changes"
+needs = ["implement"]
+description = """
+Review your own changes before the build check.
+
+**1. Review the diff:**
+```bash
+git diff origin/{{base_branch}}...HEAD     # All changes vs {{base_branch}}
+git log --oneline origin/{{base_branch}}..HEAD  # All commits
+```
+
+**2. Check for common issues:**
+
+| Category | Look For |
+|----------|----------|
+| Bugs | Off-by-one, null handling, edge cases |
+| Security | Injection, auth bypass, exposed secrets |
+| Style | Naming, formatting, code organization |
+| Completeness | Missing error handling, incomplete paths |
+| Cruft | Debug prints, commented code, TODOs |
+
+**3. Fix issues found:**
+Don't just note them - fix them now. Amend or add commits as needed.
+
+**4. Verify no unintended changes:**
+```bash
+git diff --stat origin/{{base_branch}}...HEAD
+# Only files relevant to {{issue}} should appear
+```
+
+If you accidentally modified unrelated files, remove those changes.
+
+**Exit criteria:** Changes are clean, reviewed, and ready for build check."""
+
+[[steps]]
+id = "build-check"
+title = "Build and sanity check"
+needs = ["self-review"]
+description = """
+Verify your changes compile and pass basic sanity checks. The Refinery's
+bisecting merge queue runs the full test suite — your job is to catch
+obvious problems fast so you don't waste the MQ's time.
+
+**1. Build (REQUIRED — must pass):**
+
+If build_command is set:
+```bash
+{{build_command}}
+```
+
+If setup_command is set (ensure new deps are installed):
+```bash
+{{setup_command}}
+```
+
+If typecheck_command is set:
+```bash
+{{typecheck_command}}
+```
+
+Empty commands mean "not configured" — skip silently.
+
+**2. If build fails:**
+- Fix it. Return to implement step if needed.
+- Do NOT submit broken code to the merge queue.
+
+**3. Targeted tests (OPTIONAL — run if fast and relevant):**
+
+If you modified or added test files, run those specific tests to catch
+obvious regressions. Do NOT run the full test suite — that's the
+Refinery's job.
+
+```bash
+# Example: run only tests in packages you changed
+go test ./internal/pkg/you/changed/...
+# Or for JS: npx jest --testPathPattern="changed-file"
+```
+
+If you're unsure which tests are relevant, skip this — the MQ will catch it.
+
+**4. Lint (OPTIONAL — run if configured and fast):**
+
+If lint_command is set:
+```bash
+{{lint_command}}
+```
+
+**Exit criteria:** Code compiles. Obvious regressions caught. Ready to submit."""
+
+[[steps]]
+id = "commit-changes"
+title = "Commit all implementation changes"
+needs = ["build-check"]
+description = """
+Ensure ALL implementation work is committed before cleanup.
+
+**CRITICAL: You MUST commit all changes from implementation.**
+NEVER use `git checkout -- .` or `git restore .` to discard implementation work.
+ALWAYS commit ALL uncommitted changes from your implementation.
+
+**1. Check for uncommitted changes:**
+```bash
+git status
+```
+
+**2. If there are ANY uncommitted changes, commit them now:**
+```bash
+git add -A && git commit -m "<type>: <descriptive message> ({{issue}})"
+```
+
+**3. If working tree is already clean, that's fine — but you MUST still have commits (step 4).**
+
+**4. VERIFY commits exist (HARD GATE — do NOT close this step without passing):**
+```bash
+git log origin/{{base_branch}}..HEAD --oneline
+```
+
+This MUST show at least 1 commit. If it shows NOTHING:
+- You have NOT completed your implementation. Do NOT close this step.
+- Go back to the implement step and do the work.
+- If the task genuinely requires no code changes (already fixed upstream, etc.),
+  run `gt done --status DEFERRED` and skip remaining steps.
+- Do NOT proceed to cleanup or submit with zero commits.
+
+**5. VERIFY clean working tree:**
+```bash
+git status
+```
+Must show "nothing to commit, working tree clean".
+
+**Report-only tasks (audits, reviews, research — no code changes):**
+If your task produced no code changes, verify your findings are persisted to the bead:
+```bash
+bd show {{issue}}    # Check notes/design fields have your findings
+```
+If findings are persisted, proceed to cleanup. `gt done --cleanup-status clean`
+handles the no-commit case for report-only tasks.
+
+**Exit criteria:** Working tree clean AND either (a) at least 1 commit ahead of origin/{{base_branch}}, or (b) report-only task with findings persisted to bead."""
+
+[[steps]]
+id = "pre-verify"
+title = "Pre-merge rebase verification"
+needs = ["commit-changes"]
+description = """
+Rebase onto the target branch and run the full gate suite. This enables the
+refinery to fast-path merge your MR without re-running gates (~5s merge
+instead of minutes).
+
+**1. Fetch and rebase onto target:**
+```bash
+git fetch origin {{base_branch}}
+git rebase origin/{{base_branch}}
+```
+
+If rebase conflicts:
+- Resolve them carefully
+- Re-run the build to ensure the resolution is correct
+- If stuck, mail Witness
+
+**2. Run the full gate suite on the rebased result:**
+
+Run ALL configured gates (not just targeted tests — this is the full verification):
+
+If build_command is set:
+```bash
+{{build_command}}
+```
+
+If typecheck_command is set:
+```bash
+{{typecheck_command}}
+```
+
+If lint_command is set:
+```bash
+{{lint_command}}
+```
+
+If test_command is set:
+```bash
+{{test_command}}
+```
+
+Empty commands mean "not configured" — skip silently.
+
+**3. If any gate fails after rebase:**
+- Fix the issue, commit, and re-run from step 1
+- Do NOT proceed with --pre-verified if gates failed
+
+**4. If all gates pass:**
+You will use `gt done --pre-verified` in the next step. This tells the refinery
+that you ran the full gate suite on a rebased branch, enabling fast-path merge.
+
+**Note:** If this step takes too long or the gates are not configured for this
+project, you may skip this step and use `gt done` without --pre-verified.
+The refinery will run gates normally (slower but still correct).
+
+**Exit criteria:** Branch rebased onto latest origin/{{base_branch}}, all configured gates pass."""
+
+[[steps]]
+id = "submit-and-exit"
+title = "Submit work and self-clean"
+needs = ["pre-verify"]
+description = """
+Submit your work and clean up. You cease to exist after this step.
+
+**Self-Cleaning Model:**
+Once you run `gt done`, you're gone. The command:
+1. Pushes your branch to origin
+2. Creates an MR bead in the merge queue
+3. Nukes your sandbox (worktree removal)
+4. Exits your session immediately
+
+**Pre-flight: Verify you have actual work to submit (HARD GATE):**
+```bash
+git log origin/{{base_branch}}..HEAD --oneline
+```
+This MUST show at least 1 commit. If it shows nothing, do NOT run `gt done`.
+`gt done` will reject zero-commit branches for polecats.
+
+**Run gt done:**
+```bash
+# For code tasks with pre-verification (recommended — enables fast-path merge):
+gt done --pre-verified
+
+# For code tasks without pre-verification (gates skipped or failed):
+gt done
+
+# For report-only tasks (no commits — audits, reviews, research):
+gt done --cleanup-status clean
+```
+
+You should see output like:
+```
+✓ Work submitted to merge queue
+  MR ID: gt-xxxxx
+  Source: polecat/<name>
+  Target: {{base_branch}}
+  Issue: {{issue}}
+✓ Sandbox nuked
+✓ Session exiting
+```
+
+**What happens next (not your concern):**
+- Refinery batches MRs and runs gates on the merged stack
+- If green: all MRs in the batch merge to {{base_branch}} at once
+- If red: Refinery bisects to isolate the culprit, merges the good ones
+- Refinery fixes failures itself (inline or via helper polecats)
+- Refinery closes your issue after successful merge
+
+You are NOT involved in any of that. You're gone. Done means gone.
+
+**Exit criteria:** Work submitted, sandbox nuked, session exited."""
+
+[vars]
+[vars.issue]
+description = "The issue ID assigned to this polecat"
+required = true
+
+[vars.base_branch]
+description = "The base branch to rebase on and compare against (e.g., main, integration/epic-id)"
+default = "main"
+
+[vars.setup_command]
+description = "Setup/install command (e.g., pnpm install). Empty = skip."
+default = ""
+
+[vars.typecheck_command]
+description = "Type check command (e.g., tsc --noEmit). Empty = skip."
+default = ""
+
+[vars.test_command]
+description = "Command to run tests (auto-detected from rig settings)"
+default = ""
+
+[vars.lint_command]
+description = "Command to run linting. Empty = skip."
+default = ""
+
+[vars.build_command]
+description = "Command to run build. Empty = skip."
+default = ""

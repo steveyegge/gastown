@@ -9,6 +9,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/reaper"
 )
 
 const (
@@ -92,20 +93,24 @@ func compactorDogKeepRecent(config *DaemonPatrolConfig) int {
 	return 50
 }
 
-// runCompactorDog checks each production database's commit count and
-// flattens any that exceed the threshold. The flatten algorithm:
-//  1. Record main HEAD hash and row counts (pre-flight)
-//  2. Create temp branch gt-compaction from main
-//  3. Soft-reset to root commit (keeps all data staged)
-//  4. Commit all data as single commit
-//  5. Verify row counts match (integrity check)
-//  6. Move main to the new single commit
-//  7. Delete temp branch
+// runCompactorDog checks each production database's commit count and compacts
+// any that exceed the threshold. Two modes:
+//
+// Flatten mode (default): soft-resets to root commit on main, commits all data
+// as a single commit. Safe with concurrent writes.
+//
+// Surgical mode: interactive rebase that squashes old commits while preserving
+// recent N as individual picks. NOT safe with concurrent writes — retries once.
 //
 // After successful compaction, runs dolt gc to reclaim unreferenced chunks.
-// Order matters: rebase first (compaction), gc second.
 //
-// Concurrency safety: if main HEAD moves during compaction, abort.
+// ZFC Exemption: This dog executes imperatively in Go rather than via agent-driven
+// formula execution. The mol-dog-compactor formula is used for observability
+// tracking only (pourDogMolecule + closeStep/failStep). Agent execution is
+// impractical because: (1) operations require database/sql connections, (2)
+// transactional state spans multiple queries, (3) cleanup-on-failure error paths,
+// (4) concurrent write retry with error classification, (5) row count integrity
+// verification. See mol-dog-compactor.formula.toml for full rationale.
 func (d *Daemon) runCompactorDog() {
 	if !IsPatrolEnabled(d.patrolConfig, "compactor_dog") {
 		return
@@ -201,7 +206,7 @@ func (d *Daemon) compactorDatabases() []string {
 			}
 		}
 	}
-	return d.discoverDoltDatabases()
+	return reaper.DefaultDatabases
 }
 
 // compactorCountCommits counts the number of commits in the database's dolt_log.

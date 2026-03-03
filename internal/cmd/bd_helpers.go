@@ -66,6 +66,15 @@ func (b *bdCmd) Dir(dir string) *bdCmd {
 	return b
 }
 
+// StripBeadsDir removes any inherited BEADS_DIR from the environment.
+// Use this when the command relies on Dir() for routing and an inherited
+// BEADS_DIR would incorrectly override the working-directory-based database
+// discovery. This fixes rig-prefixed bead resolution (GH#2126).
+func (b *bdCmd) StripBeadsDir() *bdCmd {
+	b.env = filterEnvKey(b.env, "BEADS_DIR")
+	return b
+}
+
 // Stderr sets the stderr writer for the command.
 // Defaults to os.Stderr if not set.
 func (b *bdCmd) Stderr(w io.Writer) *bdCmd {

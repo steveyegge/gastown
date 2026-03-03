@@ -233,6 +233,7 @@ type AddRigOptions struct {
 	BeadsPrefix   string // Beads issue prefix (defaults to derived from name)
 	LocalRepo     string // Optional local repo for reference clones
 	DefaultBranch string // Default branch (defaults to auto-detected from remote)
+	SkipDoltCheck bool   // Skip Dolt server availability check (for tests with mocked beads)
 }
 
 func resolveLocalRepo(path, gitURL string) (string, string) {
@@ -300,10 +301,12 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 
 	// Dolt server is required — refuse to proceed without it.
 	// Check early to fail fast before expensive clone operations.
-	if running, _, err := doltserver.IsRunning(m.townRoot); err != nil {
-		return nil, fmt.Errorf("checking Dolt server: %w", err)
-	} else if !running {
-		return nil, fmt.Errorf("Dolt server is not running (required for beads init); start it with 'gt up' or 'gt dolt start'")
+	if !opts.SkipDoltCheck {
+		if running, _, err := doltserver.IsRunning(m.townRoot); err != nil {
+			return nil, fmt.Errorf("checking Dolt server: %w", err)
+		} else if !running {
+			return nil, fmt.Errorf("Dolt server is not running (required for beads init); start it with 'gt up' or 'gt dolt start'")
+		}
 	}
 
 	rigPath := filepath.Join(m.townRoot, opts.Name)
@@ -556,9 +559,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Create server-side database for this rig BEFORE initializing beads.
 	// InitBeads runs bd init --server which writes metadata.json, but the actual
 	// database in .dolt-data/ must exist first for bd config commands to work.
-	if _, err := exec.LookPath("dolt"); err == nil {
-		if _, _, err := doltserver.InitRig(m.townRoot, opts.Name); err != nil {
-			fmt.Printf("  Warning: Could not create rig database: %v\n", err)
+	if !opts.SkipDoltCheck {
+		if _, err := exec.LookPath("dolt"); err == nil {
+			if _, _, err := doltserver.InitRig(m.townRoot, opts.Name); err != nil {
+				fmt.Printf("  Warning: Could not create rig database: %v\n", err)
+			}
 		}
 	}
 
@@ -796,7 +801,27 @@ func LoadRigConfig(rigPath string) (*RigConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	warnDeprecatedRigConfigKeys(data, configPath)
 	return &cfg, nil
+}
+
+// warnDeprecatedRigConfigKeys detects merge_queue keys in rig root config.json
+// that are silently ignored by json.Unmarshal (RigConfig has no merge_queue field).
+// Without this warning, users can set merge_queue.target_branch believing it
+// controls MR targets, while gt mq submit / gt done actually use default_branch.
+func warnDeprecatedRigConfigKeys(data []byte, path string) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return
+	}
+	if mq, ok := raw["merge_queue"]; ok {
+		var mqMap map[string]json.RawMessage
+		if json.Unmarshal(mq, &mqMap) == nil {
+			if _, has := mqMap["target_branch"]; has {
+				fmt.Fprintf(os.Stderr, "WARNING: %s: merge_queue.target_branch is deprecated and ignored — set default_branch instead\n", path)
+			}
+		}
+	}
 }
 
 // InitBeads initializes the beads database at rig level.

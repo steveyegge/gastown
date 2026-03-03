@@ -212,6 +212,9 @@ type OperationalConfig struct {
 
 	// Web configures web API thresholds.
 	Web *WebThresholds `json:"web,omitempty"`
+
+	// Witness configures witness patrol thresholds.
+	Witness *WitnessThresholds `json:"witness,omitempty"`
 }
 
 // SessionThresholds configures session management timeouts.
@@ -403,6 +406,29 @@ type WebThresholds struct {
 
 	// MaxBodyLen is max body length for mail API (default 100000).
 	MaxBodyLen *int `json:"max_body_len,omitempty"`
+}
+
+// WitnessThresholds configures witness patrol detection thresholds.
+type WitnessThresholds struct {
+	// StartupStallThreshold is the minimum session age before a session with no
+	// recent activity is considered stalled at startup (default "90s").
+	StartupStallThreshold string `json:"startup_stall_threshold,omitempty"`
+
+	// StartupActivityGrace is the max time since last activity before a session
+	// old enough to be past startup is considered stalled (default "60s").
+	StartupActivityGrace string `json:"startup_activity_grace,omitempty"`
+
+	// MaxBeadRespawns is the threshold above which a bead respawn is blocked
+	// and escalated to mayor instead of re-dispatched (default 3).
+	MaxBeadRespawns *int `json:"max_bead_respawns,omitempty"`
+
+	// DoneIntentStuckTimeout is how long a done-intent can be active before the
+	// session is considered stuck and restarted (default "60s").
+	DoneIntentStuckTimeout string `json:"done_intent_stuck_timeout,omitempty"`
+
+	// DoneIntentRecentGrace is how recently a done-intent must have been created
+	// to be considered still in progress (default "30s").
+	DoneIntentRecentGrace string `json:"done_intent_recent_grace,omitempty"`
 }
 
 // DefaultOperationalConfig returns an OperationalConfig with all defaults.
@@ -753,6 +779,11 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 		return base + " --prompt " + quoteForShell(p)
 	}
 
+	// Copilot  requires -i flag for initial prompt in interactive mode.
+	if resolved.Command == "copilot" {
+		return base + " -i " + quoteForShell(p)
+	}
+
 	// Quote the prompt for shell safety (positional arg for claude and others)
 	return base + " " + quoteForShell(p)
 }
@@ -773,7 +804,6 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 
 	return args
 }
-
 
 func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 	if rc == nil {
@@ -1199,7 +1229,7 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 		RetryFlakyTests:                  1,
 		PollInterval:                     "30s",
 		MaxConcurrent:                    1,
-		StaleClaimTimeout:               "30m",
+		StaleClaimTimeout:                "30m",
 	}
 }
 
@@ -1256,7 +1286,7 @@ func DefaultAccountsConfigDir() (string, error) {
 // QuotaState represents the quota management state (mayor/quota.json).
 // Tracks which accounts are rate-limited and when they were last rotated.
 type QuotaState struct {
-	Version  int                         `json:"version"`  // schema version
+	Version  int                          `json:"version"`  // schema version
 	Accounts map[string]AccountQuotaState `json:"accounts"` // handle -> quota state
 }
 
@@ -1276,7 +1306,7 @@ const (
 
 // AccountQuotaState tracks the quota status of a single account.
 type AccountQuotaState struct {
-	Status    AccountQuotaStatus `json:"status"`              // current status
+	Status    AccountQuotaStatus `json:"status"`               // current status
 	LimitedAt string             `json:"limited_at,omitempty"` // RFC3339 when limit was detected
 	ResetsAt  string             `json:"resets_at,omitempty"`  // Human-readable reset time from provider (e.g. "7pm (America/Los_Angeles)")
 	LastUsed  string             `json:"last_used,omitempty"`  // RFC3339 when account was last assigned to a session
