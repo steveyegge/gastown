@@ -216,32 +216,54 @@ func (s *Server) authorizeReceivePack(w http.ResponseWriter, r *http.Request, cl
 		return false, nil
 	}
 
-	// Bound body reads to prevent a misbehaving client from exhausting memory.
-	// 32 MiB is ample for any valid ref advertisement; binary pack data is not read.
-	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-		} else {
-			http.Error(w, "read body: "+err.Error(), http.StatusInternalServerError)
+	// Read only the pkt-line ref-update section (up to the flush packet),
+	// then stream the remaining pack data through to git untouched.
+	// This avoids loading the entire (potentially large) pack into memory.
+	const maxPktLineSection = 256 << 10 // 256 KiB: more than enough for ref lines
+	var pktBuf bytes.Buffer
+	limited := io.LimitReader(r.Body, maxPktLineSection)
+
+	// Read pkt-lines until the flush packet ("0000") or limit.
+	var tmp [4]byte
+	for {
+		_, err := io.ReadFull(limited, tmp[:])
+		if err != nil {
+			http.Error(w, "read pkt-line header: "+err.Error(), http.StatusBadRequest)
+			return false, nil
 		}
-		return false, nil
+		pktBuf.Write(tmp[:])
+		// Flush packet terminates the ref-update section.
+		if bytes.Equal(tmp[:], []byte("0000")) {
+			break
+		}
+		var pktLen int
+		_, err = fmt.Sscanf(string(tmp[:]), "%x", &pktLen)
+		if err != nil || pktLen < 4 {
+			http.Error(w, "malformed pkt-line length", http.StatusBadRequest)
+			return false, nil
+		}
+		payload := make([]byte, pktLen-4)
+		_, err = io.ReadFull(limited, payload)
+		if err != nil {
+			http.Error(w, "read pkt-line payload: "+err.Error(), http.StatusBadRequest)
+			return false, nil
+		}
+		pktBuf.Write(payload)
 	}
-	r.Body.Close()
+
+	pktBytes := pktBuf.Bytes()
 
 	// Collect refs before validation so they are available for audit logging even
 	// when authorization is denied.
-	refs := collectReceivePackRefs(body)
+	refs := collectReceivePackRefs(pktBytes)
 
-	if err := validateReceivePackRefs(body, cnName); err != nil {
+	if err := validateReceivePackRefs(pktBytes, cnName); err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return false, refs
 	}
 
-	// Use bytes.NewReader to safely re-wrap binary pack data.
-	r.Body = io.NopCloser(bytes.NewReader(body))
+	// Reconstruct body: pkt-line prefix + remaining pack data (streamed).
+	r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(pktBytes), r.Body))
 	return true, refs
 }
 

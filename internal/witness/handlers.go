@@ -82,13 +82,6 @@ var hasSession = func(sessionName string) (bool, error) {
 	return t.HasSession(sessionName)
 }
 
-// hasSession checks if a tmux session exists. Tests override this to avoid
-// requiring a live tmux server.
-var hasSession = func(sessionName string) (bool, error) {
-	t := tmux.NewTmux()
-	return t.HasSession(sessionName)
-}
-
 // initRegistryFromTownRoot initializes registries from a known town root,
 // logging any errors so that misconfiguration is observable.
 func initRegistryFromTownRoot(townRoot string) {
@@ -1826,7 +1819,7 @@ func IsBeadActivelyWorked(workDir, rigName, beadID, excludePolecat string) bool 
 		// Check if this polecat has our bead hooked
 		prefix := beads.GetPrefixForRig(townRoot, rigName)
 		agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
-		_, hookBead := getAgentBeadState(workDir, agentBeadID)
+		_, hookBead := getAgentBeadState(defaultBdProvider(), workDir, agentBeadID)
 		if hookBead != beadID {
 			continue
 		}

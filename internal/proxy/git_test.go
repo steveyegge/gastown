@@ -224,7 +224,7 @@ func TestAuthorizeReceivePack(t *testing.T) {
 		assert.Equal(t, []string{"refs/heads/main"}, refs)
 	})
 
-	t.Run("body read error returns 500", func(t *testing.T) {
+	t.Run("body read error returns 400", func(t *testing.T) {
 		cn := "gt-gastown-furiosa"
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("POST", "/v1/git/rig/git-receive-pack", nil)
@@ -233,10 +233,10 @@ func TestAuthorizeReceivePack(t *testing.T) {
 		ok, refs := srv.authorizeReceivePack(rec, req, cn)
 		assert.False(t, ok)
 		assert.Nil(t, refs)
-		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 
-	t.Run("oversized body returns 413", func(t *testing.T) {
+	t.Run("oversized body returns 400", func(t *testing.T) {
 		cn := "gt-gastown-furiosa"
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("POST", "/v1/git/rig/git-receive-pack", nil)
@@ -244,7 +244,7 @@ func TestAuthorizeReceivePack(t *testing.T) {
 
 		ok, _ := srv.authorizeReceivePack(rec, req, cn)
 		assert.False(t, ok)
-		assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 }
 

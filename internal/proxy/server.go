@@ -452,6 +452,10 @@ func (s *Server) handleIssueCert(w http.ResponseWriter, r *http.Request) {
 
 	// Parse the cert to extract serial and expiry for the response.
 	block, _ := pem.Decode(certPEM)
+	if block == nil || block.Type != "CERTIFICATE" {
+		http.Error(w, "internal error: failed to decode issued certificate PEM", http.StatusInternalServerError)
+		return
+	}
 	leaf, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
 		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)

@@ -15,7 +15,7 @@ For a fast verification that the proxy is functional:
 - ✓ Starts server on port 9876
 - ✓ Issues a test certificate
 - ✓ Runs a single `gt version` command through the proxy
-- ✓ Automatically cleans up after 10 seconds
+- ✓ Automatically cleans up on exit
 
 **Best for:** Quick CI/CD checks, rapid iteration during development
 
@@ -38,7 +38,7 @@ For thorough validation with multiple test scenarios:
   - `gt --version`
   - `gt status`
   - `gt convoy --help`
-- ✓ Tests rate limiting (5 rapid requests)
+- ✓ Tests rate limiting (25 rapid requests)
 - ✓ Displays server health and logs
 - ✓ Keeps server running for manual testing
 
@@ -56,13 +56,14 @@ Once a testing script is running, you can manually test from another terminal:
 
 ```bash
 curl -s \
-  --cert /tmp/gt-proxy-quick-test/test.crt \
-  --key /tmp/gt-proxy-quick-test/test.key \
-  --cacert /tmp/gt-proxy-quick-test/ca/ca.crt \
+  --cert /tmp/gt-proxy-quick-test/client.crt \
+  --key /tmp/gt-proxy-quick-test/client.key \
+  --cacert /tmp/gt-proxy-quick-test/ca-client.crt \
+  --resolve gt-proxy-server:9876:127.0.0.1 \
   -X POST \
   -H "Content-Type: application/json" \
-  -d '{"argv":["status"]}' \
-  https://localhost:9876/v1/exec
+  -d '{"argv":["gt","version"]}' \
+  https://gt-proxy-server:9876/v1/exec
 ```
 
 ### Test Different Commands
