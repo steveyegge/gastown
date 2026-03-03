@@ -21,7 +21,6 @@
 {"created_at":"2026-01-22T03:20:59Z","created_by":"mayor","depends_on_id":"gt-2abltl","issue_id":"gt-2abltl.3","type":"parent-child"}
 {"created_at":"2026-01-22T03:21:01Z","created_by":"mayor","depends_on_id":"gt-2abltl","issue_id":"gt-2abltl.4","type":"parent-child"}
 {"created_at":"2026-01-22T03:21:10Z","created_by":"mayor","depends_on_id":"gt-2abltl","issue_id":"gt-2abltl.5","type":"parent-child"}
-{"created_at":"2026-03-03T09:39:42Z","created_by":"mayor","depends_on_id":"gt-wisp-xh3vc","issue_id":"gt-2gra","type":"blocks"}
 {"created_at":"2026-02-27T16:47:59Z","created_by":"mayor","depends_on_id":"gt-wisp-w7o3","issue_id":"gt-2rj2","type":"blocks"}
 {"created_at":"2026-03-02T17:05:22Z","created_by":"mayor","depends_on_id":"gt-wisp-ionnv","issue_id":"gt-2rxz","type":"blocks"}
 {"created_at":"2026-02-27T14:51:02Z","created_by":"mayor","depends_on_id":"gt-wisp-7rmc","issue_id":"gt-2yx7","type":"blocks"}
@@ -38,7 +37,6 @@
 {"created_at":"2026-01-13T01:59:47Z","created_by":"mayor","depends_on_id":"gt-wd3ce","issue_id":"gt-430oy","type":"blocks"}
 {"created_at":"2026-02-28T11:28:42Z","created_by":"dog","depends_on_id":"gt-wisp-zyb6sc","issue_id":"gt-4d7p","type":"blocks"}
 {"created_at":"2026-03-02T15:28:39Z","created_by":"gastown/crew/joe","depends_on_id":"gt-qmsx","issue_id":"gt-4k12","type":"blocks"}
-{"created_at":"2026-03-03T09:39:07Z","created_by":"mayor","depends_on_id":"gt-wisp-93f6d","issue_id":"gt-4k12","type":"blocks"}
 {"created_at":"2025-12-31T04:42:19Z","created_by":"mayor","depends_on_id":"gt-441j6","issue_id":"gt-4ntnq","type":"blocks"}
 {"created_at":"2025-12-31T04:42:17Z","created_by":"mayor","depends_on_id":"gt-5q6jr","issue_id":"gt-4ntnq","type":"blocks"}
 {"created_at":"2025-12-31T04:42:19Z","created_by":"mayor","depends_on_id":"gt-84ery","issue_id":"gt-4ntnq","type":"blocks"}
@@ -232,7 +230,6 @@
 {"created_at":"2026-01-22T03:20:44Z","created_by":"mayor","depends_on_id":"gt-qmbrx8","issue_id":"gt-qmbrx8.5","type":"parent-child"}
 {"created_at":"2026-02-28T17:01:06Z","created_by":"mayor","depends_on_id":"gt-wisp-b4q040","issue_id":"gt-qzjb","type":"blocks"}
 {"created_at":"2026-02-27T14:51:14Z","created_by":"mayor","depends_on_id":"gt-wisp-0nr3","issue_id":"gt-r8m9","type":"blocks"}
-{"created_at":"2026-03-03T09:38:59Z","created_by":"mayor","depends_on_id":"gt-wisp-46b7l","issue_id":"gt-r8tf","type":"blocks"}
 {"created_at":"2026-02-27T18:53:24Z","created_by":"mayor","depends_on_id":"gt-wisp-3pxql","issue_id":"gt-rcrt","type":"blocks"}
 {"created_at":"2026-02-28T23:21:10Z","created_by":"mayor","depends_on_id":"gt-wisp-axtog","issue_id":"gt-re2y","type":"blocks"}
 {"created_at":"2026-02-28T11:20:44Z","created_by":"mayor","depends_on_id":"gt-wisp-y57rfi","issue_id":"gt-re2y","type":"blocks"}
@@ -248,7 +245,6 @@
 {"created_at":"2026-01-02T07:55:48Z","created_by":"mayor","depends_on_id":"gt-si8rq","issue_id":"gt-si8rq.8","type":"parent-child"}
 {"created_at":"2026-02-28T11:27:05Z","created_by":"dog","depends_on_id":"gt-wisp-c01lwt","issue_id":"gt-sjzd","type":"blocks"}
 {"created_at":"2026-03-02T15:28:39Z","created_by":"gastown/crew/joe","depends_on_id":"gt-qmsx","issue_id":"gt-sk5u","type":"blocks"}
-{"created_at":"2026-03-03T09:39:15Z","created_by":"mayor","depends_on_id":"gt-wisp-wyy6y","issue_id":"gt-sk5u","type":"blocks"}
 {"created_at":"2026-02-27T15:51:29Z","created_by":"mayor","depends_on_id":"gt-wisp-t02q","issue_id":"gt-spbg","type":"blocks"}
 {"created_at":"2026-02-28T16:17:27Z","created_by":"mayor","depends_on_id":"gt-wisp-ypy9qj","issue_id":"gt-th5j","type":"blocks"}
 {"created_at":"2025-12-24T00:27:39Z","created_by":"mayor","depends_on_id":"gt-3p77","issue_id":"gt-tr0a","type":"blocks"}
@@ -285,7 +281,6 @@
 {"created_at":"2026-02-28T16:18:29Z","created_by":"mayor","depends_on_id":"gt-wisp-wvshni","issue_id":"gt-wrdz","type":"blocks"}
 {"created_at":"2026-02-28T16:26:11Z","created_by":"mayor","depends_on_id":"gt-ah9y","issue_id":"gt-wsc4","type":"blocks"}
 {"created_at":"2026-02-28T17:17:55Z","created_by":"mayor","depends_on_id":"gt-wisp-71rxnn","issue_id":"gt-wsc4","type":"blocks"}
-{"created_at":"2026-03-03T09:38:38Z","created_by":"mayor","depends_on_id":"gt-wisp-qog1c","issue_id":"gt-wvd2","type":"blocks"}
 {"created_at":"2026-02-27T17:22:56Z","created_by":"mayor","depends_on_id":"gt-wisp-uh7wd","issue_id":"gt-x7t9","type":"blocks"}
 {"created_at":"2026-01-07T04:52:13Z","created_by":"mayor","depends_on_id":"gt-x0i2m","issue_id":"gt-x9bdy","type":"blocks"}
 {"created_at":"2026-02-27T22:31:59Z","created_by":"dog","depends_on_id":"gt-wisp-mdk73","issue_id":"gt-x9xm","type":"blocks"}
