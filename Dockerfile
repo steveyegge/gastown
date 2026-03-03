@@ -56,7 +56,7 @@ USER agent
 
 COPY . /app/gastown
 
-RUN cd /app/gastown && make install
+RUN cd /app/gastown && make build
 
 RUN git config --global credential.helper store
 RUN git config --global user.name "${GIT_USER}"
