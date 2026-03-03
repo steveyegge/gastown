@@ -2633,27 +2633,6 @@ func (t *Tmux) SetMailClickBinding(session string) error {
 	return err
 }
 
-// IsPaneDead checks if the pane in a session has exited (remain-on-exit keeps it visible).
-// Returns true if the pane's process has exited but the pane is still displayed.
-// This distinguishes a "dead pane waiting for respawn" from a "zombie shell still running".
-func (t *Tmux) IsPaneDead(session string) bool {
-	out, err := t.run("list-panes", "-t", session, "-F", "#{pane_dead}")
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(out) == "1"
-}
-
-// RespawnPaneDefault restarts a dead pane with its original command.
-// This is used when the pane process has exited (remain-on-exit on) and we
-// want to restart it in place without killing the entire session.
-// Unlike RespawnPane, this does NOT specify a new command — tmux reuses the
-// command from when the pane was created or last respawned.
-func (t *Tmux) RespawnPaneDefault(session string) error {
-	_, err := t.run("respawn-pane", "-k", "-t", session)
-	return err
-}
-
 // RespawnPane kills all processes in a pane and starts a new command.
 // This is used for "hot reload" of agent sessions - instantly restart in place.
 // The pane parameter should be a pane ID (e.g., "%0") or session:window.pane format.
