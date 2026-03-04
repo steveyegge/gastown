@@ -1199,7 +1199,7 @@ type strandedConvoyInfo struct {
 	TrackedCount int      `json:"tracked_count"`
 	ReadyCount   int      `json:"ready_count"`
 	ReadyIssues  []string `json:"ready_issues"`
-	CreatedAt    string   `json:"created_at"`
+	CreatedAt    string   `json:"created_at,omitempty"`
 }
 
 // readyIssueInfo holds info about a ready (stranded) issue.
