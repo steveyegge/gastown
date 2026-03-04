@@ -7,5 +7,6 @@
 {"key":"compact_tier2_days","value":"90"}
 {"key":"compact_tier2_dep_levels","value":"5"}
 {"key":"compaction_enabled","value":"false"}
-{"key":"issue_prefix","value":"hq"}
+{"key":"issue_prefix","value":"gt"}
 {"key":"schema_version","value":"6"}
+{"key":"types.custom","value":"agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request"}
