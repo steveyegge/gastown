@@ -478,6 +478,25 @@ func dagSlingableIDs(dag *ConvoyDAG) []string {
 	return ids
 }
 
+// wrapExternalBeadID wraps a bead ID in external:<rig>:<id> format if it belongs
+// to a different rig than HQ (town-level beads). Convoys live in HQ, so any bead
+// whose prefix resolves to a non-town rig needs the external wrapper for bd dep add
+// to store it as a cross-rig reference that bd dep list can resolve.
+// Returns the original ID unchanged if it's already town-level (hq-*) or if
+// the rig name cannot be resolved.
+func wrapExternalBeadID(townRoot, beadID string) string {
+	prefix := beads.ExtractPrefix(beadID)
+	if prefix == "" {
+		return beadID
+	}
+	rigName := beads.GetRigNameForPrefix(townRoot, prefix)
+	if rigName == "" {
+		// Town-level bead or unknown prefix — use raw ID
+		return beadID
+	}
+	return fmt.Sprintf("external:%s:%s", rigName, beadID)
+}
+
 // convoyTrackedBeadIDs returns the set of bead IDs tracked by a convoy.
 // It calls `bd dep list <convoyID> --direction=down --type=tracks --json`
 // against the town beads directory and unwraps external:prefix:id references.
@@ -714,11 +733,17 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string, title strin
 	}
 
 	// Track each slingable bead via bd dep add.
+	// Cross-rig beads must be wrapped in external:<rig>:<id> format so that
+	// bd dep list can resolve them. Without this, raw cross-rig IDs are silently
+	// dropped by GetDependenciesWithMetadata (they don't exist in the HQ database),
+	// causing the convoy to appear empty and auto-close.
+	townRoot := filepath.Dir(townBeads)
 	for _, beadID := range slingableIDs {
-		if out, err := BdCmd("dep", "add", convoyID, beadID, "--type=tracks").
+		depID := wrapExternalBeadID(townRoot, beadID)
+		if out, err := BdCmd("dep", "add", convoyID, depID, "--type=tracks").
 			Dir(townBeads).WithAutoCommit().
 			CombinedOutput(); err != nil {
-			return "", fmt.Errorf("bd dep add %s %s: %w\noutput: %s", convoyID, beadID, err, out)
+			return "", fmt.Errorf("bd dep add %s %s: %w\noutput: %s", convoyID, depID, err, out)
 		}
 	}
 
@@ -750,13 +775,17 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 		return fmt.Errorf("reading tracked beads for %s: %w", existingConvoyID, err)
 	}
 
+	// Wrap cross-rig bead IDs in external format for bd dep add/remove.
+	townRoot := filepath.Dir(townBeads)
+
 	// Add new beads not currently tracked.
 	for _, id := range desiredIDs {
 		if !currentIDs[id] {
-			if out, err := BdCmd("dep", "add", existingConvoyID, id, "--type=tracks").
+			depID := wrapExternalBeadID(townRoot, id)
+			if out, err := BdCmd("dep", "add", existingConvoyID, depID, "--type=tracks").
 				Dir(townBeads).WithAutoCommit().
 				CombinedOutput(); err != nil {
-				return fmt.Errorf("bd dep add %s %s: %w\noutput: %s", existingConvoyID, id, err, out)
+				return fmt.Errorf("bd dep add %s %s: %w\noutput: %s", existingConvoyID, depID, err, out)
 			}
 		}
 	}
@@ -764,10 +793,11 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 	// Remove stale beads no longer in the DAG.
 	for id := range currentIDs {
 		if !desiredSet[id] {
-			if out, err := BdCmd("dep", "remove", existingConvoyID, id, "--type=tracks").
+			depID := wrapExternalBeadID(townRoot, id)
+			if out, err := BdCmd("dep", "remove", existingConvoyID, depID, "--type=tracks").
 				Dir(townBeads).WithAutoCommit().
 				CombinedOutput(); err != nil {
-				return fmt.Errorf("bd dep remove %s %s: %w\noutput: %s", existingConvoyID, id, err, out)
+				return fmt.Errorf("bd dep remove %s %s: %w\noutput: %s", existingConvoyID, depID, err, out)
 			}
 		}
 	}
