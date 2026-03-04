@@ -663,17 +663,6 @@ func TestFindActivePatrolMultiple(t *testing.T) {
 		t.Errorf("patrolID = %q, want %q (should return the active one)", patrolID, activeID)
 	}
 
-	// Verify both stale patrols were closed
-	for _, id := range []string{stale1, stale2} {
-		issue, err := b.Show(id)
-		if err != nil {
-			t.Fatalf("show stale %s: %v", id, err)
-		}
-		if issue.Status != "closed" {
-			t.Errorf("stale patrol %s status = %q, want %q", id, issue.Status, "closed")
-		}
-	}
-
 	// Verify active patrol is still hooked
 	issue, err := b.Show(activeID)
 	if err != nil {
@@ -681,6 +670,98 @@ func TestFindActivePatrolMultiple(t *testing.T) {
 	}
 	if issue.Status != beads.StatusHooked {
 		t.Errorf("active patrol status = %q, want %q", issue.Status, beads.StatusHooked)
+	}
+
+	// Stale patrol cleanup is not guaranteed when an active patrol is found —
+	// findActivePatrol breaks early on active discovery to prevent N+1 Dolt queries
+	// (gt-18dzn6p). Remaining stale beads are cleaned by burnPreviousPatrolWisps
+	// when the patrol cycle ends. Verify stale beads are either closed or still hooked
+	// (not left in an intermediate broken state).
+	for _, id := range []string{stale1, stale2} {
+		staleIssue, showErr := b.Show(id)
+		if showErr != nil {
+			t.Fatalf("show stale %s: %v", id, showErr)
+		}
+		if staleIssue.Status != "closed" && staleIssue.Status != beads.StatusHooked {
+			t.Errorf("stale patrol %s status = %q, want closed or hooked", id, staleIssue.Status)
+		}
+	}
+}
+
+// TestFindActivePatrol_StaleCleanupCapped verifies that when many stale patrols
+// accumulate with no active patrol, cleanup is capped at maxStalePurgePerRun per call
+// to prevent overwhelming Dolt with sequential write queries (gt-18dzn6p).
+func TestFindActivePatrol_StaleCleanupCapped(t *testing.T) {
+	requireBd(t)
+	tmpDir, b := setupPatrolTestDB(t)
+
+	molName := "mol-test-patrol"
+	assignee := "testrig/witness"
+
+	// Create more stale patrols than maxStalePurgePerRun (currently 5)
+	numStale := maxStalePurgePerRun + 3 // e.g., 8 total
+	staleIDs := make([]string, numStale)
+	for i := 0; i < numStale; i++ {
+		id := createHookedPatrol(t, b, molName, assignee, true /* with child */)
+		staleIDs[i] = id
+
+		// Close the child to make the patrol stale
+		children, err := b.List(beads.ListOptions{Parent: id, Status: "all", Priority: -1})
+		if err != nil {
+			t.Fatalf("list children of %s: %v", id, err)
+		}
+		for _, child := range children {
+			if closeErr := b.ForceCloseWithReason("test cleanup", child.ID); closeErr != nil {
+				t.Fatalf("close child of %s: %v", id, closeErr)
+			}
+		}
+	}
+
+	cfg := PatrolConfig{
+		PatrolMolName: molName,
+		BeadsDir:      tmpDir,
+		Assignee:      assignee,
+		Beads:         b,
+	}
+
+	_, _, found, findErr := findActivePatrol(cfg)
+	if findErr != nil {
+		t.Fatalf("findActivePatrol error: %v", findErr)
+	}
+	if found {
+		t.Fatal("expected no active patrol (all stale)")
+	}
+
+	// Count how many stale patrols were actually closed
+	closedCount := 0
+	hookedCount := 0
+	for _, id := range staleIDs {
+		issue, err := b.Show(id)
+		if err != nil {
+			t.Fatalf("show stale %s: %v", id, err)
+		}
+		switch issue.Status {
+		case "closed":
+			closedCount++
+		case beads.StatusHooked:
+			hookedCount++
+		default:
+			t.Errorf("stale patrol %s unexpected status %q", id, issue.Status)
+		}
+	}
+
+	// Cleanup must be capped: at most maxStalePurgePerRun beads closed per run
+	if closedCount > maxStalePurgePerRun {
+		t.Errorf("closed %d stale patrols, want at most %d (cap exceeded — Dolt DoS risk)",
+			closedCount, maxStalePurgePerRun)
+	}
+	// But at least some cleanup must happen (the cap should not be zero)
+	if closedCount == 0 {
+		t.Errorf("no stale patrols were closed, expected up to %d", maxStalePurgePerRun)
+	}
+	// Total accounted for
+	if closedCount+hookedCount != numStale {
+		t.Errorf("closed=%d + hooked=%d != total=%d", closedCount, hookedCount, numStale)
 	}
 }
 
