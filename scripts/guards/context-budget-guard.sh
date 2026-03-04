@@ -87,12 +87,15 @@ else
     [[ -n "$TRANSCRIPT" ]] || exit 0
 
     # Parse last assistant message's token usage from the transcript.
-    # Read from the end for efficiency (tac), find first assistant message with usage,
+    # Read from the end for efficiency, find first assistant message with usage,
     # and sum all input token types: input_tokens + cache_creation + cache_read.
     #
     # Known limitation: This JSONL format is a Claude Code implementation detail.
     # If the format changes, jq will fail to match and the guard exits 0 (fail open).
-    INPUT_TOKENS=$(tac "$TRANSCRIPT" \
+    #
+    # Portability: tac is GNU coreutils (Linux); macOS has tail -r instead.
+    _reverse() { if command -v tac &>/dev/null; then tac "$1"; else tail -r "$1"; fi; }
+    INPUT_TOKENS=$(_reverse "$TRANSCRIPT" \
         | jq -r 'select(.type == "assistant" and .message.usage != null)
                   | .message.usage
                   | ((.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.cache_read_input_tokens // 0))' \
