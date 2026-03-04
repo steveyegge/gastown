@@ -281,6 +281,71 @@ func TestScanStranded_ClosesEmptyConvoys(t *testing.T) {
 	}
 }
 
+func TestScanStranded_GracePeriodSkipsRecentConvoy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows")
+	}
+
+	// Convoy created 30 seconds ago — well within the 5-minute grace period.
+	recentTime := time.Now().UTC().Add(-30 * time.Second).Format(time.RFC3339)
+	strandedJSON := fmt.Sprintf(`[{"id":"hq-new1","title":"New","tracked_count":0,"ready_count":0,"ready_issues":[],"created_at":"%s"}]`, recentTime)
+
+	paths := mockGtForScanTest(t, scanTestOpts{
+		strandedJSON: strandedJSON,
+	})
+
+	var logged []string
+	logger := func(format string, args ...interface{}) {
+		logged = append(logged, fmt.Sprintf(format, args...))
+	}
+
+	m := NewConvoyManager(paths.townRoot, logger, "gt", 10*time.Minute, nil, nil, nil)
+	m.scan()
+
+	// Convoy check must NOT have been called — grace period should protect it.
+	if _, err := os.Stat(paths.checkLogPath); err == nil {
+		data, _ := os.ReadFile(paths.checkLogPath)
+		t.Errorf("convoy check was called for recent convoy (grace period should protect): %s", data)
+	}
+
+	// Should see grace period log message.
+	found := false
+	for _, s := range logged {
+		if strings.Contains(s, "grace period") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected grace period log message, got: %v", logged)
+	}
+}
+
+func TestScanStranded_GracePeriodAllowsOldConvoy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows")
+	}
+
+	// Convoy created 10 minutes ago — past the 5-minute grace period.
+	oldTime := time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339)
+	strandedJSON := fmt.Sprintf(`[{"id":"hq-old1","title":"Old","tracked_count":0,"ready_count":0,"ready_issues":[],"created_at":"%s"}]`, oldTime)
+
+	paths := mockGtForScanTest(t, scanTestOpts{
+		strandedJSON: strandedJSON,
+	})
+
+	m := NewConvoyManager(paths.townRoot, func(string, ...interface{}) {}, "gt", 10*time.Minute, nil, nil, nil)
+	m.scan()
+
+	data, err := os.ReadFile(paths.checkLogPath)
+	if err != nil {
+		t.Fatalf("read check log: %v", err)
+	}
+	if !strings.Contains(string(data), "hq-old1") {
+		t.Errorf("expected gt convoy check for hq-old1 (past grace period), got: %q", data)
+	}
+}
+
 func TestScanStranded_NoStrandedConvoys(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on Windows")

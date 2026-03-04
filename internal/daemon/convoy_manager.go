@@ -19,15 +19,21 @@ import (
 const (
 	defaultStrandedScanInterval = 30 * time.Second
 	eventPollInterval           = 5 * time.Second
+
+	// convoyGracePeriod is how long after creation a convoy is immune from
+	// auto-close. This prevents a race where the daemon's stranded scan
+	// fires before the sling's bd dep add is visible in Dolt. See GH#2303.
+	convoyGracePeriod = 5 * time.Minute
 )
 
 // strandedConvoyInfo matches the JSON output of `gt convoy stranded --json`.
 type strandedConvoyInfo struct {
-	ID           string   `json:"id"`
-	Title        string   `json:"title"`
-	TrackedCount int      `json:"tracked_count"`
-	ReadyCount   int      `json:"ready_count"`
-	ReadyIssues  []string `json:"ready_issues"`
+	ID           string    `json:"id"`
+	Title        string    `json:"title"`
+	TrackedCount int       `json:"tracked_count"`
+	ReadyCount   int       `json:"ready_count"`
+	ReadyIssues  []string  `json:"ready_issues"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // ConvoyManager monitors beads events for issue closes and periodically scans for stranded convoys.
@@ -354,7 +360,12 @@ func (m *ConvoyManager) scan() {
 		if c.ReadyCount > 0 {
 			m.feedFirstReady(c)
 		} else if c.TrackedCount == 0 {
-			// Truly empty convoy — safe to auto-close mechanically.
+			// Empty convoy — but skip if it was just created (GH#2303).
+			// The sling's bd dep add may not be visible in Dolt yet.
+			if !c.CreatedAt.IsZero() && time.Since(c.CreatedAt) < convoyGracePeriod {
+				m.logger("Convoy %s: empty but within grace period (created %s ago) — skipping", c.ID, time.Since(c.CreatedAt).Round(time.Second))
+				continue
+			}
 			m.closeEmptyConvoy(c.ID)
 		} else {
 			// Tracked issues exist but none are ready. This requires agent
