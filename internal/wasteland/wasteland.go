@@ -96,17 +96,16 @@ func ParseUpstream(upstream string) (org, db string, err error) {
 // Uses the DoltHub fork API endpoint.
 func ForkDoltHubRepo(fromOrg, fromDB, toOrg, token string) error {
 	body := map[string]string{
-		"owner_name":     toOrg,
-		"new_repo_name":  fromDB,
-		"from_owner":     fromOrg,
-		"from_repo_name": fromDB,
+		"ownerName":          toOrg,
+		"parentOwnerName":    fromOrg,
+		"parentDatabaseName": fromDB,
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshaling fork request: %w", err)
 	}
 
-	url := dolthubAPIBase + "/database/fork"
+	url := dolthubAPIBase + "/fork"
 	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
 	if err != nil {
 		return fmt.Errorf("creating fork request: %w", err)
