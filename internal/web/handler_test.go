@@ -510,6 +510,7 @@ func TestConvoyHandler_ProgressBarRendering(t *testing.T) {
 				Progress:     "3/4",
 				Completed:    3,
 				Total:        4,
+				ProgressPct:  75,
 				LastActivity: activity.Calculate(time.Now()),
 			},
 		},
