@@ -153,6 +153,9 @@ const (
 
 	// FileQuotaJSON is the quota state file in mayor/.
 	FileQuotaJSON = "quota.json"
+
+	// FileFleetJSON is the fleet configuration file in mayor/.
+	FileFleetJSON = "fleet.json"
 )
 
 // Beads configuration constants.
@@ -392,6 +395,11 @@ func MayorAccountsPath(townRoot string) string {
 // MayorQuotaPath returns the path to mayor/quota.json within a town root.
 func MayorQuotaPath(townRoot string) string {
 	return townRoot + "/" + DirMayor + "/" + FileQuotaJSON
+}
+
+// MayorFleetPath returns the path to mayor/fleet.json within a town root.
+func MayorFleetPath(townRoot string) string {
+	return townRoot + "/" + DirMayor + "/" + FileFleetJSON
 }
 
 // DefaultRateLimitPatterns are the default patterns that indicate a session

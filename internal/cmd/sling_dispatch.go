@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/fleet"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
 )
@@ -29,6 +31,7 @@ type SlingParams struct {
 	BaseBranch string   // --base-branch
 	Account    string   // --account
 	Agent      string   // --agent
+	Machine    string   // --machine (fleet target)
 	NoConvoy   bool     // --no-convoy
 	Owned      bool     // --owned
 	NoMerge    bool     // --no-merge
@@ -219,23 +222,53 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		}
 	}
 
-	// 3. Spawn polecat (via spawnPolecatForSling)
-	spawnOpts := SlingSpawnOptions{
-		Force:      params.Force,
-		Account:    params.Account,
-		HookBead:   params.BeadID,
-		Agent:      params.Agent,
-		BaseBranch: params.BaseBranch,
-		// Create is always true for rig targets: executeSling only handles
-		// rig-targeted dispatch (batch sling + queue dispatch), where a fresh
-		// polecat must be spawned. The single-sling path (runSling) handles
-		// the --create flag for non-rig targets via resolveTarget.
-		Create: true,
-	}
-	spawnInfo, err := spawnPolecatForSling(params.RigName, spawnOpts)
-	if err != nil {
-		result.ErrMsg = err.Error()
-		return result, fmt.Errorf("failed to spawn polecat: %w", err)
+	// 3. Spawn polecat — fleet-remote or local
+	var spawnInfo *SpawnedPolecatInfo
+
+	if machineName, machine, fc := resolveFleetMachine(townRoot, params.Machine); machine != nil {
+		// Fleet dispatch: spawn on remote satellite via SSH
+		fmt.Printf("Dispatching to fleet machine %s (%s)...\n", machineName, machine.Host)
+		remoteResult, err := fleet.SpawnRemote(fc, machineName, machine, params.RigName, params.BeadID, fleet.SpawnRemoteOptions{
+			Account:    params.Account,
+			Agent:      params.Agent,
+			BaseBranch: params.BaseBranch,
+			Force:      params.Force,
+		})
+		if err != nil {
+			result.ErrMsg = err.Error()
+			return result, fmt.Errorf("fleet spawn on %s: %w", machineName, err)
+		}
+		spawnInfo = &SpawnedPolecatInfo{
+			RigName:     remoteResult.RigName,
+			PolecatName: remoteResult.PolecatName,
+			ClonePath:   remoteResult.ClonePath,
+			SessionName: remoteResult.SessionName,
+			BaseBranch:  remoteResult.BaseBranch,
+			Branch:      remoteResult.Branch,
+			Machine:     machineName,
+			account:     params.Account,
+			agent:       params.Agent,
+		}
+	} else {
+		// Local spawn (standard path)
+		spawnOpts := SlingSpawnOptions{
+			Force:      params.Force,
+			Account:    params.Account,
+			HookBead:   params.BeadID,
+			Agent:      params.Agent,
+			BaseBranch: params.BaseBranch,
+			// Create is always true for rig targets: executeSling only handles
+			// rig-targeted dispatch (batch sling + queue dispatch), where a fresh
+			// polecat must be spawned. The single-sling path (runSling) handles
+			// the --create flag for non-rig targets via resolveTarget.
+			Create: true,
+		}
+		var err error
+		spawnInfo, err = spawnPolecatForSling(params.RigName, spawnOpts)
+		if err != nil {
+			result.ErrMsg = err.Error()
+			return result, fmt.Errorf("failed to spawn polecat: %w", err)
+		}
 	}
 	result.SpawnInfo = spawnInfo
 	result.PolecatName = spawnInfo.PolecatName
@@ -357,6 +390,41 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 
 	result.Success = true
 	return result, nil
+}
+
+// resolveFleetMachine checks if fleet dispatch should be used.
+// If machineName is explicitly provided, selects that machine.
+// If machineName is empty but fleet.json exists with workers, selects via policy.
+// Returns ("", nil, nil) if fleet dispatch is not applicable (local spawn should be used).
+func resolveFleetMachine(townRoot string, machineName string) (string, *config.MachineEntry, *config.FleetConfig) {
+	fc, err := fleet.LoadConfig(townRoot)
+	if err != nil {
+		// No fleet config or invalid — fall back to local spawn
+		return "", nil, nil
+	}
+
+	if machineName != "" {
+		// Explicit machine requested
+		name, machine, err := fleet.SelectMachine(fc, machineName)
+		if err != nil {
+			// Machine not found/disabled — print warning and fall back to local
+			fmt.Printf("  Fleet warning: %v, falling back to local spawn\n", err)
+			return "", nil, nil
+		}
+		return name, machine, fc
+	}
+
+	// Auto-dispatch: if fleet has workers, use them
+	workers := fc.WorkerMachines()
+	if len(workers) == 0 {
+		return "", nil, nil
+	}
+
+	name, machine, err := fleet.SelectMachine(fc, "")
+	if err != nil {
+		return "", nil, nil
+	}
+	return name, machine, fc
 }
 
 // findTownRoot is defined in hook.go

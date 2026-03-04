@@ -130,6 +130,7 @@ var (
 	slingBaseBranch    string // --base-branch: override base branch for polecat worktree
 	slingRalph         bool   // --ralph: enable Ralph Wiggum loop mode for multi-step workflows
 	slingFormula       string // --formula: override formula for dispatch (default: mol-polecat-work)
+	slingMachine       string // --machine: target fleet machine for remote dispatch
 )
 
 func init() {
@@ -156,6 +157,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingBaseBranch, "base-branch", "", "Override base branch for polecat worktree (e.g., 'develop', 'release/v2')")
 	slingCmd.Flags().BoolVar(&slingRalph, "ralph", false, "Enable Ralph Wiggum loop mode (fresh context per step, for multi-step workflows)")
 	slingCmd.Flags().StringVar(&slingFormula, "formula", "", "Formula to apply (default: mol-polecat-work for polecat targets)")
+	slingCmd.Flags().StringVar(&slingMachine, "machine", "", "Fleet machine to dispatch to (requires mayor/fleet.json)")
 
 	slingCmd.AddCommand(slingRespawnResetCmd)
 	rootCmd.AddCommand(slingCmd)
@@ -286,6 +288,50 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	deferred, deferErr := shouldDeferDispatch()
 	if deferErr != nil {
 		return deferErr
+	}
+
+	// Fleet dispatch: when --machine is specified and target is a rig,
+	// route through executeSling which handles fleet dispatch.
+	if slingMachine != "" && len(args) == 2 {
+		if rigName, isRig := IsRigName(args[1]); isRig {
+			formulaName := resolveFormula(slingFormula, slingHookRawBead)
+			var mode string
+			if slingRalph {
+				mode = "ralph"
+			}
+			result, err := executeSling(SlingParams{
+				BeadID:           args[0],
+				FormulaName:      formulaName,
+				RigName:          rigName,
+				Args:             slingArgs,
+				Vars:             slingVars,
+				Merge:            slingMerge,
+				BaseBranch:       slingBaseBranch,
+				Account:          slingAccount,
+				Agent:            slingAgent,
+				Machine:          slingMachine,
+				NoConvoy:         slingNoConvoy,
+				Owned:            slingOwned,
+				NoMerge:          slingNoMerge,
+				Force:            slingForce,
+				HookRawBead:      slingHookRawBead,
+				NoBoot:           slingNoBoot,
+				Mode:             mode,
+				FormulaFailFatal: true,
+				CallerContext:    "sling-fleet",
+				TownRoot:         townRoot,
+				BeadsDir:         townBeadsDir,
+			})
+			if err != nil {
+				return err
+			}
+			if !slingNoBoot {
+				wakeRigAgents(rigName)
+			}
+			fmt.Printf("\n%s Slung %s to %s/%s on %s\n",
+				style.Bold.Render("✓"), args[0], rigName, result.PolecatName, slingMachine)
+			return nil
+		}
 	}
 
 	// Batch mode detection: multiple beads with optional rig target

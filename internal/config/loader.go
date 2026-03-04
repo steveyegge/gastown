@@ -2436,3 +2436,75 @@ func (c *EscalationConfig) GetMaxReescalations() int {
 	}
 	return *c.MaxReescalations
 }
+
+// LoadFleetConfig loads and validates a fleet configuration file.
+func LoadFleetConfig(path string) (*FleetConfig, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
+		}
+		return nil, fmt.Errorf("reading config: %w", err)
+	}
+
+	var config FleetConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+
+	if err := validateFleetConfig(&config); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+// SaveFleetConfig saves a fleet configuration to a file.
+func SaveFleetConfig(path string, config *FleetConfig) error {
+	if err := validateFleetConfig(config); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding config: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+
+	return nil
+}
+
+// validateFleetConfig validates a FleetConfig.
+func validateFleetConfig(c *FleetConfig) error {
+	if c.Type != "fleet" && c.Type != "" {
+		return fmt.Errorf("%w: expected type 'fleet', got '%s'", ErrInvalidType, c.Type)
+	}
+	if c.Version > CurrentFleetVersion {
+		return fmt.Errorf("%w: got %d, max supported %d", ErrInvalidVersion, c.Version, CurrentFleetVersion)
+	}
+	if c.Machines == nil {
+		c.Machines = make(map[string]*MachineEntry)
+	}
+	if c.DispatchPolicy == "" {
+		c.DispatchPolicy = "round-robin"
+	}
+	return nil
+}
+
+// WorkerMachines returns the enabled worker machines from a fleet config.
+func (c *FleetConfig) WorkerMachines() map[string]*MachineEntry {
+	workers := make(map[string]*MachineEntry)
+	for name, m := range c.Machines {
+		if m.Enabled && m.IsWorker() {
+			workers[name] = m
+		}
+	}
+	return workers
+}

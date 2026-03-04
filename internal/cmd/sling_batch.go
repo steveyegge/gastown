@@ -5,11 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/fleet"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -106,6 +108,23 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		}
 	}
 
+	// Fleet round-robin: resolve worker machine names for batch distribution
+	var fleetWorkerNames []string
+	if slingMachine == "" {
+		if fc, err := fleet.LoadConfig(townRoot); err == nil {
+			workers := fc.WorkerMachines()
+			fleetWorkerNames = make([]string, 0, len(workers))
+			for name := range workers {
+				fleetWorkerNames = append(fleetWorkerNames, name)
+			}
+			sort.Strings(fleetWorkerNames)
+			if len(fleetWorkerNames) > 0 {
+				fmt.Printf("  Fleet: round-robin across %d machines (%s)\n",
+					len(fleetWorkerNames), strings.Join(fleetWorkerNames, ", "))
+			}
+		}
+	}
+
 	// Track results for summary
 	type batchResult struct {
 		beadID  string
@@ -141,6 +160,12 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 
 		fmt.Printf("\n[%d/%d] Slinging %s...\n", i+1, len(beadIDs), beadID)
 
+		// Fleet round-robin: distribute beads across machines in batch mode
+		machineForBead := slingMachine
+		if machineForBead == "" && len(fleetWorkerNames) > 0 {
+			machineForBead = fleetWorkerNames[i%len(fleetWorkerNames)]
+		}
+
 		params := SlingParams{
 			BeadID:           beadID,
 			FormulaName:      formulaName,
@@ -151,6 +176,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			BaseBranch:       slingBaseBranch,
 			Account:          slingAccount,
 			Agent:            slingAgent,
+			Machine:          machineForBead,
 			NoConvoy:         slingNoConvoy,
 			Owned:            slingOwned,
 			NoMerge:          slingNoMerge,

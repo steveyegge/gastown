@@ -1476,3 +1476,58 @@ func NewEscalationConfig() *EscalationConfig {
 		MaxReescalations: intPtr(2),
 	}
 }
+
+// CurrentFleetVersion is the current schema version for FleetConfig.
+const CurrentFleetVersion = 1
+
+// FleetConfig represents the fleet of machines available for polecat dispatch (mayor/fleet.json).
+type FleetConfig struct {
+	Type           string                   `json:"type"`            // "fleet"
+	Version        int                      `json:"version"`         // schema version
+	Machines       map[string]*MachineEntry `json:"machines"`        // keyed by machine name
+	DispatchPolicy string                   `json:"dispatch_policy"` // "round-robin", "least-loaded", "explicit"
+	DoltHost       string                   `json:"dolt_host"`       // Tailscale IP of Dolt server
+	DoltPort       int                      `json:"dolt_port"`       // Dolt server port
+}
+
+// MachineEntry represents a single machine in the fleet.
+type MachineEntry struct {
+	Host        string   `json:"host"`                   // Tailscale IP or hostname
+	SSHAlias    string   `json:"ssh_alias,omitempty"`    // SSH config alias (e.g., "trillium-mini")
+	User        string   `json:"user,omitempty"`         // SSH user on remote machine
+	TownRoot    string   `json:"town_root,omitempty"`    // Path to gt workspace on remote machine
+	MaxPolecats int      `json:"max_polecats"`           // Max concurrent polecats (0 = no polecats)
+	Roles       []string `json:"roles"`                  // "command", "worker"
+	Enabled     bool     `json:"enabled"`                // Whether this machine accepts new dispatches
+}
+
+// IsWorker returns true if this machine has the "worker" role.
+func (m *MachineEntry) IsWorker() bool {
+	for _, r := range m.Roles {
+		if r == "worker" {
+			return true
+		}
+	}
+	return false
+}
+
+// IsCommand returns true if this machine has the "command" role.
+func (m *MachineEntry) IsCommand() bool {
+	for _, r := range m.Roles {
+		if r == "command" {
+			return true
+		}
+	}
+	return false
+}
+
+// SSHTarget returns the SSH connection target (alias preferred, falls back to user@host).
+func (m *MachineEntry) SSHTarget() string {
+	if m.SSHAlias != "" {
+		return m.SSHAlias
+	}
+	if m.User != "" {
+		return m.User + "@" + m.Host
+	}
+	return m.Host
+}

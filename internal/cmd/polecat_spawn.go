@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/fleet"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -31,6 +32,7 @@ type SpawnedPolecatInfo struct {
 	Pane        string // Tmux pane ID (empty until StartSession is called)
 	BaseBranch  string // Effective base branch (e.g., "main", "integration/epic-id")
 	Branch      string // Git branch name (for cleanup on rollback)
+	Machine     string // Fleet machine name (empty for local spawns)
 
 	// Internal fields for deferred session start
 	account string
@@ -318,9 +320,15 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 // This is called after the molecule/bead is attached, so the polecat
 // sees its work when gt prime runs on session start.
 // Returns the pane ID after session start.
+// For remote fleet spawns (Machine != ""), delegates to the satellite via SSH.
 func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	if s.SessionStarted() {
 		return s.Pane, nil
+	}
+
+	// Remote fleet polecat: start session on satellite via SSH
+	if s.Machine != "" {
+		return s.startRemoteSession()
 	}
 
 	townRoot, err := workspace.FindFromCwdOrError()
@@ -421,6 +429,60 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 
 	s.Pane = pane
 	return pane, nil
+}
+
+// startRemoteSession starts a polecat session on a remote fleet machine via SSH.
+// The satellite runs `gt fleet spawn-local` which already set up the polecat;
+// this starts the tmux session on the satellite after the bead has been hooked.
+func (s *SpawnedPolecatInfo) startRemoteSession() (string, error) {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return "", fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	fc, loadErr := fleet.LoadConfig(townRoot)
+	if loadErr != nil {
+		return "", fmt.Errorf("loading fleet config for remote session start: %w", loadErr)
+	}
+
+	machine, ok := fc.Machines[s.Machine]
+	if !ok {
+		return "", fmt.Errorf("machine %q not found in fleet config", s.Machine)
+	}
+
+	remoteTownRoot := machine.TownRoot
+	if remoteTownRoot == "" {
+		remoteTownRoot = "~/gt"
+	}
+
+	// Pass Dolt connection via flags so session-start sets env before spawning
+	cmd := fmt.Sprintf("cd %s && gt fleet session-start %s/%s",
+		remoteTownRoot, s.RigName, s.PolecatName)
+	if fc.DoltHost != "" {
+		cmd += " --dolt-host " + fc.DoltHost
+	}
+	if fc.DoltPort > 0 {
+		cmd += fmt.Sprintf(" --dolt-port %d", fc.DoltPort)
+	}
+	if s.account != "" {
+		cmd += " --account " + s.account
+	}
+	if s.agent != "" {
+		cmd += " --agent " + s.agent
+	}
+
+	sshResult, err := fleet.RunSSH(machine.SSHTarget(), cmd, 120*time.Second)
+	if err != nil {
+		stderr := ""
+		if sshResult != nil {
+			stderr = sshResult.Stderr
+		}
+		return "", fmt.Errorf("starting remote session on %s: %w\nstderr: %s", s.Machine, err, stderr)
+	}
+
+	// Remote pane is not directly accessible — set a placeholder
+	s.Pane = fmt.Sprintf("remote:%s:%s", s.Machine, s.SessionName)
+	return s.Pane, nil
 }
 
 // IsRigName checks if a target string is a rig name (not a role or path).
