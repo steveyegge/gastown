@@ -1,6 +1,12 @@
 @description('Name of the Container Apps Environment')
 param environmentName string
 
+@description('Azure AD app registration client ID')
+param azureAdClientId string = ''
+
+@description('Azure AD / Entra ID tenant ID')
+param azureAdTenantId string = ''
+
 @description('Name of the Container App')
 param appName string
 
@@ -102,6 +108,14 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'NODE_ENV'
               value: 'production'
+            }
+            {
+              name: 'AZURE_AD_CLIENT_ID'
+              value: azureAdClientId
+            }
+            {
+              name: 'AZURE_AD_TENANT_ID'
+              value: azureAdTenantId
             }
           ]
         }

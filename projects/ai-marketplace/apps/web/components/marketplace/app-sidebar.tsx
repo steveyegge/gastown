@@ -34,7 +34,9 @@ import {
   Server,
   Zap,
   ShieldCheck,
+  LogOut,
 } from "lucide-react"
+import { useAccount, useMsal } from "@azure/msal-react"
 
 interface NavItem {
   label: string
@@ -444,6 +446,49 @@ function DataSection() {
   )
 }
 
+function UserSection() {
+  const { instance } = useMsal()
+  const account = useAccount()
+
+  if (!account) return null
+
+  const initials = account.name
+    ? account.name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase()
+    : account.username[0]?.toUpperCase() ?? "?"
+
+  const handleSignOut = () => {
+    instance.logoutRedirect({ postLogoutRedirectUri: "/" }).catch(console.error)
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-secondary/30 p-3">
+      <div className="flex items-center gap-2.5">
+        {/* Avatar */}
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--optum-orange)]/20 text-xs font-bold text-[var(--optum-orange)]">
+          {initials}
+        </div>
+        {/* Name + email */}
+        <div className="flex-1 min-w-0">
+          <p className="truncate text-xs font-semibold text-foreground leading-tight">
+            {account.name ?? account.username}
+          </p>
+          <p className="truncate text-xs text-muted-foreground leading-tight">
+            {account.username}
+          </p>
+        </div>
+        {/* Sign out */}
+        <button
+          onClick={handleSignOut}
+          title="Sign out"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function SettingsSection() {
   const pathname = usePathname()
   const isSettings = pathname.startsWith("/settings")
@@ -565,17 +610,9 @@ export function AppSidebar() {
         <div className="mb-1"><SettingsSection /></div>
         <NavSection items={bottomNavItems} />
         
-        {/* Organization Badge */}
-        <div className="mt-3 rounded-lg border border-[var(--optum-orange)]/30 bg-[var(--optum-orange)]/5 p-3">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--optum-orange)]/20">
-              <Users className="h-4 w-4 text-[var(--optum-orange)]" />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-foreground">Optum RCM</p>
-              <p className="text-xs text-muted-foreground">Healthcare Revenue Cycle</p>
-            </div>
-          </div>
+        {/* Signed-in user */}
+        <div className="mt-3">
+          <UserSection />
         </div>
       </div>
     </aside>

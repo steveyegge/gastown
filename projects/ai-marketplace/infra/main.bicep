@@ -29,6 +29,12 @@ Example: ai-marketplace-cosmos-p7a65r22uhdxo
 ''')
 param existingCosmosAccountName string = ''
 
+@description('Azure AD app registration client ID (from app registration)')
+param azureAdClientId string = ''
+
+@description('Azure AD / Entra ID tenant ID')
+param azureAdTenantId string = ''
+
 var useExistingCosmos = !empty(existingCosmosAccountName)
 var suffix = uniqueString(resourceGroup().id)
 var shortSuffix = substring(suffix, 0, 8)
@@ -143,6 +149,8 @@ module containerApp 'modules/containerapp.bicep' = {
     acrName: acr.outputs.name
     appInsightsConnectionString: appInsights.outputs.connectionString
     apiBaseUrl: deployFunctions ? functions.outputs.defaultHostName : ''
+    azureAdClientId: azureAdClientId
+    azureAdTenantId: azureAdTenantId
   }
 }
 
