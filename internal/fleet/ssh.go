@@ -16,9 +16,20 @@ type SSHResult struct {
 	ExitCode int
 }
 
+// SSHExecutor is the function signature for executing SSH commands.
+// Override runSSH in tests to mock SSH without real connections.
+type SSHExecutor func(target string, command string, timeout time.Duration) (*SSHResult, error)
+
+// runSSH is the package-level SSH executor. Tests can replace this.
+var runSSH SSHExecutor = runSSHDefault
+
 // RunSSH executes a command on a remote machine via SSH.
 // The target is an SSH alias or user@host string.
 func RunSSH(target string, command string, timeout time.Duration) (*SSHResult, error) {
+	return runSSH(target, command, timeout)
+}
+
+func runSSHDefault(target string, command string, timeout time.Duration) (*SSHResult, error) {
 	// StrictHostKeyChecking=accept-new accepts unrecognized keys on first connect
 	// and remembers them, but rejects changed keys (MITM detection). This is an
 	// acceptable tradeoff for fleet machines on a Tailscale network where the
