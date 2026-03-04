@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/hookutil"
 )
 
 //go:embed config/*.json
@@ -28,12 +28,10 @@ const (
 
 // RoleTypeFor returns the RoleType for a given role name.
 func RoleTypeFor(role string) RoleType {
-	switch role {
-	case constants.RolePolecat, constants.RoleWitness, constants.RoleRefinery, constants.RoleDeacon, "boot":
+	if hookutil.IsAutonomousRole(role) {
 		return Autonomous
-	default:
-		return Interactive
 	}
+	return Interactive
 }
 
 // EnsureSettingsAt ensures a settings file exists at a custom directory/file.

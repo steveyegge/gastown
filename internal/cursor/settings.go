@@ -1,4 +1,12 @@
 // Package cursor provides Cursor agent configuration management.
+//
+// Hook schema follows Cursor's hooks API (cursor-agent v0.48+):
+//   - Config file: .cursor/hooks.json
+//   - Event names are camelCase: preToolUse, sessionStart, preCompact,
+//     beforeSubmitPrompt, stop
+//   - Entries are flat {command, matcher} objects (no nested hooks array)
+//   - Tool matchers use Shell() prefix (e.g., "Shell(gh pr create*)")
+//   - File includes a top-level "version": 1 field
 package cursor
 
 import (
@@ -7,7 +15,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/hookutil"
 )
 
 //go:embed config/*.json
@@ -28,12 +36,10 @@ const (
 
 // RoleTypeFor returns the RoleType for a given role name.
 func RoleTypeFor(role string) RoleType {
-	switch role {
-	case constants.RolePolecat, constants.RoleWitness, constants.RoleRefinery, constants.RoleDeacon, "boot":
+	if hookutil.IsAutonomousRole(role) {
 		return Autonomous
-	default:
-		return Interactive
 	}
+	return Interactive
 }
 
 // EnsureHooksAt ensures a hooks.json file exists at a custom directory/file.

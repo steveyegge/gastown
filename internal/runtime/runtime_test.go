@@ -321,7 +321,7 @@ func TestGetStartupFallbackInfo_HooksNoPrompt(t *testing.T) {
 }
 
 func TestGetStartupFallbackInfo_NoHooksWithPrompt(t *testing.T) {
-	// Codex/Cursor: no hooks, but has prompt support
+	// Codex: no hooks, but has prompt support
 	rc := &config.RuntimeConfig{
 		PromptMode: "arg",
 		Hooks: &config.RuntimeHooksConfig{
