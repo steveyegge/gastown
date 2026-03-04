@@ -593,6 +593,12 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to sync hooks for new rig: %v\n", err)
 	}
 
+	// Refresh tmux cycle bindings on all running sessions so the new rig's
+	// prefix is recognized by C-b n/p. Without this, existing sessions have
+	// a stale grep pattern that doesn't include the new prefix.
+	// See: https://github.com/steveyegge/gastown/issues/2299
+	refreshCycleBindingsOnExistingSessions()
+
 	elapsed := time.Since(startTime)
 
 	// Read default branch from rig config
@@ -897,6 +903,22 @@ func runRigRemove(cmd *cobra.Command, args []string) error {
 	fmt.Printf("To delete: %s\n", style.Dim.Render(fmt.Sprintf("rm -rf %s", filepath.Join(townRoot, name))))
 
 	return nil
+}
+
+// refreshCycleBindingsOnExistingSessions forces a refresh of the tmux C-b n/p
+// cycle bindings on any existing session. This is needed after gt rig add so
+// the new rig's prefix is included in the grep pattern.
+// Non-fatal: failure only means existing sessions need a restart to pick up the
+// new prefix.
+func refreshCycleBindingsOnExistingSessions() {
+	t := tmux.NewTmux()
+	sessions, err := t.ListSessions()
+	if err != nil || len(sessions) == 0 {
+		return
+	}
+	// Refresh bindings using any existing session as context.
+	// SetCycleBindings' stale-pattern check will detect the mismatch and re-bind.
+	_ = t.SetCycleBindings(sessions[0])
 }
 
 func runRigAdopt(_ *cobra.Command, args []string) error {
