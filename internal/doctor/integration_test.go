@@ -841,6 +841,13 @@ func setupMockBeads(t *testing.T, townRoot, rigName string) {
 			"issue_type": "role",
 			"labels":     []string{"gt:role"},
 		},
+		{
+			"id":         "hq-dog-role",
+			"title":      "Dog Role",
+			"status":     "open",
+			"issue_type": "role",
+			"labels":     []string{"gt:role"},
+		},
 	}
 
 	tf, err := os.Create(townIssuesFile)
