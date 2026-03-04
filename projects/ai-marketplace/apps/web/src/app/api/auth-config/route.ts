@@ -13,11 +13,6 @@ export async function GET(request: Request) {
   const clientId = process.env.AZURE_AD_CLIENT_ID ?? "";
   const tenantId = process.env.AZURE_AD_TENANT_ID ?? "";
 
-  // Derive redirectUri: prefer the request origin so it works on any
-  // deployment URL without re-deploying config.
-  const origin = new URL(request.url).origin;
-  const redirectUri = process.env.NEXTAUTH_URL ?? origin + "/";
-
   if (!clientId || !tenantId) {
     return Response.json(
       { error: "Azure AD client ID or tenant ID not configured" },
@@ -26,7 +21,7 @@ export async function GET(request: Request) {
   }
 
   return Response.json(
-    { clientId, tenantId, redirectUri },
+    { clientId, tenantId },
     {
       headers: {
         // Safe to cache briefly — values don't change between deploys

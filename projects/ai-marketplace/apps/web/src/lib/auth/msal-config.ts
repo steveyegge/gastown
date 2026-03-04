@@ -7,12 +7,14 @@ import {
 export interface AuthConfigResponse {
   clientId: string;
   tenantId: string;
-  redirectUri: string;
 }
 
 /**
  * Creates a fully-initialised MSAL PublicClientApplication from the
  * runtime auth config fetched from /api/auth-config.
+ *
+ * redirectUri is intentionally omitted — MSAL defaults to
+ * window.location.href which is always the correctly registered URL.
  */
 export function createMsalInstance(
   cfg: AuthConfigResponse
@@ -21,11 +23,11 @@ export function createMsalInstance(
     auth: {
       clientId: cfg.clientId,
       authority: `https://login.microsoftonline.com/${cfg.tenantId}`,
-      redirectUri: cfg.redirectUri,
+      // No redirectUri set — MSAL uses window.location.href (the SPA URL),
+      // which is exactly what's registered in the Entra ID app registration.
     },
     cache: {
       cacheLocation: BrowserCacheLocation.LocalStorage,
-      // Set true only if IE11 / cross-site-cookie issues arise
       storeAuthStateInCookie: false,
     },
     system: {

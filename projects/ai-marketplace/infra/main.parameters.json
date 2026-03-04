@@ -10,6 +10,12 @@
     },
     "environment": {
       "value": "dev"
+    },
+    "azureAdClientId": {
+      "value": "${AZURE_AD_CLIENT_ID}"
+    },
+    "azureAdTenantId": {
+      "value": "${AZURE_AD_TENANT_ID}"
     }
   }
 }
