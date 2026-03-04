@@ -129,12 +129,12 @@ gt mayor attach
 
 ```bash
 export GIT_USER="<your name>"
-export GIT_EMAIL=<your email>
-export FOLDER="/Users/you/code" 
+export GIT_EMAIL="<your email>"
+export FOLDER="/Users/you/code"
 
-docker-compose up --build -d
+docker compose up --build -d
 
-docker-compose exec gastown zsh # or bash
+docker compose exec gastown zsh # or bash
 
 gt up
 
