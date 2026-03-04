@@ -807,9 +807,21 @@ Your changes live on your fork. To merge them into the canonical commons, create
 
 **Option B: DoltHub API (curl)**
 
+The DoltHub API requires a separate API token — your Dolt CLI credentials (`dolt creds`) will **not** work. Create a token at:
+
+> https://www.dolthub.com/settings/tokens
+
+Store it securely (e.g., in an environment variable):
+
+```bash
+export DOLTHUB_API_TOKEN="dhat.v1.your-token-here"
+```
+
+Then create the PR:
+
 ```bash
 curl -X POST "https://www.dolthub.com/api/v1alpha1/steveyegge/wl-commons/pulls" \
-  -H "Authorization: token $(dolt creds check | grep 'key:' | awk '{print $NF}')" \
+  -H "Authorization: token ${DOLTHUB_API_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Register <your-handle> + complete <wanted-id>",
@@ -822,6 +834,23 @@ curl -X POST "https://www.dolthub.com/api/v1alpha1/steveyegge/wl-commons/pulls" 
     "toBranchName": "main"
   }'
 ```
+
+**Managing PRs via the API:**
+
+```bash
+# Close a PR
+curl -X PATCH "https://www.dolthub.com/api/v1alpha1/steveyegge/wl-commons/pulls/<pull_id>" \
+  -H "Authorization: token ${DOLTHUB_API_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"state": "closed"}'
+```
+
+> **Important gotchas we learned the hard way:**
+>
+> - **PRs are pinned to the commits at creation time.** If you push more commits to your fork after creating a PR, the existing PR will NOT update to include them. You must close the old PR and create a new one.
+> - **The live Wasteland board won't update until your PR is merged.** Your status changes (`claimed`, `in_review`) only exist on your fork until a maintainer merges them into the canonical `steveyegge/wl-commons`.
+> - **Dolt CLI credentials ≠ API tokens.** The CLI uses JWK credentials for push/pull. The REST API requires a separate token from your DoltHub account settings page.
+> - **Always use `https://www.dolthub.com`** (not `https://dolthub.com`) for API requests.
 
 A maintainer (trust_level 3) will review your PR. They will check:
 
