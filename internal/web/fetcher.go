@@ -165,9 +165,14 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 		var mostRecentActivity time.Time
 		var mostRecentUpdated time.Time
 		var hasAssignee bool
+		assigneeSet := make(map[string]struct{})
 		for _, t := range tracked {
 			if t.Status == "closed" {
 				row.Completed++
+			} else if t.Assignee != "" {
+				row.InProgress++
+			} else {
+				row.ReadyBeads++
 			}
 			// Track most recent activity from workers
 			if t.LastActivity.After(mostRecentActivity) {
@@ -179,10 +184,21 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 			}
 			if t.Assignee != "" {
 				hasAssignee = true
+				assigneeSet[t.Assignee] = struct{}{}
 			}
 		}
 
+		// Collect unique assignees (sorted for stable display order)
+		row.Assignees = make([]string, 0, len(assigneeSet))
+		for a := range assigneeSet {
+			row.Assignees = append(row.Assignees, a)
+		}
+		sort.Strings(row.Assignees)
+
 		row.Progress = fmt.Sprintf("%d/%d", row.Completed, row.Total)
+		if row.Total > 0 {
+			row.ProgressPct = (row.Completed * 100) / row.Total
+		}
 
 		// Calculate activity info from most recent worker activity
 		if !mostRecentActivity.IsZero() {
