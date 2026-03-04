@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow",
+        "matcher": "Shell(gh pr create*)"
+      },
+      {
+        "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow",
+        "matcher": "Shell(git checkout -b*)"
+      },
+      {
+        "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow",
+        "matcher": "Shell(git switch -c*)"
+      }
+    ],
+    "sessionStart": [
+      {
+        "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt prime --hook && gt mail check --inject"
+      }
+    ],
+    "preCompact": [
+      {
+        "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt prime --hook"
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt mail check --inject"
+      }
+    ],
+    "stop": [
+      {
+        "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt costs record"
+      }
+    ]
+  }
+}

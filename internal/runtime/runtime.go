@@ -10,6 +10,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/copilot"
+	"github.com/steveyegge/gastown/internal/cursor"
 	"github.com/steveyegge/gastown/internal/gemini"
 	"github.com/steveyegge/gastown/internal/omp"
 	"github.com/steveyegge/gastown/internal/opencode"
@@ -41,6 +42,10 @@ func init() {
 	config.RegisterHookInstaller("omp", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
 		// OMP hooks stay in workDir — loaded via --hook flag.
 		return omp.EnsureHookAt(workDir, hooksDir, hooksFile)
+	})
+	config.RegisterHookInstaller("cursor", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
+		// Cursor has no --settings flag; install hooks in workDir.
+		return cursor.EnsureHooksForRoleAt(workDir, role, hooksDir, hooksFile)
 	})
 	config.RegisterHookInstaller("pi", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
 		// Pi-mono extensions stay in workDir — loaded via -e flag.
