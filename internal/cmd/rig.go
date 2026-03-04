@@ -593,6 +593,16 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to sync hooks for new rig: %v\n", err)
 	}
 
+	// Refresh tmux cycle bindings so the new rig's prefix is included
+	// in the session pattern. Without this, C-b n/p won't cycle to the
+	// new rig's sessions until the next agent session start. See GH#2299.
+	if t := tmux.NewTmux(); t.IsAvailable() {
+		// Pass empty session — we only need to update the pattern, not
+		// the session-specific behavior. SetCycleBindings will detect
+		// the stale pattern and re-bind.
+		_ = t.SetCycleBindings("")
+	}
+
 	elapsed := time.Since(startTime)
 
 	// Read default branch from rig config

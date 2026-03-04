@@ -2734,15 +2734,22 @@ func (t *Tmux) isGTBinding(table, key string) bool {
 }
 
 // isGTBindingWithClient checks if the given key has a GT binding that includes
-// --client for multi-client support. Older GT bindings without --client cause
-// switch-client to target the wrong client when multiple clients are attached.
+// --client for multi-client support AND has an up-to-date prefix pattern.
+// Returns false if the binding is missing --client (older GT binding) or if the
+// prefix pattern is stale (e.g., a new rig was added via gt rig add). See GH#2299.
 func (t *Tmux) isGTBindingWithClient(table, key string) bool {
 	output, err := t.run("list-keys", "-T", table, key)
 	if err != nil || output == "" {
 		return false
 	}
-	return strings.Contains(output, "if-shell") && strings.Contains(output, "gt ") &&
-		strings.Contains(output, "--client")
+	if !(strings.Contains(output, "if-shell") && strings.Contains(output, "gt ") &&
+		strings.Contains(output, "--client")) {
+		return false
+	}
+	// Verify the baked-in prefix pattern matches the current rig set.
+	// sessionPrefixPattern() returns e.g. "^(gt|hq|qu)-", which is embedded
+	// in the grep command within the if-shell binding.
+	return strings.Contains(output, sessionPrefixPattern())
 }
 
 // getKeyBinding returns the current tmux command bound to the given key in the
