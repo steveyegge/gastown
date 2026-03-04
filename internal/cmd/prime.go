@@ -525,7 +525,7 @@ func findAgentWork(ctx RoleContext) *beads.Issue {
 	}
 
 	// Polecats and crew use a retry loop to handle the timing race where
-	// the hook slot write (SetHookBead) hasn't propagated to the database
+	// the agent bead or hooked work bead hasn't propagated to the database
 	// by the time gt prime runs on session startup.
 	maxAttempts := 1
 	if ctx.Role == RolePolecat || ctx.Role == RoleCrew {

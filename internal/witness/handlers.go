@@ -213,7 +213,7 @@ func HandlePolecatDoneFromBead(bd *BdCli, workDir, rigName, polecatName string, 
 // the idle transition.
 func TransitionPolecatToIdle(workDir, agentBeadID string) error {
 	bd := beads.New(beads.ResolveBeadsDir(workDir))
-	return bd.UpdateAgentState(agentBeadID, string(AgentStateIdle), nil)
+	return bd.UpdateAgentState(agentBeadID, string(AgentStateIdle))
 }
 
 // handlePolecatDonePendingMR handles a POLECAT_DONE when there's a pending MR.

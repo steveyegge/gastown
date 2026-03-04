@@ -1868,7 +1868,7 @@ func (m *Manager) Get(name string) (*Polecat, error) {
 // Valid states: "spawning", "working", "done", "stuck", "idle"
 func (m *Manager) SetAgentState(name string, state string) error {
 	agentID := m.agentBeadID(name)
-	return m.beads.UpdateAgentState(agentID, state, nil)
+	return m.beads.UpdateAgentState(agentID, state)
 }
 
 // - StateDone: assignee cleared from issue (polecat ready for cleanup)

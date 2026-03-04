@@ -13,7 +13,6 @@ import (
 	"github.com/gofrs/flock"
 
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
 )
 
@@ -259,20 +258,9 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 
 	// Note: role slot no longer set - role definitions are config-based
 
-	// Set the hook slot if specified (this is the authoritative storage)
-	// This fixes the slot inconsistency bug where bead status is 'hooked' but
-	// agent's hook slot is empty. See mi-619.
-	// Use a target Beads instance with proper BEADS_DIR routing (gt-wrnwq).
-	if fields != nil && fields.HookBead != "" {
-		target := b
-		if targetDir != b.getResolvedBeadsDir() {
-			target = NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
-		}
-		if err := target.SetHookBead(id, fields.HookBead); err != nil {
-			// Non-fatal: warn but continue - description text has the backup
-			style.PrintWarning("could not set hook slot: %v", err)
-		}
-	}
+	// Hook slot no longer maintained (hq-l6mm5). Work bead status+assignee
+	// is the authoritative source. HookBead in description is still written
+	// by FormatAgentDescription for backward compat with display readers.
 
 	return &issue, nil
 }
@@ -365,18 +353,7 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	}
 
 	// Note: role slot no longer set - role definitions are config-based
-
-	// Clear any existing hook slot (handles stale state from previous lifecycle)
-	// Use target Beads instance with proper BEADS_DIR routing (gt-wrnwq).
-	_ = target.ClearHookBead(id)
-
-	// Set the hook slot if specified
-	if fields != nil && fields.HookBead != "" {
-		if err := target.SetHookBead(id, fields.HookBead); err != nil {
-			// Non-fatal: warn but continue - description text has the backup
-			style.PrintWarning("could not set hook slot: %v", err)
-		}
-	}
+	// Hook slot no longer maintained (hq-l6mm5) - work bead status+assignee is authoritative.
 
 	// Return the updated bead
 	return target.Show(id)
@@ -433,24 +410,15 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 		return fmt.Errorf("resetting agent bead fields: %w", err)
 	}
 
-	// Also clear the hook slot in the database
-	_ = target.ClearHookBead(id)
+	// Hook slot no longer maintained (hq-l6mm5) — no need to clear.
 
 	return nil
 }
 
 // UpdateAgentState updates the agent_state field in an agent bead.
-// Optionally updates hook_bead if provided.
-//
-// IMPORTANT: This function uses the proper bd commands to update agent fields:
-// - `bd agent state` for agent_state (uses the database column directly)
-// - `bd slot set/clear` for hook_bead (uses the database column directly)
-//
-// This ensures consistency with `bd slot show` and other beads commands.
-// Previously, this function embedded these fields in the description text,
-// which caused inconsistencies with bd slot commands (see GH #gt-9v52).
-func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) (retErr error) {
-	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, hookBead, retErr) }()
+// Uses `bd agent state` command for the database column directly.
+func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
+	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, nil, retErr) }()
 	// Update agent state using bd agent state command
 	// Use runWithRouting so bd can resolve cross-prefix agent beads (e.g., wa-*
 	// agent beads from hq context) via routes.jsonl instead of BEADS_DIR.
@@ -459,70 +427,14 @@ func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) (ret
 		return fmt.Errorf("updating agent state: %w", err)
 	}
 
-	// Update hook_bead if provided
-	// Use runWithRouting for slot ops so bd can resolve cross-prefix beads
-	// (e.g., hq-* hook beads on gt-* agent beads) via routes.jsonl.
-	if hookBead != nil {
-		if *hookBead != "" {
-			// Set the hook using bd slot set
-			_, err = b.runWithRouting("slot", "set", id, "hook", *hookBead)
-			if err != nil {
-				// If slot is already occupied, clear it first then retry
-				// This handles re-slinging scenarios where we're updating the hook
-				errStr := err.Error()
-				if strings.Contains(errStr, "already occupied") {
-					_, _ = b.runWithRouting("slot", "clear", id, "hook")
-					_, err = b.runWithRouting("slot", "set", id, "hook", *hookBead)
-				}
-				if err != nil {
-					return fmt.Errorf("setting hook: %w", err)
-				}
-			}
-		} else {
-			// Clear the hook
-			_, err = b.runWithRouting("slot", "clear", id, "hook")
-			if err != nil {
-				return fmt.Errorf("clearing hook: %w", err)
-			}
-		}
-	}
+	// Hook slot no longer maintained (hq-l6mm5) — removed hook_bead parameter.
 
 	return nil
 }
 
-// SetHookBead sets the hook_bead slot on an agent bead.
-// This is a convenience wrapper that only sets the hook without changing agent_state.
-// Per gt-zecmc: agent_state ("running", "dead", "idle") is observable from tmux
-// and should not be recorded in beads ("discover, don't track" principle).
-func (b *Beads) SetHookBead(agentBeadID, hookBeadID string) error {
-	// Set the hook using bd slot set
-	// Use runWithRouting so bd can resolve cross-prefix beads (e.g., hq-* hook
-	// beads on gt-* agent beads) via routes.jsonl instead of BEADS_DIR.
-	_, err := b.runWithRouting("slot", "set", agentBeadID, "hook", hookBeadID)
-	if err != nil {
-		// If slot is already occupied, clear it first then retry
-		errStr := err.Error()
-		if strings.Contains(errStr, "already occupied") {
-			_, _ = b.runWithRouting("slot", "clear", agentBeadID, "hook")
-			_, err = b.runWithRouting("slot", "set", agentBeadID, "hook", hookBeadID)
-		}
-		if err != nil {
-			return fmt.Errorf("setting hook: %w", err)
-		}
-	}
-	return nil
-}
-
-// ClearHookBead clears the hook_bead slot on an agent bead.
-// Used when work is complete or unslung.
-func (b *Beads) ClearHookBead(agentBeadID string) error {
-	// Use runWithRouting so bd can resolve cross-prefix beads via routes.jsonl.
-	_, err := b.runWithRouting("slot", "clear", agentBeadID, "hook")
-	if err != nil {
-		return fmt.Errorf("clearing hook: %w", err)
-	}
-	return nil
-}
+// SetHookBead and ClearHookBead removed (hq-l6mm5).
+// Hook slot on agent beads is no longer maintained. Work bead status=hooked
+// and assignee=<agent> is the authoritative source for hook tracking.
 
 // AgentFieldUpdates specifies which agent description fields to update.
 // Only non-nil fields are modified; nil fields are left unchanged.
