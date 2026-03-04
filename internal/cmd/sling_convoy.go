@@ -362,9 +362,12 @@ func createBatchConvoy(beadIDs []string, rigName string, owned bool, mergeStrate
 
 	// Add tracking relations for all beads, recording which succeed.
 	// Use WithAutoCommit for the same reason as above.
+	// Cross-rig beads must be wrapped in external:<rig>:<id> format so that
+	// bd dep list can resolve them (same fix as convoy_stage.go).
 	var tracked []string
 	for _, beadID := range beadIDs {
-		depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
+		wrappedID := wrapExternalBeadID(townRoot, beadID)
+		depArgs := []string{"dep", "add", convoyID, wrappedID, "--type=tracks"}
 		if out, err := BdCmd(depArgs...).Dir(townRoot).WithAutoCommit().CombinedOutput(); err != nil {
 			// Log but continue — partial tracking is better than no tracking
 			fmt.Printf("  Warning: could not track %s in convoy: %v\nOutput: %s\n", beadID, err, out)
@@ -426,10 +429,11 @@ func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy string
 	}
 
 	// Add tracking relation: convoy tracks the issue.
-	// Pass the raw beadID and let bd handle cross-rig resolution via routes.jsonl,
-	// matching what gt convoy create/add already do (convoy.go:368, convoy.go:464).
+	// Cross-rig beads must be wrapped in external:<rig>:<id> format so that
+	// bd dep list can resolve them (same fix as convoy_stage.go).
 	// Use WithAutoCommit for the same reason as above.
-	depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
+	wrappedID := wrapExternalBeadID(townRoot, beadID)
+	depArgs := []string{"dep", "add", convoyID, wrappedID, "--type=tracks"}
 	if out, err := BdCmd(depArgs...).Dir(townRoot).WithAutoCommit().CombinedOutput(); err != nil {
 		// Tracking failed — delete the orphan convoy to prevent accumulation
 		_ = BdCmd("close", convoyID, "-r", "tracking dep failed").Dir(townRoot).Run()

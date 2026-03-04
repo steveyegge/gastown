@@ -322,7 +322,7 @@ func runMqIntegrationCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initialize beads for the rig
-	bd := beads.New(r.Path)
+	bd := beads.New(r.BeadsPath())
 
 	// 1. Verify epic exists
 	epic, err := bd.Show(epicID)
@@ -448,7 +448,7 @@ func runMqIntegrationLand(cmd *cobra.Command, args []string) error {
 	// Initialize beads and git for the rig
 	// Use getRigGit for early ref-only checks (branch exists, fetch).
 	// Work-tree operations (checkout, merge, push) use a temporary worktree created later.
-	bd := beads.New(r.Path)
+	bd := beads.New(r.BeadsPath())
 	g, err := getRigGit(r.Path)
 	if err != nil {
 		return fmt.Errorf("initializing git: %w", err)
@@ -819,7 +819,7 @@ func runMqIntegrationStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initialize beads and git for the rig
-	bd := beads.New(r.Path)
+	bd := beads.New(r.BeadsPath())
 	g, err := getRigGit(r.Path)
 	if err != nil {
 		return fmt.Errorf("initializing git: %w", err)

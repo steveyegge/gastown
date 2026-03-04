@@ -2,6 +2,9 @@
 package rig
 
 import (
+	"os"
+	"path/filepath"
+
 	"github.com/steveyegge/gastown/internal/config"
 )
 
@@ -74,16 +77,17 @@ func (r *Rig) Summary() RigSummary {
 }
 
 // BeadsPath returns the path to use for beads operations.
-// Always returns the rig root path where .beads/ contains either:
-//   - A local beads database (when repo doesn't track .beads/)
-//   - A redirect file pointing to mayor/rig/.beads (when repo tracks .beads/)
-//
-// The redirect is set up by initBeads() during rig creation and followed
-// automatically by the bd CLI and beads.ResolveBeadsDir().
-//
-// This ensures we never write to the user's repo clone (mayor/rig/) and
-// all beads operations go through the redirect system.
+// Checks mayor/rig/ first (where .beads/ with routes and config lives
+// in rigs that track .beads/ in their repo), then falls back to the
+// rig root path. This matches the resolution logic in rig_helpers.go.
 func (r *Rig) BeadsPath() string {
+	mayorRig := filepath.Join(r.Path, "mayor", "rig")
+	if info, err := os.Stat(mayorRig); err == nil && info.IsDir() {
+		beadsDir := filepath.Join(mayorRig, ".beads")
+		if _, err := os.Stat(beadsDir); err == nil {
+			return mayorRig
+		}
+	}
 	return r.Path
 }
 

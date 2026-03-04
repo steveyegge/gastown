@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base32"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -689,6 +690,7 @@ func findFormulaFile(name string) (string, error) {
 	}
 
 	// Try each path with common extensions
+	// Supports both flat names ("beads-workflow") and subfolder paths ("gt-toolkit/beads-workflow")
 	extensions := []string{".formula.toml", ".formula.json"}
 	for _, basePath := range searchPaths {
 		for _, ext := range extensions {
@@ -696,6 +698,27 @@ func findFormulaFile(name string) (string, error) {
 			if _, err := os.Stat(path); err == nil {
 				return path, nil
 			}
+		}
+	}
+
+	// Recursive search: walk subdirectories for the formula basename
+	baseName := filepath.Base(name)
+	for _, basePath := range searchPaths {
+		var found string
+		_ = filepath.WalkDir(basePath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || found != "" {
+				return err
+			}
+			for _, ext := range extensions {
+				if d.Name() == baseName+ext {
+					found = path
+					return filepath.SkipAll
+				}
+			}
+			return nil
+		})
+		if found != "" {
+			return found, nil
 		}
 	}
 

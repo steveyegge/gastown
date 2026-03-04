@@ -542,10 +542,13 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 
 	// Add 'tracks' relations for each tracked issue
 	trackedCount := 0
+	townRoot := filepath.Dir(townBeads)
 	for _, issueID := range trackedIssues {
+		// Wrap cross-rig bead IDs so bd dep can resolve them
+		wrappedID := wrapExternalBeadID(townRoot, issueID)
 		// Use --type=tracks for non-blocking tracking relation
 		var depStderr bytes.Buffer
-		if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
+		if err := BdCmd("dep", "add", convoyID, wrappedID, "--type=tracks").
 			WithAutoCommit().
 			Dir(townBeads).
 			Stderr(&depStderr).
@@ -651,9 +654,12 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 
 	// Add 'tracks' relations for each issue
 	addedCount := 0
+	townRootAdd := filepath.Dir(townBeads)
 	for _, issueID := range issuesToAdd {
+		// Wrap cross-rig bead IDs so bd dep can resolve them
+		wrappedID := wrapExternalBeadID(townRootAdd, issueID)
 		var depStderr bytes.Buffer
-		if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
+		if err := BdCmd("dep", "add", convoyID, wrappedID, "--type=tracks").
 			Dir(townBeads).
 			WithAutoCommit().
 			Stderr(&depStderr).
