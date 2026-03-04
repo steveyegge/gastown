@@ -107,7 +107,7 @@ func SpawnRemote(fleet *config.FleetConfig, machineName string, machine *config.
 
 	args := []string{
 		fmt.Sprintf("cd %s &&", townRoot),
-		"gt fleet spawn-local", rigName,
+		machine.GtBin(), "fleet spawn-local", rigName,
 		"--bead", beadID,
 		"--json",
 	}

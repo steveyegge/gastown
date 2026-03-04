@@ -456,8 +456,8 @@ func (s *SpawnedPolecatInfo) startRemoteSession() (string, error) {
 	}
 
 	// Pass Dolt connection via flags so session-start sets env before spawning
-	cmd := fmt.Sprintf("cd %s && gt fleet session-start %s/%s",
-		remoteTownRoot, s.RigName, s.PolecatName)
+	cmd := fmt.Sprintf("cd %s && %s fleet session-start %s/%s",
+		remoteTownRoot, machine.GtBin(), s.RigName, s.PolecatName)
 	if fc.DoltHost != "" {
 		cmd += " --dolt-host " + fc.DoltHost
 	}

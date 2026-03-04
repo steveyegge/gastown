@@ -274,7 +274,12 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	result.PolecatName = spawnInfo.PolecatName
 
 	targetAgent := spawnInfo.AgentID()
-	hookWorkDir := spawnInfo.ClonePath
+	// Use the local rig path for hookWorkDir, not spawnInfo.ClonePath.
+	// ClonePath may be a remote filesystem path when fleet spawns create
+	// polecats on satellite nodes. All downstream consumers (CookFormula,
+	// InstantiateFormulaOnBead, hookBeadWithRetry, updateAgentHookBead)
+	// run bd commands locally and need a local directory for Dolt routing.
+	hookWorkDir := filepath.Join(townRoot, params.RigName)
 
 	// 4. Auto-convoy (if !NoConvoy)
 	convoyID := ""

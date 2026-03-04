@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/session"
@@ -219,7 +220,13 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 		}
 		result.Agent = spawnInfo.AgentID()
 		result.NewPolecatInfo = spawnInfo
-		result.WorkDir = spawnInfo.ClonePath
+		// Use local rig path, not spawnInfo.ClonePath which may be a
+		// remote path for fleet spawns on satellite nodes (gt-rjn).
+		if townRoot != "" {
+			result.WorkDir = filepath.Join(townRoot, rigName)
+		} else {
+			result.WorkDir = spawnInfo.ClonePath
+		}
 		result.HookSetAtomically = opts.HookBead != ""
 		if !opts.NoBoot {
 			wakeRigAgents(rigName)
@@ -256,7 +263,13 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 				}
 				result.Agent = spawnInfo.AgentID()
 				result.NewPolecatInfo = spawnInfo
-				result.WorkDir = spawnInfo.ClonePath
+				// Use local rig path, not spawnInfo.ClonePath which may be a
+				// remote path for fleet spawns on satellite nodes (gt-rjn).
+				if opts.TownRoot != "" {
+					result.WorkDir = filepath.Join(opts.TownRoot, rigName)
+				} else {
+					result.WorkDir = spawnInfo.ClonePath
+				}
 				result.HookSetAtomically = opts.HookBead != ""
 				if !opts.NoBoot {
 					wakeRigAgents(rigName)

@@ -1496,6 +1496,7 @@ type MachineEntry struct {
 	SSHAlias    string   `json:"ssh_alias,omitempty"`    // SSH config alias (e.g., "trillium-mini")
 	User        string   `json:"user,omitempty"`         // SSH user on remote machine
 	TownRoot    string   `json:"town_root,omitempty"`    // Path to gt workspace on remote machine
+	GtBinary    string   `json:"gt_binary,omitempty"`    // Path to gt binary on remote machine (default: "gt")
 	MaxPolecats int      `json:"max_polecats"`           // Max concurrent polecats (0 = no polecats)
 	Roles       []string `json:"roles"`                  // "command", "worker"
 	Enabled     bool     `json:"enabled"`                // Whether this machine accepts new dispatches
@@ -1530,4 +1531,13 @@ func (m *MachineEntry) SSHTarget() string {
 		return m.User + "@" + m.Host
 	}
 	return m.Host
+}
+
+// GtBin returns the gt binary path for this machine.
+// Uses GtBinary if configured, otherwise falls back to "gt".
+func (m *MachineEntry) GtBin() string {
+	if m.GtBinary != "" {
+		return m.GtBinary
+	}
+	return "gt"
 }

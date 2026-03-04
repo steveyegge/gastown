@@ -454,7 +454,12 @@ exit /b 0
 		if beadID != "gt-abc123" {
 			t.Fatalf("unexpected beadID in rollback: %q", beadID)
 		}
-		if want := filepath.Join(townRoot, "fake-polecat"); hookWorkDir != want {
+		// hookWorkDir should be the local rig path, not spawnInfo.ClonePath
+		// (ClonePath may be remote for fleet spawns on satellites — gt-rjn).
+		// Use EvalSymlinks because workspace.FindFromCwd() resolves symlinks
+		// (e.g., /var → /private/var on macOS).
+		realRoot, _ := filepath.EvalSymlinks(townRoot)
+		if want := filepath.Join(realRoot, "gastown"); hookWorkDir != want {
 			t.Fatalf("unexpected hookWorkDir in rollback: got %q want %q", hookWorkDir, want)
 		}
 	}
@@ -683,8 +688,12 @@ exit /b 0
 		if beadID != "" {
 			t.Fatalf("unexpected beadID in rollback: %q", beadID)
 		}
-		if hookWorkDir != fakeWorkDir {
-			t.Fatalf("unexpected hookWorkDir in rollback: got %q want %q", hookWorkDir, fakeWorkDir)
+		// hookWorkDir should be the local rig path, not spawnInfo.ClonePath
+		// (ClonePath may be remote for fleet spawns on satellites — gt-rjn).
+		// Use EvalSymlinks because workspace.FindFromCwd() resolves symlinks.
+		realRoot, _ := filepath.EvalSymlinks(townRoot)
+		if want := filepath.Join(realRoot, "gastown"); hookWorkDir != want {
+			t.Fatalf("unexpected hookWorkDir in rollback: got %q want %q", hookWorkDir, want)
 		}
 	}
 
