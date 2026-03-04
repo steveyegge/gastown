@@ -113,7 +113,7 @@ export function WorkflowProperties({ nodeId, onClose }: Props) {
           <div className="space-y-1 text-xs text-gray-600">
             <div className="flex gap-2"><span className="text-blue-500">──→</span> Message / data flow</div>
             <div className="flex gap-2"><span className="text-orange-400">--→</span> Control flow (conditional)</div>
-            <div className="flex gap-2"><span className="text-green-500">~~→</span> Tool call / MCP invocation</div>
+            <div className="flex gap-2"><span className="text-green-500">~~→</span> MCP invocation</div>
           </div>
         </div>
       </div>

@@ -9,9 +9,9 @@ const NODE_PALETTE_ITEMS = [
     ],
   },
   {
-    category: "Tools",
+    category: "MCP",
     items: [
-      { type: "tool", label: "MCP Server", icon: "🔧", desc: "MCP server tool connection" },
+      { type: "tool", label: "MCP Server", icon: "🔧", desc: "MCP server connection" },
       { type: "tool", label: "API Connector", icon: "🔌", desc: "OpenAPI connector" },
     ],
   },
