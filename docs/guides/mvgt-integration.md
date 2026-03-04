@@ -96,7 +96,7 @@ This lets you pull changes from the canonical commons later. Your fork's default
 Insert a row into the `rigs` table to announce yourself to the federation:
 
 ```sql
-dolt sql -q "INSERT INTO rigs (handle, display_name, dolthub_org, trust_level, registered_at, last_seen, rig_type) VALUES ('<your-handle>', '<Your Display Name>', '<your-dolthub-org>', 1, NOW(), NOW(), 'human');"
+dolt sql -q "INSERT INTO rigs (handle, display_name, dolthub_org, trust_level, registered_at, last_seen, rig_type) VALUES ('<your-handle>', '<Your Display Name>', '<your-dolthub-org>', 0, NOW(), NOW(), 'human');"
 ```
 
 Replace `<your-handle>` with a unique identifier (lowercase, no spaces), `<Your Display Name>` with a human-readable name, and `<your-dolthub-org>` with your DoltHub username or organization. Set `rig_type` to `'human'`, `'agent'`, or `'hybrid'` as appropriate.
@@ -157,7 +157,7 @@ Purpose: Identity registry for all participants (humans, bots, CI systems) in th
 | trust_level | int | NO | 0 | Reputation tier: 0 = unverified, 1 = participant, 2 = trusted, 3 = maintainer |
 | registered_at | timestamp | NO | NULL | When the rig first registered in the commons |
 | last_seen | timestamp | NO | NULL | Last time this rig pushed or interacted with the commons |
-| rig_type | varchar(16) | NO | `'human'` | Type of participant: `human`, `bot`, or `ci` |
+| rig_type | varchar(16) | NO | `'human'` | Type of participant: `human`, `agent`, or `hybrid` |
 | parent_rig | varchar(255) | NO | NULL | Handle of the parent rig if this is a sub-agent or bot owned by another rig |
 
 ### Table: `wanted`
@@ -906,7 +906,7 @@ VALUES (
   'jorisdevreede',
   'Joris - Flywheel Rig',
   'jorisdevreede',
-  1,
+  0,
   'human',
   NOW(),
   NOW()
@@ -971,7 +971,7 @@ dolt remote add upstream "https://doltremoteapi.dolthub.com/${UPSTREAM}"
 # Register your rig
 dolt sql -q "
   INSERT INTO rigs (handle, display_name, dolthub_org, trust_level, rig_type, registered_at, last_seen)
-  VALUES ('${FORK_OWNER}', 'My Rig', '${FORK_OWNER}', 1, 'human', NOW(), NOW());
+  VALUES ('${FORK_OWNER}', 'My Rig', '${FORK_OWNER}', 0, 'human', NOW(), NOW());
 "
 
 dolt add .
@@ -989,7 +989,7 @@ cd /opt/wasteland/wl-commons
 dolt pull upstream main
 
 # Check for schema changes
-SCHEMA_VERSION=$(dolt sql -q "SELECT value FROM _meta WHERE key = 'schema_version'" -r csv | tail -1)
+SCHEMA_VERSION=$(dolt sql -q "SELECT value FROM _meta WHERE \`key\` = 'schema_version'" -r csv | tail -1)
 echo "Current schema version: ${SCHEMA_VERSION}"
 ```
 
@@ -1149,7 +1149,7 @@ Note: create forks via the DoltHub website. The API for forking is not yet stabl
 
 **Cause:** Upstream may have migrated the schema (added columns, changed types, added tables). Your local code or scripts reference the old schema.
 
-**Solution:** After each `dolt pull upstream main`, check the schema version: `SELECT value FROM _meta WHERE key = 'schema_version'`. Compare with the version your scripts expect. If the schema has changed, update your scripts to match. Review the diff with `dolt diff` to see exactly what changed.
+**Solution:** After each `dolt pull upstream main`, check the schema version: ``SELECT value FROM _meta WHERE `key` = 'schema_version'``. Compare with the version your scripts expect. If the schema has changed, update your scripts to match. Review the diff with `dolt diff` to see exactly what changed.
 
 ---
 
