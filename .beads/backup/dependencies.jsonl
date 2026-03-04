@@ -12,15 +12,21 @@
 {"created_at":"2026-03-03T16:28:06Z","created_by":"mayor","depends_on_id":"external:theoutlived:th-zkg","issue_id":"hq-cv-b6r","type":"tracks"}
 {"created_at":"2026-03-04T09:26:30Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-6av","issue_id":"hq-cv-epaku","type":"tracks"}
 {"created_at":"2026-03-04T09:25:57Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-29w","issue_id":"hq-cv-eyhjw","type":"tracks"}
+{"created_at":"2026-03-04T10:35:08Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-m6w","issue_id":"hq-cv-fil4g","type":"tracks"}
 {"created_at":"2026-03-03T15:15:26Z","created_by":"mayor","depends_on_id":"external:rally_tavern:rt-2fsz","issue_id":"hq-cv-grivg","type":"tracks"}
 {"created_at":"2026-03-03T15:12:43Z","created_by":"mayor","depends_on_id":"external:theoutlived:th-0ao","issue_id":"hq-cv-i0u","type":"tracks"}
 {"created_at":"2026-03-03T15:49:44Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-z4u","issue_id":"hq-cv-jko","type":"tracks"}
+{"created_at":"2026-03-04T10:34:23Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-1wg","issue_id":"hq-cv-ll2wy","type":"tracks"}
 {"created_at":"2026-03-04T09:28:11Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-1fm","issue_id":"hq-cv-mjeb6","type":"tracks"}
+{"created_at":"2026-03-04T10:34:34Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-phb","issue_id":"hq-cv-nnxue","type":"tracks"}
+{"created_at":"2026-03-04T10:34:47Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-jkx","issue_id":"hq-cv-ruwbu","type":"tracks"}
 {"created_at":"2026-03-04T09:25:49Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-agd","issue_id":"hq-cv-rv3vs","type":"tracks"}
 {"created_at":"2026-03-04T09:28:29Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-idp","issue_id":"hq-cv-txrei","type":"tracks"}
 {"created_at":"2026-03-04T09:26:06Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-53s","issue_id":"hq-cv-urmpy","type":"tracks"}
 {"created_at":"2026-03-04T09:28:19Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-a0d","issue_id":"hq-cv-v2l6o","type":"tracks"}
 {"created_at":"2026-03-04T09:25:41Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-djd","issue_id":"hq-cv-xctpk","type":"tracks"}
+{"created_at":"2026-03-04T10:35:31Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-3tr","issue_id":"hq-cv-zkb64","type":"tracks"}
+{"created_at":"2026-03-04T10:35:19Z","created_by":"mayor","depends_on_id":"external:lilypad_chat:lc-0jc","issue_id":"hq-cv-zle2i","type":"tracks"}
 {"created_at":"2026-03-03T16:35:59Z","created_by":"deacon","depends_on_id":"hq-wisp-tnlws","issue_id":"hq-p8uj","type":"parent-child"}
 {"created_at":"2026-03-03T16:31:18Z","created_by":"deacon","depends_on_id":"hq-wisp-fi1ur","issue_id":"hq-qen4","type":"parent-child"}
 {"created_at":"2026-03-03T16:33:22Z","created_by":"deacon","depends_on_id":"hq-wisp-xpve1","issue_id":"hq-s072","type":"parent-child"}
@@ -90,6 +96,8 @@
 {"created_at":"2026-03-04T09:33:25Z","created_by":"deacon","depends_on_id":"hq-wisp-4dlfs7","issue_id":"hq-wisp-0txc25","type":"parent-child"}
 {"created_at":"2026-03-04T00:13:25Z","created_by":"deacon","depends_on_id":"hq-wisp-eytwa","issue_id":"hq-wisp-0u640","type":"blocks"}
 {"created_at":"2026-03-04T00:13:25Z","created_by":"deacon","depends_on_id":"hq-wisp-xb6kj","issue_id":"hq-wisp-0u640","type":"parent-child"}
+{"created_at":"2026-03-04T10:28:28Z","created_by":"deacon","depends_on_id":"hq-wisp-5qd2r4","issue_id":"hq-wisp-0xby4z","type":"blocks"}
+{"created_at":"2026-03-04T10:28:28Z","created_by":"deacon","depends_on_id":"hq-wisp-8toxm3","issue_id":"hq-wisp-0xby4z","type":"parent-child"}
 {"created_at":"2026-03-04T03:43:25Z","created_by":"deacon","depends_on_id":"hq-wisp-9i37hf","issue_id":"hq-wisp-0ywip5","type":"parent-child"}
 {"created_at":"2026-03-04T04:33:25Z","created_by":"deacon","depends_on_id":"hq-wisp-e6eb9z","issue_id":"hq-wisp-0znqeq","type":"parent-child"}
 {"created_at":"2026-03-04T09:38:25Z","created_by":"deacon","depends_on_id":"hq-wisp-u1xcx0","issue_id":"hq-wisp-0zpnk7","type":"parent-child"}
@@ -423,6 +431,7 @@
 {"created_at":"2026-03-04T10:18:25Z","created_by":"deacon","depends_on_id":"hq-wisp-athgop","issue_id":"hq-wisp-4t3pwd","type":"parent-child"}
 {"created_at":"2026-03-04T10:18:25Z","created_by":"deacon","depends_on_id":"hq-wisp-yzp8gz","issue_id":"hq-wisp-4t3pwd","type":"blocks"}
 {"created_at":"2026-03-04T05:33:25Z","created_by":"deacon","depends_on_id":"hq-wisp-lq2tpf","issue_id":"hq-wisp-4tm62x","type":"parent-child"}
+{"created_at":"2026-03-04T10:38:25Z","created_by":"deacon","depends_on_id":"hq-wisp-s7caop","issue_id":"hq-wisp-4uh2d4","type":"parent-child"}
 {"created_at":"2026-03-03T16:34:32Z","created_by":"deacon","depends_on_id":"hq-wisp-my3pi","issue_id":"hq-wisp-4vb8z","type":"blocks"}
 {"created_at":"2026-03-03T16:34:32Z","created_by":"deacon","depends_on_id":"hq-wisp-tnlws","issue_id":"hq-wisp-4vb8z","type":"parent-child"}
 {"created_at":"2026-03-04T09:43:25Z","created_by":"deacon","depends_on_id":"hq-wisp-70mwlk","issue_id":"hq-wisp-4vzi16","type":"parent-child"}
@@ -472,6 +481,8 @@
 {"created_at":"2026-03-04T01:43:25Z","created_by":"deacon","depends_on_id":"hq-wisp-g35oh8","issue_id":"hq-wisp-5q29t5","type":"blocks"}
 {"created_at":"2026-03-04T01:43:25Z","created_by":"deacon","depends_on_id":"hq-wisp-i0gs0r","issue_id":"hq-wisp-5q29t5","type":"parent-child"}
 {"created_at":"2026-03-03T15:43:58Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-91ru","issue_id":"hq-wisp-5q40","type":"parent-child"}
+{"created_at":"2026-03-04T10:28:28Z","created_by":"deacon","depends_on_id":"hq-wisp-8toxm3","issue_id":"hq-wisp-5qd2r4","type":"parent-child"}
+{"created_at":"2026-03-04T10:28:28Z","created_by":"deacon","depends_on_id":"hq-wisp-nqn4su","issue_id":"hq-wisp-5qd2r4","type":"blocks"}
 {"created_at":"2026-03-04T09:28:32Z","created_by":"deacon","depends_on_id":"hq-wisp-f6ppgk","issue_id":"hq-wisp-5rnd13","type":"parent-child"}
 {"created_at":"2026-03-03T22:43:27Z","created_by":"deacon","depends_on_id":"hq-wisp-ub9y2","issue_id":"hq-wisp-5rnp3","type":"parent-child"}
 {"created_at":"2026-03-03T22:43:27Z","created_by":"deacon","depends_on_id":"hq-wisp-ygvz6","issue_id":"hq-wisp-5rnp3","type":"blocks"}
@@ -606,6 +617,7 @@
 {"created_at":"2026-03-03T23:03:25Z","created_by":"deacon","depends_on_id":"hq-wisp-qm48p","issue_id":"hq-wisp-78a3q","type":"blocks"}
 {"created_at":"2026-03-03T23:03:25Z","created_by":"deacon","depends_on_id":"hq-wisp-xhi9b","issue_id":"hq-wisp-78a3q","type":"parent-child"}
 {"created_at":"2026-03-04T00:43:34Z","created_by":"deacon","depends_on_id":"hq-wisp-l3ff7q","issue_id":"hq-wisp-78ujh9","type":"parent-child"}
+{"created_at":"2026-03-04T10:28:25Z","created_by":"deacon","depends_on_id":"hq-wisp-vftlsb","issue_id":"hq-wisp-79zzeo","type":"parent-child"}
 {"created_at":"2026-03-03T16:03:56Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-og0r","issue_id":"hq-wisp-7av4","type":"blocks"}
 {"created_at":"2026-03-03T16:03:56Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-q9qf","issue_id":"hq-wisp-7av4","type":"parent-child"}
 {"created_at":"2026-03-03T16:29:51Z","created_by":"deacon","depends_on_id":"hq-wisp-fi1ur","issue_id":"hq-wisp-7byic","type":"parent-child"}
@@ -624,6 +636,8 @@
 {"created_at":"2026-03-04T01:13:28Z","created_by":"deacon","depends_on_id":"hq-wisp-xmnz2l","issue_id":"hq-wisp-7g6oox","type":"parent-child"}
 {"created_at":"2026-03-03T16:47:14Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-3mmhp","issue_id":"hq-wisp-7i1cj","type":"blocks"}
 {"created_at":"2026-03-03T16:47:14Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-915cp","issue_id":"hq-wisp-7i1cj","type":"parent-child"}
+{"created_at":"2026-03-04T10:28:27Z","created_by":"deacon","depends_on_id":"hq-wisp-ap3bg8","issue_id":"hq-wisp-7i6i4q","type":"blocks"}
+{"created_at":"2026-03-04T10:28:27Z","created_by":"deacon","depends_on_id":"hq-wisp-cq6fb3","issue_id":"hq-wisp-7i6i4q","type":"parent-child"}
 {"created_at":"2026-03-03T22:43:28Z","created_by":"deacon","depends_on_id":"hq-wisp-w0cx3","issue_id":"hq-wisp-7ivu0","type":"parent-child"}
 {"created_at":"2026-03-04T03:58:27Z","created_by":"deacon","depends_on_id":"hq-wisp-y0t60z","issue_id":"hq-wisp-7jc2nb","type":"parent-child"}
 {"created_at":"2026-03-03T21:58:52Z","created_by":"deacon","depends_on_id":"hq-wisp-6x2oo","issue_id":"hq-wisp-7jqly","type":"parent-child"}
@@ -638,6 +652,8 @@
 {"created_at":"2026-03-04T01:43:25Z","created_by":"deacon","depends_on_id":"hq-wisp-i0gs0r","issue_id":"hq-wisp-7lv8na","type":"parent-child"}
 {"created_at":"2026-03-03T16:34:32Z","created_by":"deacon","depends_on_id":"hq-wisp-tnlws","issue_id":"hq-wisp-7m09l","type":"parent-child"}
 {"created_at":"2026-03-03T17:17:15Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-cdi7r","issue_id":"hq-wisp-7ohbc","type":"parent-child"}
+{"created_at":"2026-03-04T10:33:25Z","created_by":"deacon","depends_on_id":"hq-wisp-8lr4aq","issue_id":"hq-wisp-7ombn7","type":"parent-child"}
+{"created_at":"2026-03-04T10:33:25Z","created_by":"deacon","depends_on_id":"hq-wisp-u79tyv","issue_id":"hq-wisp-7ombn7","type":"blocks"}
 {"created_at":"2026-03-04T08:43:27Z","created_by":"deacon","depends_on_id":"hq-wisp-0rua1p","issue_id":"hq-wisp-7owj8n","type":"parent-child"}
 {"created_at":"2026-03-04T08:43:27Z","created_by":"deacon","depends_on_id":"hq-wisp-5bsx0n","issue_id":"hq-wisp-7owj8n","type":"blocks"}
 {"created_at":"2026-03-04T06:18:25Z","created_by":"deacon","depends_on_id":"hq-wisp-nbbhum","issue_id":"hq-wisp-7p4hn9","type":"parent-child"}
@@ -697,6 +713,8 @@
 {"created_at":"2026-03-04T02:33:29Z","created_by":"deacon","depends_on_id":"hq-wisp-r7s2zo","issue_id":"hq-wisp-8j2wyf","type":"blocks"}
 {"created_at":"2026-03-03T19:52:11Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-2itef","issue_id":"hq-wisp-8k2m0","type":"blocks"}
 {"created_at":"2026-03-03T19:52:11Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-uv75x","issue_id":"hq-wisp-8k2m0","type":"parent-child"}
+{"created_at":"2026-03-04T10:38:25Z","created_by":"deacon","depends_on_id":"hq-wisp-4uh2d4","issue_id":"hq-wisp-8kitjb","type":"blocks"}
+{"created_at":"2026-03-04T10:38:25Z","created_by":"deacon","depends_on_id":"hq-wisp-s7caop","issue_id":"hq-wisp-8kitjb","type":"parent-child"}
 {"created_at":"2026-03-04T00:28:25Z","created_by":"deacon","depends_on_id":"hq-wisp-raohjw","issue_id":"hq-wisp-8mlslb","type":"parent-child"}
 {"created_at":"2026-03-04T08:58:27Z","created_by":"deacon","depends_on_id":"hq-wisp-cqx5kr","issue_id":"hq-wisp-8ms6dj","type":"blocks"}
 {"created_at":"2026-03-04T08:58:27Z","created_by":"deacon","depends_on_id":"hq-wisp-oalu5i","issue_id":"hq-wisp-8ms6dj","type":"parent-child"}
@@ -874,6 +892,8 @@
 {"created_at":"2026-03-04T05:58:28Z","created_by":"deacon","depends_on_id":"hq-wisp-oe8xpn","issue_id":"hq-wisp-aokz2b","type":"parent-child"}
 {"created_at":"2026-03-04T02:03:25Z","created_by":"deacon","depends_on_id":"hq-wisp-0a53b7","issue_id":"hq-wisp-aoq2p7","type":"blocks"}
 {"created_at":"2026-03-04T02:03:25Z","created_by":"deacon","depends_on_id":"hq-wisp-dcguzq","issue_id":"hq-wisp-aoq2p7","type":"parent-child"}
+{"created_at":"2026-03-04T10:28:27Z","created_by":"deacon","depends_on_id":"hq-wisp-cq6fb3","issue_id":"hq-wisp-ap3bg8","type":"parent-child"}
+{"created_at":"2026-03-04T10:28:27Z","created_by":"deacon","depends_on_id":"hq-wisp-wh78a8","issue_id":"hq-wisp-ap3bg8","type":"blocks"}
 {"created_at":"2026-03-03T16:25:01Z","created_by":"deacon","depends_on_id":"hq-wisp-6zytn","issue_id":"hq-wisp-aq4y6","type":"parent-child"}
 {"created_at":"2026-03-03T16:25:01Z","created_by":"deacon","depends_on_id":"hq-wisp-ixsw0","issue_id":"hq-wisp-aq4y6","type":"blocks"}
 {"created_at":"2026-03-03T18:02:11Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-37ets","issue_id":"hq-wisp-aw0yg","type":"parent-child"}
@@ -884,6 +904,7 @@
 {"created_at":"2026-03-04T01:13:28Z","created_by":"deacon","depends_on_id":"hq-wisp-xmnz2l","issue_id":"hq-wisp-ay0nlf","type":"parent-child"}
 {"created_at":"2026-03-04T02:28:28Z","created_by":"deacon","depends_on_id":"hq-wisp-0za9vx","issue_id":"hq-wisp-b0dfxa","type":"parent-child"}
 {"created_at":"2026-03-04T08:13:55Z","created_by":"deacon","depends_on_id":"hq-wisp-vjbx0x","issue_id":"hq-wisp-b0eamg","type":"parent-child"}
+{"created_at":"2026-03-04T10:33:25Z","created_by":"deacon","depends_on_id":"hq-wisp-8lr4aq","issue_id":"hq-wisp-b0sqg4","type":"parent-child"}
 {"created_at":"2026-03-04T01:43:28Z","created_by":"deacon","depends_on_id":"hq-wisp-39yzcz","issue_id":"hq-wisp-b1t53i","type":"blocks"}
 {"created_at":"2026-03-04T01:43:28Z","created_by":"deacon","depends_on_id":"hq-wisp-i4ajek","issue_id":"hq-wisp-b1t53i","type":"parent-child"}
 {"created_at":"2026-03-03T15:58:58Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-lgup","issue_id":"hq-wisp-b2ls","type":"parent-child"}
@@ -1645,6 +1666,8 @@
 {"created_at":"2026-03-04T09:43:27Z","created_by":"deacon","depends_on_id":"hq-wisp-ilgvvt","issue_id":"hq-wisp-lmy4o5","type":"parent-child"}
 {"created_at":"2026-03-03T20:02:13Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-5zqbl","issue_id":"hq-wisp-locrf","type":"parent-child"}
 {"created_at":"2026-03-03T20:02:13Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-tbapv","issue_id":"hq-wisp-locrf","type":"blocks"}
+{"created_at":"2026-03-04T10:28:27Z","created_by":"deacon","depends_on_id":"hq-wisp-7i6i4q","issue_id":"hq-wisp-lp0f0z","type":"blocks"}
+{"created_at":"2026-03-04T10:28:27Z","created_by":"deacon","depends_on_id":"hq-wisp-cq6fb3","issue_id":"hq-wisp-lp0f0z","type":"parent-child"}
 {"created_at":"2026-03-03T15:43:59Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-sgfi","issue_id":"hq-wisp-lpqj","type":"parent-child"}
 {"created_at":"2026-03-04T07:43:28Z","created_by":"deacon","depends_on_id":"hq-wisp-iucqo8","issue_id":"hq-wisp-lpwlp2","type":"parent-child"}
 {"created_at":"2026-03-04T07:43:28Z","created_by":"deacon","depends_on_id":"hq-wisp-m4bq3f","issue_id":"hq-wisp-lpwlp2","type":"blocks"}
@@ -1800,6 +1823,7 @@
 {"created_at":"2026-03-03T23:53:25Z","created_by":"deacon","depends_on_id":"hq-wisp-sd430","issue_id":"hq-wisp-no9l1","type":"blocks"}
 {"created_at":"2026-03-03T23:13:25Z","created_by":"deacon","depends_on_id":"hq-wisp-p8hh8","issue_id":"hq-wisp-nos07","type":"blocks"}
 {"created_at":"2026-03-03T23:13:25Z","created_by":"deacon","depends_on_id":"hq-wisp-pyv6o","issue_id":"hq-wisp-nos07","type":"parent-child"}
+{"created_at":"2026-03-04T10:28:28Z","created_by":"deacon","depends_on_id":"hq-wisp-8toxm3","issue_id":"hq-wisp-nqn4su","type":"parent-child"}
 {"created_at":"2026-03-03T15:33:56Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-4xen","issue_id":"hq-wisp-nu97","type":"parent-child"}
 {"created_at":"2026-03-04T07:43:28Z","created_by":"deacon","depends_on_id":"hq-wisp-124rl4","issue_id":"hq-wisp-nuabme","type":"parent-child"}
 {"created_at":"2026-03-04T07:43:28Z","created_by":"deacon","depends_on_id":"hq-wisp-am7fx0","issue_id":"hq-wisp-nuabme","type":"blocks"}
@@ -1846,6 +1870,8 @@
 {"created_at":"2026-03-04T00:13:28Z","created_by":"deacon","depends_on_id":"hq-wisp-umcay","issue_id":"hq-wisp-o9dhq","type":"parent-child"}
 {"created_at":"2026-03-03T20:22:45Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-jhd4g","issue_id":"hq-wisp-o9rt5","type":"blocks"}
 {"created_at":"2026-03-03T20:22:45Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-meek2","issue_id":"hq-wisp-o9rt5","type":"parent-child"}
+{"created_at":"2026-03-04T10:28:25Z","created_by":"deacon","depends_on_id":"hq-wisp-vftlsb","issue_id":"hq-wisp-oa5lig","type":"parent-child"}
+{"created_at":"2026-03-04T10:28:25Z","created_by":"deacon","depends_on_id":"hq-wisp-wcv4zj","issue_id":"hq-wisp-oa5lig","type":"blocks"}
 {"created_at":"2026-03-03T20:47:13Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-lykuw","issue_id":"hq-wisp-obfml","type":"parent-child"}
 {"created_at":"2026-03-03T20:47:13Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-wbyq6","issue_id":"hq-wisp-obfml","type":"blocks"}
 {"created_at":"2026-03-03T16:25:01Z","created_by":"deacon","depends_on_id":"hq-wisp-6zytn","issue_id":"hq-wisp-obr3k","type":"parent-child"}
@@ -1866,6 +1892,8 @@
 {"created_at":"2026-03-03T16:34:32Z","created_by":"deacon","depends_on_id":"hq-wisp-tnlws","issue_id":"hq-wisp-oju6t","type":"parent-child"}
 {"created_at":"2026-03-03T19:32:13Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-562vx","issue_id":"hq-wisp-oksnu","type":"parent-child"}
 {"created_at":"2026-03-03T19:32:13Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-qtg3b","issue_id":"hq-wisp-oksnu","type":"blocks"}
+{"created_at":"2026-03-04T10:38:25Z","created_by":"deacon","depends_on_id":"hq-wisp-8kitjb","issue_id":"hq-wisp-oli7pn","type":"blocks"}
+{"created_at":"2026-03-04T10:38:25Z","created_by":"deacon","depends_on_id":"hq-wisp-s7caop","issue_id":"hq-wisp-oli7pn","type":"parent-child"}
 {"created_at":"2026-03-03T16:36:39Z","created_by":"deacon","depends_on_id":"hq-wisp-9blue","issue_id":"hq-wisp-omken","type":"parent-child"}
 {"created_at":"2026-03-03T16:36:39Z","created_by":"deacon","depends_on_id":"hq-wisp-wwgo8","issue_id":"hq-wisp-omken","type":"blocks"}
 {"created_at":"2026-03-04T05:43:28Z","created_by":"deacon","depends_on_id":"hq-wisp-bv1zbd","issue_id":"hq-wisp-on14kk","type":"parent-child"}
@@ -2293,6 +2321,8 @@
 {"created_at":"2026-03-04T02:28:25Z","created_by":"deacon","depends_on_id":"hq-wisp-ao8lug","issue_id":"hq-wisp-u5x34c","type":"blocks"}
 {"created_at":"2026-03-04T02:28:25Z","created_by":"deacon","depends_on_id":"hq-wisp-l3wl81","issue_id":"hq-wisp-u5x34c","type":"parent-child"}
 {"created_at":"2026-03-03T15:12:48Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-goe9","issue_id":"hq-wisp-u6fu","type":"parent-child"}
+{"created_at":"2026-03-04T10:33:25Z","created_by":"deacon","depends_on_id":"hq-wisp-8lr4aq","issue_id":"hq-wisp-u79tyv","type":"parent-child"}
+{"created_at":"2026-03-04T10:33:25Z","created_by":"deacon","depends_on_id":"hq-wisp-b0sqg4","issue_id":"hq-wisp-u79tyv","type":"blocks"}
 {"created_at":"2026-03-03T15:43:58Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-8xbz","issue_id":"hq-wisp-u7f9","type":"blocks"}
 {"created_at":"2026-03-03T15:43:58Z","created_by":"Jeremy Irish","depends_on_id":"hq-wisp-91ru","issue_id":"hq-wisp-u7f9","type":"parent-child"}
 {"created_at":"2026-03-04T05:43:28Z","created_by":"deacon","depends_on_id":"hq-wisp-fd58xq","issue_id":"hq-wisp-u7r7rt","type":"parent-child"}
@@ -2461,6 +2491,8 @@
 {"created_at":"2026-03-03T20:47:13Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-lykuw","issue_id":"hq-wisp-wbyq6","type":"parent-child"}
 {"created_at":"2026-03-03T23:08:25Z","created_by":"deacon","depends_on_id":"hq-wisp-c1ox2","issue_id":"hq-wisp-wchun","type":"blocks"}
 {"created_at":"2026-03-03T23:08:25Z","created_by":"deacon","depends_on_id":"hq-wisp-o9fhi","issue_id":"hq-wisp-wchun","type":"parent-child"}
+{"created_at":"2026-03-04T10:28:25Z","created_by":"deacon","depends_on_id":"hq-wisp-79zzeo","issue_id":"hq-wisp-wcv4zj","type":"blocks"}
+{"created_at":"2026-03-04T10:28:25Z","created_by":"deacon","depends_on_id":"hq-wisp-vftlsb","issue_id":"hq-wisp-wcv4zj","type":"parent-child"}
 {"created_at":"2026-03-03T23:13:28Z","created_by":"deacon","depends_on_id":"hq-wisp-0r38k","issue_id":"hq-wisp-we1t2","type":"blocks"}
 {"created_at":"2026-03-03T23:13:28Z","created_by":"deacon","depends_on_id":"hq-wisp-ysmkp","issue_id":"hq-wisp-we1t2","type":"parent-child"}
 {"created_at":"2026-03-04T06:48:25Z","created_by":"deacon","depends_on_id":"hq-wisp-ebl0c9","issue_id":"hq-wisp-wersof","type":"parent-child"}
@@ -2472,6 +2504,7 @@
 {"created_at":"2026-03-04T06:43:27Z","created_by":"deacon","depends_on_id":"hq-wisp-bdpfv9","issue_id":"hq-wisp-wgwiwa","type":"parent-child"}
 {"created_at":"2026-03-04T06:43:27Z","created_by":"deacon","depends_on_id":"hq-wisp-wgf543","issue_id":"hq-wisp-wgwiwa","type":"blocks"}
 {"created_at":"2026-03-03T23:43:27Z","created_by":"deacon","depends_on_id":"hq-wisp-9xa7w","issue_id":"hq-wisp-wh3m0","type":"parent-child"}
+{"created_at":"2026-03-04T10:28:27Z","created_by":"deacon","depends_on_id":"hq-wisp-cq6fb3","issue_id":"hq-wisp-wh78a8","type":"parent-child"}
 {"created_at":"2026-03-03T20:32:25Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-1dq9m","issue_id":"hq-wisp-whaoy","type":"parent-child"}
 {"created_at":"2026-03-03T20:32:25Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-82fiu","issue_id":"hq-wisp-whaoy","type":"blocks"}
 {"created_at":"2026-03-03T17:32:13Z","created_by":"vitalitek/refinery","depends_on_id":"hq-wisp-05f0s","issue_id":"hq-wisp-whvyt","type":"parent-child"}
