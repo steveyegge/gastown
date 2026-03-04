@@ -304,35 +304,33 @@ fi
 echo "Tags: $TAGS_CREATED, branches: $BRANCHES_CREATED, commits: $COMMITS_MADE, failed: $TAGS_FAILED"
 ```
 
-## Step 2: Clean up legacy epic branches
+## Step 2: Report orphaned epic branches
 
-Remove all `epic/*` branches — these were v1 noise from per-issue branching.
-Always safe to delete since they were never diverged from main.
+Report `epic/*` branches that exist but have no corresponding open epic.
+Never auto-delete — users may have epic branches they're actively using.
 
 ```bash
-echo "=== Legacy Branch Cleanup ==="
+echo "=== Epic Branch Report ==="
 CLEANED=0
 
 for DB in $DATABASES; do
-  EPIC_COUNT=$(mysql -h "$DOLT_HOST" -P "$DOLT_PORT" -u "$DOLT_USER" -N -B "$DB" \
-    -e "SELECT COUNT(*) FROM dolt_branches WHERE name LIKE 'epic/%'" 2>/dev/null)
+  ORPHAN_BRANCHES=$(mysql -h "$DOLT_HOST" -P "$DOLT_PORT" -u "$DOLT_USER" -N -B "$DB" \
+    -e "SELECT name FROM dolt_branches WHERE name LIKE 'epic/%'" 2>/dev/null)
 
-  if [ "$EPIC_COUNT" != "0" ] && [ -n "$EPIC_COUNT" ]; then
-    mysql -h "$DOLT_HOST" -P "$DOLT_PORT" -u "$DOLT_USER" -N -B "$DB" \
-      -e "SELECT name FROM dolt_branches WHERE name LIKE 'epic/%'" 2>/dev/null \
-      | while read -r BRANCH; do
-        mysql -h "$DOLT_HOST" -P "$DOLT_PORT" -u "$DOLT_USER" -N -B "$DB" \
-          -e "CALL DOLT_BRANCH('-D', '$BRANCH')" 2>/dev/null
-      done
-    CLEANED=$((CLEANED + EPIC_COUNT))
-    echo "  $DB: removed $EPIC_COUNT epic branches"
+  if [ -n "$ORPHAN_BRANCHES" ]; then
+    BRANCH_COUNT=$(echo "$ORPHAN_BRANCHES" | wc -l | tr -d ' ')
+    echo "  $DB: $BRANCH_COUNT epic branch(es)"
+    echo "$ORPHAN_BRANCHES" | while read -r BRANCH; do
+      echo "    - $BRANCH"
+    done
+    CLEANED=$((CLEANED + BRANCH_COUNT))
   fi
 done
 
 if [ "$CLEANED" -gt 0 ]; then
-  echo "  Cleaned $CLEANED legacy branches"
+  echo "  Found $CLEANED epic branches (not auto-deleted — review manually)"
 else
-  echo "  No legacy branches"
+  echo "  No epic branches"
 fi
 ```
 
@@ -414,7 +412,7 @@ fi
 ## Record Result
 
 ```bash
-SUMMARY="Snapshots v2: tags=$TAGS_CREATED, branches=$BRANCHES_CREATED, commits=$COMMITS_MADE, legacy_cleaned=$CLEANED, escalated=$ESCALATED, failed=$TAGS_FAILED"
+SUMMARY="Snapshots v2: tags=$TAGS_CREATED, branches=$BRANCHES_CREATED, commits=$COMMITS_MADE, epic_branches=$CLEANED, escalated=$ESCALATED, failed=$TAGS_FAILED"
 echo "=== $SUMMARY ==="
 
 RESULT="success"
