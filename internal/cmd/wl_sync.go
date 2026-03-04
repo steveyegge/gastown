@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
@@ -12,7 +14,10 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-var wlSyncDryRun bool
+var (
+	wlSyncDryRun bool
+	wlSyncUpgrade bool
+)
 
 var wlSyncCmd = &cobra.Command{
 	Use:   "sync",
@@ -24,13 +29,19 @@ var wlSyncCmd = &cobra.Command{
 If you have a local fork of wl-commons (created by gt wl join), this pulls
 the latest changes from upstream.
 
+Schema Evolution:
+  - MINOR version bumps (new columns): auto-applied
+  - MAJOR version bumps (breaking changes): require --upgrade flag
+
 EXAMPLES:
   gt wl sync                # Pull upstream changes
-  gt wl sync --dry-run      # Show what would change`,
+  gt wl sync --dry-run      # Show what would change
+  gt wl sync --upgrade      # Apply breaking schema changes`,
 }
 
 func init() {
 	wlSyncCmd.Flags().BoolVar(&wlSyncDryRun, "dry-run", false, "Show what would change without pulling")
+	wlSyncCmd.Flags().BoolVar(&wlSyncUpgrade, "upgrade", false, "Apply breaking schema changes (MAJOR version bumps)")
 
 	wlCmd.AddCommand(wlSyncCmd)
 }
@@ -95,6 +106,11 @@ func runWLSync(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\n%s Synced with upstream\n", style.Bold.Render("✓"))
 
+	// Check schema evolution
+	if err := checkSchemaEvolution(doltPath, forkDir, wlSyncUpgrade); err != nil {
+		return err
+	}
+
 	// Show summary
 	summaryQuery := `SELECT
 		(SELECT COUNT(*) FROM wanted WHERE status = 'open') AS open_wanted,
@@ -134,4 +150,171 @@ func findWLCommonsFork(townRoot string) string {
 	}
 
 	return ""
+}
+
+// schemaVersion represents a semantic version for schema evolution.
+type schemaVersion struct {
+	Major int
+	Minor int
+	Patch int
+}
+
+// parseSchemaVersion parses a version string like "1.2.3" or "1.2".
+func parseSchemaVersion(s string) (schemaVersion, error) {
+	s = strings.TrimSpace(s)
+	parts := strings.Split(s, ".")
+
+	var v schemaVersion
+	if len(parts) >= 1 {
+		major, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return v, fmt.Errorf("invalid major version: %s", parts[0])
+		}
+		v.Major = major
+	}
+	if len(parts) >= 2 {
+		minor, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return v, fmt.Errorf("invalid minor version: %s", parts[1])
+		}
+		v.Minor = minor
+	}
+	if len(parts) >= 3 {
+		patch, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return v, fmt.Errorf("invalid patch version: %s", parts[2])
+		}
+		v.Patch = patch
+	}
+	return v, nil
+}
+
+func (v schemaVersion) String() string {
+	return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch)
+}
+
+// getSchemaVersion queries the _meta table for the schema version.
+func getSchemaVersion(doltPath, forkDir string) (string, error) {
+	query := "SELECT value FROM _meta WHERE `key` = 'schema_version'"
+	cmd := exec.Command(doltPath, "sql", "-q", query, "-r", "csv")
+	cmd.Dir = forkDir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("querying schema version: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		return "1.0", nil // Default if not found
+	}
+	return strings.TrimSpace(lines[1]), nil
+}
+
+// getUpstreamSchemaVersion queries upstream for the schema version.
+func getUpstreamSchemaVersion(doltPath, forkDir string) (string, error) {
+	query := "SELECT value FROM _meta WHERE `key` = 'schema_version'"
+	cmd := exec.Command(doltPath, "sql", "-q", query, "-r", "csv", "--ref", "upstream/main")
+	cmd.Dir = forkDir
+	out, err := cmd.Output()
+	if err != nil {
+		// If upstream doesn't have _meta, assume same version
+		return "1.0", nil
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		return "1.0", nil
+	}
+	return strings.TrimSpace(lines[1]), nil
+}
+
+// checkSchemaEvolution compares local and upstream schema versions.
+// MINOR bumps (new columns) are auto-applied.
+// MAJOR bumps require --upgrade flag.
+func checkSchemaEvolution(doltPath, forkDir string, allowUpgrade bool) error {
+	localVer, err := getSchemaVersion(doltPath, forkDir)
+	if err != nil {
+		// Non-fatal - continue without schema check
+		return nil
+	}
+
+	upstreamVer, err := getUpstreamSchemaVersion(doltPath, forkDir)
+	if err != nil {
+		return nil
+	}
+
+	local, err := parseSchemaVersion(localVer)
+	if err != nil {
+		return nil
+	}
+
+	upstream, err := parseSchemaVersion(upstreamVer)
+	if err != nil {
+		return nil
+	}
+
+	// Same version - nothing to do
+	if local.Major == upstream.Major && local.Minor == upstream.Minor {
+		return nil
+	}
+
+	// MAJOR version bump - requires explicit upgrade
+	if upstream.Major > local.Major {
+		if !allowUpgrade {
+			fmt.Printf("\n%s Schema upgrade required: %s → %s\n",
+				style.Bold.Render("⚠"),
+				localVer, upstreamVer)
+			fmt.Printf("  Run: gt wl sync --upgrade\n")
+			fmt.Printf("\n  Breaking changes may affect your local data.\n")
+			fmt.Printf("  Review the changelog before upgrading.\n")
+			return fmt.Errorf("MAJOR schema upgrade required (use --upgrade to proceed)")
+		}
+
+		fmt.Printf("\n%s Applying MAJOR schema upgrade: %s → %s\n",
+			style.Bold.Render("⚡"), localVer, upstreamVer)
+
+		if err := applySchemaUpgrade(doltPath, forkDir, local, upstream); err != nil {
+			return fmt.Errorf("schema upgrade failed: %w", err)
+		}
+
+		fmt.Printf("%s Schema upgraded successfully\n", style.Bold.Render("✓"))
+		return nil
+	}
+
+	// MINOR version bump - auto-apply
+	if upstream.Minor > local.Minor {
+		fmt.Printf("\n%s Auto-applying schema changes: %s → %s\n",
+			style.Bold.Render("~"), localVer, upstreamVer)
+
+		if err := applySchemaUpgrade(doltPath, forkDir, local, upstream); err != nil {
+			return fmt.Errorf("schema migration failed: %w", err)
+		}
+
+		fmt.Printf("%s Schema updated\n", style.Bold.Render("✓"))
+	}
+
+	return nil
+}
+
+// applySchemaUpgrade applies schema migrations between versions.
+func applySchemaUpgrade(doltPath, forkDir string, from, to schemaVersion) error {
+	// Update the local schema version in _meta
+	query := fmt.Sprintf("UPDATE _meta SET value = '%s' WHERE `key` = 'schema_version'", to.String())
+	cmd := exec.Command(doltPath, "sql", "-q", query)
+	cmd.Dir = forkDir
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("updating schema version: %w", err)
+	}
+
+	// Commit the schema update
+	commitCmd := exec.Command(doltPath, "add", "-A")
+	commitCmd.Dir = forkDir
+	_ = commitCmd.Run()
+
+	commitMsg := fmt.Sprintf("Schema evolution: %s → %s", from.String(), to.String())
+	commitCmd = exec.Command(doltPath, "commit", "-m", commitMsg, "--allow-empty")
+	commitCmd.Dir = forkDir
+	_ = commitCmd.Run()
+
+	return nil
 }
