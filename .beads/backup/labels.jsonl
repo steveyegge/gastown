@@ -500,6 +500,10 @@
 {"issue_id":"hq-tmc","label":"from:wandering_river/refinery"}
 {"issue_id":"hq-tmc","label":"gt:message"}
 {"issue_id":"hq-tmc","label":"read"}
+{"issue_id":"hq-txbq","label":"delivery:pending"}
+{"issue_id":"hq-txbq","label":"from:daemon"}
+{"issue_id":"hq-txbq","label":"gt:message"}
+{"issue_id":"hq-txbq","label":"thread:thread-f0f439a63503"}
 {"issue_id":"hq-u4m","label":"from:lilypad_chat/witness"}
 {"issue_id":"hq-u4m","label":"gt:message"}
 {"issue_id":"hq-u4m","label":"read"}
