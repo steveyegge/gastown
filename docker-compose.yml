@@ -1,6 +1,5 @@
-# Run with 
-# GIT_USER="<your name>" GIT_EMAIL=<your email> FOLDER="/Users/you/code" docker-compose up --build -d
-version: '3.8'
+# Run with
+# GIT_USER="<your name>" GIT_EMAIL="<your email>" FOLDER="/Users/you/code" docker compose up --build -d
 
 services:
   gastown:
@@ -28,12 +27,11 @@ services:
       IS_SANDBOX: 1
     volumes:
       # FOLDER must be defined in .env file, e.g. FOLDER=/home/user
-      # or provided as an environment variable when running docker-compose, 
-      # e.g. FOLDER=/home/user docker-compose up
-      - ${FOLDER}:${FOLDER} 
-      # Add more volume mounts as needed
+      # or provided as an environment variable when running docker compose,
+      # e.g. FOLDER=/home/user docker compose up
+      - ${FOLDER}:${FOLDER}
     ports:
       - "3000:3000"
-    command: tail -f /dev/null  # Keep running indefinitely
+    command: sleep infinity
 
     # Exec into the container with: docker compose exec gastown zsh

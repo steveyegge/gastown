@@ -1,7 +1,9 @@
 .git
+.github
 .cursor
 .claude
 .beads
+.runtime
 dist
 bin
 node_modules
@@ -10,3 +12,9 @@ gt
 gt-desktop
 *.log
 *.tmp
+crew/
+mayor/
+refinery/
+polecats/
+witness/
+logs/
