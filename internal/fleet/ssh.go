@@ -19,6 +19,10 @@ type SSHResult struct {
 // RunSSH executes a command on a remote machine via SSH.
 // The target is an SSH alias or user@host string.
 func RunSSH(target string, command string, timeout time.Duration) (*SSHResult, error) {
+	// StrictHostKeyChecking=accept-new accepts unrecognized keys on first connect
+	// and remembers them, but rejects changed keys (MITM detection). This is an
+	// acceptable tradeoff for fleet machines on a Tailscale network where the
+	// transport is already authenticated and encrypted via WireGuard.
 	ctx := exec.Command("ssh",
 		"-o", "ConnectTimeout=10",
 		"-o", "BatchMode=yes",

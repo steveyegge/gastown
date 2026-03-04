@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"al.essio.dev/pkg/shellescape"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -33,6 +34,7 @@ type SpawnedPolecatInfo struct {
 	BaseBranch  string // Effective base branch (e.g., "main", "integration/epic-id")
 	Branch      string // Git branch name (for cleanup on rollback)
 	Machine     string // Fleet machine name (empty for local spawns)
+	MachineHost string // Fleet machine host/IP (empty for local spawns)
 
 	// Internal fields for deferred session start
 	account string
@@ -455,20 +457,23 @@ func (s *SpawnedPolecatInfo) startRemoteSession() (string, error) {
 		remoteTownRoot = "~/gt"
 	}
 
-	// Pass Dolt connection via flags so session-start sets env before spawning
-	cmd := fmt.Sprintf("cd %s && %s fleet session-start %s/%s",
-		remoteTownRoot, machine.GtBin(), s.RigName, s.PolecatName)
+	// Pass Dolt connection via flags so session-start sets env before spawning.
+	// All interpolated values are shell-escaped to prevent command injection.
+	cmd := fmt.Sprintf("cd %s && %s fleet session-start %s",
+		shellescape.Quote(remoteTownRoot),
+		shellescape.Quote(machine.GtBin()),
+		shellescape.Quote(s.RigName+"/"+s.PolecatName))
 	if fc.DoltHost != "" {
-		cmd += " --dolt-host " + fc.DoltHost
+		cmd += " --dolt-host " + shellescape.Quote(fc.DoltHost)
 	}
 	if fc.DoltPort > 0 {
 		cmd += fmt.Sprintf(" --dolt-port %d", fc.DoltPort)
 	}
 	if s.account != "" {
-		cmd += " --account " + s.account
+		cmd += " --account " + shellescape.Quote(s.account)
 	}
 	if s.agent != "" {
-		cmd += " --agent " + s.agent
+		cmd += " --agent " + shellescape.Quote(s.agent)
 	}
 
 	sshResult, err := fleet.RunSSH(machine.SSHTarget(), cmd, 120*time.Second)

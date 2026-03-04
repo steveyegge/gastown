@@ -520,8 +520,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 				initArgs = append(initArgs, "--prefix", opts.BeadsPrefix)
 			}
 			initArgs = append(initArgs, "--server")
-			// Forward GT_DOLT_PORT so bd connects to the correct server
-			// (e.g., ephemeral test servers in CI).
+			// Forward GT_DOLT_HOST/GT_DOLT_PORT so bd connects to the correct
+			// server (e.g., fleet satellites pointing back to primary's Dolt).
+			if h := os.Getenv("GT_DOLT_HOST"); h != "" {
+				initArgs = append(initArgs, "--server-host", h)
+			}
 			if p := os.Getenv("GT_DOLT_PORT"); p != "" {
 				initArgs = append(initArgs, "--server-port", p)
 			}

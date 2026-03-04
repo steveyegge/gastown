@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"al.essio.dev/pkg/shellescape"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -223,7 +224,7 @@ func runFleetAttach(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("machine %q not found in fleet", machineName)
 	}
 
-	sshCmd := fleet.RunSSHInteractive(machine.SSHTarget(), fmt.Sprintf("tmux attach-session -t %s", sessionName))
+	sshCmd := fleet.RunSSHInteractive(machine.SSHTarget(), fmt.Sprintf("tmux attach-session -t %s", shellescape.Quote(sessionName)))
 	sshCmd.Stdin = os.Stdin
 	sshCmd.Stdout = os.Stdout
 	sshCmd.Stderr = os.Stderr

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"al.essio.dev/pkg/shellescape"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 )
@@ -40,7 +41,10 @@ func LoadConfig(townRoot string) (*config.FleetConfig, error) {
 	return config.LoadFleetConfig(path)
 }
 
-// SelectMachine picks the next machine to dispatch to based on the fleet's dispatch policy.
+// selectCounter tracks round-robin position across calls within a process.
+var selectCounter uint64
+
+// SelectMachine picks the next machine to dispatch to based on round-robin.
 // If machineName is non-empty, it selects that specific machine.
 // Returns the machine name and entry, or an error if no suitable machine is available.
 func SelectMachine(fleet *config.FleetConfig, machineName string) (string, *config.MachineEntry, error) {
@@ -63,15 +67,17 @@ func SelectMachine(fleet *config.FleetConfig, machineName string) (string, *conf
 		return "", nil, fmt.Errorf("no enabled worker machines in fleet")
 	}
 
-	// For round-robin, sort by name for deterministic ordering
-	// (actual round-robin state tracking is in Phase 2)
 	names := make([]string, 0, len(workers))
 	for name := range workers {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
-	return names[0], workers[names[0]], nil
+	// Round-robin: use modulo to distribute across workers
+	idx := selectCounter % uint64(len(names))
+	selectCounter++
+
+	return names[idx], workers[names[idx]], nil
 }
 
 // SelectMachineRoundRobin picks machines round-robin for a batch of beads.
@@ -99,33 +105,34 @@ func SelectMachineRoundRobin(fleet *config.FleetConfig, beadIDs []string) (map[s
 // SpawnRemote dispatches a polecat spawn to a remote machine via SSH.
 // It runs `gt fleet spawn-local` on the satellite, passing Dolt connection info.
 func SpawnRemote(fleet *config.FleetConfig, machineName string, machine *config.MachineEntry, rigName string, beadID string, opts SpawnRemoteOptions) (*SpawnResult, error) {
-	// Build the remote command
+	// Build the remote command — all interpolated values are shell-escaped
+	// to prevent command injection via crafted config values.
 	townRoot := machine.TownRoot
 	if townRoot == "" {
 		townRoot = "~/gt"
 	}
 
 	args := []string{
-		fmt.Sprintf("cd %s &&", townRoot),
-		machine.GtBin(), "fleet spawn-local", rigName,
-		"--bead", beadID,
+		"cd", shellescape.Quote(townRoot), "&&",
+		shellescape.Quote(machine.GtBin()), "fleet", "spawn-local", shellescape.Quote(rigName),
+		"--bead", shellescape.Quote(beadID),
 		"--json",
 	}
 
 	if fleet.DoltHost != "" {
-		args = append(args, "--dolt-host", fleet.DoltHost)
+		args = append(args, "--dolt-host", shellescape.Quote(fleet.DoltHost))
 	}
 	if fleet.DoltPort > 0 {
 		args = append(args, "--dolt-port", fmt.Sprintf("%d", fleet.DoltPort))
 	}
 	if opts.Account != "" {
-		args = append(args, "--account", opts.Account)
+		args = append(args, "--account", shellescape.Quote(opts.Account))
 	}
 	if opts.Agent != "" {
-		args = append(args, "--agent", opts.Agent)
+		args = append(args, "--agent", shellescape.Quote(opts.Agent))
 	}
 	if opts.BaseBranch != "" {
-		args = append(args, "--base-branch", opts.BaseBranch)
+		args = append(args, "--base-branch", shellescape.Quote(opts.BaseBranch))
 	}
 	if opts.Force {
 		args = append(args, "--force")
