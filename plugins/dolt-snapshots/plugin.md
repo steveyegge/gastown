@@ -94,10 +94,10 @@ merge sequentially — no race conditions on main.
 ## Config
 
 ```bash
-DOLT_HOST="127.0.0.1"
-DOLT_PORT=3307
-DOLT_USER="root"
-ROUTES_FILE="$HOME/gt/.beads/routes.jsonl"
+DOLT_HOST="${DOLT_HOST:-127.0.0.1}"
+DOLT_PORT="${DOLT_PORT:-3307}"
+DOLT_USER="${DOLT_USER:-root}"
+ROUTES_FILE="${ROUTES_FILE:-$HOME/gt/.beads/routes.jsonl}"
 ```
 
 ## Step 1: Snapshot convoys at lifecycle boundaries
