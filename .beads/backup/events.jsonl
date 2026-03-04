@@ -24,3 +24,4 @@
 {"actor":"gastown/crew/scout","comment":null,"created_at":"2026-02-23T00:00:08Z","event_type":"closed","id":34,"issue_id":"gt-uoq","new_value":"Fixed: handoff now uses role_agents resolution","old_value":""}
 {"actor":"auditor/crew/birch","comment":null,"created_at":"2026-03-04T13:49:48Z","event_type":"created","id":35,"issue_id":"gt-032","new_value":"","old_value":""}
 {"actor":"barnaby/crew/tom","comment":null,"created_at":"2026-03-04T14:38:09Z","event_type":"created","id":36,"issue_id":"gt-sjm","new_value":"","old_value":""}
+{"actor":"barnaby/crew/tom","comment":null,"created_at":"2026-03-04T16:35:09Z","event_type":"created","id":37,"issue_id":"gt-wdm","new_value":"","old_value":""}
