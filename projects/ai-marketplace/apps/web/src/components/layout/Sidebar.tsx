@@ -11,8 +11,11 @@ import {
   Settings,
   Bot,
   Zap,
+  User,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { useMsal, useIsAuthenticated } from "@azure/msal-react";
+import { useMsalReady } from "@/lib/auth/msal-ready-context";
 
 const NAV_ITEMS = [
   { href: "/", label: "Home", icon: LayoutGrid },
@@ -24,6 +27,43 @@ const NAV_ITEMS = [
   { href: "/governance", label: "Governance", icon: ShieldCheck },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
 ];
+
+function UserSectionInner() {
+  const { accounts } = useMsal();
+  const isAuthenticated = useIsAuthenticated();
+  const account = accounts[0];
+
+  if (!isAuthenticated || !account) return null;
+
+  const initials = account.name
+    ? account.name
+        .split(" ")
+        .map((n) => n[0])
+        .slice(0, 2)
+        .join("")
+        .toUpperCase()
+    : "?";
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg px-2 py-2 mb-1 bg-azure-50">
+      <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-azure-500 text-white text-xs font-bold">
+        {initials}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium text-gray-900">
+          {account.name}
+        </p>
+        <p className="truncate text-[10px] text-gray-400">{account.username}</p>
+      </div>
+    </div>
+  );
+}
+
+function UserSection() {
+  const msalReady = useMsalReady();
+  if (!msalReady) return null;
+  return <UserSectionInner />;
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -64,7 +104,8 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="border-t p-3">
+      <div className="border-t p-3 space-y-0.5">
+        <UserSection />
         <Link
           href="/settings"
           className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
