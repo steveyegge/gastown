@@ -80,7 +80,9 @@ func (w *SchedulerWatcher) run() {
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 
-	// Run immediately on start
+	// Delay initial check to avoid thundering herd with other daemon tickers.
+	// Random jitter of 0-30s prevents all periodic DB queries from firing at once.
+	time.Sleep(jitterDuration(30 * time.Second))
 	w.checkAll()
 
 	for {
@@ -94,27 +96,36 @@ func (w *SchedulerWatcher) run() {
 }
 
 // checkAll runs all health checks.
+// Fetches the scheduler queue once and reuses it for both depth and age checks.
+// Stranded convoy check is removed — ConvoyManager already scans every 30s.
 func (w *SchedulerWatcher) checkAll() {
-	w.checkQueueDepth()
-	w.checkOldestPending()
-	w.checkStrandedConvoys()
+	items := w.fetchSchedulerQueue()
+	if items == nil {
+		return
+	}
+	w.checkQueueDepth(items)
+	w.checkOldestPending(items)
 }
 
-// checkQueueDepth alerts if scheduler queue exceeds threshold.
-func (w *SchedulerWatcher) checkQueueDepth() {
+// fetchSchedulerQueue fetches the scheduler queue once for reuse across checks.
+func (w *SchedulerWatcher) fetchSchedulerQueue() []map[string]interface{} {
 	cmd := exec.CommandContext(w.ctx, w.gtPath, "scheduler", "list", "--json")
 	out, err := cmd.Output()
 	if err != nil {
 		w.logger("Scheduler watcher: failed to list queue: %v", err)
-		return
+		return nil
 	}
 
 	var items []map[string]interface{}
 	if err := json.Unmarshal(out, &items); err != nil {
 		w.logger("Scheduler watcher: failed to parse queue: %v", err)
-		return
+		return nil
 	}
+	return items
+}
 
+// checkQueueDepth alerts if scheduler queue exceeds threshold.
+func (w *SchedulerWatcher) checkQueueDepth(items []map[string]interface{}) {
 	if len(items) > w.thresholds.QueueDepth {
 		w.sendAlert("queue-depth", "SCHEDULER: Queue depth high",
 			fmt.Sprintf("Scheduler queue has %d pending items (threshold: %d)\n\nRun 'gt scheduler list' to see pending work.", len(items), w.thresholds.QueueDepth))
@@ -122,20 +133,7 @@ func (w *SchedulerWatcher) checkQueueDepth() {
 }
 
 // checkOldestPending alerts if oldest pending item exceeds age threshold.
-func (w *SchedulerWatcher) checkOldestPending() {
-	cmd := exec.CommandContext(w.ctx, w.gtPath, "scheduler", "list", "--json")
-	out, err := cmd.Output()
-	if err != nil {
-		w.logger("Scheduler watcher: failed to list queue: %v", err)
-		return
-	}
-
-	var items []map[string]interface{}
-	if err := json.Unmarshal(out, &items); err != nil {
-		w.logger("Scheduler watcher: failed to parse queue: %v", err)
-		return
-	}
-
+func (w *SchedulerWatcher) checkOldestPending(items []map[string]interface{}) {
 	if len(items) == 0 {
 		return
 	}
@@ -151,27 +149,6 @@ func (w *SchedulerWatcher) checkOldestPending() {
 			w.sendAlert("pending-age", "SCHEDULER: Old pending work",
 				fmt.Sprintf("Oldest pending item is %v old (threshold: %v)\n\nItem may be stuck or blocked.\nRun 'gt scheduler list' to investigate.", age.Round(time.Minute), w.thresholds.PendingAge))
 		}
-	}
-}
-
-// checkStrandedConvoys alerts if too many convoys are stranded.
-func (w *SchedulerWatcher) checkStrandedConvoys() {
-	cmd := exec.CommandContext(w.ctx, w.gtPath, "convoy", "stranded", "--json")
-	out, err := cmd.Output()
-	if err != nil {
-		w.logger("Scheduler watcher: failed to list stranded: %v", err)
-		return
-	}
-
-	var convoys []map[string]interface{}
-	if err := json.Unmarshal(out, &convoys); err != nil {
-		w.logger("Scheduler watcher: failed to parse stranded: %v", err)
-		return
-	}
-
-	if len(convoys) > w.thresholds.StrandedConvoys {
-		w.sendAlert("stranded-convoys", "SCHEDULER: Too many stranded convoys",
-			fmt.Sprintf("%d convoys are stranded (threshold: %d)\n\nRun 'gt convoy stranded' to see details.", len(convoys), w.thresholds.StrandedConvoys))
 	}
 }
 

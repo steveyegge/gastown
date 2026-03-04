@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -559,6 +560,15 @@ func (d *Daemon) Run() error {
 	}
 }
 
+// jitterDuration returns a random duration between 0 and max.
+// Used to stagger ticker start times and prevent thundering herd on startup.
+func jitterDuration(max time.Duration) time.Duration {
+	if max <= 0 {
+		return 0
+	}
+	return time.Duration(rand.Int63n(int64(max)))
+}
+
 // recoveryHeartbeatInterval returns the config-driven recovery heartbeat interval.
 // Normal wake is handled by feed subscription (bd activity --follow).
 // The daemon is a safety net for dead sessions, GUPP violations, and orphaned work.
@@ -651,11 +661,11 @@ func (d *Daemon) heartbeat(state *State) {
 
 	// 9. (Removed) Stale agent check - violated "discover, don't track"
 
-	// 10. Check for GUPP violations (agents with work-on-hook not progressing)
-	d.checkGUPPViolations()
-
-	// 11. Check for orphaned work (assigned to dead agents)
-	d.checkOrphanedWork()
+	// 10-11. Check GUPP violations and orphaned work using a single agent bead fetch.
+	// Both checks need the same agent bead data; fetching once eliminates 2 of 4 bd spawns.
+	agentBeadsJSON := d.fetchAgentBeadsJSON()
+	d.checkGUPPViolations(agentBeadsJSON)
+	d.checkOrphanedWork(agentBeadsJSON)
 
 	// 12. Check polecat session health (proactive crash detection)
 	// This validates tmux sessions are still alive for polecats with work-on-hook

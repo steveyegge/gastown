@@ -993,21 +993,42 @@ func mergeAgentBeadJSON(wispJSON, issuesJSON []byte) []byte {
 	return combined
 }
 
+// fetchAgentBeadsJSON fetches agent bead data once for reuse by GUPP and orphan checks.
+// Returns the raw merged JSON so callers can unmarshal into their own struct shapes.
+func (d *Daemon) fetchAgentBeadsJSON() []byte {
+	// Query issues table (backward compat during migration)
+	cmd := exec.Command(d.bdPath, "list", "--label=gt:agent", "--json") //nolint:gosec // G204: bd is a trusted internal tool
+	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ()
+	issuesOutput, issuesErr := cmd.Output()
+
+	// Query wisps table (primary source after agent bead migration)
+	wispCmd := exec.Command(d.bdPath, "mol", "wisp", "list", "--json") //nolint:gosec // G204: bd is a trusted internal tool
+	wispCmd.Dir = d.config.TownRoot
+	wispCmd.Env = os.Environ()
+	wispOutput, _ := wispCmd.Output() // Best-effort: wisps table may not exist
+
+	combined := mergeAgentBeadJSON(wispOutput, issuesOutput)
+	if combined == nil && issuesErr != nil {
+		d.logger.Printf("Warning: fetching agent beads failed: %v", issuesErr)
+	}
+	return combined
+}
+
 // checkGUPPViolations looks for agents that have work-on-hook but aren't
 // progressing. This is a GUPP violation: agents with hooked work must execute.
 // The daemon detects these and notifies the relevant Witness for remediation.
-func (d *Daemon) checkGUPPViolations() {
+func (d *Daemon) checkGUPPViolations(cachedJSON []byte) {
 	// Check polecat agents - they're the ones with work-on-hook
 	rigs := d.getKnownRigs()
 	for _, rigName := range rigs {
-		d.checkRigGUPPViolations(rigName)
+		d.checkRigGUPPViolations(rigName, cachedJSON)
 	}
 }
 
 // checkRigGUPPViolations checks polecats in a specific rig for GUPP violations.
-func (d *Daemon) checkRigGUPPViolations(rigName string) {
-	// List polecat agent beads for this rig (issues + wisps tables)
-	// Pattern: <prefix>-<rig>-polecat-<name> (e.g., gt-gastown-polecat-Toast)
+func (d *Daemon) checkRigGUPPViolations(rigName string, cachedJSON []byte) {
+	// Parse cached agent bead data
 	var agents []struct {
 		ID          string   `json:"id"`
 		Description string   `json:"description"`
@@ -1018,8 +1039,11 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 		Type        string   `json:"issue_type"`
 	}
 
-	if err := d.listAgentBeadsJSON(&agents); err != nil {
-		d.logger.Printf("Warning: listing agent beads failed for GUPP check: %v", err)
+	if cachedJSON == nil {
+		return
+	}
+	if err := json.Unmarshal(cachedJSON, &agents); err != nil {
+		d.logger.Printf("Warning: parsing agent beads for GUPP check: %v", err)
 		return
 	}
 
@@ -1090,17 +1114,17 @@ Action needed: Check if agent is alive and responsive. Consider restarting if st
 // checkOrphanedWork looks for work assigned to dead agents.
 // Orphaned work needs to be reassigned or the agent needs to be restarted.
 // Per gt-zecmc: derive agent liveness from tmux, not agent_state.
-func (d *Daemon) checkOrphanedWork() {
+func (d *Daemon) checkOrphanedWork(cachedJSON []byte) {
 	// Check all polecat agents with hooked work
 	rigs := d.getKnownRigs()
 	for _, rigName := range rigs {
-		d.checkRigOrphanedWork(rigName)
+		d.checkRigOrphanedWork(rigName, cachedJSON)
 	}
 }
 
 // checkRigOrphanedWork checks polecats in a specific rig for orphaned work.
-func (d *Daemon) checkRigOrphanedWork(rigName string) {
-	// List polecat agent beads (issues + wisps tables)
+func (d *Daemon) checkRigOrphanedWork(rigName string, cachedJSON []byte) {
+	// Parse cached agent bead data
 	var agents []struct {
 		ID       string   `json:"id"`
 		HookBead string   `json:"hook_bead"`
@@ -1108,8 +1132,11 @@ func (d *Daemon) checkRigOrphanedWork(rigName string) {
 		Type     string   `json:"issue_type"`
 	}
 
-	if err := d.listAgentBeadsJSON(&agents); err != nil {
-		d.logger.Printf("Warning: listing agent beads failed for orphaned work check: %v", err)
+	if cachedJSON == nil {
+		return
+	}
+	if err := json.Unmarshal(cachedJSON, &agents); err != nil {
+		d.logger.Printf("Warning: parsing agent beads for orphaned work check: %v", err)
 		return
 	}
 
