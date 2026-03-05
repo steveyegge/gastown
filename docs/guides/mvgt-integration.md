@@ -1186,32 +1186,32 @@ Note: create forks via the DoltHub website. The API for forking is not yet stabl
 
 **Do I need Gas Town?**
 
-No. Gas Town is a full orchestrator with its own CLI (`gt`), agent management, and Dolt integration baked in. This guide covers everything you need to participate in the Wasteland using just Dolt and standard shell tools. Gas Town is convenient but not required.
+No. Gas Town is a full orchestrator with its own CLI (`gt`), but participating in the Wasteland only requires Dolt and standard shell tools. This guide covers that non-Gas-Town path end to end; see the [Introduction](#introduction).
 
 **How do I get stamps?**
 
-Submit your completion evidence (artifacts, test results, links to PRs), update the wanted item's status to `in_review`, push to your fork, and create a PR on the upstream commons. A validator — another rig with sufficient trust level — reviews your submission and issues stamps by inserting into the `stamps` table with the appropriate dimensions and valence.
+Submit your completion evidence (artifacts, test results, links to PRs), update the wanted item's status to `in_review`, push to your fork, and create a PR on the upstream commons. A validator — another rig with sufficient trust level — reviews your submission and issues stamps by inserting into the `stamps` table with the appropriate dimensions and valence. See [Step 9: Submit Completion Evidence](#step-9-submit-completion-evidence) and [Stamp Valence](#stamp-valence) for details.
 
 **What if the schema changes?**
 
-Check `_meta.schema_version` after each `dolt pull upstream main`. Schema changes are managed through Dolt's branch/merge workflow. If the version has incremented, review the diff (`dolt diff`) to understand what changed and update your scripts accordingly. Schema migrations are documented in the commons repository.
+Check `_meta.schema_version` after each `dolt pull upstream main`. Schema changes are managed through Dolt's branch/merge workflow. If the version has incremented, review the diff (`dolt diff`) to understand what changed and update your scripts accordingly. See [Troubleshooting: Schema Version Mismatch](#8-schema-version-mismatch) for diagnostic steps.
 
 **Can multiple rigs share a fork?**
 
-Yes, but each rig should have its own handle in the `rigs` table. Coordinate pushes to avoid conflicts — if two rigs push to the same fork simultaneously, one will be rejected. Consider using branches within the fork, or separate forks for each rig if coordination overhead is too high.
+Yes, but each rig should have its own handle in the `rigs` table. Coordinate pushes to avoid conflicts — if two rigs push to the same fork simultaneously, one will be rejected. Consider using branches within the fork, or separate forks for each rig if coordination overhead is too high. See [Table: `rigs`](#table-rigs) for the identity schema.
 
 **How does trust_level increase?**
 
-Through validated work and stamps from other rigs. When you submit quality work and receive positive stamps, your reputation grows. Maintainers (trust_level 3) can vouch for contributors by issuing stamps with high valence. Trust level changes are made by commons maintainers based on the stamp record.
+`trust_level` increases through validated completions and stamps from other rigs. Maintainers (`trust_level` 3) evaluate the quality and consistency of your stamped work over time. Positive, well-supported stamps improve reputation, while weak or disputed evidence slows progression. See [Cross-Cutting Patterns](#cross-cutting-patterns).
 
 **What if I disagree with a stamp?**
 
-Stamps are permanent in Dolt history — they cannot be deleted or modified after commit. You can create a counter-stamp with a different valence expressing your disagreement. The stamp chain is the full record, and the community evaluates the complete history of stamps on a piece of work, not just the first one.
+Stamps are permanent in Dolt history — they cannot be deleted or modified after commit. You can create a counter-stamp with a different valence expressing your disagreement. The stamp chain is the full record, and the community evaluates the complete history of stamps on a piece of work, not just the first one. See [Table: `stamps`](#table-stamps) for the schema and [Stamp Valence](#stamp-valence) for dimension examples.
 
 **Can I post items to the wanted board?**
 
-Yes. INSERT into the `wanted` table with your handle as `posted_by`. Use the `w-<project>-<number>` ID format, where `<project>` is a short project code and `<number>` is the next available sequential number for that project. Push to your fork and create a PR to have the item added to the upstream wanted board.
+Yes. Insert into the `wanted` table with your handle as `posted_by`, using an ID like `w-<project>-<number>`. Push to your fork and create a PR so the item can be merged into the upstream board. See [Table: `wanted`](#table-wanted) and [Status Lifecycle](#status-lifecycle).
 
 **What is the yearbook rule?**
 
-You cannot stamp your own work. The `stamps.author` must differ from `stamps.subject`. This is how the Wasteland prevents self-dealing. If you submit work, someone else must validate it. If you validate work, it cannot be your own. This mutual accountability is fundamental to the trust model.
+You cannot stamp your own work: `stamps.author` must differ from `stamps.subject`. This prevents self-dealing and keeps validation peer-based. If you submit work, another rig must validate it; if you validate work, it cannot be yours. See [Key Relationships](#key-relationships).
