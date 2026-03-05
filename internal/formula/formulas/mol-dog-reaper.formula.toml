@@ -94,8 +94,11 @@ gt reaper reap --db=<name> --port={{dolt_port}} \\
 ```
 
 **2. Inspect results:**
-- Verify reaped count matches scan expectations
-- Check for any anomalies in the response
+- Note: reap count may differ from scan count — this is expected and NOT an anomaly.
+  Scan and reap run at different times; wisps may close naturally between steps
+  (polecats completing work) or be reaped by a concurrent formula run.
+  A reap count of 0 when scan found candidates is normal churn, not a bug.
+- Check for any anomalies in the response (Dolt commit failures are the real concern).
 
 **3. Alert check:**
 If total open wisps across all databases exceed {{alert_threshold}},

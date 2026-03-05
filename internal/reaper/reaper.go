@@ -22,7 +22,8 @@ import (
 var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 // DefaultDatabases is the static fallback list of known production databases.
-var DefaultDatabases = []string{"hq", "beads", "gt"}
+// Used only when DiscoverDatabases fails (e.g., Dolt server unreachable).
+var DefaultDatabases = []string{"beads_gt", "beads_hq", "beads", "gt"}
 
 // testPollutionPrefixes are database name prefixes created by tests.
 var testPollutionPrefixes = []string{"testdb_", "beads_t", "beads_pt", "doctest_"}

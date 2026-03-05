@@ -24,19 +24,21 @@ and orphaned dog sessions (tmux session exists but dog not in kennel).
 
 ## Step 1: Get valid rig prefixes
 
-Fetch the rig registry to know which session prefixes are legitimate:
+Fetch the rig registry to know which session prefixes are legitimate.
+Session names use the bead prefix (e.g. `mm` for meety_me, `rt` for rally_tavern),
+not the full rig name. Read prefixes from `rigs.json` directly.
 
 ```bash
-RIG_JSON=$(gt rig list --json 2>/dev/null)
-if [ $? -ne 0 ] || [ -z "$RIG_JSON" ]; then
-  echo "SKIP: could not get rig list"
+RIGS_JSON_FILE="$HOME/gt/mayor/rigs.json"
+if [ ! -f "$RIGS_JSON_FILE" ]; then
+  echo "SKIP: rigs.json not found at $RIGS_JSON_FILE"
   exit 0
 fi
 
-# Extract rig names as valid prefixes
-VALID_PREFIXES=$(echo "$RIG_JSON" | jq -r '.[].name // empty' 2>/dev/null)
+# Extract bead prefixes from rigs.json (structure: {version, rigs: {<name>: {beads: {prefix: "mm"}}}})
+VALID_PREFIXES=$(jq -r '.rigs | to_entries[] | .value.beads.prefix // empty' "$RIGS_JSON_FILE" 2>/dev/null)
 if [ -z "$VALID_PREFIXES" ]; then
-  echo "SKIP: no rigs found in registry"
+  echo "SKIP: no rig prefixes found in rigs.json"
   exit 0
 fi
 ```

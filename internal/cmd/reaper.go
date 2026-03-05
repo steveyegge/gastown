@@ -43,7 +43,7 @@ var reaperDatabasesCmd = &cobra.Command{
 	Use:   "databases",
 	Short: "List databases available for reaping",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dbs := reaper.DefaultDatabases
+		dbs := reaper.DiscoverDatabases("127.0.0.1", reaperPort)
 		if reaperJSON {
 			fmt.Println(reaper.FormatJSON(dbs))
 		} else {
@@ -352,6 +352,7 @@ func init() {
 		cmd.Flags().IntVar(&reaperPort, "port", 3307, "Dolt server port")
 		cmd.Flags().BoolVar(&reaperDryRun, "dry-run", false, "Report what would happen without acting")
 	}
+	reaperDatabasesCmd.Flags().IntVar(&reaperPort, "port", 3307, "Dolt server port")
 
 	// JSON output flag for single-db commands
 	for _, cmd := range []*cobra.Command{reaperScanCmd, reaperReapCmd, reaperPurgeCmd, reaperAutoCloseCmd, reaperDatabasesCmd} {
