@@ -1587,3 +1587,107 @@ func TestClearPushURL(t *testing.T) {
 		t.Errorf("ClearPushURL (idempotent) should not error, got: %v", err)
 	}
 }
+
+func TestIsGasTownRuntimePath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{".claude/", true},
+		{".claude/settings.json", true},
+		{".claude/commands/foo.md", true},
+		{".claude", true},
+		{".runtime/", true},
+		{".runtime/state.json", true},
+		{".runtime", true},
+		{".beads/", true},
+		{".beads/db.json", true},
+		{".logs/agent.log", true},
+		{"__pycache__/", true},
+		{"__pycache__/foo.cpython-312.pyc", true},
+		{"src/__pycache__/bar.pyc", true},
+		{"src/main.go", false},
+		{"README.md", false},
+		{".gitignore", false},
+		{"claude-stuff/foo", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got := isGasTownRuntimePath(tt.path)
+			if got != tt.want {
+				t.Errorf("isGasTownRuntimePath(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCleanExcludingRuntime(t *testing.T) {
+	tests := []struct {
+		name string
+		s    UncommittedWorkStatus
+		want bool
+	}{
+		{
+			name: "only runtime artifacts",
+			s: UncommittedWorkStatus{
+				HasUncommittedChanges: true,
+				UntrackedFiles:        []string{".claude/", ".runtime/state.json"},
+			},
+			want: true,
+		},
+		{
+			name: "real code changes",
+			s: UncommittedWorkStatus{
+				HasUncommittedChanges: true,
+				ModifiedFiles:         []string{"src/main.go"},
+			},
+			want: false,
+		},
+		{
+			name: "mix of runtime and real",
+			s: UncommittedWorkStatus{
+				HasUncommittedChanges: true,
+				UntrackedFiles:        []string{".claude/settings.json"},
+				ModifiedFiles:         []string{"src/main.go"},
+			},
+			want: false,
+		},
+		{
+			name: "clean",
+			s:    UncommittedWorkStatus{},
+			want: true,
+		},
+		{
+			name: "stashes block",
+			s: UncommittedWorkStatus{
+				StashCount: 1,
+			},
+			want: false,
+		},
+		{
+			name: "unpushed commits block",
+			s: UncommittedWorkStatus{
+				UnpushedCommits: 2,
+			},
+			want: false,
+		},
+		{
+			name: "pycache untracked",
+			s: UncommittedWorkStatus{
+				HasUncommittedChanges: true,
+				UntrackedFiles:        []string{"__pycache__/foo.pyc", ".beads/db"},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.s.CleanExcludingRuntime()
+			if got != tt.want {
+				t.Errorf("CleanExcludingRuntime() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
