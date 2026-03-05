@@ -1,0 +1,356 @@
+<mxfile host="Electron" modified="2026-03-05T00:00:00.000Z" agent="AI Marketplace Architecture" version="24.0.0">
+  <diagram name="AI Marketplace Architecture" id="ai-marketplace-arch">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ═══════════════════════════════════════════════════
+             TITLE
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="title" value="AI Asset Marketplace — Application Architecture" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=22;fontStyle=1;fontColor=#1a1a2e;" vertex="1" parent="1">
+          <mxGeometry x="310" y="20" width="1300" height="44" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             LANE 0 — CLIENT BROWSER
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="lane-browser" value="Client Browser" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=12;horizontal=0;" vertex="1" parent="1">
+          <mxGeometry x="30" y="80" width="190" height="950" as="geometry" />
+        </mxCell>
+
+        <mxCell id="browser-user" value="👤 End User" style="shape=mxgraph.azure2.user;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="lane-browser">
+          <mxGeometry x="45" y="40" width="100" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="browser-msal" value="MSAL Browser&#xa;(@azure/msal-browser)&#xa;&#xa;• Sign-in popup&#xa;• Token cache&#xa;• Silent renewal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;align=left;" vertex="1" parent="lane-browser">
+          <mxGeometry x="15" y="140" width="160" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="browser-react" value="React 19 + Next.js&#xa;(Client Components)&#xa;&#xa;• NavTabs / Tabs&#xa;• AssetCard&#xa;• ModelCard&#xa;• Orchestrator&#xa;• AuthGuard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;align=left;" vertex="1" parent="lane-browser">
+          <mxGeometry x="15" y="290" width="160" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="browser-tanstack" value="TanStack Query&#xa;&#xa;• /api/* fetches&#xa;• Cache + refetch" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;align=left;" vertex="1" parent="lane-browser">
+          <mxGeometry x="15" y="460" width="160" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="browser-reactflow" value="ReactFlow&#xa;&#xa;Drag-and-drop&#xa;Workflow Builder" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;align=left;" vertex="1" parent="lane-browser">
+          <mxGeometry x="15" y="580" width="160" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             LANE 1 — AZURE CONTAINER APPS (Next.js Web)
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="lane-nextjs" value="Azure Container Apps — Next.js 16 Web  (ai-marketplace-web-dev)" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=12;horizontal=0;" vertex="1" parent="1">
+          <mxGeometry x="240" y="80" width="430" height="950" as="geometry" />
+        </mxCell>
+
+        <!-- App Router pages -->
+        <mxCell id="next-pages-header" value="App Router Pages  (app/)" style="swimlane;startSize=24;fillColor=#f5fff5;strokeColor=#82b366;fontSize=10;fontStyle=1;" vertex="1" parent="lane-nextjs">
+          <mxGeometry x="10" y="40" width="410" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="next-page-root" value="/ (Marketplace)&#xa;Agents | MCP | Models | Skills | Stats" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="next-pages-header">
+          <mxGeometry x="10" y="30" width="185" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="next-page-orch" value="/orchestration&#xa;Workflow Builder (ReactFlow)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="next-pages-header">
+          <mxGeometry x="215" y="30" width="185" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="next-page-model" value="/models/[id]&#xa;Model Card + Evaluations" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="next-pages-header">
+          <mxGeometry x="10" y="100" width="185" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="next-page-asset" value="/assets/[id]&#xa;Asset Detail + Install" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="next-pages-header">
+          <mxGeometry x="215" y="100" width="185" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Next.js API Routes -->
+        <mxCell id="next-api-header" value="Next.js Server API Routes  (app/api/)" style="swimlane;startSize=24;fillColor=#f5fff5;strokeColor=#82b366;fontSize=10;fontStyle=1;" vertex="1" parent="lane-nextjs">
+          <mxGeometry x="10" y="260" width="410" height="280" as="geometry" />
+        </mxCell>
+
+        <mxCell id="api-auth" value="GET /api/auth-config&#xa;MSAL clientId + tenantId" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1f5e1;strokeColor=#82b366;fontSize=10;" vertex="1" parent="next-api-header">
+          <mxGeometry x="10" y="30" width="185" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="api-models" value="GET /api/models&#xa;Static + AML models" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1f5e1;strokeColor=#82b366;fontSize=10;" vertex="1" parent="next-api-header">
+          <mxGeometry x="215" y="30" width="185" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="api-models-sync" value="GET /api/models/sync&#xa;Pull full AML registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1f5e1;strokeColor=#82b366;fontSize=10;" vertex="1" parent="next-api-header">
+          <mxGeometry x="10" y="100" width="185" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="api-foundry" value="GET /api/foundry/[modelId]&#xa;Foundry model card + evals" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1f5e1;strokeColor=#82b366;fontSize=10;" vertex="1" parent="next-api-header">
+          <mxGeometry x="215" y="100" width="185" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="api-aml" value="GET /api/aml/compute&#xa;GET /api/aml/compute/[name]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1f5e1;strokeColor=#82b366;fontSize=10;" vertex="1" parent="next-api-header">
+          <mxGeometry x="10" y="170" width="185" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="api-models-post" value="POST /api/models&#xa;Register BYOM model" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1f5e1;strokeColor=#82b366;fontSize=10;" vertex="1" parent="next-api-header">
+          <mxGeometry x="215" y="170" width="185" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Server-side lib -->
+        <mxCell id="next-lib-header" value="Server-side Libraries  (lib/)" style="swimlane;startSize=24;fillColor=#f5fff5;strokeColor=#82b366;fontSize=10;fontStyle=1;" vertex="1" parent="lane-nextjs">
+          <mxGeometry x="10" y="570" width="410" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lib-foundry" value="foundry-client.ts&#xa;AIProjectClient&#xa;• listDeployments()&#xa;• getModelCard()&#xa;• listFoundryAgents()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;" vertex="1" parent="next-lib-header">
+          <mxGeometry x="10" y="30" width="185" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="lib-azureml" value="azure-ml-client.ts&#xa;Azure ML REST&#xa;• listAmlModels()&#xa;• listAmlModelVersions()&#xa;• registerAmlModel()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;" vertex="1" parent="next-lib-header">
+          <mxGeometry x="215" y="30" width="185" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="lib-mockdata" value="mock-data.ts&#xa;Static asset catalog&#xa;(agents, MCP, skills)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;" vertex="1" parent="next-lib-header">
+          <mxGeometry x="10" y="138" width="185" height="52" as="geometry" />
+        </mxCell>
+        <mxCell id="lib-modelsdata" value="models-data.ts&#xa;Static model catalog&#xa;(ClinicalBERT etc.)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;" vertex="1" parent="next-lib-header">
+          <mxGeometry x="215" y="138" width="185" height="52" as="geometry" />
+        </mxCell>
+
+        <!-- ACR / Docker note -->
+        <mxCell id="next-docker" value="Docker (node:20-alpine)&#xa;Standalone Next.js output → ACR → Container App" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f3e6;strokeColor=#82b366;fontSize=10;fontStyle=2;" vertex="1" parent="lane-nextjs">
+          <mxGeometry x="10" y="800" width="410" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             LANE 2 — AZURE FUNCTIONS (API Backend)
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="lane-functions" value="Azure Functions (Flex Consumption) — API Backend  (apps/api)" style="swimlane;startSize=30;fillColor=#ffe6cc;strokeColor=#d6823a;fontStyle=1;fontSize=12;horizontal=0;" vertex="1" parent="1">
+          <mxGeometry x="690" y="80" width="320" height="950" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fn-catalog" value="Catalog Functions&#xa;&#xa;GET  /catalog/assets&#xa;GET  /catalog/ratings&#xa;GET  /catalog/versions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6823a;fontSize=10;align=left;" vertex="1" parent="lane-functions">
+          <mxGeometry x="20" y="50" width="280" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fn-publisher" value="Publisher Functions&#xa;&#xa;GET  /publisher/publishers&#xa;POST /publisher/submissions&#xa;POST /publisher/review" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6823a;fontSize=10;align=left;" vertex="1" parent="lane-functions">
+          <mxGeometry x="20" y="165" width="280" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fn-workflow" value="Workflow Functions&#xa;&#xa;GET  /workflows&#xa;POST /workflows&#xa;PUT  /workflows/:id" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6823a;fontSize=10;align=left;" vertex="1" parent="lane-functions">
+          <mxGeometry x="20" y="280" width="280" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fn-workspace" value="Workspace Functions&#xa;&#xa;GET  /workspace/projects&#xa;GET/PUT /workspace/user-config" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6823a;fontSize=10;align=left;" vertex="1" parent="lane-functions">
+          <mxGeometry x="20" y="395" width="280" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fn-sessions" value="Sessions Functions&#xa;&#xa;POST /sessions/create&#xa;GET  /sessions/:id" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6823a;fontSize=10;align=left;" vertex="1" parent="lane-functions">
+          <mxGeometry x="20" y="500" width="280" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fn-datasources" value="Data Sources&#xa;&#xa;GET  /data/data-sources" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6823a;fontSize=10;align=left;" vertex="1" parent="lane-functions">
+          <mxGeometry x="20" y="595" width="280" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fn-cosmos-client" value="lib/cosmos/client.ts&#xa;CosmosClient singleton&#xa;• COSMOS_ENDPOINT + KEY&#xa;• Database: ai-marketplace" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffd9b3;strokeColor=#d6823a;fontSize=10;align=left;" vertex="1" parent="lane-functions">
+          <mxGeometry x="20" y="690" width="280" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fn-runtime" value="Node.js 20 · TypeScript · @azure/functions v4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff0e0;strokeColor=#d6823a;fontSize=10;fontStyle=2;" vertex="1" parent="lane-functions">
+          <mxGeometry x="20" y="800" width="280" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             LANE 3 — AZURE PLATFORM SERVICES
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="lane-azure" value="Azure Platform Services" style="swimlane;startSize=30;fillColor=#f3e6ff;strokeColor=#9673a6;fontStyle=1;fontSize=12;horizontal=0;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="80" width="380" height="950" as="geometry" />
+        </mxCell>
+
+        <!-- Cosmos DB -->
+        <mxCell id="svc-cosmos" value="Azure Cosmos DB (NoSQL)&#xa;&#xa;Database: ai-marketplace&#xa;Containers:&#xa;  • assets  • workflows&#xa;  • publishers  • sessions&#xa;  • workspace  • ratings&#xa;  • submissions  • reviews&#xa;  • data-sources  • user-config&#xa;&#xa;Partition: /partitionKey" style="shape=mxgraph.azure2.cosmos_db;fillColor=#f3e6ff;strokeColor=#9673a6;fontSize=10;align=left;spacingLeft=50;whiteSpace=wrap;html=1;" vertex="1" parent="lane-azure">
+          <mxGeometry x="20" y="40" width="340" height="180" as="geometry" />
+        </mxCell>
+
+        <!-- AI Foundry -->
+        <mxCell id="svc-foundry" value="Azure AI Foundry Project&#xa;aoai-q2w5uxlkh4c6o-project&#xa;&#xa;  • 18 live model deployments&#xa;    (GPT-4o, GPT-5.x, o1,&#xa;     DeepSeek-R1, embeddings…)&#xa;  • Agents management&#xa;  • Telemetry / App Insights link&#xa;&#xa;SDK: @azure/ai-projects" style="shape=mxgraph.azure2.machine_learning;fillColor=#f3e6ff;strokeColor=#9673a6;fontSize=10;align=left;spacingLeft=50;whiteSpace=wrap;html=1;" vertex="1" parent="lane-azure">
+          <mxGeometry x="20" y="245" width="340" height="170" as="geometry" />
+        </mxCell>
+
+        <!-- AI Hub Workspace -->
+        <mxCell id="svc-aihub" value="Azure AI Hub Workspace&#xa;aimarket-hub (East US)&#xa;&#xa;  • Evaluations REST API&#xa;    (evaluation runs, metrics)&#xa;  • AML compute clusters&#xa;  • Model registry (AML)&#xa;  • Connected AI Services" style="shape=mxgraph.azure2.machine_learning;fillColor=#e8d5ff;strokeColor=#9673a6;fontSize=10;align=left;spacingLeft=50;whiteSpace=wrap;html=1;" vertex="1" parent="lane-azure">
+          <mxGeometry x="20" y="440" width="340" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- Entra ID -->
+        <mxCell id="svc-entra" value="Azure Entra ID&#xa;Tenant: 16b3c013-d300-468d&#xa;&#xa;  • App registration (MSAL)&#xa;  • Service principal&#xa;    (AZURE_AD_CLIENT_ID)&#xa;  • Token issuance&#xa;    (access + ID tokens)" style="shape=mxgraph.azure2.azure_active_directory;fillColor=#f3e6ff;strokeColor=#9673a6;fontSize=10;align=left;spacingLeft=50;whiteSpace=wrap;html=1;" vertex="1" parent="lane-azure">
+          <mxGeometry x="20" y="615" width="340" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- Supporting services -->
+        <mxCell id="svc-keyvault" value="Azure Key Vault&#xa;Cosmos keys · Foundry secrets · AD client secret" style="shape=mxgraph.azure2.key_vaults;fillColor=#f3e6ff;strokeColor=#9673a6;fontSize=10;align=left;spacingLeft=44;whiteSpace=wrap;html=1;" vertex="1" parent="lane-azure">
+          <mxGeometry x="20" y="780" width="155" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="svc-acr" value="Azure Container Registry&#xa;aimktacrp7a65r22&#xa;Web image (Docker)" style="shape=mxgraph.azure2.container_registries;fillColor=#f3e6ff;strokeColor=#9673a6;fontSize=10;align=left;spacingLeft=44;whiteSpace=wrap;html=1;" vertex="1" parent="lane-azure">
+          <mxGeometry x="205" y="780" width="155" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="svc-appinsights" value="Application Insights&#xa;Telemetry · Traces · Logs" style="shape=mxgraph.azure2.application_insights;fillColor=#f3e6ff;strokeColor=#9673a6;fontSize=10;align=left;spacingLeft=44;whiteSpace=wrap;html=1;" vertex="1" parent="lane-azure">
+          <mxGeometry x="20" y="885" width="340" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             LANE 4 — CI/CD + IaC
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="lane-cicd" value="CI/CD · IaC" style="swimlane;startSize=30;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=12;horizontal=0;" vertex="1" parent="1">
+          <mxGeometry x="1430" y="80" width="220" height="950" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cicd-github" value="GitHub&#xa;feature/go-copilotsdk&#xa;&#xa;git push →&#xa;azd deploy" style="shape=mxgraph.veeam2.microsoft_azure_github;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;whiteSpace=wrap;html=1;" vertex="1" parent="lane-cicd">
+          <mxGeometry x="20" y="40" width="180" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cicd-azd" value="Azure Developer CLI&#xa;(azd)&#xa;&#xa;azd up&#xa;azd deploy --service web&#xa;azd env get-values" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;align=left;" vertex="1" parent="lane-cicd">
+          <mxGeometry x="20" y="175" width="180" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cicd-bicep" value="Bicep IaC (infra/)&#xa;&#xa;• main.bicep&#xa;• modules/cosmos.bicep&#xa;• modules/containerapp.bicep&#xa;• modules/functions.bicep&#xa;• modules/keyvault.bicep&#xa;• modules/appinsights.bicep&#xa;• modules/containerregistry.bicep&#xa;• ai-hub/main.bicep" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;align=left;" vertex="1" parent="lane-cicd">
+          <mxGeometry x="20" y="320" width="180" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cicd-rg" value="Resource Group&#xa;rg-ai-marketplace-dev&#xa;East US" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f2c0be;strokeColor=#b85450;fontSize=10;" vertex="1" parent="lane-cicd">
+          <mxGeometry x="20" y="555" width="180" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cicd-sub" value="Azure Subscription&#xa;a7fecb91-4553-4aca-976e" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f2c0be;strokeColor=#b85450;fontSize=10;" vertex="1" parent="lane-cicd">
+          <mxGeometry x="20" y="645" width="180" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             ARROWS — Browser → Next.js
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="edge-user-msal" value="HTTPS" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#6c8ebf;fontColor=#6c8ebf;fontSize=9;" edge="1" parent="1" source="browser-user" target="next-page-root">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge-msal-entra" value="OIDC/OAuth2&#xa;token request" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#9673a6;fontColor=#9673a6;fontSize=9;dashed=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" parent="1" source="browser-msal" target="svc-entra">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1680" y="260" />
+              <mxPoint x="1680" y="740" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="edge-react-apiauth" value="fetch /api/auth-config" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#82b366;fontColor=#82b366;fontSize=9;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="browser-msal" target="api-auth">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge-tanstack-models" value="fetch /api/models" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#82b366;fontColor=#82b366;fontSize=9;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="browser-tanstack" target="api-models">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge-tanstack-foundry" value="fetch /api/foundry/[id]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#82b366;fontColor=#82b366;fontSize=9;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="browser-reactflow" target="api-foundry">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="218" y="615" />
+              <mxPoint x="218" y="440" />
+              <mxPoint x="460" y="440" />
+              <mxPoint x="460" y="455" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             ARROWS — Next.js API → Functions
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="edge-nextjs-fns" value="HTTP (localhost:7071 / prod URL)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#d6823a;fontColor=#d6823a;fontSize=9;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="next-api-header" target="fn-catalog">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             ARROWS — Next.js lib → Azure services
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="edge-foundryclient-foundry" value="AIProjectClient&#xa;deployments.list()&#xa;agents.listAgents()" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#9673a6;fontColor=#9673a6;fontSize=9;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="lib-foundry" target="svc-foundry">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge-foundryclient-aihub" value="REST evaluations API" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#9673a6;fontColor=#9673a6;fontSize=9;dashed=1;exitX=1;exitY=0.9;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="lib-foundry" target="svc-aihub">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge-amlclient-aihub" value="AML REST API&#xa;model registry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#9673a6;fontColor=#9673a6;fontSize=9;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.8;entryDx=0;entryDy=0;" edge="1" parent="1" source="lib-azureml" target="svc-aihub">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             ARROWS — Functions → Cosmos
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="edge-fns-cosmos" value="CosmosClient&#xa;HTTPS 443" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#9673a6;fontColor=#9673a6;fontSize=9;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="fn-cosmos-client" target="svc-cosmos">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             ARROWS — auth / Entra
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="edge-nextjs-entra" value="ClientSecretCredential&#xa;Foundry + AML auth" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#9673a6;fontColor=#9673a6;fontSize=9;dashed=1;exitX=1;exitY=0.95;exitDx=0;exitDy=0;entryX=0;entryY=0.2;entryDx=0;entryDy=0;" edge="1" parent="1" source="lib-foundry" target="svc-entra">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             ARROWS — ACR → Container App
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="edge-acr-containerapps" value="pull image" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#9673a6;fontColor=#9673a6;fontSize=9;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="svc-acr" target="next-docker">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             ARROWS — azd → ACR
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="edge-azd-acr" value="docker push" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#b85450;fontColor=#b85450;fontSize=9;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="cicd-azd" target="svc-acr">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             ARROWS — azd → Functions
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="edge-azd-fns" value="npm deploy" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#b85450;fontColor=#b85450;fontSize=9;exitX=0;exitY=0.4;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="cicd-azd" target="fn-runtime">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             ARROWS — AppInsights telemetry
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="edge-foundry-insights" value="telemetry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#9673a6;fontColor=#9673a6;fontSize=9;dashed=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="svc-foundry" target="svc-appinsights">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════
+             LEGEND
+             ═══════════════════════════════════════════════════ -->
+        <mxCell id="legend-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1430" y="730" width="220" height="290" as="geometry" />
+        </mxCell>
+        <mxCell id="legend-title" value="Legend" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1445" y="738" width="80" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1" value="──  HTTP/HTTPS request" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1445" y="762" width="195" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2" value="- -  OAuth2 / token flow" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1445" y="784" width="195" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3" value="🟡  Client (browser)" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1445" y="810" width="195" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4" value="🟢  Next.js / Server" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1445" y="832" width="195" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5" value="🟠  Azure Functions API" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1445" y="854" width="195" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6" value="🟣  Azure Platform Services" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1445" y="876" width="195" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg7" value="🔴  CI/CD + IaC" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1445" y="898" width="195" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg8" value="Generated: 2026-03-05" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=9;fontStyle=2;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1445" y="990" width="195" height="20" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
