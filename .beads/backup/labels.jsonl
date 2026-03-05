@@ -40,6 +40,9 @@
 {"issue_id":"hq-0tep","label":"from:overseer"}
 {"issue_id":"hq-0tep","label":"gt:message"}
 {"issue_id":"hq-0tep","label":"read"}
+{"issue_id":"hq-0v22","label":"from:theoutlived/witness"}
+{"issue_id":"hq-0v22","label":"gt:message"}
+{"issue_id":"hq-0v22","label":"read"}
 {"issue_id":"hq-120v","label":"from:theoutlived/refinery"}
 {"issue_id":"hq-120v","label":"gt:message"}
 {"issue_id":"hq-120v","label":"read"}
@@ -353,6 +356,9 @@
 {"issue_id":"hq-cat","label":"from:lilypad_chat/refinery"}
 {"issue_id":"hq-cat","label":"gt:message"}
 {"issue_id":"hq-cat","label":"read"}
+{"issue_id":"hq-cov7","label":"from:vitalitek/witness"}
+{"issue_id":"hq-cov7","label":"gt:message"}
+{"issue_id":"hq-cov7","label":"read"}
 {"issue_id":"hq-ct0q","label":"ci-failure"}
 {"issue_id":"hq-ct0q","label":"rig:vitalitek"}
 {"issue_id":"hq-cuey","label":"ci-failure"}
@@ -698,6 +704,9 @@
 {"issue_id":"hq-rsk","label":"from:wandering_river/refinery"}
 {"issue_id":"hq-rsk","label":"gt:message"}
 {"issue_id":"hq-rsk","label":"read"}
+{"issue_id":"hq-rt6t","label":"from:deacon/"}
+{"issue_id":"hq-rt6t","label":"gt:message"}
+{"issue_id":"hq-rt6t","label":"read"}
 {"issue_id":"hq-sa4","label":"from:wandering_river/refinery"}
 {"issue_id":"hq-sa4","label":"gt:message"}
 {"issue_id":"hq-sa4","label":"read"}
