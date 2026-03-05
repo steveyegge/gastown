@@ -277,6 +277,9 @@
 {"issue_id":"hq-7479","label":"from:meety_me/witness"}
 {"issue_id":"hq-7479","label":"gt:message"}
 {"issue_id":"hq-7479","label":"read"}
+{"issue_id":"hq-7n68","label":"from:deacon/"}
+{"issue_id":"hq-7n68","label":"gt:message"}
+{"issue_id":"hq-7n68","label":"read"}
 {"issue_id":"hq-7ui","label":"from:deacon/"}
 {"issue_id":"hq-7ui","label":"gt:message"}
 {"issue_id":"hq-7ui","label":"read"}
@@ -842,6 +845,9 @@
 {"issue_id":"hq-oz86","label":"from:overseer"}
 {"issue_id":"hq-oz86","label":"gt:message"}
 {"issue_id":"hq-oz86","label":"read"}
+{"issue_id":"hq-p22s","label":"from:vitalitek/witness"}
+{"issue_id":"hq-p22s","label":"gt:message"}
+{"issue_id":"hq-p22s","label":"read"}
 {"issue_id":"hq-p5kw","label":"delivery:pending"}
 {"issue_id":"hq-p5kw","label":"from:daemon"}
 {"issue_id":"hq-p5kw","label":"gt:message"}
