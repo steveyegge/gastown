@@ -823,6 +823,7 @@ func promptShellArg(prompt string) string {
 		return quoteForShell(prompt)
 	}
 	promptFile.Close()
+	os.Chmod(promptFile.Name(), 0o600)
 
 	// Write a small wrapper script that cats the prompt and cleans up both
 	// files. Using a #!/bin/sh script avoids shell-compatibility issues

@@ -42,6 +42,7 @@ func ensureTownTrustedAt(configPath, townRoot string) error {
 	folders = append(folders, townRoot)
 	config["trusted_folders"] = folders
 
+	fmt.Fprintf(os.Stderr, "copilot: added %s to trusted_folders in %s\n", townRoot, configPath)
 	return writeConfigJSON(configPath, config)
 }
 

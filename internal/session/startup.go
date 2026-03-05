@@ -162,6 +162,7 @@ func CapturePrimeContext(workDir string, env map[string]string) string {
 	cmd.Stderr = nil
 
 	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: CapturePrimeContext failed: %v\n", err)
 		return ""
 	}
 	return strings.TrimSpace(stdout.String())
