@@ -152,13 +152,13 @@ Purpose: Identity registry for all participants (humans, bots, CI systems) in th
 | display_name | varchar(255) | NO | NULL | Human-readable name, e.g. `Steve Yegge` |
 | dolthub_org | varchar(255) | NO | NULL | DoltHub organization or username that owns this rig's fork, e.g. `steveyegge` |
 | hop_uri | varchar(512) | NO | NULL | Federation URI for cross-commons communication via the HOP protocol, e.g. `hop://steveyegge/wl-commons` |
-| owner_email | varchar(255) | NO | NULL | Contact email for the rig owner |
+| owner_email | varchar(255) | NO | NULL | Contact email for the rig owner, e.g. `admin@example.com` |
 | gt_version | varchar(32) | NO | NULL | Version of Gas Town tooling the rig is running, e.g. `0.4.2` |
 | trust_level | int | NO | 0 | Reputation tier: 0 = unverified, 1 = participant, 2 = trusted, 3 = maintainer |
-| registered_at | timestamp | NO | NULL | When the rig first registered in the commons |
-| last_seen | timestamp | NO | NULL | Last time this rig pushed or interacted with the commons |
+| registered_at | timestamp | NO | NULL | When the rig first registered in the commons, e.g. `2026-02-16 14:14:42` |
+| last_seen | timestamp | NO | NULL | Last time this rig pushed or interacted with the commons, e.g. `2026-03-04 12:14:42` |
 | rig_type | varchar(16) | NO | `'human'` | Type of participant: `human`, `agent`, or `hybrid` |
-| parent_rig | varchar(255) | NO | NULL | Handle of the parent rig if this is a sub-agent or bot owned by another rig |
+| parent_rig | varchar(255) | NO | NULL | Handle of the parent rig if this is a sub-agent or bot owned by another rig, e.g. `steveyegge` |
 
 ### Table: `wanted`
 
@@ -168,21 +168,21 @@ Purpose: The job board — work items posted by rigs and available for claiming.
 |--------|------|----------|---------|-------------|
 | id | varchar(64) | YES | — | Primary key. Unique identifier for the wanted item, e.g. `w-a1b2c3d4` |
 | title | text | YES | — | Short description of the work, e.g. `Add retry logic to HOP relay` |
-| description | text | NO | NULL | Full description with acceptance criteria, context, and details |
+| description | text | NO | NULL | Full description with acceptance criteria, context, and details, e.g. `Remove lockfile and activity signal code that was part of the old beads daemon.` |
 | project | varchar(64) | NO | NULL | Project or repo this work belongs to, e.g. `wl-commons`, `gas-town` |
 | type | varchar(32) | NO | NULL | Category of work: `bug`, `feature`, `docs`, `chore`, `research` |
 | priority | int | NO | 2 | Urgency: 0 = critical, 1 = high, 2 = normal, 3 = low |
 | tags | json | NO | NULL | Freeform tags for filtering, e.g. `["dolt", "schema", "beginner-friendly"]` |
-| posted_by | varchar(255) | NO | NULL | Handle of the rig that created this item, references `rigs.handle` |
-| claimed_by | varchar(255) | NO | NULL | Handle of the rig working on this item, references `rigs.handle` |
+| posted_by | varchar(255) | NO | NULL | Handle of the rig that created this item, references `rigs.handle`, e.g. `steveyegge` |
+| claimed_by | varchar(255) | NO | NULL | Handle of the rig working on this item, references `rigs.handle`, e.g. `jorisdevreede` |
 | status | varchar(32) | NO | `'open'` | Lifecycle state: `open`, `claimed`, `in_review`, `validated` |
 | effort_level | varchar(16) | NO | `'medium'` | Estimated effort: `trivial`, `small`, `medium`, `large`, `epic` |
-| evidence_url | text | NO | NULL | URL pointing to where completed work can be reviewed, e.g. a PR link |
+| evidence_url | text | NO | NULL | URL pointing to where completed work can be reviewed, e.g. `https://github.com/steveyegge/gastown/pull/2328` |
 | sandbox_required | tinyint(1) | NO | 0 | Whether this item requires sandboxed execution (1 = yes, 0 = no) |
 | sandbox_scope | json | NO | NULL | Permissions the sandbox grants, e.g. `{"fs": ["read"], "net": ["none"]}` |
 | sandbox_min_tier | varchar(32) | NO | NULL | Minimum trust level or sandbox tier required, e.g. `trusted`, `maintainer` |
-| created_at | timestamp | NO | NULL | When the wanted item was posted |
-| updated_at | timestamp | NO | NULL | Last time the item was modified (status change, claim, etc.) |
+| created_at | timestamp | NO | NULL | When the wanted item was posted, e.g. `2026-02-16 14:06:29` |
+| updated_at | timestamp | NO | NULL | Last time the item was modified (status change, claim, etc.), e.g. `2026-02-16 14:06:29` |
 
 ### Table: `completions`
 
@@ -191,16 +191,16 @@ Purpose: Evidence records proving that a wanted item was completed, forming a ta
 | Column | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
 | id | varchar(64) | YES | — | Primary key. Unique identifier, e.g. `c-e5f6a7b8` |
-| wanted_id | varchar(64) | NO | NULL | The wanted item this completion fulfills, references `wanted.id` |
-| completed_by | varchar(255) | NO | NULL | Handle of the rig that did the work, references `rigs.handle` |
-| evidence | text | NO | NULL | Description of what was done, links to PRs, commits, or artifacts |
-| validated_by | varchar(255) | NO | NULL | Handle of the rig that reviewed and validated, references `rigs.handle` |
-| stamp_id | varchar(64) | NO | NULL | The reputation stamp issued upon validation, references `stamps.id` |
-| parent_completion_id | varchar(64) | NO | NULL | Links to a prior completion in another fork, references `completions.id` — enables chained provenance across forks |
-| block_hash | varchar(64) | NO | NULL | SHA-256 hash of this record's content for tamper detection |
-| hop_uri | varchar(512) | NO | NULL | Federation URI if this completion originated in a remote commons |
-| completed_at | timestamp | NO | NULL | When the work was finished |
-| validated_at | timestamp | NO | NULL | When a validator accepted the evidence |
+| wanted_id | varchar(64) | NO | NULL | The wanted item this completion fulfills, references `wanted.id`, e.g. `w-bd-003` |
+| completed_by | varchar(255) | NO | NULL | Handle of the rig that did the work, references `rigs.handle`, e.g. `jorisdevreede` |
+| evidence | text | NO | NULL | Description of what was done, links to PRs, commits, or artifacts, e.g. `https://github.com/steveyegge/gastown/pull/2328` |
+| validated_by | varchar(255) | NO | NULL | Handle of the rig that reviewed and validated, references `rigs.handle`, e.g. `gastown-ci` |
+| stamp_id | varchar(64) | NO | NULL | The reputation stamp issued upon validation, references `stamps.id`, e.g. `s-demo-001` |
+| parent_completion_id | varchar(64) | NO | NULL | Links to a prior completion in another fork, references `completions.id` — enables chained provenance across forks, e.g. `c-upstream-001` |
+| block_hash | varchar(64) | NO | NULL | SHA-256 hash of this record's content for tamper detection, e.g. `a1b2c3d4e5f6...` |
+| hop_uri | varchar(512) | NO | NULL | Federation URI if this completion originated in a remote commons, e.g. `hop://steveyegge/wl-commons/completions/c-demo-001` |
+| completed_at | timestamp | NO | NULL | When the work was finished, e.g. `2026-03-04 14:14:43` |
+| validated_at | timestamp | NO | NULL | When a validator accepted the evidence, e.g. `2026-03-04 15:30:00` |
 
 ### Table: `stamps`
 
@@ -209,19 +209,19 @@ Purpose: Reputation attestations — one rig rates another's work on multiple di
 | Column | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
 | id | varchar(64) | YES | — | Primary key. Unique identifier, e.g. `s-d9c8b7a6` |
-| author | varchar(255) | YES | — | Handle of the rig issuing the stamp, references `rigs.handle`. Must differ from `subject` (yearbook rule) |
-| subject | varchar(255) | YES | — | Handle of the rig being rated, references `rigs.handle` |
+| author | varchar(255) | YES | — | Handle of the rig issuing the stamp, references `rigs.handle`. Must differ from `subject` (yearbook rule), e.g. `gastown-ci` |
+| subject | varchar(255) | YES | — | Handle of the rig being rated, references `rigs.handle`, e.g. `steveyegge` |
 | valence | json | YES | — | Multi-dimensional rating object, e.g. `{"quality": 0.85, "reliability": 0.80}` |
-| confidence | float | NO | 1 | How confident the author is in this assessment, 0.0 to 1.0 |
+| confidence | float | NO | 1 | How confident the author is in this assessment, 0.0 to 1.0, e.g. `0.85` |
 | severity | varchar(16) | NO | `'leaf'` | Weight of this stamp in aggregation: `leaf`, `branch`, `root` |
-| context_id | varchar(64) | NO | NULL | ID of the entity this stamp is about (usually a `completions.id` or `wanted.id`) |
+| context_id | varchar(64) | NO | NULL | ID of the entity this stamp is about (usually a `completions.id` or `wanted.id`), e.g. `c-demo-001` |
 | context_type | varchar(32) | NO | NULL | Type of the context entity, e.g. `completion`, `wanted`, `rig` |
 | skill_tags | json | NO | NULL | Skills demonstrated, e.g. `["ruby", "testing", "dolt"]` |
 | message | text | NO | NULL | Freeform note from the author, e.g. `"Clean implementation, good test coverage"` |
-| prev_stamp_hash | varchar(64) | NO | NULL | Hash of the previous stamp in this author's chain, forming a linked integrity log |
-| block_hash | varchar(64) | NO | NULL | SHA-256 hash of this stamp's content |
-| hop_uri | varchar(512) | NO | NULL | Federation URI if this stamp originated in a remote commons |
-| created_at | timestamp | NO | NULL | When the stamp was issued |
+| prev_stamp_hash | varchar(64) | NO | NULL | Hash of the previous stamp in this author's chain, forming a linked integrity log, e.g. `a1b2c3d4...` |
+| block_hash | varchar(64) | NO | NULL | SHA-256 hash of this stamp's content, e.g. `f9e8d7c6...` |
+| hop_uri | varchar(512) | NO | NULL | Federation URI if this stamp originated in a remote commons, e.g. `hop://steveyegge/wl-commons/stamps/s-demo-001` |
+| created_at | timestamp | NO | NULL | When the stamp was issued, e.g. `2026-02-16 14:14:42` |
 
 ### Table: `badges`
 
@@ -230,10 +230,10 @@ Purpose: Achievement markers awarded to rigs for milestones, special contributio
 | Column | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
 | id | varchar(64) | YES | — | Primary key. Unique identifier, e.g. `b-1a2b3c4d` |
-| rig_handle | varchar(255) | NO | NULL | The rig receiving the badge, references `rigs.handle` |
+| rig_handle | varchar(255) | NO | NULL | The rig receiving the badge, references `rigs.handle`, e.g. `steveyegge` |
 | badge_type | varchar(64) | NO | NULL | Type of badge, e.g. `first-completion`, `trusted-reviewer`, `hundred-stamps` |
-| awarded_at | timestamp | NO | NULL | When the badge was awarded |
-| evidence | text | NO | NULL | Justification or link to the qualifying event |
+| awarded_at | timestamp | NO | NULL | When the badge was awarded, e.g. `2026-03-01 10:00:00` |
+| evidence | text | NO | NULL | Justification or link to the qualifying event, e.g. `Completed 10 validated items` |
 
 ### Table: `chain_meta`
 
@@ -243,10 +243,10 @@ Purpose: Registry of integrity chains and federation links between commons insta
 |--------|------|----------|---------|-------------|
 | chain_id | varchar(64) | YES | — | Primary key. Unique identifier for the chain, e.g. `chain-main-stamps` |
 | chain_type | varchar(32) | NO | NULL | What kind of chain: `stamps`, `completions`, `blocks` |
-| parent_chain_id | varchar(64) | NO | NULL | ID of the parent chain if this is a sub-chain or fork, references `chain_meta.chain_id` |
-| hop_uri | varchar(512) | NO | NULL | Federation URI for cross-commons chain resolution |
+| parent_chain_id | varchar(64) | NO | NULL | ID of the parent chain if this is a sub-chain or fork, references `chain_meta.chain_id`, e.g. `chain-main-stamps` |
+| hop_uri | varchar(512) | NO | NULL | Federation URI for cross-commons chain resolution, e.g. `hop://steveyegge/wl-commons/chain/chain-main-stamps` |
 | dolt_database | varchar(255) | NO | NULL | The Dolt database this chain lives in, e.g. `steveyegge/wl-commons` |
-| created_at | timestamp | NO | NULL | When the chain was initialized |
+| created_at | timestamp | NO | NULL | When the chain was initialized, e.g. `2026-02-15 23:30:48` |
 
 ### Table: `_meta`
 
