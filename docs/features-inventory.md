@@ -1,4 +1,6 @@
-Docs generated against gastown@7cc2716b18b514572ce7488a4c5399caf02a38b7.
+Docs generated against (gastown HEAD): 7cc2716b18b514572ce7488a4c5399caf02a38b7
+
+# Gastown Feature Inventory
 
 ## Cross-Repo Glossary
 
@@ -174,4 +176,7 @@ Evidence-driven inventory using the contract taxonomy. `implemented` is only use
 | Plugin: dolt-archive | Plugin molecule | `gt plugin run dolt-archive` (plugin markdown workflow) | Dolt DBs, backup repo/remotes | archive summaries + escalation on failure | exports JSONL, pushes Git/Dolt backups | indicated | Low | `gastown/plugins/dolt-archive/plugin.md:1`, `gastown/plugins/dolt-archive/plugin.md:20` | Intent is explicit in plugin molecule; runtime execution path not proven in this inventory pass. |
 | Plugin: quality-review trend alerts | Plugin molecule | `gt plugin run quality-review` (plugin markdown workflow) | quality-review result wisps | breach mail/escalations + run summary | trend analysis and alerting pipeline | roadmap | Low | `gastown/plugins/quality-review/plugin.md:20`, `gastown/plugins/quality-review/plugin.md:66` | Defined as patrol workflow text; treated as roadmap-level until executed behavior is evidenced. |
 | Convoy synthesis notify action | CLI TODO marker | `gt synthesis close <convoy-id>` | convoy ID + optional future notify target | currently no outgoing notification | convoy closes without notify integration | roadmap | Low | `gastown/internal/cmd/synthesis.go:367` | Explicit TODO marks planned-but-missing behavior. |
-| Unknown/conflict audit result | Cross-source verification | Compared documented command surfaces vs code-backed routes/commands sampled in this task | docs + code | audit row only | none | unknown/conflict | Medium | `gastown/docs/reference.md:383`, `gastown/internal/cmd/root.go:314`, `gastown/internal/web/api.go:108`, `gastown/internal/web/setup.go:64`, `gastown/internal/proxy/server.go:229` | No concrete same-precedence contradiction was proven during this pass; placeholder row records that `unknown/conflict` was explicitly checked and none were confirmed. |
+
+## Inventory audit note
+
+This pass included a cross-source check (docs vs sampled code-backed routes/commands). No concrete same-precedence contradictions were confirmed.
