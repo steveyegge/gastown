@@ -768,9 +768,17 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 
 		if existingMR != nil {
+			if _, verifyErr := verifyMergeRequestPersisted(bd, existingMR.ID, branch); verifyErr != nil {
+				mrFailed = true
+				errMsg := fmt.Sprintf("existing MR verification failed (id=%s): %v", existingMR.ID, verifyErr)
+				doneErrors = append(doneErrors, errMsg)
+				style.PrintWarning("%s\nBranch is pushed but MR bead not confirmed. Preserving worktree.", errMsg)
+				goto notifyWitness
+			}
+
 			// MR already exists - use it instead of creating a new one
 			mrID = existingMR.ID
-			fmt.Printf("%s MR already exists (idempotent)\n", style.Bold.Render("✓"))
+			fmt.Printf("%s MR already exists (idempotent, verified)\n", style.Bold.Render("✓"))
 			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
 		} else {
 			// Build MR bead title and description
@@ -832,11 +840,9 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				goto notifyWitness
 			}
 
-			// GH#1945: Verify MR bead is readable before considering it confirmed.
-			// bd.Create() succeeds when the bead is written locally, but if the write
-			// didn't persist (Dolt failure, corrupt state), we'd nuke the worktree
-			// with no MR in the queue — losing the polecat's work permanently.
-			if verifiedMR, verifyErr := bd.Show(mrID); verifyErr != nil || verifiedMR == nil {
+			// GH#1945 + hq-tb2zw: Verify MR bead is readable and structurally valid
+			// before considering it confirmed.
+			if _, verifyErr := verifyMergeRequestPersisted(bd, mrID, branch); verifyErr != nil {
 				mrFailed = true
 				errMsg := fmt.Sprintf("MR bead created but verification read-back failed (id=%s): %v", mrID, verifyErr)
 				doneErrors = append(doneErrors, errMsg)

@@ -238,8 +238,14 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		nudgeRefinery(rigName, "MERGE_READY received - check inbox for pending work")
 	}
 
+	verifiedMR, verifyErr := verifyMergeRequestPersisted(bd, mrIssue.ID, branch)
+	if verifyErr != nil {
+		return fmt.Errorf("merge request bead verification failed (id=%s): %w", mrIssue.ID, verifyErr)
+	}
+	mrIssue = verifiedMR
+
 	// Success output
-	fmt.Printf("%s Submitted to merge queue\n", style.Bold.Render("✓"))
+	fmt.Printf("%s Submitted to merge queue (verified)\n", style.Bold.Render("✓"))
 	fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrIssue.ID))
 	fmt.Printf("  Source: %s\n", branch)
 	fmt.Printf("  Target: %s\n", target)
