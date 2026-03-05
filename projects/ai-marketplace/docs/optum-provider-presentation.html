@@ -20,7 +20,8 @@
       --card-border:  #D0D5DD;
     }
 
-    .reveal { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; }
+    .reveal { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; font-size: 16px; }
+    .reveal section { overflow: hidden; box-sizing: border-box; }
 
     /* Title slide */
     .slide-title { background: linear-gradient(135deg, var(--uhg-blue) 0%, var(--optum-orange) 100%); color: #fff !important; }
@@ -29,41 +30,41 @@
 
     /* Section dividers */
     .slide-section { background: var(--uhg-blue); color: #fff !important; }
-    .slide-section h2 { color: #fff !important; font-size: 2.2em; }
+    .slide-section h2 { color: #fff !important; font-size: 1.9em; }
     .slide-section p  { color: #cdd9f5 !important; }
 
     /* Utility */
-    .reveal section { text-align: left; }
-    .reveal h2 { font-size: 1.55em; color: var(--uhg-blue); border-bottom: 3px solid var(--optum-orange); padding-bottom: .2em; margin-bottom: .5em; }
-    .reveal h3 { font-size: 1.1em; color: var(--optum-orange); margin-bottom: .25em; }
-    .reveal ul { line-height: 1.65; margin-left: 1em; }
-    .reveal li  { margin-bottom: .25em; }
-    .reveal p   { line-height: 1.6; }
+    .reveal section { text-align: left; padding: 8px 24px 14px !important; }
+    .reveal h2 { font-size: 1.25em; color: var(--uhg-blue); border-bottom: 3px solid var(--optum-orange); padding-bottom: .1em; margin-bottom: .3em; }
+    .reveal h3 { font-size: .92em; color: var(--optum-orange); margin-bottom: .12em; }
+    .reveal ul { line-height: 1.45; margin-left: .8em; }
+    .reveal li  { margin-bottom: .1em; }
+    .reveal p   { line-height: 1.4; }
 
     /* Cards grid */
-    .cards { display: grid; gap: 14px; }
+    .cards { display: grid; gap: 7px; }
     .cards.c2 { grid-template-columns: 1fr 1fr; }
     .cards.c3 { grid-template-columns: 1fr 1fr 1fr; }
     .cards.c4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
     .card {
       background: #fff;
       border: 1px solid var(--card-border);
-      border-radius: 10px;
-      padding: 16px 18px;
-      box-shadow: 0 2px 8px rgba(0,0,0,.07);
+      border-radius: 8px;
+      padding: 8px 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
     }
-    .card h4 { margin: 0 0 6px; font-size: .9em; color: var(--uhg-blue); }
-    .card p, .card ul { margin: 0; font-size: .78em; color: #444; line-height: 1.5; }
-    .card .icon { font-size: 1.6em; margin-bottom: 6px; }
-    .card.orange-top  { border-top: 4px solid var(--optum-orange); }
-    .card.blue-top    { border-top: 4px solid var(--uhg-ltblue); }
-    .card.green-top   { border-top: 4px solid var(--green); }
-    .card.accent-top  { border-top: 4px solid var(--accent); }
+    .card h4 { margin: 0 0 3px; font-size: .82em; color: var(--uhg-blue); }
+    .card p, .card ul { margin: 0; font-size: .74em; color: #444; line-height: 1.4; }
+    .card .icon { font-size: 1.1em; margin-bottom: 2px; }
+    .card.orange-top  { border-top: 3px solid var(--optum-orange); }
+    .card.blue-top    { border-top: 3px solid var(--uhg-ltblue); }
+    .card.green-top   { border-top: 3px solid var(--green); }
+    .card.accent-top  { border-top: 3px solid var(--accent); }
 
     /* Stat boxes */
     .stat { text-align: center; }
-    .stat .number { font-size: 2.4em; font-weight: 800; color: var(--optum-orange); }
-    .stat .label  { font-size: .78em; color: #555; margin-top: 2px; }
+    .stat .number { font-size: 1.7em; font-weight: 800; color: var(--optum-orange); }
+    .stat .label  { font-size: .72em; color: #555; margin-top: 1px; }
 
     /* Pill tags */
     .pill {
@@ -71,9 +72,9 @@
       background: var(--uhg-blue);
       color: #fff;
       border-radius: 20px;
-      padding: 3px 12px;
-      font-size: .72em;
-      margin: 2px 3px;
+      padding: 2px 8px;
+      font-size: .68em;
+      margin: 1px 2px;
     }
     .pill.orange { background: var(--optum-orange); }
     .pill.green  { background: var(--green); }
@@ -81,40 +82,40 @@
 
     /* Timeline */
     .timeline { list-style: none; margin: 0; padding: 0; }
-    .timeline li { position: relative; padding: 10px 0 10px 44px; border-left: 3px solid var(--optum-orange); margin-left: 18px; }
+    .timeline li { position: relative; padding: 5px 0 5px 36px; border-left: 3px solid var(--optum-orange); margin-left: 14px; }
     .timeline li:last-child { border-left-color: transparent; }
     .timeline li::before {
       content: attr(data-step);
       position: absolute;
-      left: -18px;
-      top: 8px;
-      width: 30px;
-      height: 30px;
+      left: -14px;
+      top: 5px;
+      width: 24px;
+      height: 24px;
       background: var(--optum-orange);
       color: #fff;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: .75em;
+      font-size: .68em;
       font-weight: 700;
     }
-    .timeline li h4 { margin: 0 0 3px; font-size: .88em; color: var(--uhg-blue); }
-    .timeline li p  { margin: 0; font-size: .76em; color: #555; }
+    .timeline li h4 { margin: 0 0 2px; font-size: .82em; color: var(--uhg-blue); }
+    .timeline li p  { margin: 0; font-size: .72em; color: #555; }
 
     /* Column layout */
-    .cols { display: flex; gap: 24px; }
+    .cols { display: flex; gap: 14px; }
     .cols .col { flex: 1; }
 
     /* Quote */
     blockquote {
       border-left: 4px solid var(--optum-orange);
       margin: 0;
-      padding: 10px 16px;
+      padding: 7px 12px;
       background: #fff8f2;
       border-radius: 0 8px 8px 0;
       font-style: italic;
-      font-size: .85em;
+      font-size: .78em;
       color: #333;
     }
 
@@ -122,19 +123,19 @@
     .arch-box {
       background: var(--light-bg);
       border: 1px solid var(--card-border);
-      border-radius: 10px;
-      padding: 14px;
-      font-size: .76em;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: .72em;
     }
-    .arch-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+    .arch-row { display: flex; gap: 7px; margin-bottom: 6px; flex-wrap: wrap; }
     .arch-item {
       background: #fff;
       border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 8px 12px;
-      font-size: .88em;
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: .86em;
       flex: 1;
-      min-width: 120px;
+      min-width: 100px;
     }
     .arch-item .svc { font-weight: 700; color: var(--uhg-blue); font-size: .9em; }
     .arch-item .desc { color: #666; font-size: .85em; }
@@ -152,8 +153,8 @@
       background: #e8f4fd;
       border-left: 4px solid var(--uhg-ltblue);
       border-radius: 0 8px 8px 0;
-      padding: 10px 14px;
-      font-size: .82em;
+      padding: 6px 10px;
+      font-size: .76em;
       color: #1a3c6e;
     }
     .callout.orange { background: #fff4ee; border-color: var(--optum-orange); color: #7a3b00; }
@@ -592,7 +593,7 @@
        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
   <section>
     <h2>Security &amp; Healthcare Compliance</h2>
-    <div class="cards c3" style="margin-bottom:14px;">
+    <div class="cards c3" style="margin-bottom:6px;">
       <div class="card blue-top">
         <div class="icon">🔐</div>
         <h4>Zero-Trust Identity</h4>
@@ -783,7 +784,7 @@
        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
   <section>
     <h2>Measured Outcomes — Optum Pilot Data</h2>
-    <div class="cards c4" style="margin-bottom:14px;">
+    <div class="cards c4" style="margin-bottom:8px;">
       <div class="card stat orange-top">
         <div class="number">38%</div>
         <div class="label">Reduction in prior auth denials<br/><em>(Denial Mgmt Agent, 6-mo pilot)</em></div>
@@ -999,9 +1000,9 @@
        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
   <section>
     <h2>60-Day No-Risk Pilot Program</h2>
-    <div class="cols" style="margin-bottom:16px;">
+    <div class="cols" style="margin-bottom:6px;">
       <div class="col">
-        <div class="card blue-top" style="margin-bottom:12px;">
+        <div class="card blue-top" style="margin-bottom:6px;">
           <h4>Pilot Criteria — We're Looking For</h4>
           <ul style="font-size:.82em;">
             <li>Community health systems, IHNs, or multi-specialty groups</li>
@@ -1106,8 +1107,11 @@
     progress: true,
     center: false,
     width: 1280,
-    height: 800,
-    margin: 0.04,
+    height: 760,
+    margin: 0.02,
+    minScale: 0.1,
+    maxScale: 1.5,
+    disableLayout: false,
     plugins: []
   });
 </script>
