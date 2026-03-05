@@ -21,7 +21,7 @@ export function AssetSearch({ value, onChange }: Props) {
         type="search"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Search agents, tools, models…"
+        placeholder="Search agents, MCP servers, models…"
         className="w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-9 pr-4 text-sm shadow-sm outline-none transition placeholder:text-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
       />
     </div>
