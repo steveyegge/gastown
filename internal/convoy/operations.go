@@ -233,6 +233,14 @@ func feedNextReadyIssue(ctx context.Context, store beadsdk.Storage, townRoot, co
 		return
 	}
 
+	// Extract base_branch from convoy description fields
+	var baseBranch string
+	if convoy, err := store.GetIssue(ctx, convoyID); err == nil && convoy != nil {
+		if cf := beads.ParseConvoyFields(&beads.Issue{Description: convoy.Description}); cf != nil {
+			baseBranch = cf.BaseBranch
+		}
+	}
+
 	// Sort by priority (lower = higher) then by ID for deterministic tie-breaking.
 	sort.Slice(tracked, func(i, j int) bool {
 		if tracked[i].Priority != tracked[j].Priority {
@@ -276,7 +284,7 @@ func feedNextReadyIssue(ctx context.Context, store beadsdk.Storage, townRoot, co
 		}
 
 		logger("%s: convoy %s: feeding next ready issue %s to %s", caller, convoyID, issue.ID, rig)
-		if err := dispatchIssue(ctx, townRoot, issue.ID, rig, gtPath); err != nil {
+		if err := dispatchIssue(ctx, townRoot, issue.ID, rig, gtPath, baseBranch); err != nil {
 			logger("%s: convoy %s: dispatch %s failed: %s", caller, convoyID, issue.ID, util.FirstLine(err.Error()))
 			continue // Try next issue on dispatch failure
 		}
@@ -453,8 +461,12 @@ func fetchCrossRigBeadStatus(townRoot string, ids []string) map[string]*beadsdk.
 // dispatchIssue dispatches an issue to a rig via gt sling.
 // The context parameter enables cancellation on daemon shutdown.
 // gtPath is the resolved path to the gt binary.
-func dispatchIssue(ctx context.Context, townRoot, issueID, rig, gtPath string) error {
-	cmd := exec.CommandContext(ctx, gtPath, "sling", issueID, rig, "--no-boot")
+func dispatchIssue(ctx context.Context, townRoot, issueID, rig, gtPath, baseBranch string) error {
+	args := []string{"sling", issueID, rig, "--no-boot"}
+	if baseBranch != "" {
+		args = append(args, "--base-branch="+baseBranch)
+	}
+	cmd := exec.CommandContext(ctx, gtPath, args...)
 	cmd.Dir = townRoot
 	util.SetProcessGroup(cmd)
 	var stderr bytes.Buffer

@@ -320,7 +320,7 @@ func printConvoyConflict(beadID, convoyID string) {
 // dep add failed should not reference a convoy that has no knowledge of it.
 // If owned is true, the convoy is marked with gt:owned label.
 // beadIDs must be non-empty. The convoy title uses the rig name and bead count.
-func createBatchConvoy(beadIDs []string, rigName string, owned bool, mergeStrategy string) (string, []string, error) {
+func createBatchConvoy(beadIDs []string, rigName string, owned bool, mergeStrategy, baseBranch string) (string, []string, error) {
 	if len(beadIDs) == 0 {
 		return "", nil, fmt.Errorf("no beads to track")
 	}
@@ -337,7 +337,8 @@ func createBatchConvoy(beadIDs []string, rigName string, owned bool, mergeStrate
 	convoyTitle := fmt.Sprintf("Batch: %d beads to %s", len(beadIDs), rigName)
 	prose := fmt.Sprintf("Auto-created convoy tracking %d beads", len(beadIDs))
 	description := beads.SetConvoyFields(&beads.Issue{Description: prose}, &beads.ConvoyFields{
-		Merge: mergeStrategy,
+		Merge:      mergeStrategy,
+		BaseBranch: baseBranch,
 	})
 
 	createArgs := []string{
@@ -380,7 +381,7 @@ func createBatchConvoy(beadIDs []string, rigName string, owned bool, mergeStrate
 // If owned is true, the convoy is marked with the gt:owned label for caller-managed lifecycle.
 // mergeStrategy is optional: "direct", "mr", or "local" (empty = default mr).
 // Returns the created convoy ID.
-func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy string) (_ string, retErr error) {
+func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy, baseBranch string) (_ string, retErr error) {
 	defer func() { telemetry.RecordConvoyCreate(context.Background(), beadID, retErr) }()
 	// Guard against flag-like titles propagating into convoy names (gt-e0kx5)
 	if beads.IsFlagLikeTitle(beadTitle) {
@@ -402,7 +403,8 @@ func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy string
 	convoyTitle := fmt.Sprintf("Work: %s", beadTitle)
 	prose := fmt.Sprintf("Auto-created convoy tracking %s", beadID)
 	description := beads.SetConvoyFields(&beads.Issue{Description: prose}, &beads.ConvoyFields{
-		Merge: mergeStrategy,
+		Merge:      mergeStrategy,
+		BaseBranch: baseBranch,
 	})
 
 	createArgs := []string{

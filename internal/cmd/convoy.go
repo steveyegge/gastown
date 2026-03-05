@@ -69,6 +69,7 @@ var (
 	convoyOwner        string
 	convoyOwned        bool
 	convoyMerge        string
+	convoyBaseBranch   string
 	convoyStatusJSON   bool
 	convoyListJSON     bool
 	convoyListStatus   string
@@ -365,6 +366,7 @@ func init() {
 	convoyCreateCmd.Flags().Lookup("notify").NoOptDefVal = "mayor/"
 	convoyCreateCmd.Flags().BoolVar(&convoyOwned, "owned", false, "Mark convoy as caller-managed lifecycle (no automatic witness/refinery registration)")
 	convoyCreateCmd.Flags().StringVar(&convoyMerge, "merge", "", "Merge strategy: direct (push to main), mr (merge queue, default), local (keep on branch)")
+	convoyCreateCmd.Flags().StringVar(&convoyBaseBranch, "base-branch", "", "Target branch for polecats (e.g., 'feat/extraction-review')")
 
 	// Status flags
 	convoyStatusCmd.Flags().BoolVar(&convoyStatusJSON, "json", false, "Output as JSON")
@@ -493,10 +495,11 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		owner = detectSender()
 	}
 	convoyFieldValues := &beads.ConvoyFields{
-		Owner:    owner,
-		Notify:   convoyNotify,
-		Merge:    convoyMerge,
-		Molecule: convoyMolecule,
+		Owner:      owner,
+		Notify:     convoyNotify,
+		Merge:      convoyMerge,
+		Molecule:   convoyMolecule,
+		BaseBranch: convoyBaseBranch,
 	}
 	description = beads.SetConvoyFields(&beads.Issue{Description: description}, convoyFieldValues)
 
@@ -572,6 +575,9 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	}
 	if convoyMolecule != "" {
 		fmt.Printf("  Molecule: %s\n", convoyMolecule)
+	}
+	if convoyBaseBranch != "" {
+		fmt.Printf("  Base:     %s\n", convoyBaseBranch)
 	}
 	if convoyOwned {
 		fmt.Printf("  Owned:    %s\n", style.Warning.Render("caller-managed lifecycle"))
@@ -1194,6 +1200,7 @@ type strandedConvoyInfo struct {
 	ReadyCount   int      `json:"ready_count"`
 	ReadyIssues  []string `json:"ready_issues"`
 	CreatedAt    string   `json:"created_at,omitempty"`
+	BaseBranch   string   `json:"base_branch,omitempty"`
 }
 
 // readyIssueInfo holds info about a ready (stranded) issue.
@@ -1295,9 +1302,10 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 	}
 
 	var convoys []struct {
-		ID        string `json:"id"`
-		Title     string `json:"title"`
-		CreatedAt string `json:"created_at"`
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		CreatedAt   string `json:"created_at"`
+		Description string `json:"description"`
 	}
 	if err := json.Unmarshal(out, &convoys); err != nil {
 		return nil, fmt.Errorf("parsing convoy list: %w", err)
@@ -1305,6 +1313,12 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 
 	// Check each convoy for stranded state
 	for _, convoy := range convoys {
+		// Extract base_branch from convoy description fields
+		var baseBranch string
+		if cf := beads.ParseConvoyFields(&beads.Issue{Description: convoy.Description}); cf != nil {
+			baseBranch = cf.BaseBranch
+		}
+
 		tracked, err := getTrackedIssues(townBeads, convoy.ID)
 		if err != nil {
 			// Write to stderr explicitly — stdout may be consumed as JSON
@@ -1322,6 +1336,7 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 				ReadyCount:   0,
 				ReadyIssues:  []string{},
 				CreatedAt:    convoy.CreatedAt,
+				BaseBranch:   baseBranch,
 			})
 			continue
 		}
@@ -1360,6 +1375,7 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 				ReadyCount:   len(readyIssues),
 				ReadyIssues:  readyIssues,
 				CreatedAt:    convoy.CreatedAt,
+				BaseBranch:   baseBranch,
 			})
 		} else {
 			// Has tracked issues but none are ready — include in stranded
@@ -1371,6 +1387,7 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 				ReadyCount:   0,
 				ReadyIssues:  []string{},
 				CreatedAt:    convoy.CreatedAt,
+				BaseBranch:   baseBranch,
 			})
 		}
 	}

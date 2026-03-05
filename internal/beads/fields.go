@@ -228,6 +228,7 @@ type ConvoyFields struct {
 	Notify     string // Additional notification address
 	Molecule   string // Associated molecule/swarm ID
 	Merge      string // Merge strategy
+	BaseBranch string // Target branch for polecats (e.g., "feat/extraction-review")
 }
 
 // ParseConvoyFields extracts convoy fields from an issue's description.
@@ -269,6 +270,9 @@ func ParseConvoyFields(issue *Issue) *ConvoyFields {
 			hasFields = true
 		case "merge":
 			fields.Merge = value
+			hasFields = true
+		case "base_branch", "base-branch", "basebranch":
+			fields.BaseBranch = value
 			hasFields = true
 		}
 	}
@@ -315,6 +319,9 @@ func FormatConvoyFields(fields *ConvoyFields) string {
 	if fields.Molecule != "" {
 		lines = append(lines, "Molecule: "+fields.Molecule)
 	}
+	if fields.BaseBranch != "" {
+		lines = append(lines, "base_branch: "+fields.BaseBranch)
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -329,10 +336,13 @@ func SetConvoyFields(issue *Issue, fields *ConvoyFields) string {
 
 	// Known convoy field keys (lowercase)
 	convoyKeys := map[string]bool{
-		"owner":    true,
-		"notify":   true,
-		"merge":    true,
-		"molecule": true,
+		"owner":       true,
+		"notify":      true,
+		"merge":       true,
+		"molecule":    true,
+		"base_branch": true,
+		"base-branch": true,
+		"basebranch":  true,
 	}
 
 	// Collect non-convoy lines from existing description

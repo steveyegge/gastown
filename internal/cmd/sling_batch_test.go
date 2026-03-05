@@ -70,7 +70,7 @@ exit 0
 	}
 
 	beadIDs := []string{"gt-aaa", "gt-bbb", "gt-ccc"}
-	convoyID, _, err := createBatchConvoy(beadIDs, "gastown", false, "mr")
+	convoyID, _, err := createBatchConvoy(beadIDs, "gastown", false, "mr", "")
 	if err != nil {
 		t.Fatalf("createBatchConvoy() error: %v", err)
 	}
@@ -164,7 +164,7 @@ exit 0
 		t.Fatalf("chdir: %v", err)
 	}
 
-	_, _, err = createBatchConvoy([]string{"gt-aaa"}, "gastown", true, "direct")
+	_, _, err = createBatchConvoy([]string{"gt-aaa"}, "gastown", true, "direct", "")
 	if err != nil {
 		t.Fatalf("createBatchConvoy() error: %v", err)
 	}
@@ -225,7 +225,7 @@ exit 0
 		t.Fatalf("chdir: %v", err)
 	}
 
-	_, _, err = createBatchConvoy([]string{"gt-aaa", "gt-bbb"}, "gastown", false, "direct")
+	_, _, err = createBatchConvoy([]string{"gt-aaa", "gt-bbb"}, "gastown", false, "direct", "")
 	if err != nil {
 		t.Fatalf("createBatchConvoy() error: %v", err)
 	}
@@ -246,7 +246,7 @@ exit 0
 // TestCreateBatchConvoy_EmptyBeadIDs verifies that createBatchConvoy returns
 // an error when called with no bead IDs.
 func TestCreateBatchConvoy_EmptyBeadIDs(t *testing.T) {
-	_, _, err := createBatchConvoy(nil, "gastown", false, "")
+	_, _, err := createBatchConvoy(nil, "gastown", false, "", "")
 	if err == nil {
 		t.Fatal("expected error for empty bead IDs, got nil")
 	}
@@ -295,7 +295,7 @@ exit 0
 		t.Fatalf("chdir: %v", err)
 	}
 
-	_, _, err = createBatchConvoy([]string{"gt-a", "gt-b", "gt-c", "gt-d", "gt-e"}, "myrig", false, "")
+	_, _, err = createBatchConvoy([]string{"gt-a", "gt-b", "gt-c", "gt-d", "gt-e"}, "myrig", false, "", "")
 	if err != nil {
 		t.Fatalf("createBatchConvoy() error: %v", err)
 	}
@@ -377,7 +377,7 @@ exit 0
 	}
 
 	// Should NOT return error — partial tracking is acceptable
-	convoyID, tracked, err := createBatchConvoy([]string{"gt-aaa", "gt-bbb", "gt-ccc"}, "gastown", false, "")
+	convoyID, tracked, err := createBatchConvoy([]string{"gt-aaa", "gt-bbb", "gt-ccc"}, "gastown", false, "", "")
 	if err != nil {
 		t.Fatalf("createBatchConvoy() should not error on partial dep failure: %v", err)
 	}
@@ -838,7 +838,7 @@ exit 0
 		t.Fatalf("rewrite bd stub: %v", err)
 	}
 
-	convoyID, err := createAutoConvoy("gt-aaa", "Fix the widget", false, "mr")
+	convoyID, err := createAutoConvoy("gt-aaa", "Fix the widget", false, "mr", "")
 	if err != nil {
 		t.Fatalf("createAutoConvoy() error: %v", err)
 	}
@@ -870,7 +870,7 @@ exit 0
 // TestCreateAutoConvoy_FlagLikeTitleReturnsError verifies that a title starting
 // with "--" is rejected.
 func TestCreateAutoConvoy_FlagLikeTitleReturnsError(t *testing.T) {
-	_, err := createAutoConvoy("gt-aaa", "--verbose", false, "")
+	_, err := createAutoConvoy("gt-aaa", "--verbose", false, "", "")
 	if err == nil {
 		t.Fatal("expected error for flag-like title, got nil")
 	}
@@ -897,7 +897,7 @@ exit 0
 		t.Fatalf("rewrite bd stub: %v", err)
 	}
 
-	_, err := createAutoConvoy("gt-aaa", "My task", true, "direct")
+	_, err := createAutoConvoy("gt-aaa", "My task", true, "direct", "")
 	if err != nil {
 		t.Fatalf("createAutoConvoy() error: %v", err)
 	}
@@ -941,7 +941,7 @@ exit 0
 		t.Fatalf("rewrite bd stub: %v", err)
 	}
 
-	_, err := createAutoConvoy("gt-aaa", "My task", false, "")
+	_, err := createAutoConvoy("gt-aaa", "My task", false, "", "")
 	if err == nil {
 		t.Fatal("expected error when dep add fails, got nil")
 	}
@@ -1278,7 +1278,7 @@ exit 0
 		t.Fatalf("chdir: %v", err)
 	}
 
-	convoyID, tracked, err := createBatchConvoy([]string{"gt-aaa", "gt-bbb", "gt-ccc"}, "gastown", false, "")
+	convoyID, tracked, err := createBatchConvoy([]string{"gt-aaa", "gt-bbb", "gt-ccc"}, "gastown", false, "", "")
 	if err != nil {
 		t.Fatalf("createBatchConvoy() error: %v", err)
 	}

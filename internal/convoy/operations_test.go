@@ -1170,7 +1170,7 @@ func TestDispatchIssue_Success(t *testing.T) {
 	townRoot := t.TempDir()
 	gtPath, logPath := makeGTStub(t, 0)
 
-	err := dispatchIssue(context.Background(), townRoot, "test-abc", "myrig", gtPath)
+	err := dispatchIssue(context.Background(), townRoot, "test-abc", "myrig", gtPath, "")
 	if err != nil {
 		t.Fatalf("dispatchIssue returned error: %v", err)
 	}
@@ -1194,7 +1194,7 @@ func TestDispatchIssue_Failure(t *testing.T) {
 	townRoot := t.TempDir()
 	gtPath, _ := makeGTStub(t, 1)
 
-	err := dispatchIssue(context.Background(), townRoot, "test-fail", "myrig", gtPath)
+	err := dispatchIssue(context.Background(), townRoot, "test-fail", "myrig", gtPath, "")
 	if err == nil {
 		t.Fatal("dispatchIssue should return error when gt exits 1")
 	}
