@@ -59,7 +59,7 @@ const typeBadgeConfig: Record<AssetType, { label: string; className: string; ico
     icon: Server,
   },
   "mcp-tool": {
-    label: "Tool",
+    label: "MCP Tool",
     className: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
     icon: Wrench,
   },

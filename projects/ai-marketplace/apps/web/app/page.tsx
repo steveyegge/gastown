@@ -36,7 +36,7 @@ export default function MarketplacePage() {
   // Counts for tabs
   const counts = {
     agents: assets.filter(a => a.type === "agent").length,
-    tools:  assets.filter(a => a.type === "mcp-tool" || a.type === "mcp-server").length,
+    mcp:    assets.filter(a => a.type === "mcp-tool" || a.type === "mcp-server").length,
     models: assets.filter(a => a.type === "model").length,
     skills: assets.reduce((acc, a) => acc + a.capabilities.length, 0),
   }
@@ -45,7 +45,7 @@ export default function MarketplacePage() {
   const getTabTitle = () => {
     switch (selectedTab) {
       case "agents": return "Discover Agents"
-      case "tools":  return "Discover Tools"
+      case "tools":  return "Discover MCP Servers & Tools"
       case "models": return "Discover Models"
       case "skills": return "Discover Skills"
       case "stats":  return "Marketplace Stats"
@@ -56,10 +56,10 @@ export default function MarketplacePage() {
   const getTabDescription = () => {
     switch (selectedTab) {
       case "agents": return "AI agents for healthcare RCM automation and intelligent workflows."
-      case "tools":  return "MCP tools and servers to extend agent capabilities."
+      case "tools":  return "MCP servers and tools to extend agent capabilities."
       case "models": return `${counts.models} foundation models deployed on Azure AI Foundry — click any card to view the live Model Card with benchmarks and safety metrics.`
       case "skills": return "Reusable skills that power agent actions and integrations."
-      case "stats":  return "View marketplace analytics and trends."
+      case "stats":  return "Live counts and trends across the marketplace."
       default:       return "AI agents for healthcare RCM automation and intelligent workflows."
     }
   }
@@ -127,6 +127,23 @@ export default function MarketplacePage() {
           </button>
         </div>
         
+        {/* Stats Panel */}
+        {selectedTab === "stats" && (
+          <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              { label: "Agents",      value: counts.agents, color: "text-[var(--optum-orange)]" },
+              { label: "MCP Servers & Tools", value: counts.mcp,    color: "text-[var(--success)]" },
+              { label: "Models",      value: counts.models, color: "text-purple-400" },
+              { label: "Skills",      value: counts.skills, color: "text-[var(--optum-teal)]" },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="rounded-lg border border-border bg-card/50 p-4">
+                <p className="text-sm text-muted-foreground">{label}</p>
+                <p className={`mt-1 text-3xl font-bold ${color}`}>{value}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Cards Grid */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {/* Contribute Card */}

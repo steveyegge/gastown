@@ -15,7 +15,7 @@ const mainTabs = [
   { id: "all", label: "All", icon: LayoutGrid },
   { id: "agent", label: "Agents", icon: Bot },
   { id: "mcp-server", label: "MCP Servers", icon: Server },
-  { id: "mcp-tool", label: "Tools", icon: Wrench },
+  { id: "mcp-tool", label: "MCP Tools", icon: Wrench },
   { id: "model", label: "Models", icon: Brain },
   { id: "workflow-template", label: "Workflows", icon: Workflow },
 ] as const

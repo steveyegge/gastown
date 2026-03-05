@@ -2,13 +2,10 @@
 
 import { cn } from "@/lib/utils"
 import { 
-  Puzzle, 
-  Zap, 
-  Bot, 
-  Globe, 
+  Zap,
+  Bot,
+  Globe,
   BarChart3,
-  ExternalLink,
-  Brain
 } from "lucide-react"
 
 interface NavTabsProps {
@@ -16,7 +13,7 @@ interface NavTabsProps {
   onTabChange: (tab: string) => void
   counts: {
     agents: number
-    tools: number
+    mcp: number
     skills: number
     models: number
   }
@@ -25,10 +22,9 @@ interface NavTabsProps {
 export function NavTabs({ selectedTab, onTabChange, counts }: NavTabsProps) {
   const tabs = [
     { id: "agents",  label: "Agents",  icon: Bot,      count: counts.agents },
-    { id: "tools",   label: "Tools",   icon: Puzzle,   count: counts.tools },
+    { id: "tools",   label: "MCP",     icon: Globe,    count: counts.mcp },
     { id: "models",  label: "Models",  icon: Brain,    count: counts.models },
     { id: "skills",  label: "Skills",  icon: Zap,      count: counts.skills },
-    { id: "mcp",     label: "MCP",     icon: Globe,    external: true },
     { id: "stats",   label: "Stats",   icon: BarChart3 },
   ]
 
@@ -49,10 +45,9 @@ export function NavTabs({ selectedTab, onTabChange, counts }: NavTabsProps) {
             <tab.icon className={cn(
               "h-4 w-4",
               tab.id === "agents"  && "text-[var(--optum-orange)]",
-              tab.id === "tools"   && "text-[var(--uhg-blue-light)]",
+              tab.id === "tools"   && "text-[var(--success)]",
               tab.id === "models"  && "text-purple-400",
               tab.id === "skills"  && "text-[var(--optum-teal)]",
-              tab.id === "mcp"     && "text-[var(--success)]",
               tab.id === "stats"   && "text-[var(--info)]"
             )} />
             <span>{tab.label}</span>
@@ -66,9 +61,7 @@ export function NavTabs({ selectedTab, onTabChange, counts }: NavTabsProps) {
                 {tab.count}
               </span>
             )}
-            {tab.external && (
-              <ExternalLink className="h-3 w-3" />
-            )}
+
           </button>
         ))}
       </div>
