@@ -621,6 +621,9 @@
 {"issue_id":"hq-ecaw","label":"from:deacon/"}
 {"issue_id":"hq-ecaw","label":"gt:message"}
 {"issue_id":"hq-ecaw","label":"read"}
+{"issue_id":"hq-eub9","label":"from:meety_me/witness"}
+{"issue_id":"hq-eub9","label":"gt:message"}
+{"issue_id":"hq-eub9","label":"read"}
 {"issue_id":"hq-eyvd","label":"from:vitalitek/refinery"}
 {"issue_id":"hq-eyvd","label":"gt:message"}
 {"issue_id":"hq-eyvd","label":"read"}
@@ -1187,6 +1190,7 @@
 {"issue_id":"hq-wiv","label":"read"}
 {"issue_id":"hq-wkz8","label":"from:meety_me/witness"}
 {"issue_id":"hq-wkz8","label":"gt:message"}
+{"issue_id":"hq-wkz8","label":"read"}
 {"issue_id":"hq-x1or","label":"delivery:pending"}
 {"issue_id":"hq-x1or","label":"from:daemon"}
 {"issue_id":"hq-x1or","label":"gt:message"}
