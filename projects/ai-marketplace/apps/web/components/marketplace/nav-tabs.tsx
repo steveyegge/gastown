@@ -6,6 +6,7 @@ import {
   Bot,
   Globe,
   BarChart3,
+  Brain,
 } from "lucide-react"
 
 interface NavTabsProps {
@@ -34,7 +35,7 @@ export function NavTabs({ selectedTab, onTabChange, counts }: NavTabsProps) {
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => !tab.external && onTabChange(tab.id)}
+            onClick={() => onTabChange(tab.id)}
             className={cn(
               "flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-all",
               selectedTab === tab.id
