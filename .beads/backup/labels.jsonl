@@ -559,6 +559,9 @@
 {"issue_id":"hq-k3m","label":"read"}
 {"issue_id":"hq-k7r","label":"from:lilypad_chat/refinery"}
 {"issue_id":"hq-k7r","label":"gt:message"}
+{"issue_id":"hq-kba8","label":"from:deacon/"}
+{"issue_id":"hq-kba8","label":"gt:message"}
+{"issue_id":"hq-kba8","label":"read"}
 {"issue_id":"hq-kcbu","label":"delivery:pending"}
 {"issue_id":"hq-kcbu","label":"from:daemon"}
 {"issue_id":"hq-kcbu","label":"gt:message"}
