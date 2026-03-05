@@ -264,7 +264,7 @@ func TestEnsureGitignorePatterns_CreatesNewFile(t *testing.T) {
 	}
 
 	// Check all required patterns are present (.beads/ intentionally excluded — see overlay.go)
-	patterns := []string{".runtime/", ".claude/commands/", ".logs/"}
+	patterns := []string{".runtime/", ".claude/", ".logs/", "__pycache__/"}
 	for _, pattern := range patterns {
 		if !containsLine(string(content), pattern) {
 			t.Errorf(".gitignore missing pattern %q", pattern)
@@ -302,7 +302,7 @@ func TestEnsureGitignorePatterns_AppendsToExisting(t *testing.T) {
 	}
 
 	// Should add required patterns (.beads/ intentionally excluded — see overlay.go)
-	patterns := []string{".runtime/", ".claude/commands/", ".logs/"}
+	patterns := []string{".runtime/", ".claude/", ".logs/", "__pycache__/"}
 	for _, pattern := range patterns {
 		if !containsLine(string(content), pattern) {
 			t.Errorf(".gitignore missing pattern %q", pattern)
@@ -337,14 +337,18 @@ func TestEnsureGitignorePatterns_SkipsExistingPatterns(t *testing.T) {
 		t.Errorf(".runtime/ appears %d times, expected 1", count)
 	}
 
-	// Broader .claude/ covers .claude/commands/ — no duplicate needed
-	if containsLine(string(content), ".claude/commands/") {
-		t.Error(".claude/commands/ should not be added when .claude/ already exists (superset)")
+	// .claude/ is now a direct required pattern — should not be duplicated
+	claudeCount := countOccurrences(string(content), ".claude/")
+	if claudeCount != 1 {
+		t.Errorf(".claude/ appears %d times, expected 1", claudeCount)
 	}
 
 	// Should add missing patterns
 	if !containsLine(string(content), ".logs/") {
 		t.Error(".gitignore missing pattern .logs/")
+	}
+	if !containsLine(string(content), "__pycache__/") {
+		t.Error(".gitignore missing pattern __pycache__/")
 	}
 
 	// Regression guard: .beads/ must NOT be in required patterns.
@@ -383,9 +387,9 @@ func TestEnsureGitignorePatterns_RecognizesVariants(t *testing.T) {
 		t.Errorf(".runtime appears %d times (variant detection failed)", runtimeCount)
 	}
 
-	// /.claude (leading slash, no trailing slash) should cover .claude/commands/
-	if containsLine(string(content), ".claude/commands/") {
-		t.Error(".claude/commands/ should not be added when /.claude already covers it")
+	// /.claude (leading slash, no trailing slash) should cover .claude/
+	if containsLine(string(content), ".claude/") {
+		t.Error(".claude/ should not be added when /.claude already covers it")
 	}
 }
 
@@ -393,8 +397,7 @@ func TestEnsureGitignorePatterns_AllPatternsPresent(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create existing .gitignore with all required patterns.
-	// .claude/ is a superset of .claude/commands/, so it covers the requirement.
-	existing := ".runtime/\n.claude/\n.beads/\n.logs/\n"
+	existing := ".runtime/\n.claude/\n.beads/\n.logs/\n__pycache__/\n"
 	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(existing), 0644); err != nil {
 		t.Fatalf("Failed to create .gitignore: %v", err)
 	}
@@ -423,8 +426,8 @@ func TestEnsureGitignorePatterns_AllPatternsPresent(t *testing.T) {
 func TestEnsureGitignorePatterns_NarrowPatternPresent(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create .gitignore with the exact narrow patterns
-	existing := ".runtime/\n.claude/commands/\n.logs/\n"
+	// Create .gitignore with the exact required patterns
+	existing := ".runtime/\n.claude/\n.logs/\n__pycache__/\n"
 	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(existing), 0644); err != nil {
 		t.Fatalf("Failed to create .gitignore: %v", err)
 	}
@@ -445,12 +448,44 @@ func TestEnsureGitignorePatterns_NarrowPatternPresent(t *testing.T) {
 	}
 }
 
+func TestEnsureGitignorePatterns_OldNarrowClaudeUpgraded(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Simulate old installation with narrow .claude/commands/ pattern.
+	// After upgrade, .claude/ (broad) should be added since .claude/commands/
+	// does NOT cover .claude/ (the narrow is a subset, not a superset).
+	existing := ".runtime/\n.claude/commands/\n.logs/\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(existing), 0644); err != nil {
+		t.Fatalf("Failed to create .gitignore: %v", err)
+	}
+
+	err := EnsureGitignorePatterns(tmpDir)
+	if err != nil {
+		t.Fatalf("EnsureGitignorePatterns() error = %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("Failed to read .gitignore: %v", err)
+	}
+
+	// .claude/ should be added (old .claude/commands/ doesn't cover it)
+	if !containsLine(string(content), ".claude/") {
+		t.Error(".claude/ should be added when only .claude/commands/ was present")
+	}
+
+	// __pycache__/ should be added
+	if !containsLine(string(content), "__pycache__/") {
+		t.Error("__pycache__/ should be added")
+	}
+}
+
 func TestEnsureGitignorePatterns_UpgradePreservesBroadPattern(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Simulate an existing installation that has the old broad .claude/ pattern
-	// plus other Gas Town patterns. After upgrade, the broad pattern should be
-	// preserved (it's a superset) and no narrow pattern should be added.
+	// Simulate an existing installation that has .claude/ plus other Gas Town
+	// patterns but is missing __pycache__/ (added later). After upgrade,
+	// __pycache__/ should be appended.
 	existing := "# Gas Town (added by gt)\n.runtime/\n.claude/\n.logs/\n"
 	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(existing), 0644); err != nil {
 		t.Fatalf("Failed to create .gitignore: %v", err)
@@ -466,14 +501,17 @@ func TestEnsureGitignorePatterns_UpgradePreservesBroadPattern(t *testing.T) {
 		t.Fatalf("Failed to read .gitignore: %v", err)
 	}
 
-	// File should be unchanged — broad .claude/ covers the narrow requirement
-	if string(content) != existing {
-		t.Errorf("File was modified during upgrade.\nGot: %q\nWant: %q", string(content), existing)
+	// __pycache__/ should be appended
+	if !containsLine(string(content), "__pycache__/") {
+		t.Error("__pycache__/ should be added during upgrade")
 	}
 
-	// Narrow pattern should NOT be added (superset already present)
-	if containsLine(string(content), ".claude/commands/") {
-		t.Error(".claude/commands/ should not be added when .claude/ already covers it")
+	// Existing patterns should be preserved
+	if !containsLine(string(content), ".runtime/") {
+		t.Error(".runtime/ should be preserved")
+	}
+	if !containsLine(string(content), ".claude/") {
+		t.Error(".claude/ should be preserved")
 	}
 }
 

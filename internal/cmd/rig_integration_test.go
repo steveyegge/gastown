@@ -45,7 +45,7 @@ var agentAllowlist = map[string][]string{
 	"mayor": {
 		"?? AGENTS.md",  // bd init: creates multi-provider instructions (tracked beads repos only)
 		"?? .claude/",   // bd init: creates .claude/settings.json with onboard prompt
-		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/commands/, .runtime/, and .logs/ patterns
+		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/, .runtime/, .logs/, __pycache__/ patterns
 	},
 
 	// Refinery is a worktree for the merge queue processor.
@@ -54,12 +54,12 @@ var agentAllowlist = map[string][]string{
 	// Crew workers are user-managed worktrees for human developers.
 	"crew": {
 		"?? state.json", // crew/manager.go: Gas Town metadata (TODO: migrate to beads like polecats)
-		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/commands/, .runtime/, and .logs/ patterns
+		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/, .runtime/, .logs/, __pycache__/ patterns
 	},
 
 	// Polecats are ephemeral worktrees for autonomous agents.
 	"polecat": {
-		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/commands/, .runtime/, and .logs/ patterns
+		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/, .runtime/, .logs/, __pycache__/ patterns
 	},
 }
 
