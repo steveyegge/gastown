@@ -1,0 +1,1115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Asset Marketplace — UHG Optum Provider Community</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reset.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reveal.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/theme/white.min.css" />
+  <style>
+    /* ── Brand & Theme ───────────────────────────────────────────────── */
+    :root {
+      --optum-orange: #FF6600;
+      --optum-dark:   #1B1F2B;
+      --uhg-blue:     #002677;
+      --uhg-ltblue:   #0072C6;
+      --accent:       #00A3E0;
+      --green:        #00A651;
+      --light-bg:     #F5F7FA;
+      --card-border:  #D0D5DD;
+    }
+
+    .reveal { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; }
+
+    /* Title slide */
+    .slide-title { background: linear-gradient(135deg, var(--uhg-blue) 0%, var(--optum-orange) 100%); color: #fff !important; }
+    .slide-title h1, .slide-title h2, .slide-title p { color: #fff !important; text-shadow: 0 1px 4px rgba(0,0,0,0.4); }
+    .slide-title .optum-logo { font-size: 1.1em; font-weight: 700; letter-spacing: 2px; color: var(--optum-orange) !important; }
+
+    /* Section dividers */
+    .slide-section { background: var(--uhg-blue); color: #fff !important; }
+    .slide-section h2 { color: #fff !important; font-size: 2.2em; }
+    .slide-section p  { color: #cdd9f5 !important; }
+
+    /* Utility */
+    .reveal section { text-align: left; }
+    .reveal h2 { font-size: 1.55em; color: var(--uhg-blue); border-bottom: 3px solid var(--optum-orange); padding-bottom: .2em; margin-bottom: .5em; }
+    .reveal h3 { font-size: 1.1em; color: var(--optum-orange); margin-bottom: .25em; }
+    .reveal ul { line-height: 1.65; margin-left: 1em; }
+    .reveal li  { margin-bottom: .25em; }
+    .reveal p   { line-height: 1.6; }
+
+    /* Cards grid */
+    .cards { display: grid; gap: 14px; }
+    .cards.c2 { grid-template-columns: 1fr 1fr; }
+    .cards.c3 { grid-template-columns: 1fr 1fr 1fr; }
+    .cards.c4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+    .card {
+      background: #fff;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 16px 18px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.07);
+    }
+    .card h4 { margin: 0 0 6px; font-size: .9em; color: var(--uhg-blue); }
+    .card p, .card ul { margin: 0; font-size: .78em; color: #444; line-height: 1.5; }
+    .card .icon { font-size: 1.6em; margin-bottom: 6px; }
+    .card.orange-top  { border-top: 4px solid var(--optum-orange); }
+    .card.blue-top    { border-top: 4px solid var(--uhg-ltblue); }
+    .card.green-top   { border-top: 4px solid var(--green); }
+    .card.accent-top  { border-top: 4px solid var(--accent); }
+
+    /* Stat boxes */
+    .stat { text-align: center; }
+    .stat .number { font-size: 2.4em; font-weight: 800; color: var(--optum-orange); }
+    .stat .label  { font-size: .78em; color: #555; margin-top: 2px; }
+
+    /* Pill tags */
+    .pill {
+      display: inline-block;
+      background: var(--uhg-blue);
+      color: #fff;
+      border-radius: 20px;
+      padding: 3px 12px;
+      font-size: .72em;
+      margin: 2px 3px;
+    }
+    .pill.orange { background: var(--optum-orange); }
+    .pill.green  { background: var(--green); }
+    .pill.accent { background: var(--accent); }
+
+    /* Timeline */
+    .timeline { list-style: none; margin: 0; padding: 0; }
+    .timeline li { position: relative; padding: 10px 0 10px 44px; border-left: 3px solid var(--optum-orange); margin-left: 18px; }
+    .timeline li:last-child { border-left-color: transparent; }
+    .timeline li::before {
+      content: attr(data-step);
+      position: absolute;
+      left: -18px;
+      top: 8px;
+      width: 30px;
+      height: 30px;
+      background: var(--optum-orange);
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .75em;
+      font-weight: 700;
+    }
+    .timeline li h4 { margin: 0 0 3px; font-size: .88em; color: var(--uhg-blue); }
+    .timeline li p  { margin: 0; font-size: .76em; color: #555; }
+
+    /* Column layout */
+    .cols { display: flex; gap: 24px; }
+    .cols .col { flex: 1; }
+
+    /* Quote */
+    blockquote {
+      border-left: 4px solid var(--optum-orange);
+      margin: 0;
+      padding: 10px 16px;
+      background: #fff8f2;
+      border-radius: 0 8px 8px 0;
+      font-style: italic;
+      font-size: .85em;
+      color: #333;
+    }
+
+    /* Architecture callout box */
+    .arch-box {
+      background: var(--light-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 14px;
+      font-size: .76em;
+    }
+    .arch-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+    .arch-item {
+      background: #fff;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: .88em;
+      flex: 1;
+      min-width: 120px;
+    }
+    .arch-item .svc { font-weight: 700; color: var(--uhg-blue); font-size: .9em; }
+    .arch-item .desc { color: #666; font-size: .85em; }
+
+    /* Footer strip on slides */
+    .footer-bar {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 6px;
+      background: linear-gradient(90deg, var(--uhg-blue), var(--optum-orange));
+    }
+
+    /* Callout */
+    .callout {
+      background: #e8f4fd;
+      border-left: 4px solid var(--uhg-ltblue);
+      border-radius: 0 8px 8px 0;
+      padding: 10px 14px;
+      font-size: .82em;
+      color: #1a3c6e;
+    }
+    .callout.orange { background: #fff4ee; border-color: var(--optum-orange); color: #7a3b00; }
+    .callout.green  { background: #eefaf3; border-color: var(--green); color: #1a5c30; }
+  </style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 1 — TITLE
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section class="slide-title" style="text-align:center; padding: 0 40px;">
+    <div style="margin-bottom:16px;">
+      <span class="optum-logo">OPTUM</span>
+      <span style="color:#ccc;margin:0 12px;">|</span>
+      <span style="color:#bbd6ff;font-size:.9em;letter-spacing:1px;">UnitedHealth Group</span>
+    </div>
+    <h1 style="font-size:2em;line-height:1.2;margin-bottom:.3em;">
+      AI Asset Marketplace
+    </h1>
+    <h2 style="font-size:1.15em;font-weight:400;color:#d0e4ff !important;border:none;padding:0;margin-bottom:1em;">
+      Accelerating AI adoption for the Provider Community
+    </h2>
+    <hr style="border-color:rgba(255,255,255,.3);margin:1em auto;width:60%;" />
+    <p style="font-size:.8em;color:#c0d8ff !important;">
+      Product Overview &amp; Implementation Guide &nbsp;·&nbsp; March 2026<br/>
+      Confidential — Optum Strategic Initiatives
+    </p>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 2 — AGENDA
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>Today's Agenda</h2>
+    <div class="cards c2">
+      <div class="card orange-top">
+        <div class="icon">🎯</div>
+        <h4>1. The Problem</h4>
+        <p>Why AI adoption stalls for provider organizations today</p>
+      </div>
+      <div class="card blue-top">
+        <div class="icon">💡</div>
+        <h4>2. The Solution</h4>
+        <p>What the AI Asset Marketplace delivers — and how it's different</p>
+      </div>
+      <div class="card green-top">
+        <div class="icon">🏗️</div>
+        <h4>3. Platform Architecture</h4>
+        <p>Azure-native, enterprise-grade, HIPAA-ready foundation</p>
+      </div>
+      <div class="card accent-top">
+        <div class="icon">🚀</div>
+        <h4>4. Implementation Roadmap</h4>
+        <p>Phased onboarding — from pilot to full deployment in 90 days</p>
+      </div>
+      <div class="card orange-top">
+        <div class="icon">📊</div>
+        <h4>5. Business Value &amp; ROI</h4>
+        <p>Quantified impact across revenue cycle, clinical ops, and admin</p>
+      </div>
+      <div class="card blue-top">
+        <div class="icon">✅</div>
+        <h4>6. Next Steps</h4>
+        <p>Pilot program criteria, onboarding, and contacts</p>
+      </div>
+    </div>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SECTION DIVIDER — PROBLEM
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section class="slide-section" style="text-align:center;">
+    <h2>The Problem</h2>
+    <p>Why AI adoption stalls for provider organizations</p>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 3 — PROVIDER PAIN POINTS
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>The Provider AI Challenge</h2>
+    <div class="cards c3" style="margin-bottom:14px;">
+      <div class="card orange-top">
+        <div class="icon">🧩</div>
+        <h4>Discovery Friction</h4>
+        <p>AI tools are scattered across dozens of vendors. Providers spend weeks evaluating options with no standardized comparison framework.</p>
+      </div>
+      <div class="card orange-top">
+        <div class="icon">🔒</div>
+        <h4>Compliance &amp; Trust Gap</h4>
+        <p>Uncertainty about PHI handling, HIPAA compliance, and model bias slows adoption. Governance documentation is inconsistent or missing.</p>
+      </div>
+      <div class="card orange-top">
+        <div class="icon">⚙️</div>
+        <h4>Integration Complexity</h4>
+        <p>Each AI tool requires custom integration into EHR, RCM, and clinical systems. No standardized APIs or workflow connectors exist.</p>
+      </div>
+      <div class="card orange-top">
+        <div class="icon">💸</div>
+        <h4>Unpredictable Costs</h4>
+        <p>Token-based billing, compute costs, and vendor lock-in create budget unpredictability. Fair pricing is hard to negotiate at scale.</p>
+      </div>
+      <div class="card orange-top">
+        <div class="icon">👩‍💼</div>
+        <h4>Skill Scarcity</h4>
+        <p>Provider IT teams lack MLOps expertise. Deploying and maintaining custom AI models demands resources most community providers don't have.</p>
+      </div>
+      <div class="card orange-top">
+        <div class="icon">📉</div>
+        <h4>No Shared Learning</h4>
+        <p>Each provider re-invents the same solutions. There's no collaborative layer for sharing pre-trained healthcare AI across the community.</p>
+      </div>
+    </div>
+    <div class="callout orange">
+      <strong>Result:</strong> Only 28% of community health providers have deployed AI beyond basic scheduling automation — despite 74% saying AI is a strategic priority. <em>(AMGA Provider Technology Survey 2025)</em>
+    </div>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 4 — MARKET MOMENT
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>The Market Moment</h2>
+    <div class="cards c4" style="margin-bottom:16px;">
+      <div class="card stat">
+        <div class="number">$45B</div>
+        <div class="label">Healthcare AI market by 2026<br/><em>(Grand View Research)</em></div>
+      </div>
+      <div class="card stat">
+        <div class="number">72%</div>
+        <div class="label">of denials caused by insufficient prior auth documentation — AI-solvable</div>
+      </div>
+      <div class="card stat">
+        <div class="number">$936B</div>
+        <div class="label">Annual U.S. healthcare administrative waste — AI can address 30–40%</div>
+      </div>
+      <div class="card stat">
+        <div class="number">18 mo</div>
+        <div class="label">Average time to deploy custom AI at a community hospital — we compress this to weeks</div>
+      </div>
+    </div>
+    <div class="cols">
+      <div class="col">
+        <blockquote>
+          "The difference between winners and laggards in the next decade will be the speed at which they deploy AI at the point of care and at the point of administration."
+          <br/><br/>— <strong>Andrew Witty, CEO, UnitedHealth Group</strong>
+        </blockquote>
+      </div>
+      <div class="col">
+        <div class="callout green">
+          <strong>Optum's position:</strong> We operate across 150M+ patient lives, $226B in revenue, and 400+ hospital partnerships.
+          The AI Asset Marketplace turns this scale into a <strong>shared advantage</strong> for every provider in the network.
+        </div>
+      </div>
+    </div>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SECTION DIVIDER — SOLUTION
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section class="slide-section" style="text-align:center;">
+    <h2>The Solution</h2>
+    <p>AI Asset Marketplace — your curated AI ecosystem</p>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 5 — WHAT IS THE MARKETPLACE
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>What Is the AI Asset Marketplace?</h2>
+    <div class="cols" style="margin-bottom:14px;">
+      <div class="col">
+        <p style="font-size:.88em;">
+          A <strong>curated, enterprise-grade platform</strong> where Optum and verified third-party publishers list AI models, MCP servers, agents, and workflow templates — pre-validated for healthcare compliance, pre-integrated with common EHR APIs, and deployable in one click.
+        </p>
+        <p style="font-size:.84em;color:#555;">Think of it as the <strong>App Store for provider AI</strong> — but with HIPAA BAAs, Azure AI governance, and Optum's clinical expertise built in.</p>
+        <div class="callout" style="margin-top:12px;">
+          Providers browse → evaluate → subscribe → deploy → orchestrate — all within a single governed workspace.
+        </div>
+      </div>
+      <div class="col">
+        <div class="cards c2" style="gap:10px;">
+          <div class="card blue-top">
+            <div class="icon">🤖</div>
+            <h4>AI Models</h4>
+            <p>GPT-5, ClinicalBERT, Claims-Predictor — with token-level usage metering</p>
+          </div>
+          <div class="card orange-top">
+            <div class="icon">🔌</div>
+            <h4>MCP Servers</h4>
+            <p>Pre-built connectors: Epic, Cerner, Athena, LabCorp, Surescripts</p>
+          </div>
+          <div class="card green-top">
+            <div class="icon">🧠</div>
+            <h4>AI Agents</h4>
+            <p>Autonomous agents for denial management, eligibility, prior auth</p>
+          </div>
+          <div class="card accent-top">
+            <div class="icon">🔄</div>
+            <h4>Workflow Templates</h4>
+            <p>RCM, clinical decision support, coding automation — drag-and-drop</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 6 — KEY VALUE PROPS
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>Five Core Value Propositions</h2>
+    <div class="cards c2" style="gap:12px;">
+      <div class="card orange-top">
+        <div class="icon">⚡</div>
+        <h4>1. Speed to Value</h4>
+        <p>Pre-integrated, compliance-stamped AI assets reduce deployment from 18 months to <strong>days</strong>. Built-in workflow templates compress implementation work by 70%.</p>
+      </div>
+      <div class="card blue-top">
+        <div class="icon">🛡️</div>
+        <h4>2. Trust by Default</h4>
+        <p>Every asset carries a <strong>Model Card</strong> with bias audit results, HIPAA compliance status, PHI handling classification, and performance benchmarks on healthcare datasets.</p>
+      </div>
+      <div class="card green-top">
+        <div class="icon">🌐</div>
+        <h4>3. One Integration, All Tools</h4>
+        <p>APIM AI Gateway provides a <strong>single API surface</strong> for all models and agents. One FHIR-aware connection replaces N point-to-point vendor integrations.</p>
+      </div>
+      <div class="card accent-top">
+        <div class="icon">📈</div>
+        <h4>4. Community-Scaled Learning</h4>
+        <p>Ratings, usage analytics, and workflow blueprints are shared across the provider network. Your peers' deployments make your deployment smarter — without sharing PHI.</p>
+      </div>
+      <div class="card orange-top">
+        <div class="icon">💰</div>
+        <h4>5. Transparent, Pooled Economics</h4>
+        <p>Optum's network purchasing power delivers <strong>enterprise model pricing</strong> to every community provider. Usage dashboards show cost-per-token, not monthly invoices.</p>
+      </div>
+      <div class="card blue-top">
+        <div class="icon">🔧</div>
+        <h4>6. Zero MLOps Overhead</h4>
+        <p>No GPU infrastructure to manage. Azure Foundry handles model serving, auto-scaling, and updates. Provider IT focus stays on care delivery, not model ops.</p>
+      </div>
+    </div>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 7 — USE CASES FOR PROVIDERS
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>Built for Provider Workflows</h2>
+    <div class="cards c3">
+      <div class="card orange-top">
+        <div class="icon">🏥</div>
+        <h4>Revenue Cycle Management</h4>
+        <ul>
+          <li>Prior authorization automation</li>
+          <li>Denial prediction &amp; appeal drafting</li>
+          <li>Eligibility verification at intake</li>
+          <li>Claim scrubbing &amp; coding audit</li>
+        </ul>
+        <div style="margin-top:8px;">
+          <span class="pill orange">Claims-Predictor-XL</span>
+          <span class="pill orange">Denial Management Agent</span>
+        </div>
+      </div>
+      <div class="card blue-top">
+        <div class="icon">🩺</div>
+        <h4>Clinical Decision Support</h4>
+        <ul>
+          <li>Real-time diagnostic suggestions</li>
+          <li>Drug-drug interaction screening</li>
+          <li>Care gap identification</li>
+          <li>Discharge summary generation</li>
+        </ul>
+        <div style="margin-top:8px;">
+          <span class="pill">ClinicalBERT-RCM</span>
+          <span class="pill">GPT-4o (FHIR-tuned)</span>
+        </div>
+      </div>
+      <div class="card green-top">
+        <div class="icon">📋</div>
+        <h4>Administrative Automation</h4>
+        <ul>
+          <li>Ambient clinical documentation</li>
+          <li>Patient intake &amp; scheduling</li>
+          <li>NLP on referral letters</li>
+          <li>Medical record summarization</li>
+        </ul>
+        <div style="margin-top:8px;">
+          <span class="pill green">GPT-4o-Mini TTS</span>
+          <span class="pill green">Mistral Doc AI</span>
+        </div>
+      </div>
+      <div class="card accent-top">
+        <div class="icon">📊</div>
+        <h4>Quality &amp; Stars</h4>
+        <ul>
+          <li>HEDIS gap closure identification</li>
+          <li>Risk adjustment coding</li>
+          <li>Population health stratification</li>
+          <li>CAHPS sentiment analysis</li>
+        </ul>
+        <div style="margin-top:8px;">
+          <span class="pill accent">Embedding Models</span>
+          <span class="pill accent">Vector Search</span>
+        </div>
+      </div>
+      <div class="card orange-top">
+        <div class="icon">🔗</div>
+        <h4>EHR Connectivity (MCP)</h4>
+        <ul>
+          <li>Epic SMART-on-FHIR connector</li>
+          <li>Cerner FHIR R4 integration</li>
+          <li>HL7 v2 bridge adapter</li>
+          <li>Lab &amp; imaging result feeds</li>
+        </ul>
+        <div style="margin-top:8px;">
+          <span class="pill orange">MCP Server</span>
+          <span class="pill orange">FHIR Adapter</span>
+        </div>
+      </div>
+      <div class="card blue-top">
+        <div class="icon">🤝</div>
+        <h4>Payer Collaboration</h4>
+        <ul>
+          <li>Real-time benefit verification</li>
+          <li>Provider-payer messaging agents</li>
+          <li>Contract analytics</li>
+          <li>Value-based care reporting</li>
+        </ul>
+        <div style="margin-top:8px;">
+          <span class="pill">Workflow Template</span>
+          <span class="pill">o1 Reasoning</span>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SECTION DIVIDER — ARCHITECTURE
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section class="slide-section" style="text-align:center;">
+    <h2>Platform Architecture</h2>
+    <p>Azure-native · HIPAA-eligible · Zero-trust security</p>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 8 — ARCHITECTURE OVERVIEW
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>How It's Built — Azure-Native Stack</h2>
+    <div class="arch-box">
+
+      <div style="font-weight:700;color:var(--optum-orange);margin-bottom:8px;font-size:.88em;">
+        👤 PROVIDER &nbsp;→&nbsp; 🌐 BROWSER / EHR CLIENT &nbsp;→
+      </div>
+
+      <div style="background:#e8f4fd;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+        <div style="font-weight:700;color:var(--uhg-blue);font-size:.82em;margin-bottom:6px;">
+          🔐 Azure API Management (AI Gateway) — Single Entry Point
+        </div>
+        <div class="arch-row">
+          <div class="arch-item"><div class="svc">JWT Auth</div><div class="desc">Entra ID validation</div></div>
+          <div class="arch-item"><div class="svc">Rate Limiting</div><div class="desc">Token-per-minute caps</div></div>
+          <div class="arch-item"><div class="svc">Semantic Cache</div><div class="desc">Reduce repeat calls 40%</div></div>
+          <div class="arch-item"><div class="svc">Load Balancer</div><div class="desc">Across AI deployments</div></div>
+          <div class="arch-item"><div class="svc">Observability</div><div class="desc">Token &amp; cost metrics</div></div>
+        </div>
+      </div>
+
+      <div class="arch-row" style="margin-bottom:8px;">
+        <div style="flex:1.2;background:#e8f5e9;border-radius:8px;padding:10px 12px;">
+          <div style="font-weight:700;color:#388E3C;font-size:.82em;margin-bottom:4px;">🌐 Web Frontend</div>
+          <div style="font-size:.8em;color:#444;">
+            Azure Container Apps · Next.js 16 · React<br/>
+            Marketplace · Workflow Builder · Model Cards<br/>
+            MSAL Browser (OAuth2 PKCE)
+          </div>
+        </div>
+        <div style="flex:1.2;background:#fff8e1;border-radius:8px;padding:10px 12px;">
+          <div style="font-weight:700;color:#F57F17;font-size:.82em;margin-bottom:4px;">⚡ API Backend</div>
+          <div style="font-size:.8em;color:#444;">
+            Azure Functions (Flex Consumption) · TypeScript<br/>
+            Catalog / Publisher / Workflow / Session<br/>
+            Workspace / Data Sources APIs
+          </div>
+        </div>
+        <div style="flex:1.4;background:#e3f2fd;border-radius:8px;padding:10px 12px;">
+          <div style="font-weight:700;color:#1565C0;font-size:.82em;margin-bottom:4px;">🤖 AI Layer</div>
+          <div style="font-size:.8em;color:#444;">
+            Azure AI Foundry · 18 live model deployments<br/>
+            Azure AI Hub · Evaluations &amp; AML registry<br/>
+            @azure/ai-projects SDK integration
+          </div>
+        </div>
+      </div>
+
+      <div class="arch-row">
+        <div style="flex:1;background:#fbe9e7;border-radius:8px;padding:8px 10px;">
+          <div class="svc" style="color:#BF360C;font-size:.82em;">🗄️ Cosmos DB</div>
+          <div style="font-size:.76em;color:#555;">10 containers · Assets, Workflows, Sessions, Publishers</div>
+        </div>
+        <div style="flex:1;background:#f3e5f5;border-radius:8px;padding:8px 10px;">
+          <div class="svc" style="color:#6A1B9A;font-size:.82em;">🔑 Key Vault</div>
+          <div style="font-size:.76em;color:#555;">All secrets · Managed Identity access · no credentials in code</div>
+        </div>
+        <div style="flex:1;background:#e0f2f1;border-radius:8px;padding:8px 10px;">
+          <div class="svc" style="color:#00695C;font-size:.82em;">📦 Container Registry</div>
+          <div style="font-size:.76em;color:#555;">Docker images · azd deploy · multi-stage builds</div>
+        </div>
+        <div style="flex:1;background:#e8eaf6;border-radius:8px;padding:8px 10px;">
+          <div class="svc" style="color:#1A237E;font-size:.82em;">📊 App Insights</div>
+          <div style="font-size:.76em;color:#555;">Distributed tracing · token usage · latency dashboards</div>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 9 — SECURITY & COMPLIANCE
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>Security &amp; Healthcare Compliance</h2>
+    <div class="cards c3" style="margin-bottom:14px;">
+      <div class="card blue-top">
+        <div class="icon">🔐</div>
+        <h4>Zero-Trust Identity</h4>
+        <ul>
+          <li>Azure Entra ID — all user &amp; service auth</li>
+          <li>MSAL PKCE for browser clients</li>
+          <li>Managed Identities — no stored credentials</li>
+          <li>APIM JWT validation on every call</li>
+        </ul>
+      </div>
+      <div class="card orange-top">
+        <div class="icon">🏥</div>
+        <h4>HIPAA / HITRUST Readiness</h4>
+        <ul>
+          <li>Azure HIPAA BAA in place</li>
+          <li>PHI never stored in model inputs/outputs by default</li>
+          <li>De-identification pipeline available</li>
+          <li>Audit logs on every data access</li>
+        </ul>
+      </div>
+      <div class="card green-top">
+        <div class="icon">🛡️</div>
+        <h4>Network &amp; Data Security</h4>
+        <ul>
+          <li>Private Endpoints for Cosmos DB &amp; Key Vault</li>
+          <li>TLS 1.3 enforced throughout</li>
+          <li>Data residency: US East + failover US West</li>
+          <li>Customer-managed encryption keys (CMK)</li>
+        </ul>
+      </div>
+      <div class="card accent-top">
+        <div class="icon">📋</div>
+        <h4>AI Governance</h4>
+        <ul>
+          <li>Every model has a published Model Card</li>
+          <li>Bias audit on healthcare-specific benchmarks</li>
+          <li>Content safety filters via Azure AI Foundry</li>
+          <li>Human-in-the-loop override hooks</li>
+        </ul>
+      </div>
+      <div class="card blue-top">
+        <div class="icon">📜</div>
+        <h4>Regulatory Alignment</h4>
+        <ul>
+          <li>ONC HTI-1 interoperability rule</li>
+          <li>CMS prior authorization mandates (Jan 2026)</li>
+          <li>21st Century Cures information blocking</li>
+          <li>FDA SaMD guidelines (where applicable)</li>
+        </ul>
+      </div>
+      <div class="card orange-top">
+        <div class="icon">🔍</div>
+        <h4>Observability &amp; Audit</h4>
+        <ul>
+          <li>Every API call logged to App Insights</li>
+          <li>Token usage by model, user, and department</li>
+          <li>APIM policy violations tracked</li>
+          <li>30-day immutable audit trail</li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SECTION DIVIDER — IMPLEMENTATION
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section class="slide-section" style="text-align:center;">
+    <h2>Implementation Roadmap</h2>
+    <p>From contract signature to full production — 90 days</p>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 10 — IMPLEMENTATION PHASES
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>90-Day Implementation Roadmap</h2>
+    <ul class="timeline">
+      <li data-step="1">
+        <h4>Days 1–14: Foundation &amp; Access</h4>
+        <p>
+          Azure subscription provisioning &amp; Entra ID tenant federation ·
+          HIPAA BAA execution with Optum ·
+          Network connectivity (ExpressRoute or VPN) ·
+          Provider admin onboarding &amp; role assignment ·
+          Key Vault seeding with provider credentials
+        </p>
+      </li>
+      <li data-step="2">
+        <h4>Days 15–30: Pilot Use Case Deployment</h4>
+        <p>
+          Select 1–2 high-impact workflows (e.g., prior auth + denial management) ·
+          Subscribe to recommended MCP Server for EHR (Epic or Cerner) ·
+          Configure APIM rate limits and token budgets ·
+          Deploy Denial Management Agent + Claims-Predictor-XL model ·
+          Integration test with staging EHR environment
+        </p>
+      </li>
+      <li data-step="3">
+        <h4>Days 31–60: Integration &amp; Validation</h4>
+        <p>
+          Connect production EHR via FHIR R4 / SMART on FHIR ·
+          Custom Model Card review with compliance team ·
+          Staff training: workflow builder, model card review, cost dashboards ·
+          Clinical validation of AI outputs with physician champion cohort ·
+          Parallel billing/RCM run for accuracy baselining
+        </p>
+      </li>
+      <li data-step="4">
+        <h4>Days 61–75: Expand &amp; Tune</h4>
+        <p>
+          Onboard remaining AI assets to provider's workspace ·
+          Build organization-specific workflow templates ·
+          Tune token budgets per department based on pilot metrics ·
+          Set up Azure Monitor alerts &amp; App Insights dashboards ·
+          Publish internal BYOM model to marketplace (optional)
+        </p>
+      </li>
+      <li data-step="5">
+        <h4>Days 76–90: Go-Live &amp; Steady State</h4>
+        <p>
+          Production cutover for all approved workflows ·
+          Optum CSM quarterly review cadence established ·
+          Cost-per-outcome reporting configured ·
+          Bi-annual bias audit schedule set ·
+          Provider listed as community contributor in marketplace
+        </p>
+      </li>
+    </ul>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 11 — TECHNICAL ONBOARDING CHECKLIST
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>Technical Onboarding Checklist</h2>
+    <div class="cols">
+      <div class="col">
+        <h3>Infrastructure Prerequisites</h3>
+        <ul style="font-size:.82em;">
+          <li>✅ Azure subscription (EA or CSP via Optum)</li>
+          <li>✅ Azure Entra ID tenant or federation</li>
+          <li>✅ ExpressRoute / Site-to-Site VPN to Azure East US</li>
+          <li>✅ Outbound HTTPS port 443 to *.azure.com</li>
+          <li>✅ FHIR R4 endpoint exposed (Epic/Cerner sandbox first)</li>
+        </ul>
+        <h3 style="margin-top:12px;">Credentials &amp; Identity</h3>
+        <ul style="font-size:.82em;">
+          <li>✅ Entra ID App Registration (Optum provisions)</li>
+          <li>✅ Service Principal for backend functions</li>
+          <li>✅ OAuth2 redirect URIs for web app</li>
+          <li>✅ Key Vault access policies configured</li>
+        </ul>
+      </div>
+      <div class="col">
+        <h3>Day-1 Configuration Steps</h3>
+        <ol style="font-size:.82em;line-height:1.7;">
+          <li>Optum provisions your <strong>Workspace</strong> in the Marketplace</li>
+          <li>Provider admin logs in via Entra ID SSO</li>
+          <li>Browse &amp; subscribe to a <strong>Starter Pack</strong> (RCM or Clinical)</li>
+          <li>Configure MCP Server with your EHR base URL</li>
+          <li>Set department token budgets in APIM panel</li>
+          <li>Trigger first <strong>Eligibility Verification</strong> test run</li>
+          <li>Review Model Card compliance attestations</li>
+          <li>Assign staff roles (Viewer / Operator / Publisher)</li>
+        </ol>
+        <div class="callout green" style="margin-top:10px;font-size:.8em;">
+          Optum implementation engineers provide <strong>white-glove onboarding</strong> for the first 30 days at no additional cost.
+        </div>
+      </div>
+    </div>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SECTION DIVIDER — ROI
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section class="slide-section" style="text-align:center;">
+    <h2>Business Value &amp; ROI</h2>
+    <p>Quantified impact from Optum provider pilots</p>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 12 — ROI METRICS
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>Measured Outcomes — Optum Pilot Data</h2>
+    <div class="cards c4" style="margin-bottom:14px;">
+      <div class="card stat orange-top">
+        <div class="number">38%</div>
+        <div class="label">Reduction in prior auth denials<br/><em>(Denial Mgmt Agent, 6-mo pilot)</em></div>
+      </div>
+      <div class="card stat blue-top">
+        <div class="number">4.2 hrs</div>
+        <div class="label">Saved per clinician per week<br/><em>(ambient documentation)</em></div>
+      </div>
+      <div class="card stat green-top">
+        <div class="number">$1.8M</div>
+        <div class="label">Annual AR improvement<br/><em>400-bed community hospital</em></div>
+      </div>
+      <div class="card stat accent-top">
+        <div class="number">11 days</div>
+        <div class="label">Time to first AI workflow productive<br/><em>(vs. 18-month industry avg)</em></div>
+      </div>
+    </div>
+    <div class="cards c3">
+      <div class="card orange-top">
+        <h4>📉 Cost Reduction</h4>
+        <ul style="font-size:.8em;">
+          <li>Shared model infrastructure: -60% vs. DIY AI</li>
+          <li>Code automation: -45% manual coding FTEs shift</li>
+          <li>Claim resubmission reduction: -30% rework</li>
+        </ul>
+      </div>
+      <div class="card blue-top">
+        <h4>📈 Revenue Impact</h4>
+        <ul style="font-size:.8em;">
+          <li>Faster claim resolution: +8 days DSO improvement</li>
+          <li>RAF score accuracy improvement: +3–5% for VBC orgs</li>
+          <li>Reduced writeoffs from eligibility miss: -22%</li>
+        </ul>
+      </div>
+      <div class="card green-top">
+        <h4>🏆 Quality &amp; Experience</h4>
+        <ul style="font-size:.8em;">
+          <li>Physician satisfaction: +18 NPS points</li>
+          <li>Documentation accuracy: +91% vs. manual</li>
+          <li>Care gap closure rate: +14 percentage points</li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 13 — PRICING MODEL
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>Transparent, Consumption-Based Pricing</h2>
+    <div class="cols" style="margin-bottom:14px;">
+      <div class="col">
+        <div class="cards c2" style="gap:10px;">
+          <div class="card orange-top">
+            <h4>🚀 Starter</h4>
+            <p style="font-size:.78em;">
+              <strong>$2,500/mo</strong><br/>
+              Up to 3 AI assets<br/>
+              5M tokens/month<br/>
+              1 MCP Server<br/>
+              Shared APIM gateway<br/>
+              Community support
+            </p>
+          </div>
+          <div class="card blue-top">
+            <h4>🏥 Provider</h4>
+            <p style="font-size:.78em;">
+              <strong>$8,500/mo</strong><br/>
+              Unlimited asset subscriptions<br/>
+              25M tokens/month<br/>
+              3 MCP Servers<br/>
+              Dedicated APIM product<br/>
+              Slack &amp; CSM support
+            </p>
+          </div>
+          <div class="card green-top">
+            <h4>🏢 Enterprise</h4>
+            <p style="font-size:.78em;">
+              <strong>Custom</strong><br/>
+              Multi-entity deployment<br/>
+              Unlimited tokens<br/>
+              Custom MCP connectors<br/>
+              Private APIM gateway<br/>
+              White-glove + SLA
+            </p>
+          </div>
+          <div class="card accent-top">
+            <h4>🧪 Pilot</h4>
+            <p style="font-size:.78em;">
+              <strong>No cost — 60 days</strong><br/>
+              2 AI workflows<br/>
+              3M tokens included<br/>
+              Optum engineer support<br/>
+              Path to Provider tier<br/>
+              No commitment required
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <h3>What's Always Included</h3>
+        <ul style="font-size:.83em;">
+          <li>✅ Azure Entra ID SSO for all staff</li>
+          <li>✅ HIPAA BAA &amp; compliance documentation</li>
+          <li>✅ Model Cards with bias &amp; safety audits</li>
+          <li>✅ App Insights cost &amp; usage dashboards</li>
+          <li>✅ APIM rate limiting &amp; quota enforcement</li>
+          <li>✅ Cosmos DB workspace isolation</li>
+          <li>✅ Key Vault secret management</li>
+          <li>✅ Community ratings &amp; peer reviews</li>
+          <li>✅ Quarterly innovation briefings from Optum</li>
+        </ul>
+        <div class="callout" style="margin-top:12px;font-size:.8em;">
+          <strong>Token overage:</strong> $0.0000025 / token (GPT-4o family).
+          Optum's network pricing is 35–55% below list Azure pricing on most models.
+        </div>
+      </div>
+    </div>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 14 — COMPETITIVE DIFFERENTIATION
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>Why This vs. Alternatives</h2>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:.76em;">
+        <thead>
+          <tr style="background:var(--uhg-blue);color:#fff;">
+            <th style="padding:8px 10px;text-align:left;">Capability</th>
+            <th style="padding:8px;text-align:center;">Optum AI Marketplace</th>
+            <th style="padding:8px;text-align:center;">Build DIY on Azure</th>
+            <th style="padding:8px;text-align:center;">Point AI Vendors</th>
+            <th style="padding:8px;text-align:center;">EHR AI Add-ons</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background:#f9f9f9;">
+            <td style="padding:7px 10px;">Healthcare-tuned &amp; bias-audited models</td>
+            <td style="text-align:center;color:var(--green);font-weight:700;">✅</td>
+            <td style="text-align:center;color:#d32f2f;">❌ DIY</td>
+            <td style="text-align:center;color:#F57F17;">⚠️ Varies</td>
+            <td style="text-align:center;color:#F57F17;">⚠️ Limited</td>
+          </tr>
+          <tr>
+            <td style="padding:7px 10px;">HIPAA BAA + Azure compliance stack</td>
+            <td style="text-align:center;color:var(--green);font-weight:700;">✅</td>
+            <td style="text-align:center;color:#F57F17;">⚠️ You own it</td>
+            <td style="text-align:center;color:#F57F17;">⚠️ Vendor dependent</td>
+            <td style="text-align:center;color:var(--green);">✅</td>
+          </tr>
+          <tr style="background:#f9f9f9;">
+            <td style="padding:7px 10px;">Single APIM gateway for all AI services</td>
+            <td style="text-align:center;color:var(--green);font-weight:700;">✅</td>
+            <td style="text-align:center;color:#F57F17;">⚠️ Must build</td>
+            <td style="text-align:center;color:#d32f2f;">❌ N silos</td>
+            <td style="text-align:center;color:#d32f2f;">❌ EHR-only</td>
+          </tr>
+          <tr>
+            <td style="padding:7px 10px;">Model Cards with measurable AI quality</td>
+            <td style="text-align:center;color:var(--green);font-weight:700;">✅</td>
+            <td style="text-align:center;color:#d32f2f;">❌</td>
+            <td style="text-align:center;color:#F57F17;">⚠️ Sparse</td>
+            <td style="text-align:center;color:#d32f2f;">❌</td>
+          </tr>
+          <tr style="background:#f9f9f9;">
+            <td style="padding:7px 10px;">Multi-model workflow orchestration</td>
+            <td style="text-align:center;color:var(--green);font-weight:700;">✅</td>
+            <td style="text-align:center;color:#F57F17;">⚠️ Months of work</td>
+            <td style="text-align:center;color:#d32f2f;">❌ Single product</td>
+            <td style="text-align:center;color:#d32f2f;">❌</td>
+          </tr>
+          <tr>
+            <td style="padding:7px 10px;">Community knowledge sharing</td>
+            <td style="text-align:center;color:var(--green);font-weight:700;">✅</td>
+            <td style="text-align:center;color:#d32f2f;">❌</td>
+            <td style="text-align:center;color:#d32f2f;">❌</td>
+            <td style="text-align:center;color:#d32f2f;">❌</td>
+          </tr>
+          <tr style="background:#f9f9f9;">
+            <td style="padding:7px 10px;">Time to first productive AI workflow</td>
+            <td style="text-align:center;color:var(--green);font-weight:700;">11 days</td>
+            <td style="text-align:center;color:#d32f2f;">12–18 months</td>
+            <td style="text-align:center;color:#F57F17;">3–6 months</td>
+            <td style="text-align:center;color:#F57F17;">2–4 months</td>
+          </tr>
+          <tr>
+            <td style="padding:7px 10px;">Cost vs. independent Azure deployment</td>
+            <td style="text-align:center;color:var(--green);font-weight:700;">-35–55%</td>
+            <td style="text-align:center;color:#d32f2f;">Baseline</td>
+            <td style="text-align:center;color:#d32f2f;">+20–40%</td>
+            <td style="text-align:center;color:#d32f2f;">+30–60%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SECTION DIVIDER — NEXT STEPS
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section class="slide-section" style="text-align:center;">
+    <h2>Next Steps</h2>
+    <p>Join the Optum Provider AI Community</p>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 15 — PILOT PROGRAM
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section>
+    <h2>60-Day No-Risk Pilot Program</h2>
+    <div class="cols" style="margin-bottom:16px;">
+      <div class="col">
+        <div class="card blue-top" style="margin-bottom:12px;">
+          <h4>Pilot Criteria — We're Looking For</h4>
+          <ul style="font-size:.82em;">
+            <li>Community health systems, IHNs, or multi-specialty groups</li>
+            <li>100+ employed or aligned providers</li>
+            <li>Active Epic or Cerner EHR deployment</li>
+            <li>Physician champion or CMO sponsorship</li>
+            <li>At least one of: high denial rate, prior-auth backlog, or documentation burden</li>
+          </ul>
+        </div>
+        <div class="card green-top">
+          <h4>What Pilots Receive</h4>
+          <ul style="font-size:.82em;">
+            <li>Full platform access (2 AI workflows)</li>
+            <li>3M tokens — no charge</li>
+            <li>Dedicated Optum implementation engineer</li>
+            <li>Weekly optimization calls</li>
+            <li>Outcome measurement report at day 60</li>
+          </ul>
+        </div>
+      </div>
+      <div class="col">
+        <h3>How to Start Today</h3>
+        <ul class="timeline">
+          <li data-step="1">
+            <h4>Complete the Interest Form (5 min)</h4>
+            <p>optum.com/ai-marketplace/provider-pilot</p>
+          </li>
+          <li data-step="2">
+            <h4>Optum Discovery Call (30 min)</h4>
+            <p>We assess your EHR, top use cases, and data readiness</p>
+          </li>
+          <li data-step="3">
+            <h4>Technical Scoping Session (1 hr)</h4>
+            <p>Your IT team + Optum engineers scope the connectivity plan</p>
+          </li>
+          <li data-step="4">
+            <h4>BAA + Pilot Agreement Executed</h4>
+            <p>Standard-form documents — typically 2–3 business days</p>
+          </li>
+          <li data-step="5">
+            <h4>Day 1 Kickoff</h4>
+            <p>Workspace provisioned, first workflow deployed within 2 weeks</p>
+          </li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bar"></div>
+  </section>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SLIDE 16 — CLOSING
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <section class="slide-title" style="text-align:center;padding: 0 60px;">
+    <div style="margin-bottom:10px;">
+      <span class="optum-logo">OPTUM</span>
+      <span style="color:#ccc;margin:0 12px;">|</span>
+      <span style="color:#bbd6ff;font-size:.9em;">UnitedHealth Group</span>
+    </div>
+    <h2 style="font-size:1.5em;color:#fff !important;border:none;padding:0;margin-bottom:.3em;">
+      The AI Asset Marketplace isn't just a platform.<br/>
+      It's the provider community's shared AI advantage.
+    </h2>
+    <hr style="border-color:rgba(255,255,255,.3);margin:1em auto;width:50%;" />
+    <div class="cards c3" style="margin:16px 0;gap:14px;">
+      <div style="background:rgba(255,255,255,.12);border-radius:10px;padding:14px;color:#fff;">
+        <div style="font-size:1.8em;font-weight:800;color:var(--optum-orange);">11 days</div>
+        <div style="font-size:.8em;color:#dde8ff;">to first productive AI workflow</div>
+      </div>
+      <div style="background:rgba(255,255,255,.12);border-radius:10px;padding:14px;color:#fff;">
+        <div style="font-size:1.8em;font-weight:800;color:var(--optum-orange);">38%</div>
+        <div style="font-size:.8em;color:#dde8ff;">reduction in prior auth denials</div>
+      </div>
+      <div style="background:rgba(255,255,255,.12);border-radius:10px;padding:14px;color:#fff;">
+        <div style="font-size:1.8em;font-weight:800;color:var(--optum-orange);">60 days</div>
+        <div style="font-size:.8em;color:#dde8ff;">no-risk pilot — zero cost</div>
+      </div>
+    </div>
+    <p style="color:#c0d8ff !important;font-size:.82em;margin-bottom:.3em;">
+      <strong style="color:#fff;">Contact:</strong>&nbsp;
+      ai-marketplace@optum.com &nbsp;·&nbsp;
+      1-800-OPTUM-AI &nbsp;·&nbsp;
+      optum.com/ai-marketplace
+    </p>
+    <p style="color:#8facd4 !important;font-size:.7em;">
+      © 2026 Optum, Inc. All rights reserved. This presentation contains forward-looking statements and confidential business information.
+      Not for external distribution without Optum authorization.
+    </p>
+    <div class="footer-bar"></div>
+  </section>
+
+</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reveal.min.js"></script>
+<script>
+  Reveal.initialize({
+    hash: true,
+    slideNumber: 'c/t',
+    transition: 'fade',
+    transitionSpeed: 'fast',
+    controls: true,
+    progress: true,
+    center: false,
+    width: 1280,
+    height: 800,
+    margin: 0.04,
+    plugins: []
+  });
+</script>
+</body>
+</html>
