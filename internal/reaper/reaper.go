@@ -147,32 +147,20 @@ func OpenDB(host string, port int, dbName string, readTimeout, writeTimeout time
 	return sql.Open("mysql", dsn)
 }
 
-// parentCheckWhere returns the SQL WHERE fragment that restricts operations to
-// wisps whose parent molecule is closed, that have no parent (orphans), or
-// whose parent was purged (dangling dependency reference).
-func parentCheckWhere(dbName string) string {
-	return fmt.Sprintf(`
-		(
-			NOT EXISTS (
-				SELECT 1 FROM `+"`%s`"+`.wisp_dependencies wd
-				WHERE wd.issue_id = w.id AND wd.type = 'parent-child'
-			)
-			OR
-			EXISTS (
-				SELECT 1 FROM `+"`%s`"+`.wisp_dependencies wd
-				JOIN `+"`%s`"+`.wisps parent ON parent.id = wd.depends_on_id
-				WHERE wd.issue_id = w.id AND wd.type = 'parent-child'
-				AND parent.status = 'closed'
-			)
-			OR
-			EXISTS (
-				SELECT 1 FROM `+"`%s`"+`.wisp_dependencies wd
-				LEFT JOIN `+"`%s`"+`.wisps parent ON parent.id = wd.depends_on_id
-				WHERE wd.issue_id = w.id AND wd.type = 'parent-child'
-				AND parent.id IS NULL
-			)
-		)`, dbName, dbName, dbName, dbName, dbName)
+// parentJoinClause returns a LEFT JOIN fragment that brings in parent-child
+// dependency and parent wisp data without correlated subqueries.
+// This replaces the former parentCheckWhere() which used 3 correlated EXISTS
+// subqueries causing O(n*m) query cost on large wisp tables (gt-jd1z).
+func parentJoinClause(dbName string) string {
+	return fmt.Sprintf(
+		"LEFT JOIN `%s`.wisp_dependencies wd ON wd.issue_id = w.id AND wd.type = 'parent-child' "+
+			"LEFT JOIN `%s`.wisps parent ON parent.id = wd.depends_on_id",
+		dbName, dbName)
 }
+
+// parentWhereClause returns the WHERE condition that filters to wisps eligible
+// for reaping: orphans (no parent dep), closed parent, or dangling parent ref.
+const parentWhereClause = "(wd.issue_id IS NULL OR parent.status = 'closed' OR (wd.issue_id IS NOT NULL AND parent.id IS NULL))"
 
 // Scan counts reaper candidates in a database without modifying anything.
 func Scan(db *sql.DB, dbName string, maxAge, purgeAge, mailDeleteAge, staleIssueAge time.Duration) (*ScanResult, error) {
@@ -181,12 +169,13 @@ func Scan(db *sql.DB, dbName string, maxAge, purgeAge, mailDeleteAge, staleIssue
 
 	result := &ScanResult{Database: dbName}
 	now := time.Now().UTC()
-	parentCheck := parentCheckWhere(dbName)
+	parentJoin := parentJoinClause(dbName)
 
 	// Count reap candidates: open wisps past max_age with eligible parent status.
-	reapWhere := fmt.Sprintf(
-		"w.status IN ('open', 'hooked', 'in_progress') AND w.created_at < ? AND %s", parentCheck)
-	reapQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.wisps w WHERE %s", dbName, reapWhere)
+	// Uses LEFT JOINs instead of correlated EXISTS subqueries to avoid O(n*m) cost (gt-jd1z).
+	reapQuery := fmt.Sprintf(
+		"SELECT COUNT(DISTINCT w.id) FROM `%s`.wisps w %s WHERE w.status IN ('open', 'hooked', 'in_progress') AND w.created_at < ? AND %s",
+		dbName, parentJoin, parentWhereClause)
 	if err := db.QueryRowContext(ctx, reapQuery, now.Add(-maxAge)).Scan(&result.ReapCandidates); err != nil {
 		return nil, fmt.Errorf("count reap candidates: %w", err)
 	}
@@ -263,14 +252,17 @@ func Reap(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ReapRe
 	defer cancel()
 
 	cutoff := time.Now().UTC().Add(-maxAge)
-	parentCheck := parentCheckWhere(dbName)
-	whereClause := fmt.Sprintf(
-		"w.status IN ('open', 'hooked', 'in_progress') AND w.created_at < ? AND %s", parentCheck)
+	parentJoin := parentJoinClause(dbName)
+	// Uses LEFT JOINs instead of correlated EXISTS subqueries to avoid O(n*m) cost (gt-jd1z).
+	baseWhere := fmt.Sprintf(
+		"w.status IN ('open', 'hooked', 'in_progress') AND w.created_at < ? AND %s", parentWhereClause)
 
 	result := &ReapResult{Database: dbName, DryRun: dryRun}
 
 	if dryRun {
-		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.wisps w WHERE %s", dbName, whereClause)
+		countQuery := fmt.Sprintf(
+			"SELECT COUNT(DISTINCT w.id) FROM `%s`.wisps w %s WHERE %s",
+			dbName, parentJoin, baseWhere)
 		if err := db.QueryRowContext(ctx, countQuery, cutoff).Scan(&result.Reaped); err != nil {
 			return nil, fmt.Errorf("dry-run count: %w", err)
 		}
@@ -292,8 +284,8 @@ func Reap(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ReapRe
 	// Batch UPDATE: select IDs in chunks, update each chunk.
 	// This avoids holding a write lock on the entire table for minutes.
 	idQuery := fmt.Sprintf(
-		"SELECT w.id FROM `%s`.wisps w WHERE %s LIMIT %d",
-		dbName, whereClause, DefaultBatchSize)
+		"SELECT DISTINCT w.id FROM `%s`.wisps w %s WHERE %s LIMIT %d",
+		dbName, parentJoin, baseWhere, DefaultBatchSize)
 
 	totalReaped := 0
 	for {

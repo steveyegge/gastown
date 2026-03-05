@@ -48,21 +48,32 @@ func TestFormatJSON(t *testing.T) {
 	}
 }
 
-func TestParentCheckWhere(t *testing.T) {
-	sql := parentCheckWhere("testdb")
-	// Should reference the correct database in all subqueries.
-	if sql == "" {
-		t.Error("parentCheckWhere should not return empty string")
+func TestParentJoinClause(t *testing.T) {
+	join := parentJoinClause("testdb")
+	if join == "" {
+		t.Error("parentJoinClause should not return empty string")
 	}
-	// Should contain all three branches: no parent, parent closed, dangling parent.
-	if !contains(sql, "NOT EXISTS") {
-		t.Error("parentCheckWhere should have NOT EXISTS branch for orphans")
+	if !contains(join, "LEFT JOIN") {
+		t.Error("parentJoinClause should use LEFT JOIN")
 	}
-	if !contains(sql, "parent.status = 'closed'") {
-		t.Error("parentCheckWhere should check parent status is closed")
+	if !contains(join, "wisp_dependencies") {
+		t.Error("parentJoinClause should reference wisp_dependencies")
 	}
-	if !contains(sql, "parent.id IS NULL") {
-		t.Error("parentCheckWhere should handle dangling parent refs")
+	if !contains(join, "parent-child") {
+		t.Error("parentJoinClause should filter on parent-child type")
+	}
+}
+
+func TestParentWhereClause(t *testing.T) {
+	// Should contain all three eligibility branches: orphan, closed parent, dangling ref.
+	if !contains(parentWhereClause, "wd.issue_id IS NULL") {
+		t.Error("parentWhereClause should check for orphans (no parent dep)")
+	}
+	if !contains(parentWhereClause, "parent.status = 'closed'") {
+		t.Error("parentWhereClause should check parent status is closed")
+	}
+	if !contains(parentWhereClause, "parent.id IS NULL") {
+		t.Error("parentWhereClause should handle dangling parent refs")
 	}
 }
 
