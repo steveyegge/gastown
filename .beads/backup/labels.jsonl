@@ -14,6 +14,9 @@
 {"issue_id":"gt-4ed","label":"from:theoutlived/witness"}
 {"issue_id":"gt-4ed","label":"gt:message"}
 {"issue_id":"gt-4ed","label":"read"}
+{"issue_id":"gt-4yr","label":"plugin:github-sheriff"}
+{"issue_id":"gt-4yr","label":"result:success"}
+{"issue_id":"gt-4yr","label":"type:plugin-run"}
 {"issue_id":"gt-5lr","label":"delivery:pending"}
 {"issue_id":"gt-5lr","label":"from:daemon"}
 {"issue_id":"gt-5lr","label":"gt:message"}
@@ -69,6 +72,10 @@
 {"issue_id":"gt-wzh","label":"from:overseer"}
 {"issue_id":"gt-wzh","label":"gt:message"}
 {"issue_id":"gt-wzh","label":"read"}
+{"issue_id":"gt-x2v","label":"plugin:rebuild-gt"}
+{"issue_id":"gt-x2v","label":"result:success"}
+{"issue_id":"gt-x2v","label":"rig:gastown"}
+{"issue_id":"gt-x2v","label":"type:plugin-run"}
 {"issue_id":"gt-xvh","label":"delivery-acked-at:2026-03-06T18:00:09Z"}
 {"issue_id":"gt-xvh","label":"delivery-acked-by:mayor/"}
 {"issue_id":"gt-xvh","label":"delivery:acked"}
