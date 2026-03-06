@@ -5,7 +5,7 @@ version = 3
 
 [gate]
 type = "event"
-on = "convoy.staged"
+on = "convoy.created"
 
 [tracking]
 labels = ["plugin:dolt-snapshots", "category:data-safety"]
@@ -70,9 +70,16 @@ you can commit to them — making them useful for:
 
 ## Trigger
 
-This plugin fires on the `convoy.staged` event, emitted by `gt convoy stage`.
-When triggered, it scans for ALL convoys needing snapshots (both open and staged),
-so it catches any that were created since the last run.
+This is one of three event-gated plugins sharing the same Go binary:
+
+| Plugin | Event | Snapshot |
+|--------|-------|----------|
+| `dolt-snapshots` | `convoy.created` | `open/` tags (pre-work baseline) |
+| `dolt-snapshots-staged` | `convoy.staged` | `staged/` tags + branches (staging baseline) |
+| `dolt-snapshots-launched` | `convoy.launched` | `staged/` tags + branches (launch baseline) |
+
+Each fires on its specific event. The binary is idempotent — it checks all
+convoys and creates whichever tags/branches are missing.
 
 ## Step 1: Build and run the snapshot binary
 
