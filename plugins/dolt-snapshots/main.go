@@ -336,7 +336,7 @@ func findConvoysNeedingSnapshots(db *sql.DB) ([]convoyRow, error) {
 		FROM hq.issues i
 		WHERE i.issue_type = 'convoy'
 			AND (
-				i.status IN ('staged_ready', 'open')
+				i.status IN ('staged_ready', 'staged_warnings', 'open')
 				OR (i.status = 'closed' AND i.updated_at >= NOW() - INTERVAL 24 HOUR)
 			)
 			AND EXISTS (
