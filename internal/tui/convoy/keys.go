@@ -1,3 +1,5 @@
+// Package convoy implements the interactive convoy browser TUI using Bubble Tea,
+// displaying convoy progress with expandable/collapsible issue trees.
 package convoy
 
 import "github.com/charmbracelet/bubbles/key"

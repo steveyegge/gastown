@@ -1,3 +1,5 @@
+// path.go expands the ~/ prefix in file paths to the user's home directory,
+// caching the home directory lookup for repeated calls.
 package util
 
 import (

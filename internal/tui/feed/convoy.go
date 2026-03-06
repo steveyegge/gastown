@@ -1,3 +1,5 @@
+// convoy.go fetches and renders the convoy panel in the feed TUI,
+// displaying convoy progress bars and tracked issue summaries.
 package feed
 
 import (

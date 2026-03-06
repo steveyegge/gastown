@@ -1,3 +1,5 @@
+// state.go persists scheduler runtime state (pause/resume flags and in-flight
+// dispatch tracking) to a JSON file so state survives process restarts.
 package capacity
 
 import (

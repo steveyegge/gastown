@@ -1,3 +1,6 @@
+// pipeline.go defines the core dispatch types (PendingBead, DispatchPlan,
+// DispatchParams) and the planning logic that selects which beads to dispatch
+// given current capacity constraints.
 package capacity
 
 import "strings"

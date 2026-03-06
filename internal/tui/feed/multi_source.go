@@ -1,3 +1,5 @@
+// multi_source.go provides a fan-in multiplexer that merges multiple
+// EventSources into a single ordered stream for the feed TUI.
 package feed
 
 import (

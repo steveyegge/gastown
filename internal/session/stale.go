@@ -1,3 +1,5 @@
+// stale.go detects stale sessions by comparing the latest message timestamp
+// against session creation time to identify sessions that predate the current run.
 package session
 
 import (

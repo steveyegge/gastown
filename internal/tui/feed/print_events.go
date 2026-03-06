@@ -1,3 +1,5 @@
+// print_events.go implements CLI event printing: reads .events.jsonl with
+// filtering (since, mol, type, rig) and optional follow mode for live tailing.
 package feed
 
 import (

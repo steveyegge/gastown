@@ -1,3 +1,5 @@
+// exec.go provides command execution helpers (ExecWithOutput, ExecRun) that
+// capture stderr for diagnostics and set up process groups to prevent orphans.
 package util
 
 import (

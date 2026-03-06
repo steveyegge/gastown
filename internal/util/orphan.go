@@ -1,5 +1,7 @@
 //go:build !windows
 
+// orphan.go detects orphaned and zombie Claude processes on Unix and performs
+// graceful cleanup with SIGTERM followed by SIGKILL escalation.
 package util
 
 import (

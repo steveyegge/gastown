@@ -1,3 +1,5 @@
+// io.go provides file I/O helpers for the beads directory: ensuring directory
+// existence, resolving bead file paths, and performing atomic JSON writes.
 package wisp
 
 import (

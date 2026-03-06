@@ -1,3 +1,5 @@
+// handlers.go implements mail and event handlers for the witness patrol cycle,
+// covering polecat lifecycle management, zombie session detection, and bead recovery.
 package witness
 
 import (

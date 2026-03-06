@@ -1,3 +1,5 @@
+// patrol_receipts.go defines machine-readable patrol verdict structs that
+// classify zombie detection outcomes for structured logging and automation.
 package witness
 
 import "strings"

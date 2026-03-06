@@ -1,3 +1,5 @@
+// subprocess.go propagates OpenTelemetry resource attributes to subprocesses
+// by mapping Gas Town context variables into standard OTEL environment variables.
 package telemetry
 
 import (

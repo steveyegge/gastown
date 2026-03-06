@@ -1,3 +1,5 @@
+// url.go redacts credentials from URLs so they can be safely included
+// in log output without leaking passwords or tokens.
 package util
 
 import (

@@ -1,5 +1,7 @@
 //go:build !darwin
 
+// keychain_stub.go provides no-op stubs for macOS Keychain operations
+// on non-Darwin platforms where the Keychain API is unavailable.
 package quota
 
 import (

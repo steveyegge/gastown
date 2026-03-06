@@ -1,3 +1,5 @@
+// rotate.go plans account rotations by scanning for rate-limited sessions,
+// selecting replacement accounts, and validating their tokens before swap.
 package quota
 
 import (

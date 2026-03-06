@@ -1,3 +1,5 @@
+// terminal.go detects terminal capabilities: dark/light theme mode, color
+// depth, emoji support, and whether the process is running as an agent.
 package ui
 
 import (

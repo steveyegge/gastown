@@ -1,3 +1,5 @@
+// spawn_count.go tracks bead respawn attempts and implements a circuit breaker
+// to prevent spawn storms when a bead repeatedly fails to start.
 package witness
 
 import (

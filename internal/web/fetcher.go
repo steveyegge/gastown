@@ -1,3 +1,5 @@
+// fetcher.go provides data fetchers for dashboard panels (convoys, workers,
+// mail, rigs, health checks) by invoking bd/gt subprocesses and parsing output.
 package web
 
 import (

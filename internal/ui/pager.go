@@ -1,3 +1,5 @@
+// pager.go pipes long command output through a pager (less or the PAGER
+// environment variable) to avoid flooding the terminal.
 package ui
 
 import (

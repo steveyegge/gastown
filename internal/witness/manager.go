@@ -1,3 +1,5 @@
+// manager.go manages the witness agent lifecycle (start, stop, health checks)
+// using tmux sessions as the source of truth for running state.
 package witness
 
 import (

@@ -1,3 +1,5 @@
+// config.go loads and validates the proxy server's JSON configuration,
+// which specifies TLS certificates, allowed commands, and listen address.
 package main
 
 import (

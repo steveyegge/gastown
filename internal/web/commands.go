@@ -1,3 +1,5 @@
+// commands.go defines the dashboard command whitelist, blocked shell patterns,
+// input sanitization rules, and command palette metadata for the web UI.
 package web
 
 import (

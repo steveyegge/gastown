@@ -1,3 +1,5 @@
+// setup.go handles the first-run setup flow, guiding users through workspace
+// creation or detection when no Gas Town workspace exists yet.
 package web
 
 import (

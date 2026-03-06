@@ -1,5 +1,7 @@
 //go:build !windows
 
+// process_group_unix.go provides Unix process group operations (kill group,
+// get PPID/PGID, find group members) for session cleanup and orphan detection.
 package tmux
 
 import (

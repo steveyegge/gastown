@@ -1,3 +1,5 @@
+// handler.go serves the convoy dashboard HTML page, orchestrating parallel
+// data fetches, template rendering, CSRF token injection, and static file serving.
 package web
 
 import (

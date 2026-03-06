@@ -1,3 +1,5 @@
+// model.go defines the Bubble Tea model for the convoy browser, handling
+// data fetching, expand/collapse state, and keyboard navigation.
 package convoy
 
 import (

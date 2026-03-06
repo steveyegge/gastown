@@ -1,3 +1,5 @@
+// scan.go detects rate-limited and near-limit Claude sessions by examining
+// tmux pane content for quota exhaustion indicators.
 package quota
 
 import (

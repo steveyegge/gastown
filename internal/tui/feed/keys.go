@@ -1,3 +1,5 @@
+// keys.go defines the key bindings for the feed TUI, including navigation,
+// panel switching, and the problems view toggle.
 package feed
 
 import "github.com/charmbracelet/bubbles/key"

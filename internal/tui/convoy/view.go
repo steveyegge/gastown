@@ -1,3 +1,5 @@
+// view.go renders the convoy TUI display using lipgloss styles,
+// including tree connectors, progress indicators, and status coloring.
 package convoy
 
 import (

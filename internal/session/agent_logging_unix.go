@@ -1,5 +1,7 @@
 //go:build !windows
 
+// agent_logging_unix.go spawns a detached gt agent-log process that streams
+// Claude Code's JSONL conversation log to an observability backend.
 package session
 
 import (

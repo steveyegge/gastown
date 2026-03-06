@@ -1,3 +1,5 @@
+// pidtrack.go writes and reads PID files with process birth timestamps so
+// orphan cleanup can safely distinguish stale PIDs from recycled ones.
 package session
 
 import (

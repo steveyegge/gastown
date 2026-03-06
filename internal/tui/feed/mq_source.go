@@ -1,3 +1,5 @@
+// mq_source.go is a deprecated stub for the merge queue event source,
+// retained for interface compatibility after mrqueue was removed.
 package feed
 
 import (

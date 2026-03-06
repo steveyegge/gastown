@@ -1,3 +1,5 @@
+// dispatch.go orchestrates a single dispatch cycle: evaluates pending beads
+// against available capacity and invokes execute/success/failure callbacks.
 package capacity
 
 import (

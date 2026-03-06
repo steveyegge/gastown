@@ -1,3 +1,6 @@
+// overlay.go copies runtime overlay files (such as .env) from
+// .runtime/overlay/ into worktrees, and ensures .gitignore contains
+// required Gas Town patterns so runtime artifacts stay untracked.
 package rig
 
 import (

@@ -1,3 +1,5 @@
+// api.go implements the REST API handler for the web dashboard, providing
+// command execution, session management, and options endpoints with CSRF protection.
 package web
 
 import (

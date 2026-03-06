@@ -1,3 +1,5 @@
+// convoy_issues.go refreshes cross-rig issue statuses for convoy tracked
+// issues, querying each rig's beads database for up-to-date progress.
 package feed
 
 import (

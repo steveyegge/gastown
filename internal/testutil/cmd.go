@@ -1,3 +1,5 @@
+// Package testutil provides test helpers for integration tests, including
+// bd/gt command builders with proper environment isolation and Dolt server management.
 package testutil
 
 import (

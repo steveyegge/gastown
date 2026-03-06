@@ -1,3 +1,5 @@
+// events.go defines event sources for the feed TUI: bd activity log tailing,
+// .events.jsonl file tailing, and a combined fan-in source.
 package feed
 
 import (

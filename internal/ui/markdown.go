@@ -1,3 +1,5 @@
+// markdown.go renders markdown content for terminal display using glamour,
+// with automatic terminal width detection for responsive formatting.
 package ui
 
 import (

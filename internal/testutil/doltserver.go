@@ -1,5 +1,7 @@
 //go:build !windows
 
+// doltserver.go manages Dolt Docker containers for integration tests using
+// testcontainers-go, providing isolated database instances per test suite.
 package testutil
 
 import (

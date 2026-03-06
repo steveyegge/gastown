@@ -1,3 +1,5 @@
+// townroot.go provides the embedded CLAUDE.md template for town-root
+// initialization, with CLI name substitution and required section validation.
 package templates
 
 import (

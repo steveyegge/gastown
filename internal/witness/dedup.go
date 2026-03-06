@@ -1,3 +1,5 @@
+// dedup.go provides an in-memory message deduplicator that prevents the same
+// mail or event from being processed twice across witness patrol cycles.
 package witness
 
 import "sync"

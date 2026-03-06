@@ -1,3 +1,5 @@
+// view.go renders the feed TUI layout: header, agent tree panel, convoy panel,
+// event feed panel, problems panel, and status bar.
 package feed
 
 import (

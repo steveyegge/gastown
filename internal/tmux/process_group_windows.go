@@ -1,5 +1,7 @@
 //go:build windows
 
+// process_group_windows.go provides stub implementations of process group
+// operations on Windows, using tasklist as a fallback for process enumeration.
 package tmux
 
 import (

@@ -1,3 +1,5 @@
+// validate.go provides input validation for dashboard forms: IDs, rig names,
+// git URLs, mail addresses, and tilde-prefixed path expansion.
 package web
 
 import (

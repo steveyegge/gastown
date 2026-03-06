@@ -1,6 +1,5 @@
-// ABOUTME: Shell integration installation and removal for Gas Town.
-// ABOUTME: Manages the shell hook in RC files with safe block markers.
-
+// Package shell installs and removes the Gas Town shell hook in RC files
+// (bashrc, zshrc) using safe block markers for idempotent updates.
 package shell
 
 import (

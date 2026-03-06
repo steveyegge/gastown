@@ -1,5 +1,7 @@
 //go:build windows
 
+// orphan_windows.go provides stub implementations for orphaned and zombie
+// Claude process detection on Windows, where /proc is unavailable.
 package util
 
 // OrphanedProcess represents a claude process running without a controlling terminal.

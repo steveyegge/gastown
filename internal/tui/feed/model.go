@@ -1,3 +1,5 @@
+// model.go defines the main Bubble Tea model for the feed TUI, composing the
+// agent tree, convoy panel, event feed, and problems view into a unified dashboard.
 package feed
 
 import (

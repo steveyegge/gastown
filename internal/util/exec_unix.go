@@ -1,5 +1,7 @@
 //go:build !windows
 
+// exec_unix.go configures process group IDs on child commands so that
+// killing the parent also terminates all descendants, preventing orphans.
 package util
 
 import (

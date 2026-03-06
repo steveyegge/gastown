@@ -1,5 +1,7 @@
 //go:build windows
 
+// doltserver_windows.go provides no-op stubs for Dolt Docker test containers
+// on Windows, where testcontainers-go is not supported.
 package testutil
 
 import (
