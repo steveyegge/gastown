@@ -9,4 +9,4 @@
 {"key":"compaction_enabled","value":"false"}
 {"key":"issue_prefix","value":"lc"}
 {"key":"schema_version","value":"6"}
-{"key":"types.custom","value":"agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request"}
+{"key":"types.custom","value":"molecule,gate,convoy,merge-request,slot,agent,role,rig,message"}
