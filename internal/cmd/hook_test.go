@@ -95,3 +95,36 @@ func TestHookPolecatEnvCheck(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeHookShowTarget(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		want   string
+	}{
+		{
+			name:   "shorthand polecat path resolves",
+			target: "gastown/toast",
+			want:   "gastown/polecats/toast",
+		},
+		{
+			name:   "canonical polecat path stays canonical",
+			target: "gastown/polecats/toast",
+			want:   "gastown/polecats/toast",
+		},
+		{
+			name:   "unknown target stays unchanged",
+			target: "this-is-not-an-agent-path",
+			want:   "this-is-not-an-agent-path",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeHookShowTarget(tt.target)
+			if got != tt.want {
+				t.Fatalf("normalizeHookShowTarget(%q) = %q, want %q", tt.target, got, tt.want)
+			}
+		})
+	}
+}

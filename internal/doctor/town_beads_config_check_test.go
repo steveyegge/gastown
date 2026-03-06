@@ -63,10 +63,6 @@ func TestTownBeadsConfigCheck_FixCreatesConfigFromMetadata(t *testing.T) {
 	if !strings.Contains(got, "issue-prefix: foo\n") {
 		t.Fatalf("config.yaml missing metadata-derived issue-prefix: %q", got)
 	}
-	if !strings.Contains(got, "sync.mode: dolt-native\n") {
-		t.Fatalf("config.yaml missing sync.mode default: %q", got)
-	}
-
 	result = check.Run(ctx)
 	if result.Status != StatusOK {
 		t.Fatalf("Status after fix = %v, want %v", result.Status, StatusOK)
@@ -79,7 +75,7 @@ func TestTownBeadsConfigCheck_FixDoesNotOverwriteExistingConfig(t *testing.T) {
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
-	original := "prefix: custom\nissue-prefix: custom\nsync.mode: belt-and-suspenders\n"
+	original := "prefix: custom\nissue-prefix: custom\nsync-branch: main\n"
 	configPath := filepath.Join(beadsDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(original), 0644); err != nil {
 		t.Fatalf("write config.yaml: %v", err)

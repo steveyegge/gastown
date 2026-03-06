@@ -45,7 +45,7 @@ var agentAllowlist = map[string][]string{
 	"mayor": {
 		"?? AGENTS.md",  // bd init: creates multi-provider instructions (tracked beads repos only)
 		"?? .claude/",   // bd init: creates .claude/settings.json with onboard prompt
-		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/commands/, .runtime/, and .logs/ patterns
+		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/, .runtime/, .logs/, __pycache__/ patterns
 	},
 
 	// Refinery is a worktree for the merge queue processor.
@@ -54,12 +54,12 @@ var agentAllowlist = map[string][]string{
 	// Crew workers are user-managed worktrees for human developers.
 	"crew": {
 		"?? state.json", // crew/manager.go: Gas Town metadata (TODO: migrate to beads like polecats)
-		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/commands/, .runtime/, and .logs/ patterns
+		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/, .runtime/, .logs/, __pycache__/ patterns
 	},
 
 	// Polecats are ephemeral worktrees for autonomous agents.
 	"polecat": {
-		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/commands/, .runtime/, and .logs/ patterns
+		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/, .runtime/, .logs/, __pycache__/ patterns
 	},
 }
 
@@ -1058,7 +1058,7 @@ func TestAgentBeadIDs(t *testing.T) {
 // - Mayor: mayor/rig/ (clone, created by gt rig add)
 // - Refinery: refinery/rig/ (worktree, created by gt rig add)
 // - Crew: crew/<name>/ (worktree, created by gt crew add)
-// - Polecat: polecats/<name>/<rigname>/ (worktree, created by gt polecat add)
+// - Polecat: polecats/<name>/<rigname>/ (worktree, created by gt polecat identity add)
 //
 // Known issues this test catches:
 // - Extra files in .beads/ beyond redirect (e.g., PRIME.md, databases)
@@ -1235,10 +1235,10 @@ func runAgentCleanTest(t *testing.T, hasTrackedBeads bool) {
 	cmd.Env = append(os.Environ(), "HOME="+tmpDir, "GT_ROOT="+hqPath)
 	output, err = cmd.CombinedOutput()
 	if err != nil {
-		t.Logf("gt polecat add failed (non-fatal, beads may not be available): %v", err)
+		t.Logf("gt polecat identity add failed (non-fatal, beads may not be available): %v", err)
 	} else {
 		polecatCreated = true
-		t.Logf("gt polecat add output:\n%s", output)
+		t.Logf("gt polecat identity add output:\n%s", output)
 	}
 
 	// Step 6: Define all agent worktrees to check

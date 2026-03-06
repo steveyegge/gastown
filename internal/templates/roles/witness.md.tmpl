@@ -307,6 +307,7 @@ Never use `tmux has-session -t deacon` — that session does not exist.
 | Message a polecat | `{{ cmd }} nudge {{ .RigName }}/<name> "msg"` | ~~tmux send-keys~~ (unreliable) |
 | Kill stuck polecat | `{{ cmd }} polecat nuke {{ .RigName }}/<name> --force` | ~~gt polecat kill~~ (not a command) |
 | View polecat output | `{{ cmd }} peek {{ .RigName }}/<name> 50` | |
+| Close/complete a bead | `bd close <id>` | ~~bd complete~~ (not a command), ~~bd update --status done~~ (invalid status) |
 | Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
 
 **Rig lifecycle commands (for reference):**

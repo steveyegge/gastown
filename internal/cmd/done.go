@@ -363,12 +363,16 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			return fmt.Errorf("cannot complete: working directory not available (worktree deleted?)\nUse --status DEFERRED to exit without completing")
 		}
 
-		// Block if there are uncommitted changes (would be lost on completion)
+		// Block if there are uncommitted changes (would be lost on completion).
+		// Runtime artifacts (.claude/, .beads/, .runtime/, __pycache__/) are
+		// excluded — these are toolchain-managed and normally gitignored.
+		// Without this filter, gt done fails on virtually every polecat because
+		// Cursor creates .claude/ at runtime in every workspace.
 		workStatus, err := g.CheckUncommittedWork()
 		if err != nil {
 			return fmt.Errorf("checking git status: %w", err)
 		}
-		if workStatus.HasUncommittedChanges {
+		if workStatus.HasUncommittedChanges && !workStatus.CleanExcludingRuntime() {
 			return fmt.Errorf("cannot complete: uncommitted changes would be lost\nCommit your changes first, or use --status DEFERRED to exit without completing\nUncommitted: %s", workStatus.String())
 		}
 
@@ -454,6 +458,23 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 			// Skip straight to witness notification (no MR needed)
 			goto notifyWitness
+		}
+
+		// Branch contamination preflight: check if branch is significantly behind
+		// origin/main, which indicates the branch may contain stale merge-base
+		// artifacts that will pollute the PR diff. (GH#2220)
+		contam, err := g.CheckBranchContamination(originDefault)
+		if err == nil && contam.Behind > 0 {
+			const warnThreshold = 50
+			const blockThreshold = 200
+			if contam.Behind >= blockThreshold {
+				return fmt.Errorf("branch contamination: %d commits behind %s (threshold: %d)\n"+
+					"The branch is severely stale and will include unrelated changes in the PR.\n"+
+					"Fix: git fetch origin && git rebase origin/%s",
+					contam.Behind, originDefault, blockThreshold, defaultBranch)
+			} else if contam.Behind >= warnThreshold {
+				style.PrintWarning("branch is %d commits behind %s — consider rebasing to avoid PR contamination", contam.Behind, originDefault)
+			}
 		}
 
 		// Determine merge strategy from convoy (gt-myofa.3)
@@ -801,7 +822,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 			mrIssue, err := bd.Create(beads.CreateOptions{
 				Title:       title,
-				Type:        "merge-request",
+				Labels:      []string{"gt:merge-request"},
 				Priority:    priority,
 				Description: description,
 				Ephemeral:   true,

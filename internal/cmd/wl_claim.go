@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/doltserver"
@@ -45,19 +47,30 @@ func runWlClaim(cmd *cobra.Command, args []string) error {
 	}
 	rigHandle := wlCfg.RigHandle
 
+	var item *doltserver.WantedItem
 	if !doltserver.DatabaseExists(townRoot, doltserver.WLCommonsDB) {
-		return fmt.Errorf("database %q not found\nJoin a wasteland first with: gt wl join <org/db>", doltserver.WLCommonsDB)
-	}
-
-	store := doltserver.NewWLCommons(townRoot)
-	item, err := claimWanted(store, wantedID, rigHandle)
-	if err != nil {
-		return err
+		// Fallback for wl-commons clone-based workspaces (join creates .wasteland clone).
+		if wlCfg.LocalDir == "" {
+			return fmt.Errorf("database %q not found\nJoin a wasteland first with: gt wl join <org/db>", doltserver.WLCommonsDB)
+		}
+		if err := claimWantedInLocalClone(wlCfg.LocalDir, wantedID, rigHandle); err != nil {
+			return err
+		}
+		item = &doltserver.WantedItem{ID: wantedID, Status: "claimed", ClaimedBy: rigHandle}
+	} else {
+		store := doltserver.NewWLCommons(townRoot)
+		var err error
+		item, err = claimWanted(store, wantedID, rigHandle)
+		if err != nil {
+			return err
+		}
 	}
 
 	fmt.Printf("%s Claimed %s\n", style.Bold.Render("✓"), wantedID)
 	fmt.Printf("  Claimed by: %s\n", rigHandle)
-	fmt.Printf("  Title: %s\n", item.Title)
+	if item.Title != "" {
+		fmt.Printf("  Title: %s\n", item.Title)
+	}
 
 	return nil
 }
@@ -80,4 +93,24 @@ func claimWanted(store doltserver.WLCommonsStore, wantedID, rigHandle string) (*
 	}
 
 	return item, nil
+}
+
+func claimWantedInLocalClone(localDir, wantedID, rigHandle string) error {
+	script := fmt.Sprintf(`UPDATE wanted SET claimed_by='%s', status='claimed', updated_at=NOW()
+WHERE id='%s' AND status='open';
+CALL DOLT_ADD('-A');
+CALL DOLT_COMMIT('-m', 'wl claim: %s');`,
+		doltserver.EscapeSQL(rigHandle), doltserver.EscapeSQL(wantedID), doltserver.EscapeSQL(wantedID))
+
+	cmd := exec.Command("dolt", "sql", "-q", script)
+	cmd.Dir = localDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		s := strings.ToLower(string(out))
+		if strings.Contains(s, "nothing to commit") {
+			return fmt.Errorf("wanted item %s is not open or does not exist", wantedID)
+		}
+		return fmt.Errorf("claiming wanted item: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }

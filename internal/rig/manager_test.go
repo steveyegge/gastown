@@ -469,7 +469,7 @@ exit 1
 	if err != nil {
 		t.Fatalf("reading config.yaml: %v", err)
 	}
-	want := "prefix: gt\nissue-prefix: gt\nsync.mode: dolt-native\n"
+	want := "prefix: gt\nissue-prefix: gt\n"
 	if string(config) != want {
 		t.Fatalf("config.yaml = %q, want %q", string(config), want)
 	}
@@ -515,10 +515,6 @@ exit 0
 	// Verify bd config set issue_prefix was called with the correct prefix
 	if !strings.Contains(cmds, "config set issue_prefix myrig") {
 		t.Errorf("expected 'bd config set issue_prefix myrig' in commands log, got:\n%s", cmds)
-	}
-	// Verify sync mode is explicitly set to dolt-native for new rig beads.
-	if !strings.Contains(cmds, "config set sync.mode dolt-native") {
-		t.Errorf("expected 'bd config set sync.mode dolt-native' in commands log, got:\n%s", cmds)
 	}
 }
 
@@ -1391,6 +1387,8 @@ func TestBareCloneDefaultBranch(t *testing.T) {
 	gitEnv := append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	for _, args := range [][]string{
 		{"git", "init", "-b", "master", srcDir},
+		{"git", "-C", srcDir, "config", "user.email", "test@test.com"},
+		{"git", "-C", srcDir, "config", "user.name", "Test"},
 		{"git", "-C", srcDir, "commit", "--allow-empty", "-m", "init"},
 	} {
 		c := exec.Command(args[0], args[1:]...)

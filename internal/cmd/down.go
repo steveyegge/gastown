@@ -258,6 +258,23 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Phase 4c: Clean up legacy "default" socket sessions.
+	// Old binaries created sessions on the "default" tmux socket. After
+	// transitioning to a per-town socket (e.g., "gt"), those ghost sessions
+	// persist and cause split-brain: the daemon sees them on "gt" but tools
+	// querying bare tmux see (or miss) them on "default".
+	if !downDryRun {
+		cleaned := cleanupLegacyDefaultSocket()
+		if cleaned > 0 {
+			printDownStatus("Legacy sessions", true, fmt.Sprintf("cleaned %d from 'default' socket", cleaned))
+		}
+	} else {
+		count := countLegacyDefaultSocketSessions()
+		if count > 0 {
+			printDownStatus("Legacy sessions", true, fmt.Sprintf("%d would be cleaned from 'default' socket", count))
+		}
+	}
+
 	// Phase 5: Orphan cleanup and verification (--all or --force)
 	if (downAll || downForce) && !downDryRun {
 		fmt.Println()
@@ -293,9 +310,9 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 6: Nuke tmux server (--nuke only)
-	// All towns share the "default" tmux socket (see registry.go InitRegistry),
-	// so --nuke kills the shared server and all sessions on it. Users may also
-	// have opened custom windows/panes, so we require confirmation.
+	// Each town uses a per-town tmux socket derived from the town directory name
+	// (see registry.go InitRegistry), so --nuke only affects this town's server.
+	// Users may also have opened custom windows/panes, so we require confirmation.
 	if downNuke {
 		socket := tmux.GetDefaultSocket()
 		socketLabel := "default"
@@ -545,5 +562,53 @@ func findOrphanedClaudeProcesses(townRoot string) []int {
 	}
 
 	return orphaned
+}
+
+// cleanupLegacyDefaultSocket removes Gas Town sessions left on the "default"
+// tmux socket by old binaries. Returns the number of sessions cleaned.
+func cleanupLegacyDefaultSocket() int {
+	currentSocket := tmux.GetDefaultSocket()
+	if currentSocket == "" || currentSocket == "default" {
+		return 0 // Already on the default socket, nothing to clean up
+	}
+
+	legacyTmux := tmux.NewTmuxWithSocket("default")
+	sessions, err := legacyTmux.ListSessions()
+	if err != nil {
+		return 0 // No server on default socket
+	}
+
+	var cleaned int
+	for _, sess := range sessions {
+		if session.IsKnownSession(sess) {
+			if err := legacyTmux.KillSessionWithProcesses(sess); err == nil {
+				cleaned++
+			}
+		}
+	}
+	return cleaned
+}
+
+// countLegacyDefaultSocketSessions counts Gas Town sessions on the "default"
+// tmux socket (for dry-run output).
+func countLegacyDefaultSocketSessions() int {
+	currentSocket := tmux.GetDefaultSocket()
+	if currentSocket == "" || currentSocket == "default" {
+		return 0
+	}
+
+	legacyTmux := tmux.NewTmuxWithSocket("default")
+	sessions, err := legacyTmux.ListSessions()
+	if err != nil {
+		return 0
+	}
+
+	var count int
+	for _, sess := range sessions {
+		if session.IsKnownSession(sess) {
+			count++
+		}
+	}
+	return count
 }
 

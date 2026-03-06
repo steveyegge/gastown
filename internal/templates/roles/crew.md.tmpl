@@ -340,11 +340,11 @@ Never use raw `tmux send-keys`.
 
 | Mode | Flag | Behavior |
 |------|------|----------|
-| Immediate | `--mode=immediate` (default) | Direct send-keys. Interrupts current work. |
+| Wait-idle | `--mode=wait-idle` (default) | Waits for idle prompt, then delivers. Falls back to queue. |
 | Queue | `--mode=queue` | Writes to file queue. Agent picks up at next turn boundary. |
-| Wait-idle | `--mode=wait-idle` | Waits for idle prompt, then delivers. Falls back to queue. |
+| Immediate | `--mode=immediate` | Direct send-keys. Interrupts current work. Use only for emergencies. |
 
-For non-urgent coordination, prefer `--mode=queue`.
+Default is wait-idle to avoid interrupting active tool calls.
 
 ### Nudge Resilience (for your own work)
 
@@ -421,11 +421,16 @@ See `{{ .TownRoot }}/docs/AGENT-ERGONOMICS.md` for the philosophy.
 
 | Want to... | Correct command | Common mistake |
 |------------|----------------|----------------|
+| Close/complete a bead | `bd close <id>` | ~~bd complete~~ (not a command), ~~bd update --status done~~ (invalid status) |
+| Claim work | `bd update <id> --claim` | ~~bd update --status=in_progress~~ (works but --claim is atomic) |
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
 | Dispatch work to polecat | `{{ cmd }} sling <bead> <rig>` | ~~gt polecat spawn~~ (not a command) |
 | Stop my session | `{{ cmd }} crew stop {{ .Polecat }}` | ~~gt rig stop~~ (stops rig agents, not crew) |
 | Pause rig (daemon won't restart) | `{{ cmd }} rig park <rig>` | ~~gt rig stop~~ (daemon will restart it) |
 | Permanently disable rig | `{{ cmd }} rig dock <rig>` | ~~gt rig park~~ (temporary only) |
+
+**Beads valid statuses:** `open`, `in_progress`, `blocked`, `deferred`, `closed`, `pinned`, `hooked`
+(there is NO `done` or `complete` status)
 
 **Rig lifecycle commands (park vs dock vs stop):**
 - `park/unpark` — Temporary pause. Daemon skips parked rigs.

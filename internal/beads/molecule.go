@@ -315,15 +315,16 @@ func (b *Beads) instantiateFromChildren(ctx context.Context, mol *Issue, parent 
 		description += fmt.Sprintf("instantiated_from: %s\ntemplate_step: %s", mol.ID, tmpl.ID)
 
 		// Create the child issue
+		stepType := tmpl.Type
+		if stepType == "" {
+			stepType = "task"
+		}
 		childOpts := CreateOptions{
 			Title:       tmpl.Title,
-			Type:        tmpl.Type,
+			Labels:      []string{"gt:" + stepType},
 			Priority:    parent.Priority,
 			Description: description,
 			Parent:      parent.ID,
-		}
-		if childOpts.Type == "" {
-			childOpts.Type = "task"
 		}
 
 		child, err := b.Create(childOpts)
@@ -414,7 +415,7 @@ func (b *Beads) instantiateFromMarkdown(ctx context.Context, mol *Issue, parent 
 		// Create the child issue
 		childOpts := CreateOptions{
 			Title:       step.Title,
-			Type:        "task",
+			Labels:      []string{"gt:task"},
 			Priority:    parent.Priority,
 			Description: description,
 			Parent:      parent.ID,

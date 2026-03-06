@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -89,5 +90,73 @@ func TestExtractBeadIDs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestExtractCascadeFlag(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		wantCascade bool
+		wantArgs    []string
+	}{
+		{
+			name:        "no cascade flag",
+			args:        []string{"gt-abc", "--force"},
+			wantCascade: false,
+			wantArgs:    []string{"gt-abc", "--force"},
+		},
+		{
+			name:        "cascade flag present",
+			args:        []string{"gt-abc", "--cascade"},
+			wantCascade: true,
+			wantArgs:    []string{"gt-abc"},
+		},
+		{
+			name:        "cascade flag with other flags",
+			args:        []string{"--cascade", "gt-abc", "--reason", "Done"},
+			wantCascade: true,
+			wantArgs:    []string{"gt-abc", "--reason", "Done"},
+		},
+		{
+			name:        "empty args",
+			args:        []string{},
+			wantCascade: false,
+			wantArgs:    nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotCascade, gotArgs := extractCascadeFlag(tt.args)
+			if gotCascade != tt.wantCascade {
+				t.Errorf("extractCascadeFlag(%v) cascade = %v, want %v", tt.args, gotCascade, tt.wantCascade)
+			}
+			if len(gotArgs) != len(tt.wantArgs) {
+				t.Fatalf("extractCascadeFlag(%v) args = %v, want %v", tt.args, gotArgs, tt.wantArgs)
+			}
+			for i := range gotArgs {
+				if gotArgs[i] != tt.wantArgs[i] {
+					t.Errorf("extractCascadeFlag(%v) args[%d] = %q, want %q", tt.args, i, gotArgs[i], tt.wantArgs[i])
+				}
+			}
+		})
+	}
+}
+
+func TestChildBeadUnmarshal(t *testing.T) {
+	jsonData := `[{"id":"gt-abc","status":"open"},{"id":"gt-def","status":"closed"}]`
+	var children []childBead
+	if err := json.Unmarshal([]byte(jsonData), &children); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if len(children) != 2 {
+		t.Fatalf("got %d children, want 2", len(children))
+	}
+	if children[0].ID != "gt-abc" || children[0].Status != "open" {
+		t.Errorf("child[0] = %+v, want {ID:gt-abc Status:open}", children[0])
+	}
+	if children[1].ID != "gt-def" || children[1].Status != "closed" {
+		t.Errorf("child[1] = %+v, want {ID:gt-def Status:closed}", children[1])
 	}
 }

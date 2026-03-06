@@ -187,8 +187,8 @@ func TestCheckPolecatHealth_DBStateOverridesDescription(t *testing.T) {
 
 // TestCheckPolecatHealth_NotifiesWitnessOnCrash verifies that when a polecat
 // crash is detected, the daemon sends a notification to the witness via
-// `gt mail send` with a CRASHED_POLECAT subject. This ensures the Mayor has
-// visibility into crashes even when auto-restart handles recovery.
+// `gt mail send` with a CRASHED_POLECAT subject. Restart is deferred to the
+// stuck-agent-dog plugin for context-aware recovery.
 func TestCheckPolecatHealth_NotifiesWitnessOnCrash(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test uses Unix shell script mocks for tmux and bd")

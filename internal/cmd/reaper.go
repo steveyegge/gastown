@@ -253,7 +253,7 @@ var reaperRunCmd = &cobra.Command{
 This is the inline fallback for when Dog dispatch is unavailable.
 Normally the daemon dispatches a Dog to execute the mol-dog-reaper formula.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		databases := reaper.DefaultDatabases
+		databases := reaper.DiscoverDatabases("127.0.0.1", reaperPort)
 		if reaperDB != "" {
 			databases = strings.Split(reaperDB, ",")
 		}

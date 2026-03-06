@@ -92,6 +92,36 @@ type PolecatDonePayload struct {
 	MRFailed    bool   // True when MR bead creation was attempted but failed
 }
 
+// HelpCategory classifies the nature of a help request for routing.
+type HelpCategory string
+
+const (
+	HelpCategoryDecision  HelpCategory = "decision"  // Multiple valid paths, need choice
+	HelpCategoryHelp      HelpCategory = "help"       // Need guidance or expertise
+	HelpCategoryBlocked   HelpCategory = "blocked"    // Waiting on unresolvable dependency
+	HelpCategoryFailed    HelpCategory = "failed"     // Unexpected error, can't proceed
+	HelpCategoryEmergency HelpCategory = "emergency"  // Security or data integrity issue
+	HelpCategoryLifecycle HelpCategory = "lifecycle"   // Worker stuck or needs recycle
+	HelpCategoryUnknown   HelpCategory = "help"        // Default to general help
+)
+
+// HelpSeverity indicates the assessed urgency of a help request.
+type HelpSeverity string
+
+const (
+	HelpSeverityCritical HelpSeverity = "critical" // P0: immediate attention
+	HelpSeverityHigh     HelpSeverity = "high"     // P1: urgent blocker
+	HelpSeverityMedium   HelpSeverity = "medium"   // P2: standard help request
+)
+
+// HelpAssessment contains the assessed category, severity, and routing suggestion.
+type HelpAssessment struct {
+	Category   HelpCategory
+	Severity   HelpSeverity
+	SuggestTo  string // Suggested escalation target (e.g., "deacon", "mayor", "overseer")
+	Rationale  string // Brief explanation of why this classification was chosen
+}
+
 // HelpPayload contains parsed data from a HELP message.
 type HelpPayload struct {
 	Topic       string
@@ -100,6 +130,7 @@ type HelpPayload struct {
 	Problem     string
 	Tried       string
 	RequestedAt time.Time
+	Assessment  *HelpAssessment // Populated by AssessHelp()
 }
 
 // MergedPayload contains parsed data from a MERGED message.
@@ -400,8 +431,7 @@ func SwarmWispLabels(swarmID string, total, completed int, startTime time.Time) 
 }
 
 // FormatHelpSummary formats a parsed HelpPayload into a human-readable summary
-// for the witness agent to triage. The agent decides whether to help directly,
-// escalate, and to whom — no Go-level judgment is made here.
+// for the witness agent to triage. Includes assessment if available.
 func FormatHelpSummary(payload *HelpPayload) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "HELP REQUEST from %s", payload.Agent)
@@ -409,6 +439,13 @@ func FormatHelpSummary(payload *HelpPayload) string {
 		fmt.Fprintf(&b, " (issue: %s)", payload.IssueID)
 	}
 	b.WriteString("\n")
+	if payload.Assessment != nil {
+		fmt.Fprintf(&b, "Assessment: [%s] severity=%s → suggest escalate to %s\n",
+			payload.Assessment.Category, payload.Assessment.Severity, payload.Assessment.SuggestTo)
+		if payload.Assessment.Rationale != "" {
+			fmt.Fprintf(&b, "Rationale: %s\n", payload.Assessment.Rationale)
+		}
+	}
 	if payload.Topic != "" {
 		fmt.Fprintf(&b, "Topic: %s\n", payload.Topic)
 	}
@@ -422,4 +459,82 @@ func FormatHelpSummary(payload *HelpPayload) string {
 		fmt.Fprintf(&b, "Requested: %s\n", payload.RequestedAt.Format(time.RFC3339))
 	}
 	return b.String()
+}
+
+// helpKeywords maps keyword patterns to their category and severity.
+// Checked in priority order — first match wins.
+var helpKeywords = []struct {
+	patterns []string
+	category HelpCategory
+	severity HelpSeverity
+}{
+	// Emergency: security, data corruption, system down
+	{
+		patterns: []string{"security", "vulnerability", "breach", "unauthorized", "credential", "exposed secret", "data corruption", "data loss", "system down"},
+		category: HelpCategoryEmergency,
+		severity: HelpSeverityCritical,
+	},
+	// Failed: errors, crashes, unexpected failures
+	{
+		patterns: []string{"crash", "panic", "fatal", "segfault", "oom", "out of memory", "disk full", "connection refused", "database error", "dolt", "server unreachable"},
+		category: HelpCategoryFailed,
+		severity: HelpSeverityHigh,
+	},
+	// Blocked: dependencies, waiting, merge conflicts
+	{
+		patterns: []string{"blocked", "waiting on", "depends on", "merge conflict", "conflict", "deadlock", "stuck", "cannot proceed", "can't proceed"},
+		category: HelpCategoryBlocked,
+		severity: HelpSeverityHigh,
+	},
+	// Decision: architecture, design choices, ambiguity
+	{
+		patterns: []string{"which approach", "decision", "ambiguous", "unclear", "multiple options", "design choice", "architecture", "how should", "which way"},
+		category: HelpCategoryDecision,
+		severity: HelpSeverityMedium,
+	},
+	// Lifecycle: worker state, session issues
+	{
+		patterns: []string{"session", "respawn", "restart", "zombie", "hung", "timeout", "idle", "no progress"},
+		category: HelpCategoryLifecycle,
+		severity: HelpSeverityMedium,
+	},
+}
+
+// categoryRoutes maps categories to their default escalation target.
+var categoryRoutes = map[HelpCategory]string{
+	HelpCategoryEmergency: "overseer",
+	HelpCategoryFailed:    "deacon",
+	HelpCategoryBlocked:   "mayor",
+	HelpCategoryDecision:  "deacon",
+	HelpCategoryLifecycle: "witness",
+	HelpCategoryHelp:      "deacon",
+}
+
+// AssessHelp classifies a help request's category and severity based on
+// the topic and problem fields, using keyword matching against the
+// escalation categories defined in the escalation protocol.
+func AssessHelp(payload *HelpPayload) *HelpAssessment {
+	combined := strings.ToLower(payload.Topic + " " + payload.Problem)
+
+	for _, entry := range helpKeywords {
+		for _, pattern := range entry.patterns {
+			if strings.Contains(combined, pattern) {
+				target := categoryRoutes[entry.category]
+				return &HelpAssessment{
+					Category:  entry.category,
+					Severity:  entry.severity,
+					SuggestTo: target,
+					Rationale: fmt.Sprintf("matched keyword %q", pattern),
+				}
+			}
+		}
+	}
+
+	// Default: general help, medium severity, route to deacon
+	return &HelpAssessment{
+		Category:  HelpCategoryHelp,
+		Severity:  HelpSeverityMedium,
+		SuggestTo: "deacon",
+		Rationale: "no specific keywords matched, defaulting to general help",
+	}
 }

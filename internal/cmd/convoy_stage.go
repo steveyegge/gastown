@@ -42,14 +42,14 @@ func init() {
 
 // StageResult is the top-level JSON output for gt convoy stage --json.
 type StageResult struct {
-	Status   string           `json:"status"`    // "staged_ready", "staged_warnings", or "error"
-	ConvoyID string           `json:"convoy_id"` // empty if errors prevented creation
-	Restaged bool             `json:"restaged"`  // true if an existing convoy was updated in place
-	Errors   []FindingJSON    `json:"errors"`
-	Warnings []FindingJSON    `json:"warnings"`
-	Waves    []WaveJSON       `json:"waves"`
-	Gated    []GatedTaskJSON  `json:"gated,omitempty"` // tasks blocked by open non-slingable nodes
-	Tree     []TreeNodeJSON   `json:"tree"`
+	Status   string          `json:"status"`    // "staged_ready", "staged_warnings", or "error"
+	ConvoyID string          `json:"convoy_id"` // empty if errors prevented creation
+	Restaged bool            `json:"restaged"`  // true if an existing convoy was updated in place
+	Errors   []FindingJSON   `json:"errors"`
+	Warnings []FindingJSON   `json:"warnings"`
+	Waves    []WaveJSON      `json:"waves"`
+	Gated    []GatedTaskJSON `json:"gated,omitempty"` // tasks blocked by open non-slingable nodes
+	Tree     []TreeNodeJSON  `json:"tree"`
 }
 
 // GatedTaskJSON is the JSON representation of a task gated by non-slingable blockers.
@@ -1307,9 +1307,9 @@ type bdShowResult struct {
 // Each entry is a bead that the queried issue depends on.
 // The IssueID is set by the caller (it's the bead we queried).
 type bdDepResult struct {
-	IssueID        string `json:"-"`               // set by caller
-	DependsOnID    string `json:"id"`              // the dependency target
-	Type           string `json:"dependency_type"` // blocks, parent-child, etc.
+	IssueID     string `json:"-"`               // set by caller
+	DependsOnID string `json:"id"`              // the dependency target
+	Type        string `json:"dependency_type"` // blocks, parent-child, etc.
 }
 
 // ---------------------------------------------------------------------------
@@ -1549,20 +1549,22 @@ func collectConvoyBeads(convoyID string) ([]BeadInfo, []DepInfo, error) {
 		return nil, nil, fmt.Errorf("convoy %s: %w", convoyID, err)
 	}
 
-	// 2. Get deps for the convoy — filter for "tracks" type.
-	deps, err := bdDepList(convoyID)
+	// 2. Read tracked IDs using the same filtered dep-list path used by status
+	// and staged-convoy reconciliation. This handles id-only dep rows and
+	// external:<rig>:<id> wrappers.
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return nil, nil, err
+	}
+	trackedSet, err := convoyTrackedBeadIDs(townBeads, convoyID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("deps for convoy %s: %w", convoyID, err)
 	}
-
-	// Extract tracked bead IDs. bdDepList sets IssueID to the queried bead
-	// (the convoy) and DependsOnID to the JSON "id" field (the tracked bead).
-	var trackedIDs []string
-	for _, d := range deps {
-		if d.Type == "tracks" {
-			trackedIDs = append(trackedIDs, d.DependsOnID)
-		}
+	trackedIDs := make([]string, 0, len(trackedSet))
+	for id := range trackedSet {
+		trackedIDs = append(trackedIDs, id)
 	}
+	sort.Strings(trackedIDs)
 
 	if len(trackedIDs) == 0 {
 		return nil, nil, fmt.Errorf("convoy %s tracks no beads", convoyID)

@@ -305,8 +305,8 @@ func HandleLifecycleShutdown(workDir, rigName string, msg *mail.Message) *Handle
 }
 
 // HandleHelp processes a HELP message from a polecat requesting intervention.
-// Parses the HELP payload and presents it to the witness agent for triage.
-// The agent decides whether to help directly, escalate, and to whom.
+// Parses the HELP payload, assesses category/severity, and presents a
+// classified summary to the witness agent for triage.
 func HandleHelp(workDir, rigName string, msg *mail.Message, router *mail.Router) *HandlerResult {
 	result := &HandlerResult{
 		MessageID:    msg.ID,
@@ -319,6 +319,9 @@ func HandleHelp(workDir, rigName string, msg *mail.Message, router *mail.Router)
 		result.Error = fmt.Errorf("parsing HELP: %w", err)
 		return result
 	}
+
+	// Assess category and severity from content
+	payload.Assessment = AssessHelp(payload)
 
 	// Format the help request summary for the witness agent to triage
 	summary := FormatHelpSummary(payload)

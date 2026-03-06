@@ -291,7 +291,7 @@ func (c *CheckMisclassifiedWisps) findMisclassifiedWispsJSONL(path string, rigNa
 // Uses --allow-stale to survive DB/JSONL drift (consistent with all other bd invocations).
 // Returns an error if the probe fails, so callers can track and surface failures.
 func isIssueStillOpen(workDir, id string) (bool, error) {
-	cmd := exec.Command("bd", "--allow-stale", "show", id, "--json")
+	cmd := exec.Command("bd", beads.MaybePrependAllowStale([]string{"show", id, "--json"})...)
 	cmd.Dir = workDir
 	output, err := cmd.Output()
 	if err != nil {

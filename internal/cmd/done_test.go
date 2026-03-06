@@ -274,7 +274,7 @@ func TestFindHookedBeadForAgent(t *testing.T) {
 				// Create a task and set it to hooked with assignee
 				_, err := bd.CreateWithID("test-456", beads.CreateOptions{
 					Title: "Task to be hooked",
-					Type:  "task",
+					Labels: []string{"gt:task"},
 				})
 				if err != nil {
 					t.Fatalf("create task bead: %v", err)

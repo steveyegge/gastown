@@ -10,7 +10,7 @@ import (
 func TestEnsureConfigYAMLIfMissing_DoesNotOverwriteExisting(t *testing.T) {
 	beadsDir := t.TempDir()
 	configPath := filepath.Join(beadsDir, "config.yaml")
-	original := "prefix: keep\nissue-prefix: keep\nsync.mode: custom\n"
+	original := "prefix: keep\nissue-prefix: keep\n"
 	if err := os.WriteFile(configPath, []byte(original), 0644); err != nil {
 		t.Fatalf("write config.yaml: %v", err)
 	}
@@ -50,24 +50,18 @@ func TestEnsureConfigYAMLFromMetadataIfMissing_UsesMetadataPrefix(t *testing.T) 
 	if !strings.Contains(got, "issue-prefix: foo\n") {
 		t.Fatalf("config.yaml missing metadata issue-prefix: %q", got)
 	}
-	if !strings.Contains(got, "sync.mode: dolt-native\n") {
-		t.Fatalf("config.yaml missing sync.mode default: %q", got)
-	}
 }
 
 func TestConfigDefaultsFromMetadata_FallsBackToDoltDatabase(t *testing.T) {
 	beadsDir := t.TempDir()
-	metadata := `{"backend":"dolt","dolt_mode":"server","dolt_database":"hq-custom","sync_mode":"belt-and-suspenders"}`
+	metadata := `{"backend":"dolt","dolt_mode":"server","dolt_database":"hq-custom"}`
 	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
 		t.Fatalf("write metadata.json: %v", err)
 	}
 
-	prefix, syncMode := ConfigDefaultsFromMetadata(beadsDir, "hq")
+	prefix := ConfigDefaultsFromMetadata(beadsDir, "hq")
 	if prefix != "hq-custom" {
 		t.Fatalf("prefix = %q, want %q", prefix, "hq-custom")
-	}
-	if syncMode != "belt-and-suspenders" {
-		t.Fatalf("syncMode = %q, want %q", syncMode, "belt-and-suspenders")
 	}
 }
 
@@ -78,12 +72,9 @@ func TestConfigDefaultsFromMetadata_StripsLegacyBeadsPrefixFromDoltDatabase(t *t
 		t.Fatalf("write metadata.json: %v", err)
 	}
 
-	prefix, syncMode := ConfigDefaultsFromMetadata(beadsDir, "fallback")
+	prefix := ConfigDefaultsFromMetadata(beadsDir, "fallback")
 	if prefix != "hq" {
 		t.Fatalf("prefix = %q, want %q", prefix, "hq")
-	}
-	if syncMode != "dolt-native" {
-		t.Fatalf("syncMode = %q, want %q", syncMode, "dolt-native")
 	}
 }
 

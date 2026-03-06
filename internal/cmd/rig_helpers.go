@@ -141,3 +141,27 @@ func IsRigParkedOrDocked(townRoot, rigName string) (bool, string) {
 
 	return false, ""
 }
+
+// getAllRigs discovers all rigs in the current Gas Town workspace.
+// Returns the list of rigs, the town root path, and any error.
+func getAllRigs() ([]*rig.Rig, string, error) {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return nil, "", fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
+	}
+
+	g := git.NewGit(townRoot)
+	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+	rigs, err := rigMgr.DiscoverRigs()
+	if err != nil {
+		return nil, "", err
+	}
+
+	return rigs, townRoot, nil
+}

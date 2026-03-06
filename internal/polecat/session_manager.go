@@ -183,6 +183,28 @@ func (m *SessionManager) hasPolecat(polecat string) bool {
 	return info.IsDir()
 }
 
+// polecatSlot returns a unique integer slot index for this polecat based on its
+// position among existing polecat directories. This enables port offsetting and
+// resource isolation when multiple polecats run in parallel (GH#954).
+func (m *SessionManager) polecatSlot(polecat string) int {
+	polecatsDir := filepath.Join(m.rig.Path, "polecats")
+	entries, err := os.ReadDir(polecatsDir)
+	if err != nil {
+		return 0
+	}
+	slot := 0
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if e.Name() == polecat {
+			return slot
+		}
+		slot++
+	}
+	return slot
+}
+
 // Start creates and starts a new session for a polecat.
 func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	if !m.hasPolecat(polecat) {
@@ -315,6 +337,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		"GT_POLECAT_PATH": workDir,
 		"GT_TOWN_ROOT":    townRoot,
 		"GT_RUN":          runID,
+		"POLECAT_SLOT":    fmt.Sprintf("%d", m.polecatSlot(polecat)),
 	}
 	if polecatGitBranch != "" {
 		envVarsToInject["GT_BRANCH"] = polecatGitBranch

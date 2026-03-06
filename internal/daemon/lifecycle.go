@@ -781,15 +781,7 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 	}
 
 	issue := issues[0]
-	// Check for agent type via gt:agent label (preferred) or legacy type field
-	isAgent := issue.Type == "agent"
-	for _, l := range issue.Labels {
-		if l == "gt:agent" {
-			isAgent = true
-			break
-		}
-	}
-	if !isAgent {
+	if !beads.IsAgentBead(&beads.Issue{Type: issue.Type, Labels: issue.Labels}) {
 		return nil, fmt.Errorf("bead %s is not an agent bead (type=%s)", agentBeadID, issue.Type)
 	}
 

@@ -2,6 +2,7 @@
 package deacon
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -166,7 +167,8 @@ func listHookedBeads(townRoot string) ([]*HookedBead, error) {
 		return nil, err
 	}
 
-	if len(output) == 0 || string(output) == "[]" || string(output) == "null\n" {
+	trimmed := bytes.TrimSpace(output)
+	if len(trimmed) == 0 || string(trimmed) == "null" || (trimmed[0] != '[' && trimmed[0] != '{') {
 		return nil, nil
 	}
 

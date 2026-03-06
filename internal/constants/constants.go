@@ -87,7 +87,11 @@ const (
 	MinHandoffCooldown = 2 * time.Minute
 
 	// GUPPViolationTimeout is how long an agent can have work on hook without
-	// progressing before it's considered a GUPP violation.
+	// progressing before it's considered a GUPP (Gas Town Universal Propulsion
+	// Principle) violation. GUPP states: if you have work on your hook, you run it.
+	//
+	// Single source of truth — referenced by daemon lifecycle patrol,
+	// TUI feed stuck detection, and web fetcher worker status.
 	// Configurable via operational.session.gupp_violation_timeout.
 	GUPPViolationTimeout = 30 * time.Minute
 

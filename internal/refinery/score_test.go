@@ -5,84 +5,74 @@ import (
 	"time"
 )
 
-func TestScoreMR_NegativePriority_ClampsToLowest(t *testing.T) {
+func TestScoreMR_PriorityClamping(t *testing.T) {
 	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	config := DefaultScoreConfig()
 
-	// P4 (lowest valid priority) should get 0 bonus
-	p4Input := ScoreInput{
-		Priority:    4,
-		MRCreatedAt: now,
-		Now:         now,
-	}
-	p4Score := ScoreMR(p4Input, config)
-
-	// Negative priority (-1 sentinel) should also get 0 bonus (same as P4)
-	negInput := ScoreInput{
-		Priority:    -1,
-		MRCreatedAt: now,
-		Now:         now,
-	}
-	negScore := ScoreMR(negInput, config)
-
-	if negScore != p4Score {
-		t.Errorf("negative priority score = %f, want %f (same as P4)", negScore, p4Score)
-	}
-
-	// P0 (highest valid priority) should get maximum bonus
-	p0Input := ScoreInput{
-		Priority:    0,
-		MRCreatedAt: now,
-		Now:         now,
-	}
-	p0Score := ScoreMR(p0Input, config)
-
-	if negScore >= p0Score {
-		t.Errorf("negative priority score %f should be less than P0 score %f", negScore, p0Score)
-	}
-}
-
-func TestScoreMR_PriorityAbove4_ClampsToLowest(t *testing.T) {
-	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
-	config := DefaultScoreConfig()
-
-	p4Input := ScoreInput{
-		Priority:    4,
-		MRCreatedAt: now,
-		Now:         now,
-	}
-	p4Score := ScoreMR(p4Input, config)
-
-	// Priority 10 (out of range high) should clamp to P4
-	highInput := ScoreInput{
-		Priority:    10,
-		MRCreatedAt: now,
-		Now:         now,
-	}
-	highScore := ScoreMR(highInput, config)
-
-	if highScore != p4Score {
-		t.Errorf("priority 10 score = %f, want %f (same as P4)", highScore, p4Score)
-	}
-}
-
-func TestScoreMR_ValidPriorities(t *testing.T) {
-	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
-	config := DefaultScoreConfig()
-
-	// Verify P0 > P1 > P2 > P3 > P4
-	var prevScore float64
-	for p := 0; p <= 4; p++ {
-		input := ScoreInput{
-			Priority:    p,
+	baseInput := func(priority int) ScoreInput {
+		return ScoreInput{
+			Priority:    priority,
 			MRCreatedAt: now,
 			Now:         now,
 		}
-		score := ScoreMR(input, config)
-
-		if p > 0 && score >= prevScore {
-			t.Errorf("P%d score %f should be less than P%d score %f", p, score, p-1, prevScore)
-		}
-		prevScore = score
 	}
+
+	t.Run("P0 gets maximum priority bonus", func(t *testing.T) {
+		score := ScoreMR(baseInput(0), config)
+		expected := config.BaseScore + config.PriorityWeight*4
+		if score != expected {
+			t.Errorf("P0 score = %f, want %f", score, expected)
+		}
+	})
+
+	t.Run("P4 gets zero priority bonus", func(t *testing.T) {
+		score := ScoreMR(baseInput(4), config)
+		expected := config.BaseScore
+		if score != expected {
+			t.Errorf("P4 score = %f, want %f", score, expected)
+		}
+	})
+
+	t.Run("negative priority treated as lowest not highest", func(t *testing.T) {
+		negScore := ScoreMR(baseInput(-1), config)
+		p4Score := ScoreMR(baseInput(4), config)
+		p0Score := ScoreMR(baseInput(0), config)
+
+		if negScore != p4Score {
+			t.Errorf("negative priority score = %f, want %f (same as P4)", negScore, p4Score)
+		}
+		if negScore == p0Score {
+			t.Errorf("negative priority score = %f, should NOT equal P0 score %f", negScore, p0Score)
+		}
+	})
+
+	t.Run("large negative priority treated as lowest", func(t *testing.T) {
+		negScore := ScoreMR(baseInput(-100), config)
+		p4Score := ScoreMR(baseInput(4), config)
+
+		if negScore != p4Score {
+			t.Errorf("priority -100 score = %f, want %f (same as P4)", negScore, p4Score)
+		}
+	})
+
+	t.Run("priority above 4 treated as P4", func(t *testing.T) {
+		score := ScoreMR(baseInput(10), config)
+		p4Score := ScoreMR(baseInput(4), config)
+
+		if score != p4Score {
+			t.Errorf("priority 10 score = %f, want %f (same as P4)", score, p4Score)
+		}
+	})
+
+	t.Run("priority ordering P0 > P1 > P2 > P3 > P4", func(t *testing.T) {
+		scores := make([]float64, 5)
+		for i := 0; i <= 4; i++ {
+			scores[i] = ScoreMR(baseInput(i), config)
+		}
+		for i := 0; i < 4; i++ {
+			if scores[i] <= scores[i+1] {
+				t.Errorf("P%d score (%f) should be > P%d score (%f)", i, scores[i], i+1, scores[i+1])
+			}
+		}
+	})
 }

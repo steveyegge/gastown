@@ -1,238 +1,154 @@
-# Release Process for Gas Town
+# Releasing Gas Town
 
-This document describes the release process for Gas Town, including GitHub releases and npm packages.
+## Distribution Channels
 
-## Table of Contents
+| Channel | Mechanism | Automatic? |
+|---------|-----------|------------|
+| **GitHub Release** | GoReleaser via Actions on tag push | Yes |
+| **Homebrew** (homebrew-core) | Homebrew bot detects new release | Yes (24-48h delay) |
+| **npm** (`@gastown/gt`) | Actions workflow, OIDC trusted publishing | Yes (when org is set up) |
 
-- [Overview](#overview)
-- [Prerequisites](#prerequisites)
-- [Release Checklist](#release-checklist)
-- [1. Prepare Release](#1-prepare-release)
-- [2. GitHub Release](#2-github-release)
-- [3. npm Package Release](#3-npm-package-release)
-- [4. Verify Release](#4-verify-release)
-- [Hotfix Releases](#hotfix-releases)
+## How to Release
 
-## Overview
+### Option A: Automated (recommended)
 
-A Gas Town release involves multiple distribution channels:
-
-1. **GitHub Release** - Binary downloads for all platforms
-2. **npm** - Node.js package for cross-platform installation (`@gastown/gt`)
-
-## Prerequisites
-
-### Required Tools
-
-- `git` with push access to steveyegge/gastown
-- `goreleaser` for building binaries
-- `npm` with authentication (for npm releases)
-- `gh` CLI (GitHub CLI, recommended)
-
-### Required Access
-
-- GitHub: Write access to repository and ability to create releases
-- npm: Publish access to `@gastown` organization
-
-### Verify Setup
+Use the release formula, which handles all steps:
 
 ```bash
-# Check git
-git remote -v  # Should show steveyegge/gastown
-
-# Check goreleaser
-goreleaser --version
-
-# Check GitHub CLI
-gh auth status
-
-# Check npm
-npm whoami  # Should show your npm username
+gt mol wisp create gastown-release --var version=X.Y.Z
 ```
 
-## Release Checklist
-
-Before starting a release:
-
-- [ ] All tests passing (`go test ./...`)
-- [ ] npm package tests passing (`cd npm-package && npm test`)
-- [ ] CHANGELOG.md updated with release notes
-- [ ] No uncommitted changes
-- [ ] On `main` branch and up to date with origin
-
-## 1. Prepare Release
-
-### Update CHANGELOG.md
-
-Add release notes to CHANGELOG.md following the Keep a Changelog format:
-
-```markdown
-## [0.2.0] - 2026-01-15
-
-### Added
-- New feature X
-
-### Changed
-- Improved Y
-
-### Fixed
-- Bug in Z
-```
-
-Commit the CHANGELOG changes:
+### Option B: Bump script
 
 ```bash
-git add CHANGELOG.md
-git commit -m "docs: Add CHANGELOG entry for v0.2.0"
-git push origin main
+cd gastown/mayor/rig
+./scripts/bump-version.sh X.Y.Z --commit --tag --push --install
 ```
 
-### Update Version
+### Option C: Manual
 
-Update version in relevant files:
-
-1. `internal/cmd/version.go` - CLI version constant
-2. `npm-package/package.json` - npm package version
+1. Update CHANGELOG.md `[Unreleased]` section
+2. Update `internal/cmd/info.go` `versionChanges` slice
+3. Run `./scripts/bump-version.sh X.Y.Z` (updates version.go, package.json, CHANGELOG header)
+4. Commit, tag, push:
 
 ```bash
-# Update versions
-vim internal/cmd/version.go
-vim npm-package/package.json
-
-# Commit
 git add -A
-git commit -m "chore: Bump version to 0.2.0"
+git commit -m "chore: Bump version to X.Y.Z"
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin main
+git push origin vX.Y.Z
 ```
 
-### Create Release Tag
+5. Rebuild locally:
 
 ```bash
-git tag -a v0.2.0 -m "Release v0.2.0"
-git push origin v0.2.0
+make install        # builds, codesigns, installs to ~/.local/bin
+gt daemon stop && gt daemon start
 ```
 
-This triggers GitHub Actions to build release artifacts automatically.
+## What Happens After Tag Push
 
-## 2. GitHub Release
+The `release.yml` workflow triggers automatically:
 
-### Using GoReleaser (Recommended)
+1. **goreleaser** job builds binaries for all platforms and creates the GitHub Release
+2. **publish-npm** job publishes to npm (best-effort, `continue-on-error: true`)
 
-GoReleaser automates binary building and GitHub release creation:
+Homebrew is NOT updated by the workflow. See below.
+
+## Homebrew (homebrew-core)
+
+Gastown is in **homebrew-core** (not a custom tap). The formula lives at:
+`https://github.com/Homebrew/homebrew-core/blob/HEAD/Formula/g/gastown.rb`
+
+### How it updates
+
+Homebrew's `BrewTestBot` automatically detects new GitHub releases and opens
+a PR to homebrew-core. Gastown is on the autobump list — the bot checks
+**every ~3 hours**.
+
+### If the bot doesn't pick it up
+
+Gastown is on the autobump list, so `brew bump-formula-pr` will refuse to
+submit a manual PR. If the bot hasn't updated after 6+ hours, check
+https://github.com/Homebrew/homebrew-core/pulls?q=gastown for stuck PRs.
+
+### Verifying
 
 ```bash
-# Clean any previous builds
-rm -rf dist/
-
-# Create release (uses GITHUB_TOKEN from gh CLI)
-GITHUB_TOKEN=$(gh auth token) goreleaser release --clean
+brew update
+brew info gastown    # Check version
+brew upgrade gastown # Upgrade if installed
 ```
 
-This will:
-- Build binaries for all platforms (macOS, Linux, Windows - amd64/arm64)
-- Create checksums
-- Generate release notes from CHANGELOG.md
-- Upload everything to GitHub releases
+## npm (`@gastown/gt`)
 
-### Verify GitHub Release
+### How it works
 
-1. Visit https://github.com/steveyegge/gastown/releases
-2. Verify the new version is marked as "Latest"
-3. Check all platform binaries are present
+The workflow uses **OIDC trusted publishing** (npm provenance). No NPM_TOKEN
+secret is needed — the `id-token: write` permission on the job generates a
+short-lived OIDC token that npm trusts because the GitHub repo is linked to
+the npm package.
 
-## 3. npm Package Release
+### Prerequisites
 
-The npm package wraps the native binary for Node.js environments.
+The `@gastown` npm organization must exist and be linked to this repo:
 
-### Test Installation Locally
+1. Go to https://www.npmjs.com and create (or join) the `@gastown` org
+2. Under org settings, enable "Require 2FA" and configure trusted publishing
+3. Link `steveyegge/gastown` as a trusted publisher for `@gastown/gt`
 
-```bash
-cd npm-package
+### Current status (as of 2026-03-06)
 
-# Run tests
-npm test
+The `@gastown` npm org was secured by a community member (Ivan Casco Valero,
+ivan@ivancasco.com) to prevent scope squatting. Ownership transfer is pending.
+Until the org is transferred, npm publish will fail gracefully without blocking
+the release (`continue-on-error: true` in the workflow).
 
-# Pack and test install
-npm pack
-npm install -g ./gastown-gt-0.2.0.tgz
-gt version  # Should show 0.2.0
-
-# Cleanup
-npm uninstall -g @gastown/gt
-rm gastown-gt-0.2.0.tgz
-```
-
-### Publish to npm
+### Verifying
 
 ```bash
-# IMPORTANT: Ensure GitHub release with binaries is live first!
-cd npm-package
-npm publish --access public
-```
-
-### Verify npm Release
-
-```bash
-npm install -g @gastown/gt
-gt version  # Should show 0.2.0
-```
-
-## 4. Verify Release
-
-After all channels are updated:
-
-### GitHub
-
-```bash
-# Download and test binary
-curl -LO https://github.com/steveyegge/gastown/releases/download/v0.2.0/gastown_0.2.0_darwin_arm64.tar.gz
-tar -xzf gastown_0.2.0_darwin_arm64.tar.gz
-./gt version
-```
-
-### npm
-
-```bash
+npm view @gastown/gt version
 npm install -g @gastown/gt
 gt version
 ```
 
-## Hotfix Releases
+## Files Updated During Release
 
-For urgent bug fixes:
+| File | What changes |
+|------|-------------|
+| `CHANGELOG.md` | New version section with date |
+| `internal/cmd/info.go` | `versionChanges` entry for `gt info --whats-new` |
+| `internal/cmd/version.go` | `Version` constant |
+| `npm-package/package.json` | `version` field |
+| `flake.nix` | version + vendorHash (only if `nix` is in PATH) |
 
-```bash
-# Create hotfix branch from tag
-git checkout -b hotfix/v0.2.1 v0.2.0
+## Troubleshooting
 
-# Make fixes and bump version
-# ... edit files ...
+### GoReleaser fails with "replace directives"
 
-# Commit, tag, and release
-git add -A
-git commit -m "fix: Critical bug fix"
-git tag -a v0.2.1 -m "Hotfix release v0.2.1"
-git push origin hotfix/v0.2.1
-git push origin v0.2.1
+The workflow rejects `go.mod` files with `replace` directives (they break
+`go install`). Remove the replace directive and commit before tagging.
 
-# Follow normal release process
-GITHUB_TOKEN=$(gh auth token) goreleaser release --clean
+### npm publish returns 404
 
-# Merge back to main
-git checkout main
-git merge hotfix/v0.2.1
-git push origin main
-```
+The `@gastown` npm org doesn't exist or you don't have publish access.
+See the npm section above. The release still succeeds — npm is best-effort.
 
-## Version Numbering
+### Homebrew shows old version after 6+ hours
 
-Gas Town follows [Semantic Versioning](https://semver.org/):
+Gastown is on BrewTestBot's autobump list (checked every ~3h). Check
+https://github.com/Homebrew/homebrew-core/pulls?q=gastown for stuck PRs.
+Manual `brew bump-formula-pr` is blocked for autobump formulae.
 
-- **MAJOR** (x.0.0): Breaking changes
-- **MINOR** (0.x.0): New features, backwards compatible
-- **PATCH** (0.0.x): Bug fixes, backwards compatible
+### `make install` shows `-dirty` suffix
 
-## Questions?
+The `.beads/` directory has unstaged changes. This is cosmetic — the version
+number is correct. The `-dirty` comes from `git describe` seeing any unstaged
+modifications.
 
-- Open an issue: https://github.com/steveyegge/gastown/issues
-- Check existing releases: https://github.com/steveyegge/gastown/releases
+### Version in version.go is still old after bump script
+
+The bump script reads the current version from version.go and replaces it.
+If version.go was manually edited to a different version, the script's sed
+pattern won't match. Fix version.go manually and re-run.

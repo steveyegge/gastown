@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -282,6 +283,104 @@ func TestResolveBeadsDir(t *testing.T) {
 	want2 := "/work/dir/.beads"
 	if filepath.ToSlash(got2) != want2 {
 		t.Errorf("resolveBeadsDir without townRoot = %q, want %q", got2, want2)
+	}
+}
+
+func TestSendFromCrewWorkspace_AvoidsEphemeralPrefixMismatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a bash bd stub")
+	}
+
+	tmpDir := t.TempDir()
+	townRoot := filepath.Join(tmpDir, "town")
+	senderDir := filepath.Join(townRoot, "barnaby", "crew", "tom")
+	recipientDir := filepath.Join(townRoot, "barnaby", "crew", "troy")
+	mayorDir := filepath.Join(townRoot, "mayor")
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+
+	for _, dir := range []string{senderDir, recipientDir, mayorDir, townBeadsDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(townBeadsDir, "beads.db"), []byte{}, 0644); err != nil {
+		t.Fatalf("write beads.db: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test"}`), 0644); err != nil {
+		t.Fatalf("write town.json: %v", err)
+	}
+
+	// Stub bd to reproduce the old behavior where --id msg-* with --ephemeral
+	// would fail prefix validation before ephemeral handling.
+	// The fix: sendToSingle no longer passes --id to bd create.
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	bdStub := filepath.Join(binDir, "bd")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "config" || "${1:-}" == "init" ]]; then
+  exit 0
+fi
+
+if [[ "${1:-}" == "list" ]]; then
+  echo "[]"
+  exit 0
+fi
+
+if [[ "${1:-}" == "mol" && "${2:-}" == "wisp" && "${3:-}" == "list" ]]; then
+  echo "[]"
+  exit 0
+fi
+
+if [[ "${1:-}" == "create" ]]; then
+  has_ephemeral=false
+  msg_id=""
+  i=1
+  while [[ $i -le $# ]]; do
+    arg="${!i}"
+    if [[ "$arg" == "--ephemeral" ]]; then
+      has_ephemeral=true
+    elif [[ "$arg" == "--id" ]]; then
+      ((i++))
+      msg_id="${!i:-}"
+    elif [[ "$arg" == --id=* ]]; then
+      msg_id="${arg#--id=}"
+    fi
+    ((i++))
+  done
+
+  if [[ "$has_ephemeral" == "true" && "$msg_id" == msg-* ]]; then
+    echo "prefix mismatch: database uses 'hq-' (allowed: hq,hq-cv) but ID '$msg_id' doesn't match any allowed prefix" >&2
+    exit 1
+  fi
+
+  echo "hq-testmail-1"
+  exit 0
+fi
+
+echo "unsupported bd args: $*" >&2
+exit 1
+`
+	if err := os.WriteFile(bdStub, []byte(script), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	r := NewRouter(senderDir)
+	msg := &Message{
+		From:           "barnaby/crew/tom",
+		To:             "barnaby/troy",
+		Subject:        "Test message",
+		Body:           "Hello",
+		Wisp:           true,
+		SuppressNotify: true,
+	}
+
+	if err := r.Send(msg); err != nil {
+		t.Fatalf("send from crew workspace should succeed without prefix mismatch: %v", err)
 	}
 }
 

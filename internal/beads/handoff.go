@@ -55,10 +55,9 @@ func (b *Beads) GetOrCreateHandoffBead(role string) (*Issue, error) {
 		return existing, nil
 	}
 
-	// Create new handoff bead (type is deprecated, uses gt:task label via backward compat)
 	issue, err := b.Create(CreateOptions{
 		Title:       HandoffBeadTitle(role),
-		Type:        "task", // Converted to gt:task label by Create()
+		Labels:      []string{"gt:task"},
 		Priority:    2,
 		Description: "", // Empty until first handoff
 		Actor:       role,

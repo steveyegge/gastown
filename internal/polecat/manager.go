@@ -2005,17 +2005,14 @@ func (m *Manager) unassignWorkBeads(name string) {
 	}
 }
 
-// loadFromBeads gets polecat info from agent bead hook + beads assignee field + tmux session state.
+// loadFromBeads gets polecat info from hooked work beads + beads assignee field + tmux session state.
 // State derivation priority:
-//  1. Agent bead hook_bead set → working (authoritative source for current assignment)
-//  2. Issue assigned via beads assignee → working
-//  3. Tmux session alive → working (session active even if assignment not yet recorded)
-//  4. None of the above → done (ready for cleanup)
-//
-// The hook_bead check (1) is critical for polecat name recycling: when a polecat name
-// is reused across rounds, GetAssignedIssue may return a stale issue from the previous
-// round whose assignee was never cleared. The hook_bead is set atomically at spawn/sling
-// time and is always current. (gt-ckk12)
+//  1. Work bead status=hooked + assignee=<polecat> → working (authoritative source)
+//  2. Legacy agent hook_bead that still points to a currently hooked bead for this assignee
+//     → working (compatibility fallback during migration)
+//  3. Issue assigned via beads assignee (open/in_progress/hooked) → working
+//  4. Tmux session alive → working (session active even if assignment not yet recorded)
+//  5. None of the above → idle
 func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 	// Use clonePath which handles both new (polecats/<name>/<rigname>/)
 	// and old (polecats/<name>/) structures
@@ -2029,22 +2026,43 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		branchName = fmt.Sprintf("polecat/%s", name)
 	}
 
-	// Check agent bead's hook_bead field first — this is the authoritative source
-	// for what work is currently assigned to this polecat. The hook_bead is set
-	// atomically at spawn/sling time, so it's always current even after polecat
-	// name recycling. GetAssignedIssue queries by assignee which can return stale
-	// data from previous rounds. (gt-ckk12)
-	agentID := m.agentBeadID(name)
-	_, fields, agentErr := m.beads.GetAgentBead(agentID)
-	if agentErr == nil && fields != nil && fields.HookBead != "" {
+	assignee := m.assigneeID(name)
+
+	// Primary source: the work bead itself (status=hooked + assignee).
+	// This is the direct-tracking model introduced in hq-l6mm5.
+	hookedBeads, hookedErr := m.beads.List(beads.ListOptions{
+		Status:   beads.StatusHooked,
+		Assignee: assignee,
+		Priority: -1,
+	})
+	if hookedErr == nil && len(hookedBeads) > 0 {
 		return &Polecat{
 			Name:      name,
 			Rig:       m.rig.Name,
 			State:     StateWorking,
 			ClonePath: clonePath,
 			Branch:    branchName,
-			Issue:     fields.HookBead,
+			Issue:     hookedBeads[0].ID,
 		}, nil
+	}
+
+	// Compatibility fallback: if legacy hook_bead is still set, only trust it when
+	// it resolves to a currently hooked bead for this assignee. This avoids stale
+	// issue reporting when hook_bead diverges from the work bead state.
+	agentID := m.agentBeadID(name)
+	_, fields, agentErr := m.beads.GetAgentBead(agentID)
+	if agentErr == nil && fields != nil && fields.HookBead != "" {
+		if hookIssue, err := m.beads.Show(fields.HookBead); err == nil &&
+			isCurrentHookedIssueForAssignee(hookIssue, assignee) {
+			return &Polecat{
+				Name:      name,
+				Rig:       m.rig.Name,
+				State:     StateWorking,
+				ClonePath: clonePath,
+				Branch:    branchName,
+				Issue:     fields.HookBead,
+			}, nil
+		}
 	}
 
 	// Persistent polecat model (gt-4ac): check agent_state for idle detection.
@@ -2061,7 +2079,6 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 
 	// Fallback: Query beads for assigned issue (for polecats without agent beads
 	// or with empty hook_bead)
-	assignee := m.assigneeID(name)
 	issue, beadsErr := m.beads.GetAssignedIssue(assignee)
 	if beadsErr != nil {
 		// If beads query fails, return basic polecat info as working
@@ -2100,6 +2117,12 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		Branch:    branchName,
 		Issue:     issueID,
 	}, nil
+}
+
+func isCurrentHookedIssueForAssignee(issue *beads.Issue, assignee string) bool {
+	return issue != nil &&
+		issue.Status == beads.StatusHooked &&
+		issue.Assignee == assignee
 }
 
 // setupSharedBeads creates a redirect file so the polecat uses the rig's shared .beads database.

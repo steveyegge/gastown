@@ -262,7 +262,7 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 	}
 	if !found {
 		suggestions := suggest.FindSimilar(polecatName, r.Polecats, 3)
-		hint := fmt.Sprintf("Create with: gt polecat add %s/%s", rigName, polecatName)
+		hint := fmt.Sprintf("Create with: gt polecat identity add %s %s", rigName, polecatName)
 		return fmt.Errorf("%s", suggest.FormatSuggestion("Polecat", polecatName, suggestions, hint))
 	}
 

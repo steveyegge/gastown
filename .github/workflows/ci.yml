@@ -7,6 +7,31 @@ on:
     branches: [ main ]
 
 jobs:
+  # Guard: go.mod must not contain replace directives — they break `go install`.
+  # See: https://github.com/steveyegge/gastown/issues/2230
+  check-no-replace-directives:
+    name: Reject go.mod replace directives
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Check for replace directives in go.mod
+        run: |
+          if grep -qE '^replace\s' go.mod; then
+            echo "ERROR: go.mod contains replace directives."
+            echo ""
+            echo "Replace directives break 'go install github.com/steveyegge/gastown/cmd/gt@latest'."
+            echo "See: https://github.com/steveyegge/gastown/issues/2230"
+            echo ""
+            echo "Found:"
+            grep -n '^replace' go.mod
+            echo ""
+            echo "Remove replace directives before merging to main."
+            exit 1
+          fi
+          echo "OK: no replace directives in go.mod"
+
   # Guard: gastown no longer supports issues.jsonl — Dolt server is the only backend.
   check-no-issues-jsonl:
     name: Reject issues.jsonl

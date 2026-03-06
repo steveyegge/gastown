@@ -392,6 +392,7 @@ BODY
 
 - **Escalation**: Use `{{ cmd }} escalate` (preferred) or mail to witness as HELP
 - **Everything else**: Use `{{ cmd }} nudge` — it's ephemeral and creates zero Dolt overhead
+  Default mode (wait-idle) won't interrupt the recipient. Use `--mode=immediate` only for stuck agents.
 - **Completion**: `{{ cmd }} done` handles notification automatically — do NOT mail "I'm done"
 - **Status updates**: If asked for status, respond via nudge, not mail
 
@@ -419,10 +420,14 @@ For long-running operations, prefer `run_in_background: true` on Task and Bash t
 | Want to... | Correct command | Common mistake |
 |------------|----------------|----------------|
 | Signal work complete | `{{ cmd }} done` | ~~bd close <root-issue>~~ (Refinery closes it) |
+| Close a sub-issue | `bd close <id>` | ~~bd complete~~ (not a command), ~~bd update --status done~~ (invalid status) |
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
 | Check workflow steps | `{{ cmd }} prime` (shows inline checklist) | ~~bd mol current~~ (steps not materialized) |
 | Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
 | Escalate blocker | `{{ cmd }} escalate "desc" -s HIGH` | ~~waiting for human~~ (never wait) |
+
+**Beads valid statuses:** `open`, `in_progress`, `blocked`, `deferred`, `closed`, `pinned`, `hooked`
+(there is NO `done` or `complete` status)
 
 Polecat: {{ .Polecat }}
 Rig: {{ .RigName }}

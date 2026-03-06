@@ -5,52 +5,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/copilot"
-	"github.com/steveyegge/gastown/internal/cursor"
-	"github.com/steveyegge/gastown/internal/gemini"
 	"github.com/steveyegge/gastown/internal/hookutil"
-	"github.com/steveyegge/gastown/internal/omp"
-	"github.com/steveyegge/gastown/internal/opencode"
-	"github.com/steveyegge/gastown/internal/pi"
+	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/templates/commands"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
-
-func init() {
-	// Register hook installers for all agents that support hooks.
-	// This replaces the provider switch statement in EnsureSettingsForRole.
-	// Adding a new hook-supporting agent = adding a registration here.
-	config.RegisterHookInstaller("claude", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
-		return claude.EnsureSettingsForRoleAt(settingsDir, role, hooksDir, hooksFile)
-	})
-	config.RegisterHookInstaller("gemini", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
-		// Gemini CLI has no --settings flag; install settings in workDir.
-		return gemini.EnsureSettingsForRoleAt(workDir, role, hooksDir, hooksFile)
-	})
-	config.RegisterHookInstaller("opencode", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
-		// OpenCode plugins stay in workDir — no --settings equivalent.
-		return opencode.EnsurePluginAt(workDir, hooksDir, hooksFile)
-	})
-	config.RegisterHookInstaller("copilot", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
-		// Copilot custom instructions stay in workDir — no --settings equivalent.
-		return copilot.EnsureSettingsAt(workDir, hooksDir, hooksFile)
-	})
-	config.RegisterHookInstaller("omp", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
-		// OMP hooks stay in workDir — loaded via --hook flag.
-		return omp.EnsureHookAt(workDir, hooksDir, hooksFile)
-	})
-	config.RegisterHookInstaller("cursor", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
-		// Cursor has no --settings flag; install hooks in workDir.
-		return cursor.EnsureHooksForRoleAt(workDir, role, hooksDir, hooksFile)
-	})
-	config.RegisterHookInstaller("pi", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
-		// Pi extensions stay in workDir — loaded via -e flag.
-		return pi.EnsureHookAt(workDir, hooksDir, hooksFile)
-	})
-}
 
 // EnsureSettingsForRole provisions all agent-specific configuration for a role.
 // settingsDir is where provider settings (e.g., .claude/settings.json) are installed.
@@ -72,12 +33,14 @@ func EnsureSettingsForRole(settingsDir, workDir, role string, rc *config.Runtime
 		return nil
 	}
 
-	// 1. Provider-specific settings (settings.json for Claude, plugin for OpenCode, etc.)
-	// Hook installers are registered in init() — no switch statement needed.
-	if installer := config.GetHookInstaller(provider); installer != nil {
-		if err := installer(settingsDir, workDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
-			return err
-		}
+	// 1. Provider-specific settings via generic installer.
+	// Reads template metadata from the preset and installs the appropriate template.
+	useSettingsDir := false
+	if preset := config.GetAgentPresetByName(provider); preset != nil {
+		useSettingsDir = preset.HooksUseSettingsDir
+	}
+	if err := hooks.InstallForRole(provider, settingsDir, workDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile, useSettingsDir); err != nil {
+		return err
 	}
 
 	// 2. Slash commands (agent-agnostic, uses shared body with provider-specific frontmatter)

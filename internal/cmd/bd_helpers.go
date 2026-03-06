@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // bdCmd is a builder for constructing bd exec.Command calls.
@@ -129,11 +131,26 @@ func (b *bdCmd) buildEnv() []string {
 // Build returns the configured exec.Cmd.
 // This allows callers to further customize the command before execution.
 func (b *bdCmd) Build() *exec.Cmd {
-	cmd := exec.Command("bd", b.args...)
+	args := b.resolvedArgs()
+	cmd := exec.Command("bd", args...)
 	cmd.Dir = b.dir
 	cmd.Env = b.buildEnv()
 	cmd.Stderr = b.stderr
 	return cmd
+}
+
+// resolvedArgs returns the final args, stripping --allow-stale if bd doesn't support it.
+func (b *bdCmd) resolvedArgs() []string {
+	if beads.BdSupportsAllowStale() {
+		return b.args
+	}
+	filtered := make([]string, 0, len(b.args))
+	for _, a := range b.args {
+		if a != "--allow-stale" {
+			filtered = append(filtered, a)
+		}
+	}
+	return filtered
 }
 
 // Run builds and runs the command, returning any error.
@@ -154,7 +171,8 @@ func (b *bdCmd) Output() ([]byte, error) {
 // This overrides the configured Stderr writer to capture both streams.
 // Useful for including command output in error messages.
 func (b *bdCmd) CombinedOutput() ([]byte, error) {
-	cmd := exec.Command("bd", b.args...)
+	args := b.resolvedArgs()
+	cmd := exec.Command("bd", args...)
 	cmd.Dir = b.dir
 	cmd.Env = b.buildEnv()
 	return cmd.CombinedOutput()

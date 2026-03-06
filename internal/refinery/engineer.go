@@ -939,11 +939,19 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 		}
 	}
 
-	// 1. Close source issue with reference to MR
+	// 1. Close source issue with reference to MR.
+	// Use ForceCloseWithReason to bypass dependency checks — the source issue
+	// may have an attached molecule (wisp) whose open steps would block a
+	// normal close. This matches how gt done handles closures.
 	if mr.SourceIssue != "" {
 		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
-		if err := e.beads.CloseWithReason(closeReason, mr.SourceIssue); err != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mr.SourceIssue, err)
+		if err := e.beads.ForceCloseWithReason(closeReason, mr.SourceIssue); err != nil {
+			// Check if already closed (by polecat's gt done) — that's fine
+			if issue, showErr := e.beads.Show(mr.SourceIssue); showErr == nil && beads.IssueStatus(issue.Status).IsTerminal() {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Source issue already closed: %s\n", mr.SourceIssue)
+			} else {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mr.SourceIssue, err)
+			}
 		} else {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mr.SourceIssue)
 		}
@@ -1146,7 +1154,7 @@ The Refinery will automatically retry the merge after you force-push.`,
 	taskTitle := fmt.Sprintf("Resolve merge conflicts: %s", originalTitle)
 	task, err := e.beads.Create(beads.CreateOptions{
 		Title:       taskTitle,
-		Type:        "task",
+		Labels:      []string{"gt:task"},
 		Priority:    mr.Priority,
 		Description: description,
 		Actor:       e.rig.Name + "/refinery",

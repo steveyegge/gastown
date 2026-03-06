@@ -163,8 +163,6 @@ func ParseAgentFields(description string) *AgentFields {
 			fields.AgentState = value
 		case "hook_bead":
 			fields.HookBead = value
-		case "role_bead":
-			// Ignored - role definitions are now config-based (backward compat)
 		case "cleanup_status":
 			fields.CleanupStatus = value
 		case "active_mr":

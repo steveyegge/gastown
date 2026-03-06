@@ -984,6 +984,7 @@ func hookBeadWithRetry(beadID, targetAgent, hookDir string) error {
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		err := BdCmd("update", beadID, "--status=hooked", "--assignee="+targetAgent).
 			Dir(hookDir).
+			WithAutoCommit().
 			Run()
 		if err != nil {
 			lastErr = err

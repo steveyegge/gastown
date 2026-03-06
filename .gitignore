@@ -70,3 +70,6 @@ result
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Gas Town (added by gt)
+__pycache__/

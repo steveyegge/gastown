@@ -569,3 +569,53 @@ func TestValidateSessionName(t *testing.T) {
 		})
 	}
 }
+
+func TestPolecatSlot(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigPath := tmpDir
+	polecatsDir := filepath.Join(rigPath, "polecats")
+	if err := os.MkdirAll(polecatsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{
+		Name:     "testrig",
+		Path:     rigPath,
+		Polecats: []string{},
+	}
+	sm := NewSessionManager(tmux.NewTmux(), r)
+
+	// No polecats — should return 0
+	if slot := sm.polecatSlot("alpha"); slot != 0 {
+		t.Errorf("empty dir: got slot %d, want 0", slot)
+	}
+
+	// Create some polecat dirs (sorted: alpha, beta, gamma)
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		if err := os.MkdirAll(filepath.Join(polecatsDir, name), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tests := []struct {
+		name string
+		want int
+	}{
+		{"alpha", 0},
+		{"beta", 1},
+		{"gamma", 2},
+	}
+	for _, tt := range tests {
+		if slot := sm.polecatSlot(tt.name); slot != tt.want {
+			t.Errorf("polecatSlot(%q) = %d, want %d", tt.name, slot, tt.want)
+		}
+	}
+
+	// Hidden dirs should be skipped
+	if err := os.MkdirAll(filepath.Join(polecatsDir, ".hidden"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if slot := sm.polecatSlot("beta"); slot != 1 {
+		t.Errorf("with hidden dir: polecatSlot(beta) = %d, want 1", slot)
+	}
+}

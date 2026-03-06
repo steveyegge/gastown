@@ -118,6 +118,11 @@ type AgentPresetInfo struct {
 	// For these providers, Gas Town sends startup fallback commands via nudge.
 	HooksInformational bool `json:"hooks_informational,omitempty"`
 
+	// HooksUseSettingsDir indicates the agent supports a separate settings directory
+	// (e.g., Claude's --settings flag). When true, hook templates are installed in
+	// settingsDir; when false, they're installed in workDir.
+	HooksUseSettingsDir bool `json:"hooks_use_settings_dir,omitempty"`
+
 	// ReadyPromptPrefix is the prompt prefix for tmux readiness detection (e.g., "❯ ").
 	// Empty means delay-based detection only.
 	ReadyPromptPrefix string `json:"ready_prompt_prefix,omitempty"`
@@ -181,6 +186,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		HooksProvider:          "claude",
 		HooksDir:               ".claude",
 		HooksSettingsFile:      "settings.json",
+		HooksUseSettingsDir:    true,
 		ReadyPromptPrefix:      "❯ ",
 		ReadyDelayMs:           10000,
 		InstructionsFile:       "CLAUDE.md",
@@ -717,29 +723,6 @@ func NewExampleAgentRegistry() *AgentRegistry {
 	}
 }
 
-// HookInstallerFunc is the signature for agent-specific hook/settings installers.
-// settingsDir is the gastown-managed parent (used by agents with --settings flag).
-// workDir is the agent's working directory.
-// role is the Gas Town role (e.g., "polecat", "crew", "witness").
-// hooksDir and hooksFile come from the preset's HooksDir and HooksSettingsFile.
-type HookInstallerFunc func(settingsDir, workDir, role, hooksDir, hooksFile string) error
-
-// hookInstallers maps provider names to their hook installation functions.
-// Registration happens via RegisterHookInstaller, typically from agent package init() or runtime init().
-var hookInstallers = make(map[string]HookInstallerFunc)
-
-// RegisterHookInstaller registers a hook installation function for an agent provider.
-// This replaces the switch statement in runtime.EnsureSettingsForRole.
-func RegisterHookInstaller(provider string, fn HookInstallerFunc) {
-	hookInstallers[provider] = fn
-}
-
-// GetHookInstaller returns the registered hook installer for a provider.
-// Returns nil if no installer is registered.
-func GetHookInstaller(provider string) HookInstallerFunc {
-	return hookInstallers[provider]
-}
-
 // ResetRegistryForTesting clears all registry state.
 // This is intended for use in tests only to ensure test isolation.
 func ResetRegistryForTesting() {
@@ -759,7 +742,3 @@ func RegisterAgentForTesting(name string, info AgentPresetInfo) {
 	globalRegistry.Agents[name] = &info
 }
 
-// ResetHookInstallersForTesting clears all hook installer registrations.
-func ResetHookInstallersForTesting() {
-	hookInstallers = make(map[string]HookInstallerFunc)
-}

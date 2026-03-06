@@ -17,6 +17,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // Common errors
@@ -290,7 +292,16 @@ func CleanStaleLocks(root string) (int, error) {
 func getActiveTmuxSessions() []string {
 	// Get both session name and ID to handle different lock formats
 	// Format: "session_name:session_id" e.g., "gt-beads-crew-dave:$55"
-	cmd := execCommand("tmux", "list-sessions", "-F", "#{session_name}:#{session_id}")
+	// Use the town's tmux socket so we query the correct server.
+	// Without -L, bare "tmux" queries the "default" socket, which misses
+	// all sessions on the per-town socket (e.g., "gt") and causes
+	// CleanStaleLocks to incorrectly remove locks for active sessions.
+	args := []string{}
+	if sock := tmux.GetDefaultSocket(); sock != "" {
+		args = append(args, "-L", sock)
+	}
+	args = append(args, "list-sessions", "-F", "#{session_name}:#{session_id}")
+	cmd := execCommand("tmux", args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil // tmux not running or not installed

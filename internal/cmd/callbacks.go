@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/townlog"
+	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -384,35 +385,54 @@ func handleMergeRejected(townRoot string, msg *mail.Message, dryRun bool) (strin
 }
 
 // handleHelp processes a HELP: request from a polecat.
+// Assesses category and severity to determine priority and routing.
 func handleHelp(townRoot string, msg *mail.Message, dryRun bool) (string, error) {
-	matches := patternHelp.FindStringSubmatch(msg.Subject)
-	if len(matches) < 2 {
-		return "", fmt.Errorf("could not parse topic from subject: %q", msg.Subject)
+	// Parse the help payload for structured assessment
+	payload, err := witness.ParseHelp(msg.Subject, msg.Body)
+	if err != nil {
+		return "", fmt.Errorf("could not parse help request: %w", err)
 	}
-	topic := matches[1]
+
+	// Assess category and severity from content
+	assessment := witness.AssessHelp(payload)
 
 	if dryRun {
-		return fmt.Sprintf("would forward help request to overseer: %s", topic), nil
+		return fmt.Sprintf("would forward help request to overseer: %s [%s/%s]",
+			payload.Topic, assessment.Category, assessment.Severity), nil
 	}
 
-	// Forward to overseer (human)
+	// Map assessed severity to mail priority
+	var priority mail.Priority
+	switch assessment.Severity {
+	case witness.HelpSeverityCritical:
+		priority = mail.PriorityUrgent
+	case witness.HelpSeverityHigh:
+		priority = mail.PriorityHigh
+	default:
+		priority = mail.PriorityNormal
+	}
+
+	// Forward to overseer (human) with assessed priority
 	router := mail.NewRouter(townRoot)
 	defer router.WaitPendingNotifications()
 	fwd := &mail.Message{
-		From:     "mayor/",
-		To:       "overseer",
-		Subject:  fmt.Sprintf("[FWD] HELP: %s", topic),
-		Body:     fmt.Sprintf("Forwarded from: %s\n\n%s", msg.From, msg.Body),
-		Priority: mail.PriorityHigh,
+		From:    "mayor/",
+		To:      "overseer",
+		Subject: fmt.Sprintf("[FWD][%s] HELP: %s", strings.ToUpper(string(assessment.Severity)), payload.Topic),
+		Body: fmt.Sprintf("Forwarded from: %s\nAssessment: category=%s severity=%s (suggest → %s)\nRationale: %s\n\n%s",
+			msg.From, assessment.Category, assessment.Severity, assessment.SuggestTo, assessment.Rationale, msg.Body),
+		Priority: priority,
 	}
 	if err := router.Send(fwd); err != nil {
 		return "", fmt.Errorf("forwarding to overseer: %w", err)
 	}
 
-	// Log the help request
-	logCallback(townRoot, fmt.Sprintf("help_request: from %s: %s", msg.From, topic))
+	// Log the help request with assessment
+	logCallback(townRoot, fmt.Sprintf("help_request: from %s: %s [%s/%s]",
+		msg.From, payload.Topic, assessment.Category, assessment.Severity))
 
-	return fmt.Sprintf("forwarded help request to overseer: %s", topic), nil
+	return fmt.Sprintf("forwarded help request to overseer: %s [%s/%s]",
+		payload.Topic, assessment.Category, assessment.Severity), nil
 }
 
 // handleEscalation processes an ESCALATION: from a Witness.

@@ -313,11 +313,7 @@ func extractBaseName(cmdline string) string {
 
 // isKnownAgent returns true if the command is a recognized agent runtime.
 func isKnownAgent(base string) bool {
-	switch base {
-	case "claude", "pi", "opencode", "codex", "gemini", "cursor", "auggie", "amp", "aider":
-		return true
-	}
-	return false
+	return config.IsKnownPreset(base)
 }
 
 // isAgentWrapper returns true if the command is a runtime wrapper (node, bun, etc.)

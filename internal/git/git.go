@@ -1254,6 +1254,34 @@ func (g *Git) CountCommitsBehind(ref string) (int, error) {
 	return count, nil
 }
 
+// BranchContamination holds the result of a branch contamination check.
+type BranchContamination struct {
+	Behind int // commits HEAD is behind base (e.g., origin/main)
+	Ahead  int // commits HEAD is ahead of base
+}
+
+// CheckBranchContamination checks whether the current branch has diverged
+// significantly from a base ref (typically origin/main). Returns the number
+// of commits behind and ahead, letting callers decide severity thresholds.
+// (GH#2220)
+func (g *Git) CheckBranchContamination(baseRef string) (BranchContamination, error) {
+	var result BranchContamination
+
+	behind, err := g.CountCommitsBehind(baseRef)
+	if err != nil {
+		return result, fmt.Errorf("counting commits behind %s: %w", baseRef, err)
+	}
+	result.Behind = behind
+
+	ahead, err := g.CommitsAhead(baseRef, "HEAD")
+	if err != nil {
+		return result, fmt.Errorf("counting commits ahead of %s: %w", baseRef, err)
+	}
+	result.Ahead = ahead
+
+	return result, nil
+}
+
 // StashCount returns the number of stashes belonging to the current branch.
 // Git stashes are stored in the main repo (.git/refs/stash) and shared across
 // all worktrees. Counting all stashes is incorrect for worktree-based polecats:
@@ -1372,6 +1400,55 @@ func (s *UncommittedWorkStatus) CleanExcludingBeads() bool {
 // isBeadsPath returns true if the path is a .beads/ file.
 func isBeadsPath(path string) bool {
 	return strings.Contains(path, ".beads/") || strings.Contains(path, ".beads\\")
+}
+
+// isGasTownRuntimePath returns true if the path is a Gas Town or Cursor runtime
+// artifact that should not block gt done. These paths are managed by the toolchain,
+// not by the developer, and are normally gitignored via EnsureGitignorePatterns.
+func isGasTownRuntimePath(path string) bool {
+	prefixes := []string{
+		".beads/", ".beads\\",
+		".claude/", ".claude\\",
+		".runtime/", ".runtime\\",
+		".logs/", ".logs\\",
+		"__pycache__/", "__pycache__\\",
+	}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(path, prefix) || strings.Contains(path, "/"+prefix) {
+			return true
+		}
+	}
+	// Also match bare directory entries from git status (e.g. ".claude/")
+	bare := strings.TrimSuffix(strings.TrimSuffix(path, "/"), "\\")
+	for _, name := range []string{".beads", ".claude", ".runtime", ".logs", "__pycache__"} {
+		if bare == name {
+			return true
+		}
+	}
+	return false
+}
+
+// CleanExcludingRuntime returns true if the only uncommitted changes are Gas Town
+// runtime artifacts (.beads/, .claude/, .runtime/, .logs/, __pycache__/).
+// Used by gt done to avoid blocking completion on toolchain-managed files.
+func (s *UncommittedWorkStatus) CleanExcludingRuntime() bool {
+	if s.StashCount > 0 || s.UnpushedCommits > 0 {
+		return false
+	}
+
+	for _, f := range s.ModifiedFiles {
+		if !isGasTownRuntimePath(f) {
+			return false
+		}
+	}
+
+	for _, f := range s.UntrackedFiles {
+		if !isGasTownRuntimePath(f) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // String returns a human-readable summary of uncommitted work.

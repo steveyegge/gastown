@@ -540,12 +540,21 @@ func (m *Manager) PostMerge(idOrBranch string) (*PostMergeResult, error) {
 		result.MRClosed = true
 	}
 
-	// Close the source issue
+	// Close the source issue with reason and --force to bypass dependency checks.
+	// The source issue may have an attached molecule (wisp) whose open steps
+	// would block a normal bd close. ForceCloseWithReason bypasses this,
+	// matching how gt done handles closures for the no-MR path.
 	if mr.IssueID != "" {
-		if err := b.Close(mr.IssueID); err != nil {
-			// Source issue may already be closed or not exist
-			_, _ = fmt.Fprintf(m.output, "  %s source issue close: %v\n", style.Dim.Render("○"), err)
-			result.SourceIssueNotFound = true
+		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
+		if err := b.ForceCloseWithReason(closeReason, mr.IssueID); err != nil {
+			// Check if already closed (by polecat's gt done) — that's fine
+			if issue, showErr := b.Show(mr.IssueID); showErr == nil && beads.IssueStatus(issue.Status).IsTerminal() {
+				_, _ = fmt.Fprintf(m.output, "  %s source issue already closed: %s\n", style.Dim.Render("○"), mr.IssueID)
+				result.SourceIssueClosed = true
+			} else {
+				_, _ = fmt.Fprintf(m.output, "  %s source issue close: %v\n", style.Dim.Render("○"), err)
+				result.SourceIssueNotFound = true
+			}
 		} else {
 			result.SourceIssueClosed = true
 		}

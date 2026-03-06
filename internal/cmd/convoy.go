@@ -26,11 +26,12 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-// generateShortID generates a convoy ID suffix using base36.
-// 3 chars of base36 gives ~46K possible values — plenty for convoys.
+// generateShortID generates a collision-resistant convoy ID suffix using base36.
+// 5 chars of base36 gives ~60M possible values (36^5 = 60,466,176).
+// Birthday paradox: ~1% collision at ~1,100 IDs — safe for convoy volumes. (#2063)
 func generateShortID() string {
 	const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
-	b := make([]byte, 3)
+	b := make([]byte, 5)
 	_, _ = rand.Read(b)
 	for i := range b {
 		b[i] = alphabet[int(b[i])%len(alphabet)]
@@ -2144,8 +2145,8 @@ func getExternalIssueDetails(townBeads, rigName, issueID string) *issueDetails {
 	}
 
 	// Query the rig database by running bd show from the rig directory
-	// Use --allow-stale to handle cases where the database may be temporarily stale
-	showCmd := exec.Command("bd", "show", issueID, "--json", "--allow-stale")
+	showArgs := beads.MaybePrependAllowStale([]string{"show", issueID, "--json"})
+	showCmd := exec.Command("bd", showArgs...)
 	showCmd.Dir = rigDir // Set working directory to rig directory
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout

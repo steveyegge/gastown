@@ -75,6 +75,40 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "0.11.0",
+		Date:    "2026-03-05",
+		Changes: []string{
+			"FIX: Serial killer bug — removed hung session detection that killed healthy witnesses/refineries",
+			"FIX: Stuck agent detection moved from daemon to Dog plugin (more reliable)",
+			"FIX: Sling race condition — hook write visibility ensured before polecat startup",
+			"FIX: Refinery PostMerge uses ForceCloseWithReason for source issue",
+			"FIX: bd JSON guard handles non-JSON output from bd v0.58.0+",
+			"FIX: Branch contamination preflight added to gt done",
+			"FIX: gt done uses correct rig when Claude Code resets shell cwd",
+			"FIX: Dolt server-side timeouts prevent CLOSE_WAIT accumulation",
+			"FIX: Sling TTL prevents permanent scheduling blocks",
+			"FIX: Prefix registry reloaded on heartbeat to prevent ghost sessions",
+			"NEW: Docker support — docker-compose and Dockerfile for containerized deployment",
+			"NEW: Cursor hooks — polecat agent integration for Cursor IDE",
+			"NEW: Context-budget guard — external script prevents context window overflow",
+			"NEW: Cascade close — bd close --cascade closes parent and all children",
+			"NEW: Schema evolution support for gt wl sync",
+			"NEW: POLECAT_SLOT env var for test isolation",
+			"CHANGED: Beads dependency upgraded v0.57.0 to v0.59.0",
+			"CHANGED: Hook installers consolidated into generic declarative system",
+			"CHANGED: Hardcoded isKnownAgent replaced with config.IsKnownPreset",
+			"REMOVED: gt swarm command and internal/swarm package",
+			"REMOVED: Beads Classic legacy code paths",
+		},
+	},
+	{
+		Version: "0.10.0",
+		Date:    "2026-03-03",
+		Changes: []string{
+			"Incremental fixes between v0.9.0 and v0.10.0 — see git log for details",
+		},
+	},
+	{
 		Version: "0.9.0",
 		Date:    "2026-03-01",
 		Changes: []string{

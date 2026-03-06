@@ -28,6 +28,11 @@ var DefaultDatabases = []string{"beads_gt", "beads_hq", "beads", "gt"}
 // testPollutionPrefixes are database name prefixes created by tests.
 var testPollutionPrefixes = []string{"testdb_", "beads_t", "beads_pt", "doctest_"}
 
+// isNothingToCommit returns true if the error is a Dolt "nothing to commit" error.
+func isNothingToCommit(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "nothing to commit")
+}
+
 // DiscoverDatabases queries SHOW DATABASES on the Dolt server and returns
 // all production databases, filtering out system databases and test pollution.
 // Falls back to DefaultDatabases on any error.
@@ -347,9 +352,22 @@ func Reap(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ReapRe
 	result.Reaped = totalReaped
 
 	if totalReaped > 0 {
+		// Flush the SQL transaction to the Dolt working set before DOLT_COMMIT.
+		// With autocommit=0, UPDATE changes are in the SQL transaction buffer,
+		// not the Dolt working set. DOLT_COMMIT operates on the working set,
+		// so without this COMMIT it sees "nothing to commit".
+		if _, err := db.ExecContext(ctx, "COMMIT"); err != nil {
+			return result, fmt.Errorf("sql commit: %w", err)
+		}
 		commitMsg := fmt.Sprintf("reaper: close %d stale wisps in %s", totalReaped, dbName)
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
-			return result, fmt.Errorf("dolt commit: %w", err)
+			// "nothing to commit" is expected when the reaper reverts dirty working
+			// set changes back to match HEAD. The wisps were set to "open" in the
+			// server's in-memory working set without being committed; closing them
+			// makes the working set match HEAD again, so DOLT_COMMIT sees no diff.
+			if !isNothingToCommit(err) {
+				return result, fmt.Errorf("dolt commit: %w", err)
+			}
 		}
 	}
 
@@ -441,6 +459,14 @@ func purgeClosedWisps(db *sql.DB, dbName string, purgeAge time.Duration, dryRun 
 	}
 
 	if totalDeleted > 0 {
+		// Flush SQL transaction to working set before DOLT_COMMIT.
+		if _, err := db.ExecContext(ctx, "COMMIT"); err != nil {
+			anomalies = append(anomalies, Anomaly{
+				Type:    "sql_commit_failed",
+				Message: fmt.Sprintf("sql commit after purge failed: %v", err),
+			})
+			return totalDeleted, anomalies, nil
+		}
 		commitMsg := fmt.Sprintf("reaper: purge %d closed wisps from %s", totalDeleted, dbName)
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
 			// Non-fatal — log but continue.
@@ -493,6 +519,10 @@ func purgeOldMail(db *sql.DB, dbName string, mailDeleteAge time.Duration, dryRun
 	}
 
 	if totalDeleted > 0 {
+		// Flush SQL transaction to working set before DOLT_COMMIT.
+		if _, err := db.ExecContext(ctx, "COMMIT"); err != nil {
+			return totalDeleted, fmt.Errorf("sql commit: %w", err)
+		}
 		commitMsg := fmt.Sprintf("reaper: purge %d old mail from %s", totalDeleted, dbName)
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
 			// Non-fatal.
@@ -577,6 +607,14 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 	result.Closed = len(ids)
 
 	if len(ids) > 0 {
+		// Flush SQL transaction to working set before DOLT_COMMIT.
+		if _, err := db.ExecContext(ctx, "COMMIT"); err != nil {
+			result.Anomalies = append(result.Anomalies, Anomaly{
+				Type:    "sql_commit_failed",
+				Message: fmt.Sprintf("sql commit after auto-close failed: %v", err),
+			})
+			return result, nil
+		}
 		commitMsg := fmt.Sprintf("reaper: auto-close %d stale issues in %s", len(ids), dbName)
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
 			result.Anomalies = append(result.Anomalies, Anomaly{

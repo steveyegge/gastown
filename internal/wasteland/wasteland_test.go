@@ -131,8 +131,8 @@ func TestForkDoltHubRepo(t *testing.T) {
 				if r.Method != "POST" {
 					t.Errorf("expected POST, got %s", r.Method)
 				}
-				if r.URL.Path != "/database/fork" {
-					t.Errorf("expected /database/fork, got %s", r.URL.Path)
+				if r.URL.Path != "/fork" {
+					t.Errorf("expected /fork, got %s", r.URL.Path)
 				}
 				if r.Header.Get("authorization") != "token test-token" {
 					t.Errorf("expected auth header, got %q", r.Header.Get("authorization"))
@@ -142,8 +142,8 @@ func TestForkDoltHubRepo(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					t.Errorf("decoding request body: %v", err)
 				}
-				if body["from_owner"] != "steveyegge" {
-					t.Errorf("from_owner = %q, want %q", body["from_owner"], "steveyegge")
+				if body["parentOwnerName"] != "steveyegge" {
+					t.Errorf("parentOwnerName = %q, want %q", body["parentOwnerName"], "steveyegge")
 				}
 
 				w.WriteHeader(tt.statusCode)

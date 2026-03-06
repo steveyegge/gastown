@@ -308,7 +308,6 @@ func (r *realLabelAdder) AddLabel(townRoot, id, label string) error {
 }
 
 // RoleLabelCheck verifies that role beads have the gt:role label.
-// This label is required for GetRoleConfig to recognize role beads.
 // Role beads created before the label migration may be missing this label.
 type RoleLabelCheck struct {
 	FixableCheck

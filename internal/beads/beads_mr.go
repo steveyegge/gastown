@@ -19,9 +19,9 @@ func (b *Beads) FindMRForBranchAny(branch string) (*Issue, error) {
 	return b.findMRForBranch(branch, false)
 }
 
-// findMRForBranch searches both the issues table (Dolt) and wisps table
-// (SQLite) for a merge-request bead matching the given branch.
-// Uses status=all which covers both tables with full descriptions.
+// findMRForBranch searches the issues table (Dolt) for a merge-request
+// bead matching the given branch.
+// Uses status=all which includes all issue statuses with full descriptions.
 // When skipClosed is true, closed beads are excluded (for open-MR checks).
 func (b *Beads) findMRForBranch(branch string, skipClosed bool) (*Issue, error) {
 	branchPrefix := "branch: " + branch + "\n"

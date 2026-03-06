@@ -525,16 +525,20 @@ func findAgentWork(ctx RoleContext) *beads.Issue {
 	}
 
 	// Polecats and crew use a retry loop to handle the timing race where
-	// the agent bead or hooked work bead hasn't propagated to the database
-	// by the time gt prime runs on session startup.
+	// the hook write (status=hooked + assignee) hasn't propagated to new
+	// Dolt connections by the time gt prime runs on session startup.
+	// Uses exponential backoff: 500ms, 1s, 2s, 4s, 8s (total ~15.5s max).
+	// See: https://github.com/steveyegge/gastown/issues/2389
 	maxAttempts := 1
 	if ctx.Role == RolePolecat || ctx.Role == RoleCrew {
-		maxAttempts = 3
+		maxAttempts = 5
 	}
 
+	backoff := 500 * time.Millisecond
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
-			time.Sleep(2 * time.Second)
+			time.Sleep(backoff)
+			backoff *= 2
 		}
 
 		if result := findAgentWorkOnce(ctx, agentID); result != nil {

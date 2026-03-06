@@ -338,6 +338,12 @@ func detectRole(cwd, townRoot string) RoleInfo {
 func parseRoleString(s string) (Role, string, string) {
 	s = strings.TrimSpace(s)
 
+	// Normalize consecutive slashes (e.g. "gamestore//refinery" → "gamestore/refinery")
+	for strings.Contains(s, "//") {
+		s = strings.ReplaceAll(s, "//", "/")
+	}
+	s = strings.TrimSuffix(s, "/")
+
 	// Simple roles
 	switch s {
 	case constants.RoleMayor:
