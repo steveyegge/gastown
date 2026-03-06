@@ -1040,7 +1040,8 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	// Kill threshold must be > backoff-max (5m) to avoid false positive
 	// kills during legitimate await-signal sleep.
 	if hb.IsVeryStale() {
-		d.restartStuckDeacon(sessionName)
+		// Detection only: stuck-agent-dog plugin handles context-aware restart
+		d.logger.Printf("STUCK DEACON: heartbeat stale for %s, session %s needs restart", age.Round(time.Minute), sessionName)
 	} else {
 		// Stale but not very stale (5-15 min) - nudge to wake up
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
