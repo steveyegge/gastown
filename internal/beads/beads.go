@@ -342,7 +342,13 @@ func (b *Beads) run(args ...string) (_ []byte, retErr error) {
 		return nil, b.wrapError(fmt.Errorf("command produced no output"), stderr.String(), args)
 	}
 
-	return stdout.Bytes(), nil
+	// Strip warning lines from stdout. bd may emit warnings (e.g.,
+	// "warning: beads.role not configured") to stdout, which corrupts
+	// JSON output and causes isJSONBytes to return false, silently
+	// dropping valid results. See: GH #TBD (hook delivery failure).
+	out := stripStdoutWarnings(stdout.Bytes())
+
+	return out, nil
 }
 
 // runWithRouting executes a bd command without setting BEADS_DIR, allowing bd's
@@ -376,7 +382,9 @@ func (b *Beads) runWithRouting(args ...string) (_ []byte, retErr error) { //noli
 		return nil, b.wrapError(fmt.Errorf("command produced no output"), stderr.String(), args)
 	}
 
-	return stdout.Bytes(), nil
+	out := stripStdoutWarnings(stdout.Bytes())
+
+	return out, nil
 }
 
 // Run executes a bd command and returns stdout.
@@ -582,6 +590,32 @@ func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
 	}
 
 	return issues, nil
+}
+
+// stripStdoutWarnings removes warning/diagnostic lines that bd may emit to stdout.
+// bd sometimes prints "warning: ..." lines to stdout instead of stderr, which
+// corrupts JSON output. This strips those lines so downstream JSON parsing works.
+func stripStdoutWarnings(data []byte) []byte {
+	// Fast path: no warning prefix present
+	if !bytes.Contains(data, []byte("warning:")) {
+		return data
+	}
+
+	lines := bytes.Split(data, []byte("\n"))
+	var cleaned [][]byte
+	stripped := false
+	for _, line := range lines {
+		if bytes.HasPrefix(bytes.TrimSpace(line), []byte("warning:")) {
+			stripped = true
+			continue
+		}
+		cleaned = append(cleaned, line)
+	}
+
+	if !stripped {
+		return data
+	}
+	return bytes.Join(cleaned, []byte("\n"))
 }
 
 // isJSONBytes returns true if the byte slice starts with [ or { (after whitespace).

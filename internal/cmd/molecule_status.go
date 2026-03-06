@@ -386,19 +386,29 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		if err == nil && beads.IsAgentBead(agentBead) {
 			status.AgentBeadID = agentBeadID
 
-			// Read hook_bead from the agent bead's database field (not description!)
-			// The hook_bead column is updated by `bd slot set` in UpdateAgentState.
-			// IMPORTANT: Don't use ParseAgentFields on description - the description
-			// field may contain stale data, causing the wrong issue to be hooked.
-			if agentBead.HookBead != "" {
+			// Read hook_bead: first try the database column, then fall back to
+			// parsing the description. The hook_bead column was maintained by
+			// bd slot set, but slot writes were removed in hq-l6mm5. The
+			// description's hook_bead field is now the authoritative source,
+			// written atomically at spawn time by polecat manager.
+			hookBeadID := agentBead.HookBead
+			if hookBeadID == "" {
+				// Column empty — parse from description (post-hq-l6mm5 path)
+				fields := beads.ParseAgentFields(agentBead.Description)
+				if fields.HookBead != "" && fields.HookBead != "null" {
+					hookBeadID = fields.HookBead
+				}
+			}
+
+			if hookBeadID != "" {
 				// The hooked bead may be in a different database than the agent bead.
 				// Resolve its path using prefix-based routing.
-				hookBeadPath := beads.ResolveHookDir(townRoot, agentBead.HookBead, workDir)
+				hookBeadPath := beads.ResolveHookDir(townRoot, hookBeadID, workDir)
 				hookB := b
 				if hookBeadPath != workDir {
 					hookB = beads.New(hookBeadPath)
 				}
-				hookBead, err = hookB.Show(agentBead.HookBead)
+				hookBead, err = hookB.Show(hookBeadID)
 				if err != nil {
 					// Hook bead referenced but not found - report error but continue
 					hookBead = nil
