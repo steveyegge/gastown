@@ -3,6 +3,8 @@ package cmd
 import (
 	"crypto/sha256"
 	"fmt"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -55,15 +57,21 @@ func runWlDone(cmd *cobra.Command, args []string) error {
 	}
 	rigHandle := wlCfg.RigHandle
 
-	if !doltserver.DatabaseExists(townRoot, doltserver.WLCommonsDB) {
-		return fmt.Errorf("database %q not found\nJoin a wasteland first with: gt wl join <org/db>", doltserver.WLCommonsDB)
-	}
-
-	store := doltserver.NewWLCommons(townRoot)
 	completionID := generateCompletionID(wantedID, rigHandle)
 
-	if err := submitDone(store, wantedID, rigHandle, wlDoneEvidence, completionID); err != nil {
-		return err
+	if !doltserver.DatabaseExists(townRoot, doltserver.WLCommonsDB) {
+		// Fallback for wl-commons clone-based workspaces (join creates .wasteland clone).
+		if wlCfg.LocalDir == "" {
+			return fmt.Errorf("database %q not found\nJoin a wasteland first with: gt wl join <org/db>", doltserver.WLCommonsDB)
+		}
+		if err := submitDoneInLocalClone(wlCfg.LocalDir, wantedID, rigHandle, wlDoneEvidence, completionID); err != nil {
+			return err
+		}
+	} else {
+		store := doltserver.NewWLCommons(townRoot)
+		if err := submitDone(store, wantedID, rigHandle, wlDoneEvidence, completionID); err != nil {
+			return err
+		}
 	}
 
 	fmt.Printf("%s Completion submitted for %s\n", style.Bold.Render("✓"), wantedID)
@@ -94,6 +102,33 @@ func submitDone(store doltserver.WLCommonsStore, wantedID, rigHandle, evidence, 
 		return fmt.Errorf("submitting completion: %w", err)
 	}
 
+	return nil
+}
+
+func submitDoneInLocalClone(localDir, wantedID, rigHandle, evidence, completionID string) error {
+	script := fmt.Sprintf(`UPDATE wanted SET status='in_review', evidence_url='%s', updated_at=NOW()
+  WHERE id='%s' AND status='claimed' AND claimed_by='%s';
+INSERT IGNORE INTO completions (id, wanted_id, completed_by, evidence, completed_at)
+  SELECT '%s', '%s', '%s', '%s', NOW()
+  FROM wanted WHERE id='%s' AND status='in_review' AND claimed_by='%s'
+  AND NOT EXISTS (SELECT 1 FROM completions WHERE wanted_id='%s');
+CALL DOLT_ADD('-A');
+CALL DOLT_COMMIT('-m', 'wl done: %s');`,
+		doltserver.EscapeSQL(evidence), doltserver.EscapeSQL(wantedID), doltserver.EscapeSQL(rigHandle),
+		doltserver.EscapeSQL(completionID), doltserver.EscapeSQL(wantedID), doltserver.EscapeSQL(rigHandle), doltserver.EscapeSQL(evidence),
+		doltserver.EscapeSQL(wantedID), doltserver.EscapeSQL(rigHandle), doltserver.EscapeSQL(wantedID),
+		doltserver.EscapeSQL(wantedID))
+
+	cmd := exec.Command("dolt", "sql", "-q", script)
+	cmd.Dir = localDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		s := strings.ToLower(string(out))
+		if strings.Contains(s, "nothing to commit") {
+			return fmt.Errorf("wanted item %s is not claimed by %q or does not exist", wantedID, rigHandle)
+		}
+		return fmt.Errorf("submitting completion: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
 	return nil
 }
 

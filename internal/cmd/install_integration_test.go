@@ -149,10 +149,6 @@ func TestInstallBeadsHasCorrectPrefix(t *testing.T) {
 	if !strings.Contains(configText, "issue-prefix: hq") {
 		t.Errorf("config.yaml missing issue-prefix: hq, got:\n%s", configText)
 	}
-	if !strings.Contains(configText, "sync.mode: dolt-native") {
-		t.Errorf("config.yaml missing sync.mode: dolt-native, got:\n%s", configText)
-	}
-
 	// Optional online smoke check: verify prefix via bd CLI when Dolt is reachable.
 	// Core assertions already validate prefix from tracked config.yaml above.
 	bdCmd := exec.Command("bd", "config", "get", "issue_prefix")

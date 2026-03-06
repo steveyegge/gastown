@@ -262,12 +262,21 @@ func resolveFormula(explicit string, hookRawBead bool) string {
 	return "mol-polecat-work"
 }
 
+// slingContextTTL is the maximum age of a sling context before it's considered
+// stale and ignored by areScheduled(). This prevents orphaned sling contexts
+// (from failed spawns or throttled dispatches) from permanently blocking tasks.
+// See GH#2279.
+const slingContextTTL = 30 * time.Minute
+
 // areScheduled returns a set of bead IDs that have open sling contexts.
 // Queries HQ only — sling contexts are always created in the town-root DB,
 // so HQ is authoritative. This avoids partial-failure scenarios where a rig
 // dir succeeds but HQ fails, which would silently return incomplete results.
 // On error, fails closed: treats ALL requested beads as scheduled to prevent
 // false stranded detection and duplicate scheduling attempts.
+//
+// Sling contexts older than slingContextTTL are ignored — they are likely
+// orphans from failed spawn attempts (GH#2279).
 func areScheduled(beadIDs []string) map[string]bool {
 	result := make(map[string]bool)
 	if len(beadIDs) == 0 {
@@ -295,9 +304,20 @@ func areScheduled(beadIDs []string) map[string]bool {
 		return result
 	}
 
-	// Build lookup of work bead IDs from open contexts
+	// Build lookup of work bead IDs from open contexts, skipping stale ones.
 	scheduledWorkBeads := make(map[string]bool)
+	now := time.Now()
 	for _, ctx := range contexts {
+		// Skip stale sling contexts (GH#2279): contexts older than the TTL
+		// are likely orphans from failed spawn attempts. Ignoring them allows
+		// the task to appear as "ready" again for re-dispatch.
+		if ctx.CreatedAt != "" {
+			if created, err := time.Parse(time.RFC3339, ctx.CreatedAt); err == nil {
+				if now.Sub(created) > slingContextTTL {
+					continue
+				}
+			}
+		}
 		fields := beads.ParseSlingContextFields(ctx.Description)
 		if fields != nil {
 			scheduledWorkBeads[fields.WorkBeadID] = true

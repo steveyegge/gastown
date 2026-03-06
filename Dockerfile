@@ -50,7 +50,7 @@ RUN echo 'export TERM="xterm-256color"' >> /etc/profile.d/term.sh && \
 
 USER agent
 
-COPY . /app/gastown
+COPY --chown=agent:agent . /app/gastown
 
 RUN cd /app/gastown && make build
 

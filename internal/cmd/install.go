@@ -730,7 +730,7 @@ func initTownAgentBeads(townPath string) error {
 
 	existingAgents, err := bd.List(beads.ListOptions{
 		Status:   "all",
-		Type:     "agent",
+		Label:    "gt:agent",
 		Priority: -1,
 	})
 	if err != nil {

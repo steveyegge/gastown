@@ -22,6 +22,12 @@ func TestParseRoleStringBoot(t *testing.T) {
 		{"west/boot", Role("west/boot"), "", ""},
 		// Extra path segments should NOT match RoleBoot
 		{"deacon/boot/extra", Role("deacon/boot/extra"), "", ""},
+		// Double-slash normalization
+		{"gamestore//refinery", RoleRefinery, "gamestore", ""},
+		{"gamestore//witness", RoleWitness, "gamestore", ""},
+		{"gamestore///refinery", RoleRefinery, "gamestore", ""},
+		{"gamestore/refinery/", RoleRefinery, "gamestore", ""},
+		{"gamestore//polecats//alpha", RolePolecat, "gamestore", "alpha"},
 	}
 
 	for _, tt := range tests {

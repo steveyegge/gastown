@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -17,12 +16,10 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
-	"github.com/google/uuid"
 	beadsdk "github.com/steveyegge/beads"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/boot"
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/doltserver"
@@ -115,12 +112,6 @@ type sessionDeath struct {
 const (
 	massDeathWindow    = 30 * time.Second // Time window to detect mass death
 	massDeathThreshold = 3                // Number of deaths to trigger alert
-
-	// hungSessionThreshold is how long a refinery/witness session can be
-	// inactive (no tmux output) before the daemon considers it hung and
-	// kills it for restart. Derived from constants.HungSessionThreshold
-	// (single source of truth). See: gt-tr3d
-	hungSessionThreshold = constants.HungSessionThreshold
 
 	// doctorMolCooldown is the minimum interval between mol-dog-doctor molecules.
 	// Configurable via operational.daemon.doctor_mol_cooldown.
@@ -586,6 +577,16 @@ func (d *Daemon) heartbeat(state *State) {
 	d.metrics.recordHeartbeat(d.ctx)
 	d.logger.Println("Heartbeat starting (recovery-focused)")
 
+	// 0a. Reload prefix registry so new/changed rigs get correct session names.
+	// Without this, rigs added after daemon startup get the "gt" default prefix,
+	// causing ghost sessions like gt-witness instead of ti-witness. (hq-ouz, hq-eqf, hq-3i4)
+	if err := session.InitRegistry(d.config.TownRoot); err != nil {
+		d.logger.Printf("Warning: failed to reload prefix registry: %v", err)
+	}
+
+	// 0b. Kill ghost sessions left over from stale registry (default "gt" prefix).
+	d.killDefaultPrefixGhosts()
+
 	// 0. Ensure Dolt server is running (if configured)
 	// This must happen before beads operations that depend on Dolt.
 	d.ensureDoltServerRunning()
@@ -978,9 +979,9 @@ func (d *Daemon) checkDeaconHeartbeat() {
 				return
 			}
 			// Grace period expired without any heartbeat - Deacon failed to start
-			d.logger.Printf("Deacon started %s ago but hasn't written heartbeat - restarting",
-				timeSinceStart.Round(time.Minute))
-			d.restartStuckDeacon(sessionName)
+			// Detection only: stuck-agent-dog plugin handles context-aware restart
+			d.logger.Printf("STUCK DEACON: started %s ago but hasn't written heartbeat (session: %s)",
+				timeSinceStart.Round(time.Minute), sessionName)
 			return
 		}
 
@@ -993,9 +994,9 @@ func (d *Daemon) checkDeaconHeartbeat() {
 				return
 			}
 			// Grace period expired but heartbeat still from before start
-			d.logger.Printf("Deacon started %s ago but heartbeat still pre-restart - Deacon stuck at startup",
-				timeSinceStart.Round(time.Minute))
-			d.restartStuckDeacon(sessionName)
+			// Detection only: stuck-agent-dog plugin handles context-aware restart
+			d.logger.Printf("STUCK DEACON: started %s ago but heartbeat still pre-restart (session: %s)",
+				timeSinceStart.Round(time.Minute), sessionName)
 			return
 		}
 
@@ -1035,7 +1036,8 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	// PATCH-002: Reduced from 30m to 10m for faster recovery.
 	// Must be > backoff-max (5m) to avoid false positive kills during legitimate sleep.
 	if age > 10*time.Minute {
-		d.restartStuckDeacon(sessionName)
+		// Detection only: stuck-agent-dog plugin handles context-aware restart
+		d.logger.Printf("STUCK DEACON: heartbeat stale for %s, session %s needs restart", age.Round(time.Minute), sessionName)
 	} else {
 		// Stuck but not critically - nudge to wake up
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
@@ -1045,20 +1047,6 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	}
 }
 
-// restartStuckDeacon kills and restarts a stuck Deacon session.
-// Extracted for reuse by PATCH-005 grace period logic.
-func (d *Daemon) restartStuckDeacon(sessionName string) {
-	// Check if session exists before trying to kill
-	hasSession, _ := d.tmux.HasSession(sessionName)
-	if hasSession {
-		d.logger.Printf("Killing stuck Deacon session %s", sessionName)
-		if err := d.tmux.KillSessionWithProcesses(sessionName); err != nil {
-			d.logger.Printf("Error killing stuck Deacon: %v", err)
-		}
-	}
-	// Spawn new Deacon immediately
-	d.ensureDeaconRunning()
-}
 
 // ensureWitnessesRunning ensures witnesses are running for configured rigs.
 // Called on each heartbeat to maintain witness patrol loops.
@@ -1105,14 +1093,11 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 	}
 	mgr := witness.NewManager(r)
 
-	// Check for hung session before Start (which only detects process-dead zombies).
-	// A hung session has a live process but no tmux activity for an extended period,
-	// indicating Claude is stuck. Kill it so Start() can recreate a fresh one.
-	if status := mgr.IsHealthy(hungSessionThreshold); status == tmux.AgentHung {
-		d.logger.Printf("Witness for %s is hung (no activity for %v), killing for restart", rigName, hungSessionThreshold)
-		t := tmux.NewTmux()
-		_ = t.KillSession(mgr.SessionName())
-	}
+	// NOTE: Hung session detection removed for witnesses (serial killer bug).
+	// Idle witnesses legitimately produce no tmux output while waiting for work.
+	// The deacon's patrol health-scan step handles stuck detection with proper
+	// context (checks for active work before declaring something stuck).
+	// See: daemon.log "is hung (no activity for 30m0s), killing for restart"
 
 	if err := mgr.Start(false, "", nil); err != nil {
 		if err == witness.ErrAlreadyRunning {
@@ -1174,14 +1159,11 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	}
 	mgr := refinery.NewManager(r)
 
-	// Check for hung session before Start (which only detects process-dead zombies).
-	// A hung refinery means MRs pile up with no processing. Kill it so Start()
-	// can recreate a fresh one. See: gt-tr3d
-	if status := mgr.IsHealthy(hungSessionThreshold); status == tmux.AgentHung {
-		d.logger.Printf("Refinery for %s is hung (no activity for %v), killing for restart", rigName, hungSessionThreshold)
-		t := tmux.NewTmux()
-		_ = t.KillSession(mgr.SessionName())
-	}
+	// NOTE: Hung session detection removed for refineries (serial killer bug).
+	// Idle refineries legitimately produce no tmux output while waiting for MRs.
+	// The deacon's patrol health-scan step handles stuck detection with proper
+	// context (checks for active work before declaring something stuck).
+	// See: daemon.log "is hung (no activity for 30m0s), killing for restart"
 
 	if err := mgr.Start(false, ""); err != nil {
 		if err == refinery.ErrAlreadyRunning {
@@ -1255,6 +1237,83 @@ func (d *Daemon) killRefinerySessions() {
 			d.logger.Printf("Killing leftover %s session (patrol disabled)", name)
 			if err := d.tmux.KillSessionWithProcesses(name); err != nil {
 				d.logger.Printf("Error killing %s session: %v", name, err)
+			}
+		}
+	}
+}
+
+// killDefaultPrefixGhosts kills tmux sessions that use the default "gt" prefix
+// for roles that should use a rig-specific prefix. These ghost sessions appear
+// when the daemon starts before a rig is registered or when the registry was
+// stale. After a registry reload, any "gt-witness", "gt-refinery", or "gt-*"
+// sessions that correspond to rigs with their own prefix are stale duplicates.
+// Fix for: hq-ouz, hq-eqf, hq-3i4.
+func (d *Daemon) killDefaultPrefixGhosts() {
+	reg := session.DefaultRegistry()
+	allRigs := reg.AllRigs() // rigName → shortPrefix
+	if len(allRigs) == 0 {
+		return
+	}
+
+	// Check if any rig actually has "gt" as its registered prefix.
+	// If so, gt-witness is legitimate for that rig — don't kill it.
+	gtIsLegitimate := false
+	for _, prefix := range allRigs {
+		if prefix == session.DefaultPrefix {
+			gtIsLegitimate = true
+			break
+		}
+	}
+	if gtIsLegitimate {
+		return
+	}
+
+	// Kill ghost sessions using the default "gt" prefix for patrol roles.
+	for _, role := range []string{"witness", "refinery"} {
+		ghostName := fmt.Sprintf("%s-%s", session.DefaultPrefix, role)
+		exists, _ := d.tmux.HasSession(ghostName)
+		if exists {
+			d.logger.Printf("Killing ghost session %s (default prefix, stale registry artifact)", ghostName)
+			if err := d.tmux.KillSessionWithProcesses(ghostName); err != nil {
+				d.logger.Printf("Error killing ghost session %s: %v", ghostName, err)
+			}
+		}
+	}
+
+	// Also check for ghost polecat sessions: gt-<polecatName> where the polecat
+	// actually belongs to a rig with a different prefix.
+	for _, rigName := range d.getKnownRigs() {
+		rigPrefix := session.PrefixFor(rigName)
+		if rigPrefix == session.DefaultPrefix {
+			continue // This rig uses "gt" — its sessions are fine
+		}
+		rigPath := filepath.Join(d.config.TownRoot, rigName, "polecats")
+		entries, err := os.ReadDir(rigPath)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			polecatName := entry.Name()
+			ghostName := fmt.Sprintf("%s-%s", session.DefaultPrefix, polecatName)
+			exists, _ := d.tmux.HasSession(ghostName)
+			if exists {
+				// Verify the correct session isn't also running (avoid killing legit sessions)
+				correctName := session.PolecatSessionName(rigPrefix, polecatName)
+				correctExists, _ := d.tmux.HasSession(correctName)
+				if !correctExists {
+					// Ghost is the only session — it might be doing real work.
+					// Log but don't kill; the registry reload will prevent new ghosts.
+					d.logger.Printf("Ghost polecat session %s found (should be %s), not killing (may have active work)", ghostName, correctName)
+				} else {
+					// Both exist — ghost is definitely a duplicate, kill it.
+					d.logger.Printf("Killing duplicate ghost polecat session %s (correct session %s exists)", ghostName, correctName)
+					if err := d.tmux.KillSessionWithProcesses(ghostName); err != nil {
+						d.logger.Printf("Error killing ghost session %s: %v", ghostName, err)
+					}
+				}
 			}
 		}
 	}
@@ -1866,16 +1925,8 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 	_ = events.LogFeed(events.TypeSessionDeath, sessionName,
 		events.SessionDeathPayload(sessionName, rigName+"/polecats/"+polecatName, "crash detected by daemon health check", "daemon"))
 
-	// Auto-restart the polecat
-	restartErr := d.restartPolecatSession(rigName, polecatName, sessionName)
-	if restartErr != nil {
-		d.logger.Printf("Error restarting polecat %s/%s: %v", rigName, polecatName, restartErr)
-	} else {
-		d.logger.Printf("Successfully restarted crashed polecat %s/%s", rigName, polecatName)
-	}
-
-	// Always notify witness of crash (with restart outcome)
-	d.notifyWitnessOfCrashedPolecat(rigName, polecatName, info.HookBead, restartErr)
+	// Notify witness — stuck-agent-dog plugin handles context-aware restart
+	d.notifyWitnessOfCrashedPolecat(rigName, polecatName, info.HookBead)
 }
 
 // recordSessionDeath records a session death and checks for mass death pattern.
@@ -1928,132 +1979,17 @@ func (d *Daemon) emitMassDeathEvent() {
 	d.recentDeaths = nil
 }
 
-// restartPolecatSession restarts a crashed polecat session.
-func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string) error {
-	// Check rig operational state before auto-restarting
-	if operational, reason := d.isRigOperational(rigName); !operational {
-		return fmt.Errorf("cannot restart polecat: %s", reason)
-	}
-
-	// Calculate rig path for agent config resolution
-	rigPath := filepath.Join(d.config.TownRoot, rigName)
-
-	// Determine working directory (handle both new and old structures)
-	// New structure: polecats/<name>/<rigname>/
-	// Old structure: polecats/<name>/
-	workDir := filepath.Join(rigPath, "polecats", polecatName, rigName)
-	if _, err := os.Stat(workDir); os.IsNotExist(err) {
-		// Fall back to old structure
-		workDir = filepath.Join(rigPath, "polecats", polecatName)
-	}
-
-	// Verify the worktree exists
-	if _, err := os.Stat(workDir); os.IsNotExist(err) {
-		return fmt.Errorf("polecat worktree does not exist: %s", workDir)
-	}
-
-	// Pre-sync workspace (ensure beads are current)
-	d.syncWorkspace(workDir)
-
-	// Generate a fresh run ID for this restart so all telemetry from the
-	// crash-restarted session is correlated under a new GASTA root span.
-	runID := uuid.New().String()
-
-	// Build startup command BEFORE creating the session so we can use
-	// NewSessionWithCommand (command as initial pane process). This eliminates
-	// the race condition in the old EnsureSessionFresh + SendKeys pattern where
-	// the shell might not be ready to receive keystrokes, producing empty windows.
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:        "polecat",
-		Rig:         rigName,
-		AgentName:   polecatName,
-		TownRoot:    d.config.TownRoot,
-		SessionName: sessionName,
-	})
-	// Inject GT_RUN into envVars before BuildStartupCommand so the startup
-	// command includes it (exec env …) and the loop below propagates it to
-	// the tmux session environment.
-	envVars["GT_RUN"] = runID
-	rc := config.ResolveRoleAgentConfig("polecat", d.config.TownRoot, rigPath)
-	startCmd := config.BuildStartupCommand(envVars, rigPath, "")
-
-	// Create session with command as initial process (replaces EnsureSessionFresh + SendKeys).
-	// EnsureSessionFreshWithCommand kills zombie sessions and creates a new one atomically.
-	if err := d.tmux.EnsureSessionFreshWithCommand(sessionName, workDir, startCmd); err != nil {
-		if errors.Is(err, tmux.ErrSessionRunning) {
-			d.logger.Printf("Session %s already running with healthy agent, skipping restart", sessionName)
-			return nil
-		}
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Record polecat spawn metric.
-	d.metrics.recordPolecatSpawn(d.ctx, rigName)
-
-	// Set environment variables in tmux session table (for debugging/monitoring tools).
-	// The process itself gets env vars via 'exec env ...' in the startup command.
-	for k, v := range envVars {
-		_ = d.tmux.SetEnvironment(sessionName, k, v)
-	}
-
-	// Set GT_AGENT in tmux session env so tools querying tmux environment
-	// (e.g., witness patrol) can detect non-Claude agents.
-	// BuildStartupCommand sets GT_AGENT in process env via exec env, but that
-	// isn't visible to tmux show-environment.
-	if rc.ResolvedAgent != "" {
-		_ = d.tmux.SetEnvironment(sessionName, "GT_AGENT", rc.ResolvedAgent)
-	}
-
-	// Set GT_PROCESS_NAMES for accurate liveness detection of custom agents.
-	processNames := config.ResolveProcessNames(rc.ResolvedAgent, rc.Command)
-	_ = d.tmux.SetEnvironment(sessionName, "GT_PROCESS_NAMES", strings.Join(processNames, ","))
-
-	// Record agent's pane_id for ZFC-compliant liveness checks (gt-qmsx).
-	if paneID, err := d.tmux.GetPaneID(sessionName); err == nil {
-		_ = d.tmux.SetEnvironment(sessionName, "GT_PANE_ID", paneID)
-	}
-
-	// Apply theme
-	theme := tmux.AssignTheme(rigName)
-	_ = d.tmux.ConfigureGasTownSession(sessionName, theme, rigName, polecatName, "polecat")
-
-	// Set pane-died hook for future crash detection
-	agentID := fmt.Sprintf("%s/%s", rigName, polecatName)
-	_ = d.tmux.SetPaneDiedHook(sessionName, agentID)
-
-	// Wait for Claude to start, then accept startup dialogs if they appear.
-	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal - Claude might still start
-	}
-	_ = d.tmux.AcceptStartupDialogs(sessionName)
-
-	return nil
-}
-
 // notifyWitnessOfCrashedPolecat notifies the witness when a polecat crash is detected.
-// If restartErr is nil, the notification is informational (restart succeeded).
-// If restartErr is non-nil, the notification indicates manual intervention may be needed.
-func (d *Daemon) notifyWitnessOfCrashedPolecat(rigName, polecatName, hookBead string, restartErr error) {
+// The stuck-agent-dog plugin handles context-aware restart decisions.
+func (d *Daemon) notifyWitnessOfCrashedPolecat(rigName, polecatName, hookBead string) {
 	witnessAddr := rigName + "/witness"
-	var subject, body string
-	if restartErr == nil {
-		subject = fmt.Sprintf("CRASHED_POLECAT: %s/%s restarted", rigName, polecatName)
-		body = fmt.Sprintf(`Polecat %s crashed and was automatically restarted.
+	subject := fmt.Sprintf("CRASHED_POLECAT: %s/%s detected", rigName, polecatName)
+	body := fmt.Sprintf(`Polecat %s crash detected (session dead, work on hook).
 
 hook_bead: %s
 
-No action required.`,
-			polecatName, hookBead)
-	} else {
-		subject = fmt.Sprintf("CRASHED_POLECAT: %s/%s restart failed", rigName, polecatName)
-		body = fmt.Sprintf(`Polecat %s crashed and automatic restart failed.
-
-hook_bead: %s
-restart_error: %v
-
-Manual intervention may be required.`,
-			polecatName, hookBead, restartErr)
-	}
+Restart deferred to stuck-agent-dog plugin for context-aware recovery.`,
+		polecatName, hookBead)
 
 	cmd := exec.Command(d.gtPath, "mail", "send", witnessAddr, "-s", subject, "-m", body) //nolint:gosec // G204: args are constructed internally
 	cmd.Dir = d.config.TownRoot

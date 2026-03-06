@@ -50,7 +50,7 @@ func init() {
 	nudgeCmd.Flags().BoolVarP(&nudgeForceFlag, "force", "f", false, "Send even if target has DND enabled")
 	nudgeCmd.Flags().BoolVar(&nudgeStdinFlag, "stdin", false, "Read message from stdin (avoids shell quoting issues)")
 	nudgeCmd.Flags().BoolVar(&nudgeIfFreshFlag, "if-fresh", false, "Only send if caller's tmux session is <60s old (suppresses compaction nudges)")
-	nudgeCmd.Flags().StringVar(&nudgeModeFlag, "mode", NudgeModeImmediate, "Delivery mode: immediate (default), queue, or wait-idle")
+	nudgeCmd.Flags().StringVar(&nudgeModeFlag, "mode", NudgeModeWaitIdle, "Delivery mode: wait-idle (default), queue, or immediate")
 	nudgeCmd.Flags().StringVar(&nudgePriorityFlag, "priority", nudge.PriorityNormal, "Queue priority: normal (default) or urgent")
 }
 
@@ -65,19 +65,19 @@ Delivers a message to any worker's Claude Code session: polecats, crew,
 witness, refinery, mayor, or deacon.
 
 Delivery modes (--mode):
-  immediate  Send directly via tmux send-keys (default). Interrupts in-flight
-             work but guarantees immediate delivery.
-  queue      Write to a file queue; agent picks up via hook at next turn
-             boundary. Zero interruption. Use for non-urgent coordination.
   wait-idle  Wait for agent to become idle (prompt visible), then deliver
              directly. Falls back to queue on timeout. If both idle-wait and
              queue fail, falls back to immediate delivery as a last resort.
+             This is the default — it avoids interrupting active tool calls.
+  queue      Write to a file queue; agent picks up via hook at next turn
+             boundary. Zero interruption. Use for non-urgent coordination.
+  immediate  Send directly via tmux send-keys. Interrupts in-flight work
+             but guarantees immediate delivery. Use only when you need to
+             break through (e.g., stuck agent, emergency).
 
 Queue and wait-idle modes require the target agent to support hooks
-(UserPromptSubmit) for drain. Agents without hook support should use immediate.
-
-The default is immediate for backward compatibility. For non-urgent messages
-where you don't want to interrupt the agent's current work, use --mode=queue.
+(UserPromptSubmit) for drain. Agents without hook support should use
+--mode=immediate.
 
 This is the ONLY way to send messages to Claude sessions.
 Do not use raw tmux send-keys elsewhere.

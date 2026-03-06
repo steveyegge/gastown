@@ -1022,7 +1022,8 @@ exit /b 0
 
 	// Call the unexported function directly (same package)
 	// updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
-	updateAgentStateOnDone(rigPath, townRoot, ExitCompleted, "")
+	// Pass issueID directly — hq-l6mm5 removed agent bead hook slot lookup
+	updateAgentStateOnDone(rigPath, townRoot, ExitCompleted, "gt-abc123")
 
 	// Read the close log to see what got closed
 	closesBytes, err := os.ReadFile(closesPath)

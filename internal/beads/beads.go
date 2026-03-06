@@ -27,6 +27,33 @@ var (
 	ErrFlagTitle    = errors.New("title looks like a CLI flag (starts with '-'); use --title=\"...\" to set flag-like titles intentionally")
 )
 
+// bdAllowStale caches whether the installed bd supports --allow-stale.
+// Detected once at first use via `bd --allow-stale version`.
+var (
+	bdAllowStaleOnce   sync.Once
+	bdAllowStaleResult bool
+)
+
+// BdSupportsAllowStale returns true if the installed bd binary accepts --allow-stale.
+func BdSupportsAllowStale() bool {
+	bdAllowStaleOnce.Do(func() {
+		cmd := exec.Command("bd", "--allow-stale", "version") //nolint:gosec // G204: bd is a trusted internal tool
+		if err := cmd.Run(); err == nil {
+			bdAllowStaleResult = true
+		}
+	})
+	return bdAllowStaleResult
+}
+
+// MaybePrependAllowStale prepends --allow-stale to args if bd supports it.
+// Exported for use by other packages that shell out to bd directly.
+func MaybePrependAllowStale(args []string) []string {
+	if BdSupportsAllowStale() {
+		return append([]string{"--allow-stale"}, args...)
+	}
+	return args
+}
+
 // ExtractIssueID strips the external:prefix:id wrapper from bead IDs.
 // bd dep add wraps cross-rig IDs as "external:prefix:id" for routing,
 // but consumers need the raw bead ID for display and lookups.
@@ -147,7 +174,7 @@ type IssueDep struct {
 // ListOptions specifies filters for listing issues.
 type ListOptions struct {
 	Status     string // "open", "closed", "all"
-	Type       string // Deprecated: use Label instead. "task", "bug", "feature", "epic"
+	Type       string // Deprecated: use Label instead. Was "task", "bug", "feature", "epic"; converted to "gt:" prefix.
 	Label      string // Label filter (e.g., "gt:agent", "gt:merge-request")
 	Priority   int    // 0-4, -1 for no filter
 	Parent     string // filter by parent ID
@@ -159,8 +186,9 @@ type ListOptions struct {
 // CreateOptions specifies options for creating an issue.
 type CreateOptions struct {
 	Title       string
-	Type        string // "task", "bug", "feature", "epic"
-	Priority    int    // 0-4
+	Type        string   // Deprecated: use Labels instead. Was "task", "bug", "feature", "epic".
+	Labels      []string // Labels to set (e.g., "gt:task", "gt:merge-request")
+	Priority    int      // 0-4
 	Description string
 	Parent      string
 	Actor       string // Who is creating this issue (populates created_by)
@@ -281,9 +309,9 @@ func (b *Beads) run(args ...string) (_ []byte, retErr error) {
 	defer func() {
 		telemetry.RecordBDCall(context.Background(), args, float64(time.Since(start).Milliseconds()), retErr, stdout.Bytes(), stderr.String())
 	}()
-	// Use --allow-stale to prevent failures when db is temporarily stale
-	// (e.g., after daemon is killed during shutdown).
-	fullArgs := append([]string{"--allow-stale"}, args...)
+	// Conditionally use --allow-stale to prevent failures when db is temporarily stale
+	// (e.g., after daemon is killed during shutdown). Only if bd supports it.
+	fullArgs := MaybePrependAllowStale(args)
 
 	// Always explicitly set BEADS_DIR to prevent inherited env vars from
 	// causing prefix mismatches. Use explicit beadsDir if set, otherwise
@@ -291,15 +319,6 @@ func (b *Beads) run(args ...string) (_ []byte, retErr error) {
 	beadsDir := b.beadsDir
 	if beadsDir == "" {
 		beadsDir = ResolveBeadsDir(b.workDir)
-	}
-
-	// In isolated mode, use --db flag to force specific database path
-	// This bypasses bd's routing logic that can redirect to .beads-planning
-	// Skip --db for init command since it creates the database
-	isInit := len(args) > 0 && args[0] == "init"
-	if b.isolated && !isInit {
-		beadsDB := filepath.Join(beadsDir, "beads.db")
-		fullArgs = append([]string{"--db", beadsDB}, fullArgs...)
 	}
 
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
@@ -337,7 +356,7 @@ func (b *Beads) runWithRouting(args ...string) (_ []byte, retErr error) { //noli
 	defer func() {
 		telemetry.RecordBDCall(context.Background(), args, float64(time.Since(start).Milliseconds()), retErr, stdout.Bytes(), stderr.String())
 	}()
-	fullArgs := append([]string{"--allow-stale"}, args...)
+	fullArgs := MaybePrependAllowStale(args)
 
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = b.workDir
@@ -551,12 +570,35 @@ func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
 		return nil, err
 	}
 
+	// bd list --json may return plain text (e.g., "No issues found.") instead
+	// of an empty JSON array when there are no results. Handle gracefully.
+	if len(out) == 0 || !isJSONBytes(out) {
+		return nil, nil
+	}
+
 	var issues []*Issue
 	if err := json.Unmarshal(out, &issues); err != nil {
 		return nil, fmt.Errorf("parsing bd list output: %w", err)
 	}
 
 	return issues, nil
+}
+
+// isJSONBytes returns true if the byte slice starts with [ or { (after whitespace).
+// bd list --json may return plain text like "No issues found." instead of JSON
+// when there are no results.
+func isJSONBytes(b []byte) bool {
+	for _, c := range b {
+		switch c {
+		case ' ', '\t', '\n', '\r':
+			continue
+		case '[', '{':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // ListByAssignee returns all issues assigned to a specific assignee.
@@ -726,8 +768,10 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	if opts.Title != "" {
 		args = append(args, "--title="+opts.Title)
 	}
-	// Type is deprecated: convert to gt:<type> label
-	if opts.Type != "" {
+	// Labels takes precedence; fall back to deprecated Type conversion
+	if len(opts.Labels) > 0 {
+		args = append(args, "--labels="+strings.Join(opts.Labels, ","))
+	} else if opts.Type != "" {
 		args = append(args, "--labels=gt:"+opts.Type)
 	}
 	if opts.Priority >= 0 {
@@ -782,8 +826,10 @@ func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 	if opts.Title != "" {
 		args = append(args, "--title="+opts.Title)
 	}
-	// Type is deprecated: convert to gt:<type> label
-	if opts.Type != "" {
+	// Labels takes precedence; fall back to deprecated Type conversion
+	if len(opts.Labels) > 0 {
+		args = append(args, "--labels="+strings.Join(opts.Labels, ","))
+	} else if opts.Type != "" {
 		args = append(args, "--labels=gt:"+opts.Type)
 	}
 	if opts.Priority >= 0 {

@@ -99,9 +99,9 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	}
 
 	// Polecat count cap (clown show #22): refuse to spawn if there are already
-	// too many active polecats. This is a safety net — the primary guard is the
-	// per-bead respawn limit in the witness. Default cap: 25 per town.
-	// TODO: make configurable via rig config (max_polecats already exists for scheduler)
+	// too many active polecats. This is a last-resort safety net for the direct-dispatch
+	// path. For configurable capacity gating, use scheduler.max_polecats in town settings
+	// (see internal/scheduler/capacity/).
 	const defaultMaxActivePolecats = 25
 	activeCount := countActivePolecats()
 	if activeCount >= defaultMaxActivePolecats {

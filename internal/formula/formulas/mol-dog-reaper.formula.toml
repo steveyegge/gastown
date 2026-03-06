@@ -39,7 +39,12 @@ The Dog should watch for and flag:
 - Dangling parent references (wisps referencing purged parents)
 - Sudden spikes in reap candidates (suggests a wisp lifecycle problem)
 - Open wisp counts exceeding alert_threshold
-- Dolt commit failures (data may not be persisted)"""
+- Dolt commit failures (data may not be persisted)
+
+NOT anomalies (do NOT escalate these):
+- Scan/reap count mismatch (scan finds N, reap closes M < N): this is a benign
+  race condition — the witness closes wisps for dead sessions concurrently.
+  This is expected behavior, not a bug."""
 formula = "mol-dog-reaper"
 version = 2
 
@@ -94,7 +99,10 @@ gt reaper reap --db=<name> --port={{dolt_port}} \\
 ```
 
 **2. Inspect results:**
-- Verify reaped count matches scan expectations
+- Compare reaped count to scan candidates. A mismatch (scan > reap) is NORMAL
+  and expected — the witness may close wisps for dead polecat sessions between
+  scan and reap. Do NOT escalate scan/reap count mismatches.
+- Only escalate if reap returns an actual error (not a zero count).
 - Check for any anomalies in the response
 
 **3. Alert check:**

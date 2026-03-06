@@ -114,7 +114,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  1. Add this rig to a town: %s\n",
 		style.Dim.Render("gt rig add <name> <git-url>"))
 	fmt.Printf("  2. Create a polecat: %s\n",
-		style.Dim.Render("gt polecat add <name>"))
+		style.Dim.Render("gt polecat identity add <rig> <name>"))
 
 	return nil
 }

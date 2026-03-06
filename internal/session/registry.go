@@ -120,16 +120,13 @@ func InitRegistry(townRoot string) error {
 	var errs []error
 
 	// Determine the tmux socket name from GT_TMUX_SOCKET env var:
-	//   unset / "default" → shared "default" socket (backward-compatible)
-	//   "auto"            → per-town socket derived from town dir name
-	//                       (required when running multiple towns on one machine,
-	//                       since session names like "mayor" would collide)
-	//   any other value   → use that name as-is
+	//   unset / "default" / "auto" → per-town socket derived from town dir name
+	//                                 (prevents split-brain when env var is lost
+	//                                 across daemon restarts or respawned processes)
+	//   any other value            → use that name as-is
 	socket := os.Getenv("GT_TMUX_SOCKET")
 	switch socket {
-	case "", "default":
-		socket = "default"
-	case "auto":
+	case "", "default", "auto":
 		socket = sanitizeTownName(filepath.Base(townRoot))
 	}
 	tmux.SetDefaultSocket(socket)

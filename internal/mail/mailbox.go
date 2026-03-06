@@ -163,7 +163,7 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 
 		var msgs []BeadsMessage
 		if err := json.Unmarshal(stdout, &msgs); err != nil {
-			if len(stdout) == 0 || string(stdout) == "null" {
+			if len(stdout) == 0 || string(stdout) == "null" || !isJSON(stdout) {
 				continue
 			}
 			return nil, err
@@ -202,7 +202,7 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 
 		var msgs []BeadsMessage
 		if err := json.Unmarshal(stdout, &msgs); err != nil {
-			if len(stdout) == 0 || string(stdout) == "null" {
+			if len(stdout) == 0 || string(stdout) == "null" || !isJSON(stdout) {
 				continue
 			}
 			continue // Non-fatal for CC
@@ -327,6 +327,9 @@ func (m *Mailbox) getFromDir(id, beadsDir string) (*Message, error) {
 	}
 
 	// bd show --json returns an array
+	if !isJSON(stdout) {
+		return nil, ErrMessageNotFound
+	}
 	var bms []BeadsMessage
 	if err := json.Unmarshal(stdout, &bms); err != nil {
 		return nil, err
@@ -1023,11 +1026,11 @@ func (m *Mailbox) listByThreadBeads(threadID string) ([]*Message, error) {
 		return nil, err
 	}
 
+	if !isJSON(stdout) {
+		return nil, nil
+	}
 	var beadsMsgs []BeadsMessage
 	if err := json.Unmarshal(stdout, &beadsMsgs); err != nil {
-		if len(stdout) == 0 || string(stdout) == "null" {
-			return nil, nil
-		}
 		return nil, err
 	}
 
@@ -1063,4 +1066,21 @@ func (m *Mailbox) listByThreadLegacy(threadID string) ([]*Message, error) {
 	})
 
 	return thread, nil
+}
+
+// isJSON returns true if the byte slice looks like JSON (starts with [ or {).
+// bd list --json may return plain text like "No issues found." instead of JSON
+// when there are no results.
+func isJSON(b []byte) bool {
+	for _, c := range b {
+		switch c {
+		case ' ', '\t', '\n', '\r':
+			continue
+		case '[', '{':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }

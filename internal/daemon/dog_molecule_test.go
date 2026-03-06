@@ -68,6 +68,60 @@ func TestStripANSI(t *testing.T) {
 	}
 }
 
+func TestParseChildrenJSON(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantCount int
+		wantErr   bool
+	}{
+		{
+			name:      "bare array",
+			input:     `[{"id":"a","title":"Probe","status":"open"}]`,
+			wantCount: 1,
+		},
+		{
+			name:      "map wrapper from bd show",
+			input:     `{"hq-wisp-root":[{"id":"hq-wisp-a","title":"Probe","status":"open"},{"id":"hq-wisp-b","title":"Report","status":"open"}]}`,
+			wantCount: 2,
+		},
+		{
+			name:      "empty map wrapper",
+			input:     `{"hq-wisp-root":[]}`,
+			wantCount: 0,
+		},
+		{
+			name:      "empty array",
+			input:     `[]`,
+			wantCount: 0,
+		},
+		{
+			name:    "invalid json",
+			input:   `not json`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseChildrenJSON(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+			if len(got) != tt.wantCount {
+				t.Errorf("got %d children, want %d", len(got), tt.wantCount)
+			}
+		})
+	}
+}
+
 func TestDogMolGracefulDegradation(t *testing.T) {
 	// A dogMol with empty rootID should be a no-op for all operations.
 	dm := &dogMol{

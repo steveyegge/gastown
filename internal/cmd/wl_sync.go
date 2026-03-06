@@ -13,6 +13,7 @@ import (
 )
 
 var wlSyncDryRun bool
+var wlSyncUpgrade bool
 
 var wlSyncCmd = &cobra.Command{
 	Use:   "sync",
@@ -24,13 +25,19 @@ var wlSyncCmd = &cobra.Command{
 If you have a local fork of wl-commons (created by gt wl join), this pulls
 the latest changes from upstream.
 
+Schema evolution is handled automatically based on semantic versioning:
+  - MINOR version bump (e.g. 1.0 → 1.1): auto-applied (new columns, tables)
+  - MAJOR version bump (e.g. 1.0 → 2.0): requires --upgrade flag
+
 EXAMPLES:
   gt wl sync                # Pull upstream changes
-  gt wl sync --dry-run      # Show what would change`,
+  gt wl sync --dry-run      # Show what would change
+  gt wl sync --upgrade      # Proceed through a MAJOR schema version bump`,
 }
 
 func init() {
 	wlSyncCmd.Flags().BoolVar(&wlSyncDryRun, "dry-run", false, "Show what would change without pulling")
+	wlSyncCmd.Flags().BoolVar(&wlSyncUpgrade, "upgrade", false, "Allow MAJOR schema version upgrades")
 
 	wlCmd.AddCommand(wlSyncCmd)
 }
@@ -73,6 +80,10 @@ func runWLSync(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("fetching upstream: %w", err)
 		}
 
+		if err := checkSchemaEvolution(doltPath, forkDir, wlSyncUpgrade); err != nil {
+			return err
+		}
+
 		diffCmd := exec.Command(doltPath, "diff", "--stat", "HEAD", "upstream/main")
 		diffCmd.Dir = forkDir
 		diffCmd.Stdout = os.Stdout
@@ -83,14 +94,27 @@ func runWLSync(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Printf("\nPulling from upstream...\n")
+	fmt.Printf("\nFetching from upstream...\n")
 
-	pullCmd := exec.Command(doltPath, "pull", "upstream", "main")
+	fetchCmd := exec.Command(doltPath, "fetch", "upstream")
+	fetchCmd.Dir = forkDir
+	fetchCmd.Stderr = os.Stderr
+	if err := fetchCmd.Run(); err != nil {
+		return fmt.Errorf("fetching upstream: %w", err)
+	}
+
+	if err := checkSchemaEvolution(doltPath, forkDir, wlSyncUpgrade); err != nil {
+		return err
+	}
+
+	fmt.Printf("Merging upstream changes...\n")
+
+	pullCmd := exec.Command(doltPath, "merge", "upstream/main")
 	pullCmd.Dir = forkDir
 	pullCmd.Stdout = os.Stdout
 	pullCmd.Stderr = os.Stderr
 	if err := pullCmd.Run(); err != nil {
-		return fmt.Errorf("pulling from upstream: %w", err)
+		return fmt.Errorf("merging upstream: %w", err)
 	}
 
 	fmt.Printf("\n%s Synced with upstream\n", style.Bold.Render("✓"))

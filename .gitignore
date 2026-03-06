@@ -72,3 +72,6 @@ result
 .bv/
 .pi/
 opentelemetry/gastown-trace/gastown-trace
+
+# Gas Town (added by gt)
+__pycache__/

@@ -171,6 +171,13 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 			crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, workerName)
 			checkAgentBead(crewID)
 		}
+
+		// Check polecat agents
+		polecatWorkers := listPolecats(ctx.TownRoot, rigName)
+		for _, polecatName := range polecatWorkers {
+			polecatID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+			checkAgentBead(polecatID)
+		}
 	}
 
 	if len(missing) == 0 && len(missingLabel) == 0 {
@@ -353,6 +360,17 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			if err := fixAgentBead(bd, rigBeadsPath, crewID,
 				fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", workerName, rigName),
 				&beads.AgentFields{RoleType: "crew", Rig: rigName, AgentState: "idle"},
+			); err != nil {
+				errs = append(errs, err)
+			}
+		}
+
+		polecatWorkers := listPolecats(ctx.TownRoot, rigName)
+		for _, polecatName := range polecatWorkers {
+			polecatID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+			if err := fixAgentBead(bd, rigBeadsPath, polecatID,
+				fmt.Sprintf("Polecat worker %s in %s - autonomous worker with persistent identity.", polecatName, rigName),
+				&beads.AgentFields{RoleType: "polecat", Rig: rigName, AgentState: "idle"},
 			); err != nil {
 				errs = append(errs, err)
 			}

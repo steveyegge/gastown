@@ -1594,10 +1594,10 @@ func (r *Router) notifyRecipient(msg *Message) error {
 		notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
 
 		// Wait-idle-first delivery: try direct nudge if the agent is idle,
-		// fall back to cooperative queue if busy. The 3s timeout with 200ms
-		// polling (~15 polls) distinguishes a genuine idle prompt (persists
-		// indefinitely) from brief inter-tool-call gaps (~500ms).
-		// See: https://github.com/steveyegge/gastown/issues/2032
+		// fall back to cooperative queue if busy. WaitForIdle requires 2
+		// consecutive idle polls (prompt visible + no "esc to interrupt"
+		// in the status bar) to distinguish genuine idle from brief
+		// inter-tool-call gaps. See: https://github.com/steveyegge/gastown/issues/2032
 		waitErr := r.tmux.WaitForIdle(sessionID, timeout)
 		if waitErr == nil {
 			// Agent is idle — deliver directly for immediate wakeup.

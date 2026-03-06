@@ -284,34 +284,3 @@ func ExpandPattern(pattern, townRoot, rig, name, role, prefix string) string {
 	return result
 }
 
-// ToLegacyRoleConfig converts a RoleDefinition to the legacy RoleConfig format
-// for backward compatibility with existing daemon code.
-func (rd *RoleDefinition) ToLegacyRoleConfig() *LegacyRoleConfig {
-	return &LegacyRoleConfig{
-		SessionPattern:      rd.Session.Pattern,
-		WorkDirPattern:      rd.Session.WorkDir,
-		NeedsPreSync:        rd.Session.NeedsPreSync,
-		StartCommand:        rd.Session.StartCommand,
-		EnvVars:             rd.Env,
-		PingTimeout:         rd.Health.PingTimeout.String(),
-		ConsecutiveFailures: rd.Health.ConsecutiveFailures,
-		KillCooldown:        rd.Health.KillCooldown.String(),
-		StuckThreshold:          rd.Health.StuckThreshold.String(),
-		HungSessionThreshold:   rd.Health.HungSessionThreshold.String(),
-	}
-}
-
-// LegacyRoleConfig matches the old beads.RoleConfig struct for compatibility.
-// This allows gradual migration without breaking existing code.
-type LegacyRoleConfig struct {
-	SessionPattern       string
-	WorkDirPattern       string
-	NeedsPreSync         bool
-	StartCommand         string
-	EnvVars              map[string]string
-	PingTimeout          string
-	ConsecutiveFailures  int
-	KillCooldown         string
-	StuckThreshold       string
-	HungSessionThreshold string
-}

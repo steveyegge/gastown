@@ -467,6 +467,172 @@ func TestFormatHelpSummary_MinimalPayload(t *testing.T) {
 	}
 }
 
+// --- AssessHelp tests (gt-td6p) ---
+
+func TestAssessHelp_Emergency(t *testing.T) {
+	t.Parallel()
+	payload := &HelpPayload{
+		Topic:   "Security vulnerability found",
+		Problem: "Exposed secret in logs",
+	}
+	assessment := AssessHelp(payload)
+	if assessment.Category != HelpCategoryEmergency {
+		t.Errorf("Category = %q, want %q", assessment.Category, HelpCategoryEmergency)
+	}
+	if assessment.Severity != HelpSeverityCritical {
+		t.Errorf("Severity = %q, want %q", assessment.Severity, HelpSeverityCritical)
+	}
+	if assessment.SuggestTo != "overseer" {
+		t.Errorf("SuggestTo = %q, want %q", assessment.SuggestTo, "overseer")
+	}
+}
+
+func TestAssessHelp_Failed(t *testing.T) {
+	t.Parallel()
+	payload := &HelpPayload{
+		Topic:   "Database error",
+		Problem: "Connection refused on port 3307",
+	}
+	assessment := AssessHelp(payload)
+	if assessment.Category != HelpCategoryFailed {
+		t.Errorf("Category = %q, want %q", assessment.Category, HelpCategoryFailed)
+	}
+	if assessment.Severity != HelpSeverityHigh {
+		t.Errorf("Severity = %q, want %q", assessment.Severity, HelpSeverityHigh)
+	}
+	if assessment.SuggestTo != "deacon" {
+		t.Errorf("SuggestTo = %q, want %q", assessment.SuggestTo, "deacon")
+	}
+}
+
+func TestAssessHelp_Blocked(t *testing.T) {
+	t.Parallel()
+	payload := &HelpPayload{
+		Topic:   "Merge conflict in main.go",
+		Problem: "Cannot proceed with rebase",
+	}
+	assessment := AssessHelp(payload)
+	if assessment.Category != HelpCategoryBlocked {
+		t.Errorf("Category = %q, want %q", assessment.Category, HelpCategoryBlocked)
+	}
+	if assessment.Severity != HelpSeverityHigh {
+		t.Errorf("Severity = %q, want %q", assessment.Severity, HelpSeverityHigh)
+	}
+	if assessment.SuggestTo != "mayor" {
+		t.Errorf("SuggestTo = %q, want %q", assessment.SuggestTo, "mayor")
+	}
+}
+
+func TestAssessHelp_Decision(t *testing.T) {
+	t.Parallel()
+	payload := &HelpPayload{
+		Topic:   "Which approach for caching?",
+		Problem: "Multiple options available, need guidance",
+	}
+	assessment := AssessHelp(payload)
+	if assessment.Category != HelpCategoryDecision {
+		t.Errorf("Category = %q, want %q", assessment.Category, HelpCategoryDecision)
+	}
+	if assessment.Severity != HelpSeverityMedium {
+		t.Errorf("Severity = %q, want %q", assessment.Severity, HelpSeverityMedium)
+	}
+	if assessment.SuggestTo != "deacon" {
+		t.Errorf("SuggestTo = %q, want %q", assessment.SuggestTo, "deacon")
+	}
+}
+
+func TestAssessHelp_Lifecycle(t *testing.T) {
+	t.Parallel()
+	payload := &HelpPayload{
+		Topic:   "Polecat zombie detected",
+		Problem: "Session dead but bead still in_progress",
+	}
+	assessment := AssessHelp(payload)
+	if assessment.Category != HelpCategoryLifecycle {
+		t.Errorf("Category = %q, want %q", assessment.Category, HelpCategoryLifecycle)
+	}
+	if assessment.Severity != HelpSeverityMedium {
+		t.Errorf("Severity = %q, want %q", assessment.Severity, HelpSeverityMedium)
+	}
+	if assessment.SuggestTo != "witness" {
+		t.Errorf("SuggestTo = %q, want %q", assessment.SuggestTo, "witness")
+	}
+}
+
+func TestAssessHelp_DefaultHelp(t *testing.T) {
+	t.Parallel()
+	payload := &HelpPayload{
+		Topic:   "Need guidance on implementation",
+		Problem: "Not sure how to approach this feature",
+	}
+	assessment := AssessHelp(payload)
+	if assessment.Category != HelpCategoryHelp {
+		t.Errorf("Category = %q, want %q", assessment.Category, HelpCategoryHelp)
+	}
+	if assessment.Severity != HelpSeverityMedium {
+		t.Errorf("Severity = %q, want %q", assessment.Severity, HelpSeverityMedium)
+	}
+	if assessment.SuggestTo != "deacon" {
+		t.Errorf("SuggestTo = %q, want %q", assessment.SuggestTo, "deacon")
+	}
+	if assessment.Rationale == "" {
+		t.Error("Rationale should not be empty")
+	}
+}
+
+func TestAssessHelp_CaseInsensitive(t *testing.T) {
+	t.Parallel()
+	payload := &HelpPayload{
+		Topic:   "SECURITY issue found",
+		Problem: "Possible BREACH in auth",
+	}
+	assessment := AssessHelp(payload)
+	if assessment.Category != HelpCategoryEmergency {
+		t.Errorf("Category = %q, want %q (case-insensitive match expected)", assessment.Category, HelpCategoryEmergency)
+	}
+}
+
+func TestAssessHelp_PriorityOrder(t *testing.T) {
+	t.Parallel()
+	// Emergency keywords should take priority over blocked keywords
+	payload := &HelpPayload{
+		Topic:   "Data corruption causing blocked state",
+		Problem: "Cannot proceed due to corrupted data",
+	}
+	assessment := AssessHelp(payload)
+	if assessment.Category != HelpCategoryEmergency {
+		t.Errorf("Category = %q, want %q (emergency should take priority over blocked)", assessment.Category, HelpCategoryEmergency)
+	}
+}
+
+func TestFormatHelpSummary_WithAssessment(t *testing.T) {
+	t.Parallel()
+	payload := &HelpPayload{
+		Agent:   "gastown/polecats/nux",
+		Topic:   "Merge conflict",
+		Problem: "Cannot rebase",
+		Assessment: &HelpAssessment{
+			Category:  HelpCategoryBlocked,
+			Severity:  HelpSeverityHigh,
+			SuggestTo: "mayor",
+			Rationale: "matched keyword \"merge conflict\"",
+		},
+	}
+	summary := FormatHelpSummary(payload)
+	if !strings.Contains(summary, "Assessment:") {
+		t.Errorf("summary should contain assessment line, got: %s", summary)
+	}
+	if !strings.Contains(summary, "blocked") {
+		t.Errorf("summary should contain category, got: %s", summary)
+	}
+	if !strings.Contains(summary, "high") {
+		t.Errorf("summary should contain severity, got: %s", summary)
+	}
+	if !strings.Contains(summary, "mayor") {
+		t.Errorf("summary should contain suggested target, got: %s", summary)
+	}
+}
+
 // --- Agent state and exit type constants (gt-x7t9) ---
 
 func TestAgentStateConstants(t *testing.T) {

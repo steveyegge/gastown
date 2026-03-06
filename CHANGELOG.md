@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-03-05
+
+### Added
+
+- **Docker support** — docker-compose and Dockerfile for containerized deployment.
+- **Cursor hooks** — Polecat agent integration for Cursor IDE sessions.
+- **Context-budget guard** — External script to prevent context window overflow (#2008).
+- **Cascade close** — `bd close --cascade` closes parent and all children with cycle
+  guard and depth limit (#998).
+- **Schema evolution** — `gt wl sync` supports Wasteland schema changes (gp-c7e).
+- **Dashboard enrichment** — Convoy panel shows progress %, ready/active counts,
+  and assignees.
+- **Polecat slot env** — `POLECAT_SLOT` environment variable for test isolation (#954).
+
+### Changed
+
+- **Beads dependency** upgraded from v0.57.0 to v0.59.0.
+- **Hook installers consolidated** — Per-agent hook installer packages replaced with
+  generic declarative system (gt-071h).
+- **Agent preset registry** — Hardcoded `isKnownAgent` switch replaced with
+  `config.IsKnownPreset` (gt-7r3c).
+- **Reaper TTLs shortened** — Auto-close 7d, purge 3d (previously longer).
+- **`CreateOptions.Type` deprecated** in favor of Labels.
+
+### Removed
+
+- **`gt swarm` command** — Deprecated command and `internal/swarm` package removed (#1170).
+- **Beads Classic legacy code** — Remaining SQLite/JSONL/sync code paths removed.
+- **Vestigial `sync.mode` plumbing** — Dead config removed.
+
+### Fixed
+
+- **Serial killer bug** — Removed hung session detection that was killing healthy
+  witnesses and refineries (f3d47a96). Stuck agent detection moved to Dog plugin
+  (5a5deaac).
+- **Sling race condition** — Hook write visibility ensured before polecat startup
+  (GH#2389).
+- **Refinery** — PostMerge now uses `ForceCloseWithReason` for source issue (GH#2321).
+- **Crew mail prefix** — Regression test added for crew mail send prefix mismatch
+  (gt-brip).
+- **bd JSON guard** — Non-JSON output from bd v0.58.0 handled in remaining parsers
+  (gt-ac0i).
+- **CI release guards** — Blocks `go.mod` replace directives in releases (gt-qex2).
+- **go vet** — Pre-existing failures on main resolved (gt-77xe).
+- **Branch contamination** — Preflight check added to `gt done` (#2220).
+- **Polecat nuke** — Uses `ClonePath` for best-effort push (hq-9pcb0).
+- **Polecat state** — JSON list state reconciled with session liveness.
+- **Convoy** — External tracked IDs resolved during launch collection.
+- **`gt done`** — Correct rig used when Claude Code resets shell cwd. Tolerates
+  Gas Town runtime artifacts in worktrees (#2382).
+- **Dolt server** — Server-side timeouts prevent CLOSE_WAIT accumulation (#2287).
+- **Daemon** — 5-minute grace period before auto-closing empty convoys (GH#2303).
+- **Sling TTL** — Prevents permanent scheduling blocks (GH#2279).
+- **Tmux** — Refresh cycle bindings when prefix pattern is stale (#2300).
+- **Patrol** — Cap stale cleanup and break early on active patrol found (#2285).
+- **Reaper** — Correct database name; O(n*m) correlated EXISTS replaced with LEFT
+  JOIN anti-pattern.
+- **Hook show** — Normalized targets; prefer hooked bead over stale agent hook.
+- **Tmux socket** — Derived from town name instead of defaulting to "default".
+- **Gitignore** — Broadened patterns for Cursor runtime artifacts and Gas Town
+  infrastructure directories.
+- **Rig remove** — Shows actionable guidance for orphaned rig directories.
+- **CI** — Lint errors, Windows test failures, proxy log truncation fixed.
+- **Mayor clone** — Reuses bare repo as reference for faster cloning (#1059).
+- **Prefix registry** — Reloaded on heartbeat to prevent ghost sessions (#2338).
+- **Dog molecule** — JSON parsing fix for `bd show --children` output.
+- **`--allow-stale`** — Made conditional on bd version support.
+
+## [0.10.0] - 2026-03-03
+
+_Release contained incremental fixes between v0.9.0 and v0.10.0. See git log for details._
+
 ## [0.9.0] - 2026-03-01
 
 ### Added

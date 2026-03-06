@@ -296,12 +296,6 @@ func ensureDatabaseInitialized(beadsDir string) error {
 		}
 	}
 
-	// Check for SQLite database file (legacy)
-	sqliteDB := filepath.Join(beadsDir, "beads.db")
-	if _, err := os.Stat(sqliteDB); err == nil {
-		return nil
-	}
-
 	// No database found — need to initialize.
 	prefix := detectPrefix(beadsDir)
 

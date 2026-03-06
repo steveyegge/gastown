@@ -225,7 +225,7 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		// Create MR bead (ephemeral wisp - will be cleaned up after merge)
 		mrIssue, err = bd.Create(beads.CreateOptions{
 			Title:       title,
-			Type:        "merge-request",
+			Labels:      []string{"gt:merge-request"},
 			Priority:    priority,
 			Description: description,
 			Ephemeral:   true,

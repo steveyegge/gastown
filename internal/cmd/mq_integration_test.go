@@ -53,16 +53,6 @@ func TestMockBeadsList_LabelFilter(t *testing.T) {
 	if len(results) == 1 && results[0].ID != "mr-1" {
 		t.Errorf("List() returned ID %q, want %q", results[0].ID, "mr-1")
 	}
-
-	// Query by Type "merge-request" should NOT find realistic MRs
-	// (because their Type is "task", not "merge-request")
-	typeResults, err := mock.List(beads.ListOptions{Type: "merge-request"})
-	if err != nil {
-		t.Fatalf("List() error: %v", err)
-	}
-	if len(typeResults) != 0 {
-		t.Errorf("List(Type: merge-request) returned %d results, want 0 (realistic MRs have Type: task)", len(typeResults))
-	}
 }
 
 // TestMockBeadsList_StatusFiltering verifies that the mock's List method

@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -372,10 +373,10 @@ func runHook(_ *cobra.Command, args []string) error {
 	const hookBackoffMax = 10 * time.Second
 	var lastHookErr error
 	for attempt := 1; attempt <= hookMaxRetries; attempt++ {
-		hookBdCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
-		hookBdCmd.Dir = townRoot
-		hookBdCmd.Stderr = os.Stderr
-		if err := hookBdCmd.Run(); err != nil {
+		if err := BdCmd("update", beadID, "--status=hooked", "--assignee="+agentID).
+			Dir(townRoot).
+			WithAutoCommit().
+			Run(); err != nil {
 			lastHookErr = err
 			if attempt < hookMaxRetries {
 				backoff := slingBackoff(attempt, hookBaseBackoff, hookBackoffMax)
@@ -444,7 +445,7 @@ func checkPinnedBeadComplete(b *beads.Beads, issue *beads.Issue) (isComplete boo
 func runHookShow(cmd *cobra.Command, args []string) error {
 	var target string
 	if len(args) > 0 {
-		target = args[0]
+		target = normalizeHookShowTarget(args[0])
 	} else {
 		// Auto-detect current agent from context
 		agentID, _, _, err := resolveSelfTarget()
@@ -527,6 +528,62 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 	bead := hookedBeads[0]
 	fmt.Printf("%s: %s '%s' [%s]\n", target, bead.ID, bead.Title, bead.Status)
 	return nil
+}
+
+// normalizeHookShowTarget resolves target aliases/shorthand to canonical agent IDs.
+// Examples:
+//   - "rig/polecat" -> "rig/polecats/polecat"
+//   - "mayor" -> "mayor"
+//
+// If resolution fails, it returns the original target unchanged.
+func normalizeHookShowTarget(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return target
+	}
+
+	// Use the same role/path resolver as dispatching commands, then convert
+	// the resulting tmux session back to a canonical assignee address.
+	// This keeps "hook show" target parsing aligned with sling/hook behavior.
+	if sessionName, err := resolveRoleToSession(target); err == nil && sessionName != "" {
+		if addr, ok := sessionNameToCanonicalAddress(sessionName, target); ok {
+			return addr
+		}
+	}
+
+	// Fallback for explicit/canonical addresses when resolver couldn't help.
+	if identity, err := session.ParseAddress(target); err == nil {
+		return identity.Address()
+	}
+	return target
+}
+
+// sessionNameToCanonicalAddress maps a tmux session name to a canonical agent
+// assignee address (e.g., "gastown/polecats/toast").
+//
+// targetHint is the original user input and is used to seed a temporary
+// prefix→rig mapping for deterministic parsing in tests or minimal
+// environments where the global session registry is not initialized.
+func sessionNameToCanonicalAddress(sessionName, targetHint string) (string, bool) {
+	if identity, err := session.ParseSessionName(sessionName); err == nil {
+		return identity.Address(), true
+	}
+
+	registry := session.NewPrefixRegistry()
+	for rig, prefix := range session.DefaultRegistry().AllRigs() {
+		registry.Register(prefix, rig)
+	}
+	parts := strings.Split(strings.TrimSpace(targetHint), "/")
+	if len(parts) >= 2 && parts[0] != "" {
+		rig := parts[0]
+		registry.Register(session.PrefixFor(rig), rig)
+	}
+
+	identity, err := session.ParseSessionNameWithRegistry(sessionName, registry)
+	if err != nil {
+		return "", false
+	}
+	return identity.Address(), true
 }
 
 // findTownRoot finds the Gas Town root directory.

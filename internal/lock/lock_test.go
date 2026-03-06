@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 func TestNew(t *testing.T) {
@@ -487,6 +489,38 @@ func TestGetActiveTmuxSessions(t *testing.T) {
 		if !expected[s] {
 			t.Errorf("Unexpected session: %s", s)
 		}
+	}
+}
+
+func TestGetActiveTmuxSessionsUsesSocket(t *testing.T) {
+	// Save and restore execCommand and tmux socket
+	origExecCommand := execCommand
+	defer func() { execCommand = origExecCommand }()
+
+	origSocket := tmux.GetDefaultSocket()
+	defer tmux.SetDefaultSocket(origSocket)
+
+	// Set a custom socket name
+	tmux.SetDefaultSocket("test-town")
+
+	var capturedArgs []string
+	execCommand = func(name string, args ...string) interface{ Output() ([]byte, error) } {
+		capturedArgs = args
+		return &mockCmd{output: []byte("")}
+	}
+
+	getActiveTmuxSessions()
+
+	// Verify -L flag was included with the correct socket
+	foundSocket := false
+	for i, arg := range capturedArgs {
+		if arg == "-L" && i+1 < len(capturedArgs) && capturedArgs[i+1] == "test-town" {
+			foundSocket = true
+			break
+		}
+	}
+	if !foundSocket {
+		t.Errorf("getActiveTmuxSessions() args = %v, want -L test-town", capturedArgs)
 	}
 }
 

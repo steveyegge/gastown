@@ -132,12 +132,9 @@ func (dm *dogMol) closeRemainingSteps() {
 		return
 	}
 
-	var children []struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal([]byte(out), &children); err != nil {
-		dm.logger.Printf("dog_molecule: closeRemainingSteps: parse children JSON for %s failed: %v", dm.rootID, err)
+	children, parseErr := parseChildrenJSON(out)
+	if parseErr != nil {
+		dm.logger.Printf("dog_molecule: closeRemainingSteps: parse children JSON for %s failed: %v", dm.rootID, parseErr)
 		return
 	}
 
@@ -176,12 +173,9 @@ func (dm *dogMol) discoverSteps() {
 		return
 	}
 
-	var children []struct {
-		ID    string `json:"id"`
-		Title string `json:"title"`
-	}
-	if err := json.Unmarshal([]byte(out), &children); err != nil {
-		dm.logger.Printf("dog_molecule: discover steps: parse children JSON for %s failed: %v", dm.rootID, err)
+	children, parseErr := parseChildrenJSON(out)
+	if parseErr != nil {
+		dm.logger.Printf("dog_molecule: discover steps: parse children JSON for %s failed: %v", dm.rootID, parseErr)
 		return
 	}
 
@@ -228,6 +222,36 @@ func (dm *dogMol) discoverSteps() {
 			dm.stepIDs["offsite"] = child.ID
 		}
 	}
+}
+
+// childInfo holds fields from child wisp JSON used by discoverSteps and
+// closeRemainingSteps.
+type childInfo struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
+// parseChildrenJSON parses the output of `bd show <id> --children --json`.
+// bd returns a map keyed by parent ID: {"hq-wisp-abc": [{...}, ...]}.
+// For forward compatibility, a bare array is also accepted.
+func parseChildrenJSON(raw string) ([]childInfo, error) {
+	data := []byte(raw)
+
+	var arr []childInfo
+	if err := json.Unmarshal(data, &arr); err == nil {
+		return arr, nil
+	}
+
+	var wrapped map[string][]childInfo
+	if err := json.Unmarshal(data, &wrapped); err == nil {
+		for _, children := range wrapped {
+			return children, nil
+		}
+		return nil, nil
+	}
+
+	return nil, fmt.Errorf("unrecognized JSON shape: %.200s", raw)
 }
 
 // knownSteps returns the list of known step slugs for debugging.

@@ -282,7 +282,7 @@ squashed_at: %s
 		digestIssue, err := b.Create(beads.CreateOptions{
 			Title:       digestTitle,
 			Description: digestDesc,
-			Type:        "task",
+			Labels:      []string{"gt:task"},
 			Priority:    4,       // P4 - backlog priority for digests
 			Actor:       target,
 			Ephemeral:   true,    // Don't export to JSONL - daily aggregation handles permanent record

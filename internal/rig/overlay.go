@@ -70,13 +70,16 @@ func EnsureGitignorePatterns(worktreePath string) error {
 	// This has regressed twice (PR #753 added it, #891 removed it,
 	// #966 re-added it). See overlay_test.go for a regression guard.
 	//
-	// NOTE: .claude/settings.json is NOT listed here because settings are now
-	// installed in gastown-managed parent directories via --settings flag,
-	// not in the customer repo worktree.
+	// .claude/ is the broad pattern (covers commands/, settings.json, rules/, etc.).
+	// Settings are installed in gastown-managed parent directories via --settings flag,
+	// but Cursor still creates .claude/ inside worktrees at runtime. The narrow
+	// .claude/commands/ pattern missed other Cursor-created files, causing gt done
+	// to fail with "uncommitted changes would be lost" on untracked .claude/ entries.
 	requiredPatterns := []string{
 		".runtime/",
-		".claude/commands/",
+		".claude/",
 		".logs/",
+		"__pycache__/",
 	}
 
 	// Read existing gitignore content

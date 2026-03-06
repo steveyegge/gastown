@@ -2363,6 +2363,13 @@ func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 	promptPrefix := DefaultReadyPromptPrefix
 	prefix := strings.TrimSpace(promptPrefix)
 
+	// Require 2 consecutive idle polls to filter out transient states.
+	// During inter-tool-call gaps (~500ms), the prompt may briefly appear
+	// in the pane buffer while Claude Code is still actively working.
+	// Two polls 200ms apart (400ms window) confirms genuine idle state.
+	consecutiveIdle := 0
+	const requiredConsecutive = 2
+
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		lines, err := t.CapturePaneLines(session, 5)
@@ -2373,20 +2380,52 @@ func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 			if errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrNoServer) {
 				return err
 			}
+			consecutiveIdle = 0
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
+
+		// Check the status bar first: if "esc to interrupt" is visible,
+		// Claude Code is actively running a tool call — NOT idle,
+		// regardless of whether the prompt prefix is also visible.
+		statusBarBusy := false
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.Contains(trimmed, "\u23F5\u23F5") || strings.Contains(trimmed, "⏵⏵") {
+				if strings.Contains(trimmed, "esc to interrupt") {
+					statusBarBusy = true
+				}
+				break
+			}
+		}
+		if statusBarBusy {
+			consecutiveIdle = 0
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
 		// Scan all captured lines for the prompt prefix.
 		// Claude Code renders a status bar below the prompt line,
 		// so the prompt may not be the last non-empty line.
+		promptFound := false
 		for _, line := range lines {
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" {
 				continue
 			}
 			if matchesPromptPrefix(trimmed, promptPrefix) || (prefix != "" && trimmed == prefix) {
+				promptFound = true
+				break
+			}
+		}
+
+		if promptFound {
+			consecutiveIdle++
+			if consecutiveIdle >= requiredConsecutive {
 				return nil
 			}
+		} else {
+			consecutiveIdle = 0
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

@@ -541,64 +541,14 @@ func agentIDToBeadID(agentID, townRoot string) string {
 	}
 }
 
-// updateAgentHookBead updates the agent bead's state and hook when work is slung.
-// This enables the witness to see that each agent is working.
-//
-// We run from the polecat's workDir (which redirects to the rig's beads database)
-// WITHOUT setting BEADS_DIR, so the redirect mechanism works for gt-* agent beads.
-//
-// For rig-level beads (same database), we set the hook_bead slot directly.
-// For cross-database scenarios (agent in rig db, hook bead in town db),
-// the slot set may fail - this is handled gracefully with a warning.
-// The work is still correctly attached via `bd update <bead> --assignee=<agent>`.
+// updateAgentHookBead is a no-op. Previously set the hook_bead slot on agent beads
+// when work was slung, but this was redundant: the work bead itself tracks
+// status=hooked and assignee=<agent>. Agent bead slot writes caused warnings
+// in cross-database scenarios and added unnecessary Dolt load.
+// Removed per hq-l6mm5: replace bd slot hooks with direct bead tracking.
 func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
-	_ = townBeadsDir // Not used - BEADS_DIR breaks redirect mechanism
-
-	// Determine the directory to run bd commands from:
-	// - If workDir is provided (polecat's clone path), use it for redirect-based routing
-	// - Otherwise fall back to town root
-	bdWorkDir := workDir
-	townRoot, err := workspace.FindFromCwd()
-	if err != nil {
-		// Not in a Gas Town workspace - can't update agent bead
-		fmt.Fprintf(os.Stderr, "Warning: couldn't find town root to update agent hook: %v\n", err)
-		return
-	}
-	if bdWorkDir == "" {
-		bdWorkDir = townRoot
-	}
-
-	// Convert agent ID to agent bead ID
-	// Format examples (canonical: prefix-rig-role-name):
-	//   greenplace/crew/max -> gt-greenplace-crew-max
-	//   greenplace/polecats/Toast -> gt-greenplace-polecat-Toast
-	//   mayor -> hq-mayor
-	//   greenplace/witness -> gt-greenplace-witness
-	agentBeadID := agentIDToBeadID(agentID, townRoot)
-	if agentBeadID == "" {
-		return
-	}
-
-	// Resolve the correct working directory for the agent bead.
-	// Agent beads with rig-level prefixes (e.g., go-) live in rig databases,
-	// not the town database. Use prefix-based resolution to find the correct path.
-	// This fixes go-19z: bd slot commands failing for go-* prefixed beads.
-	agentWorkDir := beads.ResolveHookDir(townRoot, agentBeadID, bdWorkDir)
-
-	// Run from agentWorkDir WITHOUT BEADS_DIR to enable redirect-based routing.
-	// Set hook_bead to the slung work (gt-zecmc: removed agent_state update).
-	// Agent liveness is observable from tmux - no need to record it in bead.
-	// For cross-database scenarios, slot set may fail gracefully (warning only).
-	bd := beads.New(agentWorkDir)
-	if err := bd.SetHookBead(agentBeadID, beadID); err != nil {
-		// Log warning instead of silent ignore - helps debug cross-beads issues
-		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
-		// Dogs created before canonical IDs need recreation: gt dog rm <name> && gt dog add <name>
-		if strings.Contains(agentBeadID, "-dog-") {
-			fmt.Fprintf(os.Stderr, "  (Old dog? Recreate with: gt dog rm <name> && gt dog add <name>)\n")
-		}
-		return
-	}
+	// No-op: work bead status=hooked + assignee is the authoritative source.
+	// Agent bead hook_bead slot is no longer maintained.
 }
 
 // wakeRigAgents wakes the witness for a rig after polecat dispatch.
@@ -1034,6 +984,7 @@ func hookBeadWithRetry(beadID, targetAgent, hookDir string) error {
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		err := BdCmd("update", beadID, "--status=hooked", "--assignee="+targetAgent).
 			Dir(hookDir).
+			WithAutoCommit().
 			Run()
 		if err != nil {
 			lastErr = err

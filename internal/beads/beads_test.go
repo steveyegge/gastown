@@ -25,7 +25,7 @@ func TestNew(t *testing.T) {
 func TestListOptions(t *testing.T) {
 	opts := ListOptions{
 		Status:   "open",
-		Type:     "task",
+		Label:    "gt:task",
 		Priority: 1,
 	}
 	if opts.Status != "open" {
@@ -37,7 +37,7 @@ func TestListOptions(t *testing.T) {
 func TestCreateOptions(t *testing.T) {
 	opts := CreateOptions{
 		Title:       "Test issue",
-		Type:        "task",
+		Labels:      []string{"gt:task"},
 		Priority:    2,
 		Description: "A test description",
 		Parent:      "gt-abc",

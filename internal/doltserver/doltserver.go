@@ -50,6 +50,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/util"
+	"gopkg.in/yaml.v3"
 )
 
 // EnsureDoltIdentity configures dolt global identity (user.name, user.email)
@@ -144,6 +145,30 @@ const (
 	DefaultWriteTimeoutMs = 5 * 60 * 1000 // 5 minutes in milliseconds
 )
 
+// doltConfigYAML represents the subset of Dolt's config.yaml that we need to read.
+type doltConfigYAML struct {
+	Listener struct {
+		Port int `yaml:"port"`
+	} `yaml:"listener"`
+}
+
+// readPortFromConfigYAML reads the port from .dolt-data/config.yaml if it exists.
+// Returns the configured port, or 0 if the file doesn't exist or doesn't specify a port.
+func readPortFromConfigYAML(townRoot string) int {
+	configPath := filepath.Join(townRoot, ".dolt-data", "config.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return 0 // File doesn't exist or can't be read
+	}
+
+	var cfg doltConfigYAML
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return 0 // Invalid YAML or doesn't match structure
+	}
+
+	return cfg.Listener.Port // 0 if not specified
+}
+
 // metadataMu provides per-path mutexes for EnsureMetadata goroutine synchronization.
 // flock is inter-process only and cannot reliably synchronize goroutines within the
 // same process (the same process may acquire the same flock twice without blocking).
@@ -211,9 +236,17 @@ type Config struct {
 }
 
 // DefaultConfig returns the default Dolt server configuration.
-// Environment variables override defaults when set:
+//
+// Port priority (highest to lowest):
+//  1. .dolt-data/config.yaml listener.port (authoritative file-based config)
+//  2. GT_DOLT_PORT environment variable (for overrides)
+//  3. DefaultPort (3307)
+//
+// This ordering prevents stale environment variables in long-running sessions
+// from overriding the intended configuration.
+//
+// Other environment variables:
 //   - GT_DOLT_HOST → Host
-//   - GT_DOLT_PORT → Port
 //   - GT_DOLT_USER → User
 //   - GT_DOLT_PASSWORD → Password
 //   - GT_DOLT_LOGLEVEL → LogLevel (trace, debug, info, warning, error, fatal)
@@ -235,11 +268,17 @@ func DefaultConfig(townRoot string) *Config {
 	if h := os.Getenv("GT_DOLT_HOST"); h != "" {
 		config.Host = h
 	}
-	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
+
+	// Port precedence: config.yaml > env var > default
+	// config.yaml takes precedence to prevent stale env var pollution
+	if port := readPortFromConfigYAML(townRoot); port > 0 {
+		config.Port = port
+	} else if p := os.Getenv("GT_DOLT_PORT"); p != "" {
 		if port, err := strconv.Atoi(p); err == nil {
 			config.Port = port
 		}
 	}
+
 	if u := os.Getenv("GT_DOLT_USER"); u != "" {
 		config.User = u
 	}

@@ -263,28 +263,21 @@ func TestRunStatusWatch_RejectsJSONCombo(t *testing.T) {
 
 func TestIsKnownAgent(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		base string
-		want bool
-	}{
-		{"claude", true},
-		{"pi", true},
-		{"opencode", true},
-		{"codex", true},
-		{"gemini", true},
-		{"cursor", true},
-		{"auggie", true},
-		{"amp", true},
-		{"aider", true},
-		{"bash", false},
-		{"node", false},
-		{"", false},
+
+	// All agent presets should be recognized
+	for _, name := range config.ListAgentPresets() {
+		t.Run(name+"_known", func(t *testing.T) {
+			if !isKnownAgent(name) {
+				t.Errorf("isKnownAgent(%q) = false, want true", name)
+			}
+		})
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.base, func(t *testing.T) {
-			if got := isKnownAgent(tt.base); got != tt.want {
-				t.Errorf("isKnownAgent(%q) = %v, want %v", tt.base, got, tt.want)
+	// Non-agents should not be recognized
+	for _, name := range []string{"bash", "node", ""} {
+		t.Run(name+"_unknown", func(t *testing.T) {
+			if isKnownAgent(name) {
+				t.Errorf("isKnownAgent(%q) = true, want false", name)
 			}
 		})
 	}

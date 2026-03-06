@@ -40,8 +40,6 @@ var (
 	digestDate      string
 	digestDryRun    bool
 
-	// Migrate subcommand flags
-	migrateDryRun bool
 )
 
 var costsCmd = &cobra.Command{
@@ -107,27 +105,6 @@ Examples:
 	RunE: runCostsDigest,
 }
 
-var costsMigrateCmd = &cobra.Command{
-	Use:   "migrate",
-	Short: "Migrate legacy session.ended beads to the new log-file architecture",
-	Long: `Migrate legacy session.ended event beads to the new cost tracking system.
-
-This command handles the transition from the old architecture (where each
-session.ended event was a permanent bead) to the new log-file-based system.
-
-The migration:
-1. Finds all open session.ended event beads (should be none if auto-close worked)
-2. Closes them with reason "migrated to log-file architecture"
-
-Legacy beads remain in the database for historical queries but won't interfere
-with the new log-file-based cost tracking.
-
-Examples:
-  gt costs migrate            # Migrate legacy beads
-  gt costs migrate --dry-run  # Preview what would be migrated`,
-	RunE: runCostsMigrate,
-}
-
 func init() {
 	rootCmd.AddCommand(costsCmd)
 	costsCmd.Flags().BoolVar(&costsJSON, "json", false, "Output as JSON")
@@ -148,9 +125,6 @@ func init() {
 	costsDigestCmd.Flags().StringVar(&digestDate, "date", "", "Digest a specific date (YYYY-MM-DD)")
 	costsDigestCmd.Flags().BoolVar(&digestDryRun, "dry-run", false, "Preview what would be done without making changes")
 
-	// Add migrate subcommand
-	costsCmd.AddCommand(costsMigrateCmd)
-	costsMigrateCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Preview what would be migrated without making changes")
 }
 
 // SessionCost represents cost info for a single session.
@@ -1421,96 +1395,3 @@ func deleteSessionCostEntries(targetDate time.Time) (int, error) {
 	return deletedCount, nil
 }
 
-// runCostsMigrate migrates legacy session.ended beads to the new architecture.
-func runCostsMigrate(cmd *cobra.Command, args []string) error {
-	// Query all session.ended events (both open and closed)
-	listArgs := []string{
-		"list",
-		"--type=event",
-		"--all",
-		"--limit=0",
-		"--json",
-	}
-
-	listCmd := exec.Command("bd", listArgs...)
-	listOutput, err := listCmd.Output()
-	if err != nil {
-		fmt.Println(style.Dim.Render("No events found or bd command failed"))
-		return nil
-	}
-
-	var listItems []EventListItem
-	if err := json.Unmarshal(listOutput, &listItems); err != nil {
-		return fmt.Errorf("parsing event list: %w", err)
-	}
-
-	if len(listItems) == 0 {
-		fmt.Println(style.Dim.Render("No events found"))
-		return nil
-	}
-
-	// Get full details for all events
-	showArgs := []string{"show", "--json"}
-	for _, item := range listItems {
-		showArgs = append(showArgs, item.ID)
-	}
-
-	showCmd := exec.Command("bd", showArgs...)
-	showOutput, err := showCmd.Output()
-	if err != nil {
-		return fmt.Errorf("showing events: %w", err)
-	}
-
-	var events []SessionEvent
-	if err := json.Unmarshal(showOutput, &events); err != nil {
-		return fmt.Errorf("parsing event details: %w", err)
-	}
-
-	// Find open session.ended events
-	var openEvents []SessionEvent
-	var closedCount int
-	for _, event := range events {
-		if event.EventKind != "session.ended" {
-			continue
-		}
-		if event.Status == "closed" {
-			closedCount++
-			continue
-		}
-		openEvents = append(openEvents, event)
-	}
-
-	fmt.Printf("%s Legacy session.ended beads:\n", style.Bold.Render("📊"))
-	fmt.Printf("  Closed: %d (no action needed)\n", closedCount)
-	fmt.Printf("  Open:   %d (will be closed)\n", len(openEvents))
-
-	if len(openEvents) == 0 {
-		fmt.Println(style.Success.Render("\n✓ No migration needed - all session.ended events are already closed"))
-		return nil
-	}
-
-	if migrateDryRun {
-		fmt.Printf("\n%s Would close %d open session.ended events\n", style.Bold.Render("[DRY RUN]"), len(openEvents))
-		for _, event := range openEvents {
-			fmt.Printf("  - %s: %s\n", event.ID, event.Title)
-		}
-		return nil
-	}
-
-	// Close all open session.ended events
-	closedMigrated := 0
-	for _, event := range openEvents {
-		closeCmd := exec.Command("bd", "close", event.ID, "--reason=migrated to log-file architecture")
-		if err := closeCmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not close %s: %v\n", event.ID, err)
-			continue
-		}
-		closedMigrated++
-	}
-
-	fmt.Printf("\n%s Migrated %d session.ended events (closed)\n", style.Success.Render("✓"), closedMigrated)
-	fmt.Println(style.Dim.Render("Legacy beads preserved for historical queries."))
-	fmt.Println(style.Dim.Render("New session costs will use ~/.gt/costs.jsonl + daily digests."))
-
-	return nil
-}

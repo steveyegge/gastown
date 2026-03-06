@@ -250,14 +250,6 @@ func (d *Daemon) exportDatabaseToJsonl(db, gitRepo, dataDir string, scrub bool) 
 	}
 	total += n
 
-	// Also write legacy flat file for backward compatibility.
-	legacyPath := filepath.Join(gitRepo, db+".jsonl")
-	newIssuesPath := filepath.Join(dbDir, "issues.jsonl")
-	// Copy instead of symlink for git compatibility.
-	if data, err := os.ReadFile(newIssuesPath); err == nil {
-		_ = os.WriteFile(legacyPath, data, 0644)
-	}
-
 	// 2. Export supplemental tables (no scrub, full export).
 	for _, table := range supplementalTables {
 		tQuery := fmt.Sprintf("SELECT * FROM `%s`.`%s` ORDER BY 1", db, table)
@@ -671,9 +663,6 @@ func (d *Daemon) applyPollutionFilter(gitRepo string, databases []string) int {
 				d.logger.Printf("jsonl_git_backup: %s: error writing filtered file: %v", db, err)
 				continue
 			}
-			// Also update legacy flat file.
-			legacyPath := filepath.Join(gitRepo, db+".jsonl")
-			_ = os.WriteFile(legacyPath, filtered, 0644)
 			totalRemoved += removed
 		}
 	}
