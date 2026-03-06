@@ -5,9 +5,15 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/testutil"
 )
 
 func TestMain(m *testing.M) {
+	// Clean up stale temp artifacts from previous test runs to prevent
+	// "no space left on device" failures on macOS.
+	testutil.CleanStaleTempDirs()
+
 	stubDir, err := os.MkdirTemp("", "gt-agent-bin-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create stub dir: %v\n", err)

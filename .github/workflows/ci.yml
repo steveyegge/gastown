@@ -88,6 +88,9 @@ jobs:
       - name: Build
         run: go build -v ./cmd/gt
 
+      - name: Clean stale test temp artifacts
+        run: make test-clean
+
       - name: Test with Coverage
         run: |
           set -o pipefail
@@ -187,6 +190,9 @@ jobs:
 
       - name: Add to PATH
         run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Clean stale test temp artifacts
+        run: make test-clean
 
       - name: Integration Tests
         run: gotestsum --format testname --junitfile junit-integration.xml -- -tags=integration -timeout=15m -v ./internal/cmd/...

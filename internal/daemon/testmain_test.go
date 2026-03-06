@@ -12,6 +12,10 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Clean up stale temp artifacts from previous test runs to prevent
+	// "no space left on device" failures on macOS.
+	testutil.CleanStaleTempDirs()
+
 	// Start an ephemeral Dolt container for this package's tests.
 	// convoy_manager_test.go calls setupTestStore which sets BEADS_TEST_MODE=1,
 	// causing the beads SDK to create testdb_<hash> databases. By routing

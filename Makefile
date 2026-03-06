@@ -1,4 +1,4 @@
-.PHONY: build desktop-build desktop-run install clean test test-e2e-container check-up-to-date
+.PHONY: build desktop-build desktop-run install clean test test-clean test-e2e-container check-up-to-date
 
 BINARY := gt
 BINARY_DESKTOP := gt-desktop
@@ -96,8 +96,19 @@ install: check-up-to-date build
 clean:
 	rm -f $(BUILD_DIR)/$(BINARY)
 
-test:
+test: test-clean
 	go test ./...
+
+# Remove stale test temp artifacts to prevent "no space left on device" on macOS.
+# Removes known gastown patterns (gt-clone-*, namepool-test-*, etc.) older than 4h.
+test-clean:
+	@echo "Cleaning stale test temp artifacts..."
+	@find "$${TMPDIR:-/tmp}" -maxdepth 1 -name 'gt-clone-*' -mmin +240 -exec rm -rf {} + 2>/dev/null || true
+	@find "$${TMPDIR:-/tmp}" -maxdepth 1 -name 'gt-agent-bin-*' -mmin +240 -exec rm -rf {} + 2>/dev/null || true
+	@find "$${TMPDIR:-/tmp}" -maxdepth 1 -name 'namepool-test-*' -mmin +240 -exec rm -rf {} + 2>/dev/null || true
+	@find "$${TMPDIR:-/tmp}" -maxdepth 1 -name 'wl-browse-*' -mmin +240 -exec rm -rf {} + 2>/dev/null || true
+	@find "$${TMPDIR:-/tmp}" -maxdepth 1 -name 'gastown-test-run-*' -mmin +240 -exec rm -rf {} + 2>/dev/null || true
+	@rm -f "$${TMPDIR:-/tmp}/gt-integration-test" 2>/dev/null || true
 
 # Run e2e tests in isolated container (the only supported way to run them)
 test-e2e-container:

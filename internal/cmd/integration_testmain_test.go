@@ -12,6 +12,10 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Clean up stale temp artifacts from previous test runs to prevent
+	// "no space left on device" failures on macOS.
+	testutil.CleanStaleTempDirs()
+
 	// Force sequential test execution to avoid bd file locks on Windows.
 	_ = flag.Set("test.parallel", "1")
 	flag.Parse()
@@ -28,6 +32,11 @@ func TestMain(m *testing.M) {
 	}
 
 	code := m.Run()
+
+	// Clean up cached integration test binary.
+	if cachedGTBinary != "" {
+		_ = os.Remove(cachedGTBinary)
+	}
 
 	// Clean up the shared Dolt container.
 	testutil.TerminateDoltContainer()
