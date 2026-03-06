@@ -1,3 +1,4 @@
+// molecule_await_signal.go implements the 'gt molecule await signal' command: Wait for activity feed signal with timeout.
 package cmd
 
 import (

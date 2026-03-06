@@ -1,3 +1,4 @@
+// hooks_scan.go implements the 'gt hooks scan' command: Scan workspace for existing Claude Code hooks.
 package cmd
 
 import (

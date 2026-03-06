@@ -1,5 +1,6 @@
 //go:build windows
 
+// flock_windows.go — FlockAcquire is a no-op on Windows. Gas Town doesn't run on Windows
 package lock
 
 // FlockAcquire is a no-op on Windows. Gas Town doesn't run on Windows

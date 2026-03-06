@@ -1,6 +1,7 @@
 // ABOUTME: Quick-add command for adding a repo to Gas Town with minimal friction.
 // ABOUTME: Used by shell hook for automatic "add to Gas Town?" prompts.
 
+// rig_quick_add.go implements the 'gt rig quick add' command: Quickly add current repo to Gas Town.
 package cmd
 
 import (

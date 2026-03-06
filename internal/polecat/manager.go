@@ -1,5 +1,8 @@
 // Liftoff test: 2026-02-08T14:00:00
 
+// manager.go implements the polecat Manager, which handles the full lifecycle
+// of polecat worker agents: creation, assignment, status tracking, nuking,
+// and worktree management within a rig.
 package polecat
 
 import (

@@ -1,3 +1,4 @@
+// mail_queue.go implements the 'gt mail queue' command: Manage mail queues.
 package cmd
 
 import (

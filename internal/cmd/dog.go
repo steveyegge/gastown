@@ -1,3 +1,4 @@
+// dog.go implements the 'gt dog' command: Manage dogs (cross-rig infrastructure workers).
 package cmd
 
 import (

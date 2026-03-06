@@ -1,3 +1,6 @@
+// overseer.go manages the human operator's identity configuration. It loads,
+// saves, and auto-detects the overseer identity from git config, GitHub CLI,
+// or environment variables, persisting the result for future sessions.
 package config
 
 import (

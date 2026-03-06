@@ -1,3 +1,4 @@
+// stale_task_dispatch_check.go — StaleTaskDispatchCheck detects settings.json files that still reference
 package doctor
 
 import (

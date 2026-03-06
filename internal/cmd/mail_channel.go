@@ -1,3 +1,4 @@
+// mail_channel.go implements the 'gt mail channel' command: Manage and view beads-native channels.
 package cmd
 
 import (

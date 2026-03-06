@@ -1,6 +1,7 @@
 // ABOUTME: Command to completely uninstall Gas Town from the system.
 // ABOUTME: Removes shell integration, wrappers, state, and optionally workspace.
 
+// uninstall.go implements the 'gt uninstall' command: Remove Gas Town from the system.
 package cmd
 
 import (

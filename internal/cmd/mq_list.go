@@ -1,3 +1,4 @@
+// mq_list.go provides runMQList and related functionality.
 package cmd
 
 import (

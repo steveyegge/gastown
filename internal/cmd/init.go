@@ -1,3 +1,4 @@
+// init.go implements the 'gt init' command: Initialize current directory as a Gas Town rig.
 package cmd
 
 import (

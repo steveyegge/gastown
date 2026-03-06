@@ -1,3 +1,4 @@
+// worktree_gitdir_check.go — WorktreeGitdirCheck validates that worktree .git files reference existing
 package doctor
 
 import (

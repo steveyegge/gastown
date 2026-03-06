@@ -1,3 +1,4 @@
+// rig_name_check.go — RigNameMismatchCheck detects when a rig's config.json has a name or beads
 package doctor
 
 import (

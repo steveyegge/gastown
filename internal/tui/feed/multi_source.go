@@ -1,3 +1,4 @@
+// multi_source.go — MultiSource combines events from multiple EventSources into a single stream
 package feed
 
 import (

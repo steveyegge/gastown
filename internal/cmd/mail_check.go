@@ -1,3 +1,4 @@
+// mail_check.go provides runMailCheck and related functionality.
 package cmd
 
 import (

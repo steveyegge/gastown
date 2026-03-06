@@ -1,5 +1,6 @@
 //go:build !windows
 
+// process_group_unix.go provides killProcessGroup and related functionality.
 package tmux
 
 import (

@@ -1,3 +1,4 @@
+// up.go implements the 'gt up' command: Bring up all Gas Town services.
 package cmd
 
 import (

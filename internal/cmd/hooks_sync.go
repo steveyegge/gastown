@@ -1,3 +1,4 @@
+// hooks_sync.go implements the 'gt hooks sync' command: Regenerate all .claude/settings.json files.
 package cmd
 
 import (

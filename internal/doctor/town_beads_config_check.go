@@ -1,3 +1,4 @@
+// town_beads_config_check.go — TownBeadsConfigCheck verifies town-level .beads/config.yaml exists when
 package doctor
 
 import (

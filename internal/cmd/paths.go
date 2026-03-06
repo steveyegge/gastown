@@ -1,3 +1,4 @@
+// paths.go defines filesystem path helpers for locating Gas Town runtime data and config.
 package cmd
 
 import (

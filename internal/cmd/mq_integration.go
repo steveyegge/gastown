@@ -1,3 +1,5 @@
+// mq_integration.go handles merge queue integration branch creation and management,
+// used by the Refinery to merge polecat work into the target branch.
 package cmd
 
 import (

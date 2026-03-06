@@ -1,3 +1,4 @@
+// molecule_attach_from_mail.go — runMoleculeAttachFromMail handles the "gt mol attach-from-mail <mail-id>" command
 package cmd
 
 import (

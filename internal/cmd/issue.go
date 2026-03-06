@@ -1,3 +1,4 @@
+// issue.go implements the 'gt issue' command: Manage current issue for status line display.
 package cmd
 
 import (

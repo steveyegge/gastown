@@ -1,3 +1,4 @@
+// boot.go implements the 'gt boot' command: Manage Boot (Deacon watchdog).
 package cmd
 
 import (

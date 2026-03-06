@@ -1,3 +1,4 @@
+// wisp_check.go — WispGCCheck detects and cleans orphaned wisps that are older than a threshold
 package doctor
 
 import (

@@ -1,3 +1,4 @@
+// hooks_base.go implements the 'gt hooks base' command: Edit the shared base hook config.
 package cmd
 
 import (

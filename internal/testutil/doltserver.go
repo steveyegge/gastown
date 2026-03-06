@@ -1,5 +1,6 @@
 //go:build !windows
 
+// doltserver.go — DoltDockerImage is the Docker image used for Dolt test containers
 package testutil
 
 import (

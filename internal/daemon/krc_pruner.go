@@ -1,3 +1,4 @@
+// krc_pruner.go — KRCPruner manages automatic pruning of expired ephemeral records
 package daemon
 
 import (

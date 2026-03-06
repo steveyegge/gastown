@@ -1,3 +1,4 @@
+// bd_helpers.go provides a fluent builder for constructing bd (beads) CLI subprocess calls.
 package cmd
 
 import (

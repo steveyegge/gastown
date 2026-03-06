@@ -1,3 +1,4 @@
+// unregistered_beads_check.go — UnregisteredBeadsDirsCheck detects directories in the town root that have
 package doctor
 
 import (

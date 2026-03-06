@@ -1,5 +1,6 @@
 //go:build !windows
 
+// flock_unix.go — FlockAcquire opens a flock file and acquires an exclusive advisory lock
 package lock
 
 import (

@@ -1,3 +1,4 @@
+// trail.go implements the 'gt trail' command: Show recent agent activity.
 package cmd
 
 import (

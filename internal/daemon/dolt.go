@@ -1,3 +1,4 @@
+// dolt.go — DefaultDoltHealthCheckInterval is how often the dedicated Dolt health check
 package daemon
 
 import (

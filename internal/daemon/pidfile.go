@@ -1,3 +1,4 @@
+// pidfile.go — PID file format: "PID\nNONCE"
 package daemon
 
 import (

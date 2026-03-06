@@ -1,3 +1,4 @@
+// land_worktree_gitignore_check.go — LandWorktreeGitignoreCheck ensures .land-worktree/ is in each rig's .gitignore
 package doctor
 
 import (

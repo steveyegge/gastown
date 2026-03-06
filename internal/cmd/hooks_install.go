@@ -1,3 +1,4 @@
+// hooks_install.go implements the 'gt hooks install' command: Install a hook from the registry.
 package cmd
 
 import (

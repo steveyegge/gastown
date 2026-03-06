@@ -1,3 +1,4 @@
+// town_claude_md_check.go — TownCLAUDEmdCheck verifies the town-root CLAUDE.md is up to date with
 package doctor
 
 import (

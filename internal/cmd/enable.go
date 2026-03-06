@@ -1,6 +1,7 @@
 // ABOUTME: Command to enable Gas Town system-wide.
 // ABOUTME: Sets the global state to enabled for all agentic coding tools.
 
+// enable.go implements the 'gt enable' command: Enable Gas Town system-wide.
 package cmd
 
 import (

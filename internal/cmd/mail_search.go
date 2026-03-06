@@ -1,3 +1,4 @@
+// mail_search.go — runMailSearch searches for messages matching a pattern
 package cmd
 
 import (

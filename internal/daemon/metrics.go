@@ -1,3 +1,4 @@
+// metrics.go — daemonMetrics holds OTel instruments for the daemon
 package daemon
 
 import (

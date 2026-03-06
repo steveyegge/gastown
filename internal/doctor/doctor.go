@@ -1,3 +1,4 @@
+// doctor.go — Doctor manages and executes health checks
 package doctor
 
 import (

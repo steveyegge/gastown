@@ -1,6 +1,7 @@
 // Package refinery provides the merge queue processing agent.
 // This file contains priority scoring logic for merge requests.
 
+// score.go — Package refinery provides the merge queue processing agent
 package refinery
 
 import (

@@ -1,6 +1,7 @@
 // ABOUTME: Command to disable Gas Town system-wide.
 // ABOUTME: Sets the global state to disabled so tools work vanilla.
 
+// disable.go implements the 'gt disable' command: Disable Gas Town system-wide.
 package cmd
 
 import (

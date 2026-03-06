@@ -1,3 +1,4 @@
+// crew_check.go — CrewStateCheck validates crew worker state.json files for completeness
 package doctor
 
 import (

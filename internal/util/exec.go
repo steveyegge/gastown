@@ -1,3 +1,4 @@
+// exec.go — FirstLine returns the first non-empty line from s, trimmed of whitespace
 package util
 
 import (

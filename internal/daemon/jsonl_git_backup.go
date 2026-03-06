@@ -1,3 +1,4 @@
+// jsonl_git_backup.go — testPollutionPatterns matches issue IDs or titles that indicate test data leaked
 package daemon
 
 import (

@@ -1,3 +1,4 @@
+// handoff.go implements the 'gt handoff' command: Hand off to a fresh session, work continues from hook.
 package cmd
 
 import (

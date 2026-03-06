@@ -1,3 +1,4 @@
+// dog_molecule.go — bdMolTimeout is the timeout for bd molecule operations
 package daemon
 
 import (

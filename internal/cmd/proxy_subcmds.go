@@ -1,3 +1,4 @@
+// proxy_subcmds.go implements the 'gt proxy subcmds' command: Output allowed subcommands for the proxy server.
 package cmd
 
 import (

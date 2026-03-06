@@ -1,3 +1,4 @@
+// hooks_list.go implements the 'gt hooks list' command: Show all managed settings.json locations.
 package cmd
 
 import (

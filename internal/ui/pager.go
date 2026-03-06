@@ -1,3 +1,4 @@
+// pager.go — PagerOptions configures pager behavior for command output
 package ui
 
 import (

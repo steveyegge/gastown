@@ -1,3 +1,4 @@
+// molecule_dep.go manages molecule dependency resolution, determining which steps are blocked.
 package cmd
 
 import (

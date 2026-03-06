@@ -1,3 +1,4 @@
+// stale_beads_redirect_check.go — StaleBeadsRedirectCheck detects .beads directories that have both a redirect
 package doctor
 
 import (

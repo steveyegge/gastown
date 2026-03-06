@@ -1,3 +1,4 @@
+// sling_formula.go defines type wispCreateJSON struct.
 package cmd
 
 import (

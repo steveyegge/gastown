@@ -1,3 +1,4 @@
+// zombie_check.go — ZombieSessionCheck detects tmux sessions that are valid Gas Town sessions
 package doctor
 
 import (

@@ -1,3 +1,4 @@
+// print_events.go — PrintOptions controls filtering and behavior for PrintGtEvents
 package feed
 
 import (

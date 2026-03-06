@@ -1,3 +1,4 @@
+// namepool.go implements the 'gt namepool' command: Manage polecat name pools.
 package cmd
 
 import (

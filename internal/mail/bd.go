@@ -1,3 +1,6 @@
+// bd.go wraps the bd command-line tool for creating, querying, and updating
+// beads, providing timeout management and structured error handling for all
+// subprocess invocations.
 package mail
 
 import (

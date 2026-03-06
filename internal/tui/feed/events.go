@@ -1,3 +1,4 @@
+// events.go — EventSource represents a source of events
 package feed
 
 import (

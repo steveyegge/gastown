@@ -1,3 +1,4 @@
+// testutil_symlink_check.go — TestutilSymlinkCheck verifies that crew and refinery/rig internal/testutil/
 package doctor
 
 import (

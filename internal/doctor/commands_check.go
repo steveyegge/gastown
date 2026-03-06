@@ -1,3 +1,4 @@
+// commands_check.go — CommandsCheck validates that town-level .claude/commands/ is provisioned
 package doctor
 
 import (

@@ -1,3 +1,4 @@
+// audit.go implements the 'gt audit' command: Query work history by actor.
 package cmd
 
 import (

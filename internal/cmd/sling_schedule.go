@@ -1,3 +1,4 @@
+// sling_schedule.go — shouldDeferDispatch checks the town config to decide dispatch mode
 package cmd
 
 import (

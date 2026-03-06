@@ -1,3 +1,6 @@
+// address.go defines the Address type for parsing and representing agent and
+// rig addresses in the format [machine:]rig[/polecat]. Addresses are used
+// throughout Gas Town for routing nudges, mail, and commands to specific targets.
 package connection
 
 import (

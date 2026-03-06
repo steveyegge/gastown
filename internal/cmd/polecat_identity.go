@@ -1,3 +1,4 @@
+// polecat_identity.go implements the 'gt polecat identity' command: Manage polecat identities.
 package cmd
 
 import (

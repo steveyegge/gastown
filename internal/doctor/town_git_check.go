@@ -1,3 +1,4 @@
+// town_git_check.go — TownGitCheck verifies that the town root directory is under version control
 package doctor
 
 import (

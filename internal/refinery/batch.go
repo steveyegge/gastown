@@ -1,3 +1,6 @@
+// batch.go implements the batch-then-bisect merge algorithm: groups merge
+// requests into batches, builds rebase stacks, and bisects on failure to
+// isolate the offending commit.
 package refinery
 
 import (

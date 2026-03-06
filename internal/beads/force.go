@@ -1,3 +1,6 @@
+// force.go detects bead IDs that require the --force flag when passed to bd.
+// IDs with multiple hyphens confuse bd's prefix inference, so callers must
+// bypass the check with --force to honor the explicit ID.
 package beads
 
 import "strings"

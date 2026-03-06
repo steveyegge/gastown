@@ -1,3 +1,4 @@
+// rollback.go — Backup represents a discovered migration backup directory
 package doltserver
 
 import (

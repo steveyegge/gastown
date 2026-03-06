@@ -1,3 +1,4 @@
+// log_rotation.go — logRotationMaxSize is the max size in bytes before auto-rotation triggers
 package daemon
 
 import (

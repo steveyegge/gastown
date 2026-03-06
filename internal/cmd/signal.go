@@ -1,3 +1,4 @@
+// signal.go implements the 'gt signal' command: Claude Code hook signal handlers.
 package cmd
 
 import (

@@ -1,3 +1,5 @@
+// manager.go handles refinery lifecycle (start, stop, status) and coordinates
+// the merge queue using beads as the source of truth for pending requests.
 package refinery
 
 import (

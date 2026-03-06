@@ -1,3 +1,4 @@
+// hooks.go implements the 'gt hooks' command: Centralized hook management for Gas Town.
 package cmd
 
 import (

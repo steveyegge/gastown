@@ -1,3 +1,4 @@
+// feed_stranded.go — Default parameters for feed-stranded rate limiting
 package deacon
 
 import (

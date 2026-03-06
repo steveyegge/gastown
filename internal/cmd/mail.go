@@ -1,3 +1,4 @@
+// mail.go implements the 'gt mail' command: Agent messaging system.
 package cmd
 
 import (

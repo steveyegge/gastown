@@ -1,3 +1,4 @@
+// mq_source.go — MQEventSource was used to read MQ lifecycle events from mq_events.jsonl
 package feed
 
 import (

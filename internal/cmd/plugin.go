@@ -1,3 +1,4 @@
+// plugin.go implements the 'gt plugin' command: Plugin management.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// crew_cycle.go — crewCycleSession is the --session flag for crew next/prev commands
 package cmd
 
 import (

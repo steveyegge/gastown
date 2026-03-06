@@ -1,6 +1,7 @@
 // ABOUTME: Global state management for Gas Town enable/disable toggle.
 // ABOUTME: Uses XDG-compliant paths for per-machine state storage.
 
+// state.go — ABOUTME: Global state management for Gas Town enable/disable toggle
 package state
 
 import (

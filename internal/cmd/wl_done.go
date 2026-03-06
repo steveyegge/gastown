@@ -1,3 +1,4 @@
+// wl_done.go implements the 'gt wl done' command: Submit completion evidence for a wanted item.
 package cmd
 
 import (

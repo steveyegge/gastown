@@ -1,3 +1,4 @@
+// routing_mode_check.go — RoutingModeCheck detects when beads routing.mode is set to "auto", which can
 package doctor
 
 import (

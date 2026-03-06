@@ -1,3 +1,4 @@
+// convoy.go — convoyIDPattern validates convoy IDs
 package feed
 
 import (

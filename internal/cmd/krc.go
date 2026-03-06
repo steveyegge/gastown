@@ -1,3 +1,4 @@
+// krc.go implements the 'gt krc' command: Key Record Chronicle - manage ephemeral data TTLs.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// release.go implements the 'gt release' command: Release stuck in_progress issues back to pending.
 package cmd
 
 import (

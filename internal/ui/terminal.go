@@ -1,3 +1,4 @@
+// terminal.go — ThemeMode represents the CLI color scheme mode
 package ui
 
 import (

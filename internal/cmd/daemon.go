@@ -1,3 +1,4 @@
+// daemon.go implements the 'gt daemon' command: Manage the Gas Town daemon.
 package cmd
 
 import (

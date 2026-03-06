@@ -1,3 +1,4 @@
+// dolt_binary_check.go — DoltBinaryCheck verifies that the dolt binary is installed, accessible in PATH,
 package doctor
 
 import (

@@ -1,3 +1,4 @@
+// scheduler_convoy.go implements convoy-aware scheduling for batch dispatch operations.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// keys.go — KeyMap defines the key bindings for the convoy TUI
 package convoy
 
 import "github.com/charmbracelet/bubbles/key"

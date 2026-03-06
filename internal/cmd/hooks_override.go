@@ -1,3 +1,4 @@
+// hooks_override.go implements the 'gt hooks override' command: Edit overrides for a role or rig.
 package cmd
 
 import (

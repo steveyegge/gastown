@@ -1,3 +1,4 @@
+// path.go — cachedHomeDir returns the user's home directory, cached after the first call
 package util
 
 import (

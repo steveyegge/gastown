@@ -1,3 +1,4 @@
+// escalate.go implements the 'gt escalate' command: Escalation system for critical issues.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// mail_group.go implements the 'gt mail group' command: Manage mail groups.
 package cmd
 
 import (

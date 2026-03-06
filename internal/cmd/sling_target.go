@@ -1,3 +1,4 @@
+// sling_target.go resolves sling target addresses into concrete agent or rig destinations.
 package cmd
 
 import (

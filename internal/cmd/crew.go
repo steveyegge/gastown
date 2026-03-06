@@ -1,3 +1,4 @@
+// crew.go implements the 'gt crew' command: Manage crew workers (persistent workspaces for humans).
 package cmd
 
 import (

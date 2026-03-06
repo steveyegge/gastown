@@ -1,3 +1,4 @@
+// sling_dog.go handles slinging work to dogs (cross-rig infrastructure workers).
 package cmd
 
 import (

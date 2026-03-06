@@ -1,3 +1,4 @@
+// session_name_check.go — tmuxRenamer is the minimal tmux interface needed by Fix()
 package doctor
 
 import (

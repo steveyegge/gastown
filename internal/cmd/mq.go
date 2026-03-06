@@ -1,3 +1,4 @@
+// mq.go implements the 'gt mq' command: Merge queue operations.
 package cmd
 
 import (

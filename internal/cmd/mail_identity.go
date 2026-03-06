@@ -1,3 +1,4 @@
+// mail_identity.go resolves mail sender/recipient identities from the workspace context.
 package cmd
 
 import (

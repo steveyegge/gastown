@@ -1,3 +1,4 @@
+// theme.go implements the 'gt theme' command: View or set tmux theme for the current rig.
 package cmd
 
 import (

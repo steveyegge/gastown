@@ -1,3 +1,4 @@
+// resume.go implements the 'gt resume' command: Check for handoff messages.
 package cmd
 
 import (

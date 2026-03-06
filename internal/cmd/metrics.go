@@ -1,3 +1,4 @@
+// metrics.go implements the 'gt metrics' command: Show command usage statistics.
 package cmd
 
 import (

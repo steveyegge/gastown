@@ -1,3 +1,4 @@
+// agent_log.go implements the 'gt agent log' command: Stream agent conversation events to OTLP log endpoint (invoked by session lifecycle).
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// memories.go implements the 'gt memories' command: List or search stored memories.
 package cmd
 
 import (

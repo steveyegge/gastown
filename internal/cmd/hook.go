@@ -1,3 +1,4 @@
+// hook.go implements the 'gt hook' command: Show or attach work on a hook.
 package cmd
 
 import (

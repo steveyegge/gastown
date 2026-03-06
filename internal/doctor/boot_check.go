@@ -1,3 +1,4 @@
+// boot_check.go — BootHealthCheck verifies Boot watchdog health
 package doctor
 
 import (

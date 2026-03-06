@@ -1,3 +1,4 @@
+// compact_report.go implements the 'gt compact report' command: Generate and send compaction digest report.
 package cmd
 
 import (

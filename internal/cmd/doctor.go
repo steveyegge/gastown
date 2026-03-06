@@ -1,3 +1,4 @@
+// doctor.go implements the 'gt doctor' command: Run health checks on the workspace.
 package cmd
 
 import (

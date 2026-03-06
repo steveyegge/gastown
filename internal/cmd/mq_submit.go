@@ -1,3 +1,5 @@
+// mq_submit.go implements the 'gt mq submit' command, submitting a branch
+// to the merge queue for automated integration testing and merge.
 package cmd
 
 import (

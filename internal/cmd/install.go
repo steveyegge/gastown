@@ -1,3 +1,4 @@
+// install.go implements the 'gt install' command: Create a new Gas Town HQ (workspace).
 package cmd
 
 import (

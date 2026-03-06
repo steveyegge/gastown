@@ -1,3 +1,4 @@
+// tap_guard.go implements the 'gt tap guard' command: Block forbidden operations (PreToolUse hook).
 package cmd
 
 import (

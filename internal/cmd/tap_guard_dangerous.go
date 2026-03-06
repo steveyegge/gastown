@@ -1,3 +1,4 @@
+// tap_guard_dangerous.go implements the 'gt tap guard dangerous' command: Block dangerous commands (rm -rf, force push, etc.).
 package cmd
 
 import (

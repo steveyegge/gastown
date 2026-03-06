@@ -1,3 +1,4 @@
+// synthesis.go implements the 'gt synthesis' command: Manage convoy synthesis steps.
 package cmd
 
 import (

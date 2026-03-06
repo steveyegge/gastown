@@ -1,3 +1,4 @@
+// patrol_report.go implements the 'gt patrol report' command: Close patrol cycle with summary and start next cycle.
 package cmd
 
 import (

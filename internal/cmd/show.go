@@ -1,3 +1,4 @@
+// show.go implements the 'gt show' command: Show details of a bead.
 package cmd
 
 import (

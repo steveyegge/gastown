@@ -1,3 +1,4 @@
+// broadcast.go implements the 'gt broadcast' command: Send a nudge message to all workers.
 package cmd
 
 import (

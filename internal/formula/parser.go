@@ -1,3 +1,5 @@
+// parser.go provides TOML parsing, structural validation, cycle detection,
+// topological sorting, and ready-step computation for formula definitions.
 package formula
 
 import (

@@ -1,3 +1,4 @@
+// refinery.go implements the 'gt refinery' command: Manage the Refinery (merge queue processor).
 package cmd
 
 import (

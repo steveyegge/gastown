@@ -1,3 +1,6 @@
+// mailbox.go provides the Mailbox type for reading, searching, and managing
+// an agent's messages, supporting both legacy JSONL files and beads-backed
+// storage with archive, thread, and delivery acknowledgment operations.
 package mail
 
 import (

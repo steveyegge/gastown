@@ -1,3 +1,4 @@
+// tmux_check.go — LinkedPaneCheck detects tmux sessions that share panes,
 package doctor
 
 import (

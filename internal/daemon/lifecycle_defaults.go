@@ -1,3 +1,4 @@
+// lifecycle_defaults.go — DefaultLifecycleConfig returns a DaemonPatrolConfig with sensible defaults
 package daemon
 
 // DefaultLifecycleConfig returns a DaemonPatrolConfig with sensible defaults

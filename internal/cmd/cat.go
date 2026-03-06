@@ -1,3 +1,4 @@
+// cat.go implements the 'gt cat' command: Display bead content.
 package cmd
 
 import (

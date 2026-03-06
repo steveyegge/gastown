@@ -1,3 +1,4 @@
+// wl_post.go implements the 'gt wl post' command: Post a new wanted item to the commons.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// molecule_dag.go implements the 'gt molecule dag' command: Visualize molecule dependency DAG.
 package cmd
 
 import (

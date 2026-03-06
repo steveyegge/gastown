@@ -1,3 +1,4 @@
+// sling_helpers.go provides shared utilities for the sling command family (bead resolution, rig lookup).
 package cmd
 
 import (

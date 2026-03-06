@@ -1,3 +1,4 @@
+// priming_check.go — PrimingCheck verifies the priming subsystem is correctly configured
 package doctor
 
 import (

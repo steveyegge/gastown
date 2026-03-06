@@ -1,5 +1,6 @@
 //go:build !windows
 
+// signals_unix.go provides daemonSignals and related functionality.
 package daemon
 
 import (

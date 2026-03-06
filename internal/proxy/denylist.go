@@ -1,3 +1,5 @@
+// denylist.go provides a thread-safe in-memory set of revoked certificate
+// serial numbers, checked during TLS handshakes to block compromised clients.
 package proxy
 
 import (

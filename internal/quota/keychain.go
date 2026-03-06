@@ -1,5 +1,7 @@
 //go:build darwin
 
+// keychain.go reads and writes OAuth tokens in the macOS Keychain
+// to support account rotation without exposing credentials on disk.
 package quota
 
 import (

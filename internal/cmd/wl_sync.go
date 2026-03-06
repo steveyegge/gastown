@@ -1,3 +1,4 @@
+// wl_sync.go implements the 'gt wl sync' command: Pull upstream changes into local wl-commons fork.
 package cmd
 
 import (

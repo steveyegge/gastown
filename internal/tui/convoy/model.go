@@ -1,3 +1,4 @@
+// model.go — convoyIDPattern validates convoy IDs
 package convoy
 
 import (

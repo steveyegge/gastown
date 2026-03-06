@@ -1,3 +1,4 @@
+// molecule_await_event.go implements the 'gt molecule await event' command: Wait for a file-based event on a named channel.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// telemetry.go records command usage metrics to a local JSONL file for operational insights.
 package cmd
 
 import (

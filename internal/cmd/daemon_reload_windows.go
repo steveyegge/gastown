@@ -1,5 +1,6 @@
 //go:build windows
 
+// daemon_reload_windows.go — signalDaemonReload is a no-op on Windows since SIGUSR2 is not available
 package cmd
 
 import (

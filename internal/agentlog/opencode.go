@@ -1,3 +1,6 @@
+// opencode.go is a placeholder AgentAdapter for OpenCode. It exists so the
+// adapter registry can recognize "opencode" as a valid agent type, but Watch
+// is not yet implemented.
 package agentlog
 
 import (

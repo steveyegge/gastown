@@ -1,3 +1,4 @@
+// maintain.go implements the 'gt maintain' command: Run full Dolt maintenance (reap + flatten + gc).
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// beads_binary_check.go — BeadsBinaryCheck verifies that the beads (bd) binary is installed and meets
 package doctor
 
 import (

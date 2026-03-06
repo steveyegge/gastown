@@ -1,3 +1,4 @@
+// branch_check.go — BranchCheck detects persistent infrastructure roles (witness, refinery)
 package doctor
 
 import (

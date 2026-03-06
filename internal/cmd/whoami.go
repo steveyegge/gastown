@@ -1,3 +1,4 @@
+// whoami.go implements the 'gt whoami' command: Show current identity for mail commands.
 package cmd
 
 import (

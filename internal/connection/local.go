@@ -1,3 +1,6 @@
+// local.go implements the Connection interface for operations on the local
+// machine, delegating to standard os, exec, and tmux calls. This is the
+// default connection type; remote connections (SSH) will use the same interface.
 package connection
 
 import (

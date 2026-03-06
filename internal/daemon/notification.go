@@ -1,3 +1,4 @@
+// notification.go — NotificationSlot tracks a pending notification for deduplication
 package daemon
 
 import (

@@ -1,3 +1,4 @@
+// version.go — CompareVersions compares two semver strings
 package deps
 
 import (

@@ -1,6 +1,7 @@
 // ABOUTME: Doctor check for Gas Town global state configuration.
 // ABOUTME: Validates that state directories and shell integration are properly configured.
 
+// global_state_check.go — ABOUTME: Doctor check for Gas Town global state configuration
 package doctor
 
 import (

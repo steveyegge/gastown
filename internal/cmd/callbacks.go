@@ -1,3 +1,4 @@
+// callbacks.go implements the 'gt callbacks' command: Handle agent callbacks.
 package cmd
 
 import (

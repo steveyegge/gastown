@@ -1,3 +1,4 @@
+// view.go — Styles for the convoy TUI
 package convoy
 
 import (

@@ -1,3 +1,6 @@
+// heartbeat.go manages polecat session heartbeat files, which agents write
+// periodically to signal liveness. The witness uses heartbeat staleness to
+// detect dead agents and trigger cleanup.
 package polecat
 
 import (

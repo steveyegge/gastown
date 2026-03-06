@@ -1,3 +1,6 @@
+// cost_tier.go defines predefined cost optimization tiers that control which
+// Claude model (Opus, Sonnet, Haiku) each Gas Town role uses. Tiers let
+// operators trade quality for cost without manually configuring each role.
 package config
 
 import (

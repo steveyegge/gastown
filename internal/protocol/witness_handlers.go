@@ -1,3 +1,6 @@
+// witness_handlers.go implements the default Witness protocol handler, which
+// processes merge outcome messages from the Refinery, notifies polecats of
+// results, and initiates cleanup for successfully merged work.
 package protocol
 
 import (

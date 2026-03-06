@@ -1,3 +1,4 @@
+// patrol_check.go — PatrolMoleculesExistCheck verifies that patrol formulas are accessible
 package doctor
 
 import (

@@ -1,3 +1,4 @@
+// upgrade.go implements the 'gt upgrade' command: Run post-install migration and sync workspace state.
 package cmd
 
 import (

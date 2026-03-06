@@ -1,5 +1,6 @@
 //go:build windows
 
+// signals_windows.go provides daemonSignals and related functionality.
 package daemon
 
 import (

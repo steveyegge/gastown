@@ -1,3 +1,4 @@
+// sling_dispatch.go — SlingParams captures everything needed to sling one bead to a rig
 package cmd
 
 import (

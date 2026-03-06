@@ -1,3 +1,4 @@
+// convoy_issues.go defines type trackedStatus struct.
 package feed
 
 import (

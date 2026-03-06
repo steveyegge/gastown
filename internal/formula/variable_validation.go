@@ -1,3 +1,6 @@
+// variable_validation.go validates that all {{variable}} template placeholders
+// used in formula text are defined in the [vars] or [inputs] sections, catching
+// missing-variable errors before runtime.
 package formula
 
 import (

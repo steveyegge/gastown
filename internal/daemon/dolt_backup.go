@@ -1,3 +1,4 @@
+// dolt_backup.go — doltBackupInterval returns the configured backup interval, or the default (15m)
 package daemon
 
 import (

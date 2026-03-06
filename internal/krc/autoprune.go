@@ -1,3 +1,6 @@
+// autoprune.go provides interval-gated automatic pruning of ephemeral
+// operational data, persisting prune state across invocations to avoid
+// redundant work.
 package krc
 
 import (

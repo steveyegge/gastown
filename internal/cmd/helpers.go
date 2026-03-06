@@ -1,3 +1,4 @@
+// helpers.go — inferRigFromCwd tries to determine the rig from the current directory
 package cmd
 
 import (

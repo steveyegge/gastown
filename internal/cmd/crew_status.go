@@ -1,3 +1,4 @@
+// crew_status.go — CrewStatusItem represents detailed status for a crew worker
 package cmd
 
 import (

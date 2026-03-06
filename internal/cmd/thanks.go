@@ -1,3 +1,4 @@
+// thanks.go implements the 'gt thanks' command: Thank the human contributors to Gas Town.
 package cmd
 
 import (

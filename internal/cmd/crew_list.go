@@ -1,3 +1,4 @@
+// crew_list.go — CrewListItem represents a crew worker in list output
 package cmd
 
 import (

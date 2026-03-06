@@ -1,3 +1,4 @@
+// lifecycle.go — BeadsMessage represents a message from gt mail inbox --json
 package daemon
 
 import (

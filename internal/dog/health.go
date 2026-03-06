@@ -1,3 +1,4 @@
+// health.go — sessionChecker abstracts the tmux health-check methods needed by the
 package dog
 
 import (

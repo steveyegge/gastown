@@ -1,3 +1,4 @@
+// compactor_dog.go — defaultCompactorCommitThreshold is the minimum commit count before compaction triggers
 package daemon
 
 import (

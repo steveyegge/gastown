@@ -1,3 +1,4 @@
+// mayor.go implements the 'gt mayor' command: Manage the Mayor (Chief of Staff for cross-rig coordination).
 package cmd
 
 import (

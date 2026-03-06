@@ -1,3 +1,4 @@
+// town_root_branch_check.go — TownRootBranchCheck verifies that the town root directory is on the main branch
 package doctor
 
 import (

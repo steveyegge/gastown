@@ -1,3 +1,4 @@
+// cycle.go implements the 'gt cycle' command: Cycle between sessions in the same group.
 package cmd
 
 import (

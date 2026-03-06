@@ -1,3 +1,4 @@
+// sling_validate.go — knownRoles lists valid second-segment roles in path-style sling targets
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// status.go implements the 'gt status' command: Show overall town status.
 package cmd
 
 import (

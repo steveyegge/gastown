@@ -1,3 +1,4 @@
+// rig_check.go — RigIsGitRepoCheck verifies the rig has a valid mayor/rig git clone
 package doctor
 
 import (

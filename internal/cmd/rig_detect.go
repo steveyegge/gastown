@@ -1,6 +1,7 @@
 // ABOUTME: Hidden command for shell hook to detect rigs and update cache.
 // ABOUTME: Called by shell integration to set GT_TOWN_ROOT and GT_RIG env vars.
 
+// rig_detect.go implements the 'gt rig detect' command: Detect rig from repository path (internal use).
 package cmd
 
 import (

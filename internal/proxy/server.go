@@ -1,3 +1,6 @@
+// server.go provides the mTLS proxy server that polecats connect to for
+// executing sandboxed commands, with certificate validation, deny list
+// enforcement, and configurable rate and concurrency limits.
 package proxy
 
 import (

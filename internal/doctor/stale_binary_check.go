@@ -1,3 +1,4 @@
+// stale_binary_check.go — StaleBinaryCheck verifies the installed gt binary is up to date with the repo
 package doctor
 
 import (

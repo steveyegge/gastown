@@ -1,3 +1,4 @@
+// rig_dock.go implements the 'gt rig dock' command: Dock a rig (global, persistent shutdown).
 package cmd
 
 import (

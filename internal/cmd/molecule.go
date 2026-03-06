@@ -1,3 +1,4 @@
+// molecule.go implements the 'gt molecule' command: Agent molecule workflow commands.
 package cmd
 
 import (

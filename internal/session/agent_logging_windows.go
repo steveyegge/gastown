@@ -1,5 +1,6 @@
 //go:build windows
 
+// agent_logging_windows.go — ActivateAgentLogging is a no-op on Windows: the detached subprocess relies on
 package session
 
 // ActivateAgentLogging is a no-op on Windows: the detached subprocess relies on

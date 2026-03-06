@@ -1,3 +1,4 @@
+// stale.go — SessionCreatedAt returns the time a tmux session was created
 package session
 
 import (

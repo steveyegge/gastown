@@ -1,5 +1,6 @@
 //go:build !windows
 
+// process_unix.go — isProcessRunning checks if a process with the given PID exists
 package cmd
 
 import "syscall"

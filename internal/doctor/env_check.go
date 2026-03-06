@@ -1,3 +1,4 @@
+// env_check.go — SessionEnvReader abstracts tmux session environment reads for testing
 package doctor
 
 import (

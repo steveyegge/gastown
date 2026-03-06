@@ -1,3 +1,4 @@
+// feed.go implements the 'gt feed' command: Show real-time activity feed of gt events.
 package cmd
 
 import (

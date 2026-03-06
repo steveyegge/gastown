@@ -1,3 +1,4 @@
+// worktree.go implements the 'gt worktree' command: Create worktree in another rig for cross-rig work.
 package cmd
 
 import (

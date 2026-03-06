@@ -1,3 +1,4 @@
+// mail_drain.go implements the 'gt mail drain' command: Bulk-archive stale protocol messages.
 package cmd
 
 import (

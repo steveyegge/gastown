@@ -1,3 +1,4 @@
+// townroot.go — TownRootCLAUDEmdVersion is the version of the embedded town-root CLAUDE.md
 package templates
 
 import (

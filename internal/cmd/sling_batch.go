@@ -1,3 +1,4 @@
+// sling_batch.go — runBatchSling handles slinging multiple beads to a rig
 package cmd
 
 import (

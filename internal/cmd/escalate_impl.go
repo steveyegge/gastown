@@ -1,3 +1,4 @@
+// escalate_impl.go provides runEscalate and related functionality.
 package cmd
 
 import (

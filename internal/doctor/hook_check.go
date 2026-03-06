@@ -1,3 +1,4 @@
+// hook_check.go — HookAttachmentValidCheck verifies that attached molecules exist and are not closed
 package doctor
 
 import (

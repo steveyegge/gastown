@@ -1,3 +1,4 @@
+// migration_check.go — DoltMetadataCheck verifies that all rig .beads/metadata.json files have
 package doctor
 
 import (

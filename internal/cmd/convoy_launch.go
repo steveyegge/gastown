@@ -1,3 +1,4 @@
+// convoy_launch.go implements the 'gt convoy launch' command: Launch a staged convoy: transition to open and dispatch Wave 1.
 package cmd
 
 import (

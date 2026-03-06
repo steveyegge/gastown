@@ -1,3 +1,4 @@
+// role.go implements the 'gt role' command: Show or manage agent role.
 package cmd
 
 import (

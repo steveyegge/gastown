@@ -1,3 +1,4 @@
+// mail_hook.go implements the 'gt mail hook' command: Attach mail to your hook (alias for 'gt hook attach').
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// beads_check.go — PrefixConflictCheck detects duplicate prefixes across rigs in routes.jsonl
 package doctor
 
 import (

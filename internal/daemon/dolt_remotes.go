@@ -1,3 +1,4 @@
+// dolt_remotes.go — doltRemotesInterval returns the configured push interval, or the default (15m)
 package daemon
 
 import (

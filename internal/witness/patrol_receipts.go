@@ -1,3 +1,4 @@
+// patrol_receipts.go — PatrolVerdict classifies witness patrol outcomes for machine consumers
 package witness
 
 import "strings"

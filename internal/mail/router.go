@@ -1,3 +1,6 @@
+// router.go implements message routing and delivery across agent boundaries.
+// It resolves addresses to the correct beads database, handles mailing lists,
+// queues, announce channels, and nudge-based delivery notifications.
 package mail
 
 import (

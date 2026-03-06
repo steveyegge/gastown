@@ -1,3 +1,4 @@
+// dolt_rebase.go implements the 'gt dolt rebase' command: Surgical compaction: squash old commits, keep recent ones.
 package cmd
 
 import (

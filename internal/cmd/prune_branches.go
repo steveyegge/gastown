@@ -1,3 +1,4 @@
+// prune_branches.go implements the 'gt prune branches' command: Remove stale local polecat tracking branches.
 package cmd
 
 import (

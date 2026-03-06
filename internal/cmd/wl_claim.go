@@ -1,3 +1,4 @@
+// wl_claim.go implements the 'gt wl claim' command: Claim a wanted item.
 package cmd
 
 import (

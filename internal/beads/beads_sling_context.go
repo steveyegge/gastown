@@ -1,3 +1,6 @@
+// beads_sling_context.go manages ephemeral sling context beads that track
+// scheduling state for work beads. The scheduler uses these to persist
+// assignment, retry, and capacity data without modifying the work bead itself.
 package beads
 
 import (

@@ -1,3 +1,4 @@
+// sparse_checkout_check.go — SparseCheckoutCheck detects legacy sparse checkout configurations that should be removed
 package doctor
 
 import (

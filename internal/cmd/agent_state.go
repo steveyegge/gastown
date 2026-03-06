@@ -1,3 +1,4 @@
+// agent_state.go implements the 'gt agent state' command: Get or set operational state on agent beads.
 package cmd
 
 import (

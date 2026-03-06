@@ -1,3 +1,4 @@
+// nudge.go implements the 'gt nudge' command: Send a synchronous message to any Gas Town worker.
 package cmd
 
 import (

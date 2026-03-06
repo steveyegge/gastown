@@ -1,3 +1,4 @@
+// stale.go implements the 'gt stale' command: Check if the gt binary is stale.
 package cmd
 
 import (

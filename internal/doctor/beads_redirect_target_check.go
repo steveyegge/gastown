@@ -1,3 +1,4 @@
+// beads_redirect_target_check.go — BeadsRedirectTargetCheck validates that .beads/redirect files in crew/polecat/refinery
 package doctor
 
 import (

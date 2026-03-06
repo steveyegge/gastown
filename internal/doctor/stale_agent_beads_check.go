@@ -1,3 +1,4 @@
+// stale_agent_beads_check.go — StaleAgentBeadsCheck detects agent beads that exist in the database but have
 package doctor
 
 import (

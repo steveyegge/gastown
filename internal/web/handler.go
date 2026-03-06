@@ -1,3 +1,4 @@
+// handler.go — ConvoyFetcher defines the interface for fetching convoy data
 package web
 
 import (

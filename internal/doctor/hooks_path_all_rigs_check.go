@@ -1,3 +1,4 @@
+// hooks_path_all_rigs_check.go — HooksPathAllRigsCheck verifies all clones across all rigs have core.hooksPath set
 package doctor
 
 import (

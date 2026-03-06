@@ -1,3 +1,6 @@
+// operational.go centralizes compiled-in default values for all operational
+// thresholds (timeouts, retry counts, pool sizes) and provides nil-safe
+// accessor methods that fall back to these defaults when no override is configured.
 package config
 
 import (

@@ -1,3 +1,4 @@
+// precheckout_hook_check.go — BranchProtectionCheck verifies that the post-checkout hook includes branch
 package doctor
 
 import (

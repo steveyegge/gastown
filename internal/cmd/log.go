@@ -1,3 +1,4 @@
+// log.go implements the 'gt log' command: View town activity log.
 package cmd
 
 import (

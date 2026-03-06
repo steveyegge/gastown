@@ -1,3 +1,4 @@
+// hooks_diff.go implements the 'gt hooks diff' command: Show what sync would change.
 package cmd
 
 import (

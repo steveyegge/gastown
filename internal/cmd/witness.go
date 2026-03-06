@@ -1,3 +1,4 @@
+// witness.go implements the 'gt witness' command: Manage the Witness (per-rig polecat health monitor).
 package cmd
 
 import (

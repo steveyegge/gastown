@@ -1,3 +1,4 @@
+// scheduler_epic.go implements epic-aware scheduling for dependency-ordered dispatch.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// api.go — CommandRequest is the JSON request body for /api/run
 package web
 
 import (

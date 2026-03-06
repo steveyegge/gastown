@@ -1,5 +1,6 @@
 //go:build !windows
 
+// daemon_reload_unix.go — signalDaemonReload sends SIGUSR2 to the daemon process to trigger a reload
 package cmd
 
 import (

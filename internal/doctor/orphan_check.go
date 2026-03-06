@@ -1,3 +1,4 @@
+// orphan_check.go — OrphanSessionCheck detects orphaned tmux sessions that don't match
 package doctor
 
 import (

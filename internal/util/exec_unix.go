@@ -1,5 +1,6 @@
 //go:build !windows
 
+// exec_unix.go — SetProcessGroup configures a command to run in its own process group so that
 package util
 
 import (

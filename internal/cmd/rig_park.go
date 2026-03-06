@@ -1,3 +1,4 @@
+// rig_park.go implements the 'gt rig park' command: Park one or more rigs (stops agents, daemon won't auto-restart).
 package cmd
 
 import (

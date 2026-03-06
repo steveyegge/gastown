@@ -1,3 +1,4 @@
+// sling_idempotency.go — normalizeAgentID trims surrounding whitespace and trailing slash for comparison
 package cmd
 
 import "strings"

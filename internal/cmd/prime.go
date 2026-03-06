@@ -1,3 +1,4 @@
+// prime.go implements the 'gt prime' command: Output role context for current directory.
 package cmd
 
 import (

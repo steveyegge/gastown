@@ -1,3 +1,4 @@
+// molecule_emit_event.go implements the 'gt molecule emit event' command: Emit a file-based event on a named channel.
 package cmd
 
 import (

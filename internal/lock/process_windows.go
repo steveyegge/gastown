@@ -1,5 +1,6 @@
 //go:build windows
 
+// process_windows.go — processExists checks if a process with the given PID exists and is alive
 package lock
 
 import (

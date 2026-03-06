@@ -1,3 +1,4 @@
+// tap.go implements the 'gt tap' command: Claude Code hook handlers.
 package cmd
 
 import (

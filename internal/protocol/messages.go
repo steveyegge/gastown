@@ -1,3 +1,6 @@
+// messages.go constructs and parses the structured mail messages exchanged
+// between Witness and Refinery agents during the merge pipeline, including
+// MERGE_READY, MERGED, MERGE_FAILED, REWORK_REQUEST, and CONVOY_NEEDS_FEEDING.
 package protocol
 
 import (

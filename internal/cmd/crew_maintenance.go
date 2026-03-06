@@ -1,3 +1,4 @@
+// crew_maintenance.go provides runCrewRename and related functionality.
 package cmd
 
 import (

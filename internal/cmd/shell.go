@@ -1,6 +1,7 @@
 // ABOUTME: Shell integration management commands.
 // ABOUTME: Install/remove shell hooks without full HQ setup.
 
+// shell.go implements the 'gt shell' command: Manage shell integration.
 package cmd
 
 import (

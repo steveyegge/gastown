@@ -1,3 +1,4 @@
+// notify.go implements the 'gt notify' command: Set notification level.
 package cmd
 
 import (

@@ -1,3 +1,5 @@
+// crew_at.go implements the 'gt crew at' command, attaching the terminal to
+// a crew worker's tmux session for interactive access.
 package cmd
 
 import (

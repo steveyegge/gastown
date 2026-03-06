@@ -1,3 +1,4 @@
+// ready.go implements the 'gt ready' command: Show work ready across town.
 package cmd
 
 import (

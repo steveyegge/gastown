@@ -1,3 +1,4 @@
+// activity.go implements the 'gt activity' command: Emit and view activity events.
 package cmd
 
 import (

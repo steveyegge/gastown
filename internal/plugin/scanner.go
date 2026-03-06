@@ -1,3 +1,6 @@
+// scanner.go discovers plugins by scanning town-level and rig-level plugin
+// directories for plugin.md files with TOML frontmatter, supporting rig-level
+// overrides of town-level plugins by name.
 package plugin
 
 import (

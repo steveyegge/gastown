@@ -1,3 +1,4 @@
+// polecat.go implements the 'gt polecat' command: Manage polecats (persistent identity, ephemeral sessions).
 package cmd
 
 import (

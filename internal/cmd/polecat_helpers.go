@@ -1,3 +1,4 @@
+// polecat_helpers.go — polecatTarget represents a polecat to operate on
 package cmd
 
 import (

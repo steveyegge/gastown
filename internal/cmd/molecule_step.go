@@ -1,3 +1,4 @@
+// molecule_step.go implements the 'gt molecule step' command: Complete step and auto-continue to next.
 package cmd
 
 import (

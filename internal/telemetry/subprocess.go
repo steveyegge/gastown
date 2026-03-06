@@ -1,3 +1,4 @@
+// subprocess.go — buildGTResourceAttrs builds the OTEL_RESOURCE_ATTRIBUTES value from GT context
 package telemetry
 
 import (

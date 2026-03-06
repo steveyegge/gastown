@@ -1,3 +1,5 @@
+// mq_status.go implements the 'gt mq status' command, displaying the current
+// state of merge requests in the queue.
 package cmd
 
 import (

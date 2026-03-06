@@ -1,3 +1,4 @@
+// pidtrack.go — pidStartTimeFunc is overridden in tests. This package's tests must NOT use
 package session
 
 import (

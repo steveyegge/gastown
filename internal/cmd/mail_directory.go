@@ -1,3 +1,4 @@
+// mail_directory.go implements the 'gt mail directory' command: List all valid mail recipient addresses.
 package cmd
 
 import (

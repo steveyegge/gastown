@@ -1,3 +1,4 @@
+// agents.go implements the 'gt agents' command: List Gas Town agent sessions.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// view.go — render produces the full TUI output
 package feed
 
 import (

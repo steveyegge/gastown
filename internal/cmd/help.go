@@ -1,3 +1,4 @@
+// help.go — colorizedHelpFunc wraps Cobra's default help with semantic coloring
 package cmd
 
 import (

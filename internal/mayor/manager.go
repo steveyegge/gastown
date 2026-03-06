@@ -1,3 +1,6 @@
+// manager.go provides the Manager type for starting, stopping, and querying
+// the mayor's tmux session, which serves as the central coordination agent
+// for a Gas Town deployment.
 package mayor
 
 import (

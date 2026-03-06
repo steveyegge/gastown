@@ -1,3 +1,4 @@
+// keys.go — KeyMap defines the key bindings for the feed TUI
 package feed
 
 import "github.com/charmbracelet/bubbles/key"

@@ -1,3 +1,4 @@
+// commands.go — CommandMeta describes a command's properties for the dashboard
 package web
 
 import (

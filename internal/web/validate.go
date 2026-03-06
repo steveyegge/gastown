@@ -1,3 +1,4 @@
+// validate.go — Validation patterns for user input
 package web
 
 import (

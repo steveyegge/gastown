@@ -1,3 +1,6 @@
+// stale_pid.go removes leftover dolt-server.pid files from beads directories
+// when the referenced process is no longer alive. Stale PID files cause bd to
+// connect to the wrong Dolt server, resulting in 30-second timeouts.
 package beads
 
 import (

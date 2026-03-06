@@ -1,3 +1,4 @@
+// model.go — Panel represents which panel has focus
 package feed
 
 import (

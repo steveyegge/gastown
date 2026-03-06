@@ -1,3 +1,4 @@
+// agent_beads_check.go — AgentBeadsCheck verifies that agent beads exist for all agents
 package doctor
 
 import (

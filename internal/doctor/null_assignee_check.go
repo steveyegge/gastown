@@ -1,3 +1,4 @@
+// null_assignee_check.go — NullAssigneeCheck detects in_progress beads with a NULL or empty assignee
 package doctor
 
 import (

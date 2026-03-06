@@ -1,3 +1,4 @@
+// done.go implements the 'gt done' command: Signal work ready for merge queue.
 package cmd
 
 import (

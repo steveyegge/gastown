@@ -1,3 +1,4 @@
+// setup.go — SetupHandler handles the setup flow when no workspace exists
 package web
 
 import (

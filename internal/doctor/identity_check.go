@@ -1,3 +1,4 @@
+// identity_check.go — IdentityCollisionCheck checks for agent identity collisions and stale locks
 package doctor
 
 import (

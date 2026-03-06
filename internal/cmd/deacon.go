@@ -1,3 +1,4 @@
+// deacon.go implements the 'gt deacon' command: Manage the Deacon (town-level watchdog).
 package cmd
 
 import (

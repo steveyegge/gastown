@@ -1,3 +1,5 @@
+// recording.go records plugin execution outcomes as ephemeral beads and
+// queries the run history for cooldown gate evaluation and status reporting.
 package plugin
 
 import (

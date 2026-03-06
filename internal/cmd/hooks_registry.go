@@ -1,3 +1,4 @@
+// hooks_registry.go implements the 'gt hooks registry' command: List available hooks from the registry.
 package cmd
 
 import (

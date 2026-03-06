@@ -1,3 +1,4 @@
+// rig_helpers.go — checkRigNotParkedOrDocked checks if a rig is parked or docked and returns
 package cmd
 
 import (

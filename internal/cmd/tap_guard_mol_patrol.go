@@ -1,3 +1,4 @@
+// tap_guard_mol_patrol.go implements the 'gt tap guard mol patrol' command: Block mol patrol in agent contexts.
 package cmd
 
 import (

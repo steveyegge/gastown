@@ -1,3 +1,4 @@
+// prime_session.go — hookInput represents the JSON input from LLM runtime hooks
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// routes_check.go — determineRigBeadsPath returns the correct route path for a rig based on its actual layout
 package doctor
 
 import (

@@ -1,3 +1,4 @@
+// lifecycle_check.go — LifecycleHygieneCheck detects and cleans up stale lifecycle state
 package doctor
 
 import (

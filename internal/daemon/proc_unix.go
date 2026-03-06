@@ -1,5 +1,6 @@
 //go:build unix
 
+// proc_unix.go — setSysProcAttr sets platform-specific process attributes
 package daemon
 
 import (

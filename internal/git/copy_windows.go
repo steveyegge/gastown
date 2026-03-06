@@ -1,5 +1,6 @@
 //go:build windows
 
+// copy_windows.go — copyDirPreserving copies a directory using robocopy, which preserves symlinks,
 package git
 
 import (

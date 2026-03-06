@@ -1,3 +1,4 @@
+// gitinit.go implements the 'gt gitinit' command: Initialize git repository for a Gas Town HQ.
 package cmd
 
 import (

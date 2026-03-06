@@ -1,3 +1,4 @@
+// version.go implements the 'gt version' command: Print version information.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// markdown.go — RenderMarkdown renders markdown text with glamour styling
 package ui
 
 import (

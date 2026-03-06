@@ -1,3 +1,4 @@
+// jsonl_bloat_check.go — CheckJSONLBloat detects when issues.jsonl is massively stale compared to the
 package doctor
 
 import (

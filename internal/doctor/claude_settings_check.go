@@ -1,3 +1,4 @@
+// claude_settings_check.go — gitFileStatus represents the git status of a file
 package doctor
 
 import (

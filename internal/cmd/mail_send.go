@@ -1,3 +1,4 @@
+// mail_send.go provides runMailSend and related functionality.
 package cmd
 
 import (

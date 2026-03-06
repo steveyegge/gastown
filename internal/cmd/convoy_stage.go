@@ -1,3 +1,4 @@
+// convoy_stage.go implements the 'gt convoy stage' command: Stage a convoy: analyze dependencies, compute waves, create staged convoy.
 package cmd
 
 import (

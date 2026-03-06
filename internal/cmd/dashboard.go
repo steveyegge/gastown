@@ -1,3 +1,4 @@
+// dashboard.go implements the 'gt dashboard' command: Start the convoy tracking web dashboard.
 package cmd
 
 import (

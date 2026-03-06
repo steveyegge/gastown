@@ -1,3 +1,4 @@
+// dolt_flatten.go implements the 'gt dolt flatten' command: Flatten database history to a single commit (NUCLEAR OPTION).
 package cmd
 
 import (

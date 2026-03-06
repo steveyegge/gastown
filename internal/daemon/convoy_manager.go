@@ -1,3 +1,4 @@
+// convoy_manager.go — convoyGracePeriod is how long after creation a convoy is immune from
 package daemon
 
 import (

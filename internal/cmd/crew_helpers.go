@@ -1,3 +1,4 @@
+// crew_helpers.go provides shared utilities for crew commands (rig inference, manager creation).
 package cmd
 
 import (

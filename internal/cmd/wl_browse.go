@@ -1,3 +1,4 @@
+// wl_browse.go implements the 'gt wl browse' command: Browse wanted items on the commons board.
 package cmd
 
 import (

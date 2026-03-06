@@ -1,3 +1,4 @@
+// crew_add.go — agentBeadUpserter captures the subset of bead operations needed by crew add
 package cmd
 
 import (

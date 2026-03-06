@@ -1,3 +1,4 @@
+// daemon_check.go — DaemonCheck verifies the daemon is running
 package doctor
 
 import (

@@ -1,3 +1,4 @@
+// hooks_sync_check.go — HooksSyncCheck verifies all settings.json files match what gt hooks sync would generate
 package doctor
 
 import (

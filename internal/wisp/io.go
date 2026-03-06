@@ -1,3 +1,4 @@
+// io.go — EnsureDir ensures the .beads directory exists in the given root
 package wisp
 
 import (

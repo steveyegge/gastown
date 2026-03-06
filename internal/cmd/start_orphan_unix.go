@@ -1,5 +1,6 @@
 //go:build !windows
 
+// start_orphan_unix.go — cleanupOrphanedClaude finds and kills orphaned Claude processes with a grace period
 package cmd
 
 import (

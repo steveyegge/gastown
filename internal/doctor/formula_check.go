@@ -1,3 +1,4 @@
+// formula_check.go — FormulaCheck verifies that embedded formulas are up-to-date
 package doctor
 
 import (

@@ -1,3 +1,4 @@
+// wl.go implements the 'gt wl' command: Wasteland federation commands.
 package cmd
 
 import (

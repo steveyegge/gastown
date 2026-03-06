@@ -1,5 +1,6 @@
 //go:build !windows
 
+// copy_unix.go — copyDirPreserving copies a directory using cp -a, which preserves symlinks,
 package git
 
 import (

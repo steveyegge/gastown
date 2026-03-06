@@ -1,3 +1,4 @@
+// rig_beads_check.go — RigBeadsCheck verifies that rig identity beads exist for all rigs
 package doctor
 
 import (

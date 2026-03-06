@@ -1,3 +1,4 @@
+// warrant.go implements the 'gt warrant' command: Manage death warrants for stuck agents.
 package cmd
 
 import (

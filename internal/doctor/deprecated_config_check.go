@@ -1,3 +1,4 @@
+// deprecated_config_check.go — DeprecatedMergeQueueKeysCheck detects stale deprecated keys in merge_queue config
 package doctor
 
 import (

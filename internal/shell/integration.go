@@ -1,6 +1,7 @@
 // ABOUTME: Shell integration installation and removal for Gas Town.
 // ABOUTME: Manages the shell hook in RC files with safe block markers.
 
+// integration.go — ABOUTME: Shell integration installation and removal for Gas Town
 package shell
 
 import (

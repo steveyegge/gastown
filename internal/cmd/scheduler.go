@@ -1,3 +1,4 @@
+// scheduler.go implements the 'gt scheduler' command: Manage dispatch scheduler.
 package cmd
 
 import (

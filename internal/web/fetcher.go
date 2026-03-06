@@ -1,3 +1,4 @@
+// fetcher.go — runCmd executes a command with a timeout and returns stdout
 package web
 
 import (

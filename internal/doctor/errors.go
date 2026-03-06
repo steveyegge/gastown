@@ -1,3 +1,4 @@
+// errors.go — Common errors
 package doctor
 
 import "errors"

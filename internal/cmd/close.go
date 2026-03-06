@@ -1,3 +1,4 @@
+// close.go implements the 'gt close' command: Close one or more beads.
 package cmd
 
 import (

@@ -1,5 +1,6 @@
 //go:build !windows
 
+// agent_logging_unix.go — ActivateAgentLogging spawns a detached `gt agent-log` process to stream the
 package session
 
 import (

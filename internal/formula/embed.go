@@ -1,3 +1,5 @@
+// embed.go embeds formula TOML files into the binary and manages their
+// provisioning, health checking, and safe updating on disk.
 package formula
 
 import (

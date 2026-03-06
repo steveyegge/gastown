@@ -1,3 +1,4 @@
+// start.go implements the 'gt start' command: Start Gas Town or a crew workspace.
 package cmd
 
 import (

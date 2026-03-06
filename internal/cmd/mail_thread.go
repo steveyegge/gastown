@@ -1,3 +1,4 @@
+// mail_thread.go provides runMailThread and related functionality.
 package cmd
 
 import (

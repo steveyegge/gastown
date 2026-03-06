@@ -1,3 +1,4 @@
+// tmux_global_env_check.go — GlobalEnvAccessor abstracts tmux global environment reads/writes for testing
 package doctor
 
 import (

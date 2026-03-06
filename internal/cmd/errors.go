@@ -1,3 +1,4 @@
+// errors.go — SilentExitError signals that the command should exit with a specific code
 package cmd
 
 import (

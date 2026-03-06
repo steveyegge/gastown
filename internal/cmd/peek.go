@@ -1,3 +1,4 @@
+// peek.go implements the 'gt peek' command: View recent output from a polecat or crew session.
 package cmd
 
 import (

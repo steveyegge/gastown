@@ -1,3 +1,4 @@
+// patrol_new.go implements the 'gt patrol new' command: Create a new patrol wisp with config variables.
 package cmd
 
 import (

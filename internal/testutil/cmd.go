@@ -1,3 +1,4 @@
+// cmd.go — CleanGTEnv returns os.Environ() with GT_* and BD_* variables removed, except
 package testutil
 
 import (

@@ -1,3 +1,7 @@
+// manager.go implements the crew worker lifecycle: creating clones, starting
+// and stopping tmux sessions, renaming, removing, and syncing crew workspaces.
+// Each crew worker gets an isolated git clone with shared beads and remotes
+// inherited from the parent rig.
 package crew
 
 import (

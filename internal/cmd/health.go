@@ -1,3 +1,4 @@
+// health.go implements the 'gt health' command: Show comprehensive system health.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// dolt.go — MinDoltVersion is the minimum compatible dolt version for this Gas Town release
 package deps
 
 import (

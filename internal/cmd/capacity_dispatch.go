@@ -1,3 +1,5 @@
+// capacity_dispatch.go implements capacity-aware work dispatch, routing beads to rigs
+// based on available polecat slots and current load.
 package cmd
 
 import (

@@ -1,3 +1,7 @@
+// integration.go provides integration branch detection and naming for epics.
+// It builds branch names from configurable templates, extracts metadata fields
+// from bead descriptions, and walks the parent chain to find the nearest epic
+// with an active integration branch.
 package beads
 
 import (

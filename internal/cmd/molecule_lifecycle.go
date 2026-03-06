@@ -1,3 +1,4 @@
+// molecule_lifecycle.go — runMoleculeBurn burns (destroys) the current molecule attachment
 package cmd
 
 import (

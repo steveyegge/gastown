@@ -1,3 +1,4 @@
+// cleanup.go implements the 'gt cleanup' command: Clean up orphaned Claude processes.
 package cmd
 
 import (

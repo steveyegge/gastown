@@ -1,3 +1,4 @@
+// mq_next.go implements the 'gt mq next' command: Show the highest-priority merge request.
 package cmd
 
 import (

@@ -1,3 +1,5 @@
+// molecule_status.go implements the 'gt mol status' command, displaying the current
+// molecule attachment and its progress through formula steps.
 package cmd
 
 import (

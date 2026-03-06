@@ -1,3 +1,4 @@
+// tap_list.go implements the 'gt tap list' command: List available tap handlers.
 package cmd
 
 import (

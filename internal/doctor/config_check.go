@@ -1,3 +1,4 @@
+// config_check.go — SettingsCheck verifies each rig has a settings/ directory
 package doctor
 
 import (

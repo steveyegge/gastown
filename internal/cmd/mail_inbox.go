@@ -1,3 +1,4 @@
+// mail_inbox.go implements the mail inbox display, listing messages for an agent.
 package cmd
 
 import (

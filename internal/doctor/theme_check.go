@@ -1,3 +1,4 @@
+// theme_check.go — ThemeCheck verifies tmux sessions have correct themes applied
 package doctor
 
 import (

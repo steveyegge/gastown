@@ -1,5 +1,6 @@
 //go:build windows
 
+// orphan_windows.go — OrphanedProcess represents a claude process running without a controlling terminal
 package util
 
 // OrphanedProcess represents a claude process running without a controlling terminal.

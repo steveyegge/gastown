@@ -1,3 +1,5 @@
+// daemon.go implements the Gas Town daemon, a long-running background service that
+// manages agent lifecycles, Dolt health, scheduled maintenance, and rig patrols.
 package daemon
 
 import (

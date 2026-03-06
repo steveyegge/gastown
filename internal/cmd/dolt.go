@@ -1,3 +1,4 @@
+// dolt.go implements the 'gt dolt' command: Manage the Dolt SQL server.
 package cmd
 
 import (

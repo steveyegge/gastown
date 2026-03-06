@@ -1,3 +1,4 @@
+// remember.go implements the 'gt remember' command: Store a persistent memory.
 package cmd
 
 import (

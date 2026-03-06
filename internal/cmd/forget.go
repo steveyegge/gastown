@@ -1,3 +1,4 @@
+// forget.go implements the 'gt forget' command: Remove a stored memory.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// info.go implements the 'gt info' command: Show Gas Town information and what's new.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// convoy.go implements the 'gt convoy' command: Track batches of work across rigs.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// crash_report_check.go — CrashReportCheck looks for recent macOS crash reports related to tmux or Claude
 package doctor
 
 import (

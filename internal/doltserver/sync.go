@@ -1,3 +1,4 @@
+// sync.go — SyncOptions controls the behavior of SyncDatabases
 package doltserver
 
 import (

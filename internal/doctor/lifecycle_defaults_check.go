@@ -1,3 +1,4 @@
+// lifecycle_defaults_check.go — LifecycleDefaultsCheck detects missing lifecycle patrol entries in daemon.json
 package doctor
 
 import (

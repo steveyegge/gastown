@@ -1,3 +1,4 @@
+// handler.go — Dog lifecycle defaults — now config-driven via operational.daemon thresholds
 package daemon
 
 import (

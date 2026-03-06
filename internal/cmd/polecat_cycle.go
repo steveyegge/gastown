@@ -1,3 +1,4 @@
+// polecat_cycle.go — cyclePolecatSession switches to the next or previous polecat session in the same rig
 package cmd
 
 import (

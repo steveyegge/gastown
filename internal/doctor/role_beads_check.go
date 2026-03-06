@@ -1,3 +1,4 @@
+// role_beads_check.go — RoleConfigCheck verifies that role configuration is valid
 package doctor
 
 import (

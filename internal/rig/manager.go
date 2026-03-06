@@ -1,3 +1,5 @@
+// manager.go handles rig lifecycle: adding and removing rigs, cloning
+// repositories, managing git worktrees, and persisting rig metadata.
 package rig
 
 import (

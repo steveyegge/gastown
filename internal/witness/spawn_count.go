@@ -1,3 +1,4 @@
+// spawn_count.go — respawnMu serializes in-process access to the respawn state file
 package witness
 
 import (

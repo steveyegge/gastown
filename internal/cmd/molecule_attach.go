@@ -1,3 +1,4 @@
+// molecule_attach.go provides runMoleculeAttach and related functionality.
 package cmd
 
 import (

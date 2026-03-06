@@ -1,3 +1,4 @@
+// doctor_dog.go — Operational constants — timeouts needed to perform checks
 package daemon
 
 import (

@@ -1,3 +1,4 @@
+// crew_lifecycle.go provides runCrewRemove and related functionality.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// rig_routes_jsonl_check.go — RigRoutesJSONLCheck detects and fixes routes.jsonl files in rig .beads directories
 package doctor
 
 import (

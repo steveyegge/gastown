@@ -1,3 +1,4 @@
+// workspace_check.go — TownConfigExistsCheck verifies mayor/town.json exists
 package doctor
 
 import (

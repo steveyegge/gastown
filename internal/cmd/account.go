@@ -1,3 +1,4 @@
+// account.go implements the 'gt account' command: Manage Claude Code accounts.
 package cmd
 
 import (

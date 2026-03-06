@@ -1,3 +1,4 @@
+// down.go implements the 'gt down' command: Stop all Gas Town services.
 package cmd
 
 import (

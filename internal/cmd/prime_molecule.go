@@ -1,3 +1,4 @@
+// prime_molecule.go — MoleculeCurrentOutput represents the JSON output of bd mol current
 package cmd
 
 import (

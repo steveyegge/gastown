@@ -1,3 +1,4 @@
+// orphans.go implements the 'gt orphans' command: Find lost polecat work.
 package cmd
 
 import (

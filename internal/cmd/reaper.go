@@ -1,3 +1,4 @@
+// reaper.go implements the 'gt reaper' command: Wisp and issue cleanup operations (Dog-callable helpers).
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// handlers.go — HungSessionThresholdMinutes is the number of minutes of tmux inactivity
 package witness
 
 import (

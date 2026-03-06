@@ -1,3 +1,4 @@
+// wisp_reaper.go — defaultWispReaperInterval is the patrol interval. Set to 1h since reaping
 package daemon
 
 import (

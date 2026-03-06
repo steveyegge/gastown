@@ -1,3 +1,6 @@
+// handlers.go provides the handler registry that dispatches incoming protocol
+// messages to type-specific handlers, along with interfaces for Witness and
+// Refinery protocol processing.
 package protocol
 
 import (

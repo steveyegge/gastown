@@ -1,3 +1,4 @@
+// vitals.go implements the 'gt vitals' command: Show unified health dashboard.
 package cmd
 
 import (

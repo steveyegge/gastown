@@ -1,3 +1,4 @@
+// seance.go implements the 'gt seance' command: Talk to your predecessor sessions.
 package cmd
 
 import (

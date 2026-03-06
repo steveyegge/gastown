@@ -1,3 +1,4 @@
+// unsling.go implements the 'gt unsling' command: Remove work from an agent's hook.
 package cmd
 
 import (

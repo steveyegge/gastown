@@ -1,3 +1,6 @@
+// claudecode.go implements the AgentAdapter for Claude Code by tailing its
+// JSONL conversation logs and emitting normalized agent events. It handles
+// session switching when Claude instances are created and destroyed.
 package agentlog
 
 import (

@@ -1,3 +1,4 @@
+// prime_output.go — outputPrimeContext outputs the role-specific context using templates or fallback
 package cmd
 
 import (

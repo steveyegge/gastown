@@ -1,3 +1,6 @@
+// config_yaml.go ensures the beads config.yaml file has the correct prefix
+// settings. It handles creation, update, and metadata-derived defaults so
+// that bd commands resolve issue IDs correctly.
 package beads
 
 import (

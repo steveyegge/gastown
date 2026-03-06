@@ -1,3 +1,4 @@
+// patrol_helpers.go provides shared configuration and utilities for patrol-based commands.
 package cmd
 
 import (

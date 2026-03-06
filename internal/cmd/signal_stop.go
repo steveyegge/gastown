@@ -1,3 +1,4 @@
+// signal_stop.go implements the 'gt signal stop' command: Stop hook handler — check for queued work at turn boundaries.
 package cmd
 
 import (

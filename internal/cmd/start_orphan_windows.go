@@ -1,5 +1,6 @@
 //go:build windows
 
+// start_orphan_windows.go — cleanupOrphanedClaude is a Windows stub
 package cmd
 
 import (

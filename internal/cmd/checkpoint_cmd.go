@@ -1,3 +1,4 @@
+// checkpoint_cmd.go implements the 'gt checkpoint cmd' command: Manage session checkpoints for crash recovery.
 package cmd
 
 import (

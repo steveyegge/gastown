@@ -1,3 +1,4 @@
+// scheduled_maintenance.go — defaultMaintenanceCheckInterval is how often the daemon checks if it's
 package daemon
 
 import (

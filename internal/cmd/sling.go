@@ -1,3 +1,4 @@
+// sling.go implements the 'gt sling' command: Assign work to an agent (THE unified work dispatch command).
 package cmd
 
 import (

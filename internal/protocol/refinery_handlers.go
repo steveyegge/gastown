@@ -1,3 +1,6 @@
+// refinery_handlers.go implements the default Refinery protocol handler, which
+// processes MERGE_READY messages from the Witness and sends merge outcome
+// notifications (MERGED, MERGE_FAILED, REWORK_REQUEST) back.
 package protocol
 
 import (

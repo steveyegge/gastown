@@ -1,3 +1,4 @@
+// session.go implements the 'gt session' command: Manage polecat sessions.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// manager.go — Common errors
 package deacon
 
 import (

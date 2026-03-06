@@ -1,3 +1,6 @@
+// loader.go loads, validates, and resolves Gas Town configuration files
+// including town config, town settings, and agent runtime configurations.
+// It also handles role-to-agent mapping and startup command construction.
 package config
 
 import (

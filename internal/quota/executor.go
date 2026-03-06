@@ -1,3 +1,5 @@
+// Package quota implements automatic account rotation for rate-limited Claude
+// sessions, swapping OAuth tokens via tmux to maintain continuous operation.
 package quota
 
 import (

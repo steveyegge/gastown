@@ -1,3 +1,6 @@
+// registry.go manages the machine registry, a persistent JSON file that maps
+// machine names to connection configurations (local or SSH). It provides
+// Connection instances for any registered machine, enabling multi-machine federation.
 package connection
 
 import (

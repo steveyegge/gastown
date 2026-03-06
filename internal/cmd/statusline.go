@@ -1,3 +1,4 @@
+// statusline.go implements the 'gt statusline' command: Output status line content for tmux (internal use).
 package cmd
 
 import (

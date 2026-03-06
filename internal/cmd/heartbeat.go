@@ -1,3 +1,4 @@
+// heartbeat.go implements the 'gt heartbeat' command: Update agent heartbeat state.
 package cmd
 
 import (

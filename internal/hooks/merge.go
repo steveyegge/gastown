@@ -1,3 +1,6 @@
+// merge.go implements the merge logic for combining a base hook configuration
+// with role-specific and rig-specific overrides, using matcher-based replacement
+// to support layered hook customization.
 package hooks
 
 import (

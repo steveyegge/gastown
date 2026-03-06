@@ -1,3 +1,4 @@
+// dolthub.go — dolthubAPIBase is the DoltHub REST API base URL
 package doltserver
 
 import (

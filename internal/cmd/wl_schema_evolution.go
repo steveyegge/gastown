@@ -1,3 +1,4 @@
+// wl_schema_evolution.go — SchemaChangeKind describes the type of schema change between two semver strings
 package cmd
 
 import (

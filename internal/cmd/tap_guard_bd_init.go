@@ -1,3 +1,4 @@
+// tap_guard_bd_init.go implements the 'gt tap guard bd init' command: Block bd init in wrong directories.
 package cmd
 
 import (

@@ -1,3 +1,4 @@
+// compact.go implements the 'gt compact' command: Compact expired wisps (TTL-based cleanup).
 package cmd
 
 import (

@@ -1,5 +1,6 @@
 //go:build !windows
 
+// sysproc_unix.go — setProcessGroup puts the command in its own process group so that signals
 package doltserver
 
 import (

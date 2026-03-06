@@ -1,5 +1,6 @@
 //go:build windows
 
+// proc_windows.go — setSysProcAttr sets platform-specific process attributes
 package daemon
 
 import (

@@ -1,3 +1,6 @@
+// delivery.go implements two-phase delivery tracking for mail messages.
+// Phase 1 marks a message as pending at send time; phase 2 acknowledges
+// receipt, enabling crash-safe delivery confirmation with idempotent retries.
 package mail
 
 import (

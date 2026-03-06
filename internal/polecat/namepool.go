@@ -1,3 +1,6 @@
+// namepool.go manages a bounded pool of themed polecat names drawn from
+// built-in or custom theme files. Names are allocated on creation, persist
+// across assignments, and are released only when a polecat is nuked.
 package polecat
 
 import (

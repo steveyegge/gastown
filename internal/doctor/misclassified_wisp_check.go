@@ -1,3 +1,4 @@
+// misclassified_wisp_check.go — CheckMisclassifiedWisps detects issues that should be marked as wisps but aren't
 package doctor
 
 import (

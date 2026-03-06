@@ -1,3 +1,4 @@
+// mail_announce.go — runMailAnnounces lists announce channels or reads messages from a channel
 package cmd
 
 import (

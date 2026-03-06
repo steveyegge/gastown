@@ -1,3 +1,4 @@
+// commit.go implements the 'gt commit' command: Git commit with automatic agent identity.
 package cmd
 
 import (

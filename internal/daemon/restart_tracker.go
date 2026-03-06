@@ -1,3 +1,4 @@
+// restart_tracker.go — RestartTrackerConfig holds configurable parameters for restart tracking
 package daemon
 
 import (

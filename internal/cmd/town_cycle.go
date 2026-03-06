@@ -1,3 +1,4 @@
+// town_cycle.go implements the 'gt town cycle' command: Town-level operations.
 package cmd
 
 import (

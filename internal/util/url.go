@@ -1,3 +1,4 @@
+// url.go — RedactURL strips credentials from a URL for safe logging
 package util
 
 import (

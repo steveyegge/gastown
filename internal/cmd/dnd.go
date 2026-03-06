@@ -1,3 +1,4 @@
+// dnd.go implements the 'gt dnd' command: Toggle Do Not Disturb mode for notifications.
 package cmd
 
 import (

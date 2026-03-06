@@ -1,3 +1,4 @@
+// sling_convoy.go — slingGenerateShortID generates a short random ID (5 lowercase chars)
 package cmd
 
 import (

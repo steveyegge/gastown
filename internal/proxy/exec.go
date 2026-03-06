@@ -1,3 +1,6 @@
+// exec.go implements the POST /v1/exec HTTP handler, which runs allowlisted
+// commands on behalf of authenticated polecat clients with per-identity rate
+// limiting and global concurrency caps.
 package proxy
 
 import (

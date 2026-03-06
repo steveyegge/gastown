@@ -1,3 +1,4 @@
+// dedup.go — MessageDeduplicator tracks processed message IDs to prevent duplicate handling
 package witness
 
 import "sync"

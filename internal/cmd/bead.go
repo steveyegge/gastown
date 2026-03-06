@@ -1,3 +1,4 @@
+// bead.go implements the 'gt bead' command: Bead management utilities.
 package cmd
 
 import (

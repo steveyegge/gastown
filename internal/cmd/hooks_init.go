@@ -1,3 +1,4 @@
+// hooks_init.go implements the 'gt hooks init' command: Bootstrap base config from existing settings.json files.
 package cmd
 
 import (

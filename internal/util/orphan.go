@@ -1,5 +1,6 @@
 //go:build !windows
 
+// orphan.go — minOrphanAge is the minimum age (in seconds) a process must be before
 package util
 
 import (
