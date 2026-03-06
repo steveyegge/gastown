@@ -56,3 +56,34 @@ func TestBuildWitnessStartCommand_AgentOverrideWins(t *testing.T) {
 		t.Errorf("expected GT_ROLE=gastown/witness in command, got %q", got)
 	}
 }
+
+func TestBuildWitnessSessionEnv_MergesRoleConfigAndOverrides(t *testing.T) {
+	t.Parallel()
+	roleCfg := &beads.RoleConfig{
+		EnvVars: map[string]string{
+			"WITNESS_HOME": "{town}/{rig}/{role}",
+			"GT_ROLE":      "should-be-overridden",
+		},
+	}
+
+	got := buildWitnessSessionEnv("gastown", "/town", "gt-witness", "", "run-123", nil, roleCfg, []string{
+		"CUSTOM_FLAG=1",
+		"GT_ROLE=override/role",
+	})
+
+	if got["GT_RUN"] != "run-123" {
+		t.Fatalf("GT_RUN = %q, want %q", got["GT_RUN"], "run-123")
+	}
+	if got["WITNESS_HOME"] != "/town/gastown/witness" {
+		t.Fatalf("WITNESS_HOME = %q, want %q", got["WITNESS_HOME"], "/town/gastown/witness")
+	}
+	if got["CUSTOM_FLAG"] != "1" {
+		t.Fatalf("CUSTOM_FLAG = %q, want %q", got["CUSTOM_FLAG"], "1")
+	}
+	if got["GT_ROLE"] != "override/role" {
+		t.Fatalf("GT_ROLE = %q, want %q", got["GT_ROLE"], "override/role")
+	}
+	if got["BD_ACTOR"] != "gastown/witness" {
+		t.Fatalf("BD_ACTOR = %q, want %q", got["BD_ACTOR"], "gastown/witness")
+	}
+}
