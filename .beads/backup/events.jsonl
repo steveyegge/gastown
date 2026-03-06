@@ -102,3 +102,19 @@
 {"actor":"sfgastown/witness","comment":null,"created_at":"2026-03-03T21:43:55Z","event_type":"closed","id":172,"issue_id":"st-wisp-z0j1q","new_value":"Cleanup: closed patrol wisps from previous cycles","old_value":""}
 {"actor":"sfgastown/witness","comment":null,"created_at":"2026-03-03T21:43:56Z","event_type":"closed","id":173,"issue_id":"st-wisp-z6qcl","new_value":"Cleanup: closed patrol wisps from previous cycles","old_value":""}
 {"actor":"sfgastown/witness","comment":null,"created_at":"2026-03-03T21:43:56Z","event_type":"closed","id":174,"issue_id":"st-wisp-4idsk","new_value":"Cleanup: closed patrol wisps from previous cycles","old_value":""}
+{"actor":"deacon","comment":null,"created_at":"2026-03-04T12:48:16Z","event_type":"created","id":175,"issue_id":"st-yhwh","new_value":"","old_value":""}
+{"actor":"dog","comment":null,"created_at":"2026-03-04T18:35:20Z","event_type":"created","id":176,"issue_id":"st-w0iy","new_value":"","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-06T16:13:17Z","event_type":"created","id":177,"issue_id":"st-rodn","new_value":"","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-06T16:13:21Z","event_type":"created","id":178,"issue_id":"st-rodn.1","new_value":"","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-06T16:13:44Z","event_type":"created","id":179,"issue_id":"st-rodn.2","new_value":"","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-06T16:13:58Z","event_type":"created","id":180,"issue_id":"st-rodn.3","new_value":"","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-06T16:16:23Z","event_type":"closed","id":181,"issue_id":"st-rodn.1","new_value":"Closed","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-06T16:18:04Z","event_type":"closed","id":182,"issue_id":"st-rodn.2","new_value":"Closed","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-06T16:18:31Z","event_type":"closed","id":183,"issue_id":"st-rodn.3","new_value":"Closed","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-06T16:18:39Z","event_type":"closed","id":184,"issue_id":"st-rodn","new_value":"all steps complete","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-06T19:53:41Z","event_type":"created","id":185,"issue_id":"st-iqou","new_value":"","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-06T19:54:04Z","event_type":"created","id":186,"issue_id":"st-iqou.1","new_value":"","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-06T19:54:24Z","event_type":"created","id":187,"issue_id":"st-iqou.2","new_value":"","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-06T19:54:41Z","event_type":"created","id":188,"issue_id":"st-iqou.3","new_value":"","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-07T08:55:55Z","event_type":"created","id":189,"issue_id":"st-5qap","new_value":"","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-07T08:58:32Z","event_type":"closed","id":190,"issue_id":"st-5qap","new_value":"Test verification complete - cross-rig snapshots working","old_value":""}
