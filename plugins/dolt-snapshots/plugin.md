@@ -81,14 +81,26 @@ This is one of three event-gated plugins sharing the same Go binary:
 Each fires on its specific event. The binary is idempotent — it checks all
 convoys and creates whichever tags/branches are missing.
 
-## Step 1: Build and run the snapshot binary
+## Step 1: Build and start the snapshot watcher
 
 The Go binary handles all Dolt operations with parameterized SQL.
 It connects using gastown's standard Dolt config (127.0.0.1:3307, root, no password)
 and reads routes.jsonl to discover rig databases.
 
+In `--watch` mode, the binary tails `~/.events.jsonl` and runs a snapshot cycle
+immediately (<1s) when convoy events are detected. This is much faster than the
+~60s deacon patrol polling approach — critical for `convoy.launched` where agents
+start writing to databases immediately.
+
 ```bash
 PLUGIN_DIR="$(dirname "$0")"
+PIDFILE="$PLUGIN_DIR/.snapshot.pid"
+
+# If watcher already running, skip
+if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+  echo "Snapshot watcher already running (PID $(cat "$PIDFILE"))"
+  exit 0
+fi
 
 # Build if binary missing or source is newer
 if [ ! -f "$PLUGIN_DIR/snapshot" ] || [ "$PLUGIN_DIR/main.go" -nt "$PLUGIN_DIR/snapshot" ]; then
@@ -100,13 +112,19 @@ if [ ! -f "$PLUGIN_DIR/snapshot" ] || [ "$PLUGIN_DIR/main.go" -nt "$PLUGIN_DIR/s
   fi
 fi
 
-# Run snapshot cycle with cleanup
+# Run one-shot first to catch up on anything missed while watcher was down
 "$PLUGIN_DIR/snapshot" --cleanup --routes "$HOME/gt/.beads/routes.jsonl"
 SNAPSHOT_EXIT=$?
 
 if [ $SNAPSHOT_EXIT -ne 0 ]; then
-  echo "Snapshot binary exited with code $SNAPSHOT_EXIT"
+  echo "Snapshot catch-up exited with code $SNAPSHOT_EXIT"
 fi
+
+# Start watcher in background (sub-second response to convoy events)
+nohup "$PLUGIN_DIR/snapshot" --watch --routes "$HOME/gt/.beads/routes.jsonl" \
+  >> "$PLUGIN_DIR/.snapshot.log" 2>&1 &
+echo $! > "$PIDFILE"
+echo "Snapshot watcher started (PID $!)"
 ```
 
 ## Step 2: Record result
@@ -119,5 +137,5 @@ fi
 
 bd create "dolt-snapshots: $RESULT" -t chore --ephemeral \
   -l type:plugin-run,plugin:dolt-snapshots,result:$RESULT \
-  -d "dolt-snapshots plugin completed with exit code $SNAPSHOT_EXIT" --silent 2>/dev/null || true
+  -d "dolt-snapshots plugin completed with exit code $SNAPSHOT_EXIT. Watcher started." --silent 2>/dev/null || true
 ```

@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -50,12 +51,20 @@ func main() {
 	routesFile := flag.String("routes", "", "Path to routes.jsonl (default: ~/gt/.beads/routes.jsonl)")
 	dryRun := flag.Bool("dry-run", false, "Show what would be done without making changes")
 	cleanup := flag.Bool("cleanup", false, "Also escalate stale convoy branches for review")
+	watch := flag.Bool("watch", false, "Watch events.jsonl and snapshot immediately on convoy events")
 	flag.Parse()
 
 	// Resolve defaults
 	h := resolveHost(*host)
 	p := resolvePort(*port)
 	rf := resolveRoutesFile(*routesFile)
+
+	if *watch {
+		if err := watchEvents(h, p, rf, *cleanup); err != nil {
+			log.Fatalf("Watch failed: %v", err)
+		}
+		return
+	}
 
 	dsn := fmt.Sprintf("root@tcp(%s:%s)/information_schema?parseTime=true&timeout=5s&readTimeout=30s&writeTimeout=30s", h, p)
 	db, err := sql.Open("mysql", dsn)
@@ -545,4 +554,96 @@ func escalateStale(db *sql.DB, databases []string, dryRun bool) {
 		fmt.Println("Escalation: stale branches should be reviewed and cleaned up.")
 		fmt.Println("Tags are never deleted — they are immutable and cheap.")
 	}
+}
+
+// convoyEvent is the minimal structure we parse from events.jsonl.
+type convoyEvent struct {
+	Type    string                 `json:"type"`
+	Payload map[string]interface{} `json:"payload"`
+}
+
+// watchEvents tails ~/.events.jsonl and runs a snapshot cycle immediately
+// when convoy lifecycle events are detected. This gives sub-second latency
+// compared to the ~60s deacon patrol polling approach.
+func watchEvents(host, port, routesFile string, cleanup bool) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot determine home dir: %w", err)
+	}
+	eventsPath := filepath.Join(home, "gt", ".events.jsonl")
+
+	file, err := os.Open(eventsPath)
+	if err != nil {
+		return fmt.Errorf("opening events file: %w", err)
+	}
+	defer file.Close()
+
+	// Seek to end — only process new events from this point forward
+	if _, err := file.Seek(0, io.SeekEnd); err != nil {
+		return fmt.Errorf("seeking to end: %w", err)
+	}
+
+	reader := bufio.NewReader(file)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	dsn := fmt.Sprintf("root@tcp(%s:%s)/information_schema?parseTime=true&timeout=5s&readTimeout=30s&writeTimeout=30s", host, port)
+
+	log.Printf("Watching %s for convoy events...", eventsPath)
+
+	for range ticker.C {
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				break // no more data available
+			}
+
+			var ev convoyEvent
+			if json.Unmarshal([]byte(line), &ev) != nil {
+				continue
+			}
+
+			switch ev.Type {
+			case "convoy.created", "convoy.staged", "convoy.launched", "convoy.closed":
+				convoyID, _ := ev.Payload["convoy_id"].(string)
+				log.Printf("Event: %s (convoy %s) — running snapshot cycle", ev.Type, convoyID)
+
+				db, err := sql.Open("mysql", dsn)
+				if err != nil {
+					log.Printf("ERROR opening DB: %v", err)
+					continue
+				}
+				db.SetMaxOpenConns(2)
+				db.SetConnMaxLifetime(time.Minute)
+
+				if err := db.Ping(); err != nil {
+					log.Printf("ERROR pinging DB: %v", err)
+					db.Close()
+					continue
+				}
+
+				databases, err := listDatabases(db)
+				if err != nil {
+					log.Printf("ERROR listing databases: %v", err)
+					db.Close()
+					continue
+				}
+
+				routes := loadRoutes(routesFile)
+				stats, err := snapshotConvoys(db, databases, routes, false)
+				if err != nil {
+					log.Printf("ERROR in snapshot cycle: %v", err)
+				} else {
+					log.Printf("Snapshot complete: %d tags, %d branches created", stats.tagsCreated, stats.branchesCreated)
+				}
+
+				if cleanup {
+					escalateStale(db, databases, false)
+				}
+
+				db.Close()
+			}
+		}
+	}
+	return nil
 }
