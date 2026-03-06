@@ -24,19 +24,30 @@ and orphaned dog sessions (tmux session exists but dog not in kennel).
 
 ## Step 1: Get valid rig prefixes
 
-Fetch the rig registry to know which session prefixes are legitimate:
+Fetch the rig registry to know which session prefixes are legitimate.
+Sessions are named using beads prefixes (e.g., `gt-crew-bear` where `gt` is
+the beads prefix for the `gastown` rig), so we need both rig names and beads
+prefixes from `rigs.json`:
 
 ```bash
-RIG_JSON=$(gt rig list --json 2>/dev/null)
-if [ $? -ne 0 ] || [ -z "$RIG_JSON" ]; then
-  echo "SKIP: could not get rig list"
+RIGS_JSON_PATH="${GT_TOWN_ROOT:-$HOME/gt}/mayor/rigs.json"
+if [ ! -f "$RIGS_JSON_PATH" ]; then
+  echo "SKIP: rigs.json not found at $RIGS_JSON_PATH"
   exit 0
 fi
 
-# Extract rig names as valid prefixes
-VALID_PREFIXES=$(echo "$RIG_JSON" | jq -r '.[].name // empty' 2>/dev/null)
+RIGS_FILE=$(cat "$RIGS_JSON_PATH" 2>/dev/null)
+if [ -z "$RIGS_FILE" ]; then
+  echo "SKIP: could not read rigs.json"
+  exit 0
+fi
+
+# Extract both rig names and beads prefixes as valid session prefixes
+RIG_NAMES=$(echo "$RIGS_FILE" | jq -r '.rigs | keys[]' 2>/dev/null)
+BEADS_PREFIXES=$(echo "$RIGS_FILE" | jq -r '.rigs[].beads.prefix // empty' 2>/dev/null)
+VALID_PREFIXES=$(printf '%s\n%s' "$RIG_NAMES" "$BEADS_PREFIXES" | sort -u)
 if [ -z "$VALID_PREFIXES" ]; then
-  echo "SKIP: no rigs found in registry"
+  echo "SKIP: no rigs found in rigs.json"
   exit 0
 fi
 ```
@@ -55,9 +66,11 @@ SESSION_COUNT=$(echo "$SESSIONS" | wc -l | tr -d ' ')
 
 ## Step 3: Identify zombie sessions
 
-A session is legitimate if its prefix matches a known rig or the `hq` namespace.
-Gas Town sessions follow the pattern `<prefix>-<role>-<name>` (e.g., `hq-dog-alpha`,
-`gastown-witness`, `gastown-polecat-slit`).
+A session is legitimate if its prefix matches a known rig name, beads prefix,
+or the `hq` namespace. Gas Town sessions follow the pattern
+`<prefix>-<role>-<name>` (e.g., `hq-dog-alpha`, `gt-crew-bear`,
+`lc-polecat-slit`) where the prefix is typically the beads prefix from
+`rigs.json`.
 
 ```bash
 ZOMBIES=()
