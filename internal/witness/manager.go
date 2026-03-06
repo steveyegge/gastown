@@ -187,35 +187,22 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Generate the GASTA run ID for this witness session.
 	runID := uuid.New().String()
 
+	// Compute the full witness environment before starting tmux so the initial
+	// shell inherits witness identity instead of the caller's GT_ROLE/GT_SESSION.
+	// Setting tmux env after session creation is too late for SessionStart hooks.
+	envVars := buildWitnessSessionEnv(m.rig.Name, townRoot, sessionID, agentOverride, runID, runtimeConfig, roleConfig, envOverrides)
+
 	// Create session with command directly to avoid send-keys race condition.
+	// Pass env up front so the first shell sees the correct witness identity.
 	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, witnessDir, command); err != nil {
+	// See: https://github.com/steveyegge/gastown/issues/1289
+	if err := t.NewSessionWithCommandAndEnv(sessionID, witnessDir, command, envVars); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:        "witness",
-		Rig:         m.rig.Name,
-		TownRoot:    townRoot,
-		Agent:       agentOverride,
-		SessionName: sessionID,
-	})
-	envVars = session.MergeRuntimeLivenessEnv(envVars, runtimeConfig)
+	// Keep tmux's session environment table in sync for respawn/liveness checks.
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
-	}
-	_ = t.SetEnvironment(sessionID, "GT_RUN", runID)
-	// Apply role config env vars if present (non-fatal).
-	for key, value := range roleConfigEnvVars(roleConfig, townRoot, m.rig.Name) {
-		_ = t.SetEnvironment(sessionID, key, value)
-	}
-	// Apply CLI env overrides (highest priority, non-fatal).
-	for _, override := range envOverrides {
-		if key, value, ok := strings.Cut(override, "="); ok {
-			_ = t.SetEnvironment(sessionID, key, value)
-		}
 	}
 
 	// Apply Gas Town theming (non-fatal: theming failure doesn't affect operation)
@@ -287,6 +274,29 @@ func roleConfigEnvVars(roleConfig *beads.RoleConfig, townRoot, rigName string) m
 		expanded[key] = beads.ExpandRolePattern(value, townRoot, rigName, "", "witness", session.PrefixFor(rigName))
 	}
 	return expanded
+}
+
+func buildWitnessSessionEnv(rigName, townRoot, sessionID, agentOverride, runID string, runtimeConfig *config.RuntimeConfig, roleConfig *beads.RoleConfig, envOverrides []string) map[string]string {
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:        "witness",
+		Rig:         rigName,
+		TownRoot:    townRoot,
+		Agent:       agentOverride,
+		SessionName: sessionID,
+	})
+	envVars = session.MergeRuntimeLivenessEnv(envVars, runtimeConfig)
+	envVars["GT_RUN"] = runID
+
+	for key, value := range roleConfigEnvVars(roleConfig, townRoot, rigName) {
+		envVars[key] = value
+	}
+	for _, override := range envOverrides {
+		if key, value, ok := strings.Cut(override, "="); ok {
+			envVars[key] = value
+		}
+	}
+
+	return envVars
 }
 
 func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOverride string, roleConfig *beads.RoleConfig) (string, error) {
