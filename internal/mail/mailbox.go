@@ -34,6 +34,7 @@ type Mailbox struct {
 	identity string // beads identity (e.g., "gastown/polecats/Toast")
 	workDir  string // directory to run bd commands in
 	beadsDir string // explicit .beads directory path (set via BEADS_DIR)
+	townRoot string // town root directory for cross-DB routing (e.g., ~/gt)
 	path     string // for legacy JSONL mode (crew workers)
 	legacy   bool   // true = use JSONL files, false = use beads
 }
@@ -240,6 +241,38 @@ func (m *Mailbox) identityVariants() []string {
 	return variants
 }
 
+// resolveBeadsDirForID returns the correct .beads directory for a bead ID.
+// If the ID has a prefix that maps to a rig-specific database (via routes.jsonl),
+// returns that rig's .beads directory. Otherwise returns m.beadsDir.
+//
+// This enables cross-DB operations: inbox listing aggregates across all DBs
+// via bd list's built-in routing, but show/close/label operate on a single DB.
+// Without this, operations on rig-prefixed messages (e.g., sm-wisp-*) fail with
+// "not found" when run against the town-level DB.
+func (m *Mailbox) resolveBeadsDirForID(id string) string {
+	if m.townRoot == "" {
+		return m.beadsDir
+	}
+
+	prefix := beads.ExtractPrefix(id)
+	if prefix == "" {
+		return m.beadsDir
+	}
+
+	rigPath := beads.GetRigPathForPrefix(m.townRoot, prefix)
+	if rigPath == "" {
+		return m.beadsDir
+	}
+
+	resolved := filepath.Join(rigPath, ".beads")
+	resolvedFinal := beads.ResolveBeadsDir(rigPath)
+	if resolvedFinal != "" {
+		resolved = resolvedFinal
+	}
+
+	return resolved
+}
+
 func (m *Mailbox) listLegacy() ([]*Message, error) {
 	file, err := os.Open(m.path)
 	if err != nil {
@@ -308,8 +341,7 @@ func (m *Mailbox) Get(id string) (*Message, error) {
 }
 
 func (m *Mailbox) getBeads(id string) (*Message, error) {
-	// Single DB query - wisps and persistent messages in same store
-	return m.getFromDir(id, m.beadsDir)
+	return m.getFromDir(id, m.resolveBeadsDirForID(id))
 }
 
 // getFromDir retrieves a message from a beads directory.
@@ -364,8 +396,7 @@ func (m *Mailbox) MarkRead(id string) error {
 }
 
 func (m *Mailbox) markReadBeads(id string) error {
-	// Single DB - wisps and persistent messages in same store
-	return m.closeInDir(id, m.beadsDir)
+	return m.closeInDir(id, m.resolveBeadsDirForID(id))
 }
 
 // closeInDir closes a message in a specific beads directory.
@@ -432,12 +463,12 @@ func (m *Mailbox) MarkReadOnly(id string) error {
 }
 
 func (m *Mailbox) markReadOnlyBeads(id string) error {
-	// Add "read" label to mark as read without closing
 	args := []string{"label", "add", id, "read"}
 
+	beadsDir := m.resolveBeadsDirForID(id)
 	ctx, cancel := bdWriteCtx()
 	defer cancel()
-	_, err := runBdCommand(ctx, args, m.workDir, m.beadsDir)
+	_, err := runBdCommand(ctx, args, m.workDir, beadsDir)
 	if err != nil {
 		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
 			return ErrMessageNotFound
@@ -459,12 +490,12 @@ func (m *Mailbox) MarkUnreadOnly(id string) error {
 }
 
 func (m *Mailbox) markUnreadOnlyBeads(id string) error {
-	// Remove "read" label to mark as unread
 	args := []string{"label", "remove", id, "read"}
 
+	beadsDir := m.resolveBeadsDirForID(id)
 	ctx, cancel := bdWriteCtx()
 	defer cancel()
-	_, err := runBdCommand(ctx, args, m.workDir, m.beadsDir)
+	_, err := runBdCommand(ctx, args, m.workDir, beadsDir)
 	if err != nil {
 		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
 			return ErrMessageNotFound
@@ -490,9 +521,10 @@ func (m *Mailbox) MarkUnread(id string) error {
 func (m *Mailbox) markUnreadBeads(id string) error {
 	args := []string{"reopen", id}
 
+	beadsDir := m.resolveBeadsDirForID(id)
 	ctx, cancel := bdWriteCtx()
 	defer cancel()
-	_, err := runBdCommand(ctx, args, m.workDir, m.beadsDir)
+	_, err := runBdCommand(ctx, args, m.workDir, beadsDir)
 	if err != nil {
 		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
 			return ErrMessageNotFound
@@ -1019,9 +1051,10 @@ func (m *Mailbox) ListByThread(threadID string) ([]*Message, error) {
 func (m *Mailbox) listByThreadBeads(threadID string) ([]*Message, error) {
 	args := []string{"message", "thread", threadID, "--json"}
 
+	beadsDir := m.resolveBeadsDirForID(threadID)
 	ctx, cancel := bdReadCtx()
 	defer cancel()
-	stdout, err := runBdCommand(ctx, args, m.workDir, m.beadsDir, "BD_IDENTITY="+m.identity)
+	stdout, err := runBdCommand(ctx, args, m.workDir, beadsDir, "BD_IDENTITY="+m.identity)
 	if err != nil {
 		return nil, err
 	}

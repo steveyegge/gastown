@@ -704,3 +704,83 @@ func TestMailboxLegacyAtomicArchive(t *testing.T) {
 	}
 }
 
+func TestResolveBeadsDirForID(t *testing.T) {
+	townRoot := t.TempDir()
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a rig directory with its own .beads
+	rigDir := filepath.Join(townRoot, "site_manager")
+	rigBeadsDir := filepath.Join(rigDir, ".beads")
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write routes.jsonl mapping sm- prefix to site_manager
+	routesContent := `{"prefix":"hq-","path":"."}
+{"prefix":"sm-","path":"site_manager"}
+`
+	if err := os.WriteFile(filepath.Join(townBeadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &Mailbox{
+		identity: "mayor/",
+		workDir:  townRoot,
+		beadsDir: townBeadsDir,
+		townRoot: townRoot,
+	}
+
+	tests := []struct {
+		name     string
+		id       string
+		wantDir  string
+	}{
+		{
+			name:    "town-level bead uses default beadsDir",
+			id:      "hq-wisp-abc123",
+			wantDir: townBeadsDir,
+		},
+		{
+			name:    "rig-prefixed bead routes to rig beadsDir",
+			id:      "sm-wisp-xyz789",
+			wantDir: rigBeadsDir,
+		},
+		{
+			name:    "unknown prefix falls back to default beadsDir",
+			id:      "zz-wisp-unknown",
+			wantDir: townBeadsDir,
+		},
+		{
+			name:    "empty ID falls back to default beadsDir",
+			id:      "",
+			wantDir: townBeadsDir,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := m.resolveBeadsDirForID(tt.id)
+			if got != tt.wantDir {
+				t.Errorf("resolveBeadsDirForID(%q) = %q, want %q", tt.id, got, tt.wantDir)
+			}
+		})
+	}
+}
+
+func TestResolveBeadsDirForID_NoTownRoot(t *testing.T) {
+	m := &Mailbox{
+		identity: "mayor/",
+		workDir:  "/some/dir",
+		beadsDir: "/some/dir/.beads",
+		townRoot: "",
+	}
+
+	got := m.resolveBeadsDirForID("sm-wisp-abc123")
+	if got != "/some/dir/.beads" {
+		t.Errorf("without townRoot, resolveBeadsDirForID should return default beadsDir, got %q", got)
+	}
+}
+

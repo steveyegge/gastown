@@ -1545,7 +1545,9 @@ func isSelfMail(from, to string) bool {
 func (r *Router) GetMailbox(address string) (*Mailbox, error) {
 	beadsDir := r.resolveBeadsDir()
 	workDir := filepath.Dir(beadsDir) // Parent of .beads
-	return NewMailboxFromAddress(address, workDir), nil
+	mb := NewMailboxFromAddress(address, workDir)
+	mb.townRoot = r.townRoot
+	return mb, nil
 }
 
 // notifyRecipient sends a notification to a recipient's tmux session.
