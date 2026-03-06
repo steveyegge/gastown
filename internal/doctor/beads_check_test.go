@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -619,5 +620,232 @@ func TestDatabasePrefixCheck_NoBeadsDir(t *testing.T) {
 	// Should be OK - no beads dir for the rig is fine
 	if result.Status != StatusOK {
 		t.Errorf("expected StatusOK when rig beads dir doesn't exist, got %v", result.Status)
+	}
+}
+
+// mockDBPrefixGetter returns canned prefixes by directory for testing.
+type mockDBPrefixGetter struct {
+	prefixes   map[string]string // rigPath -> prefix
+	setCalls   []prefixSetCall   // recorded Fix calls (not used by getter, but handy for the mock)
+}
+
+type prefixSetCall struct {
+	rigPath string
+	prefix  string
+}
+
+func (m *mockDBPrefixGetter) GetDBPrefix(rigPath string) (string, error) {
+	if p, ok := m.prefixes[rigPath]; ok {
+		return p, nil
+	}
+	return "", fmt.Errorf("no prefix configured")
+}
+
+func TestDatabasePrefixCheck_SkipsRigRedirectingToTownDB(t *testing.T) {
+	// Layout:
+	//   <town>/.beads/           <- town root beads (prefix "hq")
+	//   <town>/site_manager/.beads/redirect -> "../.beads"  (shares town DB)
+	//   routes.jsonl has both {"prefix":"hq-","path":"."} and {"prefix":"sm-","path":"site_manager"}
+	//
+	// Before the fix, the check would see site_manager's DB prefix is "hq" (because
+	// it shares the town DB), flag it as a mismatch with "sm", and --fix would
+	// overwrite the shared DB's prefix to "sm", breaking the town.
+
+	tmpDir := t.TempDir()
+
+	// Town-level .beads
+	townBeads := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(townBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// routes.jsonl: town root + site_manager
+	routesContent := `{"prefix":"hq-","path":"."}
+{"prefix":"sm-","path":"site_manager"}`
+	if err := os.WriteFile(filepath.Join(townBeads, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// site_manager/.beads/redirect -> ../.beads (shares town DB)
+	smBeads := filepath.Join(tmpDir, "site_manager", ".beads")
+	if err := os.MkdirAll(smBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(smBeads, "redirect"), []byte("../.beads\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &mockDBPrefixGetter{
+		prefixes: map[string]string{
+			filepath.Join(tmpDir, "site_manager"): "hq",
+		},
+	}
+
+	check := NewDatabasePrefixCheck()
+	check.prefixGetter = mock
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK (redirect rig should be skipped), got %v: %s\nDetails: %v",
+			result.Status, result.Message, result.Details)
+	}
+	if len(check.mismatches) != 0 {
+		t.Errorf("expected 0 mismatches, got %d: %+v", len(check.mismatches), check.mismatches)
+	}
+}
+
+func TestDatabasePrefixCheck_DetectsMismatchForOwnDB(t *testing.T) {
+	// A rig with its own .beads (no redirect) that has a wrong prefix
+	// should still be detected as a mismatch.
+
+	tmpDir := t.TempDir()
+
+	townBeads := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(townBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix":"hq-","path":"."}
+{"prefix":"mm-","path":"mission_manager"}`
+	if err := os.WriteFile(filepath.Join(townBeads, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// mission_manager has its own .beads (no redirect)
+	mmBeads := filepath.Join(tmpDir, "mission_manager", ".beads")
+	if err := os.MkdirAll(mmBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &mockDBPrefixGetter{
+		prefixes: map[string]string{
+			filepath.Join(tmpDir, "mission_manager"): "wrong",
+		},
+	}
+
+	check := NewDatabasePrefixCheck()
+	check.prefixGetter = mock
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusWarning {
+		t.Errorf("expected StatusWarning for prefix mismatch, got %v: %s", result.Status, result.Message)
+	}
+	if len(check.mismatches) != 1 {
+		t.Fatalf("expected 1 mismatch, got %d", len(check.mismatches))
+	}
+	m := check.mismatches[0]
+	if m.routesPrefix != "mm" || m.dbPrefix != "wrong" {
+		t.Errorf("unexpected mismatch data: routes=%q db=%q", m.routesPrefix, m.dbPrefix)
+	}
+}
+
+func TestDatabasePrefixCheck_MultipleRedirectsSameDB(t *testing.T) {
+	// Multiple rigs all redirect to the town DB. None should be flagged.
+
+	tmpDir := t.TempDir()
+
+	townBeads := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(townBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix":"hq-","path":"."}
+{"prefix":"sm-","path":"site_manager"}
+{"prefix":"cr-","path":"camera_relay"}
+{"prefix":"au-","path":"autostart"}`
+	if err := os.WriteFile(filepath.Join(townBeads, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// All three rigs redirect to town root
+	for _, rig := range []string{"site_manager", "camera_relay", "autostart"} {
+		rigBeads := filepath.Join(tmpDir, rig, ".beads")
+		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(rigBeads, "redirect"), []byte("../.beads\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mock := &mockDBPrefixGetter{
+		prefixes: map[string]string{
+			filepath.Join(tmpDir, "site_manager"): "hq",
+			filepath.Join(tmpDir, "camera_relay"): "hq",
+			filepath.Join(tmpDir, "autostart"):    "hq",
+		},
+	}
+
+	check := NewDatabasePrefixCheck()
+	check.prefixGetter = mock
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK (all redirect rigs skipped), got %v: %s\nDetails: %v",
+			result.Status, result.Message, result.Details)
+	}
+}
+
+func TestDatabasePrefixCheck_MixedOwnAndRedirect(t *testing.T) {
+	// Mix of rigs: some redirect to town DB (should be skipped), one has
+	// its own DB with a wrong prefix (should be flagged).
+
+	tmpDir := t.TempDir()
+
+	townBeads := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(townBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix":"hq-","path":"."}
+{"prefix":"sm-","path":"site_manager"}
+{"prefix":"mm-","path":"mission_manager"}`
+	if err := os.WriteFile(filepath.Join(townBeads, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// site_manager redirects to town DB
+	smBeads := filepath.Join(tmpDir, "site_manager", ".beads")
+	if err := os.MkdirAll(smBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(smBeads, "redirect"), []byte("../.beads\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// mission_manager has its own DB (no redirect) with wrong prefix
+	mmBeads := filepath.Join(tmpDir, "mission_manager", ".beads")
+	if err := os.MkdirAll(mmBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &mockDBPrefixGetter{
+		prefixes: map[string]string{
+			filepath.Join(tmpDir, "site_manager"):    "hq",
+			filepath.Join(tmpDir, "mission_manager"): "wrong",
+		},
+	}
+
+	check := NewDatabasePrefixCheck()
+	check.prefixGetter = mock
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusWarning {
+		t.Errorf("expected StatusWarning, got %v: %s", result.Status, result.Message)
+	}
+	if len(check.mismatches) != 1 {
+		t.Fatalf("expected 1 mismatch (only mission_manager), got %d: %+v",
+			len(check.mismatches), check.mismatches)
+	}
+	if check.mismatches[0].rigPath != "mission_manager" {
+		t.Errorf("expected mismatch for mission_manager, got %s", check.mismatches[0].rigPath)
 	}
 }

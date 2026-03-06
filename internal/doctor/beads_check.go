@@ -420,6 +420,25 @@ func (c *RoleLabelCheck) Fix(ctx *CheckContext) error {
 	return nil
 }
 
+// dbPrefixGetter abstracts querying the database for issue_prefix.
+// Allows mocking in tests without shelling out to bd.
+type dbPrefixGetter interface {
+	GetDBPrefix(rigPath string) (string, error)
+}
+
+// realDBPrefixGetter shells out to bd to query the database.
+type realDBPrefixGetter struct{}
+
+func (r *realDBPrefixGetter) GetDBPrefix(rigPath string) (string, error) {
+	cmd := exec.Command("bd", "config", "get", "issue_prefix")
+	cmd.Dir = rigPath
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 // DatabasePrefixCheck detects when a rig's database has a different issue_prefix
 // than what routes.jsonl specifies. This can happen when:
 // - The database was initialized with a different prefix
@@ -428,9 +447,15 @@ func (c *RoleLabelCheck) Fix(ctx *CheckContext) error {
 //
 // Unlike PrefixMismatchCheck (rigs.json ↔ routes.jsonl), this check verifies
 // the actual database configuration matches the routing table.
+//
+// Rigs that redirect to a shared database (e.g. the town root's .beads) are
+// skipped. Their database prefix is owned by the route that provides the
+// canonical database, not by the redirecting rig. Attempting to "fix" these
+// would overwrite the shared database's prefix with the rig's prefix.
 type DatabasePrefixCheck struct {
 	FixableCheck
-	mismatches []databasePrefixMismatch
+	mismatches     []databasePrefixMismatch
+	prefixGetter   dbPrefixGetter
 }
 
 type databasePrefixMismatch struct {
@@ -477,15 +502,26 @@ func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// Check if bd command is available
-	if _, err := exec.LookPath("bd"); err != nil {
-		return &CheckResult{
-			Name:     c.Name(),
-			Status:   StatusOK,
-			Message:  "beads not installed (skipped)",
-			Category: c.Category(),
+	// Check if bd command is available (skip when using injected mock)
+	if c.prefixGetter == nil {
+		if _, err := exec.LookPath("bd"); err != nil {
+			return &CheckResult{
+				Name:     c.Name(),
+				Status:   StatusOK,
+				Message:  "beads not installed (skipped)",
+				Category: c.Category(),
+			}
 		}
 	}
+
+	getter := c.prefixGetter
+	if getter == nil {
+		getter = &realDBPrefixGetter{}
+	}
+
+	// Resolve the town root's canonical beads directory so we can detect
+	// rigs that redirect to the shared town database.
+	townBeadsDir, _ := filepath.Abs(beads.ResolveBeadsDir(ctx.TownRoot))
 
 	var problems []string
 
@@ -495,26 +531,30 @@ func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Resolve the rig path and check beads directory exists
 		rigPath := filepath.Join(ctx.TownRoot, route.Path)
 		rigBeadsDir := beads.ResolveBeadsDir(rigPath)
 
 		// Check if beads directory exists
 		if _, err := os.Stat(rigBeadsDir); os.IsNotExist(err) {
-			continue // No beads dir for this rig
-		}
-
-		// Query database for issue_prefix by running bd from the rig directory
-		dbPrefix, err := c.getDBPrefix(rigPath)
-		if err != nil {
-			// No issue_prefix configured - that's OK
 			continue
 		}
 
-		// Normalize routes prefix (strip trailing hyphen)
+		// Skip rigs whose beads redirect resolves to the town root database.
+		// These rigs share the town DB; the prefix is owned by the town root
+		// route, not by this rig. "Fixing" them would overwrite the shared
+		// database's issue_prefix with the rig's route prefix.
+		absRigBeadsDir, _ := filepath.Abs(rigBeadsDir)
+		if absRigBeadsDir == townBeadsDir {
+			continue
+		}
+
+		dbPrefix, err := getter.GetDBPrefix(rigPath)
+		if err != nil {
+			continue
+		}
+
 		routesPrefix := strings.TrimSuffix(route.Prefix, "-")
 
-		// Compare prefixes
 		if dbPrefix != routesPrefix {
 			problems = append(problems, fmt.Sprintf("Route '%s': routes.jsonl says '%s', database has '%s'",
 				route.Path, routesPrefix, dbPrefix))
@@ -545,25 +585,14 @@ func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 }
 
-// getDBPrefix queries the database for issue_prefix config value.
-// Runs bd from the rig directory so it discovers the correct database.
-func (c *DatabasePrefixCheck) getDBPrefix(rigPath string) (string, error) {
-	cmd := exec.Command("bd", "config", "get", "issue_prefix")
-	cmd.Dir = rigPath
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
 // Fix updates database configs to match routes.jsonl prefixes.
+// Only fixes rigs with their own database; rigs that redirect to a shared
+// database are skipped by Run() and will not appear in c.mismatches.
 func (c *DatabasePrefixCheck) Fix(ctx *CheckContext) error {
-	// Re-run check to populate mismatches if needed
 	if len(c.mismatches) == 0 {
 		result := c.Run(ctx)
 		if result.Status == StatusOK {
-			return nil // Nothing to fix
+			return nil
 		}
 	}
 
