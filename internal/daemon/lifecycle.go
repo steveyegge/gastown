@@ -453,10 +453,19 @@ func (d *Daemon) getNeedsPreSync(config *beads.RoleConfig, parsed *ParsedIdentit
 // Uses role config if available, then role-based agent selection, then hardcoded defaults.
 // Includes beacon + role-specific instructions in the CLI prompt.
 func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIdentity) string {
-	// If role config is available, use it
+	// Role config start_command: only use when the resolved agent is Claude.
+	// Built-in role TOMLs hardcode "exec claude ..." which bypasses the
+	// declarative agent resolution system. Fall through to agent resolution
+	// so non-Claude agents (copilot, codex, etc.) get the correct command.
 	if roleConfig != nil && roleConfig.StartCommand != "" {
-		// Expand any patterns in the command
-		return beads.ExpandRolePattern(roleConfig.StartCommand, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType, session.PrefixFor(parsed.RigName))
+		rigPath := ""
+		if parsed != nil && parsed.RigName != "" {
+			rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
+		}
+		rc := config.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
+		if config.IsResolvedAgentClaude(rc) {
+			return beads.ExpandRolePattern(roleConfig.StartCommand, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType, session.PrefixFor(parsed.RigName))
+		}
 	}
 
 	rigPath := ""

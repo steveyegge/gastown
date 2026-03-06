@@ -1253,6 +1253,13 @@ func ResolveWorkerAgentConfig(workerName, townRoot, rigPath string) *RuntimeConf
 // When Provider is explicitly set, it's authoritative. When empty, the Command
 // is checked: bare "claude", a path ending in "/claude" (or "\claude" on Windows),
 // or an empty command (the default) all indicate Claude.
+// IsResolvedAgentClaude returns true if the RuntimeConfig represents a Claude agent.
+// Exported for use in witness/daemon code that needs to skip hardcoded
+// Claude start commands when a non-Claude agent is configured.
+func IsResolvedAgentClaude(rc *RuntimeConfig) bool {
+	return isClaudeAgent(rc)
+}
+
 func isClaudeAgent(rc *RuntimeConfig) bool {
 	if rc.Provider != "" {
 		return rc.Provider == "claude"

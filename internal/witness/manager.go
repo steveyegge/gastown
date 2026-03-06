@@ -301,7 +301,14 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOver
 		roleConfig = nil
 	}
 	if roleConfig != nil && roleConfig.StartCommand != "" {
-		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness", session.PrefixFor(rigName)), nil
+		// Skip the hardcoded start_command when a non-Claude agent is configured.
+		// Built-in role TOMLs hardcode "exec claude ..." which bypasses the
+		// declarative agent resolution system. Fall through to
+		// BuildStartupCommandFromConfig so the correct agent command is built.
+		rc := config.ResolveRoleAgentConfig("witness", townRoot, rigPath)
+		if config.IsResolvedAgentClaude(rc) {
+			return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness", session.PrefixFor(rigName)), nil
+		}
 	}
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
 		Recipient: session.BeaconRecipient("witness", "", rigName),
