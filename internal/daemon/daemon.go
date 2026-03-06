@@ -1010,8 +1010,8 @@ func (d *Daemon) checkDeaconHeartbeat() {
 
 	age := hb.Age()
 
-	// If heartbeat is fresh, nothing to do
-	if !hb.IsVeryStale() {
+	// If heartbeat is fresh (< 5 min), nothing to do
+	if hb.IsFresh() {
 		return
 	}
 
@@ -1030,13 +1030,18 @@ func (d *Daemon) checkDeaconHeartbeat() {
 		return
 	}
 
-	// Session exists but heartbeat is stale - Deacon is stuck
-	// PATCH-002: Reduced from 30m to 10m for faster recovery.
-	// Must be > backoff-max (5m) to avoid false positive kills during legitimate sleep.
-	if age > 10*time.Minute {
+	// Session exists but heartbeat is stale - Deacon may be stuck.
+	// gt-p7k: Use two-tier response — nudge for stale (5-15 min),
+	// kill only for very stale (>= 15 min). The previous logic gated on
+	// IsVeryStale() (>= 15 min) then checked age > 10 min, making the
+	// nudge path unreachable (dead code). Now nudge fires for 5-15 min
+	// staleness, giving the Deacon a chance to respond before killing.
+	// Kill threshold must be > backoff-max (5m) to avoid false positive
+	// kills during legitimate await-signal sleep.
+	if hb.IsVeryStale() {
 		d.restartStuckDeacon(sessionName)
 	} else {
-		// Stuck but not critically - nudge to wake up
+		// Stale but not very stale (5-15 min) - nudge to wake up
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
 		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
 			d.logger.Printf("Error nudging stuck Deacon: %v", err)
