@@ -43,14 +43,13 @@ func TestInstallForRole_RoleAware(t *testing.T) {
 }
 
 func TestInstallForRole_RoleAgnostic(t *testing.T) {
-	// OpenCode, Copilot, Pi, OMP have single templates
+	// OpenCode, Pi, OMP have single templates
 	tests := []struct {
 		provider  string
 		hooksDir  string
 		hooksFile string
 	}{
 		{"opencode", ".opencode/plugins", "gastown.js"},
-		{"copilot", ".copilot", "copilot-instructions.md"},
 		{"pi", ".pi/extensions", "gastown-hooks.js"},
 		{"omp", ".omp/hooks", "gastown-hook.ts"},
 	}
@@ -185,5 +184,32 @@ func TestInstallForRole_GeminiRoleAware(t *testing.T) {
 	want, _ := templateFS.ReadFile("templates/gemini/settings-autonomous.json")
 	if string(got) != string(want) {
 		t.Error("gemini autonomous: content mismatch")
+	}
+}
+
+func TestInstallForRole_CopilotRoleAware(t *testing.T) {
+	// Copilot uses gastown-autonomous.json / gastown-interactive.json naming
+	dir := t.TempDir()
+	err := InstallForRole("copilot", dir, dir, "polecat", ".github/hooks", "gastown.json", false)
+	if err != nil {
+		t.Fatalf("InstallForRole(copilot, polecat): %v", err)
+	}
+
+	got, _ := os.ReadFile(filepath.Join(dir, ".github/hooks", "gastown.json"))
+	want, _ := templateFS.ReadFile("templates/copilot/gastown-autonomous.json")
+	if string(got) != string(want) {
+		t.Error("copilot autonomous: content mismatch")
+	}
+
+	dir2 := t.TempDir()
+	err = InstallForRole("copilot", dir2, dir2, "crew", ".github/hooks", "gastown.json", false)
+	if err != nil {
+		t.Fatalf("InstallForRole(copilot, crew): %v", err)
+	}
+
+	got, _ = os.ReadFile(filepath.Join(dir2, ".github/hooks", "gastown.json"))
+	want, _ = templateFS.ReadFile("templates/copilot/gastown-interactive.json")
+	if string(got) != string(want) {
+		t.Error("copilot interactive: content mismatch")
 	}
 }

@@ -1037,8 +1037,8 @@ func TestCopilotAgentPreset(t *testing.T) {
 		t.Errorf("copilot ResumeStyle = %q, want flag", info.ResumeStyle)
 	}
 
-	if info.SupportsHooks {
-		t.Error("copilot should not support hooks (instructions file is not executable)")
+	if !info.SupportsHooks {
+		t.Error("copilot should support hooks (.github/hooks/*.json lifecycle hooks)")
 	}
 
 	if info.SupportsForkSession {
@@ -1132,21 +1132,21 @@ func TestCopilotProviderDefaults(t *testing.T) {
 		t.Errorf("defaultHooksProvider(copilot) = %q, want copilot", provider)
 	}
 
-	if !defaultHooksInformational("copilot") {
-		t.Error("defaultHooksInformational(copilot) should be true")
+	if defaultHooksInformational("copilot") {
+		t.Error("defaultHooksInformational(copilot) should be false (executable hooks)")
 	}
 	if defaultHooksInformational("claude") {
 		t.Error("defaultHooksInformational(claude) should be false")
 	}
 
 	dir := defaultHooksDir("copilot")
-	if dir != ".copilot" {
-		t.Errorf("defaultHooksDir(copilot) = %q, want .copilot", dir)
+	if dir != ".github/hooks" {
+		t.Errorf("defaultHooksDir(copilot) = %q, want .github/hooks", dir)
 	}
 
 	file := defaultHooksFile("copilot")
-	if file != "copilot-instructions.md" {
-		t.Errorf("defaultHooksFile(copilot) = %q, want copilot-instructions.md", file)
+	if file != "gastown.json" {
+		t.Errorf("defaultHooksFile(copilot) = %q, want gastown.json", file)
 	}
 
 	names := defaultProcessNames("copilot", "copilot")
