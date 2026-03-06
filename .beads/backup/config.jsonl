@@ -9,4 +9,5 @@
 {"key":"compaction_enabled","value":"false"}
 {"key":"issue_prefix","value":"gt"}
 {"key":"schema_version","value":"6"}
+{"key":"status.custom","value":"staged_ready,staged_warnings,status.custom (not set)"}
 {"key":"types.custom","value":"agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request"}
