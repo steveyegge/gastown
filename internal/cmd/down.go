@@ -258,20 +258,28 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Phase 4c: Clean up legacy "default" socket sessions.
-	// Old binaries created sessions on the "default" tmux socket. After
-	// transitioning to a per-town socket (e.g., "gt"), those ghost sessions
-	// persist and cause split-brain: the daemon sees them on "gt" but tools
-	// querying bare tmux see (or miss) them on "default".
+	// Phase 4c: Clean up legacy socket sessions.
+	// Old binaries created sessions on the "default" tmux socket or on the
+	// basename-only socket (e.g., "gt" instead of "gt-a1b2c3"). After
+	// transitioning to path-hashed sockets, ghost sessions on old sockets
+	// persist and cause split-brain.
 	if !downDryRun {
 		cleaned := cleanupLegacyDefaultSocket()
 		if cleaned > 0 {
 			printDownStatus("Legacy sessions", true, fmt.Sprintf("cleaned %d from 'default' socket", cleaned))
 		}
+		cleaned = cleanupLegacyBaseSocket(townRoot)
+		if cleaned > 0 {
+			printDownStatus("Legacy sessions", true, fmt.Sprintf("cleaned %d from old basename socket", cleaned))
+		}
 	} else {
 		count := countLegacyDefaultSocketSessions()
 		if count > 0 {
 			printDownStatus("Legacy sessions", true, fmt.Sprintf("%d would be cleaned from 'default' socket", count))
+		}
+		count = countLegacyBaseSocketSessions(townRoot)
+		if count > 0 {
+			printDownStatus("Legacy sessions", true, fmt.Sprintf("%d would be cleaned from old basename socket", count))
 		}
 	}
 
@@ -310,9 +318,10 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 6: Nuke tmux server (--nuke only)
-	// Each town uses a per-town tmux socket derived from the town directory name
-	// (see registry.go InitRegistry), so --nuke only affects this town's server.
-	// Users may also have opened custom windows/panes, so we require confirmation.
+	// Each town uses a per-town tmux socket derived from a hash of the town's
+	// canonical path (see registry.go townSocketName), so --nuke only affects
+	// this town's server. Users may also have opened custom windows/panes, so
+	// we require confirmation.
 	if downNuke {
 		socket := tmux.GetDefaultSocket()
 		socketLabel := "default"
@@ -323,9 +332,9 @@ func runDown(cmd *cobra.Command, args []string) error {
 			printDownStatus("Tmux server", true, fmt.Sprintf("would kill (socket: %s)", socketLabel))
 		} else if os.Getenv("GT_NUKE_ACKNOWLEDGED") == "" {
 			fmt.Println()
-			fmt.Printf("%s The --nuke flag kills the shared tmux server (socket: %s).\n",
+			fmt.Printf("%s The --nuke flag kills this town's tmux server (socket: %s).\n",
 				style.Bold.Render("⚠ BLOCKED:"), socketLabel)
-			fmt.Printf("All towns share this socket — this will destroy all tmux sessions, including any custom windows you opened.\n")
+			fmt.Printf("This will destroy all tmux sessions on this socket, including any custom windows you opened.\n")
 			fmt.Println()
 			fmt.Printf("To proceed, run with: %s\n", style.Bold.Render("GT_NUKE_ACKNOWLEDGED=1 gt down --nuke"))
 			allOK = false
@@ -598,6 +607,57 @@ func countLegacyDefaultSocketSessions() int {
 	}
 
 	legacyTmux := tmux.NewTmuxWithSocket("default")
+	sessions, err := legacyTmux.ListSessions()
+	if err != nil {
+		return 0
+	}
+
+	var count int
+	for _, sess := range sessions {
+		if session.IsKnownSession(sess) {
+			count++
+		}
+	}
+	return count
+}
+
+// cleanupLegacyBaseSocket removes Gas Town sessions left on the old basename-only
+// tmux socket (e.g., "gt") by binaries from before path-hashed socket names were
+// introduced (e.g., "gt-a1b2c3"). Returns the number of sessions cleaned.
+func cleanupLegacyBaseSocket(townRoot string) int {
+	currentSocket := tmux.GetDefaultSocket()
+	legacySocket := session.LegacySocketName(townRoot)
+	if currentSocket == legacySocket {
+		return 0 // Same socket, no migration needed
+	}
+
+	legacyTmux := tmux.NewTmuxWithSocket(legacySocket)
+	sessions, err := legacyTmux.ListSessions()
+	if err != nil {
+		return 0 // No server on legacy socket
+	}
+
+	var cleaned int
+	for _, sess := range sessions {
+		if session.IsKnownSession(sess) {
+			if err := legacyTmux.KillSessionWithProcesses(sess); err == nil {
+				cleaned++
+			}
+		}
+	}
+	return cleaned
+}
+
+// countLegacyBaseSocketSessions counts Gas Town sessions on the old basename-only
+// tmux socket (for dry-run output).
+func countLegacyBaseSocketSessions(townRoot string) int {
+	currentSocket := tmux.GetDefaultSocket()
+	legacySocket := session.LegacySocketName(townRoot)
+	if currentSocket == legacySocket {
+		return 0
+	}
+
+	legacyTmux := tmux.NewTmuxWithSocket(legacySocket)
 	sessions, err := legacyTmux.ListSessions()
 	if err != nil {
 		return 0

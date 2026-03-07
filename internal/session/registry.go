@@ -2,6 +2,8 @@
 package session
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -127,7 +129,7 @@ func InitRegistry(townRoot string) error {
 	socket := os.Getenv("GT_TMUX_SOCKET")
 	switch socket {
 	case "", "default", "auto":
-		socket = sanitizeTownName(filepath.Base(townRoot))
+		socket = townSocketName(townRoot)
 	}
 	tmux.SetDefaultSocket(socket)
 
@@ -152,6 +154,34 @@ var sanitizeRe = regexp.MustCompile(`[^a-z0-9-]+`)
 
 // sanitizeTownName cleans a town name to be a valid tmux socket name.
 // Lowercases, replaces non-alphanumeric characters with hyphens, trims hyphens.
+// townSocketName derives a unique tmux socket name from the full town path.
+// Uses the directory basename plus a short hash of the canonical path to ensure
+// uniqueness even when two towns share the same basename (e.g., ~/gt and ~/work/gt).
+// Format: "basename-hash6" (e.g., "gt-a1b2c3").
+func townSocketName(townRoot string) string {
+	base := sanitizeTownName(filepath.Base(townRoot))
+
+	// Resolve symlinks and get absolute path for a canonical representation.
+	canonical, err := filepath.EvalSymlinks(townRoot)
+	if err != nil {
+		canonical, err = filepath.Abs(townRoot)
+		if err != nil {
+			canonical = townRoot
+		}
+	}
+
+	h := sha256.Sum256([]byte(canonical))
+	suffix := hex.EncodeToString(h[:3]) // 6 hex chars = 3 bytes
+	return base + "-" + suffix
+}
+
+// LegacySocketName returns the old-format socket name (basename only, no hash)
+// used before path-based socket derivation was added. Used by gt down to clean
+// up sessions orphaned on the old socket during migration.
+func LegacySocketName(townRoot string) string {
+	return sanitizeTownName(filepath.Base(townRoot))
+}
+
 func sanitizeTownName(name string) string {
 	name = strings.ToLower(name)
 	name = sanitizeRe.ReplaceAllString(name, "-")
