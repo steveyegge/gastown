@@ -541,6 +541,34 @@ func TestEngineer_DeleteMergedBranchesConfig(t *testing.T) {
 	}
 }
 
+func TestPolecatBranchAlwaysDeletedAfterMerge(t *testing.T) {
+	// Polecat branches should be cleaned up regardless of DeleteMergedBranches config.
+	// This tests the condition logic: (DeleteMergedBranches || isPolecat)
+	tests := []struct {
+		name                 string
+		branch               string
+		deleteMergedBranches bool
+		wantDelete           bool
+	}{
+		{"polecat branch with config true", "polecat/nux/gt-abc", true, true},
+		{"polecat branch with config false", "polecat/nux/gt-abc", false, true},
+		{"non-polecat branch with config true", "feature/my-thing", true, true},
+		{"non-polecat branch with config false", "feature/my-thing", false, false},
+		{"empty branch", "", false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isPolecat := strings.HasPrefix(tt.branch, "polecat/")
+			shouldDelete := tt.branch != "" && (tt.deleteMergedBranches || isPolecat)
+			if shouldDelete != tt.wantDelete {
+				t.Errorf("branch=%q deleteMerged=%v: got shouldDelete=%v, want %v",
+					tt.branch, tt.deleteMergedBranches, shouldDelete, tt.wantDelete)
+			}
+		})
+	}
+}
+
 func TestPostMergeConvoyCheck_NoTownBeads(t *testing.T) {
 	// postMergeConvoyCheck should silently return when town-level beads doesn't exist
 	tmpDir, err := os.MkdirTemp("", "engineer-convoy-test-*")

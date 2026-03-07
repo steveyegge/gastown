@@ -964,8 +964,12 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 		}
 	}
 
-	// 2. Delete source branch if configured (local and remote)
-	if e.config.DeleteMergedBranches && mr.Branch != "" {
+	// 2. Delete source branch (local and remote).
+	// Polecat branches (polecat/*) are always cleaned up — they are ephemeral
+	// work branches that should never persist after merge. Other branches
+	// respect the DeleteMergedBranches config.
+	isPolecat := strings.HasPrefix(mr.Branch, "polecat/")
+	if mr.Branch != "" && (e.config.DeleteMergedBranches || isPolecat) {
 		if err := e.git.DeleteBranch(mr.Branch, true); err != nil {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete local branch %s: %v\n", mr.Branch, err)
 		} else {
