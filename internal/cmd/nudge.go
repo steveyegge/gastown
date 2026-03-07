@@ -188,9 +188,13 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 		// Brief settle, then check: if idle, drain queue and deliver directly.
 		time.Sleep(postQueueSettleDelay)
 		if t.IsIdle(sessionName) {
-			// Drain the queue to prevent double delivery, then deliver directly.
-			_, _ = nudge.Drain(townRoot, sessionName)
-			return t.NudgeSession(sessionName, prefixedMessage)
+			// Drain atomically claims queued entries (rename-based). If another
+			// process (e.g., the agent's hook) raced and drained first, we get
+			// an empty slice and skip delivery to avoid duplicates.
+			drained, _ := nudge.Drain(townRoot, sessionName)
+			if len(drained) > 0 {
+				return t.NudgeSession(sessionName, prefixedMessage)
+			}
 		}
 		return nil
 
