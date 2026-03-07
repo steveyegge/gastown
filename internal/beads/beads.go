@@ -58,20 +58,22 @@ func MaybePrependAllowStale(args []string) []string {
 // bd v0.59+ tree-format output ignores --json; --flat is required for JSON.
 // Exported for use by other packages that call bd list directly.
 func InjectFlatForListJSON(args []string) []string {
-	hasListCmd := false
+	// Only apply to top-level "bd list" commands (args[0] == "list"),
+	// not subcommands like "bd dep list" where --flat is unsupported.
+	if len(args) == 0 || args[0] != "list" {
+		return args
+	}
 	hasJSON := false
 	hasFlat := false
-	for _, a := range args {
+	for _, a := range args[1:] {
 		switch {
-		case a == "list":
-			hasListCmd = true
 		case a == "--json":
 			hasJSON = true
 		case a == "--flat":
 			hasFlat = true
 		}
 	}
-	if hasListCmd && hasJSON && !hasFlat {
+	if hasJSON && !hasFlat {
 		return append(args, "--flat")
 	}
 	return args
