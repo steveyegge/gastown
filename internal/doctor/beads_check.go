@@ -487,6 +487,9 @@ func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
+	// Resolve the town root beads dir so we can detect rigs that redirect to it.
+	townRootBeadsDir, _ := filepath.Abs(beads.ResolveBeadsDir(ctx.TownRoot))
+
 	var problems []string
 
 	for _, route := range routes {
@@ -498,6 +501,13 @@ func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
 		// Resolve the rig path and check beads directory exists
 		rigPath := filepath.Join(ctx.TownRoot, route.Path)
 		rigBeadsDir := beads.ResolveBeadsDir(rigPath)
+
+		// If the rig redirects to the town root's beads DB, skip it.
+		// Its prefix is owned by the town root route, not this rig's route.
+		absRigBeadsDir, _ := filepath.Abs(rigBeadsDir)
+		if absRigBeadsDir == townRootBeadsDir {
+			continue
+		}
 
 		// Check if beads directory exists
 		if _, err := os.Stat(rigBeadsDir); os.IsNotExist(err) {

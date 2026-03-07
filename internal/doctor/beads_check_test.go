@@ -621,3 +621,53 @@ func TestDatabasePrefixCheck_NoBeadsDir(t *testing.T) {
 		t.Errorf("expected StatusOK when rig beads dir doesn't exist, got %v", result.Status)
 	}
 }
+
+func TestDatabasePrefixCheck_SkipsSharedDB(t *testing.T) {
+	// Setup: town root with .beads, and a rig whose .beads/redirect
+	// points back to the town root's .beads. The check should skip
+	// this rig because it shares the town root's database.
+	tmpDir := t.TempDir()
+
+	// Create town root .beads directory
+	townBeadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create rig directory with .beads/redirect pointing to town root
+	rigDir := filepath.Join(tmpDir, "myrig", "mayor", "rig")
+	rigBeadsDir := filepath.Join(rigDir, ".beads")
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write redirect that resolves to town root's .beads
+	redirectPath := filepath.Join(rigBeadsDir, "redirect")
+	if err := os.WriteFile(redirectPath, []byte(filepath.Join(tmpDir, ".beads")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the redirect resolves to town root beads
+	resolved := beads.ResolveBeadsDir(rigDir)
+	expectedAbs, _ := filepath.Abs(townBeadsDir)
+	resolvedAbs, _ := filepath.Abs(resolved)
+	if resolvedAbs != expectedAbs {
+		t.Fatalf("redirect didn't resolve as expected: got %s, want %s", resolvedAbs, expectedAbs)
+	}
+
+	// Create routes.jsonl with a route for the rig
+	routesContent := `{"prefix":"mr-","path":"myrig/mayor/rig"}`
+	if err := os.WriteFile(filepath.Join(townBeadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewDatabasePrefixCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	// Should be OK — the rig redirects to town root's DB, so it's skipped
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK for rig sharing town DB, got %v: %s", result.Status, result.Message)
+	}
+}
