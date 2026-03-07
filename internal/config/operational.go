@@ -38,7 +38,7 @@ const (
 	DefaultMassDeathWindow                 = 30 * time.Second
 	DefaultMassDeathThreshold              = 3
 	DefaultDogIdleSessionTimeout           = 1 * time.Hour
-	DefaultPolecatIdleSessionTimeout       = 5 * time.Minute
+	DefaultPolecatIdleSessionTimeout       = 15 * time.Minute
 	DefaultDogIdleRemoveTimeout            = 4 * time.Hour
 	DefaultStaleWorkingTimeout             = 2 * time.Hour
 	DefaultMaxDogPoolSize                  = 4
@@ -303,7 +303,8 @@ func (d *DaemonThresholds) DogIdleSessionTimeoutD() time.Duration {
 
 // PolecatIdleSessionTimeoutD returns the configured or default polecat idle session timeout.
 // Polecats that have been idle (no hooked work, heartbeat state=idle) longer than this
-// threshold are auto-killed to prevent API slot burn. Default 5 minutes.
+// threshold are auto-killed to prevent API slot burn. Default 15 minutes — long enough
+// for polecats to run gt done after completing work, short enough to prevent hour-long burns.
 func (d *DaemonThresholds) PolecatIdleSessionTimeoutD() time.Duration {
 	if d != nil {
 		return ParseDurationOrDefault(d.PolecatIdleSessionTimeout, DefaultPolecatIdleSessionTimeout)

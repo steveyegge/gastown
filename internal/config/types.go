@@ -289,7 +289,7 @@ type DaemonThresholds struct {
 	DogIdleRemoveTimeout string `json:"dog_idle_remove_timeout,omitempty"`
 
 	// PolecatIdleSessionTimeout is how long a polecat can be idle before its session
-	// is killed to prevent API slot burn (default "5m"). Polecats are ephemeral workers;
+	// is killed to prevent API slot burn (default "15m"). Polecats are ephemeral workers;
 	// unlike dogs, they should not persist when idle.
 	PolecatIdleSessionTimeout string `json:"polecat_idle_session_timeout,omitempty"`
 
