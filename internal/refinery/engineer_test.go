@@ -650,6 +650,46 @@ func TestNotifyDeaconConvoyFeeding_AttemptsWhenConvoyID(t *testing.T) {
 	}
 }
 
+func TestNotifyMayorMergeComplete_AttemptsNudge(t *testing.T) {
+	// notifyMayorMergeComplete should attempt to nudge mayor.
+	// The nudge will fail (no tmux) but we verify the attempt via output.
+	tmpDir, err := os.MkdirTemp("", "engineer-notify-mayor-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	rigDir := filepath.Join(tmpDir, "testrig")
+	if err := os.MkdirAll(rigDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{
+		Name: "testrig",
+		Path: rigDir,
+	}
+
+	e := NewEngineer(r)
+	var buf bytes.Buffer
+	e.SetOutput(&buf)
+
+	mr := &MRInfo{
+		ID:          "gt-test",
+		SourceIssue: "gt-src",
+		Worker:      "testrig/alpha",
+	}
+	result := ProcessResult{
+		MergeCommit: "abc1234",
+	}
+	e.notifyMayorMergeComplete(mr, result)
+
+	output := buf.String()
+	// Should have attempted to send — either success or warning about failure
+	if !strings.Contains(output, "MERGE_COMPLETED") && !strings.Contains(output, "merge completion") {
+		t.Errorf("expected output mentioning MERGE_COMPLETED, got: %s", output)
+	}
+}
+
 func TestConvoyInfoDescriptionParsing(t *testing.T) {
 	// Test that landConvoySwarm correctly parses Molecule from description
 	tests := []struct {

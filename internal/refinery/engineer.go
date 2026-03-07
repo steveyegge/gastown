@@ -1571,16 +1571,21 @@ func (e *Engineer) notifyDeaconConvoyFeeding(mr *MRInfo) {
 
 // notifyMayorMergeComplete nudges the mayor after a successful merge so the
 // dispatcher can unblock dependent work without waiting for manual polling.
+// Note: the mayor-side handler for MERGE_COMPLETED is not yet implemented;
+// this nudge enables it without requiring a coordinated deploy.
 func (e *Engineer) notifyMayorMergeComplete(mr *MRInfo, result ProcessResult) {
-	nudgeMsg := fmt.Sprintf("MERGE_COMPLETE: mr=%s issue=%s worker=%s commit=%s",
+	nudgeMsg := fmt.Sprintf("MERGE_COMPLETED: mr=%s issue=%s worker=%s commit=%s",
 		mr.ID, mr.SourceIssue, mr.Worker, result.MergeCommit)
 	nudgeCmd := exec.Command("gt", "nudge", "mayor", nudgeMsg)
 	nudgeCmd.Dir = e.workDir
 	if err := nudgeCmd.Run(); err != nil {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to nudge mayor about merge completion for %s: %v\n", mr.ID, err)
 	} else {
-		_, _ = fmt.Fprintf(e.output, "[Engineer] Nudged mayor: MERGE_COMPLETE %s\n", mr.ID)
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Nudged mayor: MERGE_COMPLETED %s\n", mr.ID)
 	}
+
+	// Emit event to wake mayor from await-signal (mirrors deacon pattern).
+	_ = events.LogFeed(events.TypeNudge, e.rig.Name+"/refinery", events.NudgePayload("", "mayor", nudgeMsg))
 }
 
 // convoyInfo holds minimal info about a closed convoy for post-merge processing.
