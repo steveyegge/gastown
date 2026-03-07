@@ -6,13 +6,16 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/reaper"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var (
 	reaperDB       string
 	reaperPort     int
+	reaperHost     string
 	reaperMaxAge   string
 	reaperPurgeAge string
 	reaperMailAge  string
@@ -20,6 +23,38 @@ var (
 	reaperDryRun   bool
 	reaperJSON     bool
 )
+
+// resolveReaperDoltConfig resolves the Dolt server host and port using the
+// same precedence as other gt commands: config.yaml > GT_DOLT_PORT env > default.
+// This replaces hardcoded 127.0.0.1:3307 which broke when the server ran on
+// a different port (GH#2470).
+func resolveReaperDoltConfig() (host string, port int) {
+	host = "127.0.0.1"
+	port = doltserver.DefaultPort
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return
+	}
+	cfg := doltserver.DefaultConfig(townRoot)
+	port = cfg.Port
+	if cfg.Host != "" {
+		host = cfg.Host
+	}
+	return
+}
+
+// reaperEffectiveHostPort returns host/port to use, preferring explicit CLI
+// flags over the resolved config. This lets --port/--host override when set.
+func reaperEffectiveHostPort(cmd *cobra.Command) (string, int) {
+	host, port := resolveReaperDoltConfig()
+	if cmd.Flags().Changed("port") {
+		port = reaperPort
+	}
+	if cmd.Flags().Changed("host") {
+		host = reaperHost
+	}
+	return host, port
+}
 
 var reaperCmd = &cobra.Command{
 	Use:     "reaper",
@@ -43,7 +78,8 @@ var reaperDatabasesCmd = &cobra.Command{
 	Use:   "databases",
 	Short: "List databases available for reaping",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dbs := reaper.DiscoverDatabases("127.0.0.1", reaperPort)
+		host, port := reaperEffectiveHostPort(cmd)
+		dbs := reaper.DiscoverDatabases(host, port)
 		if reaperJSON {
 			fmt.Println(reaper.FormatJSON(dbs))
 		} else {
@@ -84,7 +120,8 @@ The Dog uses this to understand the state before deciding what to reap.`,
 			return fmt.Errorf("invalid --stale-age: %w", err)
 		}
 
-		db, err := reaper.OpenDB("127.0.0.1", reaperPort, reaperDB, 10*time.Second, 10*time.Second)
+		host, port := reaperEffectiveHostPort(cmd)
+		db, err := reaper.OpenDB(host, port, reaperDB, 10*time.Second, 10*time.Second)
 		if err != nil {
 			return fmt.Errorf("connect to %s: %w", reaperDB, err)
 		}
@@ -129,7 +166,8 @@ Returns the count of reaped wisps. Use --dry-run to preview.`,
 			return fmt.Errorf("invalid --max-age: %w", err)
 		}
 
-		db, err := reaper.OpenDB("127.0.0.1", reaperPort, reaperDB, 10*time.Second, 10*time.Second)
+		host, port := reaperEffectiveHostPort(cmd)
+		db, err := reaper.OpenDB(host, port, reaperDB, 10*time.Second, 10*time.Second)
 		if err != nil {
 			return fmt.Errorf("connect to %s: %w", reaperDB, err)
 		}
@@ -175,7 +213,8 @@ Returns counts of purged rows. Use --dry-run to preview.`,
 			return fmt.Errorf("invalid --mail-age: %w", err)
 		}
 
-		db, err := reaper.OpenDB("127.0.0.1", reaperPort, reaperDB, 30*time.Second, 30*time.Second)
+		host, port := reaperEffectiveHostPort(cmd)
+		db, err := reaper.OpenDB(host, port, reaperDB, 30*time.Second, 30*time.Second)
 		if err != nil {
 			return fmt.Errorf("connect to %s: %w", reaperDB, err)
 		}
@@ -220,7 +259,8 @@ Returns the count of closed issues. Use --dry-run to preview.`,
 			return fmt.Errorf("invalid --stale-age: %w", err)
 		}
 
-		db, err := reaper.OpenDB("127.0.0.1", reaperPort, reaperDB, 10*time.Second, 10*time.Second)
+		host, port := reaperEffectiveHostPort(cmd)
+		db, err := reaper.OpenDB(host, port, reaperDB, 10*time.Second, 10*time.Second)
 		if err != nil {
 			return fmt.Errorf("connect to %s: %w", reaperDB, err)
 		}
@@ -253,7 +293,8 @@ var reaperRunCmd = &cobra.Command{
 This is the inline fallback for when Dog dispatch is unavailable.
 Normally the daemon dispatches a Dog to execute the mol-dog-reaper formula.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		databases := reaper.DiscoverDatabases("127.0.0.1", reaperPort)
+		host, port := reaperEffectiveHostPort(cmd)
+		databases := reaper.DiscoverDatabases(host, port)
 		if reaperDB != "" {
 			databases = strings.Split(reaperDB, ",")
 		}
@@ -283,7 +324,7 @@ Normally the daemon dispatches a Dog to execute the mol-dog-reaper formula.`,
 				continue
 			}
 
-			db, err := reaper.OpenDB("127.0.0.1", reaperPort, dbName, 30*time.Second, 30*time.Second)
+			db, err := reaper.OpenDB(host, port, dbName, 30*time.Second, 30*time.Second)
 			if err != nil {
 				fmt.Printf("%s: connect error: %v\n", dbName, err)
 				continue
@@ -346,10 +387,12 @@ Normally the daemon dispatches a Dog to execute the mol-dog-reaper formula.`,
 }
 
 func init() {
-	// Shared flags
-	for _, cmd := range []*cobra.Command{reaperScanCmd, reaperReapCmd, reaperPurgeCmd, reaperAutoCloseCmd, reaperRunCmd} {
+	// Shared flags — port/host default is resolved at runtime via reaperEffectiveHostPort
+	// using doltserver.DefaultConfig (config.yaml > GT_DOLT_PORT > 3307).
+	for _, cmd := range []*cobra.Command{reaperScanCmd, reaperReapCmd, reaperPurgeCmd, reaperAutoCloseCmd, reaperRunCmd, reaperDatabasesCmd} {
 		cmd.Flags().StringVar(&reaperDB, "db", "", "Database name (required for single-db commands)")
-		cmd.Flags().IntVar(&reaperPort, "port", 3307, "Dolt server port")
+		cmd.Flags().IntVar(&reaperPort, "port", doltserver.DefaultPort, "Dolt server port (default: auto-detect from config)")
+		cmd.Flags().StringVar(&reaperHost, "host", "127.0.0.1", "Dolt server host (default: auto-detect from config)")
 		cmd.Flags().BoolVar(&reaperDryRun, "dry-run", false, "Report what would happen without acting")
 	}
 
