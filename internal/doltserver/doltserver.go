@@ -1317,7 +1317,7 @@ func SyncPortFiles(townRoot string, port int) error {
 	// Town-level .beads/ (hq)
 	townBeadsDir := filepath.Join(townRoot, ".beads")
 	if _, err := os.Stat(townBeadsDir); err == nil {
-		_ = os.WriteFile(filepath.Join(townBeadsDir, "dolt-server.port"), portStr, 0644)
+		writePortFileIfChanged(filepath.Join(townBeadsDir, "dolt-server.port"), portStr)
 	}
 
 	// Read rigs.json for all registered rigs
@@ -1341,10 +1341,20 @@ func SyncPortFiles(townRoot string, port int) error {
 		if _, err := os.Stat(beadsDir); err != nil {
 			continue // .beads/ dir doesn't exist for this rig
 		}
-		_ = os.WriteFile(filepath.Join(beadsDir, "dolt-server.port"), portStr, 0644)
+		writePortFileIfChanged(filepath.Join(beadsDir, "dolt-server.port"), portStr)
 	}
 
 	return nil
+}
+
+// writePortFileIfChanged writes the port file only if the content differs,
+// avoiding unnecessary writes when the port already matches.
+func writePortFileIfChanged(path string, portStr []byte) {
+	existing, err := os.ReadFile(path)
+	if err == nil && bytes.Equal(existing, portStr) {
+		return
+	}
+	_ = os.WriteFile(path, portStr, 0644)
 }
 
 // CheckPortFiles compares each rig's dolt-server.port against the expected port.
