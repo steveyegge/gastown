@@ -843,6 +843,125 @@ func TestCheckHandoffMarkerParsesReason(t *testing.T) {
 	})
 }
 
+// TestIsGitDir tests the isGitDir helper function.
+func TestIsGitDir(t *testing.T) {
+	t.Run("directory_with_git_dir", func(t *testing.T) {
+		dir := t.TempDir()
+		gitDir := filepath.Join(dir, ".git")
+		if err := os.Mkdir(gitDir, 0755); err != nil {
+			t.Fatalf("create .git dir: %v", err)
+		}
+		if !isGitDir(dir) {
+			t.Fatalf("expected isGitDir=true for directory with .git/")
+		}
+	})
+
+	t.Run("directory_with_git_file", func(t *testing.T) {
+		dir := t.TempDir()
+		// Worktrees use a .git file (not directory)
+		gitFile := filepath.Join(dir, ".git")
+		if err := os.WriteFile(gitFile, []byte("gitdir: /some/path"), 0644); err != nil {
+			t.Fatalf("create .git file: %v", err)
+		}
+		if !isGitDir(dir) {
+			t.Fatalf("expected isGitDir=true for directory with .git file (worktree)")
+		}
+	})
+
+	t.Run("directory_without_git", func(t *testing.T) {
+		dir := t.TempDir()
+		if isGitDir(dir) {
+			t.Fatalf("expected isGitDir=false for directory without .git")
+		}
+	})
+}
+
+// TestOutputGitRepoContext tests the nested git repo detection and output.
+func TestOutputGitRepoContext(t *testing.T) {
+	t.Run("multiple_nested_repos_shows_warning", func(t *testing.T) {
+		// Create a nested structure: townRoot/.git and townRoot/rig/polecats/name/.git
+		townRoot := t.TempDir()
+		if err := os.Mkdir(filepath.Join(townRoot, ".git"), 0755); err != nil {
+			t.Fatalf("create town .git: %v", err)
+		}
+
+		workDir := filepath.Join(townRoot, "myrig", "polecats", "alpha")
+		if err := os.MkdirAll(workDir, 0755); err != nil {
+			t.Fatalf("create workdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(workDir, ".git"), []byte("gitdir: /some/path"), 0644); err != nil {
+			t.Fatalf("create worktree .git: %v", err)
+		}
+
+		ctx := RoleContext{
+			Role:     RolePolecat,
+			Rig:      "myrig",
+			Polecat:  "alpha",
+			TownRoot: townRoot,
+			WorkDir:  workDir,
+		}
+
+		// Capture stdout
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		outputGitRepoContext(ctx)
+
+		w.Close()
+		var buf bytes.Buffer
+		io.Copy(&buf, r)
+		os.Stdout = oldStdout
+		output := buf.String()
+
+		if !strings.Contains(output, "Multiple git repos") {
+			t.Fatalf("expected nested repo warning, got: %s", output)
+		}
+		if !strings.Contains(output, "town HQ repo") {
+			t.Fatalf("expected town HQ label, got: %s", output)
+		}
+		if !strings.Contains(output, workDir) {
+			t.Fatalf("expected workdir path in output, got: %s", output)
+		}
+	})
+
+	t.Run("single_repo_no_output", func(t *testing.T) {
+		// Only workdir has .git, town root does not
+		townRoot := t.TempDir()
+		workDir := filepath.Join(townRoot, "myrig", "polecats", "alpha")
+		if err := os.MkdirAll(workDir, 0755); err != nil {
+			t.Fatalf("create workdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(workDir, ".git"), []byte("gitdir: /some/path"), 0644); err != nil {
+			t.Fatalf("create worktree .git: %v", err)
+		}
+
+		ctx := RoleContext{
+			Role:     RolePolecat,
+			Rig:      "myrig",
+			Polecat:  "alpha",
+			TownRoot: townRoot,
+			WorkDir:  workDir,
+		}
+
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		outputGitRepoContext(ctx)
+
+		w.Close()
+		var buf bytes.Buffer
+		io.Copy(&buf, r)
+		os.Stdout = oldStdout
+		output := buf.String()
+
+		if output != "" {
+			t.Fatalf("expected no output for single repo, got: %s", output)
+		}
+	})
+}
+
 // TestOutputContinuationDirective tests that the continuation directive
 // outputs the expected content without the full autonomous mode block (GH#1965).
 func TestOutputContinuationDirective(t *testing.T) {

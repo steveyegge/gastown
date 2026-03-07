@@ -382,6 +382,7 @@ func outputRoleContext(ctx RoleContext) (string, error) {
 		return "", err
 	}
 
+	outputGitRepoContext(ctx)
 	outputContextFile(ctx)
 	outputHandoffContent(ctx)
 	outputAttachmentStatus(ctx)

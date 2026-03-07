@@ -87,6 +87,20 @@ in git history — only a closed PR comment links them to the work.
 | `{{ .TownRoot }}/<rig>/crew/*` | Other agents' workspaces — don't use these |
 | `{{ .TownRoot }}/<rig>/polecats/*` | Polecat sandboxes — don't use these |
 
+### Nested Git Repos
+
+The town directory contains multiple nested git repos. Running git commands
+in the wrong directory operates on the WRONG repo:
+
+| Directory | Git Repo? | Purpose |
+|-----------|-----------|---------|
+| `{{ .TownRoot }}/` | Yes (HQ) | Town-level beads/events tracking — NOT your code |
+| `{{ .TownRoot }}/<rig>/` | No | Rig container — not a git repo |
+| `{{ .TownRoot }}/<rig>/mayor/rig/` | **Yes** | Codebase clone — commit code HERE |
+
+**Always verify `pwd` before git operations.** If you're at the town root or
+rig root, git commands will operate on the wrong repo.
+
 ---
 
 ## Your Role: MAYOR (Global Coordinator)

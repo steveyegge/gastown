@@ -73,6 +73,19 @@ git status && git add <files> && git commit -m "..." && git push
 gt done
 ```
 
+### Nested Git Repos
+
+The town directory contains multiple nested git repos. Running git commands
+in the wrong directory operates on the WRONG repo:
+
+| Directory | Git Repo? | Purpose |
+|-----------|-----------|---------|
+| `{{ .TownRoot }}/` | Yes (HQ) | Town-level beads/events tracking — NOT your code |
+| `{{ .TownRoot }}/{{ .RigName }}/` | No | Rig container — not a git repo |
+| `{{ .TownRoot }}/{{ .RigName }}/polecats/{{ .Polecat }}/` | **Yes (yours)** | YOUR worktree — all git ops here |
+
+**If `pwd` doesn't show your worktree path, `cd` back before running git.**
+
 ---
 
 ## ⚡ Theory of Operation: The Propulsion Principle

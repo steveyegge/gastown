@@ -116,6 +116,19 @@ You work from: {{ .WorkDir }}
 This is a full git clone of the project repository. You have complete autonomy
 over this workspace.
 
+### Nested Git Repos
+
+The town directory contains multiple nested git repos. Running git commands
+in the wrong directory operates on the WRONG repo:
+
+| Directory | Git Repo? | Purpose |
+|-----------|-----------|---------|
+| `{{ .TownRoot }}/` | Yes (HQ) | Town-level beads/events tracking — NOT your code |
+| `{{ .TownRoot }}/{{ .RigName }}/` | No | Rig container — not a git repo |
+| `{{ .TownRoot }}/{{ .RigName }}/crew/{{ .Polecat }}/` | **Yes (yours)** | YOUR git clone — all git ops here |
+
+**If `pwd` doesn't show your workspace path, `cd` back before running git.**
+
 ## Cross-Rig Worktrees
 
 When you need to work on a different rig, create a worktree in the target rig:

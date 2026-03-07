@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -188,6 +189,12 @@ func outputPolecatContext(ctx RoleContext) {
 	fmt.Println("3. Look for '📋 Work Assignment' messages for your task")
 	fmt.Println("4. If no mail, check `bd list --status=in_progress` for existing work")
 	fmt.Println()
+	fmt.Println("## Directory Discipline")
+	fmt.Printf("**YOUR worktree**: `%s` — ALL git ops must happen here.\n", ctx.WorkDir)
+	fmt.Println("The town directory contains nested git repos. Running git commands")
+	fmt.Println("in the wrong directory operates on the WRONG repo.")
+	fmt.Printf("**Always verify `pwd` shows your worktree before any git operations.**\n")
+	fmt.Println()
 	fmt.Println("## Key Commands")
 	fmt.Println("- `" + cli.Name() + " mail inbox` - Check your inbox for work assignments")
 	fmt.Println("- `bd show <issue>` - View your assigned issue")
@@ -345,6 +352,82 @@ func outputCommandQuickReference(ctx RoleContext) {
 	fmt.Println("- `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).")
 	fmt.Println("- `restart/reboot` — Stop then start rig agents.")
 	fmt.Println()
+}
+
+// outputGitRepoContext detects nested git repositories in the agent's path
+// hierarchy and outputs a clear map showing which directories are git repos.
+// This prevents agents from running git commands in the wrong directory
+// (e.g., running git in the rig root instead of their worktree). (GH#716)
+func outputGitRepoContext(ctx RoleContext) {
+	// Walk up from WorkDir to TownRoot, collecting git repo boundaries
+	type gitRepo struct {
+		Path string
+		Role string // what this repo is used for
+	}
+
+	var repos []gitRepo
+
+	// Check the agent's working directory
+	if isGitDir(ctx.WorkDir) {
+		label := "your working directory"
+		switch ctx.Role {
+		case RolePolecat:
+			label = "YOUR git worktree (commit here)"
+		case RoleCrew:
+			label = "YOUR git worktree (commit here)"
+		case RoleMayor:
+			label = "your codebase clone (commit here)"
+		case RoleWitness:
+			label = "witness rig clone"
+		case RoleRefinery:
+			label = "refinery rig clone"
+		}
+		repos = append(repos, gitRepo{Path: ctx.WorkDir, Role: label})
+	}
+
+	// Check intermediate directories between WorkDir and TownRoot
+	dir := filepath.Dir(ctx.WorkDir)
+	for dir != ctx.TownRoot && strings.HasPrefix(dir, ctx.TownRoot) && dir != "/" {
+		if isGitDir(dir) {
+			repos = append(repos, gitRepo{Path: dir, Role: "intermediate directory (NOT for your commits)"})
+		}
+		dir = filepath.Dir(dir)
+	}
+
+	// Check town root
+	if ctx.TownRoot != "" && isGitDir(ctx.TownRoot) {
+		repos = append(repos, gitRepo{Path: ctx.TownRoot, Role: "town HQ repo (beads/events tracking, NOT your code)"})
+	}
+
+	// Only output if there are multiple git repos (the confusion case)
+	if len(repos) <= 1 {
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("## Git Repository Structure (Nested Repos)")
+	fmt.Println()
+	fmt.Println("**WARNING: Multiple git repos exist in your path hierarchy.**")
+	fmt.Println("Running git commands in the wrong directory will operate on the WRONG repo.")
+	fmt.Println()
+	for _, r := range repos {
+		marker := " "
+		if r.Path == ctx.WorkDir {
+			marker = ">"
+		}
+		fmt.Printf("  %s `%s`\n    %s\n", marker, r.Path, r.Role)
+	}
+	fmt.Println()
+	fmt.Printf("**Always run git commands from `%s`** (your working directory).\n", ctx.WorkDir)
+	fmt.Printf("If `pwd` shows a different path, `cd` back before any git operations.\n")
+	fmt.Println()
+}
+
+// isGitDir checks if a directory is a git repository (has .git file or directory).
+func isGitDir(dir string) bool {
+	gitPath := filepath.Join(dir, ".git")
+	_, err := os.Stat(gitPath)
+	return err == nil
 }
 
 // outputContextFile reads and displays the CONTEXT.md file from the town root.
