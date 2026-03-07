@@ -537,6 +537,66 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
+	// Single-sling to rig: delegate to executeSling() for unified dispatch.
+	// This eliminates the duplicated 12-step inline flow for rig targets.
+	// Non-rig targets (dogs, mayor, crew, self-sling, nudge) continue below.
+	// Dry-run is not supported by executeSling, so it falls through to inline.
+	if !slingDryRun && len(args) >= 2 {
+		if rigName, isRig := IsRigName(args[len(args)-1]); isRig {
+			// Resolve formula: auto-apply mol-polecat-work for bare bead → polecat
+			formula := formulaName
+			if formula == "" {
+				formula = resolveFormula(slingFormula, slingHookRawBead)
+			}
+
+			// Cross-rig guard (executeSling caller responsibility per contract)
+			if !slingForce {
+				if err := checkCrossRigGuard(beadID, rigName+"/polecats/_", townRoot); err != nil {
+					return err
+				}
+			}
+
+			mode := ""
+			if slingRalph {
+				mode = "ralph"
+			}
+
+			params := SlingParams{
+				BeadID:           beadID,
+				FormulaName:      formula,
+				RigName:          rigName,
+				Args:             slingArgs,
+				Vars:             slingVars,
+				Merge:            slingMerge,
+				BaseBranch:       slingBaseBranch,
+				Account:          slingAccount,
+				Agent:            slingAgent,
+				NoConvoy:         slingNoConvoy || formulaName != "",
+				Owned:            slingOwned,
+				NoMerge:          slingNoMerge,
+				Force:            slingForce,
+				HookRawBead:      slingHookRawBead,
+				NoBoot:           slingNoBoot,
+				FormulaFailFatal: true,
+				TownRoot:         townRoot,
+				BeadsDir:         townBeadsDir,
+				Mode:             mode,
+			}
+
+			_, err := executeSling(params)
+			if err != nil {
+				return err
+			}
+
+			// wakeRigAgents is executeSling caller responsibility
+			if !slingNoBoot {
+				wakeRigAgents(rigName)
+			}
+
+			return nil
+		}
+	}
+
 	// Serialize assignment writes per bead to prevent concurrent sling races from
 	// producing conflicting assignee/metadata updates.
 	releaseSlingLock, err := tryAcquireSlingBeadLock(townRoot, beadID)
@@ -629,16 +689,13 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
-	// TODO(scheduler-unify): Migrate single-sling rig dispatch to use executeSling().
-	// The inline logic below duplicates executeSling's 12-step flow. Batch sling
-	// and scheduler dispatch already use the unified path. Single-sling is deferred
-	// because it handles non-rig targets (dogs, mayor, crew, self-sling, nudge)
-	// that executeSling does not cover. The rig-target case could be factored out
-	// to use executeSling, limiting this to non-rig targets only.
+	// Non-rig target dispatch: dogs, mayor, crew, self-sling, nudge, existing agents.
+	// Rig targets are handled above via executeSling() (gt-s04l).
 	//
 	// Resolve target agent using shared dispatch logic.
 	// Note: args[1] == args[len(args)-1] here because batch mode (len(args) > 2
-	// with rig last arg) exits at line 234. The only remaining case is len(args) <= 2.
+	// with rig last arg) exits above. The only remaining case is len(args) <= 2
+	// with a non-rig target, or len(args) == 1 (self-sling).
 	var target string
 	if len(args) > 1 {
 		target = args[1]
