@@ -48,8 +48,14 @@ func readHookSessionID() (sessionID, source string) {
 	return uuid.New().String(), ""
 }
 
+// stdinReadTimeout is how long readStdinJSON waits for data before giving up.
+// Claude Code sends JSON immediately; other runtimes (Gemini CLI, etc.) may
+// pipe stdin without writing anything, which would block forever without this.
+const stdinReadTimeout = 2 * time.Second
+
 // readStdinJSON attempts to read and parse JSON from stdin.
-// Returns nil if stdin is empty, not a pipe, or invalid JSON.
+// Returns nil if stdin is empty, not a pipe, invalid JSON, or no data
+// arrives within stdinReadTimeout.
 func readStdinJSON() *hookInput {
 	// Check if stdin has data (non-blocking)
 	stat, err := os.Stdin.Stat()
@@ -63,10 +69,28 @@ func readStdinJSON() *hookInput {
 		return nil
 	}
 
-	// Read first line (JSON should be on one line)
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadString('\n')
-	if err != nil && line == "" {
+	// Read with timeout: some LLM runtimes pipe stdin without sending data,
+	// which would block ReadString forever. Use a goroutine + timer so we
+	// fall through to env-var / auto-generate paths after stdinReadTimeout.
+	type readResult struct {
+		line string
+		err  error
+	}
+	ch := make(chan readResult, 1)
+	go func() {
+		reader := bufio.NewReader(os.Stdin)
+		line, err := reader.ReadString('\n')
+		ch <- readResult{line, err}
+	}()
+
+	var line string
+	select {
+	case r := <-ch:
+		if r.err != nil && r.line == "" {
+			return nil
+		}
+		line = r.line
+	case <-time.After(stdinReadTimeout):
 		return nil
 	}
 
