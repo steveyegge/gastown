@@ -10,7 +10,6 @@ prompt_template = "deacon.md.tmpl"
 pattern = "hq-deacon"
 work_dir = "{town}"
 needs_pre_sync = false
-start_command = "exec claude --dangerously-skip-permissions"
 
 [env]
 GT_ROLE = "deacon"
