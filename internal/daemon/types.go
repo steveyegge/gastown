@@ -125,6 +125,7 @@ type PatrolsConfig struct {
 	JsonlGitBackup *JsonlGitBackupConfig  `json:"jsonl_git_backup,omitempty"`
 	WispReaper     *WispReaperConfig      `json:"wisp_reaper,omitempty"`
 	DoctorDog      *DoctorDogConfig       `json:"doctor_dog,omitempty"`
+	PolecatHealth          *PatrolConfig                  `json:"polecat_health,omitempty"`
 	CompactorDog           *CompactorDogConfig            `json:"compactor_dog,omitempty"`
 	ScheduledMaintenance   *ScheduledMaintenanceConfig    `json:"scheduled_maintenance,omitempty"`
 	RestartTracker         *RestartTrackerConfig          `json:"restart_tracker,omitempty"`
@@ -308,6 +309,10 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 	case "handler":
 		if config.Patrols.Handler != nil {
 			return config.Patrols.Handler.Enabled
+		}
+	case "polecat_health":
+		if config.Patrols.PolecatHealth != nil {
+			return config.Patrols.PolecatHealth.Enabled
 		}
 	}
 	return true // Default: enabled
