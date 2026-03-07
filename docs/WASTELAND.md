@@ -28,6 +28,7 @@ board, claiming your first task, and submitting evidence of completion.
 | `gt wl claim <id>` | Claim a wanted item |
 | `gt wl done <id> --evidence <url>` | Submit completion evidence |
 | `gt wl post --title "..."` | Post a new wanted item |
+| `gt wl sweep` | Release expired claims |
 | `gt wl sync` | Pull upstream changes |
 
 ## Prerequisites
@@ -199,6 +200,29 @@ forks are reconciled upstream — the actual work (your GitHub PR) is
 what establishes priority.
 
 Future phases will introduce automatic claim propagation via DoltHub PRs.
+
+### Claim Timeout and Auto-Release
+
+Claims have a default timeout of **72 hours (3 days)**. If a claimed item
+is not completed within this window, it can be automatically released back
+to `open` status so other rigs can claim it.
+
+Release happens in two ways:
+
+1. **Manual sweep**: Run `gt wl sweep` to release all expired claims
+2. **Auto-sweep on sync**: `gt wl sync` automatically sweeps expired claims
+   after merging upstream changes
+
+```bash
+gt wl sweep                    # Release claims older than 72h (default)
+gt wl sweep --timeout 24h     # Release claims older than 24h
+gt wl sweep --timeout 168h    # Release claims older than 1 week
+gt wl sweep --dry-run         # Show what would be released
+```
+
+The `claimed_at` timestamp is set when you claim an item and cleared when
+a claim is released. Items without a `claimed_at` (claimed before this
+feature was added) are not affected by the sweep.
 
 ### Choosing What to Claim
 

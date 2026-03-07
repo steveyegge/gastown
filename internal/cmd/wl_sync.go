@@ -5,8 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/wasteland"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -119,6 +121,9 @@ func runWLSync(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\n%s Synced with upstream\n", style.Bold.Render("✓"))
 
+	// Auto-sweep expired claims after sync
+	sweepSyncExpiredClaims(forkDir)
+
 	// Show summary
 	summaryQuery := `SELECT
 		(SELECT COUNT(*) FROM wanted WHERE status = 'open') AS open_wanted,
@@ -158,4 +163,42 @@ func findWLCommonsFork(townRoot string) string {
 	}
 
 	return ""
+}
+
+// sweepSyncExpiredClaims releases expired claims as part of sync.
+// Errors are non-fatal — we report them but don't fail the sync.
+func sweepSyncExpiredClaims(forkDir string) {
+	cutoff := doltserver.ClaimTimeoutCutoff(DefaultClaimTimeout)
+
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) as cnt FROM wanted WHERE status='claimed' AND claimed_at IS NOT NULL AND claimed_at < '%s';`, cutoff)
+	countCmd := exec.Command("dolt", "sql", "-q", countQuery, "-r", "csv")
+	countCmd.Dir = forkDir
+	countOut, err := countCmd.CombinedOutput()
+	if err != nil {
+		return // silently skip — claimed_at column may not exist yet
+	}
+	rows := wlParseCSV(string(countOut))
+	if len(rows) < 2 || len(rows[1]) == 0 || rows[1][0] == "0" {
+		return
+	}
+	count := rows[1][0]
+
+	script := fmt.Sprintf(`UPDATE wanted SET status='open', claimed_by=NULL, claimed_at=NULL, updated_at=NOW()
+  WHERE status='claimed' AND claimed_at IS NOT NULL AND claimed_at < '%s';
+CALL DOLT_ADD('-A');
+CALL DOLT_COMMIT('-m', 'wl sweep: release %s expired claims');`, cutoff, doltserver.EscapeSQL(count))
+
+	cmd := exec.Command("dolt", "sql", "-q", script)
+	cmd.Dir = forkDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		s := strings.ToLower(string(out))
+		if strings.Contains(s, "nothing to commit") {
+			return
+		}
+		// Non-fatal
+		return
+	}
+
+	fmt.Printf("  Swept %s expired claim(s)\n", count)
 }
