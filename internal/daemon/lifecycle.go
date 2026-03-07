@@ -543,9 +543,14 @@ func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.Rol
 		_ = d.tmux.SetEnvironment(sessionName, "GT_PANE_ID", paneID)
 	}
 
-	// Set any custom env vars from role config
+	// Set any custom env vars from role config.
+	// Skip keys already set by AgentEnv to prevent TOML [env] from clobbering
+	// canonical qualified values (e.g., GT_ROLE). See #2492.
 	if roleConfig != nil {
 		for k, v := range roleConfig.EnvVars {
+			if _, alreadySet := envVars[k]; alreadySet {
+				continue
+			}
 			expanded := beads.ExpandRolePattern(v, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType, session.PrefixFor(parsed.RigName))
 			_ = d.tmux.SetEnvironment(sessionName, k, expanded)
 		}
