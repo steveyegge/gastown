@@ -119,6 +119,9 @@ func readStdinJSON() *hookInput {
 		}
 		line = r.line
 	case <-time.After(stdinReadTimeout):
+		// The goroutine above is still blocked on ReadString and will leak.
+		// This is intentional — gt prime is a short-lived CLI command that
+		// exits shortly after, so the goroutine is cleaned up by process exit.
 		return nil
 	}
 
