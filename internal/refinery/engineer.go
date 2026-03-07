@@ -987,7 +987,10 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 	// Run convoy check to auto-close and notify subscribers.
 	e.postMergeConvoyCheck(mr)
 
-	// 4. Log success
+	// 4. Notify mayor of successful merge
+	e.notifyMayorMerged(mr, result)
+
+	// 5. Log success
 	_, _ = fmt.Fprintf(e.output, "[Engineer] ✓ Merged: %s (commit: %s)\n", mr.ID, result.MergeCommit)
 }
 
@@ -1564,6 +1567,20 @@ func (e *Engineer) notifyDeaconConvoyFeeding(mr *MRInfo) {
 
 	// Emit event to wake deacon from await-signal.
 	_ = events.LogFeed(events.TypeMail, e.rig.Name+"/refinery", events.MailPayload("deacon/", "CONVOY_NEEDS_FEEDING "+mr.ConvoyID))
+}
+
+// notifyMayorMerged nudges the mayor after a successful merge so the mayor
+// has visibility into merge queue throughput without polling.
+func (e *Engineer) notifyMayorMerged(mr *MRInfo, result ProcessResult) {
+	nudgeMsg := fmt.Sprintf("MERGED: mr=%s branch=%s issue=%s commit=%s worker=%s",
+		mr.ID, mr.Branch, mr.SourceIssue, result.MergeCommit, mr.Worker)
+	nudgeCmd := exec.Command("gt", "nudge", "mayor", nudgeMsg)
+	nudgeCmd.Dir = e.workDir
+	if err := nudgeCmd.Run(); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to nudge mayor about merge %s: %v\n", mr.ID, err)
+	} else {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Notified mayor: MERGED %s\n", mr.ID)
+	}
 }
 
 // convoyInfo holds minimal info about a closed convoy for post-merge processing.

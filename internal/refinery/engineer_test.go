@@ -678,6 +678,47 @@ func TestNotifyDeaconConvoyFeeding_AttemptsWhenConvoyID(t *testing.T) {
 	}
 }
 
+func TestNotifyMayorMerged_AttemptsNudge(t *testing.T) {
+	// notifyMayorMerged should attempt to nudge mayor after successful merge.
+	// The nudge will fail (no gt binary in test tmpdir) but we verify the attempt via output.
+	tmpDir, err := os.MkdirTemp("", "engineer-notify-mayor-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	rigDir := filepath.Join(tmpDir, "testrig")
+	if err := os.MkdirAll(rigDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{
+		Name: "testrig",
+		Path: rigDir,
+	}
+
+	e := NewEngineer(r)
+	var buf bytes.Buffer
+	e.SetOutput(&buf)
+
+	mr := &MRInfo{
+		ID:          "gt-test",
+		Branch:      "polecat/dag/gt-test",
+		SourceIssue: "gt-src",
+		Worker:      "polecats/dag",
+	}
+	result := ProcessResult{
+		MergeCommit: "abc1234",
+	}
+	e.notifyMayorMerged(mr, result)
+
+	output := buf.String()
+	// Should have attempted — either success or warning about failure
+	if !strings.Contains(output, "MERGED") && !strings.Contains(output, "mayor") {
+		t.Errorf("expected output mentioning mayor merge notification, got: %s", output)
+	}
+}
+
 func TestConvoyInfoDescriptionParsing(t *testing.T) {
 	// Test that landConvoySwarm correctly parses Molecule from description
 	tests := []struct {
