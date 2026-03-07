@@ -302,6 +302,10 @@ func (t *Tmux) NewSessionWithCommandAndEnv(name, workDir, command string, env ma
 	if err := validateSessionName(name); err != nil {
 		return err
 	}
+
+	// Kill any stale same-named session on other sockets to prevent split-brain.
+	// See: https://github.com/steveyegge/gastown/issues/2441
+	t.KillStaleSessionOnOtherSockets(name)
 	if workDir != "" {
 		info, err := os.Stat(workDir)
 		if err != nil {
@@ -661,6 +665,33 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 		return nil
 	}
 	return err
+}
+
+// KillStaleSessionOnOtherSockets checks for a same-named session on the "other"
+// tmux socket and kills it if found. This prevents split-brain where a session
+// exists on both the "default" and town-specific (e.g., "gt") sockets due to
+// env mismatch, older binaries, or manual tmux usage.
+//
+// The logic: if we're targeting socket "gt", check "default"; if targeting
+// "default", check the town socket. Sessions on the wrong socket are stale
+// by definition — the correct socket is whichever one we're creating on.
+func (t *Tmux) KillStaleSessionOnOtherSockets(name string) {
+	if t.socketName == "" {
+		return // No socket configured, nothing to cross-check
+	}
+
+	otherSocket := "default"
+	if t.socketName == "default" {
+		otherSocket = GetDefaultSocket()
+		if otherSocket == "" || otherSocket == "default" {
+			return // No other socket to check
+		}
+	}
+
+	other := NewTmuxWithSocket(otherSocket)
+	if running, _ := other.HasSession(name); running {
+		_ = other.KillSessionWithProcesses(name)
+	}
 }
 
 // collectReparentedGroupMembers returns process group members that have been
