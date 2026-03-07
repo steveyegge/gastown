@@ -14,6 +14,7 @@ import (
 	"regexp"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -187,14 +188,14 @@ func BuildPrefixRegistryFromTown(townRoot string) (*PrefixRegistry, error) {
 
 	// Fallback: town root (safe from git operations in mayor worktree).
 	if _, err := os.Stat(fallbackPath); err == nil {
-		fmt.Fprintf(os.Stderr, "Warning: mayor/rigs.json missing, using fallback %s\n", fallbackPath)
+		style.PrintWarning("mayor/rigs.json missing, using fallback %s", fallbackPath)
 		return BuildPrefixRegistryFromFile(fallbackPath)
 	}
 
 	// No rigs.json found anywhere — warn loudly.
-	fmt.Fprintf(os.Stderr, "Warning: rigs.json not found (checked mayor/rigs.json and town root). "+
-		"PrefixRegistry is empty — session parsing will fail. "+
-		"Run 'gt doctor' or restore rigs.json.\n")
+	style.PrintWarning("rigs.json not found (checked mayor/rigs.json and town root). " +
+		"PrefixRegistry is empty — session parsing will fail. " +
+		"Run 'gt doctor' or restore rigs.json.")
 	return NewPrefixRegistry(), nil
 }
 
@@ -326,5 +327,9 @@ func copyFileIfNewer(src, dst string) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(dst, data, 0644)
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, dst)
 }

@@ -2,7 +2,6 @@ package doctor
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 )
@@ -44,13 +43,12 @@ func (c *RigsJSONCheck) CanFix() bool {
 	return false
 }
 
-// Fix copies rigs.json from fallback to canonical location.
+// Fix copies rigs.json from fallback to canonical location using atomic write.
 func (c *RigsJSONCheck) Fix(ctx *CheckContext) error {
-	src, err := os.Open(c.fallbackPath)
+	data, err := os.ReadFile(c.fallbackPath)
 	if err != nil {
 		return fmt.Errorf("reading fallback rigs.json: %w", err)
 	}
-	defer src.Close()
 
 	// Ensure mayor directory exists
 	mayorDir := filepath.Dir(c.canonicalPath)
@@ -58,14 +56,14 @@ func (c *RigsJSONCheck) Fix(ctx *CheckContext) error {
 		return fmt.Errorf("creating mayor dir: %w", err)
 	}
 
-	dst, err := os.Create(c.canonicalPath)
-	if err != nil {
-		return fmt.Errorf("writing canonical rigs.json: %w", err)
+	// Write to temp file then rename for atomic operation.
+	tmp := c.canonicalPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return fmt.Errorf("writing temp rigs.json: %w", err)
 	}
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, src); err != nil {
-		return fmt.Errorf("copying rigs.json: %w", err)
+	if err := os.Rename(tmp, c.canonicalPath); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("renaming temp to canonical rigs.json: %w", err)
 	}
 	return nil
 }
