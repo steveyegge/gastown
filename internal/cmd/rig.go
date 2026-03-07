@@ -697,12 +697,13 @@ func runRigList(cmd *cobra.Command, args []string) error {
 	t := tmux.NewTmux()
 
 	type rigInfo struct {
-		Name     string `json:"name"`
-		Status   string `json:"status"`
-		Witness  string `json:"witness"`
-		Refinery string `json:"refinery"`
-		Polecats int    `json:"polecats"`
-		Crew     int    `json:"crew"`
+		Name        string `json:"name"`
+		BeadsPrefix string `json:"beads_prefix"`
+		Status      string `json:"status"`
+		Witness     string `json:"witness"`
+		Refinery    string `json:"refinery"`
+		Polecats    int    `json:"polecats"`
+		Crew        int    `json:"crew"`
 		// sorting fields (not exported to JSON)
 		sortPrio int
 	}
@@ -710,16 +711,18 @@ func runRigList(cmd *cobra.Command, args []string) error {
 	var rigs []rigInfo
 
 	for name := range rigsConfig.Rigs {
+		prefix := session.PrefixFor(name)
+
 		r, err := mgr.GetRig(name)
 		if err != nil {
-			rigs = append(rigs, rigInfo{Name: name, Status: "error", sortPrio: 99})
+			rigs = append(rigs, rigInfo{Name: name, BeadsPrefix: prefix, Status: "error", sortPrio: 99})
 			continue
 		}
 
 		opState, _ := getRigOperationalState(townRoot, name)
 
-		witnessSession := session.WitnessSessionName(session.PrefixFor(name))
-		refinerySession := session.RefinerySessionName(session.PrefixFor(name))
+		witnessSession := session.WitnessSessionName(prefix)
+		refinerySession := session.RefinerySessionName(prefix)
 		witnessRunning, _ := t.HasSession(witnessSession)
 		refineryRunning, _ := t.HasSession(refinerySession)
 
@@ -734,13 +737,14 @@ func runRigList(cmd *cobra.Command, args []string) error {
 
 		summary := r.Summary()
 		rigs = append(rigs, rigInfo{
-			Name:     name,
-			Status:   strings.ToLower(opState),
-			Witness:  witnessStatus,
-			Refinery: refineryStatus,
-			Polecats: summary.PolecatCount,
-			Crew:     summary.CrewCount,
-			sortPrio: rigStatePriority(witnessRunning, refineryRunning, opState),
+			Name:        name,
+			BeadsPrefix: prefix,
+			Status:      strings.ToLower(opState),
+			Witness:     witnessStatus,
+			Refinery:    refineryStatus,
+			Polecats:    summary.PolecatCount,
+			Crew:        summary.CrewCount,
+			sortPrio:    rigStatePriority(witnessRunning, refineryRunning, opState),
 		})
 	}
 
