@@ -300,6 +300,13 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// was skipped, polling the port would just burn the full timeout. (review finding #1)
 	if !doltSkipped && doltOK {
 		waitForDoltReady(townRoot)
+		// Propagate Dolt port to process env so all subsequently spawned
+		// agents (witnesses, refineries, crew) inherit it. Without this,
+		// bd auto-starts rogue Dolt instances in agent tmux sessions. (GH#2412)
+		doltCfg := doltserver.DefaultConfig(townRoot)
+		portStr := fmt.Sprintf("%d", doltCfg.Port)
+		os.Setenv("GT_DOLT_PORT", portStr)
+		os.Setenv("BEADS_DOLT_PORT", portStr)
 	}
 
 	// 5 & 6. Witnesses and Refineries (using prefetched rigs)

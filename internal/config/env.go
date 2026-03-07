@@ -262,6 +262,23 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		}
 	}
 
+	// Propagate Dolt server port so bd subprocesses connect to the centralized
+	// Dolt server instead of auto-starting rogue instances. GT_DOLT_PORT is the
+	// Gas Town canonical var; BEADS_DOLT_PORT is what bd reads. Both must be
+	// set for the full gt→bd chain to work. (GH#2412)
+	if port := os.Getenv("GT_DOLT_PORT"); port != "" {
+		env["GT_DOLT_PORT"] = port
+		// Also set BEADS_DOLT_PORT unless already explicitly set in the
+		// environment (e.g., test overrides).
+		if os.Getenv("BEADS_DOLT_PORT") != "" {
+			env["BEADS_DOLT_PORT"] = os.Getenv("BEADS_DOLT_PORT")
+		} else {
+			env["BEADS_DOLT_PORT"] = port
+		}
+	} else if port := os.Getenv("BEADS_DOLT_PORT"); port != "" {
+		env["BEADS_DOLT_PORT"] = port
+	}
+
 	// Pass through cloud API credentials and provider configuration from the parent shell.
 	// Only variables explicitly listed here are forwarded; all others are blocked for isolation.
 	for _, key := range []string{

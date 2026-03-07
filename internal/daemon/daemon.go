@@ -174,6 +174,25 @@ func New(config *Config) (*Daemon, error) {
 		doltServer = NewDoltServerManager(config.TownRoot, patrolConfig.Patrols.DoltServer, logger.Printf)
 		if doltServer.IsEnabled() {
 			logger.Printf("Dolt server management enabled (port %d)", patrolConfig.Patrols.DoltServer.Port)
+			// Propagate Dolt port to process env so AgentEnv() passes it to
+			// all spawned agent sessions. Without this, bd in agent sessions
+			// auto-starts rogue Dolt instances. (GH#2412)
+			portStr := strconv.Itoa(patrolConfig.Patrols.DoltServer.Port)
+			os.Setenv("GT_DOLT_PORT", portStr)
+			os.Setenv("BEADS_DOLT_PORT", portStr)
+		}
+	}
+
+	// Fallback: if GT_DOLT_PORT still isn't set (no DoltServerManager, daemon
+	// started independently of gt up), detect the port from dolt config.
+	// This ensures AgentEnv() always has the port for spawned sessions. (GH#2412)
+	if os.Getenv("GT_DOLT_PORT") == "" {
+		doltCfg := doltserver.DefaultConfig(config.TownRoot)
+		if doltCfg.Port > 0 {
+			portStr := strconv.Itoa(doltCfg.Port)
+			os.Setenv("GT_DOLT_PORT", portStr)
+			os.Setenv("BEADS_DOLT_PORT", portStr)
+			logger.Printf("Set GT_DOLT_PORT=%s from Dolt config (fallback)", portStr)
 		}
 	}
 

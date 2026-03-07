@@ -827,6 +827,53 @@ func TestAgentEnv_DisablesBdBackup(t *testing.T) {
 	}
 }
 
+// TestAgentEnv_PropagatesDoltPort verifies that GT_DOLT_PORT and BEADS_DOLT_PORT
+// are propagated from the process env to agent sessions, preventing bd from
+// auto-starting rogue Dolt instances. (GH#2412)
+func TestAgentEnv_PropagatesDoltPort(t *testing.T) {
+	// Subtest: GT_DOLT_PORT set → both vars propagated
+	t.Run("gt_dolt_port_set", func(t *testing.T) {
+		t.Setenv("GT_DOLT_PORT", "13307")
+		t.Setenv("BEADS_DOLT_PORT", "")
+		env := AgentEnv(AgentEnvConfig{Role: "crew", Rig: "myrig", AgentName: "alice"})
+		assertEnv(t, env, "GT_DOLT_PORT", "13307")
+		assertEnv(t, env, "BEADS_DOLT_PORT", "13307")
+	})
+
+	// Subtest: BEADS_DOLT_PORT explicitly set → preserved
+	t.Run("beads_dolt_port_override", func(t *testing.T) {
+		t.Setenv("GT_DOLT_PORT", "13307")
+		t.Setenv("BEADS_DOLT_PORT", "99999")
+		env := AgentEnv(AgentEnvConfig{Role: "polecat", Rig: "myrig", AgentName: "Toast"})
+		assertEnv(t, env, "GT_DOLT_PORT", "13307")
+		assertEnv(t, env, "BEADS_DOLT_PORT", "99999")
+	})
+
+	// Subtest: only BEADS_DOLT_PORT set (no GT_DOLT_PORT) → still propagated
+	t.Run("beads_only", func(t *testing.T) {
+		t.Setenv("GT_DOLT_PORT", "")
+		t.Setenv("BEADS_DOLT_PORT", "3307")
+		env := AgentEnv(AgentEnvConfig{Role: "witness", Rig: "myrig"})
+		if _, ok := env["GT_DOLT_PORT"]; ok {
+			t.Error("GT_DOLT_PORT should not be set when env is empty")
+		}
+		assertEnv(t, env, "BEADS_DOLT_PORT", "3307")
+	})
+
+	// Subtest: neither set → neither propagated
+	t.Run("neither_set", func(t *testing.T) {
+		t.Setenv("GT_DOLT_PORT", "")
+		t.Setenv("BEADS_DOLT_PORT", "")
+		env := AgentEnv(AgentEnvConfig{Role: "mayor"})
+		if _, ok := env["GT_DOLT_PORT"]; ok {
+			t.Error("GT_DOLT_PORT should not be set")
+		}
+		if _, ok := env["BEADS_DOLT_PORT"]; ok {
+			t.Error("BEADS_DOLT_PORT should not be set")
+		}
+	})
+}
+
 func TestBuildStartupCommandWithEnv_IncludesNodeOptions(t *testing.T) {
 	t.Parallel()
 	// Integration test: verify BuildStartupCommandWithEnv output includes NODE_OPTIONS=
