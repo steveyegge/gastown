@@ -27,6 +27,7 @@ import (
 	"github.com/steveyegge/gastown/internal/feed"
 	gitpkg "github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mayor"
+	polecatpkg "github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -657,9 +658,12 @@ func (d *Daemon) heartbeat(state *State) {
 	// 11. Check for orphaned work (assigned to dead agents)
 	d.checkOrphanedWork()
 
-	// 12. Check polecat session health (proactive crash detection)
-	// This validates tmux sessions are still alive for polecats with work-on-hook
-	d.checkPolecatSessionHealth()
+	// 12. Check polecat session health (proactive crash detection + auto-restart)
+	// Validates tmux sessions are alive and heartbeats are fresh for polecats with work-on-hook.
+	// Auto-restarts crashed polecats with exponential backoff to prevent crash loops.
+	if IsPatrolEnabled(d.patrolConfig, "polecat_health") {
+		d.checkPolecatSessionHealth()
+	}
 
 	// 13. Clean up orphaned claude subagent processes (memory leak prevention)
 	// These are Task tool subagents that didn't clean up after completion.
@@ -1843,7 +1847,8 @@ func listPolecatWorktrees(polecatsDir string) ([]string, error) {
 }
 
 // checkPolecatHealth checks a single polecat's session health.
-// If the polecat has work-on-hook but the tmux session is dead, it's restarted.
+// If the polecat has work-on-hook but the tmux session is dead, it is auto-restarted
+// with exponential backoff via the RestartTracker to prevent crash loops.
 func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 	// Build the expected tmux session name
 	sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
@@ -1856,7 +1861,8 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 	}
 
 	if sessionAlive {
-		// Session is alive - nothing to do
+		// Session is alive. Check heartbeat staleness for early warning.
+		d.checkPolecatHeartbeatHealth(rigName, polecatName, sessionName)
 		return
 	}
 
@@ -1924,8 +1930,90 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 	_ = events.LogFeed(events.TypeSessionDeath, sessionName,
 		events.SessionDeathPayload(sessionName, rigName+"/polecats/"+polecatName, "crash detected by daemon health check", "daemon"))
 
-	// Notify witness — stuck-agent-dog plugin handles context-aware restart
-	d.notifyWitnessOfCrashedPolecat(rigName, polecatName, info.HookBead)
+	// Auto-restart with backoff protection
+	d.restartCrashedPolecat(rigName, polecatName, info.HookBead)
+}
+
+// checkPolecatHeartbeatHealth checks heartbeat staleness for a running polecat session.
+// This detects stuck agents where the tmux session is alive but the agent process
+// inside has stopped making progress (e.g., Claude hung, context exhaustion).
+func (d *Daemon) checkPolecatHeartbeatHealth(rigName, polecatName, sessionName string) {
+	stale, exists := polecatpkg.IsSessionHeartbeatStale(d.config.TownRoot, sessionName)
+	if !exists {
+		// No heartbeat file — agent may not support heartbeats yet (v1 rollout).
+		// Fall through to other liveness checks.
+		return
+	}
+
+	if !stale {
+		// Heartbeat is fresh — agent is making progress. Reset backoff if tracked.
+		agentID := rigName + "/polecats/" + polecatName
+		if d.restartTracker != nil {
+			d.restartTracker.RecordSuccess(agentID)
+		}
+		return
+	}
+
+	// Heartbeat is stale — agent may be stuck. Log warning for visibility.
+	// The Witness patrol handles stuck agent intervention (nudge, cycle, etc.).
+	// The daemon only warns here; killing a live session is the Witness's job.
+	hb := polecatpkg.ReadSessionHeartbeat(d.config.TownRoot, sessionName)
+	if hb != nil {
+		d.logger.Printf("STALE HEARTBEAT: polecat %s/%s last heartbeat %s ago (state=%s, bead=%s)",
+			rigName, polecatName, time.Since(hb.Timestamp).Round(time.Second),
+			hb.EffectiveState(), hb.Bead)
+	}
+}
+
+// restartCrashedPolecat auto-restarts a crashed polecat with exponential backoff.
+// Uses the RestartTracker to prevent crash loops. Also notifies the witness.
+func (d *Daemon) restartCrashedPolecat(rigName, polecatName, hookBead string) {
+	agentID := rigName + "/polecats/" + polecatName
+
+	// Check restart tracker for backoff / crash loop
+	if d.restartTracker != nil {
+		if d.restartTracker.IsInCrashLoop(agentID) {
+			d.logger.Printf("Polecat %s/%s is in crash loop, skipping auto-restart (use 'gt daemon clear-backoff %s' to reset)",
+				rigName, polecatName, agentID)
+			// Still notify witness so it can take manual action
+			d.notifyWitnessOfCrashedPolecat(rigName, polecatName, hookBead)
+			return
+		}
+		if !d.restartTracker.CanRestart(agentID) {
+			remaining := d.restartTracker.GetBackoffRemaining(agentID)
+			d.logger.Printf("Polecat %s/%s restart in backoff, %s remaining",
+				rigName, polecatName, remaining.Round(time.Second))
+			return
+		}
+	}
+
+	// Auto-restart via gt session restart
+	d.logger.Printf("Auto-restarting polecat %s/%s (hook_bead=%s)", rigName, polecatName, hookBead)
+	address := fmt.Sprintf("%s/%s", rigName, polecatName)
+	cmd := exec.Command(d.gtPath, "session", "restart", address, "--force") //nolint:gosec // G204: args are constructed internally
+	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ()
+
+	if err := cmd.Run(); err != nil {
+		d.logger.Printf("Failed to auto-restart polecat %s/%s: %v", rigName, polecatName, err)
+		// Notify witness on failure so it can intervene
+		d.notifyWitnessOfCrashedPolecat(rigName, polecatName, hookBead)
+		return
+	}
+
+	d.logger.Printf("Successfully auto-restarted polecat %s/%s", rigName, polecatName)
+
+	// Record restart for backoff tracking
+	if d.restartTracker != nil {
+		d.restartTracker.RecordRestart(agentID)
+		if err := d.restartTracker.Save(); err != nil {
+			d.logger.Printf("Warning: failed to save restart state: %v", err)
+		}
+	}
+
+	// Emit metrics
+	d.metrics.recordRestart(d.ctx, "polecat/"+polecatName)
+	telemetry.RecordDaemonRestart(d.ctx, "polecat/"+polecatName)
 }
 
 // recordSessionDeath records a session death and checks for mass death pattern.

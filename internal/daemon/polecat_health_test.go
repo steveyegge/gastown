@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -44,6 +46,35 @@ func writeFakeTestBD(t *testing.T, dir, descState, dbState, hookBead, updatedAt 
 		t.Fatalf("writing fake bd: %v", err)
 	}
 	return path
+}
+
+// writeFakeGt creates a shell script in dir named "gt" that logs invocations.
+func writeFakeGt(t *testing.T, dir string) (gtPath, logPath string) {
+	t.Helper()
+	logPath = filepath.Join(t.TempDir(), "gt-invocations.log")
+	gtPath = filepath.Join(dir, "gt")
+	gtScript := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %s\n", logPath)
+	if err := os.WriteFile(gtPath, []byte(gtScript), 0755); err != nil {
+		t.Fatalf("writing fake gt: %v", err)
+	}
+	return gtPath, logPath
+}
+
+// newTestDaemon creates a Daemon with fake binaries for testing.
+func newTestDaemon(t *testing.T, binDir string, bdPath, gtPath string) (*Daemon, *strings.Builder) {
+	t.Helper()
+	var logBuf strings.Builder
+	townRoot := t.TempDir()
+	d := &Daemon{
+		config:         &Config{TownRoot: townRoot},
+		logger:         log.New(&logBuf, "", 0),
+		tmux:           tmux.NewTmux(),
+		bdPath:         bdPath,
+		gtPath:         gtPath,
+		ctx:            context.Background(),
+		restartTracker: NewRestartTracker(townRoot, RestartTrackerConfig{}),
+	}
+	return d, &logBuf
 }
 
 // TestCheckPolecatHealth_SkipsSpawning verifies that checkPolecatHealth does NOT
@@ -94,16 +125,11 @@ func TestCheckPolecatHealth_DetectsCrashedPolecat(t *testing.T) {
 	writeFakeTestTmux(t, binDir)
 	recentTime := time.Now().UTC().Format(time.RFC3339)
 	bdPath := writeFakeTestBD(t, binDir, "working", "working", "gt-xyz", recentTime)
+	gtPath, _ := writeFakeGt(t, binDir)
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
-	var logBuf strings.Builder
-	d := &Daemon{
-		config: &Config{TownRoot: t.TempDir()},
-		logger: log.New(&logBuf, "", 0),
-		tmux:   tmux.NewTmux(),
-		bdPath: bdPath,
-	}
+	d, logBuf := newTestDaemon(t, binDir, bdPath, gtPath)
 
 	d.checkPolecatHealth("myr", "mycat")
 
@@ -125,16 +151,11 @@ func TestCheckPolecatHealth_SpawningGuardExpires(t *testing.T) {
 	// Use a timestamp >5 minutes ago to expire the spawning guard
 	oldTime := time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339)
 	bdPath := writeFakeTestBD(t, binDir, "spawning", "spawning", "gt-xyz", oldTime)
+	gtPath, _ := writeFakeGt(t, binDir)
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
-	var logBuf strings.Builder
-	d := &Daemon{
-		config: &Config{TownRoot: t.TempDir()},
-		logger: log.New(&logBuf, "", 0),
-		tmux:   tmux.NewTmux(),
-		bdPath: bdPath,
-	}
+	d, logBuf := newTestDaemon(t, binDir, bdPath, gtPath)
 
 	d.checkPolecatHealth("myr", "mycat")
 
@@ -161,16 +182,11 @@ func TestCheckPolecatHealth_DBStateOverridesDescription(t *testing.T) {
 	recentTime := time.Now().UTC().Format(time.RFC3339)
 	// Description says "spawning" (stale) but DB column says "working" (truth)
 	bdPath := writeFakeTestBD(t, binDir, "spawning", "working", "gt-xyz", recentTime)
+	gtPath, _ := writeFakeGt(t, binDir)
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
-	var logBuf strings.Builder
-	d := &Daemon{
-		config: &Config{TownRoot: t.TempDir()},
-		logger: log.New(&logBuf, "", 0),
-		tmux:   tmux.NewTmux(),
-		bdPath: bdPath,
-	}
+	d, logBuf := newTestDaemon(t, binDir, bdPath, gtPath)
 
 	d.checkPolecatHealth("myr", "mycat")
 
@@ -185,11 +201,10 @@ func TestCheckPolecatHealth_DBStateOverridesDescription(t *testing.T) {
 	}
 }
 
-// TestCheckPolecatHealth_NotifiesWitnessOnCrash verifies that when a polecat
-// crash is detected, the daemon sends a notification to the witness via
-// `gt mail send` with a CRASHED_POLECAT subject. Restart is deferred to the
-// stuck-agent-dog plugin for context-aware recovery.
-func TestCheckPolecatHealth_NotifiesWitnessOnCrash(t *testing.T) {
+// TestCheckPolecatHealth_AutoRestartsOnCrash verifies that when a polecat
+// crash is detected, the daemon auto-restarts it via `gt session restart`
+// and records the restart in the tracker.
+func TestCheckPolecatHealth_AutoRestartsOnCrash(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test uses Unix shell script mocks for tmux and bd")
 	}
@@ -197,26 +212,11 @@ func TestCheckPolecatHealth_NotifiesWitnessOnCrash(t *testing.T) {
 	writeFakeTestTmux(t, binDir)
 	recentTime := time.Now().UTC().Format(time.RFC3339)
 	bdPath := writeFakeTestBD(t, binDir, "working", "working", "gt-xyz", recentTime)
-
-	// Create a fake gt script that logs invocations to a file
-	gtLog := filepath.Join(t.TempDir(), "gt-invocations.log")
-	fakeGt := filepath.Join(binDir, "gt")
-	gtScript := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %s\n", gtLog)
-	if err := os.WriteFile(fakeGt, []byte(gtScript), 0755); err != nil {
-		t.Fatalf("writing fake gt: %v", err)
-	}
+	gtPath, gtLog := writeFakeGt(t, binDir)
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
-	townRoot := t.TempDir()
-	var logBuf strings.Builder
-	d := &Daemon{
-		config: &Config{TownRoot: townRoot},
-		logger: log.New(&logBuf, "", 0),
-		tmux:   tmux.NewTmux(),
-		bdPath: bdPath,
-		gtPath: fakeGt,
-	}
+	d, logBuf := newTestDaemon(t, binDir, bdPath, gtPath)
 
 	d.checkPolecatHealth("myr", "mycat")
 
@@ -224,20 +224,208 @@ func TestCheckPolecatHealth_NotifiesWitnessOnCrash(t *testing.T) {
 	if !strings.Contains(got, "CRASH DETECTED") {
 		t.Fatalf("expected CRASH DETECTED, got: %q", got)
 	}
+	if !strings.Contains(got, "Auto-restarting polecat myr/mycat") {
+		t.Errorf("expected auto-restart log, got: %q", got)
+	}
 
-	// Verify gt mail send was called with CRASHED_POLECAT subject
+	// Verify gt session restart was called
+	logData, err := os.ReadFile(gtLog)
+	if err != nil {
+		t.Fatalf("reading gt invocation log: %v", err)
+	}
+	invocations := string(logData)
+	if !strings.Contains(invocations, "session restart myr/mycat --force") {
+		t.Errorf("expected 'gt session restart myr/mycat --force', got: %q", invocations)
+	}
+
+	// Verify restart was recorded in tracker
+	agentID := "myr/polecats/mycat"
+	if d.restartTracker.CanRestart(agentID) {
+		// After first restart, should be in backoff period
+		remaining := d.restartTracker.GetBackoffRemaining(agentID)
+		if remaining <= 0 {
+			t.Errorf("expected backoff after restart, but backoff remaining is %v", remaining)
+		}
+	}
+}
+
+// TestCheckPolecatHealth_RespectsBackoff verifies that a polecat in backoff
+// is not restarted until the backoff period expires.
+func TestCheckPolecatHealth_RespectsBackoff(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+	binDir := t.TempDir()
+	writeFakeTestTmux(t, binDir)
+	recentTime := time.Now().UTC().Format(time.RFC3339)
+	bdPath := writeFakeTestBD(t, binDir, "working", "working", "gt-xyz", recentTime)
+	gtPath, gtLog := writeFakeGt(t, binDir)
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	d, logBuf := newTestDaemon(t, binDir, bdPath, gtPath)
+
+	// Pre-record a restart to put the agent in backoff
+	agentID := "myr/polecats/mycat"
+	d.restartTracker.RecordRestart(agentID)
+
+	d.checkPolecatHealth("myr", "mycat")
+
+	got := logBuf.String()
+	if !strings.Contains(got, "CRASH DETECTED") {
+		t.Fatalf("expected CRASH DETECTED, got: %q", got)
+	}
+	if !strings.Contains(got, "restart in backoff") {
+		t.Errorf("expected backoff message, got: %q", got)
+	}
+
+	// Verify gt session restart was NOT called
+	logData, _ := os.ReadFile(gtLog)
+	if strings.Contains(string(logData), "session restart") {
+		t.Errorf("should NOT have called gt session restart during backoff, got: %q", string(logData))
+	}
+}
+
+// TestCheckPolecatHealth_CrashLoopNotifiesWitness verifies that when a polecat
+// is in a crash loop, the daemon skips auto-restart but still notifies the witness.
+func TestCheckPolecatHealth_CrashLoopNotifiesWitness(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+	binDir := t.TempDir()
+	writeFakeTestTmux(t, binDir)
+	recentTime := time.Now().UTC().Format(time.RFC3339)
+	bdPath := writeFakeTestBD(t, binDir, "working", "working", "gt-xyz", recentTime)
+	gtPath, gtLog := writeFakeGt(t, binDir)
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	d, logBuf := newTestDaemon(t, binDir, bdPath, gtPath)
+
+	// Simulate crash loop by recording many restarts
+	agentID := "myr/polecats/mycat"
+	for i := 0; i < 6; i++ {
+		d.restartTracker.RecordRestart(agentID)
+	}
+
+	d.checkPolecatHealth("myr", "mycat")
+
+	got := logBuf.String()
+	if !strings.Contains(got, "crash loop") {
+		t.Errorf("expected crash loop message, got: %q", got)
+	}
+
+	// Verify witness was notified (fallback when auto-restart is blocked)
 	logData, err := os.ReadFile(gtLog)
 	if err != nil {
 		t.Fatalf("reading gt invocation log: %v", err)
 	}
 	invocations := string(logData)
 	if !strings.Contains(invocations, "mail send") {
-		t.Errorf("expected gt mail send invocation, got: %q", invocations)
+		t.Errorf("expected witness notification during crash loop, got: %q", invocations)
 	}
 	if !strings.Contains(invocations, "CRASHED_POLECAT") {
 		t.Errorf("expected CRASHED_POLECAT in mail subject, got: %q", invocations)
 	}
-	if !strings.Contains(invocations, "myr/witness") {
-		t.Errorf("expected witness address myr/witness, got: %q", invocations)
+}
+
+// TestCheckPolecatHealth_HeartbeatStaleWarning verifies that when a polecat session
+// is alive but its heartbeat is stale, a warning is logged.
+func TestCheckPolecatHealth_HeartbeatStaleWarning(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+
+	// Create a fake tmux that reports session as alive
+	binDir := t.TempDir()
+	tmuxScript := "#!/bin/sh\n" +
+		"case \"$*\" in\n" +
+		"  *has-session*) exit 0;;\n" +
+		"  *) echo 'unexpected tmux command' >&2; exit 1;;\n" +
+		"esac\n"
+	if err := os.WriteFile(filepath.Join(binDir, "tmux"), []byte(tmuxScript), 0755); err != nil {
+		t.Fatalf("writing fake tmux: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	townRoot := t.TempDir()
+	var logBuf strings.Builder
+	d := &Daemon{
+		config:         &Config{TownRoot: townRoot},
+		logger:         log.New(&logBuf, "", 0),
+		tmux:           tmux.NewTmux(),
+		restartTracker: NewRestartTracker(townRoot, RestartTrackerConfig{}),
+		ctx:            context.Background(),
+	}
+
+	// Write a stale heartbeat with an old timestamp in the JSON
+	sessionName := "gt-mycat"
+	hbDir := filepath.Join(townRoot, ".runtime", "heartbeats")
+	if err := os.MkdirAll(hbDir, 0755); err != nil {
+		t.Fatalf("creating heartbeats dir: %v", err)
+	}
+	hbPath := filepath.Join(hbDir, sessionName+".json")
+	staleJSON := fmt.Sprintf(`{"timestamp":"%s","state":"working","context":"test","bead":"gt-xyz"}`,
+		time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339Nano))
+	if err := os.WriteFile(hbPath, []byte(staleJSON), 0644); err != nil {
+		t.Fatalf("writing stale heartbeat: %v", err)
+	}
+
+	d.checkPolecatHealth("myr", "mycat")
+
+	got := logBuf.String()
+	if !strings.Contains(got, "STALE HEARTBEAT") {
+		t.Errorf("expected STALE HEARTBEAT warning, got: %q", got)
+	}
+}
+
+// TestCheckPolecatHealth_FreshHeartbeatResetsBackoff verifies that a fresh
+// heartbeat from an alive polecat resets the restart tracker backoff.
+func TestCheckPolecatHealth_FreshHeartbeatResetsBackoff(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+
+	// Create a fake tmux that reports session as alive
+	binDir := t.TempDir()
+	tmuxScript := "#!/bin/sh\n" +
+		"case \"$*\" in\n" +
+		"  *has-session*) exit 0;;\n" +
+		"  *) echo 'unexpected tmux command' >&2; exit 1;;\n" +
+		"esac\n"
+	if err := os.WriteFile(filepath.Join(binDir, "tmux"), []byte(tmuxScript), 0755); err != nil {
+		t.Fatalf("writing fake tmux: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	townRoot := t.TempDir()
+	var logBuf strings.Builder
+	rt := NewRestartTracker(townRoot, RestartTrackerConfig{
+		StabilityPeriod: 0, // Reset immediately on success
+	})
+	d := &Daemon{
+		config:         &Config{TownRoot: townRoot},
+		logger:         log.New(&logBuf, "", 0),
+		tmux:           tmux.NewTmux(),
+		restartTracker: rt,
+		ctx:            context.Background(),
+	}
+
+	// Pre-record some restarts
+	agentID := "myr/polecats/mycat"
+	rt.RecordRestart(agentID)
+	rt.RecordRestart(agentID)
+
+	// Write a fresh heartbeat
+	sessionName := "gt-mycat"
+	polecat.TouchSessionHeartbeatWithState(townRoot, sessionName, polecat.HeartbeatWorking, "test", "gt-xyz")
+
+	d.checkPolecatHealth("myr", "mycat")
+
+	// After fresh heartbeat, backoff should be cleared (stability period = 0)
+	if !rt.CanRestart(agentID) {
+		t.Errorf("expected backoff to be reset after fresh heartbeat, but agent is still in backoff")
 	}
 }
