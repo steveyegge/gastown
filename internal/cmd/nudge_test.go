@@ -375,6 +375,38 @@ func TestIfFreshSessionAgeCheck(t *testing.T) {
 	}
 }
 
+func TestPostQueueIdleRecovery_SkipsDeliveryWhenDrainEmpty(t *testing.T) {
+	// Behavioral test (gt-y2zk): when the idle recovery path fires but
+	// another process already drained the queue, we must NOT deliver to
+	// avoid duplicates. This exercises the len(drained) > 0 guard.
+	townRoot := t.TempDir()
+	session := "gt-crew-test"
+
+	// Enqueue a nudge, then drain it (simulating a racing hook).
+	if err := nudge.Enqueue(townRoot, session, nudge.QueuedNudge{
+		Sender:  "test",
+		Message: "hello",
+	}); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	drained, err := nudge.Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("first Drain: %v", err)
+	}
+	if len(drained) != 1 {
+		t.Fatalf("first Drain got %d entries, want 1", len(drained))
+	}
+
+	// Second drain should return empty — the racing hook already claimed it.
+	drained2, err := nudge.Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("second Drain: %v", err)
+	}
+	if len(drained2) != 0 {
+		t.Errorf("second Drain got %d entries, want 0 (already claimed)", len(drained2))
+	}
+}
+
 func TestValidModeMapsMatchConstants(t *testing.T) {
 	// Ensure the validation maps cover all defined mode constants.
 	modes := []string{NudgeModeImmediate, NudgeModeQueue, NudgeModeWaitIdle}
