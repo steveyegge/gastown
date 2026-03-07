@@ -1164,6 +1164,8 @@ func Start(townRoot string) error {
 						_ = SaveState(townRoot, state)
 					}
 				}
+				// Sync port files so bd never spawns orphan embedded servers
+				_ = SyncPortFiles(townRoot, config.Port)
 				return nil // already running and legitimate — idempotent success
 			}
 		}
@@ -1287,6 +1289,8 @@ func Start(townRoot string) error {
 		}
 
 		if err := CheckServerReachable(townRoot); err == nil {
+			// Sync port files so bd never spawns orphan embedded servers
+			_ = SyncPortFiles(townRoot, config.Port)
 			return nil // Server is up and accepting connections
 		} else {
 			lastErr = err
@@ -1294,6 +1298,124 @@ func Start(townRoot string) error {
 	}
 
 	return fmt.Errorf("Dolt server process started (PID %d) but not accepting connections after 5s: %w\nCheck logs with: gt dolt logs", cmd.Process.Pid, lastErr)
+}
+
+// SyncPortFiles writes the shared server port to dolt-server.port in every
+// rig's .beads/ directory (and the town-level .beads/). This prevents bd from
+// thinking no server is running and spawning its own embedded Dolt server.
+//
+// bd reads dolt-server.port as part of its port resolution chain. When the file
+// is missing or contains a stale port, bd may fall back to DerivePort and start
+// an orphan server on a random port with an empty database — causing "issue not
+// found" errors across all bd operations.
+//
+// Called after gt dolt start (both fresh start and already-running cases) and
+// by gt doctor --fix for the dolt-port-files check.
+func SyncPortFiles(townRoot string, port int) error {
+	portStr := []byte(strconv.Itoa(port))
+
+	// Town-level .beads/ (hq)
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if _, err := os.Stat(townBeadsDir); err == nil {
+		_ = os.WriteFile(filepath.Join(townBeadsDir, "dolt-server.port"), portStr, 0644)
+	}
+
+	// Read rigs.json for all registered rigs
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	data, err := os.ReadFile(rigsPath)
+	if err != nil {
+		return nil // No rigs.json — nothing to sync
+	}
+	var config struct {
+		Rigs map[string]interface{} `json:"rigs"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil
+	}
+
+	for rigName := range config.Rigs {
+		beadsDir := FindRigBeadsDir(townRoot, rigName)
+		if beadsDir == "" {
+			continue
+		}
+		if _, err := os.Stat(beadsDir); err != nil {
+			continue // .beads/ dir doesn't exist for this rig
+		}
+		_ = os.WriteFile(filepath.Join(beadsDir, "dolt-server.port"), portStr, 0644)
+	}
+
+	return nil
+}
+
+// CheckPortFiles compares each rig's dolt-server.port against the expected port.
+// Returns a list of (beadsDir, currentPort) pairs where the port is wrong or missing.
+func CheckPortFiles(townRoot string, expectedPort int) []PortFileDrift {
+	var drifted []PortFileDrift
+
+	// Town-level .beads/
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if _, err := os.Stat(townBeadsDir); err == nil {
+		checkPortFile(townBeadsDir, expectedPort, &drifted)
+	}
+
+	// Read rigs.json
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	data, err := os.ReadFile(rigsPath)
+	if err != nil {
+		return drifted
+	}
+	var config struct {
+		Rigs map[string]interface{} `json:"rigs"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return drifted
+	}
+
+	for rigName := range config.Rigs {
+		beadsDir := FindRigBeadsDir(townRoot, rigName)
+		if beadsDir == "" {
+			continue
+		}
+		if _, err := os.Stat(beadsDir); err != nil {
+			continue
+		}
+		checkPortFile(beadsDir, expectedPort, &drifted)
+	}
+
+	return drifted
+}
+
+// PortFileDrift describes a dolt-server.port file that doesn't match the shared server port.
+type PortFileDrift struct {
+	BeadsDir    string
+	CurrentPort int // 0 means missing
+	ExpectedPort int
+}
+
+func checkPortFile(beadsDir string, expected int, drifted *[]PortFileDrift) {
+	portFile := filepath.Join(beadsDir, "dolt-server.port")
+	data, err := os.ReadFile(portFile)
+	if err != nil {
+		// Missing port file
+		*drifted = append(*drifted, PortFileDrift{
+			BeadsDir:     beadsDir,
+			CurrentPort:  0,
+			ExpectedPort: expected,
+		})
+		return
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || port != expected {
+		actual := 0
+		if err == nil {
+			actual = port
+		}
+		*drifted = append(*drifted, PortFileDrift{
+			BeadsDir:     beadsDir,
+			CurrentPort:  actual,
+			ExpectedPort: expected,
+		})
+	}
 }
 
 // cleanupStaleDoltLock removes a stale Dolt LOCK file if no process holds it.

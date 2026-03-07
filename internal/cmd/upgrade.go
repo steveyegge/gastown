@@ -143,6 +143,7 @@ func upgradeDoctor(townRoot string) upgradeResult {
 	d.Register(doctor.NewDeprecatedMergeQueueKeysCheck())
 	d.Register(doctor.NewStaleTaskDispatchCheck())
 	d.Register(doctor.NewHooksSyncCheck())
+	d.Register(doctor.NewDoltPortFileCheck())
 	d.Register(doctor.NewSparseCheckoutCheck())
 	d.Register(doctor.NewPrimingCheck())
 	d.Register(doctor.NewLifecycleHygieneCheck())
