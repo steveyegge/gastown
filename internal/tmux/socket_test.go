@@ -58,6 +58,44 @@ func TestBuildCommandNoSocket(t *testing.T) {
 	}
 }
 
+func TestKillStaleSessionOnOtherSockets_NoSocket(t *testing.T) {
+	// Should be a no-op when socketName is empty
+	tmx := &Tmux{socketName: ""}
+	tmx.KillStaleSessionOnOtherSockets("test-session")
+	// No panic = pass
+}
+
+func TestKillStaleSessionOnOtherSockets_DefaultToDefault(t *testing.T) {
+	orig := defaultSocket
+	defer func() { defaultSocket = orig }()
+
+	// When target is "default" and GetDefaultSocket is also "default", should no-op
+	SetDefaultSocket("default")
+	tmx := &Tmux{socketName: "default"}
+	tmx.KillStaleSessionOnOtherSockets("test-session")
+	// No panic = pass
+}
+
+func TestKillStaleSessionOnOtherSockets_ChecksDefaultWhenOnTownSocket(t *testing.T) {
+	// When targeting "gt" socket, should check "default" socket
+	tmx := &Tmux{socketName: "gt"}
+	// This will try to contact the "default" tmux server. If no server
+	// is running, HasSession returns false and nothing happens — that's fine.
+	tmx.KillStaleSessionOnOtherSockets("nonexistent-session")
+	// No panic = pass
+}
+
+func TestKillStaleSessionOnOtherSockets_ChecksTownWhenOnDefault(t *testing.T) {
+	orig := defaultSocket
+	defer func() { defaultSocket = orig }()
+
+	SetDefaultSocket("gt")
+	tmx := &Tmux{socketName: "default"}
+	// Should check "gt" socket for stale sessions
+	tmx.KillStaleSessionOnOtherSockets("nonexistent-session")
+	// No panic = pass
+}
+
 func TestBuildCommandWithSocket(t *testing.T) {
 	orig := defaultSocket
 	defer func() { defaultSocket = orig }()

@@ -131,6 +131,108 @@ func (c *LinkedPaneCheck) Fix(ctx *CheckContext) error {
 	return lastErr
 }
 
+// SocketSplitBrainCheck detects sessions that exist on both the town socket
+// and the default socket, which causes inter-agent communication failures.
+type SocketSplitBrainCheck struct {
+	FixableCheck
+	duplicates []string // Session names found on both sockets, cached for Fix
+}
+
+// NewSocketSplitBrainCheck creates a new socket split-brain check.
+func NewSocketSplitBrainCheck() *SocketSplitBrainCheck {
+	return &SocketSplitBrainCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "socket-split-brain",
+				CheckDescription: "Detect sessions duplicated across tmux sockets (causes communication failures)",
+				CheckCategory:    CategoryInfrastructure,
+			},
+		},
+	}
+}
+
+// Run checks for sessions that exist on both the town socket and default socket.
+func (c *SocketSplitBrainCheck) Run(ctx *CheckContext) *CheckResult {
+	townSocket := tmux.GetDefaultSocket()
+	if townSocket == "" || townSocket == "default" {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No town socket configured (using default)",
+		}
+	}
+
+	// List sessions on the town socket
+	townTmux := tmux.NewTmuxWithSocket(townSocket)
+	townSessions, err := townTmux.ListSessions()
+	if err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "Town tmux server not running",
+		}
+	}
+
+	// List sessions on the default socket
+	defaultTmux := tmux.NewTmuxWithSocket("default")
+	defaultSessions, err := defaultTmux.ListSessions()
+	if err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "Default tmux server not running",
+		}
+	}
+
+	// Build set of default socket sessions
+	defaultSet := make(map[string]bool, len(defaultSessions))
+	for _, s := range defaultSessions {
+		defaultSet[s] = true
+	}
+
+	// Find duplicates: sessions on town socket that also exist on default
+	c.duplicates = nil
+	var details []string
+	for _, s := range townSessions {
+		if defaultSet[s] {
+			c.duplicates = append(c.duplicates, s)
+			details = append(details, fmt.Sprintf("Session %q exists on both %q and \"default\" sockets", s, townSocket))
+		}
+	}
+
+	if len(c.duplicates) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: fmt.Sprintf("No duplicate sessions across sockets (%d on %q, %d on default)", len(townSessions), townSocket, len(defaultSessions)),
+		}
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusError,
+		Message: fmt.Sprintf("SPLIT-BRAIN: %d session(s) exist on both %q and \"default\" sockets", len(c.duplicates), townSocket),
+		Details: details,
+		FixHint: "Run 'gt doctor --fix' to kill stale sessions on the default socket",
+	}
+}
+
+// Fix kills duplicate sessions on the default socket (the town socket copy is authoritative).
+func (c *SocketSplitBrainCheck) Fix(ctx *CheckContext) error {
+	if len(c.duplicates) == 0 {
+		return nil
+	}
+
+	defaultTmux := tmux.NewTmuxWithSocket("default")
+	var lastErr error
+	for _, s := range c.duplicates {
+		if err := defaultTmux.KillSessionWithProcesses(s); err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
 // getSessionPanes returns all pane IDs for a session.
 func (c *LinkedPaneCheck) getSessionPanes(session string) ([]string, error) {
 	// Get pane IDs using tmux list-panes with format
