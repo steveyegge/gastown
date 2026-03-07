@@ -388,8 +388,6 @@ func (t *Tmux) checkSessionAfterCreate(name, command string) error {
 		return err
 	}
 
-<<<<<<< HEAD
-=======
 	// Third check at 1.25s: the exec-env pattern (exec env VAR=val binary)
 	// adds shell parsing overhead that can exceed 250ms on heavily loaded CI
 	// runners. This catches those late failures without impacting normal
@@ -401,7 +399,6 @@ func (t *Tmux) checkSessionAfterCreate(name, command string) error {
 		}
 	}
 
->>>>>>> 0d43b8ea (fix: increase exec-env health check to 1.25s for CI reliability)
 	// Pane is alive — restore default (no need to keep dead sessions around)
 	_, _ = t.run("set-option", "-t", name, "remain-on-exit", "off")
 	return nil
