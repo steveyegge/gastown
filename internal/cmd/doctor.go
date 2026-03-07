@@ -199,6 +199,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewDefaultBranchAllRigsCheck())
 	d.Register(doctor.NewIdentityCollisionCheck())
 	d.Register(doctor.NewLinkedPaneCheck())
+	d.Register(doctor.NewSocketSplitBrainCheck())
 	d.Register(doctor.NewThemeCheck())
 	d.Register(doctor.NewCrashReportCheck())
 	d.Register(doctor.NewEnvVarsCheck())
