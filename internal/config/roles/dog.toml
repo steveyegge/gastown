@@ -10,7 +10,6 @@ prompt_template = "dog.md.tmpl"
 pattern = "gt-dog-{name}"
 work_dir = "{town}/deacon/dogs/{name}"
 needs_pre_sync = false
-start_command = "exec claude --dangerously-skip-permissions"
 
 [env]
 GT_ROLE = "dog"
