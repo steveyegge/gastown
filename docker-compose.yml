@@ -1,14 +1,11 @@
 # Run with
-# GIT_USER="<your name>" GIT_EMAIL="<your email>" FOLDER="/Users/you/code" docker compose up --build -d
+# GIT_USER="<your name>" GIT_EMAIL="<your email>" FOLDER="/Users/you/code" docker compose up -d
 
 services:
   gastown:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        GIT_USER: ${GIT_USER:-TestUser}
-        GIT_EMAIL: ${GIT_EMAIL:-test@example.com}
     container_name: gastown-sandbox
     stdin_open: false
     tty: false
@@ -25,13 +22,19 @@ services:
       - NET_RAW
     environment:
       IS_SANDBOX: 1
+      GIT_USER: ${GIT_USER:-TestUser}
+      GIT_EMAIL: ${GIT_EMAIL:-test@example.com}
     volumes:
       # FOLDER must be defined in .env file, e.g. FOLDER=/home/user
       # or provided as an environment variable when running docker compose,
       # e.g. FOLDER=/home/user docker compose up
+      - agent-home:/home/agent
       - ${FOLDER}:/gt
     ports:
       - "3000:3000"
     command: sleep infinity
 
     # Exec into the container with: docker compose exec gastown zsh
+
+volumes:
+  agent-home:

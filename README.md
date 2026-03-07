@@ -132,16 +132,16 @@ export GIT_USER="<your name>"
 export GIT_EMAIL="<your email>"
 export FOLDER="/Users/you/code"
 
-docker compose up --build -d
+docker compose build              # only needed on first run or after code changes
+docker compose up -d
 
-docker compose exec gastown zsh # or bash
+docker compose exec gastown zsh   # or bash
 
 gt up
 
-gh auth login #if you want gh to work
+gh auth login                     # if you want gh to work
 
 gt mayor attach
-
 ```
 
 ## Quick Start Guide
