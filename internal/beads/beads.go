@@ -603,8 +603,9 @@ func isJSONBytes(b []byte) bool {
 
 // ListMergeRequests returns merge-request beads from both the issues table
 // and the wisps table. MRs are created as ephemeral (wisps) by gt mq submit,
-// but bd list only queries the issues table. This method merges both sources,
-// mirroring the pattern used by ListAgentBeads.
+// but bd list only queries the issues table. This method queries the wisps
+// table via bd sql --json to get full data (bd mol wisp list returns minimal
+// fields without labels, assignee, or description).
 func (b *Beads) ListMergeRequests(opts ListOptions) ([]*Issue, error) {
 	// 1. Query issues table (bd list)
 	issueResults, err := b.List(opts)
@@ -618,39 +619,67 @@ func (b *Beads) ListMergeRequests(opts ListOptions) ([]*Issue, error) {
 		seen[issue.ID] = true
 	}
 
-	// 2. Query wisps table (bd mol wisp list)
-	wispArgs := []string{"mol", "wisp", "list", "--json"}
-	if opts.Status == "" || opts.Status == "open" {
-		// default: only open wisps (bd mol wisp list excludes closed by default)
-	} else {
-		wispArgs = append(wispArgs, "--all")
+	// 2. Query wisps table via SQL for merge-request wisps with full data
+	statusFilter := "w.status = 'open'"
+	if opts.Status != "" && strings.EqualFold(opts.Status, "all") {
+		statusFilter = "1=1"
+	} else if opts.Status != "" {
+		statusFilter = fmt.Sprintf("w.status = '%s'", strings.ReplaceAll(strings.ToLower(opts.Status), "'", "''"))
 	}
-	wispOut, wispErr := b.run(wispArgs...)
-	if wispErr == nil && len(wispOut) > 0 {
-		var wrapper struct {
-			Wisps []*Issue `json:"wisps"`
+
+	query := fmt.Sprintf(
+		"SELECT w.id, w.title, w.description, w.status, w.priority, w.assignee, "+
+			"w.created_at, w.updated_at, w.created_by, "+
+			"GROUP_CONCAT(al.label) as labels_csv "+
+			"FROM wisps w "+
+			"JOIN wisp_labels l ON w.id = l.issue_id "+
+			"LEFT JOIN wisp_labels al ON w.id = al.issue_id "+
+			"WHERE l.label = 'gt:merge-request' AND %s "+
+			"GROUP BY w.id, w.title, w.description, w.status, w.priority, w.assignee, w.created_at, w.updated_at, w.created_by",
+		statusFilter)
+
+	sqlOut, sqlErr := b.run("sql", "--json", query)
+	if sqlErr == nil && len(sqlOut) > 0 && isJSONBytes(sqlOut) {
+		var rows []struct {
+			ID          string `json:"id"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			Status      string `json:"status"`
+			Priority    int    `json:"priority"`
+			Assignee    string `json:"assignee"`
+			CreatedAt   string `json:"created_at"`
+			UpdatedAt   string `json:"updated_at"`
+			CreatedBy   string `json:"created_by"`
+			LabelsCSV   string `json:"labels_csv"`
 		}
-		if jsonErr := json.Unmarshal(wispOut, &wrapper); jsonErr == nil {
-			for _, w := range wrapper.Wisps {
-				if seen[w.ID] {
-					continue // issues table entry wins
+		if jsonErr := json.Unmarshal(sqlOut, &rows); jsonErr == nil {
+			for _, row := range rows {
+				if seen[row.ID] {
+					continue
 				}
-				// Filter: must have gt:merge-request label OR title prefix "Merge: "
-				if HasLabel(w, "gt:merge-request") || strings.HasPrefix(w.Title, "Merge: ") {
-					// Apply status filter if needed
-					if opts.Status != "" && !strings.EqualFold(opts.Status, "all") {
-						if !strings.EqualFold(w.Status, opts.Status) {
-							continue
-						}
-					}
-					issueResults = append(issueResults, w)
+				issue := &Issue{
+					ID:          row.ID,
+					Title:       row.Title,
+					Description: row.Description,
+					Status:      row.Status,
+					Priority:    row.Priority,
+					Assignee:    row.Assignee,
+					CreatedAt:   row.CreatedAt,
+					UpdatedAt:   row.UpdatedAt,
+					CreatedBy:   row.CreatedBy,
+					Ephemeral:   true,
 				}
+				if row.LabelsCSV != "" {
+					issue.Labels = strings.Split(row.LabelsCSV, ",")
+				}
+				issueResults = append(issueResults, issue)
 			}
 		}
 	}
 
 	return issueResults, nil
 }
+
 
 // ListByAssignee returns all issues assigned to a specific assignee.
 // The assignee is typically in the format "rig/polecats/polecatName" (e.g., "gastown/polecats/Toast").
