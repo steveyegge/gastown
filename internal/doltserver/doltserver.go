@@ -2499,6 +2499,13 @@ func EnsureMetadata(townRoot, rigName string) error {
 		existing["dolt_database"] = rigName
 		changed = true
 	}
+	// Ensure dolt_port is written so bd can discover the central server.
+	// Without this, bd falls back to starting its own Dolt instance.
+	expectedPort := float64(DefaultPort)
+	if existing["dolt_port"] != expectedPort {
+		existing["dolt_port"] = expectedPort
+		changed = true
+	}
 
 	// Fast path: avoid rewriting metadata.json when already correct.
 	if !changed {

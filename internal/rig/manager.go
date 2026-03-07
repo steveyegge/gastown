@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -895,11 +896,14 @@ func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 		initArgs = append(initArgs, "--prefix", prefix)
 	}
 	initArgs = append(initArgs, "--server")
-	// When GT_DOLT_PORT is set (e.g., test environment with ephemeral server),
-	// pass --server-port so bd init configures the correct port in metadata.
-	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-		initArgs = append(initArgs, "--server-port", p)
+	// Always pass --server-port so bd init connects to the correct Dolt server
+	// instead of starting its own. GT_DOLT_PORT overrides for test environments;
+	// otherwise use the standard Gas Town port (3307).
+	serverPort := os.Getenv("GT_DOLT_PORT")
+	if serverPort == "" {
+		serverPort = strconv.Itoa(doltserver.DefaultPort)
 	}
+	initArgs = append(initArgs, "--server-port", serverPort)
 	cmd := exec.Command("bd", initArgs...)
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv
