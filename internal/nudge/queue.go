@@ -272,6 +272,13 @@ func Pending(townRoot, session string) (int, error) {
 	return count, nil
 }
 
+// QueueLen returns the number of pending nudges for a session without draining.
+// Returns 0 on any error (missing dir, etc.) — callers use this for quick checks.
+func QueueLen(townRoot, session string) int {
+	n, _ := Pending(townRoot, session)
+	return n
+}
+
 // FormatForInjection formats queued nudges as a system-reminder block
 // suitable for Claude Code hook output.
 func FormatForInjection(nudges []QueuedNudge) string {
