@@ -375,6 +375,18 @@ func TestIfFreshSessionAgeCheck(t *testing.T) {
 	}
 }
 
+func TestPostQueueSettleDelay(t *testing.T) {
+	// Verify the post-queue settle delay is reasonable (gt-y2zk).
+	// Too short: won't catch agents that just became idle.
+	// Too long: adds unnecessary latency to every queued nudge.
+	if postQueueSettleDelay < 100*time.Millisecond {
+		t.Errorf("postQueueSettleDelay = %v, too short to catch idle transitions", postQueueSettleDelay)
+	}
+	if postQueueSettleDelay > 1*time.Second {
+		t.Errorf("postQueueSettleDelay = %v, too long — adds latency to every queued nudge", postQueueSettleDelay)
+	}
+}
+
 func TestValidModeMapsMatchConstants(t *testing.T) {
 	// Ensure the validation maps cover all defined mode constants.
 	modes := []string{NudgeModeImmediate, NudgeModeQueue, NudgeModeWaitIdle}
