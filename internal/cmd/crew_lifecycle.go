@@ -264,7 +264,11 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 	var rigName string
 	var crewNames []string
 
-	if len(args) == 0 {
+	// --rig flag takes priority (matches crew stop behavior)
+	if crewRig != "" {
+		rigName = crewRig
+		crewNames = args
+	} else if len(args) == 0 {
 		// No args - infer rig from cwd
 		rigName = "" // getCrewManager will infer from cwd
 	} else {
