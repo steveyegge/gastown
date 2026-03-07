@@ -135,7 +135,7 @@ var (
 func init() {
 	slingCmd.Flags().StringVarP(&slingSubject, "subject", "s", "", "Context subject for the work")
 	slingCmd.Flags().StringVarP(&slingMessage, "message", "m", "", "Context message for the work")
-	slingCmd.Flags().BoolVarP(&slingDryRun, "dry-run", "n", false, "Show what would be done")
+	slingCmd.Flags().BoolVarP(&slingDryRun, "dry-run", "n", false, "Validate and show what would be done (no side effects)")
 	slingCmd.Flags().StringVar(&slingOnTarget, "on", "", "Apply formula to existing bead (implies wisp scaffolding)")
 	slingCmd.Flags().StringArrayVar(&slingVars, "var", nil, "Formula variable (key=value), can be repeated")
 	slingCmd.Flags().StringVarP(&slingArgs, "args", "a", "", "Natural language instructions for the executor (e.g., 'patch release')")
@@ -740,11 +740,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		existingConvoy := isTrackedByConvoy(beadID)
 		if existingConvoy == "" {
 			if slingDryRun {
-				fmt.Printf("Would create convoy 'Work: %s'\n", info.Title)
-				fmt.Printf("Would add tracking relation to %s\n", beadID)
-				if slingMerge != "" {
-					fmt.Printf("Would set convoy merge strategy: %s\n", slingMerge)
-				}
+				// Convoy details are shown in the structured plan output below
 			} else {
 				convoyID, err := createAutoConvoy(beadID, info.Title, slingOwned, slingMerge)
 				if err != nil {
@@ -793,8 +789,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 				(info.Assignee == "" && (info.Status == "open" || info.Status == "in_progress")) ||
 				(info.Assignee != "" && isHookedAgentDeadFn(info.Assignee))
 			if slingDryRun {
-				fmt.Printf("  Would burn %d stale molecule(s): %s\n",
-					len(existingMolecules), strings.Join(existingMolecules, ", "))
+				// Molecule details are shown in the structured validation output below
 			} else if stale {
 				fmt.Printf("  %s Burning %d stale molecule(s) from previous assignment: %s\n",
 					style.Warning.Render("⚠"), len(existingMolecules), strings.Join(existingMolecules, ", "))
@@ -809,25 +804,37 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 	if slingDryRun {
+		// Structured validation report
+		cl := buildSlingValidation(beadID, info, targetAgent, formulaName, townRoot, force)
+
+		// Check for stale molecules
 		if formulaName != "" {
-			fmt.Printf("Would instantiate formula %s:\n", formulaName)
-			fmt.Printf("  1. bd cook %s\n", formulaName)
-			fmt.Printf("  2. bd mol wisp %s --var feature=\"%s\" --var issue=\"%s\"\n", formulaName, info.Title, beadID)
-			fmt.Printf("  3. bd mol bond <wisp-root> %s\n", beadID)
-			fmt.Printf("  4. bd update <compound-root> --status=hooked --assignee=%s\n", targetAgent)
-		} else {
-			fmt.Printf("Would run: bd update %s --status=hooked --assignee=%s\n", beadID, targetAgent)
+			existingMolecules := collectExistingMolecules(info)
+			if len(existingMolecules) > 0 {
+				cl.warn("stale molecules", fmt.Sprintf("%d would be burned: %s",
+					len(existingMolecules), strings.Join(existingMolecules, ", ")))
+			} else {
+				cl.pass("no stale molecules", "")
+			}
 		}
+
+		cl.render()
+
+		// Planned operations
+		plan := buildDryRunPlan(beadID, info, targetAgent, targetPane, formulaName, dryRunPlanOpts{
+			args:     slingArgs,
+			merge:    slingMerge,
+			noConvoy: slingNoConvoy || formulaName != "",
+			noMerge:  slingNoMerge,
+		})
 		if slingSubject != "" {
-			fmt.Printf("  subject (in nudge): %s\n", slingSubject)
+			plan = append(plan, fmt.Sprintf("Nudge subject: %s", slingSubject))
 		}
 		if slingMessage != "" {
-			fmt.Printf("  context: %s\n", slingMessage)
+			plan = append(plan, fmt.Sprintf("Context message: %s", truncate(slingMessage, 60)))
 		}
-		if slingArgs != "" {
-			fmt.Printf("  args (in nudge): %s\n", slingArgs)
-		}
-		fmt.Printf("Would inject start prompt to pane: %s\n", targetPane)
+		renderDryRunPlan(plan)
+		fmt.Println()
 		return nil
 	}
 
