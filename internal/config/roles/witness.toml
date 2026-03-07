@@ -12,7 +12,7 @@ work_dir = "{town}/{rig}/witness"
 needs_pre_sync = false
 
 [env]
-GT_ROLE = "witness"
+GT_ROLE = "{rig}/witness"
 GT_SCOPE = "rig"
 
 [health]

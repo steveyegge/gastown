@@ -208,7 +208,13 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	}
 	_ = t.SetEnvironment(sessionID, "GT_RUN", runID)
 	// Apply role config env vars if present (non-fatal).
+	// Skip keys already set by AgentEnv to prevent TOML env overriding
+	// the canonical qualified GT_ROLE (e.g., "beacon/witness" not "witness").
+	// See: https://github.com/steveyegge/gastown/issues/2492
 	for key, value := range roleConfigEnvVars(roleConfig, townRoot, m.rig.Name) {
+		if _, alreadySet := envVars[key]; alreadySet {
+			continue
+		}
 		_ = t.SetEnvironment(sessionID, key, value)
 	}
 	// Apply CLI env overrides (highest priority, non-fatal).
