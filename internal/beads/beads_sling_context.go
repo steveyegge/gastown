@@ -102,9 +102,8 @@ func (b *Beads) ListOpenSlingContexts() ([]*Issue, error) {
 		return nil, err
 	}
 
-	// Handle empty output
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" || trimmed == "null" {
+	// Handle empty or non-JSON output (bd list --json returns "No issues found." when empty)
+	if len(out) == 0 || !isJSONBytes(out) {
 		return nil, nil
 	}
 
