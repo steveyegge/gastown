@@ -29,7 +29,7 @@ services:
       # FOLDER must be defined in .env file, e.g. FOLDER=/home/user
       # or provided as an environment variable when running docker compose,
       # e.g. FOLDER=/home/user docker compose up
-      - ${FOLDER}:${FOLDER}
+      - ${FOLDER}:/gt
     ports:
       - "3000:3000"
     command: sleep infinity
