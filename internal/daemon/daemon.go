@@ -2075,7 +2075,13 @@ func (d *Daemon) reapIdlePolecat(rigName, polecatName string, timeout time.Durat
 		agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
 		info, err := d.getAgentBeadInfo(agentBeadID)
 		if err != nil {
-			return // Can't read agent bead — skip
+			// Agent bead lookup failed — polecat has no provable work.
+			// If heartbeat is stale enough (2x timeout), reap anyway to prevent
+			// indefinite API burn when bead infrastructure is degraded.
+			if staleDuration >= timeout*2 {
+				d.killIdlePolecat(rigName, polecatName, sessionName, staleDuration, timeout, "working-bead-lookup-failed")
+			}
+			return
 		}
 
 		// If polecat has hooked work, it might just be stuck (not idle).
