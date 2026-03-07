@@ -100,20 +100,35 @@ func runConvoyScheduleByID(convoyID string, opts convoyScheduleOpts) error {
 	formula := opts.Formula
 
 	if opts.DryRun {
-		fmt.Printf("%s Would schedule %d issue(s) from convoy %s:\n",
-			style.Bold.Render("DRY-RUN"), len(candidates), convoyID)
+		cl := &slingChecklist{}
+		cl.pass("convoy", convoyID)
+		cl.info("candidates", fmt.Sprintf("%d issue(s)", len(candidates)))
 		if formula != "" {
-			fmt.Printf("  Formula: %s\n", formula)
-		} else {
-			fmt.Printf("  Hook raw beads (no formula)\n")
+			cl.pass("formula", formula)
 		}
 		for _, c := range candidates {
-			fmt.Printf("  Would schedule: %s -> %s (%s)\n", c.ID, c.RigName, c.Title)
+			cl.pass("issue "+c.ID, fmt.Sprintf("%s → %s", truncate(c.Title, 30), c.RigName))
 		}
-		if skippedClosed > 0 || skippedAssigned > 0 || skippedScheduled > 0 || skippedNoRig > 0 {
-			fmt.Printf("\nSkipped: %d closed, %d assigned, %d already scheduled, %d no rig\n",
-				skippedClosed, skippedAssigned, skippedScheduled, skippedNoRig)
+		if skippedClosed > 0 {
+			cl.info("skipped closed", fmt.Sprintf("%d", skippedClosed))
 		}
+		if skippedAssigned > 0 {
+			cl.info("skipped assigned", fmt.Sprintf("%d", skippedAssigned))
+		}
+		if skippedScheduled > 0 {
+			cl.info("skipped scheduled", fmt.Sprintf("%d", skippedScheduled))
+		}
+		if skippedNoRig > 0 {
+			cl.warn("skipped no rig", fmt.Sprintf("%d", skippedNoRig))
+		}
+		cl.render()
+
+		var plan []string
+		for _, c := range candidates {
+			plan = append(plan, fmt.Sprintf("Schedule %s → %s", c.ID, c.RigName))
+		}
+		renderDryRunPlan(plan)
+		fmt.Println()
 		return nil
 	}
 
@@ -215,15 +230,32 @@ func runConvoySlingByID(convoyID string, opts convoyScheduleOpts) error {
 	formula := opts.Formula
 
 	if opts.DryRun {
-		fmt.Printf("%s Would dispatch %d issue(s) from convoy %s:\n",
-			style.Bold.Render("DRY-RUN"), len(candidates), convoyID)
+		cl := &slingChecklist{}
+		cl.pass("convoy", convoyID)
+		cl.info("candidates", fmt.Sprintf("%d issue(s)", len(candidates)))
+		if formula != "" {
+			cl.pass("formula", formula)
+		}
 		for _, c := range candidates {
-			fmt.Printf("  Would dispatch: %s -> %s (%s)\n", c.ID, c.RigName, c.Title)
+			cl.pass("issue "+c.ID, fmt.Sprintf("%s → %s", truncate(c.Title, 30), c.RigName))
 		}
-		if skippedClosed > 0 || skippedAssigned > 0 || skippedNoRig > 0 {
-			fmt.Printf("\nSkipped: %d closed, %d assigned, %d no rig\n",
-				skippedClosed, skippedAssigned, skippedNoRig)
+		if skippedClosed > 0 {
+			cl.info("skipped closed", fmt.Sprintf("%d", skippedClosed))
 		}
+		if skippedAssigned > 0 {
+			cl.info("skipped assigned", fmt.Sprintf("%d", skippedAssigned))
+		}
+		if skippedNoRig > 0 {
+			cl.warn("skipped no rig", fmt.Sprintf("%d", skippedNoRig))
+		}
+		cl.render()
+
+		var plan []string
+		for _, c := range candidates {
+			plan = append(plan, fmt.Sprintf("Dispatch %s → %s (spawn polecat)", c.ID, c.RigName))
+		}
+		renderDryRunPlan(plan)
+		fmt.Println()
 		return nil
 	}
 

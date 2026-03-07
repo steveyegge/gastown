@@ -69,19 +69,32 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 	formulaName := resolveFormula(slingFormula, slingHookRawBead)
 
 	if slingDryRun {
-		fmt.Printf("%s Batch slinging %d beads to rig '%s':\n", style.Bold.Render("🎯"), len(beadIDs), rigName)
+		cl := &slingChecklist{}
+		cl.pass("target rig", rigName)
+		cl.info("batch size", fmt.Sprintf("%d beads", len(beadIDs)))
 		if formulaName != "" {
-			fmt.Printf("  Would cook %s formula once\n", formulaName)
+			cl.pass("formula", formulaName)
 		} else {
-			fmt.Printf("  Would hook raw beads (no formula)\n")
+			cl.info("formula", "none (raw hook)")
 		}
-		for _, beadID := range beadIDs {
-			if formulaName != "" {
-				fmt.Printf("  Would spawn polecat and apply %s to: %s\n", formulaName, beadID)
+		for _, id := range beadIDs {
+			if err := verifyBeadExists(id); err != nil {
+				cl.warn("bead "+id, "not found")
 			} else {
-				fmt.Printf("  Would spawn polecat and hook raw: %s\n", beadID)
+				cl.pass("bead "+id, "exists")
 			}
 		}
+		cl.render()
+
+		var plan []string
+		if formulaName != "" {
+			plan = append(plan, fmt.Sprintf("Cook formula once: %s", formulaName))
+		}
+		for _, id := range beadIDs {
+			plan = append(plan, fmt.Sprintf("Spawn polecat + hook: %s", id))
+		}
+		renderDryRunPlan(plan)
+		fmt.Println()
 		return nil
 	}
 

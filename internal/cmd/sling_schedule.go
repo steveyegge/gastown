@@ -112,11 +112,22 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 	}
 
 	if opts.DryRun {
-		fmt.Printf("Would schedule %s → %s\n", beadID, rigName)
-		fmt.Printf("  Would create sling context bead\n")
-		if !opts.NoConvoy {
-			fmt.Printf("  Would create auto-convoy\n")
+		cl := buildScheduleValidation(beadID, info, rigName, opts.Formula)
+		cl.render()
+
+		var plan []string
+		plan = append(plan, fmt.Sprintf("Create sling context for %s → %s", beadID, rigName))
+		if opts.Formula != "" {
+			plan = append(plan, fmt.Sprintf("Cook formula: %s", opts.Formula))
 		}
+		if !opts.NoConvoy {
+			plan = append(plan, fmt.Sprintf("Create auto-convoy: \"Work: %s\"", truncate(info.Title, 40)))
+		}
+		if opts.Args != "" {
+			plan = append(plan, fmt.Sprintf("Store args: %s", truncate(opts.Args, 60)))
+		}
+		renderDryRunPlan(plan)
+		fmt.Println()
 		return nil
 	}
 
@@ -200,10 +211,24 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 // Returns error when all schedule attempts fail.
 func runBatchSchedule(beadIDs []string, rigName string) error {
 	if slingDryRun {
-		fmt.Printf("%s Would schedule %d beads to rig '%s':\n", style.Bold.Render("📋"), len(beadIDs), rigName)
-		for _, beadID := range beadIDs {
-			fmt.Printf("  Would schedule: %s → %s\n", beadID, rigName)
+		cl := &slingChecklist{}
+		cl.pass("target rig", rigName)
+		cl.info("batch size", fmt.Sprintf("%d beads", len(beadIDs)))
+		for _, id := range beadIDs {
+			if err := verifyBeadExists(id); err != nil {
+				cl.warn("bead "+id, "not found")
+			} else {
+				cl.pass("bead "+id, "exists")
+			}
 		}
+		cl.render()
+
+		var plan []string
+		for _, id := range beadIDs {
+			plan = append(plan, fmt.Sprintf("Schedule %s → %s", id, rigName))
+		}
+		renderDryRunPlan(plan)
+		fmt.Println()
 		return nil
 	}
 

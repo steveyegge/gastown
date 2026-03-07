@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
@@ -68,3 +70,166 @@ func TestValidateTarget(t *testing.T) {
 		})
 	}
 }
+
+func TestSlingChecklistRender(t *testing.T) {
+	// Capture stdout
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = origStdout })
+
+	cl := &slingChecklist{}
+	cl.pass("bead exists", "gt-abc")
+	cl.pass("bead status", "open")
+	cl.info("batch size", "3 beads")
+	cl.warn("respawn count", "at limit")
+	cl.render()
+
+	w.Close()
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	output := buf.String()
+
+	// Verify section header
+	if !strings.Contains(output, "Validation") {
+		t.Errorf("expected 'Validation' header in output, got:\n%s", output)
+	}
+
+	// Verify checks appear
+	if !strings.Contains(output, "bead exists") {
+		t.Errorf("expected 'bead exists' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "gt-abc") {
+		t.Errorf("expected 'gt-abc' detail in output, got:\n%s", output)
+	}
+
+	// Verify summary: 2 passes out of 4 total checks
+	if !strings.Contains(output, "2/4 checks passed") {
+		t.Errorf("expected '2/4 checks passed' in output, got:\n%s", output)
+	}
+}
+
+func TestBuildSlingValidation(t *testing.T) {
+	info := &beadInfo{
+		Title:    "Fix the bug",
+		Status:   "open",
+		Assignee: "",
+	}
+	cl := buildSlingValidation("gt-xyz", info, "gastown/polecats/test", "mol-polecat-work", t.TempDir(), false)
+
+	// Should have: bead exists, bead status, title valid, target resolved, formula exists, cross-rig guard, respawn count
+	if len(cl.checks) < 6 {
+		t.Errorf("expected at least 6 checks, got %d", len(cl.checks))
+	}
+
+	// All should pass for a normal bead
+	for _, chk := range cl.checks {
+		if chk.Status == "warn" {
+			t.Errorf("unexpected warning for check %q: %s", chk.Name, chk.Detail)
+		}
+	}
+}
+
+func TestBuildDryRunPlan(t *testing.T) {
+	info := &beadInfo{Title: "Test issue", Status: "open"}
+	plan := buildDryRunPlan("gt-abc", info, "gastown/polecats/test", "%99", "mol-polecat-work", dryRunPlanOpts{
+		args:  "focus on security",
+		merge: "mr",
+	})
+
+	found := map[string]bool{}
+	for _, line := range plan {
+		if strings.Contains(line, "Cook formula") {
+			found["cook"] = true
+		}
+		if strings.Contains(line, "Hook bead") {
+			found["hook"] = true
+		}
+		if strings.Contains(line, "Nudge pane") {
+			found["nudge"] = true
+		}
+		if strings.Contains(line, "Store args") {
+			found["args"] = true
+		}
+		if strings.Contains(line, "Merge strategy") {
+			found["merge"] = true
+		}
+	}
+
+	for _, key := range []string{"cook", "hook", "nudge", "args", "merge"} {
+		if !found[key] {
+			t.Errorf("expected %q in plan, got: %v", key, plan)
+		}
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		input string
+		max   int
+		want  string
+	}{
+		{"short", 10, "short"},
+		{"exactly10!", 10, "exactly10!"},
+		{"this is too long", 10, "this is..."},
+	}
+	for _, tc := range tests {
+		got := truncate(tc.input, tc.max)
+		if got != tc.want {
+			t.Errorf("truncate(%q, %d) = %q, want %q", tc.input, tc.max, got, tc.want)
+		}
+	}
+}
+
+func TestRenderDryRunPlan(t *testing.T) {
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = origStdout })
+
+	renderDryRunPlan([]string{"Step 1: do thing", "Step 2: do other thing"})
+
+	w.Close()
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Plan") {
+		t.Errorf("expected 'Plan' header in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Step 1") {
+		t.Errorf("expected 'Step 1' in output, got:\n%s", output)
+	}
+}
+
+func TestBuildScheduleValidation(t *testing.T) {
+	info := &beadInfo{
+		Title:  "Test task",
+		Status: "open",
+	}
+	cl := buildScheduleValidation("gt-abc", info, "gastown", "mol-polecat-work")
+
+	// Should have: bead exists, bead status, target rig, formula exists, cross-rig guard, no duplicate
+	if len(cl.checks) < 5 {
+		t.Errorf("expected at least 5 checks, got %d", len(cl.checks))
+	}
+
+	// Find formula check
+	foundFormula := false
+	for _, chk := range cl.checks {
+		if chk.Name == "formula exists" {
+			foundFormula = true
+			if chk.Detail != "mol-polecat-work" {
+				t.Errorf("formula detail = %q, want %q", chk.Detail, "mol-polecat-work")
+			}
+		}
+	}
+	if !foundFormula {
+		t.Error("expected 'formula exists' check")
+	}
+}
+

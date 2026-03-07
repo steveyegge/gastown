@@ -2342,7 +2342,7 @@ exit /b 0
 			}
 
 			// Verify the dry-run output includes the nudge pane
-			if !strings.Contains(stdout, "Would inject start prompt to pane: "+tt.wantPaneIn) {
+			if !strings.Contains(stdout, "Nudge pane: "+tt.wantPaneIn) {
 				t.Errorf("expected nudge pane %q in output, got:\n%s", tt.wantPaneIn, stdout)
 			}
 
