@@ -137,9 +137,12 @@ func (d *Daemon) dispatchReaperDog(vars map[string]string) error {
 // reapWispsInline is the fallback that runs the reaper cycle inline when
 // Dog dispatch is unavailable. Delegates to the reaper package for SQL execution.
 func (d *Daemon) reapWispsInline(config *WispReaperConfig, maxAge, deleteAge time.Duration, mol *dogMol) {
+	host := d.doltServerHost()
+	port := d.doltServerPort()
+
 	databases := config.Databases
 	if len(databases) == 0 {
-		databases = reaper.DiscoverDatabases("127.0.0.1", d.doltServerPort())
+		databases = reaper.DiscoverDatabases(host, port)
 	}
 	if len(databases) == 0 {
 		d.logger.Printf("wisp_reaper: no databases to reap")
@@ -148,8 +151,6 @@ func (d *Daemon) reapWispsInline(config *WispReaperConfig, maxAge, deleteAge tim
 	}
 	d.logger.Printf("wisp_reaper: scanning %d databases (inline fallback)", len(databases))
 	mol.closeStep("scan")
-
-	port := d.doltServerPort()
 	dryRun := config.DryRun
 	var totalReaped, totalOpen, totalPurged, totalMailPurged, totalAutoClosed int
 
@@ -159,7 +160,7 @@ func (d *Daemon) reapWispsInline(config *WispReaperConfig, maxAge, deleteAge tim
 		if err := reaper.ValidateDBName(dbName); err != nil {
 			continue
 		}
-		db, err := reaper.OpenDB("127.0.0.1", port, dbName, 10*time.Second, 10*time.Second)
+		db, err := reaper.OpenDB(host, port, dbName, 10*time.Second, 10*time.Second)
 		if err != nil {
 			d.logger.Printf("wisp_reaper: %s: connect error: %v", dbName, err)
 			reapErrors++
@@ -190,7 +191,7 @@ func (d *Daemon) reapWispsInline(config *WispReaperConfig, maxAge, deleteAge tim
 		if err := reaper.ValidateDBName(dbName); err != nil {
 			continue
 		}
-		db, err := reaper.OpenDB("127.0.0.1", port, dbName, 30*time.Second, 30*time.Second)
+		db, err := reaper.OpenDB(host, port, dbName, 30*time.Second, 30*time.Second)
 		if err != nil {
 			purgeErrors++
 			continue
@@ -220,7 +221,7 @@ func (d *Daemon) reapWispsInline(config *WispReaperConfig, maxAge, deleteAge tim
 		if err := reaper.ValidateDBName(dbName); err != nil {
 			continue
 		}
-		db, err := reaper.OpenDB("127.0.0.1", port, dbName, 10*time.Second, 10*time.Second)
+		db, err := reaper.OpenDB(host, port, dbName, 10*time.Second, 10*time.Second)
 		if err != nil {
 			autoCloseErrors++
 			continue
@@ -256,4 +257,12 @@ func (d *Daemon) doltServerPort() int {
 		return d.doltServer.config.Port
 	}
 	return 3307
+}
+
+// doltServerHost returns the configured Dolt server host.
+func (d *Daemon) doltServerHost() string {
+	if d.doltServer != nil && d.doltServer.config.Host != "" {
+		return d.doltServer.config.Host
+	}
+	return "127.0.0.1"
 }
