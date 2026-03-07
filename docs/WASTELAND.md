@@ -38,7 +38,7 @@ You need a running Gas Town installation and a DoltHub account.
 | Requirement | Check | Setup |
 |-------------|-------|-------|
 | **Gas Town** | `gt version` | See [INSTALLING.md](INSTALLING.md) |
-| **Dolt** | `dolt version` (>= 1.82.4) | See [dolthub/dolt](https://github.com/dolthub/dolt?tab=readme-ov-file#installation) |
+| **Dolt** | `dolt version` (>= 1.83.1) | See [dolthub/dolt](https://github.com/dolthub/dolt?tab=readme-ov-file#installation) |
 | **DoltHub account** | — | [Sign up](https://www.dolthub.com/signin) |
 | **DoltHub API token** | — | [Generate token](https://www.dolthub.com/settings/tokens) |
 

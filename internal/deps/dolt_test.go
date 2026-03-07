@@ -7,8 +7,8 @@ func TestParseDoltVersion(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"dolt version 1.82.4", "1.82.4"},
-		{"dolt version 1.82.4\n", "1.82.4"},
+		{"dolt version 1.83.1", "1.83.1"},
+		{"dolt version 1.83.1\n", "1.83.1"},
 		{"dolt version 1.0.0", "1.0.0"},
 		{"dolt version 10.20.30", "10.20.30"},
 		{"some other output", ""},

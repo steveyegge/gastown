@@ -11,7 +11,7 @@ import (
 
 // MinDoltVersion is the minimum compatible dolt version for this Gas Town release.
 // Update this when Gas Town requires new dolt features.
-const MinDoltVersion = "1.82.4"
+const MinDoltVersion = "1.83.1"
 
 // DoltInstallURL is the installation page for dolt.
 const DoltInstallURL = "https://github.com/dolthub/dolt#installation"
