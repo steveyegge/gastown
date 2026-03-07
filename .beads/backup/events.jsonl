@@ -118,3 +118,4 @@
 {"actor":"mayor","comment":null,"created_at":"2026-03-06T19:54:41Z","event_type":"created","id":188,"issue_id":"st-iqou.3","new_value":"","old_value":""}
 {"actor":"mayor","comment":null,"created_at":"2026-03-07T08:55:55Z","event_type":"created","id":189,"issue_id":"st-5qap","new_value":"","old_value":""}
 {"actor":"mayor","comment":null,"created_at":"2026-03-07T08:58:32Z","event_type":"closed","id":190,"issue_id":"st-5qap","new_value":"Test verification complete - cross-rig snapshots working","old_value":""}
+{"actor":"mayor","comment":null,"created_at":"2026-03-08T00:20:03Z","event_type":"created","id":191,"issue_id":"st-w0ea","new_value":"","old_value":""}
