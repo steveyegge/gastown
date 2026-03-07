@@ -630,16 +630,17 @@ func (b *Beads) ListAgentBeads() (map[string]*Issue, error) {
 	// doctor checks (for example, validating gt:agent labels).
 	// Agent beads are type=agent (infrastructure), hidden by bd list default filter.
 	// Use --include-infra so they appear in results.
-	out, err := b.run("list", "--label=gt:agent", "--include-infra", "--json")
+	out, err := b.run("list", "--label=gt:agent", "--include-infra", "--json", "--no-pager")
 	if err != nil {
 		return nil, err
 	}
 	issuesByID := make(map[string]*Issue)
 	var issues []*Issue
-	if jsonErr := json.Unmarshal(out, &issues); jsonErr == nil {
-		for _, issue := range issues {
-			issuesByID[issue.ID] = issue
-		}
+	if jsonErr := json.Unmarshal(out, &issues); jsonErr != nil {
+		return nil, fmt.Errorf("parsing bd list --json output: %w (raw output %d bytes)", jsonErr, len(out))
+	}
+	for _, issue := range issues {
+		issuesByID[issue.ID] = issue
 	}
 
 	// Query wisps table as a fallback source.
