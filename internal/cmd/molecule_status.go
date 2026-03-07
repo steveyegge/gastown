@@ -432,9 +432,18 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 			}
 		}
 	} else {
-		// FALLBACK: Query for hooked beads (work on agent's hook)
+		// FALLBACK: Query for hooked beads (work on agent's hook).
+		// Use the rig's beads directory (townRoot/rig), not the polecat worktree,
+		// because hooked beads are stored in the rig's .beads database. (GH#2503)
+		rigB := b
+		if roleCtx.Rig != "" && townRoot != "" {
+			rigBeadsDir := filepath.Join(townRoot, roleCtx.Rig)
+			if rigBeadsDir != workDir {
+				rigB = beads.New(rigBeadsDir)
+			}
+		}
 		// First try status=hooked (work that's been slung but not yet claimed)
-		hookedBeads, err := b.List(beads.ListOptions{
+		hookedBeads, err := rigB.List(beads.ListOptions{
 			Status:   beads.StatusHooked,
 			Assignee: target,
 			Priority: -1,
@@ -447,7 +456,7 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		// This handles the case where work was claimed (status changed to in_progress)
 		// but the session was interrupted before completion. The hook should persist.
 		if len(hookedBeads) == 0 {
-			inProgressBeads, err := b.List(beads.ListOptions{
+			inProgressBeads, err := rigB.List(beads.ListOptions{
 				Status:   "in_progress",
 				Assignee: target,
 				Priority: -1,
