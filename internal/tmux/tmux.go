@@ -1341,29 +1341,37 @@ func (t *Tmux) NudgeSession(session, message string) error {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// 2. Sanitize control characters that corrupt delivery
+	// 2. Clear any pending input before sending. This closes the TOCTOU race
+	//    between deliverNudge's IsInputEmpty check and the actual send-keys:
+	//    the user (or another nudge) may have added text to the input field
+	//    in the gap. Ctrl-U clears the current line in Claude Code's TUI
+	//    (same approach used by SendKeysReplace). It's a no-op if empty.
+	_, _ = t.run("send-keys", "-t", target, "C-u")
+	time.Sleep(50 * time.Millisecond)
+
+	// 3. Sanitize control characters that corrupt delivery
 	sanitized := sanitizeNudgeMessage(message)
 
-	// 3. Send text via send-keys -l. Messages > 512 bytes are chunked
+	// 4. Send text via send-keys -l. Messages > 512 bytes are chunked
 	//    with 10ms inter-chunk delays to avoid argument length limits.
 	if err := t.sendMessageToTarget(target, sanitized, constants.NudgeReadyTimeout); err != nil {
 		return err
 	}
 
-	// 4. Wait 500ms for text delivery to complete (tested, required)
+	// 5. Wait 500ms for text delivery to complete (tested, required)
 	time.Sleep(500 * time.Millisecond)
 
-	// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
+	// 6. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
 	// See: https://github.com/anthropics/gastown/issues/307
 	_, _ = t.run("send-keys", "-t", target, "Escape")
 
-	// 6. Wait 600ms — must exceed bash readline's keyseq-timeout (500ms default)
+	// 7. Wait 600ms — must exceed bash readline's keyseq-timeout (500ms default)
 	// so ESC is processed alone, not as a meta prefix for the subsequent Enter.
 	// Without this, ESC+Enter within 500ms becomes M-Enter (meta-return) which
 	// does NOT submit the line.
 	time.Sleep(600 * time.Millisecond)
 
-	// 7. Send Enter with retry (critical for message submission)
+	// 8. Send Enter with retry (critical for message submission)
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -1373,7 +1381,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 			lastErr = err
 			continue
 		}
-		// 8. Wake the pane to trigger SIGWINCH for detached sessions
+		// 9. Wake the pane to trigger SIGWINCH for detached sessions
 		t.WakePaneIfDetached(session)
 		return nil
 	}
@@ -1399,26 +1407,30 @@ func (t *Tmux) NudgePane(pane, message string) error {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// 2. Sanitize control characters that corrupt delivery
+	// 2. Clear any pending input (same TOCTOU fix as NudgeSession).
+	_, _ = t.run("send-keys", "-t", pane, "C-u")
+	time.Sleep(50 * time.Millisecond)
+
+	// 3. Sanitize control characters that corrupt delivery
 	sanitized := sanitizeNudgeMessage(message)
 
-	// 3. Send text via send-keys -l. Messages > 512 bytes are chunked
+	// 4. Send text via send-keys -l. Messages > 512 bytes are chunked
 	//    with 10ms inter-chunk delays to avoid argument length limits.
 	if err := t.sendMessageToTarget(pane, sanitized, constants.NudgeReadyTimeout); err != nil {
 		return err
 	}
 
-	// 4. Wait 500ms for text delivery to complete (tested, required)
+	// 5. Wait 500ms for text delivery to complete (tested, required)
 	time.Sleep(500 * time.Millisecond)
 
-	// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
+	// 6. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
 	// See: https://github.com/anthropics/gastown/issues/307
 	_, _ = t.run("send-keys", "-t", pane, "Escape")
 
-	// 6. Wait 600ms — must exceed bash readline's keyseq-timeout (500ms default)
+	// 7. Wait 600ms — must exceed bash readline's keyseq-timeout (500ms default)
 	time.Sleep(600 * time.Millisecond)
 
-	// 7. Send Enter with retry (critical for message submission)
+	// 8. Send Enter with retry (critical for message submission)
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -1428,7 +1440,7 @@ func (t *Tmux) NudgePane(pane, message string) error {
 			lastErr = err
 			continue
 		}
-		// 8. Wake the pane to trigger SIGWINCH for detached sessions
+		// 9. Wake the pane to trigger SIGWINCH for detached sessions
 		t.WakePaneIfDetached(pane)
 		return nil
 	}

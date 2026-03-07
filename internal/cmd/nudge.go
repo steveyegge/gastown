@@ -194,12 +194,20 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 		// never drain its queue autonomously — the UserPromptSubmit hook
 		// only fires on input, so queued nudges for idle agents are lost.
 		// Brief settle, then check: if idle with empty input, drain queue
-		// and deliver directly.
+		// and deliver ALL queued messages directly.
 		time.Sleep(postQueueSettleDelay)
-		if t.IsInputEmpty(sessionName) {
-			// Drain the queue to prevent double delivery, then deliver directly.
-			_, _ = nudge.Drain(townRoot, sessionName)
-			return t.NudgeSession(sessionName, prefixedMessage)
+		if t.IsIdle(sessionName) && t.IsInputEmpty(sessionName) {
+			// Drain ALL queued nudges (not just ours) to prevent both
+			// double-delivery and silent loss of other queued messages.
+			drained, drainErr := nudge.Drain(townRoot, sessionName)
+			if drainErr != nil || len(drained) == 0 {
+				// Drain failed or empty (our message was already picked up).
+				// Fall back to direct delivery of just our message.
+				return t.NudgeSession(sessionName, prefixedMessage)
+			}
+			// Format all drained nudges (including ours) and deliver as one.
+			formatted := nudge.FormatForInjection(drained)
+			return t.NudgeSession(sessionName, formatted)
 		}
 		return nil
 
