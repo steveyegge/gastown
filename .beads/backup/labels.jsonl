@@ -19,9 +19,13 @@
 {"issue_id":"gt-gastown-refinery","label":"gt:agent"}
 {"issue_id":"gt-gastown-witness","label":"gt:agent"}
 {"issue_id":"gt-rig-gastown","label":"gt:rig"}
+{"issue_id":"gt-rig-polecat-TestAgent","label":"gt:agent"}
 {"issue_id":"gt-wisp-515f","label":"gt:merge-request"}
 {"issue_id":"gt-wisp-558r","label":"gt:merge-request"}
 {"issue_id":"gt-wisp-72nm","label":"gt:merge-request"}
 {"issue_id":"gt-wisp-79h2","label":"gt:merge-request"}
+{"issue_id":"gt-wisp-79xt","label":"backoff-until:1772856554"}
+{"issue_id":"gt-wisp-gqhq","label":"gt:merge-request"}
+{"issue_id":"gt-wisp-guvd","label":"gt:merge-request"}
 {"issue_id":"gt-wisp-vby2","label":"gt:merge-request"}
 {"issue_id":"gt-wisp-wvl0","label":"gt:merge-request"}
