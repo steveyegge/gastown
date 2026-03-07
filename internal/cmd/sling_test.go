@@ -919,6 +919,9 @@ exit /b 1
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
+	// Reset the cached --allow-stale probe so it picks up our stub bd.
+	beads.ResetBdAllowStaleForTest(true)
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -1561,6 +1564,8 @@ exit /b 0
 
 	t.Setenv("BD_LOG", logPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// Reset cached --allow-stale probe to pick up our stub bd.
+	beads.ResetBdAllowStaleForTest(true)
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_CREW", "")
 	t.Setenv("GT_POLECAT", "")
@@ -1607,6 +1612,14 @@ exit /b 0
 
 	for _, line := range logLines {
 		if line == "" {
+			continue
+		}
+		// hookBeadWithRetry uses .WithAutoCommit() for the critical hook write,
+		// which legitimately overrides the global off to on. Allow that.
+		if strings.Contains(line, "|update ") && strings.Contains(line, "--status=hooked") {
+			if !strings.Contains(line, "ENV:BD_DOLT_AUTO_COMMIT=on|") {
+				t.Errorf("hook update should have BD_DOLT_AUTO_COMMIT=on: %s", line)
+			}
 			continue
 		}
 		if !strings.Contains(line, "ENV:BD_DOLT_AUTO_COMMIT=off|") {

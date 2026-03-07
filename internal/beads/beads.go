@@ -45,6 +45,16 @@ func BdSupportsAllowStale() bool {
 	return bdAllowStaleResult
 }
 
+// ResetBdAllowStaleForTest resets the cached --allow-stale probe result.
+// This allows tests with stub bd binaries to get a fresh probe against
+// the stub instead of inheriting a stale result from a previous test.
+func ResetBdAllowStaleForTest(supported bool) {
+	bdAllowStaleOnce = sync.Once{}
+	bdAllowStaleOnce.Do(func() {
+		bdAllowStaleResult = supported
+	})
+}
+
 // MaybePrependAllowStale prepends --allow-stale to args if bd supports it.
 // Exported for use by other packages that shell out to bd directly.
 func MaybePrependAllowStale(args []string) []string {

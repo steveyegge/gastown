@@ -86,6 +86,13 @@ func TestLoadBuiltinRoleDefinition(t *testing.T) {
 				t.Errorf("Session.NeedsPreSync = %v, want %v", def.Session.NeedsPreSync, tt.wantPreSync)
 			}
 
+			// Builtin role TOMLs must NOT set start_command — the daemon
+			// uses ResolveRoleAgentConfig for proper agent resolution.
+			// Town/rig overrides may still set it for custom commands.
+			if def.Session.StartCommand != "" {
+				t.Errorf("Session.StartCommand = %q, want empty (agent resolution is bypassed when set)", def.Session.StartCommand)
+			}
+
 			// Verify health config has reasonable defaults
 			if def.Health.PingTimeout.Duration == 0 {
 				t.Error("Health.PingTimeout should not be zero")
