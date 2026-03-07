@@ -3,10 +3,11 @@
 > **Bead:** gt-t6muy
 > **Date:** 2026-02-20
 > **Author:** capable (gastown polecat)
-> **Status:** Implementation reference
+> **Status:** Implemented — core lifecycle shipped, PRs #2436/#2437 pending
+> **Updated:** 2026-03-07 (gt-o8g8 implementation audit by bear)
 > **Related:** gt-dtw9u (Witness monitoring), gt-qpwv4 (Completion detection),
 > gt-6qyt1 (Refinery queue), gt-budeb (Auto-nuke), gt-5j3ia (Swarm aggregation),
-> gt-1dbcp (Polecat auto-start)
+> gt-1dbcp (Polecat auto-start), w-gt-004 (Wasteland lifecycle item)
 
 ---
 
@@ -619,7 +620,44 @@ changes the transport layer but preserves the lifecycle model:
 
 ---
 
-## 10. Summary
+## 10. Implementation Status (gt-o8g8 audit, 2026-03-07)
+
+### Shipped
+
+All core lifecycle operations are implemented and running in production:
+
+| Operation | Command/Component | Key Implementation |
+|-----------|------------------|-------------------|
+| Spawn/assign | `gt sling` | `sling.go`, `polecat_spawn.go` — finds idle polecat or allocates new slot |
+| Work execution | `gt prime --hook` | Session discovers hook via `bd mol current`, GUPP fires |
+| Session cycling | `gt handoff` | `handoff.go` — all roles, preserves sandbox and identity |
+| Step completion | `bd close` + `gt handoff` | Step cleanup: session dies, sandbox lives |
+| Work submission | `gt done` | `done.go` — push, MR, sandbox sync, set idle |
+| Idle polecat reuse | `gt sling` | `FindIdlePolecat()` + `ReuseIdlePolecat()` — branch-only repair |
+| Zombie detection | Witness patrol | `DetectZombiePolecats()` — restart-first, no auto-nuke |
+| Stale detection | Witness patrol | `DetectStalePolecats()` — tmux-based, protects paused states |
+| Orphan recovery | Witness patrol | `DetectOrphanedBeads()` — reset and re-dispatch |
+| Cleanup pipeline | Mail-based | POLECAT_DONE → Witness → MERGE_READY → Refinery → MERGED |
+| Merge queue | Refinery | Squash-merge, close MR and issue, convoy check |
+
+### Pending (open PRs)
+
+| PR | Description | Impact |
+|----|-------------|--------|
+| #2437 | Always delete polecat branches after merge | Prevents branch pollution |
+| #2436 | Refinery notifies mayor after merge | Unblocks dependent work dispatch |
+
+### Deferred (design only)
+
+| Feature | Rationale for deferral |
+|---------|----------------------|
+| Pool size enforcement | On-demand allocation works; fixed pool is optimization, not correctness |
+| `gt polecat pool init` | Polecats created naturally by first `gt sling`; pre-allocation unnecessary |
+| `ReconcilePool()` | Witness patrol already detects state drift via zombie/stale/orphan checks |
+
+---
+
+## 11. Summary
 
 See [concepts/polecat-lifecycle.md](../concepts/polecat-lifecycle.md) for the
 complete lifecycle model (three layers, four states, persistent polecat design).

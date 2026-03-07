@@ -154,27 +154,50 @@ git branch -r | grep 'origin/polecat/' | grep -v 'furiosa/gt-ziiu' | grep -v 'nu
 
 ## Implementation Phases
 
-### Phase 1: Stop the bleeding (SHIPPED)
+### Phase 1: Stop the bleeding — SHIPPED
 - Witness no longer nukes idle polecats
 - `gt polecat done` transitions to IDLE instead of triggering nuke
 - Refinery deletes remote branch after merge
 
-### Phase 2: Pool initialization
+### Phase 2: Pool initialization — DEFERRED
 - `gt polecat pool init <rig>` creates N persistent polecats
 - Pool size configured in rig.config.json
 - Worktrees created once, reused across assignments
 
-### Phase 3: Sandbox sync
-- DONE → IDLE transition syncs worktree to main
-- IDLE → WORKING creates fresh branch (no worktree add)
-- `gt sling` prefers idle polecats (already implemented)
+**Status:** Polecats are allocated on-demand by `gt sling` via `FindIdlePolecat()`
+and `AllocateAndAdd()`. Pre-allocation is unnecessary because idle polecats are
+reused automatically. Pool size enforcement is a future optimization, not a blocker.
 
-### Phase 4: Session independence
+### Phase 3: Sandbox sync — SHIPPED
+- DONE → IDLE transition syncs worktree to main (`done.go` lines 969-995)
+- IDLE → WORKING creates fresh branch (no worktree add) via `ReuseIdlePolecat()`
+- `gt sling` prefers idle polecats via `FindIdlePolecat()`
+- Branch-only reuse eliminates ~5s worktree creation overhead
+
+### Phase 4: Session independence — SHIPPED
 - Session cycling doesn't affect polecat state
-- Dead sessions restarted by witness (not nuked)
+- Dead sessions restarted by witness (restart-first policy, no auto-nuke)
 - Handoff preserves polecat identity across session boundaries
+- `gt handoff` works for all roles (Mayor, Crew, Witness, Refinery, Polecats)
 
-### Phase 5: One-time cleanup
-- Prune 219 stale remote branches
-- Prune stale local branches
-- Reconcile pool state with reality
+### Phase 5: One-time cleanup — PARTIALLY SHIPPED
+- Polecat branch cleanup after merge: PR #2437 (open, awaiting review)
+- Refinery notifies mayor after merge: PR #2436 (open, awaiting review)
+- Pool reconciliation (`ReconcilePool`): not yet implemented
+
+### Implementation Status Summary
+
+| Component | Status | Key Files |
+|-----------|--------|-----------|
+| `gt done` (push, MR, idle, sandbox sync) | SHIPPED | `internal/cmd/done.go` |
+| `gt sling` (idle reuse, branch-only repair) | SHIPPED | `internal/cmd/sling.go`, `polecat_spawn.go` |
+| `gt handoff` (session cycle, all roles) | SHIPPED | `internal/cmd/handoff.go` |
+| Witness patrol (zombie, stale, orphan detection) | SHIPPED | `internal/witness/handlers.go`, `internal/polecat/manager.go` |
+| Cleanup pipeline (POLECAT_DONE → MERGE_READY → MERGED) | SHIPPED | `internal/witness/handlers.go`, `internal/refinery/engineer.go` |
+| Idle polecat heresy fix (skip healthy idle) | SHIPPED | `internal/witness/handlers.go` |
+| Restart-first policy (no auto-nuke) | SHIPPED | `internal/polecat/manager.go` |
+| Polecat branch always deleted after merge | PR #2437 | `internal/refinery/engineer.go` |
+| Refinery notifies mayor after merge | PR #2436 | `internal/refinery/engineer.go` |
+| Pool size enforcement | DEFERRED | — |
+| `ReconcilePool()` | DEFERRED | — |
+| `gt polecat pool init` command | DEFERRED | — |

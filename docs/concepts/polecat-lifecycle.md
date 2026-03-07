@@ -358,8 +358,24 @@ This distinction matters for:
 - **Cost accounting** - Who pays for inference?
 - **Federation** - Agents having their own chains in a distributed world
 
+## Implementation Status
+
+As of 2026-03-07 (gt-o8g8 audit), all core lifecycle operations are **shipped and
+running in production**. See [design/polecat-lifecycle-patrol.md § 10](../design/polecat-lifecycle-patrol.md#10-implementation-status-gt-o8g8-audit-2026-03-07)
+for the full implementation matrix and [design/persistent-polecat-pool.md](../design/persistent-polecat-pool.md)
+for phase-by-phase shipping status.
+
+Key files:
+- `internal/cmd/done.go` — work submission, sandbox sync, idle transition
+- `internal/cmd/sling.go` + `polecat_spawn.go` — idle reuse, branch-only repair
+- `internal/cmd/handoff.go` — session cycling for all roles
+- `internal/witness/handlers.go` — cleanup pipeline, POLECAT_DONE routing
+- `internal/polecat/manager.go` — zombie/stale detection, pool management
+
 ## Related Documentation
 
 - [Overview](../overview.md) - Role taxonomy and architecture
 - [Molecules](molecules.md) - Molecule execution and polecat workflow
 - [Propulsion Principle](propulsion-principle.md) - Why work triggers immediate execution
+- [Polecat Lifecycle Patrol](../design/polecat-lifecycle-patrol.md) - Implementation details, cleanup stages, patrol coordination
+- [Persistent Polecat Pool](../design/persistent-polecat-pool.md) - Pool management design and shipping status
