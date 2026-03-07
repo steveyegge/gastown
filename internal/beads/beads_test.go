@@ -1897,8 +1897,56 @@ func TestDelegationTerms(t *testing.T) {
 
 // TestSetupRedirect tests the beads redirect setup for worktrees.
 func TestSetupRedirect(t *testing.T) {
-	t.Run("crew worktree prefers town-level beads", func(t *testing.T) {
-		// When town-level .beads has a DB, redirect should go there (3 levels up).
+	t.Run("rig with own DB redirects to rig-level beads", func(t *testing.T) {
+		// When rig has its own dolt_database in metadata.json, crew must
+		// redirect to rig-level .beads (not town-level) to see correct prefix.
+		townRoot := t.TempDir()
+		townBeads := filepath.Join(townRoot, ".beads")
+		rigRoot := filepath.Join(townRoot, "testrig")
+		rigBeads := filepath.Join(rigRoot, ".beads")
+		crewPath := filepath.Join(rigRoot, "crew", "max")
+
+		// Create both town-level and rig-level beads
+		if err := os.MkdirAll(filepath.Join(townBeads, "dolt"), 0755); err != nil {
+			t.Fatalf("mkdir town beads: %v", err)
+		}
+		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+			t.Fatalf("mkdir rig beads: %v", err)
+		}
+		// Rig has its own database (e.g., laneassist with lc- prefix)
+		meta := []byte(`{"dolt_database":"testrig","backend":"dolt"}`)
+		if err := os.WriteFile(filepath.Join(rigBeads, "metadata.json"), meta, 0644); err != nil {
+			t.Fatalf("write metadata: %v", err)
+		}
+		if err := os.MkdirAll(crewPath, 0755); err != nil {
+			t.Fatalf("mkdir crew: %v", err)
+		}
+
+		if err := SetupRedirect(townRoot, crewPath); err != nil {
+			t.Fatalf("SetupRedirect failed: %v", err)
+		}
+
+		redirectPath := filepath.Join(crewPath, ".beads", "redirect")
+		content, err := os.ReadFile(redirectPath)
+		if err != nil {
+			t.Fatalf("read redirect: %v", err)
+		}
+
+		// 2 levels up to rig root: crew/max -> testrig, then .beads
+		want := "../../.beads\n"
+		if string(content) != want {
+			t.Errorf("redirect content = %q, want %q", string(content), want)
+		}
+
+		// Verify redirect resolves to rig-level, NOT town-level
+		resolved := ResolveBeadsDir(crewPath)
+		if resolved != rigBeads {
+			t.Errorf("resolved = %q, want %q (rig-level)", resolved, rigBeads)
+		}
+	})
+
+	t.Run("rig without own DB redirects to town-level beads", func(t *testing.T) {
+		// When rig has no own database, crew should use town-level .beads.
 		townRoot := t.TempDir()
 		townBeads := filepath.Join(townRoot, ".beads")
 		rigRoot := filepath.Join(townRoot, "testrig")
@@ -1928,7 +1976,7 @@ func TestSetupRedirect(t *testing.T) {
 			t.Errorf("redirect content = %q, want %q", string(content), want)
 		}
 
-		// Verify redirect resolves correctly
+		// Verify redirect resolves to town-level
 		resolved := ResolveBeadsDir(crewPath)
 		if resolved != townBeads {
 			t.Errorf("resolved = %q, want %q", resolved, townBeads)
@@ -1936,13 +1984,13 @@ func TestSetupRedirect(t *testing.T) {
 	})
 
 	t.Run("crew worktree falls back to rig-level beads", func(t *testing.T) {
-		// When town-level .beads is absent, fall back to rig-level (2 levels up).
+		// When neither rig metadata nor town-level .beads exists, fall back to rig-level (2 levels up).
 		townRoot := t.TempDir()
 		rigRoot := filepath.Join(townRoot, "testrig")
 		rigBeads := filepath.Join(rigRoot, ".beads")
 		crewPath := filepath.Join(rigRoot, "crew", "max")
 
-		// Create rig-level beads only (no town-level)
+		// Create rig-level beads only (no town-level, no metadata.json)
 		if err := os.MkdirAll(rigBeads, 0755); err != nil {
 			t.Fatalf("mkdir rig beads: %v", err)
 		}
