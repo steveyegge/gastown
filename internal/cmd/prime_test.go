@@ -1021,3 +1021,30 @@ func TestOutputContinuationDirective(t *testing.T) {
 		}
 	})
 }
+
+// TestInjectHandoffContext verifies that injectHandoffContext doesn't panic
+// when run without a valid mail setup. (GH#1996)
+func TestInjectHandoffContext(t *testing.T) {
+	t.Run("no_panic_without_town_root", func(t *testing.T) {
+		ctx := RoleContext{
+			Role:     RoleCrew,
+			WorkDir:  t.TempDir(),
+			TownRoot: "",
+		}
+		// Should return silently without panic
+		injectHandoffContext(ctx)
+	})
+
+	t.Run("no_panic_without_mailbox", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		ctx := RoleContext{
+			Role:     RoleCrew,
+			WorkDir:  tmpDir,
+			TownRoot: tmpDir,
+			Rig:      "test",
+		}
+		t.Setenv("GT_ROLE", "test/crew/agent")
+		// Should return silently without panic
+		injectHandoffContext(ctx)
+	})
+}

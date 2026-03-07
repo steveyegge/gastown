@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/lock"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
@@ -223,6 +224,15 @@ func runPrimeCompactResume(ctx RoleContext, cwd string, hookedBead *beads.Issue)
 		attachment := beads.ParseAttachmentFields(hookedBead)
 		hasMolecule := attachment != nil && attachment.AttachedMolecule != ""
 		outputContinuationDirective(hookedBead, hasMolecule)
+	}
+
+	// Inject the predecessor's handoff mail body for full context. (GH#1996)
+	// The handoff mail contains collected state (git status, hooked work,
+	// inbox, in-progress beads) that the successor needs to continue working.
+	// Without this, the agent only sees the bead ID/title and loses all
+	// working context from the previous session.
+	if !primeDryRun {
+		injectHandoffContext(ctx)
 	}
 
 	// Molecule progress if available
@@ -483,6 +493,51 @@ func runMailCheckInject(workDir string) {
 	if output != "" {
 		fmt.Println()
 		fmt.Println(output)
+	}
+}
+
+// injectHandoffContext reads and displays the body of the most recent handoff
+// mail. During compact/resume, the predecessor's handoff mail contains collected
+// state (git status, hooked work, inbox, in-progress beads) that provides
+// critical context for the successor session. (GH#1996)
+//
+// Without this, the successor only sees the bead ID/title from the continuation
+// directive and the mail subject line from mail check inject — never the detailed
+// handoff notes body. This is the root cause of "empty context" after compaction.
+func injectHandoffContext(ctx RoleContext) {
+	actor := getAgentIdentity(ctx)
+	if actor == "" {
+		return
+	}
+
+	townRoot := ctx.TownRoot
+	if townRoot == "" {
+		return
+	}
+
+	router := mail.NewRouter(townRoot)
+	mailbox, err := router.GetMailbox(actor)
+	if err != nil {
+		return
+	}
+
+	messages, err := mailbox.ListUnread()
+	if err != nil {
+		return
+	}
+
+	// Find the most recent handoff mail and display its body.
+	// Messages are sorted by priority (higher first), then timestamp (newest first).
+	// Handoff mail is created with priority=1 (high), so it should be near the top.
+	for _, msg := range messages {
+		if strings.Contains(msg.Subject, "HANDOFF") && msg.Body != "" {
+			fmt.Println()
+			fmt.Println(style.Bold.Render("## Handoff Context (from predecessor)"))
+			fmt.Println()
+			fmt.Println(msg.Body)
+			fmt.Println()
+			break
+		}
 	}
 }
 

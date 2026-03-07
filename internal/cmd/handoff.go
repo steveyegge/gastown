@@ -1377,53 +1377,32 @@ func collectHandoffState() string {
 		parts = append(parts, gitState)
 	}
 
-	// Get hooked work
-	hookOutput, err := exec.Command("gt", "hook").Output()
-	if err == nil {
-		hookStr := strings.TrimSpace(string(hookOutput))
-		if hookStr != "" && !strings.Contains(hookStr, "Nothing on hook") {
-			parts = append(parts, "## Hooked Work\n"+hookStr)
+	// Collect task state using Go libraries for reliability. (GH#1996)
+	// External commands (gt hook, bd ready, etc.) can fail during PreCompact
+	// hook execution when PATH or environment is incomplete. Go library calls
+	// are deterministic and don't depend on external command availability.
+	cwd, _ := os.Getwd()
+	agentID := detectSender()
+	townRoot := detectTownRootFromCwd()
+
+	// Hooked work — replaces exec.Command("gt", "hook")
+	if agentID != "" && cwd != "" {
+		if hookState := collectHookedWorkState(cwd, townRoot, agentID); hookState != "" {
+			parts = append(parts, hookState)
 		}
 	}
 
-	// Get inbox summary (first few messages)
-	inboxOutput, err := exec.Command("gt", "mail", "inbox").Output()
-	if err == nil {
-		inboxStr := strings.TrimSpace(string(inboxOutput))
-		if inboxStr != "" && !strings.Contains(inboxStr, "Inbox empty") {
-			// Limit to first 10 lines for brevity
-			lines := strings.Split(inboxStr, "\n")
-			if len(lines) > 10 {
-				lines = append(lines[:10], "... (more messages)")
-			}
-			parts = append(parts, "## Inbox\n"+strings.Join(lines, "\n"))
+	// Inbox summary — replaces exec.Command("gt", "mail", "inbox")
+	if agentID != "" && townRoot != "" {
+		if inboxState := collectInboxState(townRoot, agentID); inboxState != "" {
+			parts = append(parts, inboxState)
 		}
 	}
 
-	// Get ready beads
-	readyOutput, err := exec.Command("bd", "ready").Output()
-	if err == nil {
-		readyStr := strings.TrimSpace(string(readyOutput))
-		if readyStr != "" && !strings.Contains(readyStr, "No issues ready") {
-			// Limit to first 10 lines
-			lines := strings.Split(readyStr, "\n")
-			if len(lines) > 10 {
-				lines = append(lines[:10], "... (more issues)")
-			}
-			parts = append(parts, "## Ready Work\n"+strings.Join(lines, "\n"))
-		}
-	}
-
-	// Get in-progress beads
-	inProgressOutput, err := exec.Command("bd", "list", "--status=in_progress").Output()
-	if err == nil {
-		ipStr := strings.TrimSpace(string(inProgressOutput))
-		if ipStr != "" && !strings.Contains(ipStr, "No issues") {
-			lines := strings.Split(ipStr, "\n")
-			if len(lines) > 5 {
-				lines = append(lines[:5], "... (more)")
-			}
-			parts = append(parts, "## In Progress\n"+strings.Join(lines, "\n"))
+	// In-progress beads — replaces exec.Command("bd", "list", "--status=in_progress")
+	if cwd != "" {
+		if ipState := collectInProgressState(cwd); ipState != "" {
+			parts = append(parts, ipState)
 		}
 	}
 
@@ -1432,6 +1411,95 @@ func collectHandoffState() string {
 	}
 
 	return strings.Join(parts, "\n\n")
+}
+
+// collectHookedWorkState returns hooked work using the beads Go library.
+// Checks both rig-level and town-level beads. (GH#1996)
+func collectHookedWorkState(cwd, townRoot, agentID string) string {
+	var lines []string
+	seen := make(map[string]bool)
+
+	// Rig-level hooked beads
+	b := beads.New(cwd)
+	hooked, err := b.List(beads.ListOptions{
+		Status:   beads.StatusHooked,
+		Assignee: agentID,
+		Priority: -1,
+	})
+	if err == nil {
+		for _, h := range hooked {
+			seen[h.ID] = true
+			lines = append(lines, fmt.Sprintf("  %s: %s", h.ID, h.Title))
+		}
+	}
+
+	// Town-level hooked beads (HQ-prefix)
+	if townRoot != "" {
+		townB := beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
+		townHooked, err := townB.List(beads.ListOptions{
+			Status:   beads.StatusHooked,
+			Assignee: agentID,
+			Priority: -1,
+		})
+		if err == nil {
+			for _, h := range townHooked {
+				if !seen[h.ID] {
+					lines = append(lines, fmt.Sprintf("  %s: %s", h.ID, h.Title))
+				}
+			}
+		}
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+	return "## Hooked Work\n" + strings.Join(lines, "\n")
+}
+
+// collectInboxState returns inbox summary using the mail Go library. (GH#1996)
+func collectInboxState(townRoot, agentID string) string {
+	router := mail.NewRouter(townRoot)
+	mailbox, err := router.GetMailbox(agentID)
+	if err != nil {
+		return ""
+	}
+
+	messages, err := mailbox.ListUnread()
+	if err != nil || len(messages) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for i, msg := range messages {
+		if i >= 10 {
+			lines = append(lines, fmt.Sprintf("  ... (+%d more)", len(messages)-10))
+			break
+		}
+		lines = append(lines, fmt.Sprintf("  %s from %s: %s", msg.ID, msg.From, msg.Subject))
+	}
+	return "## Inbox\n" + strings.Join(lines, "\n")
+}
+
+// collectInProgressState returns in-progress beads using the beads Go library. (GH#1996)
+func collectInProgressState(cwd string) string {
+	b := beads.New(cwd)
+	inProgress, err := b.List(beads.ListOptions{
+		Status:   "in_progress",
+		Priority: -1,
+	})
+	if err != nil || len(inProgress) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for i, issue := range inProgress {
+		if i >= 5 {
+			lines = append(lines, fmt.Sprintf("  ... (+%d more)", len(inProgress)-5))
+			break
+		}
+		lines = append(lines, fmt.Sprintf("  %s: %s", issue.ID, issue.Title))
+	}
+	return "## In Progress\n" + strings.Join(lines, "\n")
 }
 
 // collectGitState captures deterministic workspace state using the Go git library.

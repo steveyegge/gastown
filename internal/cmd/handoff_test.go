@@ -661,6 +661,77 @@ func TestHandoffProcessNames(t *testing.T) {
 	})
 }
 
+// TestCollectHandoffState_GoLibrary verifies that collectHandoffState uses
+// Go library calls (not exec.Command) and always produces output from a
+// git repo even when beads/mail are unavailable. (GH#1996)
+func TestCollectHandoffState_GoLibrary(t *testing.T) {
+	t.Run("includes_git_state_without_beads", func(t *testing.T) {
+		// Create a temp git repo (no beads DB)
+		tmpDir := makeTestGitRepo(t)
+		t.Chdir(tmpDir)
+		t.Setenv("GT_ROLE", "")
+		t.Setenv("GT_RIG", "")
+		t.Setenv("GT_TOWN_ROOT", "")
+		t.Setenv("GT_ROOT", "")
+
+		state := collectHandoffState()
+
+		if state == "" || state == "No active state to report." {
+			t.Error("collectHandoffState() should include git state from a git repo")
+		}
+		if !strings.Contains(state, "## Workspace State") {
+			t.Errorf("expected git workspace state section, got: %s", state)
+		}
+	})
+
+	t.Run("returns_fallback_outside_git_repo", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Chdir(tmpDir)
+		t.Setenv("GT_ROLE", "")
+		t.Setenv("GT_RIG", "")
+		t.Setenv("GT_TOWN_ROOT", "")
+		t.Setenv("GT_ROOT", "")
+
+		state := collectHandoffState()
+		if state != "No active state to report." {
+			t.Errorf("expected fallback message outside git repo, got: %s", state)
+		}
+	})
+}
+
+// TestCollectHookedWorkState verifies hooked work collection using Go library.
+func TestCollectHookedWorkState(t *testing.T) {
+	t.Run("returns_empty_without_beads", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		result := collectHookedWorkState(tmpDir, "", "test/agent")
+		if result != "" {
+			t.Errorf("expected empty string without beads, got: %q", result)
+		}
+	})
+}
+
+// TestCollectInboxState verifies inbox collection using Go library.
+func TestCollectInboxState(t *testing.T) {
+	t.Run("returns_empty_without_mail", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		result := collectInboxState(tmpDir, "test/agent")
+		if result != "" {
+			t.Errorf("expected empty string without mail setup, got: %q", result)
+		}
+	})
+}
+
+// TestCollectInProgressState verifies in-progress collection using Go library.
+func TestCollectInProgressState(t *testing.T) {
+	t.Run("returns_empty_without_beads", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		result := collectInProgressState(tmpDir)
+		if result != "" {
+			t.Errorf("expected empty string without beads, got: %q", result)
+		}
+	})
+}
+
 // TestCollectGitState verifies that collectGitState returns deterministic
 // workspace state from a git repo without shelling out to gt/bd. (GH#1996)
 func TestCollectGitState(t *testing.T) {
