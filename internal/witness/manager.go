@@ -208,7 +208,14 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	}
 	_ = t.SetEnvironment(sessionID, "GT_RUN", runID)
 	// Apply role config env vars if present (non-fatal).
+	// Skip keys already set by AgentEnv — AgentEnv is the single source of truth
+	// for identity vars (GT_ROLE, BD_ACTOR, etc.) and produces fully-qualified
+	// values (e.g., "beacon/witness"). TOML [env] sections contain unqualified
+	// values (e.g., "witness") that would overwrite the correct ones.
 	for key, value := range roleConfigEnvVars(roleConfig, townRoot, m.rig.Name) {
+		if _, alreadySet := envVars[key]; alreadySet {
+			continue
+		}
 		_ = t.SetEnvironment(sessionID, key, value)
 	}
 	// Apply CLI env overrides (highest priority, non-fatal).
