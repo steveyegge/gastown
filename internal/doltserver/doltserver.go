@@ -2499,11 +2499,12 @@ func EnsureMetadata(townRoot, rigName string) error {
 		existing["dolt_database"] = rigName
 		changed = true
 	}
-	// Ensure dolt_port is written so bd can discover the central server.
+	// Ensure dolt_server_port is written so bd can discover the central server.
 	// Without this, bd falls back to starting its own Dolt instance.
+	// Key must be "dolt_server_port" to match what bd init --server-port writes.
 	expectedPort := float64(DefaultPort)
-	if existing["dolt_port"] != expectedPort {
-		existing["dolt_port"] = expectedPort
+	if existing["dolt_server_port"] != expectedPort {
+		existing["dolt_server_port"] = expectedPort
 		changed = true
 	}
 
