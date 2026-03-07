@@ -387,12 +387,12 @@ func (t *Tmux) checkSessionAfterCreate(name, command string) error {
 		return err
 	}
 
-	// Third check at 750ms: the exec-env pattern (exec env VAR=val binary)
+	// Third check at 1.25s: the exec-env pattern (exec env VAR=val binary)
 	// adds shell parsing overhead that can exceed 250ms on heavily loaded CI
 	// runners. This catches those late failures without impacting normal
 	// session creation (long-lived processes are still alive at this point).
 	if strings.Contains(command, "exec env") || strings.Contains(command, "exec ") {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(1000 * time.Millisecond)
 		if dead, err := checkPaneDead(); dead {
 			return err
 		}
@@ -1361,7 +1361,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 	}
 
 	// 4. Wait 500ms for text delivery to complete (tested, required)
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
 	// See: https://github.com/anthropics/gastown/issues/307
@@ -1419,7 +1419,7 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	}
 
 	// 4. Wait 500ms for text delivery to complete (tested, required)
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
 	// See: https://github.com/anthropics/gastown/issues/307
@@ -1487,7 +1487,7 @@ func (t *Tmux) AcceptWorkspaceTrustDialog(session string) error {
 				return err
 			}
 			// Wait for dialog to dismiss before proceeding
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(1000 * time.Millisecond)
 			return nil
 		}
 
@@ -1592,7 +1592,7 @@ func (t *Tmux) DismissStartupDialogsBlind(session string) error {
 	if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
 		return fmt.Errorf("sending Enter for trust dialog: %w", err)
 	}
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	// Step 2: Send Down+Enter to dismiss bypass permissions dialog (if present)
 	if _, err := t.run("send-keys", "-t", session, "Down"); err != nil {
