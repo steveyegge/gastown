@@ -156,10 +156,15 @@ func cleanBeadsRuntimeFiles(beadsDir string) error {
 //   - townRoot: the town root directory (e.g., ~/gt)
 //   - worktreePath: the worktree directory (e.g., <rig>/crew/<name> or <rig>/refinery/rig)
 //
-// Returns the redirect target path (e.g., "../../.beads" or "../../mayor/rig/.beads"),
+// Returns the redirect target path (e.g., "../../../.beads"),
 // or an error if the path is invalid or no beads location exists.
+//
+// The redirect targets the town-level .beads directory (townRoot/.beads) which
+// contains routes.jsonl, config.yaml, and the Dolt server connection info.
+// This is required because the bd CLI needs routing config to resolve prefixed
+// bead IDs (e.g., hq-xxx). Falls back to rig-level .beads if town-level is absent.
 func ComputeRedirectTarget(townRoot, worktreePath string) (string, error) {
-	// Get rig root from worktree path
+	// Get relative path from town root to worktree.
 	// worktreePath = <town>/<rig>/crew/<name> or <town>/<rig>/refinery/rig etc.
 	relPath, err := filepath.Rel(townRoot, worktreePath)
 	if err != nil {
@@ -178,14 +183,35 @@ func ComputeRedirectTarget(townRoot, worktreePath string) (string, error) {
 		return "", fmt.Errorf("cannot create redirect in canonical beads location (mayor/rig)")
 	}
 
-	rigRoot := filepath.Join(townRoot, parts[0])
+	rigName := parts[0]
+	rigRoot := filepath.Join(townRoot, rigName)
+	townBeadsPath := filepath.Join(townRoot, ".beads")
 	rigBeadsPath := filepath.Join(rigRoot, ".beads")
 	mayorBeadsPath := filepath.Join(rigRoot, "mayor", "rig", ".beads")
 
-	// Check rig-level .beads first, fall back to mayor/rig/.beads (tracked beads architecture).
-	// For dolt backend, the actual database lives at mayor/rig/.beads/dolt/, not at rig/.beads/.
-	// The rig-root .beads/ only has metadata.json (runtime state). If rig/.beads exists but has
-	// no database (no dolt/), redirect to mayor/rig/.beads where the DB is.
+	// Prefer town-level .beads (has routes.jsonl, config.yaml, Dolt server info).
+	// Fall back to rig-level or mayor/rig/.beads if town-level is absent.
+	townBeadsHasDB := false
+	if info, err := os.Stat(townBeadsPath); err == nil && info.IsDir() {
+		if _, err := os.Stat(filepath.Join(townBeadsPath, "dolt")); err == nil {
+			townBeadsHasDB = true
+		} else if _, err := os.Stat(filepath.Join(townBeadsPath, "config.yaml")); err == nil {
+			townBeadsHasDB = true
+		}
+	}
+
+	if townBeadsHasDB {
+		// Redirect to town-level .beads — the canonical beads location with
+		// routing config, Dolt server, and all rig databases.
+		// Depth is len(parts) to traverse from worktree up to town root.
+		// e.g., <rig>/crew/<name> (depth 3) -> ../../../.beads
+		//       <rig>/refinery/rig (depth 3) -> ../../../.beads
+		depth := len(parts)
+		upPath := strings.Repeat("../", depth)
+		return upPath + ".beads", nil
+	}
+
+	// Town-level .beads not available — fall back to rig-level beads.
 	usesMayorFallback := false
 	rigBeadsExists := false
 	if _, err := os.Stat(rigBeadsPath); err == nil {
@@ -193,38 +219,29 @@ func ComputeRedirectTarget(townRoot, worktreePath string) (string, error) {
 	}
 	rigHasDB := false
 	if rigBeadsExists {
-		// Check for actual database: dolt/ directory
 		if _, err := os.Stat(filepath.Join(rigBeadsPath, "dolt")); err == nil {
 			rigHasDB = true
 		} else if _, err := os.Stat(filepath.Join(rigBeadsPath, "redirect")); err == nil {
-			// A redirect file is a valid beads configuration (tracked beads case).
-			// initBeads creates this to point to mayor/rig/.beads.
 			rigHasDB = true
 		}
 	}
 
 	if !rigBeadsExists || !rigHasDB {
-		// Rig .beads doesn't exist or has no database — check mayor/rig/.beads
 		if _, err := os.Stat(mayorBeadsPath); os.IsNotExist(err) {
 			if !rigBeadsExists {
-				return "", fmt.Errorf("no beads found at %s or %s", rigBeadsPath, mayorBeadsPath)
+				return "", fmt.Errorf("no beads found at %s, %s, or %s", townBeadsPath, rigBeadsPath, mayorBeadsPath)
 			}
-			// Rig .beads exists but has no DB and mayor path doesn't exist either.
-			// Fall through to use rig path (best effort).
 		} else {
 			usesMayorFallback = true
 		}
 	}
 
-	// Compute relative path from worktree to rig root
-	// e.g., crew/<name> (depth 2) -> ../../.beads
-	//       refinery/rig (depth 2) -> ../../.beads
-	depth := len(parts) - 1 // subtract 1 for rig name itself
+	// Rig-level fallback: depth is len(parts)-1 to traverse from worktree to rig root.
+	depth := len(parts) - 1
 	upPath := strings.Repeat("../", depth)
 
 	var redirectPath string
 	if usesMayorFallback {
-		// Direct redirect to mayor/rig/.beads since rig/.beads doesn't exist
 		redirectPath = upPath + "mayor/rig/.beads"
 	} else {
 		redirectPath = upPath + ".beads"
@@ -237,11 +254,8 @@ func ComputeRedirectTarget(townRoot, worktreePath string) (string, error) {
 			rigRedirectTarget := strings.TrimSpace(string(data))
 			if rigRedirectTarget != "" {
 				if filepath.IsAbs(rigRedirectTarget) {
-					// Absolute redirect — pass through as-is (ResolveBeadsDir handles it)
 					redirectPath = rigRedirectTarget
 				} else {
-					// Relative redirect (e.g., "mayor/rig/.beads" for tracked beads).
-					// Redirect worktree directly to the final destination.
 					redirectPath = upPath + rigRedirectTarget
 				}
 			}
@@ -251,17 +265,9 @@ func ComputeRedirectTarget(townRoot, worktreePath string) (string, error) {
 	return redirectPath, nil
 }
 
-// SetupRedirect creates a .beads/redirect file for a worktree to point to the rig's shared beads.
-// This is used by crew, polecats, and refinery worktrees to share the rig's beads database.
-//
-// Parameters:
-//   - townRoot: the town root directory (e.g., ~/gt)
-//   - worktreePath: the worktree directory (e.g., <rig>/crew/<name> or <rig>/refinery/rig)
-//
-// The function:
-//  1. Computes the relative path from worktree to rig-level .beads
-//  2. Cleans up runtime files (preserving tracked files like formulas/)
-//  3. Creates the redirect file
+// SetupRedirect creates a .beads/redirect file for a worktree to point to the shared beads.
+// Prefers town-level .beads (has routing config); falls back to rig-level .beads.
+// This is used by crew, polecats, and refinery worktrees.
 //
 // Safety: This function refuses to create redirects in the canonical beads location
 // (mayor/rig) to prevent circular redirect chains.

@@ -1897,14 +1897,52 @@ func TestDelegationTerms(t *testing.T) {
 
 // TestSetupRedirect tests the beads redirect setup for worktrees.
 func TestSetupRedirect(t *testing.T) {
-	t.Run("crew worktree with local beads", func(t *testing.T) {
-		// Setup: town/rig/.beads (local, no redirect)
+	t.Run("crew worktree prefers town-level beads", func(t *testing.T) {
+		// When town-level .beads has a DB, redirect should go there (3 levels up).
+		townRoot := t.TempDir()
+		townBeads := filepath.Join(townRoot, ".beads")
+		rigRoot := filepath.Join(townRoot, "testrig")
+		crewPath := filepath.Join(rigRoot, "crew", "max")
+
+		// Create town-level beads with dolt DB
+		if err := os.MkdirAll(filepath.Join(townBeads, "dolt"), 0755); err != nil {
+			t.Fatalf("mkdir town beads: %v", err)
+		}
+		if err := os.MkdirAll(crewPath, 0755); err != nil {
+			t.Fatalf("mkdir crew: %v", err)
+		}
+
+		if err := SetupRedirect(townRoot, crewPath); err != nil {
+			t.Fatalf("SetupRedirect failed: %v", err)
+		}
+
+		redirectPath := filepath.Join(crewPath, ".beads", "redirect")
+		content, err := os.ReadFile(redirectPath)
+		if err != nil {
+			t.Fatalf("read redirect: %v", err)
+		}
+
+		// 3 levels up: crew/max -> testrig -> townRoot, then .beads
+		want := "../../../.beads\n"
+		if string(content) != want {
+			t.Errorf("redirect content = %q, want %q", string(content), want)
+		}
+
+		// Verify redirect resolves correctly
+		resolved := ResolveBeadsDir(crewPath)
+		if resolved != townBeads {
+			t.Errorf("resolved = %q, want %q", resolved, townBeads)
+		}
+	})
+
+	t.Run("crew worktree falls back to rig-level beads", func(t *testing.T) {
+		// When town-level .beads is absent, fall back to rig-level (2 levels up).
 		townRoot := t.TempDir()
 		rigRoot := filepath.Join(townRoot, "testrig")
 		rigBeads := filepath.Join(rigRoot, ".beads")
 		crewPath := filepath.Join(rigRoot, "crew", "max")
 
-		// Create rig structure
+		// Create rig-level beads only (no town-level)
 		if err := os.MkdirAll(rigBeads, 0755); err != nil {
 			t.Fatalf("mkdir rig beads: %v", err)
 		}
@@ -1912,12 +1950,10 @@ func TestSetupRedirect(t *testing.T) {
 			t.Fatalf("mkdir crew: %v", err)
 		}
 
-		// Run SetupRedirect
 		if err := SetupRedirect(townRoot, crewPath); err != nil {
 			t.Fatalf("SetupRedirect failed: %v", err)
 		}
 
-		// Verify redirect was created
 		redirectPath := filepath.Join(crewPath, ".beads", "redirect")
 		content, err := os.ReadFile(redirectPath)
 		if err != nil {
@@ -2176,19 +2212,19 @@ func TestSetupRedirect(t *testing.T) {
 		}
 	})
 
-	t.Run("fails if rig beads missing", func(t *testing.T) {
+	t.Run("fails if no beads at any level", func(t *testing.T) {
 		townRoot := t.TempDir()
 		rigRoot := filepath.Join(townRoot, "testrig")
 		crewPath := filepath.Join(rigRoot, "crew", "max")
 
-		// No rig/.beads or mayor/rig/.beads created
+		// No town/.beads, rig/.beads, or mayor/rig/.beads created
 		if err := os.MkdirAll(crewPath, 0755); err != nil {
 			t.Fatalf("mkdir crew: %v", err)
 		}
 
 		err := SetupRedirect(townRoot, crewPath)
 		if err == nil {
-			t.Error("SetupRedirect should fail if rig .beads missing")
+			t.Error("SetupRedirect should fail if no beads found at any level")
 		}
 	})
 
