@@ -299,7 +299,7 @@ func cleanOrphanedWispDeps(bd *beads.Beads, result *compactResult) {
 // Returns extended issue structs with comment_count and wisp_type.
 func listWisps(bd *beads.Beads) ([]*compactIssue, error) {
 	// Use bd list --json --all to get wisps in all statuses, unlimited
-	out, err := bd.Run("list", "--json", "--all", "-n", "0")
+	out, err := bd.Run("list", "--json", "--flat", "--all", "-n", "0")
 	if err != nil {
 		return nil, err
 	}

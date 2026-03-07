@@ -1573,7 +1573,7 @@ type convoyInfo struct {
 // are complete. Returns the list of convoys that were closed.
 func (e *Engineer) checkAndCloseCompletedConvoys(townRoot, townBeads string) []convoyInfo {
 	// List all open convoys
-	listCmd := exec.Command("bd", "list", "--type=convoy", "--status=open", "--json")
+	listCmd := exec.Command("bd", "list", "--type=convoy", "--status=open", "--json", "--flat")
 	listCmd.Dir = townBeads
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout

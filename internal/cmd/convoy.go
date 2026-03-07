@@ -423,6 +423,8 @@ func getTownBeadsDir() (string, error) {
 // fails, the error includes bd's stderr for diagnostics instead of a bare
 // "exit status 1".
 func runBdJSON(dir string, args ...string) ([]byte, error) {
+	// bd v0.59+ requires --flat for list --json to produce JSON output
+	args = beads.InjectFlatForListJSON(args)
 	cmd := exec.Command("bd", args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
@@ -2321,7 +2323,7 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 		go func(beadsDir string) {
 			defer wg.Done()
 
-			cmd := exec.Command("bd", "list", "--type=agent", "--status=open", "--json", "--limit=0")
+			cmd := exec.Command("bd", "list", "--type=agent", "--status=open", "--json", "--flat", "--limit=0")
 			cmd.Dir = beadsDir
 			var stdout bytes.Buffer
 			cmd.Stdout = &stdout

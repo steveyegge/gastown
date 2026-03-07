@@ -50,6 +50,9 @@ func (f *LiveConvoyFetcher) runBdCmd(beadsDir string, args ...string) (*bytes.Bu
 	ctx, cancel := context.WithTimeout(context.Background(), f.cmdTimeout)
 	defer cancel()
 
+	// bd v0.59+ requires --flat for list --json to produce JSON output
+	args = beads.InjectFlatForListJSON(args)
+
 	bin := f.bdBin
 	if bin == "" {
 		bin = "bd"

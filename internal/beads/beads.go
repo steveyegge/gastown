@@ -54,6 +54,29 @@ func MaybePrependAllowStale(args []string) []string {
 	return args
 }
 
+// InjectFlatForListJSON adds --flat to bd list commands that use --json.
+// bd v0.59+ tree-format output ignores --json; --flat is required for JSON.
+// Exported for use by other packages that call bd list directly.
+func InjectFlatForListJSON(args []string) []string {
+	hasListCmd := false
+	hasJSON := false
+	hasFlat := false
+	for _, a := range args {
+		switch {
+		case a == "list":
+			hasListCmd = true
+		case a == "--json":
+			hasJSON = true
+		case a == "--flat":
+			hasFlat = true
+		}
+	}
+	if hasListCmd && hasJSON && !hasFlat {
+		return append(args, "--flat")
+	}
+	return args
+}
+
 // ExtractIssueID strips the external:prefix:id wrapper from bead IDs.
 // bd dep add wraps cross-rig IDs as "external:prefix:id" for routing,
 // but consumers need the raw bead ID for display and lookups.
@@ -312,6 +335,11 @@ func (b *Beads) run(args ...string) (_ []byte, retErr error) {
 	// Conditionally use --allow-stale to prevent failures when db is temporarily stale
 	// (e.g., after daemon is killed during shutdown). Only if bd supports it.
 	fullArgs := MaybePrependAllowStale(args)
+
+	// bd v0.59+ requires --flat for --json to produce JSON output on "list" commands.
+	// Without --flat, bd list --json silently returns human-readable tree format,
+	// causing all JSON parsing to fail. Inject --flat automatically.
+	fullArgs = InjectFlatForListJSON(fullArgs)
 
 	// Always explicitly set BEADS_DIR to prevent inherited env vars from
 	// causing prefix mismatches. Use explicit beadsDir if set, otherwise

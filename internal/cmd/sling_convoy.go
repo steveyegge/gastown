@@ -66,7 +66,7 @@ func findConvoyByDescription(townRoot, beadID string) string {
 	townBeads := filepath.Join(townRoot, ".beads")
 
 	// Query all open convoys from HQ
-	listCmd := exec.Command("bd", "list", "--type=convoy", "--status=open", "--json")
+	listCmd := exec.Command("bd", "list", "--type=convoy", "--status=open", "--json", "--flat")
 	listCmd.Dir = townBeads
 
 	out, err := listCmd.Output()
