@@ -61,6 +61,10 @@ RUN git config --global credential.helper store && \
     dolt config --global --add user.name "${GIT_USER}" && \
     dolt config --global --add user.email "${GIT_EMAIL}"
 
-RUN /app/gastown/gt install /gt --git
+COPY --chown=agent:agent docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 WORKDIR /gt
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["sleep", "infinity"]
