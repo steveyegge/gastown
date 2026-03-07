@@ -1,9 +1,106 @@
 {
+  "uid": "gastown-overview",
+  "title": "Gas Town Overview",
+  "tags": [
+    "gastown"
+  ],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "database",
+        "label": "Rig Database",
+        "type": "query",
+        "datasource": {
+          "uid": "dolt-beads"
+        },
+        "query": "SELECT DISTINCT TABLE_SCHEMA AS __value, TABLE_SCHEMA AS __text FROM information_schema.TABLES WHERE TABLE_NAME = 'issues' ORDER BY TABLE_SCHEMA",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "allValue": null,
+        "current": {
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "role",
+        "type": "query",
+        "datasource": {
+          "uid": "victoriametrics"
+        },
+        "query": "label_values(gastown_session_starts_total, role)",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2
+      },
+      {
+        "name": "harness",
+        "type": "query",
+        "datasource": {
+          "uid": "victoriametrics"
+        },
+        "query": "label_values(gastown_session_starts_total, harness)",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2
+      },
+      {
+        "name": "subcommand",
+        "type": "query",
+        "datasource": {
+          "uid": "victoriametrics"
+        },
+        "query": "label_values(gastown_bd_calls_total, subcommand)",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2
+      }
+    ]
+  },
   "panels": [
     {
+      "id": 1,
+      "title": "Session Starts",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
       "datasource": {
         "uid": "victoriametrics"
       },
+      "targets": [
+        {
+          "expr": "increase(gastown_session_starts_total{role=~\"$role\", harness=~\"$harness\"}[5m])",
+          "legendFormat": "{{role}}"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -14,103 +111,81 @@
             }
           }
         }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
-      "id": 1,
-      "targets": [
-        {
-          "expr": "increase(gastown_session_starts_total{role=~\"$role\", harness=~\"$harness\"}[5m])",
-          "legendFormat": "{{role}}"
-        }
-      ],
-      "title": "Session Starts",
-      "type": "timeseries"
+      }
     },
     {
-      "datasource": {
-        "uid": "victoriametrics"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 50
-          }
-        }
-      },
+      "id": 2,
+      "title": "Daemon Agent Restarts",
+      "type": "timeseries",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
         "y": 0
       },
-      "id": 2,
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
           "expr": "increase(gastown_daemon_agent_restarts_total[5m])",
           "legendFormat": "{{agent_type}}"
         }
       ],
-      "title": "Daemon Agent Restarts",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "uid": "victoriametrics"
-      },
       "fieldConfig": {
         "defaults": {
           "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10
+            "drawStyle": "bars",
+            "fillOpacity": 50
           },
-          "unit": "reqps"
+          "color": {
+            "mode": "palette-classic"
+          }
         }
-      },
+      }
+    },
+    {
+      "id": 3,
+      "title": "bd Call Rate",
+      "type": "timeseries",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
         "y": 8
       },
-      "id": 3,
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
           "expr": "rate(gastown_bd_calls_total{subcommand=~\"$subcommand\"}[5m])",
           "legendFormat": "{{subcommand}} ({{status}})"
         }
       ],
-      "title": "bd Call Rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "uid": "victoriametrics"
-      },
       "fieldConfig": {
         "defaults": {
+          "unit": "reqps",
           "custom": {
             "drawStyle": "line",
-            "fillOpacity": 5
-          },
-          "unit": "ms"
+            "fillOpacity": 10
+          }
         }
-      },
+      }
+    },
+    {
+      "id": 4,
+      "title": "bd Call Latency (p50 / p95 / p99)",
+      "type": "timeseries",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
         "y": 8
       },
-      "id": 4,
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
           "expr": "histogram_quantile(0.50, rate(gastown_bd_duration_ms_milliseconds_bucket[5m]))",
@@ -125,41 +200,35 @@
           "legendFormat": "p99"
         }
       ],
-      "title": "bd Call Latency (p50 / p95 / p99)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "uid": "victoriametrics"
-      },
       "fieldConfig": {
         "defaults": {
+          "unit": "ms",
           "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 50
+            "drawStyle": "line",
+            "fillOpacity": 5
           }
         }
-      },
+      }
+    },
+    {
+      "id": 5,
+      "title": "Mail Operations",
+      "type": "timeseries",
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 0,
         "y": 16
       },
-      "id": 5,
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
           "expr": "increase(gastown_mail_operations_total[5m])",
           "legendFormat": "{{operation}} ({{status}})"
         }
       ],
-      "title": "Mail Operations",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "uid": "victoriametrics"
-      },
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -167,14 +236,21 @@
             "fillOpacity": 50
           }
         }
-      },
+      }
+    },
+    {
+      "id": 6,
+      "title": "Polecat Activity",
+      "type": "timeseries",
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 8,
         "y": 16
       },
-      "id": 6,
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
           "expr": "increase(gastown_polecat_spawns_total[5m])",
@@ -185,13 +261,6 @@
           "legendFormat": "removes"
         }
       ],
-      "title": "Polecat Activity",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "uid": "victoriametrics"
-      },
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -199,14 +268,21 @@
             "fillOpacity": 50
           }
         }
-      },
+      }
+    },
+    {
+      "id": 7,
+      "title": "Sling Dispatches & Prime Invocations",
+      "type": "timeseries",
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 16,
         "y": 16
       },
-      "id": 7,
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
           "expr": "increase(gastown_sling_dispatches_total[5m])",
@@ -217,13 +293,33 @@
           "legendFormat": "primes ({{role}})"
         }
       ],
-      "title": "Sling Dispatches \u0026 Prime Invocations",
-      "type": "timeseries"
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50
+          }
+        }
+      }
     },
     {
+      "id": 8,
+      "title": "Active Sessions (current)",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 24
+      },
       "datasource": {
         "uid": "victoriametrics"
       },
+      "targets": [
+        {
+          "expr": "sum(gastown_session_starts_total{status=\"ok\"}) - sum(gastown_session_stops_total{status=\"ok\"})"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "thresholds": {
@@ -239,64 +335,64 @@
             ]
           }
         }
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 0,
-        "y": 24
-      },
-      "id": 8,
-      "targets": [
-        {
-          "expr": "sum(gastown_session_starts_total{status=\"ok\"}) - sum(gastown_session_stops_total{status=\"ok\"})"
-        }
-      ],
-      "title": "Active Sessions (current)",
-      "type": "stat"
+      }
     },
     {
-      "datasource": {
-        "uid": "victoriametrics"
-      },
+      "id": 9,
+      "title": "Total bd Calls",
+      "type": "stat",
       "gridPos": {
         "h": 4,
         "w": 6,
         "x": 6,
         "y": 24
       },
-      "id": 9,
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
           "expr": "sum(gastown_bd_calls_total)"
         }
-      ],
-      "title": "Total bd Calls",
-      "type": "stat"
+      ]
     },
     {
-      "datasource": {
-        "uid": "victoriametrics"
-      },
+      "id": 10,
+      "title": "Total Mail Operations",
+      "type": "stat",
       "gridPos": {
         "h": 4,
         "w": 6,
         "x": 12,
         "y": 24
       },
-      "id": 10,
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
           "expr": "sum(gastown_mail_operations_total)"
         }
-      ],
-      "title": "Total Mail Operations",
-      "type": "stat"
+      ]
     },
     {
+      "id": 11,
+      "title": "Daemon Restarts (total)",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 24
+      },
       "datasource": {
         "uid": "victoriametrics"
       },
+      "targets": [
+        {
+          "expr": "sum(gastown_daemon_agent_restarts_total)"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "thresholds": {
@@ -316,41 +412,21 @@
             ]
           }
         }
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 18,
-        "y": 24
-      },
-      "id": 11,
-      "targets": [
-        {
-          "expr": "sum(gastown_daemon_agent_restarts_total)"
-        }
-      ],
-      "title": "Daemon Restarts (total)",
-      "type": "stat"
+      }
     },
     {
-      "datasource": {
-        "uid": "victoriametrics"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10
-          }
-        }
-      },
+      "id": 12,
+      "title": "Dolt Connection Pool",
+      "type": "timeseries",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
         "y": 28
       },
-      "id": 12,
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
           "expr": "gastown_dolt_connections",
@@ -361,120 +437,44 @@
           "legendFormat": "max connections"
         }
       ],
-      "title": "Dolt Connection Pool",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "uid": "victoriametrics"
-      },
       "fieldConfig": {
         "defaults": {
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 10
-          },
-          "unit": "bytes"
+          }
         }
-      },
+      }
+    },
+    {
+      "id": 13,
+      "title": "Dolt Disk Usage",
+      "type": "timeseries",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
         "y": 28
       },
-      "id": 13,
+      "datasource": {
+        "uid": "victoriametrics"
+      },
       "targets": [
         {
           "expr": "gastown_dolt_disk_usage_bytes",
           "legendFormat": "disk usage"
         }
       ],
-      "title": "Dolt Disk Usage",
-      "type": "timeseries"
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        }
+      }
     }
   ],
-  "refresh": "",
-  "schemaVersion": 39,
-  "tags": [
-    "gastown"
-  ],
-  "templating": {
-    "list": [
-      {
-        "allValue": null,
-        "current": {
-          "text": "All",
-          "value": [
-            "$__all"
-          ]
-        },
-        "datasource": {
-          "uid": "dolt-beads"
-        },
-        "includeAll": true,
-        "label": "Rig Database",
-        "multi": true,
-        "name": "database",
-        "query": "SELECT DISTINCT TABLE_SCHEMA AS __value, TABLE_SCHEMA AS __text FROM information_schema.TABLES WHERE TABLE_NAME = 'issues' ORDER BY TABLE_SCHEMA",
-        "refresh": 1,
-        "type": "query"
-      },
-      {
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        },
-        "datasource": {
-          "uid": "victoriametrics"
-        },
-        "includeAll": true,
-        "multi": true,
-        "name": "role",
-        "query": "label_values(gastown_session_starts_total, role)",
-        "refresh": 2,
-        "type": "query"
-      },
-      {
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        },
-        "datasource": {
-          "uid": "victoriametrics"
-        },
-        "includeAll": true,
-        "multi": true,
-        "name": "harness",
-        "query": "label_values(gastown_session_starts_total, harness)",
-        "refresh": 2,
-        "type": "query"
-      },
-      {
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        },
-        "datasource": {
-          "uid": "victoriametrics"
-        },
-        "includeAll": true,
-        "multi": true,
-        "name": "subcommand",
-        "query": "label_values(gastown_bd_calls_total, subcommand)",
-        "refresh": 2,
-        "type": "query"
-      }
-    ]
-  },
-  "time": {
-    "from": "now-6h",
-    "to": "now"
-  },
-  "timezone": "browser",
-  "title": "Gas Town Overview",
-  "uid": "gastown-overview"
+  "schemaVersion": 39
 }
