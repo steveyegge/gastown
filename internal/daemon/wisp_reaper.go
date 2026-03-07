@@ -152,87 +152,77 @@ func (d *Daemon) reapWispsInline(config *WispReaperConfig, maxAge, deleteAge tim
 	port := d.doltServerPort()
 	dryRun := config.DryRun
 	var totalReaped, totalOpen, totalPurged, totalMailPurged, totalAutoClosed int
+	var reapErrors, purgeErrors, autoCloseErrors int
 
-	// Step 2: Reap
-	reapErrors := 0
-	for _, dbName := range databases {
-		if err := reaper.ValidateDBName(dbName); err != nil {
-			continue
-		}
-		db, err := reaper.OpenDB("127.0.0.1", port, dbName, 10*time.Second, 10*time.Second)
-		if err != nil {
-			d.logger.Printf("wisp_reaper: %s: connect error: %v", dbName, err)
-			reapErrors++
-			continue
-		}
-		result, err := reaper.Reap(db, dbName, maxAge, dryRun)
-		db.Close()
-		if err != nil {
-			d.logger.Printf("wisp_reaper: %s: reap error: %v", dbName, err)
-			reapErrors++
-			continue
-		}
-		totalReaped += result.Reaped
-		totalOpen += result.OpenRemain
-		if result.Reaped > 0 {
-			d.logger.Printf("wisp_reaper: %s: reaped %d stale wisps, %d open remain", dbName, result.Reaped, result.OpenRemain)
-		}
-	}
-	if reapErrors > 0 {
-		mol.failStep("reap", fmt.Sprintf("%d databases had reap errors", reapErrors))
-	} else {
-		mol.closeStep("reap")
-	}
-
-	// Step 3: Purge
-	purgeErrors := 0
 	for _, dbName := range databases {
 		if err := reaper.ValidateDBName(dbName); err != nil {
 			continue
 		}
 		db, err := reaper.OpenDB("127.0.0.1", port, dbName, 30*time.Second, 30*time.Second)
 		if err != nil {
+			d.logger.Printf("wisp_reaper: %s: connect error: %v", dbName, err)
+			reapErrors++
 			purgeErrors++
+			autoCloseErrors++
 			continue
 		}
-		result, err := reaper.Purge(db, dbName, deleteAge, defaultMailDeleteAge, dryRun)
-		db.Close()
-		if err != nil {
+		if ok, err := reaper.HasReaperSchema(db); err != nil {
+			d.logger.Printf("wisp_reaper: %s: schema check error: %v", dbName, err)
+			db.Close()
+			reapErrors++
+			purgeErrors++
+			autoCloseErrors++
+			continue
+		} else if !ok {
+			d.logger.Printf("wisp_reaper: %s: skipped (no reaper schema)", dbName)
+			db.Close()
+			continue
+		}
+
+		// Reap
+		if result, err := reaper.Reap(db, dbName, maxAge, dryRun); err != nil {
+			d.logger.Printf("wisp_reaper: %s: reap error: %v", dbName, err)
+			reapErrors++
+		} else {
+			totalReaped += result.Reaped
+			totalOpen += result.OpenRemain
+			if result.Reaped > 0 {
+				d.logger.Printf("wisp_reaper: %s: reaped %d stale wisps, %d open remain", dbName, result.Reaped, result.OpenRemain)
+			}
+		}
+
+		// Purge
+		if result, err := reaper.Purge(db, dbName, deleteAge, defaultMailDeleteAge, dryRun); err != nil {
 			d.logger.Printf("wisp_reaper: %s: purge error: %v", dbName, err)
 			purgeErrors++
-			continue
+		} else {
+			totalPurged += result.WispsPurged
+			totalMailPurged += result.MailPurged
+			for _, a := range result.Anomalies {
+				d.logger.Printf("wisp_reaper: %s: ANOMALY: %s", dbName, a.Message)
+			}
 		}
-		totalPurged += result.WispsPurged
-		totalMailPurged += result.MailPurged
-		for _, a := range result.Anomalies {
-			d.logger.Printf("wisp_reaper: %s: ANOMALY: %s", dbName, a.Message)
+
+		// Auto-close
+		if result, err := reaper.AutoClose(db, dbName, defaultStaleIssueAge, dryRun); err != nil {
+			d.logger.Printf("wisp_reaper: %s: auto-close error: %v", dbName, err)
+			autoCloseErrors++
+		} else {
+			totalAutoClosed += result.Closed
 		}
+
+		db.Close()
+	}
+
+	if reapErrors > 0 {
+		mol.failStep("reap", fmt.Sprintf("%d databases had reap errors", reapErrors))
+	} else {
+		mol.closeStep("reap")
 	}
 	if purgeErrors > 0 {
 		mol.failStep("purge", fmt.Sprintf("%d databases had purge errors", purgeErrors))
 	} else {
 		mol.closeStep("purge")
-	}
-
-	// Step 4: Auto-close
-	autoCloseErrors := 0
-	for _, dbName := range databases {
-		if err := reaper.ValidateDBName(dbName); err != nil {
-			continue
-		}
-		db, err := reaper.OpenDB("127.0.0.1", port, dbName, 10*time.Second, 10*time.Second)
-		if err != nil {
-			autoCloseErrors++
-			continue
-		}
-		result, err := reaper.AutoClose(db, dbName, defaultStaleIssueAge, dryRun)
-		db.Close()
-		if err != nil {
-			d.logger.Printf("wisp_reaper: %s: auto-close error: %v", dbName, err)
-			autoCloseErrors++
-			continue
-		}
-		totalAutoClosed += result.Closed
 	}
 	if autoCloseErrors > 0 {
 		mol.failStep("auto-close", fmt.Sprintf("%d databases had auto-close errors", autoCloseErrors))

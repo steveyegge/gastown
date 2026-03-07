@@ -183,6 +183,23 @@ func parentExcludeJoin(dbName string) (joinClause, whereCondition string) {
 	return
 }
 
+// HasReaperSchema checks whether the database has the tables required for reaper
+// operations (wisps and issues). Returns false (no error) when tables are missing
+// — callers use this to skip databases with incomplete beads schema (e.g.
+// databases created by InitRig but not yet migrated by bd).
+func HasReaperSchema(db *sql.DB) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var count int
+	err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM information_schema.tables WHERE table_name IN ('wisps', 'issues') AND table_schema = DATABASE()").Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("check reaper schema: %w", err)
+	}
+	return count >= 2, nil
+}
+
 // Scan counts reaper candidates in a database without modifying anything.
 func Scan(db *sql.DB, dbName string, maxAge, purgeAge, mailDeleteAge, staleIssueAge time.Duration) (*ScanResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultQueryTimeout)
