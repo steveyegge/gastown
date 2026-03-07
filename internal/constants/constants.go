@@ -248,6 +248,9 @@ const (
 
 	// RoleDeacon is the deacon agent role.
 	RoleDeacon = "deacon"
+
+	// RoleHeadless is the headless agent role (lightweight, no git worktree).
+	RoleHeadless = "headless"
 )
 
 // Role emojis - centralized for easy customization.
@@ -327,6 +330,8 @@ func RoleEmoji(role string) string {
 		return EmojiCrew
 	case RolePolecat:
 		return EmojiPolecat
+	case RoleHeadless:
+		return "👻"
 	default:
 		return "❓"
 	}

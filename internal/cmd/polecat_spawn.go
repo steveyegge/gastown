@@ -55,6 +55,7 @@ type SlingSpawnOptions struct {
 	HookBead   string // Bead ID to set as hook_bead at spawn time (atomic assignment)
 	Agent      string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
 	BaseBranch string // Override base branch for polecat worktree (e.g., "develop", "release/v2")
+	Headless   bool   // If true, create without git worktree (for non-repo tasks)
 }
 
 // SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
@@ -148,6 +149,11 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// Persistent polecat model (gt-4ac): try to reuse an idle polecat first.
 	// Idle polecats have completed their work but kept their sandbox (worktree).
 	// Reusing avoids the overhead of creating a new worktree.
+	// Skip for headless spawns — headless workers don't have worktrees to reuse.
+	if opts.Headless {
+		return spawnHeadlessPolecat(polecatMgr, r, rigName, opts, t)
+	}
+
 	idlePolecat, findErr := polecatMgr.FindIdlePolecat()
 	if findErr == nil && idlePolecat != nil {
 		polecatName := idlePolecat.Name
@@ -457,6 +463,49 @@ func IsRigName(target string) (string, bool) {
 	}
 
 	return target, true
+}
+
+// spawnHeadlessPolecat creates a headless polecat (no git worktree) for non-repo tasks.
+func spawnHeadlessPolecat(polecatMgr *polecat.Manager, r *rig.Rig, rigName string, opts SlingSpawnOptions, t *tmux.Tmux) (*SpawnedPolecatInfo, error) {
+	addOpts := polecat.AddOptions{
+		HookBead: opts.HookBead,
+		Headless: true,
+	}
+
+	polecatName, _, err := polecatMgr.AllocateAndAdd(addOpts)
+	if err != nil {
+		return nil, fmt.Errorf("allocating headless worker: %w", err)
+	}
+	fmt.Printf("Created headless worker: %s\n", polecatName)
+
+	polecatObj, err := polecatMgr.Get(polecatName)
+	if err != nil {
+		return nil, fmt.Errorf("getting headless worker after creation: %w", err)
+	}
+
+	// Verify directory exists (no git verification needed)
+	if _, err := os.Stat(polecatObj.ClonePath); err != nil {
+		_ = polecatMgr.Remove(polecatName, true)
+		return nil, fmt.Errorf("headless work directory not found at %s: %w", polecatObj.ClonePath, err)
+	}
+
+	polecatSessMgr := polecat.NewSessionManager(t, r)
+	sessionName := polecatSessMgr.SessionName(polecatName)
+
+	fmt.Printf("%s Headless worker %s spawned (session start deferred)\n", style.Bold.Render("✓"), polecatName)
+	_ = events.LogFeed(events.TypeSpawn, "gt", events.SpawnPayload(rigName, polecatName))
+
+	return &SpawnedPolecatInfo{
+		RigName:     rigName,
+		PolecatName: polecatName,
+		ClonePath:   polecatObj.ClonePath,
+		SessionName: sessionName,
+		Pane:        "",
+		BaseBranch:  r.DefaultBranch(),
+		Branch:      "", // No branch for headless
+		account:     opts.Account,
+		agent:       opts.Agent,
+	}, nil
 }
 
 // verifyWorktreeExists checks that a git worktree was actually created at the given path

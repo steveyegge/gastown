@@ -51,6 +51,7 @@ const (
 	RolePolecat  Role = "polecat"
 	RoleCrew     Role = "crew"
 	RoleDog      Role = "dog"
+	RoleHeadless Role = "headless"
 	RoleUnknown  Role = "unknown"
 )
 

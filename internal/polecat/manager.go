@@ -501,6 +501,7 @@ func (m *Manager) exists(name string) bool {
 type AddOptions struct {
 	HookBead   string // Bead ID to set as hook_bead at spawn time (atomic assignment)
 	BaseBranch string // Override base branch for worktree (e.g., "origin/integration/gt-epic")
+	Headless   bool   // If true, create a plain directory instead of a git worktree (for non-repo tasks)
 }
 
 // Add creates a new polecat as a git worktree from the repo base.
@@ -709,6 +710,55 @@ func (m *Manager) addWithOptionsLocked(name string, opts AddOptions, polecatDir 
 
 		m.namePool.Release(name)
 		_ = m.namePool.Save()
+	}
+
+	// Headless mode: create a plain directory instead of a git worktree.
+	// Used for non-repo tasks (research, comms, audits) that don't need git.
+	if opts.Headless {
+		if err := os.MkdirAll(clonePath, 0755); err != nil {
+			cleanupOnError()
+			return nil, fmt.Errorf("creating headless work dir: %w", err)
+		}
+
+		// Set up shared beads so the headless worker can use bd commands
+		if err := m.setupSharedBeads(clonePath); err != nil {
+			cleanupOnError()
+			return nil, fmt.Errorf("setting up shared beads: %w (headless worker needs beads access)", err)
+		}
+
+		if err := beads.ProvisionPrimeMDForWorktree(clonePath); err != nil {
+			style.PrintWarning("could not provision PRIME.md: %v", err)
+		}
+
+		townRoot := filepath.Dir(m.rig.Path)
+		roleName := "headless"
+		runtimeConfig := config.ResolveRoleAgentConfig(roleName, townRoot, m.rig.Path)
+		settingsDir := config.RoleSettingsDir(roleName, m.rig.Path)
+		if err := runtime.EnsureSettingsForRole(settingsDir, clonePath, roleName, runtimeConfig); err != nil {
+			style.PrintWarning("could not install runtime settings: %v", err)
+		}
+
+		agentID := m.agentBeadID(name)
+		if err := m.createAgentBeadWithRetry(agentID, &beads.AgentFields{
+			RoleType:   "headless",
+			Rig:        m.rig.Name,
+			AgentState: "spawning",
+			HookBead:   opts.HookBead,
+		}); err != nil {
+			cleanupOnError()
+			return nil, fmt.Errorf("agent bead required for headless tracking: %w", err)
+		}
+
+		now := time.Now()
+		return &Polecat{
+			Name:      name,
+			Rig:       m.rig.Name,
+			State:     StateWorking,
+			ClonePath: clonePath,
+			Branch:    "", // No branch for headless
+			CreatedAt: now,
+			UpdatedAt: now,
+		}, nil
 	}
 
 	repoGit, err := m.repoBase()

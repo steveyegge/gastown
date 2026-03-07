@@ -1,0 +1,25 @@
+# Headless role definition
+# Lightweight workers for non-repo tasks (research, comms, audits).
+# Like polecats but without git worktree overhead. Multiple per rig.
+
+role = "headless"
+scope = "rig"
+nudge = "Check your hook for work assignments."
+prompt_template = "polecat.md.tmpl"
+
+[session]
+pattern = "{prefix}-hl-{name}"
+work_dir = "{town}/{rig}/polecats/{name}"
+needs_pre_sync = false
+needs_worktree = false
+
+[env]
+GT_ROLE = "headless"
+GT_SCOPE = "rig"
+GT_HEADLESS = "true"
+
+[health]
+ping_timeout = "30s"
+consecutive_failures = 3
+kill_cooldown = "5m"
+stuck_threshold = "2h"

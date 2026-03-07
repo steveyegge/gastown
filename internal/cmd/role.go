@@ -208,8 +208,8 @@ func GetRoleWithContext(cwd, townRoot string) (RoleInfo, error) {
 
 		// If env is incomplete (missing rig/polecat for roles that need them),
 		// fill gaps from cwd detection and mark as incomplete
-		needsRig := parsedRole == RoleWitness || parsedRole == RoleRefinery || parsedRole == RolePolecat || parsedRole == RoleCrew
-		needsPolecat := parsedRole == RolePolecat || parsedRole == RoleCrew || parsedRole == RoleDog
+		needsRig := parsedRole == RoleWitness || parsedRole == RoleRefinery || parsedRole == RolePolecat || parsedRole == RoleCrew || parsedRole == RoleHeadless
+		needsPolecat := parsedRole == RolePolecat || parsedRole == RoleCrew || parsedRole == RoleDog || parsedRole == RoleHeadless
 
 		if needsRig && info.Rig == "" && cwdCtx.Rig != "" {
 			info.Rig = cwdCtx.Rig
@@ -354,6 +354,8 @@ func parseRoleString(s string) (Role, string, string) {
 		return RoleBoot, "", ""
 	case "dog":
 		return RoleDog, "", ""
+	case "headless":
+		return RoleHeadless, "", ""
 	}
 
 	// Compound roles: rig/role or rig/polecats/name or rig/crew/name
@@ -611,6 +613,7 @@ func runRoleList(cmd *cobra.Command, args []string) error {
 		{RoleRefinery, "Per-rig merge queue processor"},
 		{RolePolecat, "Worker with persistent identity, ephemeral sessions"},
 		{RoleCrew, "Persistent worker with own worktree"},
+		{RoleHeadless, "Lightweight worker without git worktree (research, comms)"},
 	}
 
 	fmt.Println("Available roles:")
@@ -720,6 +723,7 @@ func runRoleDef(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  pattern        = %q\n", def.Session.Pattern)
 	fmt.Printf("  work_dir       = %q\n", def.Session.WorkDir)
 	fmt.Printf("  needs_pre_sync = %v\n", def.Session.NeedsPreSync)
+	fmt.Printf("  needs_worktree = %v\n", def.Session.RequiresWorktree())
 	if def.Session.StartCommand != "" {
 		fmt.Printf("  start_command  = %q\n", def.Session.StartCommand)
 	}

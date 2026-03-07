@@ -108,6 +108,7 @@ type ResolveTargetOptions struct {
 	TownRoot   string
 	WorkDesc   string // Description for dog dispatch (defaults to HookBead if empty)
 	BaseBranch string // Override base branch for polecat worktree
+	Headless   bool   // Spawn without git worktree (for non-repo tasks)
 }
 
 // ResolvedTarget holds the results of target resolution.
@@ -212,6 +213,7 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 			HookBead:   opts.HookBead,
 			Agent:      opts.Agent,
 			BaseBranch: opts.BaseBranch,
+			Headless:   opts.Headless,
 		}
 		spawnInfo, err := spawnPolecatForSling(rigName, spawnOpts)
 		if err != nil {
@@ -249,6 +251,7 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 					HookBead:   opts.HookBead,
 					Agent:      opts.Agent,
 					BaseBranch: opts.BaseBranch,
+					Headless:   opts.Headless,
 				}
 				spawnInfo, spawnErr := spawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {

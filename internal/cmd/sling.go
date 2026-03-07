@@ -130,6 +130,7 @@ var (
 	slingBaseBranch    string // --base-branch: override base branch for polecat worktree
 	slingRalph         bool   // --ralph: enable Ralph Wiggum loop mode for multi-step workflows
 	slingFormula       string // --formula: override formula for dispatch (default: mol-polecat-work)
+	slingHeadless      bool   // --headless: spawn without git worktree (for non-repo tasks)
 )
 
 func init() {
@@ -156,6 +157,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingBaseBranch, "base-branch", "", "Override base branch for polecat worktree (e.g., 'develop', 'release/v2')")
 	slingCmd.Flags().BoolVar(&slingRalph, "ralph", false, "Enable Ralph Wiggum loop mode (fresh context per step, for multi-step workflows)")
 	slingCmd.Flags().StringVar(&slingFormula, "formula", "", "Formula to apply (default: mol-polecat-work for polecat targets)")
+	slingCmd.Flags().BoolVar(&slingHeadless, "headless", false, "Spawn without git worktree (for non-repo tasks like research, comms)")
 
 	slingCmd.AddCommand(slingRespawnResetCmd)
 	rootCmd.AddCommand(slingCmd)
@@ -208,7 +210,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	// "gastown/polecats/Toast"). If GT_ROLE is unset, fall back to GT_POLECAT.
 	if role := os.Getenv("GT_ROLE"); role != "" {
 		parsedRole, _, _ := parseRoleString(role)
-		if parsedRole == RolePolecat {
+		if parsedRole == RolePolecat || parsedRole == RoleHeadless {
 			return fmt.Errorf("polecats cannot sling (use gt done for handoff)")
 		}
 	} else if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
@@ -711,6 +713,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		BeadID:     beadID,
 		TownRoot:   townRoot,
 		BaseBranch: slingBaseBranch,
+		Headless:   slingHeadless,
 	})
 	if err != nil {
 		return err

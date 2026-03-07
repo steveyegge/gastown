@@ -55,6 +55,12 @@ type RoleSessionConfig struct {
 	// NeedsPreSync indicates if workspace needs git sync before starting.
 	NeedsPreSync bool `toml:"needs_pre_sync"`
 
+	// NeedsWorktree indicates if the role requires a git worktree.
+	// Defaults to true when not set (zero value). Roles like "headless"
+	// set this to false for non-repo tasks (research, comms).
+	// When false, the polecat gets a plain directory instead of a git worktree.
+	NeedsWorktree *bool `toml:"needs_worktree,omitempty"`
+
 	// StartCommand is the command to run after creating the session.
 	// Default: "exec claude --dangerously-skip-permissions"
 	StartCommand string `toml:"start_command,omitempty"`
@@ -105,9 +111,18 @@ func (d Duration) String() string {
 	return d.Duration.String()
 }
 
+// RequiresWorktree returns whether this role needs a git worktree.
+// Defaults to true if NeedsWorktree is not explicitly set.
+func (r *RoleSessionConfig) RequiresWorktree() bool {
+	if r.NeedsWorktree == nil {
+		return true
+	}
+	return *r.NeedsWorktree
+}
+
 // AllRoles returns the list of all known role names.
 func AllRoles() []string {
-	return []string{"mayor", "deacon", "dog", "witness", "refinery", "polecat", "crew"}
+	return []string{"mayor", "deacon", "dog", "witness", "refinery", "polecat", "crew", "headless"}
 }
 
 // TownRoles returns roles that operate at town scope.
@@ -117,7 +132,7 @@ func TownRoles() []string {
 
 // RigRoles returns roles that operate at rig scope.
 func RigRoles() []string {
-	return []string{"witness", "refinery", "polecat", "crew"}
+	return []string{"witness", "refinery", "polecat", "crew", "headless"}
 }
 
 // isValidRoleName checks if the given name is a known role.
@@ -231,6 +246,9 @@ func mergeRoleDefinition(base, override *RoleDefinition) {
 	// disabling it would break the role's assumptions about workspace state.
 	if override.Session.NeedsPreSync {
 		base.Session.NeedsPreSync = true
+	}
+	if override.Session.NeedsWorktree != nil {
+		base.Session.NeedsWorktree = override.Session.NeedsWorktree
 	}
 	if override.Session.StartCommand != "" {
 		base.Session.StartCommand = override.Session.StartCommand

@@ -17,6 +17,7 @@ const (
 	RoleRefinery Role = "refinery"
 	RoleCrew     Role = "crew"
 	RolePolecat  Role = "polecat"
+	RoleHeadless Role = "headless"
 )
 
 // AgentIdentity represents a parsed Gas Town agent identity.
@@ -152,6 +153,15 @@ func ParseSessionNameWithRegistry(session string, registry *PrefixRegistry) (*Ag
 		return &AgentIdentity{Role: RoleCrew, Rig: rig, Name: name, Prefix: prefix}, nil
 	}
 
+	// Check for headless (marker in rest)
+	if strings.HasPrefix(rest, "hl-") {
+		name := rest[3:] // len("hl-") = 3
+		if name == "" {
+			return nil, fmt.Errorf("invalid session name %q: empty headless name", session)
+		}
+		return &AgentIdentity{Role: RoleHeadless, Rig: rig, Name: name, Prefix: prefix}, nil
+	}
+
 	// Default: polecat
 	// rest is the polecat name (may contain dashes)
 	if rest == "" {
@@ -180,6 +190,8 @@ func (a *AgentIdentity) SessionName() string {
 		return CrewSessionName(a.prefix(), a.Name)
 	case RolePolecat:
 		return PolecatSessionName(a.prefix(), a.Name)
+	case RoleHeadless:
+		return HeadlessSessionName(a.prefix(), a.Name)
 	default:
 		return ""
 	}
@@ -221,6 +233,8 @@ func (a *AgentIdentity) BeaconAddress() string {
 		return BeaconRecipient("crew", a.Name, a.Rig)
 	case RolePolecat:
 		return BeaconRecipient("polecat", a.Name, a.Rig)
+	case RoleHeadless:
+		return BeaconRecipient("headless", a.Name, a.Rig)
 	default:
 		return ""
 	}
@@ -249,6 +263,8 @@ func (a *AgentIdentity) Address() string {
 	case RoleCrew:
 		return fmt.Sprintf("%s/crew/%s", a.Rig, a.Name)
 	case RolePolecat:
+		return fmt.Sprintf("%s/polecats/%s", a.Rig, a.Name)
+	case RoleHeadless:
 		return fmt.Sprintf("%s/polecats/%s", a.Rig, a.Name)
 	default:
 		return ""

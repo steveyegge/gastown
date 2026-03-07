@@ -84,14 +84,17 @@ func init() {
 
 func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	defer func() { telemetry.RecordDone(context.Background(), strings.ToUpper(doneStatus), retErr) }()
-	// Guard: Only polecats should call gt done
+	// Guard: Only polecats/headless workers should call gt done
 	// Crew, deacons, witnesses etc. don't use gt done - they persist across tasks.
-	// Polecat sessions end with gt done — the session is cleaned up, but the
-	// polecat's persistent identity (agent bead, CV chain) survives across assignments.
+	// Polecat/headless sessions end with gt done — the session is cleaned up, but the
+	// agent's persistent identity (agent bead, CV chain) survives across assignments.
 	actor := os.Getenv("BD_ACTOR")
 	if actor != "" && !isPolecatActor(actor) {
 		return fmt.Errorf("gt done is for polecats only (you are %s)\nPolecat sessions end with gt done — the session is cleaned up, but identity persists.\nOther roles persist across tasks and don't use gt done.", actor)
 	}
+
+	// Detect headless mode (no git worktree)
+	isHeadless := os.Getenv("GT_HEADLESS") == "true"
 
 	// Validate exit status
 	exitType := strings.ToUpper(doneStatus)
@@ -192,40 +195,51 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 	// Initialize git - use cwd if available, otherwise use rig's mayor clone
+	// Headless workers don't have git worktrees, so git operations are limited.
 	var g *git.Git
-	if cwdAvailable {
-		g = git.NewGit(cwd)
-	} else {
-		// Fallback: use the rig's mayor clone for git operations
+	var branch string
+	if isHeadless {
+		// Headless: use mayor clone for beads operations only (no push/MR).
 		mayorClone := filepath.Join(townRoot, rigName, "mayor", "rig")
 		g = git.NewGit(mayorClone)
-	}
-
-	// Get current branch - try env var first if cwd is gone
-	var branch string
-	if !cwdAvailable {
-		// Try to get branch from GT_BRANCH env var (set by session manager)
-		branch = os.Getenv("GT_BRANCH")
-	}
-	// CRITICAL FIX: Only call g.CurrentBranch() if we're using the cwd-based git.
-	// When cwdAvailable is false, we fall back to the mayor clone for git operations,
-	// but the mayor clone is on main/master - NOT the polecat branch. Calling
-	// g.CurrentBranch() in that case would incorrectly return main/master.
-	if branch == "" {
-		if !cwdAvailable {
-			// We don't have GT_BRANCH and we're using mayor clone - can't determine branch.
-			// Session stays alive (persistent polecat model) — Witness handles recovery.
-			return fmt.Errorf("cannot determine branch: GT_BRANCH not set and working directory unavailable")
+		branch = "" // No branch for headless
+		if doneCleanupStatus == "" {
+			doneCleanupStatus = "clean" // Headless workers have no git state to check
 		}
-		var err error
-		branch, err = g.CurrentBranch()
-		if err != nil {
-			// Last resort: try to extract from polecat name (polecat/<name>-<suffix>)
-			if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
-				branch = fmt.Sprintf("polecat/%s", polecatName)
-				style.PrintWarning("could not get branch from git, using fallback: %s", branch)
-			} else {
-				return fmt.Errorf("getting current branch: %w", err)
+	} else {
+		if cwdAvailable {
+			g = git.NewGit(cwd)
+		} else {
+			// Fallback: use the rig's mayor clone for git operations
+			mayorClone := filepath.Join(townRoot, rigName, "mayor", "rig")
+			g = git.NewGit(mayorClone)
+		}
+
+		// Get current branch - try env var first if cwd is gone
+		if !cwdAvailable {
+			// Try to get branch from GT_BRANCH env var (set by session manager)
+			branch = os.Getenv("GT_BRANCH")
+		}
+		// CRITICAL FIX: Only call g.CurrentBranch() if we're using the cwd-based git.
+		// When cwdAvailable is false, we fall back to the mayor clone for git operations,
+		// but the mayor clone is on main/master - NOT the polecat branch. Calling
+		// g.CurrentBranch() in that case would incorrectly return main/master.
+		if branch == "" {
+			if !cwdAvailable {
+				// We don't have GT_BRANCH and we're using mayor clone - can't determine branch.
+				// Session stays alive (persistent polecat model) — Witness handles recovery.
+				return fmt.Errorf("cannot determine branch: GT_BRANCH not set and working directory unavailable")
+			}
+			var err error
+			branch, err = g.CurrentBranch()
+			if err != nil {
+				// Last resort: try to extract from polecat name (polecat/<name>-<suffix>)
+				if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
+					branch = fmt.Sprintf("polecat/%s", polecatName)
+					style.PrintWarning("could not get branch from git, using fallback: %s", branch)
+				} else {
+					return fmt.Errorf("getting current branch: %w", err)
+				}
 			}
 		}
 	}
@@ -347,6 +361,22 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	var doneErrors []string
 	var convoyInfo *ConvoyInfo // Populated if issue is tracked by a convoy
 	if exitType == ExitCompleted {
+		// Headless workers skip all git operations — no branch, no push, no MR.
+		// They complete by closing the issue and transitioning to idle.
+		if isHeadless {
+			fmt.Printf("%s Headless worker completing (no git operations)\n", style.Bold.Render("→"))
+			// Close the issue directly (no Refinery MR to trigger close)
+			if issueID != "" {
+				bd := beads.New(cwd)
+				if err := bd.Close(issueID); err != nil {
+					style.PrintWarning("could not close issue %s: %v", issueID, err)
+				} else {
+					fmt.Printf("  Closed issue: %s\n", issueID)
+				}
+			}
+			goto notifyWitness
+		}
+
 		if branch == defaultBranch || branch == "master" {
 			return fmt.Errorf("cannot submit %s/master branch to merge queue", defaultBranch)
 		}
