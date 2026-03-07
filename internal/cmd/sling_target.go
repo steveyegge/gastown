@@ -110,6 +110,7 @@ type ResolveTargetOptions struct {
 	TownRoot   string
 	WorkDesc   string // Description for dog dispatch (defaults to HookBead if empty)
 	BaseBranch string // Override base branch for polecat worktree
+	Daytona    bool   // Force daytona remote mode for polecat spawn
 }
 
 // ResolvedTarget holds the results of target resolution.
@@ -214,6 +215,7 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 			HookBead:   opts.HookBead,
 			Agent:      opts.Agent,
 			BaseBranch: opts.BaseBranch,
+			Daytona:    opts.Daytona,
 		}
 		spawnInfo, err := spawnPolecatForSling(rigName, spawnOpts)
 		if err != nil {
@@ -251,6 +253,7 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 					HookBead:   opts.HookBead,
 					Agent:      opts.Agent,
 					BaseBranch: opts.BaseBranch,
+					Daytona:    opts.Daytona,
 				}
 				spawnInfo, spawnErr := spawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {

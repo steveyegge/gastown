@@ -103,6 +103,12 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	// No deferred session kill — the polecat transitions to IDLE with sandbox
 	// preserved. The Witness handles any cleanup if the polecat gets stuck.
 
+	// Detect Daytona/proxy mode: when gt done is called from inside a Daytona
+	// sandbox, it's proxied to the host. The git repo is in the sandbox, not on
+	// the host. We use the bare .repo.git on the host for branch resolution
+	// and skip worktree-specific checks (uncommitted changes, etc.).
+	isDaytonaProxy := os.Getenv("GT_PROXY_IDENTITY") != ""
+
 	// Find workspace with fallback for deleted worktrees (hq-3xaxy)
 	// If the polecat's worktree was deleted by Witness before gt done finishes,
 	// getcwd will fail. We fall back to GT_TOWN_ROOT env var in that case.
@@ -153,7 +159,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	// - The mayor rig path (Claude Code Bash tool CWD reset)
 	// - Any non-polecat path within the rig
 	cwdIsPolecatWorktree := strings.Contains(cwd, "/polecats/")
-	if cwdAvailable && !cwdIsPolecatWorktree {
+	if cwdAvailable && !cwdIsPolecatWorktree && !isDaytonaProxy {
 		if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" && rigName != "" {
 			polecatClone := filepath.Join(townRoot, rigName, "polecats", polecatName, rigName)
 			if _, err := os.Stat(polecatClone); err == nil {
@@ -191,9 +197,13 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
-	// Initialize git - use cwd if available, otherwise use rig's mayor clone
+	// Initialize git — for Daytona proxy mode, use the bare .repo.git on the
+	// host since the worktree is inside the sandbox and not accessible here.
 	var g *git.Git
-	if cwdAvailable {
+	if isDaytonaProxy {
+		repoGit := filepath.Join(townRoot, rigName, ".repo.git")
+		g = git.NewGit(repoGit)
+	} else if cwdAvailable {
 		g = git.NewGit(cwd)
 	} else {
 		// Fallback: use the rig's mayor clone for git operations
@@ -201,9 +211,30 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		g = git.NewGit(mayorClone)
 	}
 
-	// Get current branch - try env var first if cwd is gone
+	// Get current branch.
+	// Daytona proxy mode: resolve from agent bead metadata since we can't
+	// query the sandbox's git checkout. The branch was pushed to .repo.git.
 	var branch string
-	if !cwdAvailable {
+	if isDaytonaProxy {
+		// Try GT_BRANCH first, then fall back to polecat name pattern.
+		branch = os.Getenv("GT_BRANCH")
+		if branch == "" {
+			if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
+				// Search .repo.git for a matching polecat branch.
+				// Use wildcard — branch format is polecat/<name>/<issue>@<timestamp>
+				branches, _ := g.ListBranches("polecat/" + polecatName + "/*")
+				if len(branches) > 0 {
+					// Pick the newest branch by @timestamp suffix (base36 unix millis).
+					// ListBranches returns alphabetical order which may pick stale
+					// branches from previous assignments. See: gtd-2m9 / hq-gk5g
+					branch = newestBranchByTimestamp(branches)
+				} else {
+					branch = fmt.Sprintf("polecat/%s", polecatName)
+					style.PrintWarning("could not find branch for polecat %s in .repo.git, using fallback: %s", polecatName, branch)
+				}
+			}
+		}
+	} else if !cwdAvailable {
 		// Try to get branch from GT_BRANCH env var (set by session manager)
 		branch = os.Getenv("GT_BRANCH")
 	}
@@ -232,6 +263,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 	// Auto-detect cleanup status if not explicitly provided
 	// This prevents premature polecat cleanup by ensuring witness knows git state
+	if doneCleanupStatus == "" && isDaytonaProxy {
+		// Daytona proxy: sandbox handles cleanup; branch was already pushed.
+		doneCleanupStatus = "clean"
+	}
 	if doneCleanupStatus == "" {
 		if !cwdAvailable {
 			// Can't detect git state without working directory, default to unknown
@@ -298,12 +333,12 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		// Sessions stay alive after gt done — polecat transitions to IDLE.
 	}
 
-	// If issue ID not set by flag or branch name, query for hooked beads
-	// assigned to this agent. This replaces reading agent_bead.hook_bead
-	// (hq-l6mm5: direct bead tracking instead of agent bead slot).
-	if issueID == "" && sender != "" {
-		bd := beads.New(cwd)
-		if hookIssue := findHookedBeadForAgent(bd, sender); hookIssue != "" {
+	// If issue ID not set by flag or branch name, try agent's hook_bead.
+	// This handles cases where branch name doesn't contain issue ID
+	// (e.g., "polecat/furiosa-mkb0vq9f" doesn't have the actual issue).
+	if issueID == "" && agentBeadID != "" {
+		bd := beads.New(beads.ResolveBeadsDir(cwd))
+		if hookIssue := getIssueFromAgentHook(bd, agentBeadID); hookIssue != "" {
 			issueID = hookIssue
 		}
 	}
@@ -318,7 +353,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	// skip those stages to avoid repeating work or hitting errors.
 	checkpoints := map[DoneCheckpoint]string{}
 	if agentBeadID != "" {
-		bd := beads.New(cwd)
+		bd := beads.New(beads.ResolveBeadsDir(cwd))
 		setDoneIntentLabel(bd, agentBeadID, exitType)
 		checkpoints = readDoneCheckpoints(bd, agentBeadID)
 		if len(checkpoints) > 0 {
@@ -357,29 +392,39 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		// 1. Working directory availability (can't verify git state without it)
 		// 2. Uncommitted changes (work that would be lost)
 		// 3. Unique commits compared to origin (ensures branch was pushed with actual work)
+		//
+
 
 		// Block if working directory not available - can't verify git state
-		if !cwdAvailable {
+		if !isDaytonaProxy && !cwdAvailable {
 			return fmt.Errorf("cannot complete: working directory not available (worktree deleted?)\nUse --status DEFERRED to exit without completing")
 		}
 
 		// Block if there are uncommitted changes (would be lost on completion).
 		// Runtime artifacts (.claude/, .beads/, .runtime/, __pycache__/) are
 		// excluded — these are toolchain-managed and normally gitignored.
-		// Without this filter, gt done fails on virtually every polecat because
-		// Cursor creates .claude/ at runtime in every workspace.
-		workStatus, err := g.CheckUncommittedWork()
-		if err != nil {
-			return fmt.Errorf("checking git status: %w", err)
-		}
-		if workStatus.HasUncommittedChanges && !workStatus.CleanExcludingRuntime() {
-			return fmt.Errorf("cannot complete: uncommitted changes would be lost\nCommit your changes first, or use --status DEFERRED to exit without completing\nUncommitted: %s", workStatus.String())
+		// Skip in Daytona proxy mode — no local worktree to check.
+		if !isDaytonaProxy {
+			workStatus, err := g.CheckUncommittedWork()
+			if err != nil {
+				return fmt.Errorf("checking git status: %w", err)
+			}
+			if workStatus.HasUncommittedChanges && !workStatus.CleanExcludingRuntime() {
+				return fmt.Errorf("cannot complete: uncommitted changes would be lost\nCommit your changes first, or use --status DEFERRED to exit without completing\nUncommitted: %s", workStatus.String())
+			}
 		}
 
 		// Check if branch has commits ahead of origin/default
 		// If not, work may have been pushed directly to main - that's fine, just skip MR
 		originDefault := "origin/" + defaultBranch
-		aheadCount, err := g.CommitsAhead(originDefault, "HEAD")
+		// In Daytona proxy mode, git is pointed at .repo.git (bare repo).
+		// HEAD in a bare repo points to the default branch, NOT the polecat's
+		// branch, so we must compare against the resolved branch name.
+		compareRef := "HEAD"
+		if isDaytonaProxy {
+			compareRef = branch
+		}
+		aheadCount, err := g.CommitsAhead(originDefault, compareRef)
 		if err != nil {
 			// Fallback to local branch comparison if origin not available
 			aheadCount, err = g.CommitsAhead(defaultBranch, branch)
@@ -434,7 +479,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			// Normally the Refinery closes after merge, but with no MR, nothing
 			// would ever close the issue.
 			if issueID != "" {
-				bd := beads.New(cwd)
+				bd := beads.New(beads.ResolveBeadsDir(cwd))
 
 				// Acceptance criteria gate: check for unchecked criteria before closing.
 				// If criteria exist and are unchecked, warn and skip close — the bead stays
@@ -536,7 +581,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 			// Close the base issue — no MR/refinery will close it
 			if issueID != "" {
-				directBd := beads.New(cwd)
+				directBd := beads.New(beads.ResolveBeadsDir(cwd))
 				closeReason := fmt.Sprintf("Direct merge to %s (convoy strategy)", defaultBranch)
 				var closeErr error
 				for attempt := 1; attempt <= 3; attempt++ {
@@ -654,7 +699,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 		// Write push checkpoint for resume (gt-aufru)
 		if agentBeadID != "" {
-			cpBd := beads.New(cwd)
+			cpBd := beads.New(beads.ResolveBeadsDir(cwd))
 			writeDoneCheckpoint(cpBd, agentBeadID, CheckpointPushed, branch)
 		}
 
@@ -666,12 +711,19 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 		// Initialize beads — warn if resolved to a local .beads/ (no redirect).
 		// Without a redirect, MR beads are invisible to the Refinery.
-		resolvedBeads := beads.ResolveBeadsDir(cwd)
+		// In Daytona proxy mode, cwd is the town root (not the polecat worktree),
+		// so resolve from the rig path to ensure MR beads land in the rig's
+		// beads directory where the Refinery can find them.
+		beadsCwd := cwd
+		if isDaytonaProxy {
+			beadsCwd = filepath.Join(townRoot, rigName)
+		}
+		resolvedBeads := beads.ResolveBeadsDir(beadsCwd)
 		if beads.IsLocalBeadsDir(cwd, resolvedBeads) {
 			fmt.Fprintf(os.Stderr, "WARNING: beads resolved to local dir %s (no shared-beads redirect)\n", resolvedBeads)
 			fmt.Fprintf(os.Stderr, "  MR beads written here will be invisible to the Refinery — run 'gt polecat repair' to fix\n")
 		}
-		bd := beads.NewWithBeadsDir(cwd, resolvedBeads)
+		bd := beads.New(resolvedBeads)
 
 		// Check for no_merge flag - if set, skip merge queue and notify for review
 		sourceIssueForNoMerge, err := bd.Show(issueID)
@@ -913,7 +965,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 		// Write MR checkpoint for resume (gt-aufru)
 		if mrID != "" && agentBeadID != "" {
-			cpBd := beads.New(cwd)
+			cpBd := beads.New(beads.ResolveBeadsDir(cwd))
 			writeDoneCheckpoint(cpBd, agentBeadID, CheckpointMRCreated, mrID)
 		}
 
@@ -948,7 +1000,7 @@ notifyWitness:
 	// longer processes routine completions from these fields.
 	fmt.Printf("\nNotifying Witness...\n")
 	if agentBeadID != "" {
-		completionBd := beads.New(cwd)
+		completionBd := beads.New(beads.ResolveBeadsDir(cwd))
 		meta := &beads.CompletionMetadata{
 			ExitType:       exitType,
 			MRID:           mrID,
@@ -971,7 +1023,7 @@ notifyWitness:
 
 	// Write witness notification checkpoint for resume (gt-aufru)
 	if agentBeadID != "" {
-		cpBd := beads.New(cwd)
+		cpBd := beads.New(beads.ResolveBeadsDir(cwd))
 		writeDoneCheckpoint(cpBd, agentBeadID, CheckpointWitnessNotified, "ok")
 	}
 
@@ -1003,7 +1055,7 @@ notifyWitness:
 		// Phase 3 of persistent-polecat-pool: DONE→IDLE syncs to main and deletes old branch.
 		// Non-fatal: if sync fails, the polecat is still IDLE and the Witness
 		// or next gt sling can handle the branch state.
-		if cwdAvailable && !pushFailed {
+		if cwdAvailable && !pushFailed && !isDaytonaProxy {
 			// Remember the old branch so we can delete it after switching
 			oldBranch := branch
 
@@ -1164,10 +1216,7 @@ func clearDoneCheckpoints(bd *beads.Beads, agentBeadID string) {
 	}
 }
 
-// updateAgentStateOnDone closes the hooked work bead and reports cleanup status.
-// Uses issueID directly to find the hooked bead instead of reading the agent bead's
-// hook_bead slot (hq-l6mm5: direct bead tracking).
-//
+// updateAgentStateOnDone clears the agent's hook and reports cleanup status.
 // Per gt-zecmc: observable states ("done", "idle") removed - use tmux to discover.
 // Non-observable states ("stuck", "awaiting-gate") are still set since they represent
 // intentional agent decisions that can't be observed from tmux.
@@ -1177,7 +1226,7 @@ func clearDoneCheckpoints(bd *beads.Beads, agentBeadID string) {
 // BUG FIX (hq-3xaxy): This function must be resilient to working directory deletion.
 // If the polecat's worktree is deleted before gt done finishes, we use env vars as fallback.
 // All errors are warnings, not failures - gt done must complete even if bead ops fail.
-func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
+func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unused but kept for future audit logging
 	// Get role context - try multiple sources for resilience
 	roleInfo, err := GetRoleWithContext(cwd, townRoot)
 	if err != nil {
@@ -1220,7 +1269,7 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 		return
 	}
 
-	// Use rig path for bd commands.
+	// Use rig path for slot commands - bd slot doesn't route from town root
 	// IMPORTANT: Use the rig's directory (not polecat worktree) so bd commands
 	// work even if the polecat worktree is deleted.
 	var beadsPath string
@@ -1232,18 +1281,27 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 	}
 	bd := beads.New(beadsPath)
 
-	// Find the hooked bead to close. Use issueID directly instead of reading
-	// agent bead's hook_bead slot (hq-l6mm5: direct bead tracking).
-	hookedBeadID := issueID
-	if hookedBeadID == "" {
-		// Fallback: query for hooked beads assigned to this agent
-		agentID := roleInfo.ActorString()
-		if found := findHookedBeadForAgent(bd, agentID); found != "" {
-			hookedBeadID = found
-		}
+	// BUG FIX (gt-vwjz6): Close hooked beads before clearing the hook.
+	// Previously, the agent's hook_bead slot was cleared but the hooked bead itself
+	// stayed status=hooked forever. Now we close the hooked bead before clearing.
+	//
+	// BUG FIX (hq-i26n2): Check if agent bead exists before clearing hook.
+	// Old polecats may not have identity beads, so ClearHookBead would fail.
+	// gt done must be resilient - missing agent bead is not an error.
+	//
+	// BUG FIX (hq-3xaxy): All bead operations are non-fatal. If the agent bead
+	// is deleted by another process (e.g., Witness cleanup), we just warn.
+	agentBead, err := bd.Show(agentBeadID)
+	if err != nil {
+		// Agent bead doesn't exist - nothing to clear, that's fine
+		// This happens for polecats created before identity beads existed,
+		// or if the agent bead was deleted by another process
+		style.PrintWarning("agent bead %s not found, skipping state update: %v", agentBeadID, err)
+		return
 	}
 
-	if hookedBeadID != "" && exitType != ExitDeferred {
+	if agentBead.HookBead != "" && exitType != ExitDeferred {
+		hookedBeadID := agentBead.HookBead
 		// BUG FIX (gt-pftz): Close hooked bead unless already terminal (closed/tombstone).
 		// Previously checked hookedBead.Status == StatusHooked, but polecats update
 		// their work bead to in_progress during work. The exact-match check caused
@@ -1294,7 +1352,13 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 		}
 	}
 
-	// No ClearHookBead call needed — agent bead hook slot is no longer maintained (hq-l6mm5).
+	// Clear the hook (work is done) - gt-zecmc
+	// BUG FIX (hq-3xaxy): This is non-fatal - if hook clearing fails, warn and continue.
+	// The Witness will clean up any orphaned state.
+	if err := bd.ClearHookBead(agentBeadID); err != nil {
+		// Non-fatal: warn but don't fail gt done
+		fmt.Fprintf(os.Stderr, "Warning: couldn't clear agent %s hook: %v\n", agentBeadID, err)
+	}
 
 	// Self-managed completion (gt-1qlg, polecat-self-managed-completion.md Phase 2):
 	// Polecat sets agent_state=idle directly, skipping the intermediate "done" state.
@@ -1329,23 +1393,19 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 	clearDoneCheckpoints(bd, agentBeadID)
 }
 
-// findHookedBeadForAgent queries for beads with status=hooked assigned to this agent.
-// This is the authoritative source for what work a polecat is doing, since the
-// work bead itself tracks status and assignee (hq-l6mm5).
-// Returns empty string if no hooked bead is found.
-func findHookedBeadForAgent(bd *beads.Beads, agentID string) string {
-	if agentID == "" {
+// getIssueFromAgentHook retrieves the issue ID from an agent's hook_bead field.
+// This is the authoritative source for what work a polecat is doing, since branch
+// names may not contain the issue ID (e.g., "polecat/furiosa-mkb0vq9f").
+// Returns empty string if agent doesn't exist or has no hook.
+func getIssueFromAgentHook(bd *beads.Beads, agentBeadID string) string {
+	if agentBeadID == "" {
 		return ""
 	}
-	hookedBeads, err := bd.List(beads.ListOptions{
-		Status:   beads.StatusHooked,
-		Assignee: agentID,
-		Priority: -1,
-	})
-	if err != nil || len(hookedBeads) == 0 {
+	agentBead, err := bd.Show(agentBeadID)
+	if err != nil {
 		return ""
 	}
-	return hookedBeads[0].ID
+	return agentBead.HookBead
 }
 
 // parseCleanupStatus converts a string flag value to a CleanupStatus.
@@ -1476,4 +1536,23 @@ func selfKillSession(townRoot string, roleInfo RoleInfo) error {
 	}
 
 	return nil
+}
+
+// newestBranchByTimestamp picks the branch with the highest @timestamp suffix.
+// Branch format: polecat/<name>/<issue>@<base36-unix-millis>
+// Falls back to the first element if no timestamps found.
+func newestBranchByTimestamp(branches []string) string {
+	best := branches[0]
+	var bestTS int64
+	for _, b := range branches {
+		if idx := strings.LastIndex(b, "@"); idx >= 0 {
+			if ts, err := strconv.ParseInt(b[idx+1:], 36, 64); err == nil {
+				if ts > bestTS {
+					bestTS = ts
+					best = b
+				}
+			}
+		}
+	}
+	return best
 }

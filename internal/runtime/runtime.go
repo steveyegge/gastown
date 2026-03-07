@@ -7,7 +7,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/hookutil"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/templates/commands"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -108,10 +108,19 @@ func RunStartupFallback(t *tmux.Tmux, sessionID, role string, rc *config.Runtime
 }
 
 // isAutonomousRole returns true if the given role should automatically
-// inject mail check on startup. Delegates to hookutil.IsAutonomousRole
-// for the single source of truth on role classification.
+// inject mail check on startup. Autonomous roles (polecat, witness,
+// refinery, deacon, boot) operate without human prompting and need mail injection
+// to receive work assignments.
+//
+// Non-autonomous roles (mayor, crew) are human-guided and should not
+// have automatic mail injection to avoid confusion.
 func isAutonomousRole(role string) bool {
-	return hookutil.IsAutonomousRole(role)
+	switch role {
+	case constants.RolePolecat, constants.RoleWitness, constants.RoleRefinery, constants.RoleDeacon, "boot":
+		return true
+	default:
+		return false
+	}
 }
 
 // DefaultPrimeWaitMs is the default wait time in milliseconds for non-hook agents

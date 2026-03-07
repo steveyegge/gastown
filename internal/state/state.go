@@ -5,12 +5,14 @@ package state
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/util"
+	"github.com/gofrs/flock"
 	"github.com/google/uuid"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // State represents the global Gas Town state.
@@ -58,6 +60,30 @@ func CacheDir() string {
 // StatePath returns the path to state.json.
 func StatePath() string {
 	return filepath.Join(StateDir(), "state.json")
+}
+
+// stateLockPath returns the path to the flock sidecar for state.json.
+func stateLockPath() string {
+	return StatePath() + ".lock"
+}
+
+// withStateLock acquires an exclusive cross-process file lock around fn.
+// This prevents the read-check-generate-write race where concurrent callers
+// (e.g. daemon + CLI) could both see an empty MachineID, generate different
+// UUIDs, and clobber each other's writes.
+func withStateLock(fn func() error) error {
+	dir := StateDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("creating state directory: %w", err)
+	}
+
+	fl := flock.New(stateLockPath())
+	if err := fl.Lock(); err != nil {
+		return fmt.Errorf("acquiring state file lock: %w", err)
+	}
+	defer fl.Unlock() //nolint:errcheck // best-effort unlock
+
+	return fn()
 }
 
 // IsEnabled checks if Gas Town is globally enabled.
@@ -111,35 +137,39 @@ func Save(s *State) error {
 
 // Enable enables Gas Town globally.
 func Enable(version string) error {
-	s, err := Load()
-	if err != nil {
-		// Create new state
-		s = &State{
-			InstalledAt: time.Now(),
-			MachineID:   generateMachineID(),
+	return withStateLock(func() error {
+		s, err := Load()
+		if err != nil {
+			// Create new state
+			s = &State{
+				InstalledAt: time.Now(),
+				MachineID:   generateMachineID(),
+			}
 		}
-	}
 
-	s.Enabled = true
-	s.Version = version
-	return Save(s)
+		s.Enabled = true
+		s.Version = version
+		return Save(s)
+	})
 }
 
 // Disable disables Gas Town globally.
 func Disable() error {
-	s, err := Load()
-	if err != nil {
-		// Nothing to disable, create disabled state
-		s = &State{
-			InstalledAt: time.Now(),
-			MachineID:   generateMachineID(),
-			Enabled:     false,
+	return withStateLock(func() error {
+		s, err := Load()
+		if err != nil {
+			// Nothing to disable, create disabled state
+			s = &State{
+				InstalledAt: time.Now(),
+				MachineID:   generateMachineID(),
+				Enabled:     false,
+			}
+			return Save(s)
 		}
-		return Save(s)
-	}
 
-	s.Enabled = false
-	return Save(s)
+		s.Enabled = false
+		return Save(s)
+	})
 }
 
 // generateMachineID creates a unique machine identifier.
@@ -147,34 +177,57 @@ func generateMachineID() string {
 	return uuid.New().String()[:8]
 }
 
-// GetMachineID returns the machine ID, creating one if needed.
+// GetMachineID returns the machine ID, creating and persisting one if needed.
+// Uses file locking to ensure concurrent callers converge on the same ID.
 func GetMachineID() string {
-	s, err := Load()
-	if err != nil || s.MachineID == "" {
+	var machineID string
+	err := withStateLock(func() error {
+		s, loadErr := Load()
+		if loadErr == nil && s.MachineID != "" {
+			machineID = s.MachineID
+			return nil
+		}
+		// State missing or MachineID empty — generate and persist.
+		if s == nil {
+			s = &State{
+				InstalledAt: time.Now(),
+			}
+		}
+		s.MachineID = generateMachineID()
+		machineID = s.MachineID
+		return Save(s)
+	})
+	if err != nil {
+		// Lock/save failed — return a transient ID as fallback so callers
+		// always get a usable value, but log nothing (callers don't expect errors).
 		return generateMachineID()
 	}
-	return s.MachineID
+	return machineID
 }
 
 // SetShellIntegration records which shell integration is installed.
 func SetShellIntegration(shell string) error {
-	s, err := Load()
-	if err != nil {
-		s = &State{
-			InstalledAt: time.Now(),
-			MachineID:   generateMachineID(),
+	return withStateLock(func() error {
+		s, err := Load()
+		if err != nil {
+			s = &State{
+				InstalledAt: time.Now(),
+				MachineID:   generateMachineID(),
+			}
 		}
-	}
-	s.ShellIntegration = shell
-	return Save(s)
+		s.ShellIntegration = shell
+		return Save(s)
+	})
 }
 
 // RecordDoctorRun records when doctor was last run.
 func RecordDoctorRun() error {
-	s, err := Load()
-	if err != nil {
-		return err
-	}
-	s.LastDoctorRun = time.Now()
-	return Save(s)
+	return withStateLock(func() error {
+		s, err := Load()
+		if err != nil {
+			return err
+		}
+		s.LastDoctorRun = time.Now()
+		return Save(s)
+	})
 }

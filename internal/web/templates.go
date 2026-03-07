@@ -204,10 +204,6 @@ type ConvoyRow struct {
 	Progress      string // e.g., "2/5"
 	Completed     int
 	Total         int
-	ProgressPct   int      // 0-100, computed from Completed/Total
-	ReadyBeads    int      // open beads with no assignee (available to pick up)
-	InProgress    int      // beads currently being worked on
-	Assignees     []string // unique assignees across tracked issues
 	LastActivity  activity.Info
 	TrackedIssues []TrackedIssue
 }
@@ -227,6 +223,7 @@ func LoadTemplates() (*template.Template, error) {
 		"activityClass":      activityClass,
 		"statusClass":        statusClass,
 		"workStatusClass":    workStatusClass,
+		"progressPercent":    progressPercent,
 		"senderColorClass":   senderColorClass,
 		"severityClass":      severityClass,
 		"dogStateClass":      dogStateClass,
@@ -295,6 +292,14 @@ func workStatusClass(workStatus string) string {
 	default:
 		return "work-unknown"
 	}
+}
+
+// progressPercent calculates percentage as an integer for progress bars.
+func progressPercent(completed, total int) int {
+	if total == 0 {
+		return 0
+	}
+	return (completed * 100) / total
 }
 
 // senderColorClass returns a CSS class for sender-based color coding.

@@ -353,10 +353,12 @@ func validateReceivePackRefs(body []byte, cnName string) error {
 		}
 		ref := string(parts[2])
 
-		// Only allow refs/heads/polecat/<cnName>-* (prefix form).
+		// Only allow refs/heads/polecat/<cnName>-* or refs/heads/polecat/<cnName>/*
+		// (branch names may use hyphen or slash separators).
 		// Exact-name pushes (without timestamp suffix) are not permitted.
-		if !strings.HasPrefix(ref, allowed) {
-			return fmt.Errorf("push to %q denied: only refs/heads/polecat/%s-* allowed", ref, cnName)
+		allowedSlash := "refs/heads/polecat/" + cnName + "/"
+		if !strings.HasPrefix(ref, allowed) && !strings.HasPrefix(ref, allowedSlash) {
+			return fmt.Errorf("push to %q denied: only refs/heads/polecat/%s-* or refs/heads/polecat/%s/* allowed", ref, cnName, cnName)
 		}
 	}
 	return nil

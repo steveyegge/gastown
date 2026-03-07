@@ -306,7 +306,7 @@ gt sling <bead> --daytona
   │       daytona create https://<host>:9876/v1/git/<rig>
   │         --name gt-<rig>-<polecat>
   │         --branch polecat/<name>-<ts>
-  │         --devcontainer-path .devcontainer/gastown-polecat
+  │         --dockerfile .devcontainer/Dockerfile
   │       (clones from proxy → .repo.git; runs onCreateCommand)
   │
   ├─ 4. Inject cert into workspace:
@@ -397,7 +397,7 @@ The `DaytonaConfig` struct:
 ```go
 type DaytonaConfig struct {
     WorkspaceID string `json:"workspace_id"`
-    Profile     string `json:"profile,omitempty"`     // devcontainer name
+    Dockerfile  string `json:"dockerfile,omitempty"`  // path to Dockerfile for sandbox snapshot
     Image       string `json:"image,omitempty"`       // override image directly
     AutoStop    bool   `json:"auto_stop,omitempty"`   // stop workspace after session ends
     AutoDelete  bool   `json:"auto_delete,omitempty"` // delete workspace after session ends

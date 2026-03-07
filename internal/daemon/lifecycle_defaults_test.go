@@ -140,6 +140,7 @@ func TestEnsureLifecycleDefaults_FullyConfigured(t *testing.T) {
 			JsonlGitBackup:       &JsonlGitBackupConfig{Enabled: false},
 			DoltBackup:           &DoltBackupConfig{Enabled: false},
 			ScheduledMaintenance: &ScheduledMaintenanceConfig{Enabled: false, Threshold: &threshold},
+			DaytonaReconcile:     &DaytonaReconcileConfig{Enabled: false},
 		},
 	}
 

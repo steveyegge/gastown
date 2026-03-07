@@ -2456,6 +2456,7 @@ func TestResetAgentBeadForReuse_NukeRespawnCycle(t *testing.T) {
 		Rig:        "testrig",
 		AgentState: "spawning",
 		HookBead:   "test-task-1",
+		CertSerial: "deadbeef01",
 	})
 	if err != nil {
 		t.Fatalf("Spawn 1: %v", err)
@@ -2484,6 +2485,9 @@ func TestResetAgentBeadForReuse_NukeRespawnCycle(t *testing.T) {
 	}
 	if nukedFields.HookBead != "" {
 		t.Errorf("After nuke: hook_bead = %q, want empty", nukedFields.HookBead)
+	}
+	if nukedFields.CertSerial != "" {
+		t.Errorf("After nuke: cert_serial = %q, want empty (gtd-nyq)", nukedFields.CertSerial)
 	}
 
 	// Spawn 2: CreateOrReopenAgentBead should detect open bead and update it
@@ -2529,6 +2533,91 @@ func TestResetAgentBeadForReuse_NukeRespawnCycle(t *testing.T) {
 	}
 
 	t.Log("LIFECYCLE TEST PASSED: spawn → reset → respawn works without close/reopen")
+}
+
+// TestResetAgentFields_CertSerialCleared verifies that the field-clearing logic
+// used by ResetAgentBeadForReuse clears CertSerial (gtd-nyq). This is a pure
+// unit test of ParseAgentFields + FormatAgentDescription round-trip that does
+// not require the bd CLI.
+func TestResetAgentFields_CertSerialCleared(t *testing.T) {
+	// Simulate an agent bead description with cert_serial set
+	original := &AgentFields{
+		RoleType:         "polecat",
+		Rig:              "testrig",
+		AgentState:       "working",
+		HookBead:         "test-task-1",
+		CertSerial:       "deadbeef01",
+		DaytonaWorkspace: "ws-123",
+		ActiveMR:         "mr-456",
+		CleanupStatus:    "clean",
+		ExitType:         "COMPLETED",
+		MRID:             "mr-789",
+		Branch:           "polecat/jade/test",
+		MRFailed:         true,
+		CompletionTime:   "2026-03-04T00:00:00Z",
+	}
+	desc := FormatAgentDescription("test-agent", original)
+
+	// Parse back and apply the same clearing logic as ResetAgentBeadForReuse
+	fields := ParseAgentFields(desc)
+	fields.HookBead = ""
+	fields.ActiveMR = ""
+	fields.CleanupStatus = ""
+	fields.AgentState = string(AgentStateNuked)
+	fields.DaytonaWorkspace = ""
+	fields.CertSerial = "" // gtd-nyq fix
+	fields.ExitType = ""
+	fields.MRID = ""
+	fields.Branch = ""
+	fields.MRFailed = false
+	fields.CompletionTime = ""
+
+	// Re-format and parse again to verify round-trip
+	resetDesc := FormatAgentDescription("test-agent", fields)
+	result := ParseAgentFields(resetDesc)
+
+	// Immutable fields preserved
+	if result.RoleType != "polecat" {
+		t.Errorf("role_type = %q, want 'polecat'", result.RoleType)
+	}
+	if result.Rig != "testrig" {
+		t.Errorf("rig = %q, want 'testrig'", result.Rig)
+	}
+
+	// Mutable fields cleared
+	if result.CertSerial != "" {
+		t.Errorf("cert_serial = %q, want empty (gtd-nyq: must be cleared on reset)", result.CertSerial)
+	}
+	if result.HookBead != "" {
+		t.Errorf("hook_bead = %q, want empty", result.HookBead)
+	}
+	if result.DaytonaWorkspace != "" {
+		t.Errorf("daytona_workspace = %q, want empty", result.DaytonaWorkspace)
+	}
+	if result.ActiveMR != "" {
+		t.Errorf("active_mr = %q, want empty", result.ActiveMR)
+	}
+	if result.CleanupStatus != "" {
+		t.Errorf("cleanup_status = %q, want empty", result.CleanupStatus)
+	}
+	if result.AgentState != "nuked" {
+		t.Errorf("agent_state = %q, want 'nuked'", result.AgentState)
+	}
+	if result.ExitType != "" {
+		t.Errorf("exit_type = %q, want empty", result.ExitType)
+	}
+	if result.MRID != "" {
+		t.Errorf("mr_id = %q, want empty", result.MRID)
+	}
+	if result.Branch != "" {
+		t.Errorf("branch = %q, want empty", result.Branch)
+	}
+	if result.MRFailed {
+		t.Errorf("mr_failed = true, want false")
+	}
+	if result.CompletionTime != "" {
+		t.Errorf("completion_time = %q, want empty", result.CompletionTime)
+	}
 }
 
 // TestIsAgentBead verifies the IsAgentBead function correctly identifies agent

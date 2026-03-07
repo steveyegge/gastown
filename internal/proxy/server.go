@@ -201,7 +201,7 @@ func (s *Server) DenyCert(serial *big.Int) {
 	s.denyList.Deny(serial)
 }
 
-// Start begins listening and serving. Blocks until ctx is canceled.
+// Start begins listening and serving. Blocks until ctx is cancelled.
 func (s *Server) Start(ctx context.Context) error {
 	pool := x509.NewCertPool()
 	pool.AddCert(s.ca.Cert)
@@ -286,6 +286,7 @@ func (s *Server) Start(ctx context.Context) error {
 	var adminSrv *http.Server
 	if s.cfg.AdminListenAddr != "" {
 		adminMux := http.NewServeMux()
+		adminMux.HandleFunc("/v1/admin/health", s.handleHealth)
 		adminMux.HandleFunc("/v1/admin/deny-cert", s.handleDenyCert)
 		adminMux.HandleFunc("/v1/admin/issue-cert", s.handleIssueCert)
 
@@ -475,6 +476,16 @@ func (s *Server) handleIssueCert(w http.ResponseWriter, r *http.Request) {
 		Serial:    leaf.SerialNumber.Text(16),
 		ExpiresAt: leaf.NotAfter.UTC().Format(time.RFC3339),
 	})
+}
+
+// handleHealth handles GET /v1/admin/health on the local admin server.
+// Returns 200 OK to indicate the server is alive and ready.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 // denyCertRequest is the JSON body for POST /v1/admin/deny-cert.

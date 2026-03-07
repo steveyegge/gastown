@@ -9,6 +9,7 @@ package daemon
 //   - Doctor Dog (health): every 5m
 //   - JSONL Git Backup: every 15m
 //   - Dolt Filesystem Backup: every 15m
+//   - Daytona Reconcile: every 30m
 //   - Scheduled Maintenance (FLATTEN): daily at 03:00, threshold 1000
 func DefaultLifecycleConfig() *DaemonPatrolConfig {
 	threshold := 1000
@@ -40,6 +41,10 @@ func DefaultLifecycleConfig() *DaemonPatrolConfig {
 			DoltBackup: &DoltBackupConfig{
 				Enabled:     true,
 				IntervalStr: "15m",
+			},
+			DaytonaReconcile: &DaytonaReconcileConfig{
+				Enabled:     true,
+				IntervalStr: "30m",
 			},
 			ScheduledMaintenance: &ScheduledMaintenanceConfig{
 				Enabled:   true,
@@ -90,6 +95,10 @@ func EnsureLifecycleDefaults(config *DaemonPatrolConfig) bool {
 	}
 	if p.DoltBackup == nil {
 		p.DoltBackup = d.DoltBackup
+		changed = true
+	}
+	if p.DaytonaReconcile == nil {
+		p.DaytonaReconcile = d.DaytonaReconcile
 		changed = true
 	}
 	if p.ScheduledMaintenance == nil {

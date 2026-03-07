@@ -57,6 +57,31 @@ with either a branch push via `{{ cmd }} done` OR an explicit `bd close` on the 
 
 ## 🚨 CRITICAL: Directory Discipline 🚨
 
+{{ if .IsDaytona -}}
+**You are in a Daytona remote sandbox.** Your workspace is NOT a pre-existing worktree.
+
+**Setup your workspace:**
+```bash
+if [ -d ~/repo ]; then
+  # Reused sandbox — fetch new branch and switch to it
+  cd ~/repo && git fetch origin && git checkout -B "$GT_REPO_BRANCH" "origin/$GT_REPO_BRANCH"
+else
+  # Fresh sandbox — clone and checkout branch
+  git clone -b "$GT_REPO_BRANCH" "$GT_REPO_URL" ~/repo && cd ~/repo
+fi
+```
+
+- `$GT_REPO_URL` — proxy git URL for the rig's repo
+- `$GT_REPO_BRANCH` — your assigned feature branch (e.g., `polecat/{{ .Polecat }}/issue@timestamp`)
+- **ALL work must be in `~/repo/`** — commit and push before running `gt done`
+- `gt` and `bd` commands work via proxy (no need for special setup)
+
+```bash
+# Before gt done:
+cd ~/repo && git add <files> && git commit -m "..." && git push origin HEAD
+gt done
+```
+{{ else -}}
 **YOU ARE IN: `{{ .RigName }}/polecats/{{ .Polecat }}/`** — This is YOUR git worktree. Stay here.
 
 - **ALL file edits** must be within this directory (your worktree)
@@ -72,6 +97,7 @@ pwd                  # Should show .../polecats/{{ .Polecat }}/...
 git status && git add <files> && git commit -m "..." && git push
 gt done
 ```
+{{ end -}}
 
 ---
 

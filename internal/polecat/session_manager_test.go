@@ -1,6 +1,7 @@
 package polecat
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/daytona"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -511,6 +513,391 @@ func TestVerifyStartupNudgeDelivery_NilConfig(t *testing.T) {
 		},
 	}
 	m.verifyStartupNudgeDelivery("nonexistent-session", rc)
+}
+
+// TestSessionManagerIsRemoteMode verifies that SessionManager.isRemoteMode
+// correctly detects when daytona remote execution is configured.
+func TestSessionManagerIsRemoteMode(t *testing.T) {
+	t.Parallel()
+
+	r := &rig.Rig{Name: "testrig", Path: t.TempDir()}
+	m := NewSessionManager(tmux.NewTmux(), r)
+
+	// Default: not remote
+	if m.isRemoteMode() {
+		t.Error("isRemoteMode() = true, want false for default SessionManager")
+	}
+
+	// SetDaytona with nil RemoteBackend: still not remote
+	m.SetDaytona(daytona.NewClient("gt-test"), &config.RigSettings{})
+	if m.isRemoteMode() {
+		t.Error("isRemoteMode() = true, want false when RemoteBackend is nil")
+	}
+
+	// SetDaytona with RemoteBackend: remote
+	m.SetDaytona(daytona.NewClient("gt-test"), &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{Provider: "daytona"},
+	})
+	if !m.isRemoteMode() {
+		t.Error("isRemoteMode() = false, want true when RemoteBackend is set")
+	}
+}
+
+// TestBuildDaytonaCommand verifies that buildDaytonaCommand produces a properly
+// formatted daytona exec command with env vars and the agent command.
+func TestBuildDaytonaCommand(t *testing.T) {
+	t.Parallel()
+
+	rigPath := filepath.Join(t.TempDir(), "testrig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{Name: "testrig", Path: rigPath}
+	m := NewSessionManager(tmux.NewTmux(), r)
+	m.SetDaytona(daytona.NewClient("gt-abc12345"), &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{
+			Provider:  "daytona",
+			ProxyAddr: "proxy.example.com:8443",
+		},
+	})
+
+	rc := &config.RuntimeConfig{
+		Provider: "claude",
+		Command:  "claude",
+		Args:     []string{"--dangerously-skip-permissions"},
+	}
+
+	beacon := "Test beacon message"
+	wsName := "gt-abc12345-testrig--onyx"
+	runID := "test-run-id-123"
+
+	cmd := m.buildDaytonaCommand("onyx", wsName, beacon, "", rc, runID)
+
+	// Verify the command starts with daytona exec and includes --tty
+	if !strings.HasPrefix(cmd, "daytona exec "+wsName) {
+		t.Errorf("command should start with 'daytona exec %s', got: %s", wsName, cmd)
+	}
+	if !strings.Contains(cmd, "--tty") {
+		t.Errorf("command missing --tty flag\ncmd: %s", cmd)
+	}
+
+	// All env vars (identity, proxy, per-session) are passed inline because
+	// daytona exec does not inherit workspace-level env vars.
+	for _, required := range []string{
+		"GT_RUN=test-run-id-123",
+		"GT_RIG=testrig",
+		"GT_POLECAT=onyx",
+		"GT_ROLE=testrig/polecats/onyx",
+		"GT_PROXY_URL=https://proxy.example.com:8443",
+		"GT_PROXY_CERT=/home/daytona/.gt-proxy/client.crt",
+		"GT_PROXY_CA=/home/daytona/.gt-proxy/ca.crt",
+		"GIT_SSL_CAINFO=/home/daytona/.gt-proxy/ca.crt",
+	} {
+		if !strings.Contains(cmd, required) {
+			t.Errorf("command missing %s\ncmd: %s", required, cmd)
+		}
+	}
+
+	// Verify the command contains --tty -- env ... sh -c with the agent command
+	if !strings.Contains(cmd, "-- env") {
+		t.Errorf("command missing '-- env' prefix\ncmd: %s", cmd)
+	}
+	if !strings.Contains(cmd, "sh -c") {
+		t.Errorf("command missing 'sh -c'\ncmd: %s", cmd)
+	}
+
+	// Verify the agent command includes claude and the beacon
+	if !strings.Contains(cmd, "claude") {
+		t.Errorf("command missing 'claude'\ncmd: %s", cmd)
+	}
+	if !strings.Contains(cmd, "Test beacon message") {
+		t.Errorf("command missing beacon text\ncmd: %s", cmd)
+	}
+}
+
+// TestBuildDaytonaCommand_IncludesAllEnvVars verifies that the exec command
+// includes all required env vars (identity, proxy, per-session) inline,
+// since daytona exec does not inherit workspace-level env vars.
+func TestBuildDaytonaCommand_IncludesAllEnvVars(t *testing.T) {
+	t.Parallel()
+
+	rigPath := filepath.Join(t.TempDir(), "testrig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{Name: "testrig", Path: rigPath}
+	m := NewSessionManager(tmux.NewTmux(), r)
+	m.SetDaytona(daytona.NewClient("gt-abc12345"), &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{
+			Provider: "daytona",
+		},
+	})
+
+	rc := &config.RuntimeConfig{
+		Provider: "claude",
+		Command:  "claude",
+		Args:     []string{"--dangerously-skip-permissions"},
+	}
+
+	cmd := m.buildDaytonaCommand("onyx", "ws-name", "beacon", "", rc, "run-id")
+
+	// All env vars must be present inline for the agent to function.
+	for _, required := range []string{"GT_RUN=run-id", "GT_PROXY_URL=", "GT_RIG=testrig", "GT_POLECAT=onyx", "GIT_SSL_CAINFO="} {
+		if !strings.Contains(cmd, required) {
+			t.Errorf("command missing %s\ncmd: %s", required, cmd)
+		}
+	}
+}
+
+// TestBuildDaytonaCommand_ExtraEnvNotInExec verifies that RemoteBackend.Env vars
+// are NOT included in the daytona exec command (they're set at create time).
+func TestBuildDaytonaCommand_ExtraEnvNotInExec(t *testing.T) {
+	t.Parallel()
+
+	rigPath := filepath.Join(t.TempDir(), "testrig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{Name: "testrig", Path: rigPath}
+	m := NewSessionManager(tmux.NewTmux(), r)
+	m.SetDaytona(daytona.NewClient("gt-abc12345"), &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{
+			Provider: "daytona",
+			Env:      map[string]string{"CUSTOM_VAR": "custom_value"},
+		},
+	})
+
+	rc := &config.RuntimeConfig{
+		Provider: "claude",
+		Command:  "claude",
+		Args:     []string{"--dangerously-skip-permissions"},
+	}
+
+	cmd := m.buildDaytonaCommand("onyx", "ws-name", "beacon", "", rc, "run-id")
+
+	// CUSTOM_VAR should NOT be in exec command (set at create time via daytona create --env).
+	if strings.Contains(cmd, "CUSTOM_VAR") {
+		t.Errorf("command should not contain CUSTOM_VAR (set at create time)\ncmd: %s", cmd)
+	}
+}
+
+// TestBuildDaytonaCommand_EnvValueShellQuoting verifies that per-session env
+// values are properly quoted in the inline env prefix.
+func TestBuildDaytonaCommand_EnvValueShellQuoting(t *testing.T) {
+	t.Parallel()
+
+	rigPath := filepath.Join(t.TempDir(), "testrig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{Name: "testrig", Path: rigPath}
+	m := NewSessionManager(tmux.NewTmux(), r)
+	m.SetDaytona(daytona.NewClient("gt-abc12345"), &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{
+			Provider: "daytona",
+		},
+	})
+
+	rc := &config.RuntimeConfig{
+		Provider: "claude",
+		Command:  "claude",
+		Args:     []string{"--dangerously-skip-permissions"},
+	}
+
+	// All env vars are passed via inline env prefix, not --env flags.
+	cmd := m.buildDaytonaCommand("onyx", "ws-name", "beacon", "", rc, "run-id")
+
+	// Should use inline env prefix, not --env flags.
+	if strings.Contains(cmd, "--env") {
+		t.Errorf("command should not use --env flags\ncmd: %s", cmd)
+	}
+	// GT_RUN should be present via env prefix.
+	if !strings.Contains(cmd, "GT_RUN=run-id") {
+		t.Errorf("command missing GT_RUN=run-id\ncmd: %s", cmd)
+	}
+}
+
+// TestBuildDaytonaCommand_BeaconWithSpecialChars verifies that beacons containing
+// shell special characters (newlines, quotes, etc.) are properly escaped.
+func TestBuildDaytonaCommand_BeaconWithSpecialChars(t *testing.T) {
+	t.Parallel()
+
+	rigPath := filepath.Join(t.TempDir(), "testrig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{Name: "testrig", Path: rigPath}
+	m := NewSessionManager(tmux.NewTmux(), r)
+	m.SetDaytona(daytona.NewClient("gt-abc12345"), &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{Provider: "daytona"},
+	})
+
+	rc := &config.RuntimeConfig{
+		Provider: "claude",
+		Command:  "claude",
+		Args:     []string{"--dangerously-skip-permissions"},
+	}
+
+	// Beacon with newlines, quotes, and dollar signs
+	beacon := "Line 1\nLine 2\n\"quoted\" and $var and 'single'"
+
+	cmd := m.buildDaytonaCommand("onyx", "ws-name", beacon, "", rc, "run-id")
+
+	// The command should be properly formed (not empty, has env prefix and sh -c)
+	if !strings.Contains(cmd, "-- env") {
+		t.Errorf("command missing '-- env' prefix\ncmd: %s", cmd)
+	}
+	if !strings.Contains(cmd, "sh -c") {
+		t.Errorf("command missing 'sh -c'\ncmd: %s", cmd)
+	}
+	if cmd == "" {
+		t.Error("buildDaytonaCommand returned empty string")
+	}
+
+	// The beacon is first quoted by quoteForShell (double-quote escaping),
+	// then the whole agent command is wrapped in single quotes by ShellQuote.
+	// Verify special characters survive the double quoting layers.
+
+	// Single quotes in the beacon must be escaped via the '\'' idiom.
+	if !strings.Contains(cmd, `'\''`) {
+		t.Errorf("single quotes in beacon not properly escaped\ncmd: %s", cmd)
+	}
+	// Dollar sign should be backslash-escaped by quoteForShell.
+	if !strings.Contains(cmd, `\$var`) {
+		t.Errorf("dollar sign in beacon not escaped\ncmd: %s", cmd)
+	}
+	// Double quotes in the beacon should be backslash-escaped by quoteForShell.
+	if !strings.Contains(cmd, `\"quoted\"`) {
+		t.Errorf("double quotes in beacon not escaped\ncmd: %s", cmd)
+	}
+	// Newlines in the beacon should be preserved (appear literally in the command).
+	if !strings.Contains(cmd, "Line 1\nLine 2") {
+		t.Errorf("newlines in beacon not preserved\ncmd: %s", cmd)
+	}
+}
+
+// testDaytonaRunner records daytona CLI calls for verifying Stop behavior.
+type testDaytonaRunner struct {
+	calls    []testDaytonaCall
+	stderr   string
+	exitCode int
+	err      error
+}
+
+type testDaytonaCall struct {
+	Name string
+	Args []string
+}
+
+func (r *testDaytonaRunner) Run(_ context.Context, name string, args ...string) (string, string, int, error) {
+	r.calls = append(r.calls, testDaytonaCall{Name: name, Args: args})
+	return "", r.stderr, r.exitCode, r.err
+}
+
+// TestStopDaytonaWorkspaceOnStop_AutoStopTrue verifies that Stop calls
+// daytona stop when in remote mode with AutoStop=true.
+func TestStopDaytonaWorkspaceOnStop_AutoStopTrue(t *testing.T) {
+	t.Parallel()
+
+	runner := &testDaytonaRunner{}
+	client := daytona.NewClientWithRunner("gt-test1234", runner)
+
+	r := &rig.Rig{Name: "testrig", Path: t.TempDir()}
+	m := NewSessionManager(tmux.NewTmux(), r)
+	m.SetDaytona(client, &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{
+			Provider: "daytona",
+			AutoStop: true,
+		},
+	})
+
+	m.stopDaytonaWorkspaceOnStop("onyx")
+
+	// Should have called daytona stop with the correct workspace name
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 daytona call, got %d", len(runner.calls))
+	}
+	call := runner.calls[0]
+	if call.Name != "daytona" {
+		t.Errorf("expected command 'daytona', got %q", call.Name)
+	}
+	wantArgs := []string{"stop", "gt-test1234-testrig--onyx"}
+	if strings.Join(call.Args, " ") != strings.Join(wantArgs, " ") {
+		t.Errorf("args = %v, want %v", call.Args, wantArgs)
+	}
+}
+
+// TestStopDaytonaWorkspaceOnStop_AutoStopFalse verifies that Stop does NOT
+// call daytona stop when AutoStop=false.
+func TestStopDaytonaWorkspaceOnStop_AutoStopFalse(t *testing.T) {
+	t.Parallel()
+
+	runner := &testDaytonaRunner{}
+	client := daytona.NewClientWithRunner("gt-test1234", runner)
+
+	r := &rig.Rig{Name: "testrig", Path: t.TempDir()}
+	m := NewSessionManager(tmux.NewTmux(), r)
+	m.SetDaytona(client, &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{
+			Provider: "daytona",
+			AutoStop: false,
+		},
+	})
+
+	m.stopDaytonaWorkspaceOnStop("onyx")
+
+	if len(runner.calls) != 0 {
+		t.Errorf("expected 0 daytona calls when AutoStop=false, got %d", len(runner.calls))
+	}
+}
+
+// TestStopDaytonaWorkspaceOnStop_LocalMode verifies that Stop does NOT call
+// daytona stop when not in remote mode (no daytona client configured).
+func TestStopDaytonaWorkspaceOnStop_LocalMode(t *testing.T) {
+	t.Parallel()
+
+	r := &rig.Rig{Name: "testrig", Path: t.TempDir()}
+	m := NewSessionManager(tmux.NewTmux(), r)
+
+	// Should be a no-op — no panic, no calls
+	m.stopDaytonaWorkspaceOnStop("onyx")
+}
+
+// TestStopDaytonaWorkspaceOnStop_StopFailure verifies that Stop does not panic
+// when the daytona stop command fails (non-zero exit code).
+func TestStopDaytonaWorkspaceOnStop_StopFailure(t *testing.T) {
+	t.Parallel()
+
+	runner := &testDaytonaRunner{
+		stderr:   "Error: workspace not found",
+		exitCode: 1,
+	}
+	client := daytona.NewClientWithRunner("gt-test1234", runner)
+
+	r := &rig.Rig{Name: "testrig", Path: t.TempDir()}
+	m := NewSessionManager(tmux.NewTmux(), r)
+	m.SetDaytona(client, &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{
+			Provider: "daytona",
+			AutoStop: true,
+		},
+	})
+
+	// Should not panic — error is logged as a warning to stderr.
+	m.stopDaytonaWorkspaceOnStop("onyx")
+
+	// The stop command should still have been attempted.
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 daytona call, got %d", len(runner.calls))
+	}
+	if runner.calls[0].Args[0] != "stop" {
+		t.Errorf("expected 'stop' command, got %v", runner.calls[0].Args)
+	}
 }
 
 func TestValidateSessionName(t *testing.T) {

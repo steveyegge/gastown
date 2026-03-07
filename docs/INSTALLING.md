@@ -22,6 +22,16 @@ Complete setup guide for Gas Town multi-agent orchestrator.
 | **Codex CLI** (optional) | latest | `codex --version` | See [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli) |
 | **OpenCode CLI** (optional) | latest | `opencode --version` | See [opencode.ai](https://opencode.ai) |
 
+### Optional (for Daytona Remote Backend)
+
+| Tool | Version | Check | Install |
+|------|---------|-------|---------|
+| **Daytona CLI** | >= 0.49.0 | `daytona version` | See [daytona.io/docs/installation](https://www.daytona.io/docs/installation/installation/) |
+
+The Daytona remote backend runs polecats in cloud containers instead of local
+git worktrees. See [daytona-backend.md](daytona-backend.md) for setup and
+configuration. Run `gt doctor` to verify the Daytona CLI version.
+
 ## Installing Prerequisites
 
 ### macOS

@@ -80,6 +80,96 @@ func TestTownConfigRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLoadTownConfig_AutoGeneratesInstallationID(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mayor", "town.json")
+
+	// Save config without InstallationID
+	original := &TownConfig{
+		Type:      "town",
+		Version:   1,
+		Name:      "test-town",
+		CreatedAt: time.Now().Truncate(time.Second),
+	}
+	if err := SaveTownConfig(path, original); err != nil {
+		t.Fatalf("SaveTownConfig: %v", err)
+	}
+
+	// Load should auto-generate InstallationID
+	loaded, err := LoadTownConfig(path)
+	if err != nil {
+		t.Fatalf("LoadTownConfig: %v", err)
+	}
+	if loaded.InstallationID == "" {
+		t.Fatal("expected InstallationID to be auto-generated, got empty string")
+	}
+	if len(loaded.InstallationID) != 36 { // UUID v4 format: 8-4-4-4-12
+		t.Errorf("InstallationID length = %d, want 36 (UUID v4)", len(loaded.InstallationID))
+	}
+
+	// Verify it was persisted to disk
+	reloaded, err := LoadTownConfig(path)
+	if err != nil {
+		t.Fatalf("second LoadTownConfig: %v", err)
+	}
+	if reloaded.InstallationID != loaded.InstallationID {
+		t.Errorf("InstallationID changed on reload: %q != %q", reloaded.InstallationID, loaded.InstallationID)
+	}
+}
+
+func TestLoadTownConfig_PreservesExistingInstallationID(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mayor", "town.json")
+
+	existingID := "550e8400-e29b-41d4-a716-446655440000"
+	original := &TownConfig{
+		Type:           "town",
+		Version:        1,
+		Name:           "test-town",
+		InstallationID: existingID,
+		CreatedAt:      time.Now().Truncate(time.Second),
+	}
+	if err := SaveTownConfig(path, original); err != nil {
+		t.Fatalf("SaveTownConfig: %v", err)
+	}
+
+	loaded, err := LoadTownConfig(path)
+	if err != nil {
+		t.Fatalf("LoadTownConfig: %v", err)
+	}
+	if loaded.InstallationID != existingID {
+		t.Errorf("InstallationID = %q, want %q", loaded.InstallationID, existingID)
+	}
+}
+
+func TestShortInstallationID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		id   string
+		want string
+	}{
+		{"full UUID", "550e8400-e29b-41d4-a716-446655440000", "550e8400-e29"},
+		{"short string", "abc", "abc"},
+		{"empty", "", ""},
+		{"exactly 12", "123456789abc", "123456789abc"},
+		{"longer than 12", "123456789abcdef", "123456789abc"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &TownConfig{InstallationID: tt.id}
+			got := c.ShortInstallationID()
+			if got != tt.want {
+				t.Errorf("ShortInstallationID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRigsConfigRoundTrip(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -385,6 +475,37 @@ func TestRigSettingsValidation(t *testing.T) {
 				Version: 1,
 				MergeQueue: &MergeQueueConfig{
 					StaleClaimTimeout: "-5m",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid remote_backend",
+			settings: &RigSettings{
+				Type:    "rig-settings",
+				Version: 1,
+				RemoteBackend: &RemoteBackend{
+					Provider: "daytona",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "remote_backend missing provider",
+			settings: &RigSettings{
+				Type:    "rig-settings",
+				Version: 1,
+				RemoteBackend: &RemoteBackend{},
+			},
+			wantErr: true,
+		},
+		{
+			name: "remote_backend unsupported provider",
+			settings: &RigSettings{
+				Type:    "rig-settings",
+				Version: 1,
+				RemoteBackend: &RemoteBackend{
+					Provider: "dyatona",
 				},
 			},
 			wantErr: true,

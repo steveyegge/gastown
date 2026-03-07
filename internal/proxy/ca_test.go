@@ -355,6 +355,66 @@ func TestIssuePolecat(t *testing.T) {
 	})
 }
 
+func TestIssuePolecat_CertSerialExtraction(t *testing.T) {
+	dir := t.TempDir()
+	ca, err := GenerateCA(dir)
+	require.NoError(t, err)
+
+	t.Run("serial can be extracted as lowercase hex for revocation", func(t *testing.T) {
+		certPEM, _, err := ca.IssuePolecat("gt-myrig-onyx", 24*time.Hour)
+		require.NoError(t, err)
+
+		block, rest := pem.Decode(certPEM)
+		require.NotNil(t, block, "certPEM should decode to a PEM block")
+		assert.Empty(t, rest, "should be a single PEM block")
+
+		leaf, err := x509.ParseCertificate(block.Bytes)
+		require.NoError(t, err)
+
+		serial := leaf.SerialNumber.Text(16) // lowercase hex, same as addDaytona
+		assert.NotEmpty(t, serial, "serial should be non-empty")
+		assert.Greater(t, len(serial), 8, "serial should be a long hex string (128-bit random)")
+
+		// Serial should be lowercase hex only
+		for _, c := range serial {
+			assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
+				"serial char %c should be lowercase hex", c)
+		}
+	})
+
+	t.Run("two certs get distinct serials", func(t *testing.T) {
+		cert1PEM, _, err := ca.IssuePolecat("gt-rig-alpha", time.Hour)
+		require.NoError(t, err)
+		cert2PEM, _, err := ca.IssuePolecat("gt-rig-beta", time.Hour)
+		require.NoError(t, err)
+
+		block1, _ := pem.Decode(cert1PEM)
+		leaf1, err := x509.ParseCertificate(block1.Bytes)
+		require.NoError(t, err)
+
+		block2, _ := pem.Decode(cert2PEM)
+		leaf2, err := x509.ParseCertificate(block2.Bytes)
+		require.NoError(t, err)
+
+		serial1 := leaf1.SerialNumber.Text(16)
+		serial2 := leaf2.SerialNumber.Text(16)
+		assert.NotEqual(t, serial1, serial2, "two certs should have distinct serials")
+	})
+
+	t.Run("cert and key PEM are both present and parseable", func(t *testing.T) {
+		certPEM, keyPEM, err := ca.IssuePolecat("gt-rig-test", time.Hour)
+		require.NoError(t, err)
+
+		certBlock, _ := pem.Decode(certPEM)
+		require.NotNil(t, certBlock)
+		assert.Equal(t, "CERTIFICATE", certBlock.Type)
+
+		keyBlock, _ := pem.Decode(keyPEM)
+		require.NotNil(t, keyBlock)
+		assert.Equal(t, "EC PRIVATE KEY", keyBlock.Type)
+	})
+}
+
 func TestCertEdgeCases(t *testing.T) {
 	dir := t.TempDir()
 	ca, err := GenerateCA(dir)

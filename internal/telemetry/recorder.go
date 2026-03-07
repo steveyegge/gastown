@@ -104,7 +104,8 @@ type recorderInstruments struct {
 	beadCreateTotal       metric.Int64Counter
 
 	// Histograms
-	bdDurationHist metric.Float64Histogram
+	bdDurationHist           metric.Float64Histogram
+	polecatCreateDurationHist metric.Float64Histogram
 }
 
 var (
@@ -221,6 +222,10 @@ func initInstruments() {
 		inst.bdDurationHist, _ = m.Float64Histogram("gastown.bd.duration_ms",
 			metric.WithDescription("bd CLI call round-trip latency in milliseconds"),
 			metric.WithUnit("ms"),
+		)
+		inst.polecatCreateDurationHist, _ = m.Float64Histogram("gastown.polecat.create_duration_seconds",
+			metric.WithDescription("Polecat workspace creation latency (cold-start vs warm-start)"),
+			metric.WithUnit("s"),
 		)
 	})
 }
@@ -547,6 +552,26 @@ func RecordPolecatRemove(ctx context.Context, name string, err error) {
 	)
 	emit(ctx, "polecat.remove", severity(err),
 		otellog.String("name", name),
+		otellog.String("status", status),
+		errKV(err),
+	)
+}
+
+// RecordPolecatCreateDuration records workspace creation latency as a histogram.
+// startType is "cold" (image pull + post-create) or "warm" (snapshot-based).
+// durationSeconds is the wall-clock time of the workspace provisioning step.
+func RecordPolecatCreateDuration(ctx context.Context, name, startType string, durationSeconds float64, err error) {
+	initInstruments()
+	status := statusStr(err)
+	attrs := metric.WithAttributes(
+		attribute.String("start_type", startType),
+		attribute.String("status", status),
+	)
+	inst.polecatCreateDurationHist.Record(ctx, durationSeconds, attrs)
+	emit(ctx, "polecat.create_duration", severity(err),
+		otellog.String("name", name),
+		otellog.String("start_type", startType),
+		otellog.Float64("duration_seconds", durationSeconds),
 		otellog.String("status", status),
 		errKV(err),
 	)

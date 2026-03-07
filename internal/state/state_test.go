@@ -6,6 +6,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -127,5 +128,96 @@ func TestGenerateMachineID(t *testing.T) {
 	}
 	if id1 == id2 {
 		t.Error("generateMachineID() should generate unique IDs")
+	}
+}
+
+func TestGetMachineID_PersistsOnFirstCall(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.Setenv("XDG_STATE_HOME", tmpDir)
+	defer os.Unsetenv("XDG_STATE_HOME")
+
+	id := GetMachineID()
+	if len(id) != 8 {
+		t.Fatalf("GetMachineID() length = %d, want 8", len(id))
+	}
+
+	// Second call should return the same persisted ID.
+	id2 := GetMachineID()
+	if id != id2 {
+		t.Errorf("GetMachineID() returned different IDs: %q vs %q", id, id2)
+	}
+
+	// Verify it was persisted to disk.
+	s, err := Load()
+	if err != nil {
+		t.Fatalf("Load() after GetMachineID: %v", err)
+	}
+	if s.MachineID != id {
+		t.Errorf("persisted MachineID = %q, want %q", s.MachineID, id)
+	}
+}
+
+func TestConcurrentEnable_SameMachineID(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.Setenv("XDG_STATE_HOME", tmpDir)
+	defer os.Unsetenv("XDG_STATE_HOME")
+
+	const goroutines = 10
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines)
+
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			if err := Enable("1.0.0"); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Fatalf("Enable() failed: %v", err)
+	}
+
+	// After all goroutines finish, there must be exactly one MachineID on disk.
+	s, err := Load()
+	if err != nil {
+		t.Fatalf("Load() after concurrent Enable: %v", err)
+	}
+	if s.MachineID == "" {
+		t.Fatal("MachineID should not be empty after concurrent Enable calls")
+	}
+	if len(s.MachineID) != 8 {
+		t.Errorf("MachineID length = %d, want 8", len(s.MachineID))
+	}
+}
+
+func TestConcurrentGetMachineID_Converges(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.Setenv("XDG_STATE_HOME", tmpDir)
+	defer os.Unsetenv("XDG_STATE_HOME")
+
+	const goroutines = 10
+	ids := make([]string, goroutines)
+	var wg sync.WaitGroup
+
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			ids[i] = GetMachineID()
+		}()
+	}
+	wg.Wait()
+
+	// All goroutines should have converged on the same ID.
+	for i := 1; i < goroutines; i++ {
+		if ids[i] != ids[0] {
+			t.Errorf("GetMachineID() goroutine %d returned %q, want %q (same as goroutine 0)", i, ids[i], ids[0])
+		}
 	}
 }

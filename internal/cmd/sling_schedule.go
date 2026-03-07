@@ -59,6 +59,7 @@ type ScheduleOptions struct {
 	Agent       string   // Agent override (e.g., "gemini", "codex")
 	HookRawBead bool     // Hook raw bead without default formula
 	Ralph       bool     // Ralph Wiggum loop mode
+	Daytona     bool     // Force daytona remote mode
 }
 
 // scheduleBead schedules a bead for deferred dispatch via the capacity scheduler.
@@ -162,6 +163,7 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 		fields.Mode = "ralph"
 	}
 	fields.Owned = opts.Owned
+	fields.Daytona = opts.Daytona
 
 	// Create sling context bead — single atomic operation. No two-step write.
 	ctxBead, err := townBeads.CreateSlingContext(info.Title, beadID, fields)
@@ -227,6 +229,7 @@ func runBatchSchedule(beadIDs []string, rigName string) error {
 			Agent:       slingAgent,
 			HookRawBead: slingHookRawBead,
 			Ralph:       slingRalph,
+			Daytona:     slingDaytona,
 		})
 		if err != nil {
 			fmt.Printf("  %s %s: %v\n", style.Dim.Render("✗"), beadID, err)

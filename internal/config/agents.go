@@ -249,19 +249,15 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SessionIDEnv:        "", // Uses --resume with chatId directly
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
-		SupportsHooks:       true,
+		SupportsHooks:       false, // TODO: verify hooks support
 		SupportsForkSession: false,
 		NonInteractive: &NonInteractiveConfig{
 			PromptFlag: "-p",
 			OutputFlag: "--output-format json",
 		},
 		// Runtime defaults
-		PromptMode:        "arg",
-		ConfigDir:         ".cursor",
-		HooksProvider:     "cursor",
-		HooksDir:          ".cursor",
-		HooksSettingsFile: "hooks.json",
-		InstructionsFile:  "AGENTS.md",
+		PromptMode:       "arg",
+		InstructionsFile: "AGENTS.md",
 	},
 	AgentAuggie: {
 		Name:                AgentAuggie,

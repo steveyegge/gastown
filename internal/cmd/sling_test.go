@@ -1499,9 +1499,11 @@ exit /b 0
 }
 
 // TestSlingSetsDoltAutoCommitOff verifies that gt sling sets BD_DOLT_AUTO_COMMIT=off
-// for all child bd processes. Under concurrent load (batch slinging), auto-commits
+// for child bd processes by default. Under concurrent load (batch slinging), auto-commits
 // from individual bd writes cause manifest contention and 'database is read only'
 // errors. The Dolt server handles commits — individual auto-commits are unnecessary.
+// Exception: hook writes (--status=hooked) use WithAutoCommit() to ensure immediate
+// Dolt visibility before polecat startup (GH#2389).
 // Fixes: gt-u6n6a
 
 // TestCheckCrossRigGuard verifies that cross-rig sling is rejected when a bead's
@@ -1709,7 +1711,10 @@ exit /b 0
 		t.Fatalf("read bd log: %v", err)
 	}
 
-	// Verify that ALL bd commands received BD_DOLT_AUTO_COMMIT=off
+	// Verify bd commands received correct BD_DOLT_AUTO_COMMIT values.
+	// The hook write (update --status=hooked) uses WithAutoCommit() to ensure
+	// immediate Dolt visibility before polecat startup (GH#2389), so it gets "on".
+	// All other bd commands should inherit the global "off" set by runSling.
 	logLines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
 	if len(logLines) == 0 {
 		t.Fatal("no bd commands logged")
@@ -1722,6 +1727,9 @@ exit /b 0
 		// Commands using .WithAutoCommit() (e.g., "update --status=hooked")
 		// legitimately override to "on" for sequential consistency.
 		if strings.Contains(line, "update") && strings.Contains(line, "--status=hooked") {
+			if !strings.Contains(line, "ENV:BD_DOLT_AUTO_COMMIT=on|") {
+				t.Errorf("hook write should have BD_DOLT_AUTO_COMMIT=on (GH#2389): %s", line)
+			}
 			continue
 		}
 		if !strings.Contains(line, "ENV:BD_DOLT_AUTO_COMMIT=off|") {

@@ -14,12 +14,24 @@ import (
 
 // TownConfig represents the main town identity (mayor/town.json).
 type TownConfig struct {
-	Type       string    `json:"type"`                  // "town"
-	Version    int       `json:"version"`               // schema version
-	Name       string    `json:"name"`                  // town identifier (internal)
-	Owner      string    `json:"owner,omitempty"`       // owner email (entity identity)
-	PublicName string    `json:"public_name,omitempty"` // public display name
-	CreatedAt  time.Time `json:"created_at"`
+	Type           string    `json:"type"`                      // "town"
+	Version        int       `json:"version"`                   // schema version
+	Name           string    `json:"name"`                      // town identifier (internal)
+	Owner          string    `json:"owner,omitempty"`           // owner email (entity identity)
+	PublicName     string    `json:"public_name,omitempty"`     // public display name
+	InstallationID string    `json:"installation_id,omitempty"` // unique UUID v4 per installation, auto-generated on first load
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// ShortInstallationID returns the first 12 characters of the InstallationID,
+// used for workspace naming: gt-<installID-short>-<rig>-<polecat>.
+// 12 hex chars = 48 bits of entropy; birthday collision probability stays below
+// 1% up to ~260 000 installations (vs ~9 300 with the old 8-char / 32-bit scheme).
+func (c *TownConfig) ShortInstallationID() string {
+	if len(c.InstallationID) < 12 {
+		return c.InstallationID
+	}
+	return c.InstallationID[:12]
 }
 
 // MayorConfig represents town-level behavioral configuration (mayor/config.json).
@@ -627,6 +639,117 @@ type RigSettings struct {
 	// Takes precedence over RoleAgents["crew"] but is overridden by explicit --agent flags.
 	// Example: {"denali": "codex", "glacier": "gemini"}
 	WorkerAgents map[string]string `json:"worker_agents,omitempty"`
+
+	// RemoteBackend configures remote container execution for polecats.
+	// When non-nil, polecat lifecycle uses daytona instead of local worktrees.
+	// Per-rig granularity: some rigs can be local, others remote.
+	RemoteBackend *RemoteBackend `json:"remote_backend,omitempty"`
+}
+
+// RemoteBackend configures remote container execution for polecats via daytona.
+// When RigSettings.RemoteBackend is non-nil, the polecat lifecycle creates
+// daytona workspaces instead of local git worktrees.
+type RemoteBackend struct {
+	// Provider is the remote backend provider. Currently only "daytona" is supported.
+	Provider string `json:"provider"`
+
+	// Image overrides the default container image for daytona workspaces.
+	Image string `json:"image,omitempty"`
+
+	// Dockerfile specifies a path to a Dockerfile for daytona sandbox snapshots.
+	// Maps to the --dockerfile flag on `daytona create`.
+	Dockerfile string `json:"dockerfile,omitempty"`
+
+	// Snapshot specifies a pre-built snapshot ID for faster workspace creation.
+	// When set, daytona creates from the snapshot (--snapshot) instead of pulling
+	// an image and running post-create setup, cutting cold-start from minutes to
+	// seconds. Mutually exclusive with Image — Snapshot takes precedence.
+	Snapshot string `json:"snapshot,omitempty"`
+
+	// Profile selects a devcontainer profile for workspace creation.
+	Profile string `json:"profile,omitempty"`
+
+	// AutoStop stops the daytona workspace when the polecat session ends.
+	AutoStop bool `json:"auto_stop,omitempty"`
+
+	// AutoDelete deletes the daytona workspace when the polecat is removed.
+	// If false, workspaces are stopped but preserved for faster re-spawn.
+	AutoDelete bool `json:"auto_delete,omitempty"`
+
+	// AutoStopInterval is the idle time in minutes before Daytona automatically
+	// stops the workspace. Passed as --auto-stop-interval to daytona create.
+	// Zero means use Daytona's default.
+	AutoStopInterval int `json:"auto_stop_interval,omitempty"`
+
+	// AutoArchiveInterval is the time in minutes after stop before Daytona
+	// automatically archives the workspace. Passed as --auto-archive-interval
+	// to daytona create. Zero means use Daytona's default.
+	AutoArchiveInterval int `json:"auto_archive_interval,omitempty"`
+
+	// AutoDeleteInterval is the time in minutes after archive before Daytona
+	// automatically deletes the workspace. Passed as --auto-delete-interval
+	// to daytona create. Zero means use Daytona's default.
+	AutoDeleteInterval int `json:"auto_delete_interval,omitempty"`
+
+	// ProxyAddr overrides the default proxy address for remote polecats.
+	ProxyAddr string `json:"proxy_addr,omitempty"`
+
+	// ProxyAdminAddr overrides the default proxy admin API address used for
+	// preflight checks and cert management. Defaults to "127.0.0.1:9877".
+	// Must be set in multi-machine setups where the proxy runs on a different host.
+	ProxyAdminAddr string `json:"proxy_admin_addr,omitempty"`
+
+	// Target specifies the geographic region for daytona workspace placement.
+	// Maps to the --target flag on `daytona create` (e.g., "us", "eu").
+	Target string `json:"target,omitempty"`
+
+	// Env provides extra environment variables injected into daytona containers.
+	Env map[string]string `json:"env,omitempty"`
+
+	// Class selects a predefined resource tier for daytona workspaces.
+	// Maps to --class on `daytona create`. Values: "small", "medium", "large".
+	Class string `json:"class,omitempty"`
+
+	// CPU sets the number of CPU cores for daytona workspaces.
+	// Maps to --cpu on `daytona create`. Overrides the class default.
+	CPU int `json:"cpu,omitempty"`
+
+	// Memory sets the memory in MB for daytona workspaces.
+	// Maps to --memory on `daytona create`. Overrides the class default.
+	Memory int `json:"memory,omitempty"`
+
+	// Disk sets the disk size in GB for daytona workspaces.
+	// Maps to --disk on `daytona create`. Overrides the class default.
+	Disk int `json:"disk,omitempty"`
+
+	// NetworkBlockAll blocks all outbound network access from the container.
+	// When true, daytona create is called with --network-block-all.
+	NetworkBlockAll bool `json:"network_block_all,omitempty"`
+
+	// NetworkAllowList is a comma-separated list of CIDRs to allow when
+	// NetworkBlockAll is true. Passed as --network-allow-list to daytona create.
+	NetworkAllowList string `json:"network_allow_list,omitempty"`
+
+	// SandboxedNetwork enables network isolation for sandboxes. When true,
+	// --network-block-all is passed to daytona create, and only the proxy IP
+	// (derived from ProxyAddr) plus any AllowedIPs are allowed through via
+	// --network-allow-list. Use this for Daytona tiers that support network
+	// policy (Tier 3+).
+	SandboxedNetwork bool `json:"sandboxed_network,omitempty"`
+
+	// AllowedIPs is a list of IPs or CIDRs that sandboxes should be able to
+	// reach. These are appended to the --network-allow-list alongside the
+	// auto-derived proxy IP. Only takes effect when SandboxedNetwork is true.
+	AllowedIPs []string `json:"allowed_ips,omitempty"`
+}
+
+// Validate checks that RemoteBackend has a supported provider.
+// Currently only "daytona" is supported.
+func (rb *RemoteBackend) Validate() error {
+	if rb.Provider != "daytona" {
+		return fmt.Errorf("unsupported remote backend provider %q (supported: daytona)", rb.Provider)
+	}
+	return nil
 }
 
 // CrewConfig represents crew workspace settings for a rig.

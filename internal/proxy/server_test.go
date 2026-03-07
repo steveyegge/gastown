@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -45,28 +46,28 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("AllowedCommands are stored in allowed map", func(t *testing.T) {
-		srv, err := New(Config{TownRoot: t.TempDir(), AllowedCommands: []string{"echo", "true"}, Logger: discardLogger()}, nil)
+		srv, err := New(Config{TownRoot: t.TempDir(), AllowedCommands: []string{"gt", "bd"}, Logger: discardLogger()}, nil)
 		require.NoError(t, err)
-		assert.True(t, srv.allowed["echo"])
-		assert.True(t, srv.allowed["true"])
+		assert.True(t, srv.allowed["gt"])
+		assert.True(t, srv.allowed["bd"])
 		assert.False(t, srv.allowed["curl"])
 	})
 
 	t.Run("isAllowed reflects allowed map", func(t *testing.T) {
-		srv, err := New(Config{TownRoot: t.TempDir(), AllowedCommands: []string{"echo", "true"}, Logger: discardLogger()}, nil)
+		srv, err := New(Config{TownRoot: t.TempDir(), AllowedCommands: []string{"gt", "bd"}, Logger: discardLogger()}, nil)
 		require.NoError(t, err)
-		assert.True(t, srv.isAllowed("echo"))
-		assert.True(t, srv.isAllowed("true"))
+		assert.True(t, srv.isAllowed("gt"))
+		assert.True(t, srv.isAllowed("bd"))
 		assert.False(t, srv.isAllowed("curl"))
 		assert.False(t, srv.isAllowed(""))
 	})
 
 	t.Run("AllowedCommands with path separators are rejected", func(t *testing.T) {
-		srv, err := New(Config{TownRoot: t.TempDir(), AllowedCommands: []string{"/usr/bin/echo", "true", `C:\echo.exe`}, Logger: discardLogger()}, nil)
+		srv, err := New(Config{TownRoot: t.TempDir(), AllowedCommands: []string{"/usr/bin/gt", "bd", `C:\gt.exe`}, Logger: discardLogger()}, nil)
 		require.NoError(t, err)
-		assert.False(t, srv.isAllowed("/usr/bin/echo"), "absolute path should be rejected")
-		assert.True(t, srv.isAllowed("true"), "plain name should be accepted")
-		assert.False(t, srv.isAllowed(`C:\echo.exe`), "windows path should be rejected")
+		assert.False(t, srv.isAllowed("/usr/bin/gt"), "absolute path should be rejected")
+		assert.True(t, srv.isAllowed("bd"), "plain name should be accepted")
+		assert.False(t, srv.isAllowed(`C:\gt.exe`), "windows path should be rejected")
 	})
 }
 
@@ -832,5 +833,140 @@ func TestAdminIssueCertEndpoint(t *testing.T) {
 		// Default TTL is 720h (30 days). Allow some clock skew.
 		expectedExpiry := time.Now().Add(720 * time.Hour)
 		assert.WithinDuration(t, expectedExpiry, expiry, 5*time.Minute)
+	})
+}
+
+// TestCertRevocationViaAdminClient is an integration test that verifies the
+// exact code path used by Manager.denyCertForPolecat and SessionManager.denyCertOnStop:
+//
+//  1. Issue a cert via AdminClient.IssueCert (same as Manager.issueCertForPolecat)
+//  2. Use the cert for a successful mTLS connection
+//  3. Revoke via AdminClient.DenyCert with the serial (same as denyCertForPolecat)
+//  4. Verify the serial is in the proxy's deny list (requirement 1)
+//  5. Verify TLS handshake is rejected for the revoked cert (requirement 2)
+//  6. Verify a non-revoked cert still works
+//
+// All polecat removal paths (RemoveWithOptions, SessionManager.Stop, witness
+// cleanup, force-destroy) funnel through AdminClient.DenyCert, so this single
+// test covers requirement 3 (all removal paths).
+func TestCertRevocationViaAdminClient(t *testing.T) {
+	dir := t.TempDir()
+	ca, err := GenerateCA(dir)
+	require.NoError(t, err)
+
+	srv, err := New(Config{
+		ListenAddr:      "127.0.0.1:0",
+		AdminListenAddr: "127.0.0.1:0",
+		AllowedCommands: []string{"echo"},
+		TownRoot:        t.TempDir(),
+		Logger:          discardLogger(),
+	}, ca)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	go func() { srv.Start(ctx) }() //nolint:errcheck
+
+	// Wait for both listeners.
+	var mainAddr, adminAddr string
+	require.Eventually(t, func() bool {
+		if a := srv.Addr(); a != nil {
+			mainAddr = a.String()
+		}
+		if a := srv.AdminAddr(); a != nil {
+			adminAddr = a.String()
+		}
+		return mainAddr != "" && adminAddr != ""
+	}, 5*time.Second, 10*time.Millisecond)
+	waitForServer(t, mainAddr, 5*time.Second)
+	waitForServer(t, adminAddr, 5*time.Second)
+
+	adminClient := NewAdminClient(adminAddr)
+
+	// --- Issue two certs via AdminClient (mirrors issueCertForPolecat) ---
+	aliceResult, err := adminClient.IssueCert(ctx, "TestRig", "alice", "1h")
+	require.NoError(t, err)
+	require.NotNil(t, aliceResult)
+	require.NotEmpty(t, aliceResult.Serial)
+
+	bobResult, err := adminClient.IssueCert(ctx, "TestRig", "bob", "1h")
+	require.NoError(t, err)
+	require.NotNil(t, bobResult)
+	require.NotEmpty(t, bobResult.Serial)
+
+	// Build mTLS clients from the issued certs.
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM([]byte(aliceResult.CA))
+
+	aliceCert, err := tls.X509KeyPair([]byte(aliceResult.Cert), []byte(aliceResult.Key))
+	require.NoError(t, err)
+	bobCert, err := tls.X509KeyPair([]byte(bobResult.Cert), []byte(bobResult.Key))
+	require.NoError(t, err)
+
+	makeClient := func(cert tls.Certificate) *http.Client {
+		return &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					Certificates: []tls.Certificate{cert},
+					RootCAs:      pool,
+				},
+			},
+		}
+	}
+
+	t.Run("both certs work before revocation", func(t *testing.T) {
+		for _, cert := range []tls.Certificate{aliceCert, bobCert} {
+			resp, err := makeClient(cert).Post(
+				"https://"+mainAddr+"/v1/exec",
+				"application/json",
+				strings.NewReader(`{"argv":["echo","hi"]}`),
+			)
+			require.NoError(t, err)
+			resp.Body.Close()
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+		}
+	})
+
+	t.Run("revoke alice via AdminClient and verify deny list", func(t *testing.T) {
+		// This mirrors what denyCertForPolecat does: call AdminClient.DenyCert
+		// with the serial string read from the agent bead.
+		err := adminClient.DenyCert(ctx, aliceResult.Serial)
+		require.NoError(t, err)
+
+		// Requirement 1: cert serial appears in the proxy's deny list.
+		serial := new(big.Int)
+		_, ok := serial.SetString(aliceResult.Serial, 16)
+		require.True(t, ok)
+		assert.True(t, srv.denyList.IsDenied(serial),
+			"revoked serial %s must appear in deny list", aliceResult.Serial)
+	})
+
+	t.Run("revoked cert is rejected at TLS handshake", func(t *testing.T) {
+		// Requirement 2: TLS handshake using the revoked cert is rejected.
+		_, err := makeClient(aliceCert).Post(
+			"https://"+mainAddr+"/v1/exec",
+			"application/json",
+			strings.NewReader(`{"argv":["echo","hi"]}`),
+		)
+		assert.Error(t, err, "revoked cert should be rejected at TLS handshake")
+	})
+
+	t.Run("non-revoked cert still works", func(t *testing.T) {
+		resp, err := makeClient(bobCert).Post(
+			"https://"+mainAddr+"/v1/exec",
+			"application/json",
+			strings.NewReader(`{"argv":["echo","hi"]}`),
+		)
+		require.NoError(t, err, "non-revoked cert must still work")
+		resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("idempotent revocation does not error", func(t *testing.T) {
+		// denyCertForPolecat may be called multiple times (e.g. if a polecat
+		// is cleaned up by both witness and nuke). Verify idempotency.
+		err := adminClient.DenyCert(ctx, aliceResult.Serial)
+		assert.NoError(t, err, "revoking an already-revoked cert should succeed")
 	})
 }

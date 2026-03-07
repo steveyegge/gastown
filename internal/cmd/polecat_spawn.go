@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,9 +13,11 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/daytona"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/proxy"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -55,6 +58,7 @@ type SlingSpawnOptions struct {
 	HookBead   string // Bead ID to set as hook_bead at spawn time (atomic assignment)
 	Agent      string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
 	BaseBranch string // Override base branch for polecat worktree (e.g., "develop", "release/v2")
+	Daytona    bool   // Force daytona remote mode (overrides rig config auto-detection)
 }
 
 // SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
@@ -85,6 +89,48 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	polecatGit := git.NewGit(r.Path)
 	t := tmux.NewTmux()
 	polecatMgr := polecat.NewManager(r, polecatGit, t)
+
+	// Daytona mode detection: explicit --daytona flag or auto-detect from rig config.
+	// When active, configure the polecat manager for remote mode and run preflight checks.
+	settingsPath := filepath.Join(r.Path, "settings", "config.json")
+	rigSettings, _ := config.LoadRigSettings(settingsPath)
+	useDaytona := shouldUseDaytona(opts.Daytona, rigSettings)
+	var daytonaClient *daytona.Client
+	if useDaytona {
+		if err := runDaytonaPreflightChecks(townRoot, rigSettings); err != nil {
+			return nil, fmt.Errorf("daytona preflight failed: %w", err)
+		}
+		// Load town config for installation prefix
+		townConfigPath := filepath.Join(townRoot, "mayor", "town.json")
+		townConfig, err := config.LoadTownConfig(townConfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("loading town config for daytona: %w", err)
+		}
+		shortID := townConfig.ShortInstallationID()
+		if shortID == "" {
+			return nil, fmt.Errorf("empty InstallationID in town config — cannot scope daytona workspaces. Run 'gt install' to initialize")
+		}
+		installPrefix := constants.InstallPrefix(shortID)
+		daytonaClient = daytona.NewClient(installPrefix)
+
+		// Load proxy CA (required for mTLS cert issuance to remote polecats)
+		caDir := filepath.Join(townRoot, ".runtime", "ca")
+		ca, err := proxy.LoadOrGenerateCA(caDir)
+		if err != nil {
+			return nil, fmt.Errorf("loading proxy CA for daytona: %w", err)
+		}
+
+		// Ensure rig settings has RemoteBackend when --daytona flag forces it
+		if rigSettings == nil {
+			rigSettings = &config.RigSettings{}
+		}
+		if rigSettings.RemoteBackend == nil {
+			rigSettings.RemoteBackend = &config.RemoteBackend{Provider: "daytona"}
+		}
+
+		polecatMgr.SetDaytona(daytonaClient, ca, rigSettings)
+		fmt.Printf("  Daytona remote mode enabled (prefix: %s)\n", installPrefix)
+	}
 
 	// Pre-spawn Dolt health check (gt-94llt7): verify Dolt is reachable before
 	// allocating a polecat. Prevents orphaned polecats when Dolt is down.
@@ -148,14 +194,13 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// Persistent polecat model (gt-4ac): try to reuse an idle polecat first.
 	// Idle polecats have completed their work but kept their sandbox (worktree).
 	// Reusing avoids the overhead of creating a new worktree.
-	idlePolecat, findErr := polecatMgr.FindIdlePolecat()
-	if findErr == nil && idlePolecat != nil {
-		polecatName := idlePolecat.Name
-		fmt.Printf("Reusing idle polecat: %s\n", polecatName)
-
-		// Determine base branch
-		baseBranch := opts.BaseBranch
-		if baseBranch == "" && opts.HookBead != "" {
+	//
+	// Use FindAndReuseIdlePolecat for atomic find+claim under pool lock (gtd-frf).
+	// This prevents concurrent gt sling processes from racing on the same idle polecat.
+	{
+		// Determine base branch before atomic find+reuse
+		reuseBaseBranch := opts.BaseBranch
+		if reuseBaseBranch == "" && opts.HookBead != "" {
 			settingsPath := filepath.Join(r.Path, "settings", "config.json")
 			polecatIntegrationEnabled := true
 			if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.MergeQueue != nil {
@@ -167,43 +212,61 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 					bd := beads.New(r.Path)
 					detected, detectErr := beads.DetectIntegrationBranch(bd, repoGit, opts.HookBead)
 					if detectErr == nil && detected != "" {
-						baseBranch = "origin/" + detected
+						reuseBaseBranch = "origin/" + detected
 						fmt.Printf("  Auto-detected integration branch: %s\n", detected)
 					}
 				}
 			}
 		}
-		if baseBranch != "" && !strings.HasPrefix(baseBranch, "origin/") {
-			baseBranch = "origin/" + baseBranch
+		if reuseBaseBranch != "" && !strings.HasPrefix(reuseBaseBranch, "origin/") {
+			reuseBaseBranch = "origin/" + reuseBaseBranch
 		}
 
-		// Reuse the idle polecat with branch-only operations (no worktree add/remove).
-		// Phase 3 of persistent-polecat-pool: eliminates ~5s worktree creation overhead.
-		// Falls back to full worktree repair if branch-only reuse fails.
 		addOpts := polecat.AddOptions{
 			HookBead:   opts.HookBead,
-			BaseBranch: baseBranch,
-		}
-		reuseOK := false
-		if _, err := polecatMgr.ReuseIdlePolecat(polecatName, addOpts); err != nil {
-			// Branch-only reuse failed — try full worktree repair as fallback
-			fmt.Printf("  Branch-only reuse failed for idle polecat %s: %v, trying full repair...\n", polecatName, err)
-			if _, err := polecatMgr.RepairWorktreeWithOptions(polecatName, true, addOpts); err != nil {
-				fmt.Printf("  Full repair also failed for %s: %v, allocating new...\n", polecatName, err)
-			} else {
-				reuseOK = true
-			}
-		} else {
-			reuseOK = true
+			BaseBranch: reuseBaseBranch,
 		}
 
-		if reuseOK {
+		// Build Daytona workspace filter: skip idle polecats whose workspace
+		// was auto-deleted.
+		var filter polecat.IdlePolecatFilter
+		if useDaytona && daytonaClient != nil {
+			filter = func(p *polecat.Polecat) bool {
+				wsName := p.DaytonaWorkspaceName
+				if wsName == "" {
+					wsName = daytonaClient.WorkspaceName(rigName, p.Name)
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				_, wsErr := daytonaClient.Info(ctx, wsName)
+				cancel()
+				if wsErr != nil {
+					fmt.Printf("Idle polecat %s workspace %s gone (auto-deleted?), skipping reuse\n",
+						p.Name, wsName)
+					return false
+				}
+				return true
+			}
+		}
+
+		reusedPolecat, reuseErr := polecatMgr.FindAndReuseIdlePolecat(addOpts, filter)
+		if reuseErr != nil {
+			// Reuse failed (e.g., branch-only reuse failed) — fall through to new allocation.
+			fmt.Printf("  Idle polecat reuse failed: %v, allocating new...\n", reuseErr)
+		}
+		if reusedPolecat != nil {
+			polecatName := reusedPolecat.Name
+			fmt.Printf("Reusing idle polecat: %s\n", polecatName)
+
 			polecatObj, err := polecatMgr.Get(polecatName)
 			if err != nil {
 				return nil, fmt.Errorf("getting idle polecat after reuse: %w", err)
 			}
-			if err := verifyWorktreeExists(polecatObj.ClonePath); err != nil {
-				return nil, fmt.Errorf("worktree verification failed for reused %s: %w", polecatName, err)
+			// Skip worktree verification for Daytona polecats — no local worktree.
+			// The workspace will be restarted (if stopped) by StartSession.
+			if !useDaytona {
+				if err := verifyWorktreeExists(polecatObj.ClonePath); err != nil {
+					return nil, fmt.Errorf("worktree verification failed for reused %s: %w", polecatName, err)
+				}
 			}
 
 			polecatSessMgr := polecat.NewSessionManager(t, r)
@@ -212,7 +275,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 			fmt.Printf("%s Polecat %s reused (idle → working, session start deferred)\n", style.Bold.Render("✓"), polecatName)
 			_ = events.LogFeed(events.TypeSpawn, "gt", events.SpawnPayload(rigName, polecatName))
 
-			effectiveBranch := strings.TrimPrefix(baseBranch, "origin/")
+			effectiveBranch := strings.TrimPrefix(reuseBaseBranch, "origin/")
 			if effectiveBranch == "" {
 				effectiveBranch = r.DefaultBranch()
 			}
@@ -234,7 +297,6 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// Determine base branch for polecat worktree
 	baseBranch := opts.BaseBranch
 	if baseBranch == "" && opts.HookBead != "" {
-		// Auto-detect: check if the hooked bead's parent epic has an integration branch
 		settingsPath := filepath.Join(r.Path, "settings", "config.json")
 		polecatIntegrationEnabled := true
 		if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.MergeQueue != nil {
@@ -256,13 +318,86 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		baseBranch = "origin/" + baseBranch
 	}
 
-	// Build add options with hook_bead set atomically at spawn time
 	addOpts := polecat.AddOptions{
 		HookBead:   opts.HookBead,
 		BaseBranch: baseBranch,
 	}
 
+	// Build filter for Daytona workspace existence check (runs under pool lock).
+	var idleFilter polecat.IdlePolecatFilter
+	if useDaytona && daytonaClient != nil {
+		idleFilter = func(p *polecat.Polecat) bool {
+			wsName := p.DaytonaWorkspaceName
+			if wsName == "" {
+				wsName = daytonaClient.WorkspaceName(rigName, p.Name)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			_, wsErr := daytonaClient.Info(ctx, wsName)
+			cancel()
+			if wsErr != nil {
+				fmt.Printf("Idle polecat %s workspace %s gone (auto-deleted?), skipping reuse\n",
+					p.Name, wsName)
+				return false
+			}
+			return true
+		}
+	}
+
+	reusedPolecat, reuseErr := polecatMgr.FindAndReuseIdlePolecat(addOpts, idleFilter)
+	if reuseErr != nil {
+		// Atomic reuse failed — try full worktree repair as fallback (local mode only).
+		// For Daytona mode, fall through to new allocation since there's no local worktree to repair.
+		if !useDaytona {
+			fmt.Printf("  Idle polecat reuse failed: %v, trying repair...\n", reuseErr)
+			// Re-find without lock to get the name for repair attempt
+			if idleP, _ := polecatMgr.FindIdlePolecat(); idleP != nil {
+				if _, repairErr := polecatMgr.RepairWorktreeWithOptions(idleP.Name, true, addOpts); repairErr == nil {
+					reusedPolecat, reuseErr = polecatMgr.Get(idleP.Name)
+					if reuseErr == nil {
+						reusedPolecat.State = polecat.StateWorking
+					}
+				}
+			}
+		}
+	}
+	if reuseErr == nil && reusedPolecat != nil {
+		polecatName := reusedPolecat.Name
+		fmt.Printf("Reusing idle polecat: %s\n", polecatName)
+
+		// Skip worktree verification for Daytona polecats — no local worktree.
+		// The workspace will be restarted (if stopped) by StartSession.
+		if !useDaytona {
+			if err := verifyWorktreeExists(reusedPolecat.ClonePath); err != nil {
+				return nil, fmt.Errorf("worktree verification failed for reused %s: %w", polecatName, err)
+			}
+		}
+
+		polecatSessMgr := polecat.NewSessionManager(t, r)
+		sessionName := polecatSessMgr.SessionName(polecatName)
+
+		fmt.Printf("%s Polecat %s reused (idle → working, session start deferred)\n", style.Bold.Render("✓"), polecatName)
+		_ = events.LogFeed(events.TypeSpawn, "gt", events.SpawnPayload(rigName, polecatName))
+
+		effectiveBranch := strings.TrimPrefix(baseBranch, "origin/")
+		if effectiveBranch == "" {
+			effectiveBranch = r.DefaultBranch()
+		}
+
+		return &SpawnedPolecatInfo{
+			RigName:     rigName,
+			PolecatName: polecatName,
+			ClonePath:   reusedPolecat.ClonePath,
+			SessionName: sessionName,
+			Pane:        "",
+			BaseBranch:  effectiveBranch,
+			Branch:      reusedPolecat.Branch,
+			account:     opts.Account,
+			agent:       opts.Agent,
+		}, nil
+	}
+
 	// No idle polecat available — allocate and create atomically (GH#2215).
+	// baseBranch and addOpts were computed above (shared by reuse and fresh paths).
 	// AllocateAndAdd holds the pool lock through directory creation, preventing
 	// concurrent processes from allocating the same name.
 	polecatName, _, err := polecatMgr.AllocateAndAdd(addOpts)
@@ -274,16 +409,23 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// Get polecat object for path info
 	polecatObj, err := polecatMgr.Get(polecatName)
 	if err != nil {
+		// Clean up partial state: AllocateAndAdd succeeded, so the polecat directory,
+		// agent bead, branch, workspace, and cert are all allocated. Without removal
+		// they leak with no cleanup path.
+		_ = polecatMgr.Remove(polecatName, true)
 		return nil, fmt.Errorf("getting polecat after creation: %w", err)
 	}
 
 	// Verify worktree was actually created (fixes #1070)
-	// The identity bead may exist but worktree creation can fail silently
-	if err := verifyWorktreeExists(polecatObj.ClonePath); err != nil {
-		// Clean up the partial state before returning error
-		_ = polecatMgr.Remove(polecatName, true) // force=true to clean up partial state
-		return nil, fmt.Errorf("worktree verification failed for %s: %w\nHint: try 'gt polecat nuke %s/%s --force' to clean up",
-			polecatName, err, rigName, polecatName)
+	// The identity bead may exist but worktree creation can fail silently.
+	// Skip for daytona polecats — their worktree is remote, not local.
+	if !useDaytona {
+		if err := verifyWorktreeExists(polecatObj.ClonePath); err != nil {
+			// Clean up the partial state before returning error
+			_ = polecatMgr.Remove(polecatName, true) // force=true to clean up partial state
+			return nil, fmt.Errorf("worktree verification failed for %s: %w\nHint: try 'gt polecat nuke %s/%s --force' to clean up",
+				polecatName, err, rigName, polecatName)
+		}
 	}
 
 	// Get session manager for session name (session start is deferred)
@@ -353,10 +495,26 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	t := tmux.NewTmux()
 	polecatSessMgr := polecat.NewSessionManager(t, r)
 
+	// Configure Daytona remote mode if rig has RemoteBackend configured.
+	rigSettings, _ := config.LoadRigSettings(config.RigSettingsPath(r.Path))
+	if rigSettings != nil && rigSettings.RemoteBackend != nil {
+		townConfigPath := filepath.Join(townRoot, "mayor", "town.json")
+		townConfig, err := config.LoadTownConfig(townConfigPath)
+		if err == nil {
+			shortID := townConfig.ShortInstallationID()
+			if shortID != "" {
+				installPrefix := constants.InstallPrefix(shortID)
+				daytonaClient := daytona.NewClient(installPrefix)
+				polecatSessMgr.SetDaytona(daytonaClient, rigSettings)
+			}
+		}
+	}
+
 	fmt.Printf("Starting session for %s/%s...\n", s.RigName, s.PolecatName)
 	startOpts := polecat.SessionStartOptions{
 		RuntimeConfigDir: claudeConfigDir,
 		Agent:            s.agent,
+		Branch:           s.Branch,
 	}
 	if s.agent != "" {
 		cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(s.RigName, s.PolecatName, r.Path, "", s.agent)
@@ -457,6 +615,76 @@ func IsRigName(target string) (string, bool) {
 	}
 
 	return target, true
+}
+
+// shouldUseDaytona returns true if daytona remote mode should be activated,
+// either from an explicit flag or auto-detected from rig settings.
+func shouldUseDaytona(explicitFlag bool, settings *config.RigSettings) bool {
+	if explicitFlag {
+		return true
+	}
+	return settings != nil && settings.RemoteBackend != nil && settings.RemoteBackend.Provider == "daytona"
+}
+
+// checkCAFiles verifies that the proxy CA certificate and key exist at the
+// expected paths under townRoot. Returns nil if both files are present.
+func checkCAFiles(townRoot string) error {
+	caDir := filepath.Join(townRoot, ".runtime", "ca")
+	certPath := filepath.Join(caDir, "ca.crt")
+	keyPath := filepath.Join(caDir, "ca.key")
+	if _, err := os.Stat(certPath); err != nil {
+		return fmt.Errorf("proxy CA certificate not found at %s\n"+
+			"The proxy server creates the CA on startup. Start the proxy first: gt-proxy-server", certPath)
+	}
+	if _, err := os.Stat(keyPath); err != nil {
+		return fmt.Errorf("proxy CA key not found at %s\n"+
+			"The proxy server creates the CA on startup. Start the proxy first: gt-proxy-server", keyPath)
+	}
+	return nil
+}
+
+// runDaytonaPreflightChecks verifies the prerequisites for daytona remote mode:
+// 1. daytona CLI is installed and accessible
+// 2. proxy server is running (admin API reachable)
+// 3. proxy CA exists (required for mTLS cert issuance)
+// 4. daytona CLI is authenticated (has active profile)
+func runDaytonaPreflightChecks(townRoot string, settings *config.RigSettings) error {
+	// 1. Verify daytona CLI is installed
+	if _, err := exec.LookPath("daytona"); err != nil {
+		return fmt.Errorf("daytona CLI not found in PATH\n" +
+			"Install: https://www.daytona.io/docs/installation/installation/\n" +
+			"Or remove remote_backend from rig settings to use local mode")
+	}
+
+	// 2. Verify proxy server is running (check admin API reachability)
+	adminAddr := constants.DefaultProxyAdminAddr
+	if settings != nil && settings.RemoteBackend != nil && settings.RemoteBackend.ProxyAdminAddr != "" {
+		adminAddr = settings.RemoteBackend.ProxyAdminAddr
+	}
+	adminClient := proxy.NewAdminClient(adminAddr)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := adminClient.Ping(ctx); err != nil {
+		return fmt.Errorf("proxy server not reachable at %s: %w\n"+
+			"Start the proxy: gt-proxy-server --town-root %s", adminAddr, err, townRoot)
+	}
+
+	// 3. Verify proxy CA exists
+	if err := checkCAFiles(townRoot); err != nil {
+		return err
+	}
+
+	// 4. Verify daytona is authenticated
+	// An unauthenticated CLI passes all other checks but causes confusing errors
+	// later during sandbox creation. Use "daytona list" as a lightweight auth check
+	// (v0.149+ removed the "profile" subcommand).
+	listCmd := exec.Command("daytona", "list")
+	if output, err := listCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("daytona CLI is not authenticated: %s\n"+
+			"Run 'daytona login' to authenticate", strings.TrimSpace(string(output)))
+	}
+
+	return nil
 }
 
 // verifyWorktreeExists checks that a git worktree was actually created at the given path

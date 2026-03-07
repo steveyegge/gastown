@@ -32,6 +32,7 @@ type SlingContextFields struct {
 	HookRawBead      bool   `json:"hook_raw_bead,omitempty"`
 	Owned            bool   `json:"owned,omitempty"`
 	Mode             string `json:"mode,omitempty"`
+	Daytona          bool   `json:"daytona,omitempty"`
 	DispatchFailures int    `json:"dispatch_failures,omitempty"`
 	LastFailure      string `json:"last_failure,omitempty"`
 }
@@ -169,6 +170,7 @@ type DispatchParams struct {
 	Mode        string
 	NoMerge     bool
 	HookRawBead bool
+	Daytona     bool
 }
 
 // ReconstructFromContext builds DispatchParams from sling context fields.
@@ -185,6 +187,7 @@ func ReconstructFromContext(ctx *SlingContextFields) DispatchParams {
 		Mode:        ctx.Mode,
 		NoMerge:     ctx.NoMerge,
 		HookRawBead: ctx.HookRawBead,
+		Daytona:     ctx.Daytona,
 	}
 	if ctx.Vars != "" {
 		p.Vars = splitVars(ctx.Vars)

@@ -528,6 +528,41 @@ func TestAgentFieldsCompletionOmittedWhenEmpty(t *testing.T) {
 	}
 }
 
+// --- CertSerial field round-trip (gtd-qip) ---
+
+func TestAgentFieldsCertSerialRoundTrip(t *testing.T) {
+	original := &AgentFields{
+		RoleType:   "polecat",
+		Rig:        "gastown",
+		AgentState: "working",
+		CertSerial: "deadbeef0123456789abcdef",
+	}
+
+	formatted := FormatAgentDescription("Polecat Test", original)
+	if !strings.Contains(formatted, "cert_serial: deadbeef0123456789abcdef") {
+		t.Errorf("FormatAgentDescription missing cert_serial field, got:\n%s", formatted)
+	}
+
+	parsed := ParseAgentFields(formatted)
+	if parsed.CertSerial != "deadbeef0123456789abcdef" {
+		t.Errorf("CertSerial: got %q, want %q", parsed.CertSerial, "deadbeef0123456789abcdef")
+	}
+}
+
+func TestAgentFieldsCertSerialOmittedWhenEmpty(t *testing.T) {
+	fields := &AgentFields{
+		RoleType:   "polecat",
+		Rig:        "gastown",
+		AgentState: "working",
+		// CertSerial intentionally empty
+	}
+
+	formatted := FormatAgentDescription("Polecat Test", fields)
+	if strings.Contains(formatted, "cert_serial:") {
+		t.Errorf("FormatAgentDescription should not include cert_serial when empty, got:\n%s", formatted)
+	}
+}
+
 func TestParseAgentFields_WithCompletionMetadata(t *testing.T) {
 	desc := "role_type: polecat\nrig: gastown\nagent_state: done\nhook_bead: gt-abc\nexit_type: ESCALATED\nbranch: polecat/nux/gt-abc@hash\nmr_failed: true\ncompletion_time: 2026-02-28T02:00:00Z"
 	got := ParseAgentFields(desc)

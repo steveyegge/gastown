@@ -512,13 +512,17 @@ func IsBuiltinTheme(theme string) bool {
 var validPoolNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 // ValidatePoolName validates a polecat name for use in a theme.
-// Names must be >3 chars, lowercase alphanumeric with hyphens, and not reserved.
+// Names must be >3 chars, lowercase alphanumeric with hyphens, not reserved,
+// and must not contain "--" (double hyphen is the workspace name delimiter).
 func ValidatePoolName(name string) error {
 	if len(name) <= 3 {
 		return fmt.Errorf("name %q too short (must be >3 characters)", name)
 	}
 	if !validPoolNameRe.MatchString(name) {
 		return fmt.Errorf("name %q invalid (must be lowercase alphanumeric with hyphens, starting with a letter)", name)
+	}
+	if strings.Contains(name, "--") {
+		return fmt.Errorf("name %q must not contain \"--\" (reserved as workspace name delimiter)", name)
 	}
 	if ReservedInfraAgentNames[name] {
 		return fmt.Errorf("name %q is reserved for infrastructure agents", name)

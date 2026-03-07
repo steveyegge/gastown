@@ -1,0 +1,106 @@
+# syntax=docker/dockerfile:1
+#
+# Gas Town — Daytona polecat container image
+#
+# Fulfils prerequisites from docs/daytona-backend.md:
+#   • claude-code              AI agent (installed via npm)
+#   • gt-proxy-client          installed as /usr/local/bin/gt and /usr/local/bin/bd
+#   • git                      repository operations via mTLS proxy
+#   • Standard POSIX tools     sh, tee, mkdir (provided by base image)
+#   • Go SDK                   for building and running Go code inside the container
+#
+# Base: Debian Bookworm slim (glibc).
+# Alpine/musl is intentionally avoided — claude-code currently has a bug with musl
+# https://github.com/anthropics/claude-code/issues/29559
+#
+# Build:
+#   docker build -f Dockerfile.daytona -t ghcr.io/your-org/gt-polecat:latest .
+#
+# Override Go version at build time:
+#   docker build -f Dockerfile.daytona --build-arg GO_VERSION=1.25.6 -t ...
+#
+# Reference in rig config (docs/daytona-backend.md):
+#   "image": "ghcr.io/your-org/gt-polecat:latest"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 1 — compile gt-proxy-client
+# ──────────────────────────────────────────────────────────────────────────────
+FROM golang:1.25-bookworm AS builder
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux \
+    go build -trimpath -ldflags="-s -w" \
+    -o /out/gt-proxy-client \
+    ./cmd/gt-proxy-client
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 2 — runtime image
+# Debian Bookworm slim: glibc, no unnecessary SDK layers.
+# ──────────────────────────────────────────────────────────────────────────────
+FROM debian:bookworm-slim
+
+# ── Base system packages ──────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        gnupg \
+        jq \
+        make \
+        procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Node.js 22 LTS ───────────────────────────────────────────────────────────
+# Used by claude-code. Installed from the official NodeSource APT repository
+# (GPG-verified) rather than the outdated Debian package.
+RUN mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Go SDK ────────────────────────────────────────────────────────────────────
+# Installed from the official tarball. Uses TARGETARCH for multi-arch support.
+ARG GO_VERSION=1.25.6
+ARG TARGETARCH=amd64
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz" \
+        | tar -C /usr/local -xz
+
+ENV GOROOT=/usr/local/go
+
+# Set up PATH (accessible to all users)
+ENV PATH="/usr/local/bin:/usr/local/go/bin:$PATH"
+
+# ── claude-code (AI agent) ───────────────────────────────────────────────────
+# Pinned for reproducible builds.
+ARG CLAUDE_CODE_VERSION=2.1.71
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+
+# ── gt-proxy-client ──────────────────────────────────────────────────────────
+# The same binary serves as both `gt` and `bd` inside the container.
+# When GT_PROXY_URL, GT_PROXY_CERT, GT_PROXY_KEY, and GT_PROXY_CA are all set
+# it forwards commands to the host proxy via mTLS. Otherwise it falls through
+# to the real binary at /usr/local/bin/gt.real (or $GT_REAL_BIN).
+COPY --from=builder /out/gt-proxy-client /usr/local/lib/gt-proxy-client
+RUN ln -s /usr/local/lib/gt-proxy-client /usr/local/bin/gt \
+    && ln -s /usr/local/lib/gt-proxy-client /usr/local/bin/bd
+
+# ── daytona user ─────────────────────────────────────────────────────────────
+# Daytona runs sandboxes as the 'daytona' non-root user (uid/gid 1000).
+RUN groupadd --gid 1000 daytona \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash daytona
+
+USER daytona
+WORKDIR /home/daytona
+
+# GOPATH under home so `go install` works without elevated privileges.
+ENV GOPATH=/home/daytona/go
+ENV PATH="/home/daytona/go/bin:$PATH"
+RUN mkdir -p /home/daytona/go/bin

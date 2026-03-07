@@ -774,6 +774,8 @@ func TestValidatePoolName(t *testing.T) {
 		{"witness", true},  // reserved
 		{"refinery", true}, // reserved
 		{"valid-name", false},
+		{"double--hyphen", true}, // double hyphen reserved as workspace delimiter
+		{"a--b--c", true},       // double hyphen reserved as workspace delimiter
 	}
 	for _, tc := range tests {
 		err := ValidatePoolName(tc.name)

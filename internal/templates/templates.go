@@ -61,6 +61,7 @@ type RoleData struct {
 	Polecat        string   // polecat name (for polecat role)
 	Polecats       []string // list of polecats (for witness role)
 	DogName        string   // dog name (for dog role)
+	IsDaytona      bool     // true when running in a Daytona remote sandbox
 	BeadsDir       string   // BEADS_DIR path
 	IssuePrefix    string   // beads issue prefix
 	MayorSession   string   // e.g., "gt-ai-mayor" - dynamic mayor session name

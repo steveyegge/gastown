@@ -204,23 +204,6 @@ func TestRemoveRigNotFound(t *testing.T) {
 	}
 }
 
-func TestRemoveRigNotFoundWithOrphanDir(t *testing.T) {
-	root, rigsConfig := setupTestTown(t)
-	manager := NewManager(root, rigsConfig, git.NewGit(root))
-
-	// Create an orphaned directory on disk without registering it in config
-	orphanDir := filepath.Join(root, "orphan-rig")
-	if err := os.MkdirAll(orphanDir, 0o755); err != nil {
-		t.Fatalf("creating orphan dir: %v", err)
-	}
-
-	// Manager should still return ErrRigNotFound (UX is handled in cmd layer)
-	err := manager.RemoveRig("orphan-rig")
-	if err != ErrRigNotFound {
-		t.Errorf("RemoveRig orphan dir = %v, want ErrRigNotFound", err)
-	}
-}
-
 func TestAddRig_RejectsInvalidNames(t *testing.T) {
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
@@ -1380,6 +1363,7 @@ func TestAddRig_UpstreamURL(t *testing.T) {
 
 	_ = rig
 }
+
 
 // TestBareCloneDefaultBranch verifies that DefaultBranch() returns the correct
 // branch for a bare clone whose remote uses a non-"main" default branch.

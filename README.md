@@ -63,7 +63,7 @@ Your personal workspace within a rig. Where you do hands-on work.
 
 ### Polecats 🦨
 
-Worker agents with persistent identity but ephemeral sessions. Spawned for tasks, sessions end on completion, but identity and work history persist.
+Worker agents with persistent identity but ephemeral sessions. Spawned for tasks, sessions end on completion, but identity and work history persist. Polecats can run locally (git worktrees) or remotely in [Daytona](https://www.daytona.io/) cloud containers via the [remote backend](docs/daytona-backend.md).
 
 ### Hooks 🪝
 
@@ -94,7 +94,7 @@ Git-backed issue tracking system that stores work state as structured data.
 - **Claude Code CLI** (default runtime) - [claude.ai/code](https://claude.ai/code)
 - **Codex CLI** (optional runtime) - [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli)
 
-### Setup (Docker-Compose below)
+### Setup
 
 ```bash
 # Install Gas Town
@@ -315,6 +315,27 @@ gt sling gt-m3k9p myproject/my-agent
 # Check status
 gt convoy show
 ```
+
+## Remote Backend (Daytona)
+
+Gas Town can run polecats in Daytona cloud containers instead of local git worktrees.
+Each polecat gets an isolated container with its own filesystem, network, and process
+tree. Git traffic and control-plane commands route through a host-side mTLS proxy.
+
+```bash
+# Configure a rig for Daytona (add remote_backend to settings/config.json)
+# Then sling as normal — Daytona mode is auto-detected
+gt sling my-bead myrig
+
+# Or force Daytona mode for one-off testing
+gt sling my-bead myrig --daytona
+```
+
+Features include snapshot-based warm start, resource sizing (class/cpu/memory/disk),
+target region placement, network isolation, auto-stop/archive/delete intervals,
+workspace labels, and volume-based persistent cert storage.
+
+See [docs/daytona-backend.md](docs/daytona-backend.md) for full setup and configuration.
 
 ## Runtime Configuration
 

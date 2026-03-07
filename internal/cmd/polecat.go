@@ -12,6 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/daytona"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -387,6 +390,8 @@ type PolecatListItem struct {
 	SessionRunning bool          `json:"session_running"`
 	Zombie         bool          `json:"zombie,omitempty"`
 	SessionName    string        `json:"session_name,omitempty"`
+	Backend        string        `json:"backend"`
+	WorkspaceName  string        `json:"workspace_name,omitempty"`
 }
 
 // effectivePolecatState returns the observable state used by polecat list output.
@@ -404,8 +409,10 @@ func effectivePolecatState(item PolecatListItem) polecat.State {
 }
 
 // getPolecatManager creates a polecat manager for the given rig.
+// If the rig has a RemoteBackend configured, it initializes the daytona client
+// so that removal operations can properly stop/delete remote workspaces.
 func getPolecatManager(rigName string) (*polecat.Manager, *rig.Rig, error) {
-	_, r, err := getRig(rigName)
+	townRoot, r, err := getRig(rigName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -413,6 +420,21 @@ func getPolecatManager(rigName string) (*polecat.Manager, *rig.Rig, error) {
 	polecatGit := git.NewGit(r.Path)
 	t := tmux.NewTmux()
 	mgr := polecat.NewManager(r, polecatGit, t)
+
+	// Load rig settings and configure daytona client when RemoteBackend is present.
+	// Without this, removeDaytonaWorkspace silently skips workspace cleanup because
+	// daytonaClient is nil, leaking running Daytona workspaces on every CLI removal.
+	rigSettings, _ := config.LoadRigSettings(config.RigSettingsPath(r.Path))
+	if rigSettings != nil && rigSettings.RemoteBackend != nil {
+		townConfigPath := constants.MayorTownPath(townRoot)
+		if townCfg, err := config.LoadTownConfig(townConfigPath); err == nil {
+			shortID := townCfg.ShortInstallationID()
+			if shortID != "" {
+				daytonaClient := daytona.NewClient(constants.InstallPrefix(shortID))
+				mgr.SetDaytona(daytonaClient, nil, rigSettings)
+			}
+		}
+	}
 
 	return mgr, r, nil
 }
@@ -458,12 +480,20 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 		knownNames := make(map[string]bool)
 		for _, p := range polecats {
 			running, _ := polecatMgr.IsRunning(p.Name)
+			backend := "local"
+			workspaceName := ""
+			if p.DaytonaWorkspaceName != "" {
+				backend = "daytona"
+				workspaceName = p.DaytonaWorkspaceName
+			}
 			allPolecats = append(allPolecats, PolecatListItem{
 				Rig:            r.Name,
 				Name:           p.Name,
 				State:          p.State,
 				Issue:          p.Issue,
 				SessionRunning: running,
+				Backend:        backend,
+				WorkspaceName:  workspaceName,
 			})
 			knownNames[p.Name] = true
 		}
@@ -485,6 +515,7 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 					SessionRunning: true,
 					Zombie:         true,
 					SessionName:    sessionName,
+					Backend:        "local",
 				})
 			}
 		}
@@ -529,9 +560,18 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 			stateStr = style.Dim.Render(stateStr)
 		}
 
-		fmt.Printf("  %s %s/%s  %s\n", sessionStatus, p.Rig, p.Name, stateStr)
+		// Backend indicator
+		backendStr := style.Dim.Render(p.Backend)
+		if p.Backend == "daytona" {
+			backendStr = style.Info.Render(p.Backend)
+		}
+
+		fmt.Printf("  %s %s/%s  %s  %s\n", sessionStatus, p.Rig, p.Name, stateStr, backendStr)
 		if p.Issue != "" {
 			fmt.Printf("    %s\n", style.Dim.Render(p.Issue))
+		}
+		if p.WorkspaceName != "" {
+			fmt.Printf("    %s\n", style.Dim.Render("workspace: "+p.WorkspaceName))
 		}
 		if p.Zombie && p.SessionName != "" {
 			fmt.Printf("    %s\n", style.Dim.Render("session: "+p.SessionName+" (no worktree)"))

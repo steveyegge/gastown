@@ -101,6 +101,48 @@ const (
 	HungSessionThreshold = 30 * time.Minute
 )
 
+// Daytona / proxy constants for remote polecat management.
+const (
+	// DefaultProxyAdminAddr is the default admin API address for the proxy server.
+	// Used for preflight health checks and mTLS cert management.
+	// Overridable via RemoteBackend.ProxyAdminAddr in rig settings.
+	DefaultProxyAdminAddr = "127.0.0.1:9877"
+
+	// DefaultProxyAddr is the default proxy address that remote polecats connect to.
+	// Used for git clone URLs and GT_PROXY_URL environment variable.
+	// Overridable via RemoteBackend.ProxyAddr in rig settings.
+	DefaultProxyAddr = "localhost:8443"
+
+	// DefaultRemoteCertDir is the directory inside daytona sandboxes where
+	// mTLS certificates are injected for proxy authentication.
+	// Uses $HOME/.gt-proxy to avoid permission issues in non-root sandboxes.
+	DefaultRemoteCertDir = "/home/daytona/.gt-proxy"
+
+	// DefaultCertTTL is the default time-to-live for mTLS certificates
+	// issued to remote polecats.
+	DefaultCertTTL = 24 * time.Hour
+
+	// DaytonaCreateTimeout is the timeout for creating a daytona workspace.
+	DaytonaCreateTimeout = 120 * time.Second
+
+	// DaytonaListTimeout is the timeout for listing or reconciling daytona workspaces.
+	DaytonaListTimeout = 30 * time.Second
+
+	// DaytonaStopTimeout is the timeout for stopping or deleting a daytona workspace.
+	// These operations are heavier than list and need more time under load.
+	DaytonaStopTimeout = 60 * time.Second
+
+	// InstallPrefixBase is the prefix prepended to ShortInstallationID
+	// to form the daytona workspace naming prefix ("gt-<shortID>").
+	InstallPrefixBase = "gt-"
+)
+
+// InstallPrefix builds the full install prefix from a short installation ID.
+// The result is used to scope daytona workspace names to a specific Gas Town installation.
+func InstallPrefix(shortID string) string {
+	return InstallPrefixBase + shortID
+}
+
 // Directory names within a Gas Town workspace.
 const (
 	// DirMayor is the directory containing mayor configuration and state.

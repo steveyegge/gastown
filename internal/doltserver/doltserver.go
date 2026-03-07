@@ -129,20 +129,6 @@ const (
 	DefaultPort           = 3307
 	DefaultUser           = "root" // Default Dolt user (no password for local access)
 	DefaultMaxConnections = 1000   // Dolt default; no reason to limit below (Tim Sehn confirmed 1k is fine)
-
-	// DefaultReadTimeoutMs is the server-side timeout for reading a complete request from a client.
-	// Controls how long Dolt waits for a client to send a query on an idle connection.
-	// Prevents CLOSE_WAIT accumulation from abandoned connections: when a client times out
-	// and closes its end, Dolt will detect the dead connection within this window.
-	// 5 minutes matches the compactor GC timeout (compactorGCTimeout) so GC ops complete
-	// before the connection is considered stale.
-	DefaultReadTimeoutMs = 5 * 60 * 1000 // 5 minutes in milliseconds
-
-	// DefaultWriteTimeoutMs is the server-side timeout for writing a response back to a client.
-	// When a client closes its TCP connection while a query is running (e.g. compactor GC),
-	// Dolt detects the dead connection within this timeout rather than holding CLOSE_WAIT
-	// for Dolt's default 8 hours. Set to match compactor GC timeout.
-	DefaultWriteTimeoutMs = 5 * 60 * 1000 // 5 minutes in milliseconds
 )
 
 // doltConfigYAML represents the subset of Dolt's config.yaml that we need to read.
@@ -214,21 +200,6 @@ type Config struct {
 	// connection storms during mass polecat slings.
 	MaxConnections int
 
-	// ReadTimeoutMs is the server-side read timeout in milliseconds.
-	// Controls how long Dolt waits for a client to send a request on an idle connection.
-	// Prevents abandoned connections from staying in CLOSE_WAIT indefinitely.
-	// Set to 0 to use Dolt's default (28800000 = 8 hours — strongly discouraged).
-	ReadTimeoutMs int
-
-	// WriteTimeoutMs is the server-side write timeout in milliseconds.
-	// Controls how long Dolt waits to write response data back to a client.
-	// When a client closes its TCP connection while a query is running, Dolt
-	// detects the dead connection within WriteTimeoutMs instead of holding it
-	// open for up to 8 hours (Dolt default).
-	// Must be >= the longest expected query (e.g., compactor GC at 5 minutes).
-	// Set to 0 to use Dolt's default (28800000 = 8 hours — strongly discouraged).
-	WriteTimeoutMs int
-
 	// LogLevel is the Dolt server log level (trace, debug, info, warning, error, fatal).
 	// Default is "warning" to suppress connection open/close noise. Override with
 	// GT_DOLT_LOGLEVEL=info (or debug) for diagnostics.
@@ -260,8 +231,6 @@ func DefaultConfig(townRoot string) *Config {
 		LogFile:        filepath.Join(daemonDir, "dolt.log"),
 		PidFile:        filepath.Join(daemonDir, "dolt.pid"),
 		MaxConnections: DefaultMaxConnections,
-		ReadTimeoutMs:  DefaultReadTimeoutMs,
-		WriteTimeoutMs: DefaultWriteTimeoutMs,
 		LogLevel:       "warning",
 	}
 
@@ -1218,17 +1187,26 @@ func Start(townRoot string) error {
 		return err
 	}
 
-	// Always write a managed config.yaml from the Config struct before starting.
-	// This ensures critical settings (especially read/write timeouts) are always
-	// present, preventing CLOSE_WAIT accumulation from abandoned connections.
-	// The config file uses --config so all settings come from this file; CLI flags
-	// are ignored by dolt when --config is used.
+	// Start dolt sql-server. If a config.yaml exists in the data directory,
+	// pass --config to enable config-only features like auto_gc_behavior.
+	// When --config is used, all other CLI flags are ignored by dolt, so the
+	// config file must contain the full server configuration.
+	var args []string
 	configPath := filepath.Join(config.DataDir, "config.yaml")
-	if err := writeServerConfig(config, configPath); err != nil {
-		logFile.Close()
-		return fmt.Errorf("writing Dolt config: %w", err)
+	if _, err := os.Stat(configPath); err == nil {
+		args = []string{"sql-server", "--config", configPath}
+	} else {
+		args = []string{"sql-server",
+			"--port", strconv.Itoa(config.Port),
+			"--data-dir", config.DataDir,
+		}
+		if config.MaxConnections > 0 {
+			args = append(args, "--max-connections", strconv.Itoa(config.MaxConnections))
+		}
+		if config.LogLevel != "" {
+			args = append(args, "--loglevel", config.LogLevel)
+		}
 	}
-	args := []string{"sql-server", "--config", configPath}
 	cmd := exec.Command("dolt", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile

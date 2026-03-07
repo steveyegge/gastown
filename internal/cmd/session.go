@@ -17,6 +17,8 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/suggest"
+	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/daytona"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -237,6 +239,23 @@ func getSessionManager(rigName string) (*polecat.SessionManager, *rig.Rig, error
 
 	t := tmux.NewTmux()
 	polecatMgr := polecat.NewSessionManager(t, r)
+
+	// Configure Daytona remote mode if rig has RemoteBackend configured.
+	rigSettings, _ := config.LoadRigSettings(config.RigSettingsPath(r.Path))
+	if rigSettings != nil && rigSettings.RemoteBackend != nil {
+		if townRoot, twErr := workspace.FindFromCwd(); twErr == nil && townRoot != "" {
+			townConfigPath := filepath.Join(townRoot, "mayor", "town.json")
+			townConfig, tcErr := config.LoadTownConfig(townConfigPath)
+			if tcErr == nil {
+				shortID := townConfig.ShortInstallationID()
+				if shortID != "" {
+					installPrefix := constants.InstallPrefix(shortID)
+					daytonaClient := daytona.NewClient(installPrefix)
+					polecatMgr.SetDaytona(daytonaClient, rigSettings)
+				}
+			}
+		}
+	}
 
 	return polecatMgr, r, nil
 }

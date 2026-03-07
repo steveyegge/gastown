@@ -1,6 +1,7 @@
 package polecat
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/daytona"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -1382,6 +1385,76 @@ func TestStalePendingMarkerIsCleanedUp(t *testing.T) {
 	}
 }
 
+// TestCleanupOrphanPreservesRemoteMarkerDirs verifies that cleanupOrphanPolecatState
+// does not delete remote (daytona) polecat marker directories. Regression test for
+// gtd-0qz: remote polecats have marker dirs without git worktrees, which were being
+// incorrectly classified as orphaned and deleted.
+func TestCleanupOrphanPreservesRemoteMarkerDirs(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	r := &rig.Rig{
+		Name: "myrig",
+		Path: tmpDir,
+	}
+	m := NewManager(r, nil, nil)
+
+	// Configure remote mode (requires non-nil client for isRemoteMode).
+	m.SetDaytona(daytona.NewClient("gt-test"), nil, &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{Provider: "daytona"},
+	})
+
+	polecatsDir := filepath.Join(tmpDir, "polecats")
+	if err := os.MkdirAll(polecatsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a remote polecat marker directory (no clone subdirectory, no .git).
+	markerDir := filepath.Join(polecatsDir, "onyx")
+	if err := os.MkdirAll(markerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	m.cleanupOrphanPolecatState()
+
+	if _, err := os.Stat(markerDir); os.IsNotExist(err) {
+		t.Errorf("remote polecat marker directory was deleted by cleanupOrphanPolecatState")
+	}
+}
+
+// TestCleanupOrphanDeletesLocalOrphans verifies that cleanupOrphanPolecatState
+// still removes orphaned local polecat directories (without .git) when NOT in
+// remote mode. This ensures the fix for gtd-0qz didn't break local cleanup.
+func TestCleanupOrphanDeletesLocalOrphans(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	r := &rig.Rig{
+		Name: "myrig",
+		Path: tmpDir,
+	}
+	m := NewManager(r, nil, nil)
+
+	polecatsDir := filepath.Join(tmpDir, "polecats")
+	if err := os.MkdirAll(polecatsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an orphaned local polecat directory (no clone subdirectory).
+	orphanDir := filepath.Join(polecatsDir, "onyx")
+	if err := os.MkdirAll(orphanDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	m.cleanupOrphanPolecatState()
+
+	if _, err := os.Stat(orphanDir); !os.IsNotExist(err) {
+		t.Errorf("orphaned local polecat directory was not cleaned up by cleanupOrphanPolecatState")
+	}
+}
+
 // TestAddWithOptions_RollbackReleasesName verifies that when AddWithOptions fails,
 // the allocated name is released back to the pool and the polecat directory is cleaned up.
 // Regression test for gt-2vs22: cleanupOnError previously only removed the directory,
@@ -1694,5 +1767,292 @@ func TestAllocateAndAdd_NoDuplicateNames(t *testing.T) {
 		if count > 1 {
 			t.Errorf("name %q allocated %d times — race condition (GH#2215)", name, count)
 		}
+	}
+}
+
+func TestIsRemoteMode(t *testing.T) {
+	r := &rig.Rig{Name: "testrig", Path: t.TempDir()}
+	m := NewManager(r, git.NewGit(r.Path), nil)
+
+	// Default: not remote
+	if m.isRemoteMode() {
+		t.Error("isRemoteMode() = true, want false for default manager")
+	}
+
+	// SetDaytona with nil RemoteBackend: still not remote
+	m.SetDaytona(nil, nil, &config.RigSettings{})
+	if m.isRemoteMode() {
+		t.Error("isRemoteMode() = true, want false when RemoteBackend is nil")
+	}
+
+	// SetDaytona with RemoteBackend but nil client: still not remote
+	m.SetDaytona(nil, nil, &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{Provider: "daytona"},
+	})
+	if m.isRemoteMode() {
+		t.Error("isRemoteMode() = true, want false when daytonaClient is nil")
+	}
+
+	// SetDaytona with client and RemoteBackend: remote
+	m.SetDaytona(daytona.NewClient("gt-test"), nil, &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{Provider: "daytona"},
+	})
+	if !m.isRemoteMode() {
+		t.Error("isRemoteMode() = false, want true when client and RemoteBackend are set")
+	}
+}
+
+func TestWriteFileInWorkspace_UsesDirectData(t *testing.T) {
+	t.Parallel()
+	rigDir := t.TempDir()
+	r := &rig.Rig{Name: "testrig", Path: rigDir}
+	m := NewManager(r, git.NewGit(rigDir), nil)
+
+	runner := &mockRunner{}
+	client := daytona.NewClientWithRunner("gt-test1234", runner)
+	settings := &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{Provider: "daytona"},
+	}
+	m.SetDaytona(client, nil, settings)
+
+	data := []byte("-----BEGIN CERTIFICATE-----\nMIIBtest\n-----END CERTIFICATE-----\n")
+	_ = m.writeFileInWorkspace(context.Background(), "ws-test", "/tmp/cert.pem", "", data)
+
+	if len(runner.calls) == 0 {
+		t.Fatal("expected daytona exec call")
+	}
+
+	call := runner.calls[0]
+	// Data and path should be embedded in the sh -c script (shell-quoted),
+	// not base64-encoded. Verify the script contains the data directly.
+	args := call.args
+	script := ""
+	for i, a := range args {
+		if a == "--" && i+3 < len(args) && args[i+1] == "sh" && args[i+2] == "-c" {
+			script = args[i+3]
+			break
+		}
+	}
+	if script == "" {
+		t.Fatalf("could not find sh -c script in exec args: %v", args)
+	}
+	// Script should contain the raw PEM data (shell-quoted), not base64
+	if !strings.Contains(script, "BEGIN CERTIFICATE") {
+		t.Errorf("script should contain raw PEM data, not base64: %s", script)
+	}
+	if !strings.Contains(script, "/tmp/cert.pem") {
+		t.Errorf("script should contain path: %s", script)
+	}
+	if strings.Contains(script, "$1") || strings.Contains(script, "$2") {
+		t.Errorf("script should not use positional args (daytona flattens args): %s", script)
+	}
+}
+
+func TestSetDaytona(t *testing.T) {
+	r := &rig.Rig{Name: "testrig", Path: t.TempDir()}
+	m := NewManager(r, git.NewGit(r.Path), nil)
+
+	if m.daytonaClient != nil {
+		t.Error("daytonaClient should be nil before SetDaytona")
+	}
+
+	settings := &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{
+			Provider:  "daytona",
+			Image:     "ubuntu:22.04",
+			ProxyAddr: "proxy.example.com:8443",
+		},
+	}
+	m.SetDaytona(nil, nil, settings)
+
+	if m.rigSettings != settings {
+		t.Error("rigSettings not set correctly")
+	}
+}
+
+// mockRunner records daytona CLI invocations for test assertions.
+type mockRunner struct {
+	calls []mockCall
+}
+
+type mockCall struct {
+	name string
+	args []string
+}
+
+func (r *mockRunner) Run(_ context.Context, name string, args ...string) (string, string, int, error) {
+	r.calls = append(r.calls, mockCall{name: name, args: args})
+	return "", "", 0, nil
+}
+
+// TestRemoveDaytonaWorkspace_NilClient verifies that when daytonaClient is nil
+// (the bug scenario), removeDaytonaWorkspace still cleans up local state but
+// silently skips the remote workspace stop/delete — leaking the workspace.
+func TestRemoveDaytonaWorkspace_NilClient(t *testing.T) {
+	t.Parallel()
+
+	rigDir := t.TempDir()
+	polecatDir := filepath.Join(rigDir, "polecats", "test-polecat")
+	if err := os.MkdirAll(polecatDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{Name: "testrig", Path: rigDir}
+	m := NewManager(r, git.NewGit(rigDir), nil)
+	// daytonaClient is nil — this is the bug condition
+
+	err := m.removeDaytonaWorkspace("test-polecat", "ws-leaked", polecatDir, "polecat/test-branch")
+	if err != nil {
+		t.Fatalf("removeDaytonaWorkspace() error = %v", err)
+	}
+
+	// Marker directory should still be cleaned up
+	if _, statErr := os.Stat(polecatDir); !os.IsNotExist(statErr) {
+		t.Error("expected marker directory to be removed")
+	}
+
+	// But no daytona stop/delete was issued — workspace is leaked.
+	// This test documents the bug behavior: local cleanup happens but remote doesn't.
+}
+
+// TestRemoveDaytonaWorkspace_WithClient verifies that when daytonaClient is set
+// (the fix), removeDaytonaWorkspace properly stops the remote workspace.
+func TestRemoveDaytonaWorkspace_WithClient(t *testing.T) {
+	t.Parallel()
+
+	rigDir := t.TempDir()
+	polecatDir := filepath.Join(rigDir, "polecats", "test-polecat")
+	if err := os.MkdirAll(polecatDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{Name: "testrig", Path: rigDir}
+	m := NewManager(r, git.NewGit(rigDir), nil)
+
+	runner := &mockRunner{}
+	client := daytona.NewClientWithRunner("gt-test1234", runner)
+	settings := &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{Provider: "daytona"},
+	}
+	m.SetDaytona(client, nil, settings)
+
+	err := m.removeDaytonaWorkspace("test-polecat", "ws-remote", polecatDir, "polecat/test-branch")
+	if err != nil {
+		t.Fatalf("removeDaytonaWorkspace() error = %v", err)
+	}
+
+	// Marker directory should be cleaned up
+	if _, statErr := os.Stat(polecatDir); !os.IsNotExist(statErr) {
+		t.Error("expected marker directory to be removed")
+	}
+
+	// Daytona stop should have been called (default behavior: stop, not delete)
+	if len(runner.calls) == 0 {
+		t.Fatal("expected daytona CLI to be called, got 0 calls")
+	}
+	found := false
+	for _, c := range runner.calls {
+		if c.name == "daytona" && len(c.args) > 0 && c.args[0] == "stop" {
+			found = true
+			if c.args[1] != "ws-remote" {
+				t.Errorf("daytona stop called with workspace %q, want %q", c.args[1], "ws-remote")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected 'daytona stop' call, got calls: %v", runner.calls)
+	}
+}
+
+// TestRemoveDaytonaWorkspace_AutoDelete verifies that when AutoDelete is set,
+// removeDaytonaWorkspace calls delete instead of stop.
+func TestRemoveDaytonaWorkspace_AutoDelete(t *testing.T) {
+	t.Parallel()
+
+	rigDir := t.TempDir()
+	polecatDir := filepath.Join(rigDir, "polecats", "test-polecat")
+	if err := os.MkdirAll(polecatDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{Name: "testrig", Path: rigDir}
+	m := NewManager(r, git.NewGit(rigDir), nil)
+
+	runner := &mockRunner{}
+	client := daytona.NewClientWithRunner("gt-test1234", runner)
+	settings := &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{
+			Provider:   "daytona",
+			AutoDelete: true,
+		},
+	}
+	m.SetDaytona(client, nil, settings)
+
+	err := m.removeDaytonaWorkspace("test-polecat", "ws-remote", polecatDir, "polecat/test-branch")
+	if err != nil {
+		t.Fatalf("removeDaytonaWorkspace() error = %v", err)
+	}
+
+	// Daytona delete should have been called (AutoDelete mode)
+	found := false
+	for _, c := range runner.calls {
+		if c.name == "daytona" && len(c.args) > 0 && c.args[0] == "delete" {
+			found = true
+			if c.args[1] != "ws-remote" {
+				t.Errorf("daytona delete called with workspace %q, want %q", c.args[1], "ws-remote")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected 'daytona delete' call, got calls: %v", runner.calls)
+	}
+}
+
+// TestWriteFileInWorkspace_NoShellInjection verifies that writeFileInWorkspace
+// shell-quotes the path to prevent shell injection via crafted paths.
+func TestWriteFileInWorkspace_NoShellInjection(t *testing.T) {
+	t.Parallel()
+
+	rigDir := t.TempDir()
+	r := &rig.Rig{Name: "testrig", Path: rigDir}
+	m := NewManager(r, git.NewGit(rigDir), nil)
+
+	runner := &mockRunner{}
+	client := daytona.NewClientWithRunner("gt-test1234", runner)
+	settings := &config.RigSettings{
+		RemoteBackend: &config.RemoteBackend{Provider: "daytona"},
+	}
+	m.SetDaytona(client, nil, settings)
+
+	// A path that would cause shell injection if interpolated directly.
+	maliciousPath := "/tmp/cert; rm -rf /"
+	data := []byte("test-data")
+
+	_ = m.writeFileInWorkspace(context.Background(), "ws-test", maliciousPath, "", data)
+
+	if len(runner.calls) == 0 {
+		t.Fatal("expected daytona exec call")
+	}
+
+	call := runner.calls[0]
+	args := call.args
+	script := ""
+	for i, a := range args {
+		if a == "--" && i+3 < len(args) && args[i+1] == "sh" && args[i+2] == "-c" {
+			script = args[i+3]
+			break
+		}
+	}
+	if script == "" {
+		t.Fatalf("could not find sh -c script in exec args: %v", args)
+	}
+	// The malicious path must NOT appear unquoted in the script.
+	// ShellQuote wraps it in single quotes: '/tmp/cert; rm -rf /'
+	if strings.Contains(script, maliciousPath) && !strings.Contains(script, "'"+maliciousPath+"'") {
+		t.Errorf("shell script contains unquoted malicious path (injection vulnerable): %s", script)
+	}
+	// The quoted version should be present.
+	if !strings.Contains(script, "'/tmp/cert; rm -rf /'") {
+		t.Errorf("script should contain shell-quoted path: %s", script)
 	}
 }

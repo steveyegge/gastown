@@ -28,6 +28,7 @@ ENV PATH="/app/gastown:/usr/local/go/bin:/home/agent/go/bin:${PATH}"
 # Install beads (bd) and dolt
 RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
 RUN curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash
+RUN curl -Lo /usr/bin/daytona "https://download.daytona.io/cli/latest/daytona-linux-amd64" && chmod +x /usr/bin/daytona
 
 # Set up directories
 RUN mkdir -p /app /gt && chown agent:agent /app /gt

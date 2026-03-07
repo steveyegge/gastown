@@ -1196,7 +1196,6 @@ type strandedConvoyInfo struct {
 	TrackedCount int      `json:"tracked_count"`
 	ReadyCount   int      `json:"ready_count"`
 	ReadyIssues  []string `json:"ready_issues"`
-	CreatedAt    string   `json:"created_at,omitempty"`
 }
 
 // readyIssueInfo holds info about a ready (stranded) issue.
@@ -1298,9 +1297,8 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 	}
 
 	var convoys []struct {
-		ID        string `json:"id"`
-		Title     string `json:"title"`
-		CreatedAt string `json:"created_at"`
+		ID    string `json:"id"`
+		Title string `json:"title"`
 	}
 	if err := json.Unmarshal(out, &convoys); err != nil {
 		return nil, fmt.Errorf("parsing convoy list: %w", err)
@@ -1324,7 +1322,6 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 				TrackedCount: 0,
 				ReadyCount:   0,
 				ReadyIssues:  []string{},
-				CreatedAt:    convoy.CreatedAt,
 			})
 			continue
 		}
@@ -1362,7 +1359,6 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 				TrackedCount: len(tracked),
 				ReadyCount:   len(readyIssues),
 				ReadyIssues:  readyIssues,
-				CreatedAt:    convoy.CreatedAt,
 			})
 		} else {
 			// Has tracked issues but none are ready — include in stranded
@@ -1373,7 +1369,6 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 				TrackedCount: len(tracked),
 				ReadyCount:   0,
 				ReadyIssues:  []string{},
-				CreatedAt:    convoy.CreatedAt,
 			})
 		}
 	}

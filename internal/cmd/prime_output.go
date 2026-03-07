@@ -78,6 +78,7 @@ func outputPrimeContext(ctx RoleContext) (string, error) {
 		DefaultBranch: defaultBranch,
 		Polecat:       ctx.Polecat,
 		DogName:       ctx.Polecat, // ctx.Polecat holds the dog name for RoleDog
+		IsDaytona:     os.Getenv("GT_PROXY_IDENTITY") != "",
 		MayorSession:  session.MayorSessionName(),
 		DeaconSession: session.DeaconSessionName(),
 	}

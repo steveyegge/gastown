@@ -3,7 +3,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -25,7 +24,6 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/suggest"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
@@ -915,23 +913,6 @@ func runRigRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := mgr.RemoveRig(name); err != nil {
-		if errors.Is(err, rig.ErrRigNotFound) {
-			rigPath := filepath.Join(townRoot, name)
-			if info, statErr := os.Stat(rigPath); statErr == nil && info.IsDir() {
-				fmt.Printf("%s Rig %q is not registered but directory exists at %s\n\n",
-					style.Warning.Render("!"), name, rigPath)
-				fmt.Printf("This is an inconsistent state. To fix it, either:\n")
-				fmt.Printf("  Adopt the directory:  %s\n",
-					style.Dim.Render(fmt.Sprintf("gt rig add %s --adopt", name)))
-				fmt.Printf("  Delete the directory: %s\n",
-					style.Dim.Render(fmt.Sprintf("rm -rf %s", rigPath)))
-				return fmt.Errorf("rig %q not in registry but directory exists", name)
-			}
-			// Directory doesn't exist either — suggest similar rig names
-			suggestions := suggest.FindSimilar(name, mgr.ListRigNames(), 3)
-			return fmt.Errorf("removing rig: %s",
-				suggest.FormatSuggestion("rig", name, suggestions, ""))
-		}
 		return fmt.Errorf("removing rig: %w", err)
 	}
 
@@ -959,22 +940,6 @@ func runRigRemove(cmd *cobra.Command, args []string) error {
 	fmt.Printf("To delete: %s\n", style.Dim.Render(fmt.Sprintf("rm -rf %s", filepath.Join(townRoot, name))))
 
 	return nil
-}
-
-// refreshCycleBindingsOnExistingSessions forces a refresh of the tmux C-b n/p
-// cycle bindings on any existing session. This is needed after gt rig add so
-// the new rig's prefix is included in the grep pattern.
-// Non-fatal: failure only means existing sessions need a restart to pick up the
-// new prefix.
-func refreshCycleBindingsOnExistingSessions() {
-	t := tmux.NewTmux()
-	sessions, err := t.ListSessions()
-	if err != nil || len(sessions) == 0 {
-		return
-	}
-	// Refresh bindings using any existing session as context.
-	// SetCycleBindings' stale-pattern check will detect the mismatch and re-bind.
-	_ = t.SetCycleBindings(sessions[0])
 }
 
 func runRigAdopt(_ *cobra.Command, args []string) error {

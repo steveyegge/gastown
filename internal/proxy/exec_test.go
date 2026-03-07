@@ -295,27 +295,29 @@ func TestHandleExec(t *testing.T) {
 }
 
 func TestRunCommand(t *testing.T) {
+	srv := newExecTestServer(t, Config{AllowedCommands: []string{"echo", "sh"}})
+
 	t.Run("echo world produces expected stdout", func(t *testing.T) {
-		stdout, stderr, code := runCommand(context.Background(), []string{"echo", "world"}, "")
+		stdout, stderr, code := srv.runCommand(context.Background(), []string{"echo", "world"}, "")
 		assert.Equal(t, "world\n", stdout)
 		assert.Equal(t, "", stderr)
 		assert.Equal(t, 0, code)
 	})
 
 	t.Run("sh exit 42 returns exitCode 42", func(t *testing.T) {
-		_, _, code := runCommand(context.Background(), []string{"sh", "-c", "exit 42"}, "")
+		_, _, code := srv.runCommand(context.Background(), []string{"sh", "-c", "exit 42"}, "")
 		assert.Equal(t, 42, code)
 	})
 
 	t.Run("stderr is captured separately", func(t *testing.T) {
-		stdout, stderr, code := runCommand(context.Background(), []string{"sh", "-c", "echo err >&2"}, "")
+		stdout, stderr, code := srv.runCommand(context.Background(), []string{"sh", "-c", "echo err >&2"}, "")
 		assert.Equal(t, "", stdout)
 		assert.Equal(t, "err\n", stderr)
 		assert.Equal(t, 0, code)
 	})
 
 	t.Run("non-existent binary returns exitCode 1", func(t *testing.T) {
-		_, _, code := runCommand(context.Background(), []string{"/no/such/binary/xyzzy"}, "")
+		_, _, code := srv.runCommand(context.Background(), []string{"/no/such/binary/xyzzy"}, "")
 		assert.Equal(t, 1, code)
 	})
 
@@ -323,10 +325,18 @@ func TestRunCommand(t *testing.T) {
 		// Set a sentinel in the test process env; the subprocess must not see it.
 		t.Setenv("PROXY_TEST_SENTINEL", "super_secret_sentinel_12345")
 
-		stdout, _, code := runCommand(context.Background(), []string{"sh", "-c", "echo ${PROXY_TEST_SENTINEL:-NOT_SET}"}, "")
+		stdout, _, code := srv.runCommand(context.Background(), []string{"sh", "-c", "echo ${PROXY_TEST_SENTINEL:-NOT_SET}"}, "")
 		assert.Equal(t, 0, code)
 		assert.NotContains(t, stdout, "super_secret_sentinel_12345",
 			"subprocess should not inherit test env vars")
+	})
+
+	t.Run("identity injects polecat env vars", func(t *testing.T) {
+		stdout, _, code := srv.runCommand(context.Background(),
+			[]string{"sh", "-c", "echo $GT_ROLE $GT_RIG $GT_POLECAT"},
+			"GasTownDaytona/quartz")
+		assert.Equal(t, 0, code)
+		assert.Equal(t, "GasTownDaytona/polecats/quartz GasTownDaytona quartz\n", stdout)
 	})
 }
 

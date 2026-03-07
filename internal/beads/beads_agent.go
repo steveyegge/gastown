@@ -13,6 +13,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
 )
 
@@ -44,6 +45,8 @@ type AgentFields struct {
 	ActiveMR          string // Currently active merge request bead ID (for traceability)
 	NotificationLevel string // DND mode: verbose, normal, muted (default: normal)
 	Mode              string // Execution mode: "" (normal) or "ralph" (Ralph Wiggum loop)
+	DaytonaWorkspace  string // Daytona workspace ID for remote polecats (empty for local)
+	CertSerial        string // Proxy mTLS cert serial (lowercase hex) for revocation on cleanup
 	// Note: RoleBead field removed - role definitions are now config-based.
 	// See internal/config/roles/*.toml and config-based-roles.md.
 
@@ -113,6 +116,14 @@ func FormatAgentDescription(title string, fields *AgentFields) string {
 		lines = append(lines, fmt.Sprintf("mode: %s", fields.Mode))
 	}
 
+	if fields.DaytonaWorkspace != "" {
+		lines = append(lines, fmt.Sprintf("daytona_workspace: %s", fields.DaytonaWorkspace))
+	}
+
+	if fields.CertSerial != "" {
+		lines = append(lines, fmt.Sprintf("cert_serial: %s", fields.CertSerial))
+	}
+
 	// Completion metadata fields (gt-x7t9)
 	if fields.ExitType != "" {
 		lines = append(lines, fmt.Sprintf("exit_type: %s", fields.ExitType))
@@ -171,6 +182,10 @@ func ParseAgentFields(description string) *AgentFields {
 			fields.NotificationLevel = value
 		case "mode":
 			fields.Mode = value
+		case "daytona_workspace":
+			fields.DaytonaWorkspace = value
+		case "cert_serial":
+			fields.CertSerial = value
 		// Completion metadata fields (gt-x7t9)
 		case "exit_type":
 			fields.ExitType = value
@@ -256,13 +271,18 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 
 	// Note: role slot no longer set - role definitions are config-based
 
-	// Set hook_bead slot so gt mol status can find hooked work via the
-	// agent bead's JSON field (primary lookup path in lookupHookedWork).
-	// The fallback query (status=hooked + assignee) is unreliable for
-	// cross-database scenarios. Restoring per hq-gfg.
+	// Set the hook slot if specified (this is the authoritative storage)
+	// This fixes the slot inconsistency bug where bead status is 'hooked' but
+	// agent's hook slot is empty. See mi-619.
+	// Use a target Beads instance with proper BEADS_DIR routing (gt-wrnwq).
 	if fields != nil && fields.HookBead != "" {
-		if _, slotErr := b.run("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
-			// Non-fatal: fallback query may still find the work bead
+		target := b
+		if targetDir != b.getResolvedBeadsDir() {
+			target = NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
+		}
+		if err := target.SetHookBead(id, fields.HookBead); err != nil {
+			// Non-fatal: warn but continue - description text has the backup
+			style.PrintWarning("could not set hook slot: %v", err)
 		}
 	}
 
@@ -358,12 +378,15 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 
 	// Note: role slot no longer set - role definitions are config-based
 
-	// Set hook_bead slot so gt mol status can find hooked work via the
-	// agent bead's JSON field (primary lookup path in lookupHookedWork).
-	// Restoring per hq-gfg.
+	// Clear any existing hook slot (handles stale state from previous lifecycle)
+	// Use target Beads instance with proper BEADS_DIR routing (gt-wrnwq).
+	_ = target.ClearHookBead(id)
+
+	// Set the hook slot if specified
 	if fields != nil && fields.HookBead != "" {
-		if _, slotErr := target.run("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
-			// Non-fatal: fallback query may still find the work bead
+		if err := target.SetHookBead(id, fields.HookBead); err != nil {
+			// Non-fatal: warn but continue - description text has the backup
+			style.PrintWarning("could not set hook slot: %v", err)
 		}
 	}
 
@@ -409,6 +432,8 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 	fields.ActiveMR = ""      // Clear active_mr
 	fields.CleanupStatus = "" // Clear cleanup_status
 	fields.AgentState = string(AgentStateNuked)
+	fields.DaytonaWorkspace = "" // Clear daytona workspace
+	fields.CertSerial = ""      // Clear cert serial (gtd-nyq: stale serial causes wrong cert revocation)
 	// Clear completion metadata (gt-x7t9)
 	fields.ExitType = ""
 	fields.MRID = ""
@@ -422,15 +447,24 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 		return fmt.Errorf("resetting agent bead fields: %w", err)
 	}
 
-	// Hook slot no longer maintained (hq-l6mm5) — no need to clear.
+	// Also clear the hook slot in the database
+	_ = target.ClearHookBead(id)
 
 	return nil
 }
 
 // UpdateAgentState updates the agent_state field in an agent bead.
-// Uses `bd agent state` command for the database column directly.
-func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
-	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, nil, retErr) }()
+// Optionally updates hook_bead if provided.
+//
+// IMPORTANT: This function uses the proper bd commands to update agent fields:
+// - `bd agent state` for agent_state (uses the database column directly)
+// - `bd slot set/clear` for hook_bead (uses the database column directly)
+//
+// This ensures consistency with `bd slot show` and other beads commands.
+// Previously, this function embedded these fields in the description text,
+// which caused inconsistencies with bd slot commands (see GH #gt-9v52).
+func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) (retErr error) {
+	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, hookBead, retErr) }()
 	// Update agent state using bd agent state command
 	// Use runWithRouting so bd can resolve cross-prefix agent beads (e.g., wa-*
 	// agent beads from hq context) via routes.jsonl instead of BEADS_DIR.
@@ -439,14 +473,70 @@ func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 		return fmt.Errorf("updating agent state: %w", err)
 	}
 
-	// Hook slot no longer maintained (hq-l6mm5) — removed hook_bead parameter.
+	// Update hook_bead if provided
+	// Use runWithRouting for slot ops so bd can resolve cross-prefix beads
+	// (e.g., hq-* hook beads on gt-* agent beads) via routes.jsonl.
+	if hookBead != nil {
+		if *hookBead != "" {
+			// Set the hook using bd slot set
+			_, err = b.runWithRouting("slot", "set", id, "hook", *hookBead)
+			if err != nil {
+				// If slot is already occupied, clear it first then retry
+				// This handles re-slinging scenarios where we're updating the hook
+				errStr := err.Error()
+				if strings.Contains(errStr, "already occupied") {
+					_, _ = b.runWithRouting("slot", "clear", id, "hook")
+					_, err = b.runWithRouting("slot", "set", id, "hook", *hookBead)
+				}
+				if err != nil {
+					return fmt.Errorf("setting hook: %w", err)
+				}
+			}
+		} else {
+			// Clear the hook
+			_, err = b.runWithRouting("slot", "clear", id, "hook")
+			if err != nil {
+				return fmt.Errorf("clearing hook: %w", err)
+			}
+		}
+	}
 
 	return nil
 }
 
-// SetHookBead and ClearHookBead removed (hq-l6mm5).
-// Hook slot on agent beads is no longer maintained. Work bead status=hooked
-// and assignee=<agent> is the authoritative source for hook tracking.
+// SetHookBead sets the hook_bead slot on an agent bead.
+// This is a convenience wrapper that only sets the hook without changing agent_state.
+// Per gt-zecmc: agent_state ("running", "dead", "idle") is observable from tmux
+// and should not be recorded in beads ("discover, don't track" principle).
+func (b *Beads) SetHookBead(agentBeadID, hookBeadID string) error {
+	// Set the hook using bd slot set
+	// Use runWithRouting so bd can resolve cross-prefix beads (e.g., hq-* hook
+	// beads on gt-* agent beads) via routes.jsonl instead of BEADS_DIR.
+	_, err := b.runWithRouting("slot", "set", agentBeadID, "hook", hookBeadID)
+	if err != nil {
+		// If slot is already occupied, clear it first then retry
+		errStr := err.Error()
+		if strings.Contains(errStr, "already occupied") {
+			_, _ = b.runWithRouting("slot", "clear", agentBeadID, "hook")
+			_, err = b.runWithRouting("slot", "set", agentBeadID, "hook", hookBeadID)
+		}
+		if err != nil {
+			return fmt.Errorf("setting hook: %w", err)
+		}
+	}
+	return nil
+}
+
+// ClearHookBead clears the hook_bead slot on an agent bead.
+// Used when work is complete or unslung.
+func (b *Beads) ClearHookBead(agentBeadID string) error {
+	// Use runWithRouting so bd can resolve cross-prefix beads via routes.jsonl.
+	_, err := b.runWithRouting("slot", "clear", agentBeadID, "hook")
+	if err != nil {
+		return fmt.Errorf("clearing hook: %w", err)
+	}
+	return nil
+}
 
 // AgentFieldUpdates specifies which agent description fields to update.
 // Only non-nil fields are modified; nil fields are left unchanged.
@@ -457,6 +547,8 @@ type AgentFieldUpdates struct {
 	ActiveMR          *string
 	NotificationLevel *string
 	Mode              *string
+	DaytonaWorkspace  *string
+	CertSerial        *string
 	// Completion metadata fields (gt-x7t9)
 	ExitType       *string
 	MRID           *string
@@ -506,6 +598,12 @@ func (b *Beads) UpdateAgentDescriptionFields(id string, updates AgentFieldUpdate
 	if updates.Mode != nil {
 		fields.Mode = *updates.Mode
 	}
+	if updates.DaytonaWorkspace != nil {
+		fields.DaytonaWorkspace = *updates.DaytonaWorkspace
+	}
+	if updates.CertSerial != nil {
+		fields.CertSerial = *updates.CertSerial
+	}
 	// Completion metadata fields (gt-x7t9)
 	if updates.ExitType != nil {
 		fields.ExitType = *updates.ExitType
@@ -546,6 +644,13 @@ func (b *Beads) UpdateAgentActiveMR(id string, activeMR string) error {
 // Pass empty string to reset to default (normal).
 func (b *Beads) UpdateAgentNotificationLevel(id string, level string) error {
 	return b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{NotificationLevel: &level})
+}
+
+// UpdateAgentCertSerial updates the cert_serial field in an agent bead.
+// This stores the proxy mTLS certificate serial (lowercase hex) for revocation
+// during polecat cleanup. Pass empty string to clear.
+func (b *Beads) UpdateAgentCertSerial(id string, serial string) error {
+	return b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{CertSerial: &serial})
 }
 
 // CompletionMetadata holds the fields written by gt done to record

@@ -3,12 +3,14 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,18 +18,20 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/google/uuid"
 	beadsdk "github.com/steveyegge/beads"
-	"gopkg.in/natefinch/lumberjack.v2"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/daytona"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/feed"
 	gitpkg "github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mayor"
+	"github.com/steveyegge/gastown/internal/proxy"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -36,6 +40,7 @@ import (
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // Daemon is the town-level background service.
@@ -52,8 +57,8 @@ type Daemon struct {
 	curator       *feed.Curator
 	convoyManager *ConvoyManager
 	beadsStores   map[string]beadsdk.Storage
-	doltServer *DoltServerManager
-	krcPruner  *KRCPruner
+	doltServer    *DoltServerManager
+	krcPruner     *KRCPruner
 
 	// Mass death detection: track recent session deaths
 	deathsMu     sync.Mutex
@@ -295,6 +300,11 @@ func (d *Daemon) Run() error {
 		}
 	}
 
+	// Reconcile daytona workspaces for rigs with remote backends.
+	// Runs once at startup to detect orphaned workspaces/beads from unclean shutdowns.
+	// Also runs periodically via the daytona_reconcile patrol ticker (see below).
+	d.reconcileDaytonaWorkspaces()
+
 	// Write PID file with nonce for ownership verification
 	if _, err := writePIDFile(d.config.PidFile, os.Getpid()); err != nil {
 		return fmt.Errorf("writing PID file: %w", err)
@@ -473,6 +483,19 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("Scheduled maintenance ticker started (check interval %v, window %s)", interval, window)
 	}
 
+	// Start daytona reconcile ticker if configured.
+	// Periodically reconciles daytona workspaces with bead state,
+	// catching orphans from auto-deleted workspaces between daemon restarts.
+	var daytonaReconcileTicker *time.Ticker
+	var daytonaReconcileChan <-chan time.Time
+	if IsPatrolEnabled(d.patrolConfig, "daytona_reconcile") {
+		interval := daytonaReconcileInterval(d.patrolConfig)
+		daytonaReconcileTicker = time.NewTicker(interval)
+		daytonaReconcileChan = daytonaReconcileTicker.C
+		defer daytonaReconcileTicker.Stop()
+		d.logger.Printf("Daytona reconcile ticker started (interval %v)", interval)
+	}
+
 	// Note: PATCH-010 uses per-session hooks in deacon/manager.go (SetAutoRespawnHook).
 	// Global pane-died hooks don't fire reliably in tmux 3.2a, so we rely on the
 	// per-session approach which has been tested to work for continuous recovery.
@@ -558,6 +581,13 @@ func (d *Daemon) Run() error {
 			// and runs `gt maintain --force` when commit counts exceed threshold.
 			if !d.isShutdownInProgress() {
 				d.runScheduledMaintenance()
+			}
+
+		case <-daytonaReconcileChan:
+			// Periodic daytona reconciliation — catches orphaned workspaces/beads
+			// from auto-deleted workspaces between daemon restarts.
+			if !d.isShutdownInProgress() {
+				d.reconcileDaytonaWorkspaces()
 			}
 
 		case <-timer.C:
@@ -776,7 +806,6 @@ func (d *Daemon) pourDoctorMolecule(warnings []string) {
 	d.logger.Printf("Doctor molecule: %d warning(s): %s", len(warnings), summary)
 	mol.closeStep("report")
 }
-
 
 // checkAllRigsDolt verifies all rigs are using the Dolt backend.
 func (d *Daemon) checkAllRigsDolt() error {
@@ -2013,6 +2042,440 @@ func (d *Daemon) emitMassDeathEvent() {
 	d.recentDeaths = nil
 }
 
+// restartPolecatSession restarts a crashed polecat session.
+// For daytona polecats (rigs with RemoteBackend), it ensures the remote
+// workspace is running and wraps the agent command in daytona exec.
+func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string) error {
+	// Check rig operational state before auto-restarting
+	if operational, reason := d.isRigOperational(rigName); !operational {
+		return fmt.Errorf("cannot restart polecat: %s", reason)
+	}
+
+	rigPath := filepath.Join(d.config.TownRoot, rigName)
+
+	// Determine local vs remote restart from the agent bead's DaytonaWorkspace
+	// field, not from current config. This prevents path mismatch when config
+	// changes while polecats are running (gtd-eg9).
+	isDaytona, beadErr := d.isPolecatDaytona(rigName, polecatName)
+	if beadErr != nil {
+		// Agent bead unreadable (e.g., first spawn before bead exists).
+		// Fall back to config-based check.
+		rigSettingsPath := config.RigSettingsPath(rigPath)
+		if rigSettings, err := config.LoadRigSettings(rigSettingsPath); err == nil && rigSettings.RemoteBackend != nil {
+			isDaytona = true
+		}
+	}
+	if isDaytona {
+		return d.restartDaytonaPolecatSession(rigName, polecatName, sessionName, rigPath)
+	}
+
+	// --- Local polecat restart (existing logic) ---
+
+	// Determine working directory (handle both new and old structures)
+	// New structure: polecats/<name>/<rigname>/
+	// Old structure: polecats/<name>/
+	workDir := filepath.Join(rigPath, "polecats", polecatName, rigName)
+	if _, err := os.Stat(workDir); os.IsNotExist(err) {
+		// Fall back to old structure
+		workDir = filepath.Join(rigPath, "polecats", polecatName)
+	}
+
+	// Verify the worktree exists
+	if _, err := os.Stat(workDir); os.IsNotExist(err) {
+		return fmt.Errorf("polecat worktree does not exist: %s", workDir)
+	}
+
+	// Pre-sync workspace (ensure beads are current)
+	d.syncWorkspace(workDir)
+
+	// Generate a fresh run ID for this restart so all telemetry from the
+	// crash-restarted session is correlated under a new GASTA root span.
+	runID := uuid.New().String()
+
+	// Build startup command BEFORE creating the session so we can use
+	// NewSessionWithCommand (command as initial pane process). This eliminates
+	// the race condition in the old EnsureSessionFresh + SendKeys pattern where
+	// the shell might not be ready to receive keystrokes, producing empty windows.
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:        "polecat",
+		Rig:         rigName,
+		AgentName:   polecatName,
+		TownRoot:    d.config.TownRoot,
+		SessionName: sessionName,
+	})
+	// Inject GT_RUN into envVars before BuildStartupCommand so the startup
+	// command includes it (exec env …) and the loop below propagates it to
+	// the tmux session environment.
+	envVars["GT_RUN"] = runID
+	rc := config.ResolveRoleAgentConfig("polecat", d.config.TownRoot, rigPath)
+	startCmd := config.BuildStartupCommand(envVars, rigPath, "")
+
+	// Create session with command as initial process (replaces EnsureSessionFresh + SendKeys).
+	// EnsureSessionFreshWithCommand kills zombie sessions and creates a new one atomically.
+	if err := d.tmux.EnsureSessionFreshWithCommand(sessionName, workDir, startCmd); err != nil {
+		if errors.Is(err, tmux.ErrSessionRunning) {
+			d.logger.Printf("Session %s already running with healthy agent, skipping restart", sessionName)
+			return nil
+		}
+		return fmt.Errorf("creating session: %w", err)
+	}
+
+	// Record polecat spawn metric.
+	d.metrics.recordPolecatSpawn(d.ctx, rigName)
+
+	// Set environment variables in tmux session table (for debugging/monitoring tools).
+	// The process itself gets env vars via 'exec env ...' in the startup command.
+	for k, v := range envVars {
+		_ = d.tmux.SetEnvironment(sessionName, k, v)
+	}
+
+	// Set GT_AGENT in tmux session env so tools querying tmux environment
+	// (e.g., witness patrol) can detect non-Claude agents.
+	// BuildStartupCommand sets GT_AGENT in process env via exec env, but that
+	// isn't visible to tmux show-environment.
+	if rc.ResolvedAgent != "" {
+		_ = d.tmux.SetEnvironment(sessionName, "GT_AGENT", rc.ResolvedAgent)
+	}
+
+	// Set GT_PROCESS_NAMES for accurate liveness detection of custom agents.
+	processNames := config.ResolveProcessNames(rc.ResolvedAgent, rc.Command)
+	_ = d.tmux.SetEnvironment(sessionName, "GT_PROCESS_NAMES", strings.Join(processNames, ","))
+
+	// Record agent's pane_id for ZFC-compliant liveness checks (gt-qmsx).
+	if paneID, err := d.tmux.GetPaneID(sessionName); err == nil {
+		_ = d.tmux.SetEnvironment(sessionName, "GT_PANE_ID", paneID)
+	}
+
+	// Apply theme
+	theme := tmux.AssignTheme(rigName)
+	_ = d.tmux.ConfigureGasTownSession(sessionName, theme, rigName, polecatName, "polecat")
+
+	// Set pane-died hook for future crash detection
+	agentID := fmt.Sprintf("%s/%s", rigName, polecatName)
+	_ = d.tmux.SetPaneDiedHook(sessionName, agentID)
+
+	// Wait for Claude to start, then accept startup dialogs if they appear.
+	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal - Claude might still start
+	}
+	_ = d.tmux.AcceptStartupDialogs(sessionName)
+
+	return nil
+}
+
+// isPolecatDaytona checks the agent bead's DaytonaWorkspace field to determine
+// whether a polecat was spawned as a remote (daytona) or local polecat.
+// Returns (true, nil) for daytona polecats, (false, nil) for local polecats,
+// and (false, err) if the agent bead cannot be read.
+func (d *Daemon) isPolecatDaytona(rigName, polecatName string) (bool, error) {
+	prefix := config.GetRigPrefix(d.config.TownRoot, rigName)
+	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+
+	cmd := exec.Command(d.bdPath, "show", agentBeadID, "--json") //nolint:gosec // G204: bd is a trusted internal tool
+	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ()
+
+	output, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("bd show %s: %w", agentBeadID, err)
+	}
+
+	var issues []struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(output, &issues); err != nil || len(issues) == 0 {
+		return false, fmt.Errorf("parsing agent bead %s: no results", agentBeadID)
+	}
+
+	fields := beads.ParseAgentFields(issues[0].Description)
+	return fields != nil && fields.DaytonaWorkspace != "", nil
+}
+
+// restartDaytonaPolecatSession restarts a crashed polecat that runs in a
+// daytona workspace. If the workspace is stopped, it starts it first,
+// then creates a tmux session running daytona exec to reconnect.
+func (d *Daemon) restartDaytonaPolecatSession(rigName, polecatName, sessionName, rigPath string) error {
+	// Load town config for installation ID (workspace naming prefix).
+	townConfigPath := filepath.Join(d.config.TownRoot, "mayor", "town.json")
+	townCfg, err := config.LoadTownConfig(townConfigPath)
+	if err != nil {
+		return fmt.Errorf("loading town config for daytona restart: %w", err)
+	}
+	if townCfg.InstallationID == "" {
+		return fmt.Errorf("no installation ID in town config, cannot determine workspace name")
+	}
+	shortID := townCfg.ShortInstallationID()
+	installPrefix := constants.InstallPrefix(shortID)
+	client := daytona.NewClient(installPrefix)
+	wsName := client.WorkspaceName(rigName, polecatName)
+
+	// Check workspace state and start if stopped.
+	// Use independent timeouts so ListOwned doesn't eat into Start's budget.
+	listCtx, listCancel := context.WithTimeout(d.ctx, constants.DaytonaListTimeout)
+	defer listCancel()
+
+	workspaces, err := client.ListOwned(listCtx)
+	if err != nil {
+		return fmt.Errorf("listing daytona workspaces for restart: %w", err)
+	}
+
+	var wsState string
+	wsFound := false
+	for _, ws := range workspaces {
+		if ws.Name == wsName {
+			wsState = ws.State
+			wsFound = true
+			break
+		}
+	}
+
+	if !wsFound {
+		// Workspace was auto-deleted by Daytona (inactivity timeout, resource
+		// limits, or admin action). Clean up the orphaned agent bead state so
+		// the daemon doesn't retry restart on every heartbeat, then return
+		// a clear error for the witness notification.
+		d.logger.Printf("Daytona workspace %s not found for polecat %s/%s (likely auto-deleted), cleaning up agent bead",
+			wsName, rigName, polecatName)
+		d.cleanupAutoDeletedWorkspace(rigName, polecatName, rigPath)
+		return fmt.Errorf("daytona workspace %s was deleted (inactivity/resource limit/admin action) for polecat %s/%s; "+
+			"agent bead cleaned up, work requires re-dispatch", wsName, rigName, polecatName)
+	}
+
+	switch wsState {
+	case "stopped", "archived":
+		d.logger.Printf("Starting %s daytona workspace %s for polecat %s/%s", wsState, wsName, rigName, polecatName)
+		startCtx, startCancel := context.WithTimeout(d.ctx, constants.DaytonaCreateTimeout)
+		defer startCancel()
+		if err := client.Start(startCtx, wsName); err != nil {
+			return fmt.Errorf("starting daytona workspace %s (was %s): %w", wsName, wsState, err)
+		}
+		d.logger.Printf("Daytona workspace %s started successfully", wsName)
+
+	case "running", "started":
+		// Ready for exec — proceed.
+
+	case "creating", "starting":
+		return fmt.Errorf("daytona workspace %s is in transitional state %q, cannot restart polecat %s/%s yet",
+			wsName, wsState, rigName, polecatName)
+
+	case "stopping", "archiving":
+		return fmt.Errorf("daytona workspace %s is %s, cannot restart polecat %s/%s yet",
+			wsName, wsState, rigName, polecatName)
+
+	case "error":
+		return fmt.Errorf("daytona workspace %s is in error state, cannot restart polecat %s/%s",
+			wsName, rigName, polecatName)
+
+	default:
+		return fmt.Errorf("daytona workspace %s has unknown state %q, cannot restart polecat %s/%s",
+			wsName, wsState, rigName, polecatName)
+	}
+
+	// Generate a fresh run ID for telemetry correlation.
+	runID := uuid.New().String()
+
+	// Build environment variables (same as local polecats).
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:        "polecat",
+		Rig:         rigName,
+		AgentName:   polecatName,
+		TownRoot:    d.config.TownRoot,
+		SessionName: sessionName,
+	})
+	envVars["GT_RUN"] = runID
+
+	// Inject proxy and mTLS cert environment variables so gt-proxy-client and
+	// git can authenticate against the host proxy from inside the container.
+	// Cert files are injected into the container at spawn time under DefaultRemoteCertDir.
+	// Both GT_PROXY_* (read by gt-proxy-client) and GIT_SSL_* (read natively by git)
+	// must be set — they serve different consumers but point at the same files.
+	proxyAddr := constants.DefaultProxyAddr
+	if rigSettings, err := config.LoadRigSettings(config.RigSettingsPath(rigPath)); err == nil &&
+		rigSettings.RemoteBackend != nil && rigSettings.RemoteBackend.ProxyAddr != "" {
+		proxyAddr = rigSettings.RemoteBackend.ProxyAddr
+	}
+	certDir := constants.DefaultRemoteCertDir
+	envVars["GT_PROXY_URL"] = "https://" + proxyAddr
+	envVars["GT_PROXY_CERT"] = certDir + "/client.crt"
+	envVars["GT_PROXY_KEY"] = certDir + "/client.key"
+	envVars["GT_PROXY_CA"] = certDir + "/ca.crt"
+	envVars["GIT_SSL_CERT"] = certDir + "/client.crt"
+	envVars["GIT_SSL_KEY"] = certDir + "/client.key"
+	envVars["GIT_SSL_CAINFO"] = certDir + "/ca.crt"
+
+	// Resolve agent config for command and process name detection.
+	rc := config.ResolveRoleAgentConfig("polecat", d.config.TownRoot, rigPath)
+
+	// Build the daytona exec command that wraps the agent inside the workspace.
+	// Format: exec daytona exec <ws> -- env K=V ... <agent-cmd>
+	startCmd := d.buildDaytonaExecCommand(wsName, envVars, rc)
+
+	// Use the marker directory as tmux working directory.
+	// Daytona polecats have marker dirs (no worktree) at polecats/<name>/.
+	workDir := filepath.Join(rigPath, "polecats", polecatName)
+	if _, err := os.Stat(workDir); os.IsNotExist(err) {
+		workDir = rigPath // fallback to rig root
+	}
+
+	// Create tmux session with daytona exec as initial process.
+	if err := d.tmux.EnsureSessionFreshWithCommand(sessionName, workDir, startCmd); err != nil {
+		if errors.Is(err, tmux.ErrSessionRunning) {
+			d.logger.Printf("Session %s already running with healthy agent, skipping restart", sessionName)
+			return nil
+		}
+		return fmt.Errorf("creating daytona session: %w", err)
+	}
+
+	// Record polecat spawn metric.
+	d.metrics.recordPolecatSpawn(d.ctx, rigName)
+
+	// Set environment variables in tmux session table.
+	for k, v := range envVars {
+		_ = d.tmux.SetEnvironment(sessionName, k, v)
+	}
+
+	if rc.ResolvedAgent != "" {
+		_ = d.tmux.SetEnvironment(sessionName, "GT_AGENT", rc.ResolvedAgent)
+	}
+
+	// Process names: include "daytona" so liveness detection recognises the
+	// daytona exec process as the live agent connection (design doc §5.2).
+	processNames := config.ResolveProcessNames(rc.ResolvedAgent, rc.Command)
+	processNames = append(processNames, "daytona")
+	_ = d.tmux.SetEnvironment(sessionName, "GT_PROCESS_NAMES", strings.Join(processNames, ","))
+
+	if paneID, err := d.tmux.GetPaneID(sessionName); err == nil {
+		_ = d.tmux.SetEnvironment(sessionName, "GT_PANE_ID", paneID)
+	}
+
+	// Apply theme and pane-died hook.
+	theme := tmux.AssignTheme(rigName)
+	_ = d.tmux.ConfigureGasTownSession(sessionName, theme, rigName, polecatName, "polecat")
+
+	agentID := fmt.Sprintf("%s/%s", rigName, polecatName)
+	_ = d.tmux.SetPaneDiedHook(sessionName, agentID)
+
+	// Wait for the agent to start inside the container.
+	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal - agent might still start
+	}
+	_ = d.tmux.AcceptStartupDialogs(sessionName)
+
+	d.logger.Printf("Daytona polecat %s/%s restarted via workspace %s", rigName, polecatName, wsName)
+	return nil
+}
+
+// cleanupAutoDeletedWorkspace handles a Daytona workspace that was auto-deleted
+// (by inactivity timeout, resource limits, or admin action). It:
+//  1. Revokes the mTLS cert (prevents orphaned certs from authenticating)
+//  2. Clears the daytona_workspace field (removes orphaned reference)
+//  3. Sets agent_state to nuked (marks polecat as permanently failed)
+//  4. Clears hook_bead (breaks restart loop in checkPolecatHealth)
+//
+// The witness notification (sent by the caller in checkPolecatHealth) includes
+// the hook_bead for re-dispatch. All operations are best-effort.
+func (d *Daemon) cleanupAutoDeletedWorkspace(rigName, polecatName, rigPath string) {
+	prefix := config.GetRigPrefix(d.config.TownRoot, rigName)
+	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+
+	// Read agent bead description for cert serial (needed for revocation).
+	var certSerial string
+	showCmd := exec.Command(d.bdPath, "show", agentBeadID, "--json") //nolint:gosec // G204: bd is a trusted internal tool
+	showCmd.Dir = d.config.TownRoot
+	showCmd.Env = os.Environ()
+	if output, err := showCmd.Output(); err == nil {
+		var issues []struct {
+			Description string `json:"description"`
+		}
+		if json.Unmarshal(output, &issues) == nil && len(issues) > 0 {
+			if fields := beads.ParseAgentFields(issues[0].Description); fields != nil {
+				certSerial = fields.CertSerial
+			}
+		}
+	}
+
+	// Revoke mTLS cert if present.
+	if certSerial != "" {
+		adminAddr := "127.0.0.1:9877"
+		settingsPath := config.RigSettingsPath(rigPath)
+		if rigSettings, err := config.LoadRigSettings(settingsPath); err == nil &&
+			rigSettings.RemoteBackend != nil && rigSettings.RemoteBackend.ProxyAdminAddr != "" {
+			adminAddr = rigSettings.RemoteBackend.ProxyAdminAddr
+		}
+		revokeCtx, revokeCancel := context.WithTimeout(d.ctx, 10*time.Second)
+		defer revokeCancel()
+		if err := proxy.NewAdminClient(adminAddr).DenyCert(revokeCtx, certSerial); err != nil {
+			d.logger.Printf("Warning: failed to revoke cert for %s/%s (serial %s): %v",
+				rigName, polecatName, certSerial, err)
+		} else {
+			d.logger.Printf("Revoked mTLS cert for auto-deleted workspace %s/%s (serial %s)",
+				rigName, polecatName, certSerial)
+		}
+	}
+
+	// Clear daytona_workspace field.
+	resetCmd := exec.Command(d.bdPath, "agent", "update", agentBeadID, //nolint:gosec // G204: bd is a trusted internal tool
+		"--set", "daytona_workspace=")
+	resetCmd.Dir = d.config.TownRoot
+	resetCmd.Env = os.Environ()
+	if out, err := resetCmd.CombinedOutput(); err != nil {
+		d.logger.Printf("Warning: failed to clear daytona_workspace for %s: %v (output: %s)",
+			agentBeadID, err, string(out))
+	}
+
+	// Set agent_state to nuked.
+	stateCmd := exec.Command(d.bdPath, "agent", "state", agentBeadID, //nolint:gosec // G204: bd is a trusted internal tool
+		string(beads.AgentStateNuked))
+	stateCmd.Dir = d.config.TownRoot
+	stateCmd.Env = os.Environ()
+	if out, err := stateCmd.CombinedOutput(); err != nil {
+		d.logger.Printf("Warning: failed to set agent_state=nuked for %s: %v (output: %s)",
+			agentBeadID, err, string(out))
+	}
+
+	// Clear hook_bead to break restart loop (checkPolecatHealth skips
+	// polecats with no hook_bead).
+	clearCmd := exec.Command(d.bdPath, "slot", "clear", agentBeadID, "hook") //nolint:gosec // G204: bd is a trusted internal tool
+	clearCmd.Dir = d.config.TownRoot
+	clearCmd.Env = os.Environ()
+	if out, err := clearCmd.CombinedOutput(); err != nil {
+		d.logger.Printf("Warning: failed to clear hook_bead for %s: %v (output: %s)",
+			agentBeadID, err, string(out))
+	}
+
+	d.logger.Printf("Cleaned up auto-deleted workspace state for polecat %s/%s (bead %s)",
+		rigName, polecatName, agentBeadID)
+}
+
+// buildDaytonaExecCommand constructs the tmux pane command that runs the agent
+// inside a daytona workspace. The command uses exec to replace the shell so
+// that pane_current_command shows daytona (for liveness detection).
+//
+// Environment variables are injected via an inline `env K=V` prefix rather than
+// --env flags, because daytona exec does not support --env.
+//
+// Format: exec daytona exec <ws> -- env K=V ... <agent-cmd>
+func (d *Daemon) buildDaytonaExecCommand(wsName string, envVars map[string]string, rc *config.RuntimeConfig) string {
+	var parts []string
+	parts = append(parts, "exec", "daytona", "exec", wsName, "--")
+
+	// Set environment variables via inline env command since daytona exec
+	// does not support --env flags. Sort keys for deterministic output.
+	parts = append(parts, "env")
+	envKeys := make([]string, 0, len(envVars))
+	for k := range envVars {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
+	for _, k := range envKeys {
+		parts = append(parts, fmt.Sprintf("%s=%s", k, config.ShellQuote(envVars[k])))
+	}
+
+	parts = append(parts, rc.BuildCommand())
+
+	return strings.Join(parts, " ")
+}
+
 // notifyWitnessOfCrashedPolecat notifies the witness when a polecat crash is detected.
 // The stuck-agent-dog plugin handles context-aware restart decisions.
 func (d *Daemon) notifyWitnessOfCrashedPolecat(rigName, polecatName, hookBead string) {
@@ -2116,4 +2579,198 @@ func (d *Daemon) dispatchQueuedWork() {
 	} else if len(out) > 0 {
 		d.logger.Printf("Scheduler dispatch: %s", string(out))
 	}
+}
+
+const defaultDaytonaReconcileInterval = 30 * time.Minute
+
+// DaytonaReconcileConfig holds configuration for the daytona_reconcile patrol.
+// This patrol periodically reconciles daytona workspaces with bead state,
+// cleaning up orphaned workspaces and resetting stale bead references.
+type DaytonaReconcileConfig struct {
+	// Enabled controls whether periodic reconciliation runs.
+	Enabled bool `json:"enabled"`
+
+	// IntervalStr is how often to reconcile, as a string (e.g., "30m").
+	IntervalStr string `json:"interval,omitempty"`
+}
+
+// daytonaReconcileInterval returns the configured reconcile interval, or the default (30m).
+func daytonaReconcileInterval(config *DaemonPatrolConfig) time.Duration {
+	if config != nil && config.Patrols != nil && config.Patrols.DaytonaReconcile != nil {
+		if config.Patrols.DaytonaReconcile.IntervalStr != "" {
+			if d, err := time.ParseDuration(config.Patrols.DaytonaReconcile.IntervalStr); err == nil && d > 0 {
+				return d
+			}
+		}
+	}
+	return defaultDaytonaReconcileInterval
+}
+
+// reconcileDaytonaWorkspaces discovers and reconciles daytona workspaces
+// for all rigs with RemoteBackend configured. Called at daemon startup and
+// periodically (default every 30m) to keep bead state consistent with
+// actual workspace state.
+//
+// For each daytona-enabled rig:
+//  1. ListOwned to get all workspaces matching this installation
+//  2. Cross-reference with agent beads (polecat role with daytona_workspace)
+//  3. Orphaned workspaces (no bead) → stop + optionally delete
+//  4. Orphaned beads (no workspace) → reset bead daytona_workspace field
+//  5. Healthy matches → logged for visibility
+func (d *Daemon) reconcileDaytonaWorkspaces() {
+	// Load town config for installation ID.
+	townConfigPath := filepath.Join(d.config.TownRoot, "mayor", "town.json")
+	townCfg, err := config.LoadTownConfig(townConfigPath)
+	if err != nil {
+		d.logger.Printf("Warning: skipping daytona reconciliation: cannot load town config: %v", err)
+		return
+	}
+
+	shortID := townCfg.ShortInstallationID()
+	if shortID == "" {
+		d.logger.Printf("Warning: skipping daytona reconciliation: no installation ID configured")
+		return
+	}
+
+	rigs := d.getKnownRigs()
+	if len(rigs) == 0 {
+		return
+	}
+
+	reconciled := false
+	for _, rigName := range rigs {
+		// Load rig settings to check for RemoteBackend.
+		rigSettingsPath := config.RigSettingsPath(filepath.Join(d.config.TownRoot, rigName))
+		rigSettings, err := config.LoadRigSettings(rigSettingsPath)
+		if err != nil {
+			// Settings file may not exist for some rigs — skip silently.
+			continue
+		}
+		if rigSettings.RemoteBackend == nil {
+			continue // Local rig, no daytona.
+		}
+
+		if !reconciled {
+			d.logger.Printf("Daytona workspace reconciliation starting")
+			reconciled = true
+		}
+
+		d.reconcileDaytonaRig(rigName, shortID, rigSettings.RemoteBackend)
+	}
+
+	if reconciled {
+		d.logger.Printf("Daytona workspace reconciliation complete")
+	}
+}
+
+// reconcileDaytonaRig performs workspace discovery and reconciliation for a single rig.
+func (d *Daemon) reconcileDaytonaRig(rigName, shortID string, backend *config.RemoteBackend) {
+	installPrefix := constants.InstallPrefix(shortID)
+	client := daytona.NewClient(installPrefix)
+
+	listCtx, listCancel := context.WithTimeout(d.ctx, constants.DaytonaListTimeout)
+	defer listCancel()
+
+	// Get all workspaces owned by this installation.
+	workspaces, err := client.ListOwned(listCtx)
+	if err != nil {
+		d.logger.Printf("Warning: daytona reconcile %s: list workspaces failed: %v", rigName, err)
+		return
+	}
+
+	// Get polecat agent beads with daytona_workspace set.
+	agentBeads := d.listDaytonaPolecatBeads(rigName)
+
+	// Run discovery.
+	report := daytona.DiscoverWorkspaces(rigName, workspaces, agentBeads)
+
+	d.logger.Printf("Daytona reconcile %s: healthy=%d orphaned_ws=%d orphaned_beads=%d spawning_skipped=%d",
+		rigName, report.Healthy, report.OrphanedWorkspaces, report.OrphanedBeads, report.SpawningSkipped)
+
+	if report.OrphanedWorkspaces == 0 && report.OrphanedBeads == 0 {
+		return // Nothing to reconcile.
+	}
+
+	// Build bead resetter callback — clears daytona_workspace field via bd CLI.
+	beadResetter := func(beadID string) error {
+		resetCmd := exec.Command(d.bdPath, "agent", "update", beadID,
+			"--set", "daytona_workspace=") //nolint:gosec // G204: bd is a trusted internal tool
+		resetCmd.Dir = d.config.TownRoot
+		resetCmd.Env = os.Environ()
+		if out, err := resetCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("bd agent update %s: %w (output: %s)", beadID, err, string(out))
+		}
+		return nil
+	}
+
+	// Build cert revoker callback — revokes mTLS certs via the proxy admin API
+	// before bead reset to prevent orphaned certs from authenticating.
+	adminAddr := constants.DefaultProxyAdminAddr
+	if backend.ProxyAdminAddr != "" {
+		adminAddr = backend.ProxyAdminAddr
+	}
+	proxyAdmin := proxy.NewAdminClient(adminAddr)
+	certRevoker := func(ctx context.Context, serial string) error {
+		return proxyAdmin.DenyCert(ctx, serial)
+	}
+
+	opts := daytona.ReconcileOptions{
+		AutoDelete:          backend.AutoDelete,
+		PerOperationTimeout: 30 * time.Second,
+	}
+
+	// Use parent context (not the list context) so each operation gets its own
+	// timeout budget via PerOperationTimeout, rather than sharing a single deadline.
+	result := daytona.Reconcile(d.ctx, client, report, opts, beadResetter, certRevoker, d.logger)
+
+	if len(result.Errors) > 0 {
+		d.logger.Printf("Daytona reconcile %s: %d errors occurred", rigName, len(result.Errors))
+	}
+}
+
+// listDaytonaPolecatBeads returns polecat agent beads for a rig that have
+// a daytona_workspace field set. Used for workspace reconciliation.
+func (d *Daemon) listDaytonaPolecatBeads(rigName string) []daytona.AgentBead {
+	var agents []struct {
+		ID          string   `json:"id"`
+		Labels      []string `json:"labels"`
+		Description string   `json:"description"`
+	}
+
+	if err := d.listAgentBeadsJSON(&agents); err != nil {
+		d.logger.Printf("Warning: daytona reconcile %s: failed to list agent beads: %v", rigName, err)
+		return nil
+	}
+
+	prefix := beads.GetPrefixForRig(d.config.TownRoot, rigName)
+	// Pattern: <prefix>-<rig>-polecat-<name>
+	beadPrefix := prefix + "-" + rigName + "-polecat-"
+
+	var result []daytona.AgentBead
+	for _, agent := range agents {
+		if !strings.HasPrefix(agent.ID, beadPrefix) {
+			continue
+		}
+
+		fields := beads.ParseAgentFields(agent.Description)
+		if fields.DaytonaWorkspace == "" {
+			continue // Local polecat, no daytona workspace.
+		}
+
+		// Extract polecat name from bead ID.
+		polecatName := strings.TrimPrefix(agent.ID, beadPrefix)
+		if polecatName == "" {
+			continue
+		}
+
+		result = append(result, daytona.AgentBead{
+			ID:                   agent.ID,
+			Polecat:              polecatName,
+			DaytonaWorkspaceName: fields.DaytonaWorkspace,
+			AgentState:           fields.AgentState,
+			CertSerial:           fields.CertSerial,
+		})
+	}
+
+	return result
 }

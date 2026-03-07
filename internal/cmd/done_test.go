@@ -251,11 +251,11 @@ func TestDoneCircularRedirectProtection(t *testing.T) {
 	}
 }
 
-// TestFindHookedBeadForAgent verifies that findHookedBeadForAgent correctly
-// finds hooked beads by querying status=hooked + assignee (hq-l6mm5).
+// TestGetIssueFromAgentHook verifies that getIssueFromAgentHook correctly
+// retrieves the issue ID from an agent's hook_bead field.
 // This is critical because branch names like "polecat/furiosa-mkb0vq9f" don't
-// contain the actual issue ID (test-845.1), but the status query finds it.
-func TestFindHookedBeadForAgent(t *testing.T) {
+// contain the actual issue ID (test-845.1), but the agent's hook does.
+func TestGetIssueFromAgentHook(t *testing.T) {
 	// Skip: bd CLI 0.47.2 has a bug where database writes don't commit
 	// ("sql: database is closed" during auto-flush). This blocks tests
 	// that need to create issues. See internal issue for tracking.
@@ -263,15 +263,15 @@ func TestFindHookedBeadForAgent(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		agentID     string
-		setupBeads  func(t *testing.T, bd *beads.Beads) // setup hooked bead
+		agentBeadID string
+		setupBeads  func(t *testing.T, bd *beads.Beads) // setup agent bead with hook
 		wantIssueID string
 	}{
 		{
-			name:    "hooked bead assigned to agent returns issue ID",
-			agentID: "testrig/polecats/furiosa",
+			name:        "agent with hook_bead returns issue ID",
+			agentBeadID: "test-testrig-polecat-furiosa",
 			setupBeads: func(t *testing.T, bd *beads.Beads) {
-				// Create a task and set it to hooked with assignee
+				// Create a task that will be hooked
 				_, err := bd.CreateWithID("test-456", beads.CreateOptions{
 					Title: "Task to be hooked",
 					Labels: []string{"gt:task"},
@@ -279,26 +279,42 @@ func TestFindHookedBeadForAgent(t *testing.T) {
 				if err != nil {
 					t.Fatalf("create task bead: %v", err)
 				}
-				hookedStatus := beads.StatusHooked
-				assignee := "testrig/polecats/furiosa"
-				if err := bd.Update("test-456", beads.UpdateOptions{
-					Status:   &hookedStatus,
-					Assignee: &assignee,
-				}); err != nil {
-					t.Fatalf("update bead to hooked: %v", err)
+
+				// Create agent bead using CreateAgentBead
+				// Agent ID format: <prefix>-<rig>-<role>-<name>
+				_, err = bd.CreateAgentBead("test-testrig-polecat-furiosa", "Test polecat agent", nil)
+				if err != nil {
+					t.Fatalf("create agent bead: %v", err)
+				}
+
+				// Set hook_bead on agent
+				if err := bd.SetHookBead("test-testrig-polecat-furiosa", "test-456"); err != nil {
+					t.Fatalf("set hook bead: %v", err)
 				}
 			},
 			wantIssueID: "test-456",
 		},
 		{
-			name:        "no hooked beads returns empty",
-			agentID:     "testrig/polecats/idle",
+			name:        "agent without hook_bead returns empty",
+			agentBeadID: "test-testrig-polecat-idle",
+			setupBeads: func(t *testing.T, bd *beads.Beads) {
+				// Create agent bead without hook
+				_, err := bd.CreateAgentBead("test-testrig-polecat-idle", "Test agent without hook", nil)
+				if err != nil {
+					t.Fatalf("create agent bead: %v", err)
+				}
+			},
+			wantIssueID: "",
+		},
+		{
+			name:        "nonexistent agent returns empty",
+			agentBeadID: "test-nonexistent",
 			setupBeads:  func(t *testing.T, bd *beads.Beads) {},
 			wantIssueID: "",
 		},
 		{
 			name:        "empty agent ID returns empty",
-			agentID:     "",
+			agentBeadID: "",
 			setupBeads:  func(t *testing.T, bd *beads.Beads) {},
 			wantIssueID: "",
 		},
@@ -321,9 +337,9 @@ func TestFindHookedBeadForAgent(t *testing.T) {
 
 			tt.setupBeads(t, bd)
 
-			got := findHookedBeadForAgent(bd, tt.agentID)
+			got := getIssueFromAgentHook(bd, tt.agentBeadID)
 			if got != tt.wantIssueID {
-				t.Errorf("findHookedBeadForAgent(%q) = %q, want %q", tt.agentID, got, tt.wantIssueID)
+				t.Errorf("getIssueFromAgentHook(%q) = %q, want %q", tt.agentBeadID, got, tt.wantIssueID)
 			}
 		})
 	}
@@ -1212,5 +1228,30 @@ func TestHookedBeadCloseNotRestrictedToHookedStatus(t *testing.T) {
 				t.Errorf("shouldClose for status %q = %v, want %v", tt.status, shouldClose, tt.wantClose)
 			}
 		})
+	}
+}
+
+func TestNewestBranchByTimestamp(t *testing.T) {
+	// base36 timestamps: older=1000 (decimal 46656), newer=zzzz (much larger)
+	branches := []string{
+		"polecat/garnet/gtd-abc@1000",
+		"polecat/garnet/gtd-xyz@zzzz",
+		"polecat/garnet/gtd-mid@a000",
+	}
+	got := newestBranchByTimestamp(branches)
+	if got != "polecat/garnet/gtd-xyz@zzzz" {
+		t.Errorf("newestBranchByTimestamp = %q, want polecat/garnet/gtd-xyz@zzzz", got)
+	}
+
+	// Single branch
+	got = newestBranchByTimestamp([]string{"polecat/garnet/gtd-abc@1000"})
+	if got != "polecat/garnet/gtd-abc@1000" {
+		t.Errorf("single branch: got %q", got)
+	}
+
+	// No timestamp suffix — falls back to first
+	got = newestBranchByTimestamp([]string{"polecat/garnet", "polecat/garnet/old"})
+	if got != "polecat/garnet" {
+		t.Errorf("no timestamp: got %q, want polecat/garnet", got)
 	}
 }
