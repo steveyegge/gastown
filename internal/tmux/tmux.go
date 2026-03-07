@@ -387,12 +387,13 @@ func (t *Tmux) checkSessionAfterCreate(name, command string) error {
 		return err
 	}
 
-	// Third check at 750ms: the exec-env pattern (exec env VAR=val binary)
+	// Third check at 1.25s: the exec-env pattern (exec env VAR=val binary)
 	// adds shell parsing overhead that can exceed 250ms on heavily loaded CI
-	// runners. This catches those late failures without impacting normal
-	// session creation (long-lived processes are still alive at this point).
+	// runners. We use a generous timeout because long-lived processes (Claude,
+	// sleep) are still alive at this point — the extra wait only costs time
+	// when the command actually fails quickly.
 	if strings.Contains(command, "exec env") || strings.Contains(command, "exec ") {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(1000 * time.Millisecond)
 		if dead, err := checkPaneDead(); dead {
 			return err
 		}
