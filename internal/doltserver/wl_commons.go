@@ -27,6 +27,8 @@ type WLCommonsStore interface {
 	ClaimWanted(wantedID, rigHandle string) error
 	SubmitCompletion(completionID, wantedID, rigHandle, evidence string) error
 	QueryWanted(wantedID string) (*WantedItem, error)
+	QueryExpiredClaims(timeout time.Duration) ([]*WantedItem, error)
+	ReleaseExpiredClaims(timeout time.Duration) (int, error)
 }
 
 // WLCommons implements WLCommonsStore using the real Dolt server.
@@ -47,6 +49,12 @@ func (w *WLCommons) SubmitCompletion(completionID, wantedID, rigHandle, evidence
 func (w *WLCommons) QueryWanted(wantedID string) (*WantedItem, error) {
 	return QueryWanted(w.townRoot, wantedID)
 }
+func (w *WLCommons) QueryExpiredClaims(timeout time.Duration) ([]*WantedItem, error) {
+	return QueryExpiredClaims(w.townRoot, timeout)
+}
+func (w *WLCommons) ReleaseExpiredClaims(timeout time.Duration) (int, error) {
+	return ReleaseExpiredClaims(w.townRoot, timeout)
+}
 
 // WantedItem represents a row in the wanted table.
 type WantedItem struct {
@@ -59,6 +67,7 @@ type WantedItem struct {
 	Tags            []string
 	PostedBy        string
 	ClaimedBy       string
+	ClaimedAt       *time.Time
 	Status          string
 	EffortLevel     string
 	SandboxRequired bool
@@ -151,6 +160,7 @@ CREATE TABLE IF NOT EXISTS wanted (
     tags JSON,
     posted_by VARCHAR(255),
     claimed_by VARCHAR(255),
+    claimed_at TIMESTAMP,
     status VARCHAR(32) DEFAULT 'open',
     effort_level VARCHAR(16) DEFAULT 'medium',
     evidence_url TEXT,
@@ -297,7 +307,7 @@ CALL DOLT_COMMIT('-m', 'wl post: %s');
 // and eliminates the need for DOLT_RESET on failure.
 func ClaimWanted(townRoot, wantedID, rigHandle string) error {
 	script := fmt.Sprintf(`USE %s;
-UPDATE wanted SET claimed_by='%s', status='claimed', updated_at=NOW()
+UPDATE wanted SET claimed_by='%s', claimed_at=NOW(), status='claimed', updated_at=NOW()
   WHERE id='%s' AND status='open';
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl claim: %s');
@@ -347,6 +357,80 @@ CALL DOLT_COMMIT('-m', 'wl done: %s');
 		return fmt.Errorf("wanted item %q is not claimed by %q or does not exist", wantedID, rigHandle)
 	}
 	return fmt.Errorf("completion failed: %w", err)
+}
+
+// ClaimTimeoutCutoff returns the UTC cutoff timestamp string for a given timeout duration.
+func ClaimTimeoutCutoff(timeout time.Duration) string {
+	return time.Now().UTC().Add(-timeout).Format("2006-01-02 15:04:05")
+}
+
+// QueryExpiredClaims returns claimed wanted items whose claimed_at is older than timeout.
+func QueryExpiredClaims(townRoot string, timeout time.Duration) ([]*WantedItem, error) {
+	cutoff := time.Now().UTC().Add(-timeout).Format("2006-01-02 15:04:05")
+	query := fmt.Sprintf(`USE %s; SELECT id, title, status, COALESCE(claimed_by, '') as claimed_by, COALESCE(claimed_at, '') as claimed_at FROM wanted WHERE status='claimed' AND claimed_at IS NOT NULL AND claimed_at < '%s';`,
+		WLCommonsDB, cutoff)
+
+	output, err := doltSQLQuery(townRoot, query)
+	if err != nil {
+		return nil, fmt.Errorf("querying expired claims: %w", err)
+	}
+
+	rows := parseSimpleCSV(output)
+	var items []*WantedItem
+	for _, row := range rows {
+		item := &WantedItem{
+			ID:        row["id"],
+			Title:     row["title"],
+			Status:    row["status"],
+			ClaimedBy: row["claimed_by"],
+		}
+		if v := row["claimed_at"]; v != "" {
+			if t, err := time.Parse("2006-01-02 15:04:05", v); err == nil {
+				item.ClaimedAt = &t
+			}
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// ReleaseExpiredClaims releases wanted items that have been claimed longer than
+// the given timeout. Returns the number of items released.
+func ReleaseExpiredClaims(townRoot string, timeout time.Duration) (int, error) {
+	cutoff := time.Now().UTC().Add(-timeout).Format("2006-01-02 15:04:05")
+
+	// Count how many will be released (for reporting).
+	countQuery := fmt.Sprintf(`USE %s; SELECT COUNT(*) as cnt FROM wanted WHERE status='claimed' AND claimed_at IS NOT NULL AND claimed_at < '%s';`,
+		WLCommonsDB, cutoff)
+	countOut, err := doltSQLQuery(townRoot, countQuery)
+	if err != nil {
+		return 0, fmt.Errorf("counting expired claims: %w", err)
+	}
+	rows := parseSimpleCSV(countOut)
+	count := 0
+	if len(rows) > 0 {
+		if v, ok := rows[0]["cnt"]; ok {
+			fmt.Sscanf(v, "%d", &count)
+		}
+	}
+	if count == 0 {
+		return 0, nil
+	}
+
+	script := fmt.Sprintf(`USE %s;
+UPDATE wanted SET status='open', claimed_by=NULL, claimed_at=NULL, updated_at=NOW()
+  WHERE status='claimed' AND claimed_at IS NOT NULL AND claimed_at < '%s';
+CALL DOLT_ADD('-A');
+CALL DOLT_COMMIT('-m', 'wl sweep: release %d expired claims');
+`, WLCommonsDB, cutoff, count)
+
+	if err := doltSQLScriptWithRetry(townRoot, script); err != nil {
+		if isNothingToCommit(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("releasing expired claims: %w", err)
+	}
+	return count, nil
 }
 
 // QueryWanted fetches a wanted item by ID. Returns nil if not found.

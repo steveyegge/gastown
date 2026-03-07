@@ -96,7 +96,7 @@ func claimWanted(store doltserver.WLCommonsStore, wantedID, rigHandle string) (*
 }
 
 func claimWantedInLocalClone(localDir, wantedID, rigHandle string) error {
-	script := fmt.Sprintf(`UPDATE wanted SET claimed_by='%s', status='claimed', updated_at=NOW()
+	script := fmt.Sprintf(`UPDATE wanted SET claimed_by='%s', claimed_at=NOW(), status='claimed', updated_at=NOW()
 WHERE id='%s' AND status='open';
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl claim: %s');`,

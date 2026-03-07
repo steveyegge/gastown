@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/doltserver"
 )
@@ -85,6 +86,8 @@ func (f *fakeWLCommonsStore) ClaimWanted(wantedID, rigHandle string) error {
 	}
 	item.Status = "claimed"
 	item.ClaimedBy = rigHandle
+	now := time.Now()
+	item.ClaimedAt = &now
 	return nil
 }
 
@@ -124,4 +127,36 @@ func (f *fakeWLCommonsStore) QueryWanted(wantedID string) (*doltserver.WantedIte
 	}
 	cp := *item
 	return &cp, nil
+}
+
+func (f *fakeWLCommonsStore) QueryExpiredClaims(timeout time.Duration) ([]*doltserver.WantedItem, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	cutoff := time.Now().Add(-timeout)
+	var expired []*doltserver.WantedItem
+	for _, item := range f.items {
+		if item.Status == "claimed" && item.ClaimedAt != nil && item.ClaimedAt.Before(cutoff) {
+			cp := *item
+			expired = append(expired, &cp)
+		}
+	}
+	return expired, nil
+}
+
+func (f *fakeWLCommonsStore) ReleaseExpiredClaims(timeout time.Duration) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	cutoff := time.Now().Add(-timeout)
+	count := 0
+	for _, item := range f.items {
+		if item.Status == "claimed" && item.ClaimedAt != nil && item.ClaimedAt.Before(cutoff) {
+			item.Status = "open"
+			item.ClaimedBy = ""
+			item.ClaimedAt = nil
+			count++
+		}
+	}
+	return count, nil
 }
