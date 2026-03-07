@@ -534,7 +534,7 @@ func stripEnvPrefixes(environ []string, prefixes ...string) []string {
 
 // List returns issues matching the given options.
 func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
-	args := []string{"list", "--json"}
+	args := []string{"list", "--flat", "--json"}
 
 	if opts.Status != "" {
 		args = append(args, "--status="+opts.Status)
