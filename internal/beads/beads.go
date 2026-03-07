@@ -601,6 +601,57 @@ func isJSONBytes(b []byte) bool {
 	return false
 }
 
+// ListMergeRequests returns merge-request beads from both the issues table
+// and the wisps table. MRs are created as ephemeral (wisps) by gt mq submit,
+// but bd list only queries the issues table. This method merges both sources,
+// mirroring the pattern used by ListAgentBeads.
+func (b *Beads) ListMergeRequests(opts ListOptions) ([]*Issue, error) {
+	// 1. Query issues table (bd list)
+	issueResults, err := b.List(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build dedup map from issues
+	seen := make(map[string]bool, len(issueResults))
+	for _, issue := range issueResults {
+		seen[issue.ID] = true
+	}
+
+	// 2. Query wisps table (bd mol wisp list)
+	wispArgs := []string{"mol", "wisp", "list", "--json"}
+	if opts.Status == "" || opts.Status == "open" {
+		// default: only open wisps (bd mol wisp list excludes closed by default)
+	} else {
+		wispArgs = append(wispArgs, "--all")
+	}
+	wispOut, wispErr := b.run(wispArgs...)
+	if wispErr == nil && len(wispOut) > 0 {
+		var wrapper struct {
+			Wisps []*Issue `json:"wisps"`
+		}
+		if jsonErr := json.Unmarshal(wispOut, &wrapper); jsonErr == nil {
+			for _, w := range wrapper.Wisps {
+				if seen[w.ID] {
+					continue // issues table entry wins
+				}
+				// Filter: must have gt:merge-request label OR title prefix "Merge: "
+				if HasLabel(w, "gt:merge-request") || strings.HasPrefix(w.Title, "Merge: ") {
+					// Apply status filter if needed
+					if opts.Status != "" && !strings.EqualFold(opts.Status, "all") {
+						if !strings.EqualFold(w.Status, opts.Status) {
+							continue
+						}
+					}
+					issueResults = append(issueResults, w)
+				}
+			}
+		}
+	}
+
+	return issueResults, nil
+}
+
 // ListByAssignee returns all issues assigned to a specific assignee.
 // The assignee is typically in the format "rig/polecats/polecatName" (e.g., "gastown/polecats/Toast").
 func (b *Beads) ListByAssignee(assignee string) ([]*Issue, error) {

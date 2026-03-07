@@ -221,6 +221,12 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 		}
 	}
 
+	// Query 3: Wisps table — ephemeral messages (protocol/lifecycle) are stored
+	// as wisps by shouldBeWisp(), but bd list only queries the issues table.
+	// Mirror the pattern from beads.ListAgentBeadsFromWisps().
+	wispMessages := m.listWispMessages(beadsDir, identities, seen)
+	messages = append(messages, wispMessages...)
+
 	return messages, nil
 }
 
@@ -238,6 +244,79 @@ func (m *Mailbox) identityVariants() []string {
 	}
 
 	return variants
+}
+
+// listWispMessages queries the wisps table for ephemeral messages matching the identity.
+// Protocol/lifecycle messages are stored as wisps by shouldBeWisp(), but bd list only
+// queries the issues table. This mirrors the pattern from beads.ListAgentBeadsFromWisps().
+func (m *Mailbox) listWispMessages(beadsDir string, identities []string, seen map[string]bool) []*Message {
+	// Build identity set for fast lookup
+	idSet := make(map[string]bool, len(identities))
+	for _, id := range identities {
+		idSet[strings.ToLower(id)] = true
+	}
+
+	// Query all wisps via bd mol wisp list --json
+	args := []string{"mol", "wisp", "list", "--json"}
+	ctx, cancel := bdReadCtx()
+	stdout, err := runBdCommand(ctx, args, m.workDir, beadsDir)
+	cancel()
+	if err != nil {
+		return nil // Wisps table may not exist yet
+	}
+
+	// bd mol wisp list --json returns {"wisps": [...], "count": N, ...}
+	var wrapper struct {
+		Wisps []BeadsMessage `json:"wisps"`
+	}
+	if err := json.Unmarshal(stdout, &wrapper); err != nil {
+		return nil
+	}
+
+	var messages []*Message
+	for i := range wrapper.Wisps {
+		w := &wrapper.Wisps[i]
+		if seen[w.ID] {
+			continue
+		}
+		// Only include messages (gt:message label)
+		if !hasLabel(w.Labels, "gt:message") {
+			continue
+		}
+		// Only open or hooked status
+		if w.Status != "open" && w.Status != "hooked" {
+			continue
+		}
+		// Check assignee matches identity (direct messages)
+		assigneeMatch := idSet[strings.ToLower(w.Assignee)]
+		// Check CC match
+		ccMatch := false
+		for _, label := range w.Labels {
+			if strings.HasPrefix(label, "cc:") {
+				ccID := strings.TrimPrefix(label, "cc:")
+				if idSet[strings.ToLower(ccID)] {
+					ccMatch = true
+					break
+				}
+			}
+		}
+		if !assigneeMatch && !ccMatch {
+			continue
+		}
+		seen[w.ID] = true
+		messages = append(messages, w.ToMessage())
+	}
+	return messages
+}
+
+// hasLabel checks if a label exists in a labels slice.
+func hasLabel(labels []string, target string) bool {
+	for _, l := range labels {
+		if l == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Mailbox) listLegacy() ([]*Message, error) {

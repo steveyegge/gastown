@@ -57,7 +57,7 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		// Cannot use b.Ready() because it excludes ephemeral beads,
 		// and MRs are ephemeral by design (see gt-t5t6y).
 		opts.Status = "open"
-		allOpen, err := b.List(opts)
+		allOpen, err := b.ListMergeRequests(opts)
 		if err != nil {
 			return fmt.Errorf("querying ready MRs: %w", err)
 		}
@@ -68,7 +68,7 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			issues = append(issues, issue)
 		}
 	} else {
-		issues, err = b.List(opts)
+		issues, err = b.ListMergeRequests(opts)
 		if err != nil {
 			return fmt.Errorf("querying merge queue: %w", err)
 		}

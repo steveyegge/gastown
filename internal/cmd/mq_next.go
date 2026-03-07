@@ -65,7 +65,7 @@ func runMQNext(cmd *cobra.Command, args []string) error {
 		Priority: -1, // No priority filter
 	}
 
-	issues, err := b.List(opts)
+	issues, err := b.ListMergeRequests(opts)
 	if err != nil {
 		return fmt.Errorf("querying merge queue: %w", err)
 	}
