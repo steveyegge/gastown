@@ -30,7 +30,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 # Install Go from official tarball (apt golang-go is too old)
-RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" | tar -C /usr/local -xz
+ARG TARGETARCH
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz" | tar -C /usr/local -xz
 ENV PATH="/usr/local/go/bin:/home/agent/go/bin:${PATH}"
 
 # Install beads (bd) and dolt
