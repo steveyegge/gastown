@@ -981,7 +981,11 @@ notifyWitness:
 	}
 
 	// Update agent bead state (ZFC: self-report completion)
-	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
+	// gt-uhj8: Pass mrSubmitted so we skip closing the work bead when an MR
+	// was created. The Refinery closes the source issue after merge — closing
+	// it here allows dependents to dispatch before the code lands on main.
+	mrSubmitted := mrID != "" && !mrFailed
+	updateAgentStateOnDone(cwd, townRoot, exitType, issueID, mrSubmitted)
 
 	// Persistent polecat model (gt-hdf8): polecats transition to IDLE after completion.
 	// Session stays alive, sandbox preserved, worktree synced to main for reuse.
@@ -1165,6 +1169,10 @@ func clearDoneCheckpoints(bd *beads.Beads, agentBeadID string) {
 // Uses issueID directly to find the hooked bead instead of reading the agent bead's
 // hook_bead slot (hq-l6mm5: direct bead tracking).
 //
+// gt-uhj8: When mrSubmitted is true, the work bead is NOT closed here. The Refinery
+// closes it after merge (engineer.go). Closing prematurely allows dependents to
+// dispatch before the dependency code lands on main.
+//
 // Per gt-zecmc: observable states ("done", "idle") removed - use tmux to discover.
 // Non-observable states ("stuck", "awaiting-gate") are still set since they represent
 // intentional agent decisions that can't be observed from tmux.
@@ -1174,7 +1182,7 @@ func clearDoneCheckpoints(bd *beads.Beads, agentBeadID string) {
 // BUG FIX (hq-3xaxy): This function must be resilient to working directory deletion.
 // If the polecat's worktree is deleted before gt done finishes, we use env vars as fallback.
 // All errors are warnings, not failures - gt done must complete even if bead ops fail.
-func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
+func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string, mrSubmitted bool) {
 	// Get role context - try multiple sources for resilience
 	roleInfo, err := GetRoleWithContext(cwd, townRoot)
 	if err != nil {
@@ -1280,8 +1288,14 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 				}
 			}
 
-			// Acceptance criteria gate: skip close if criteria are unchecked.
-			if unchecked := beads.HasUncheckedCriteria(hookedBead); unchecked > 0 {
+			// gt-uhj8: Skip closing the work bead when an MR was submitted to the
+			// Refinery merge queue. The Refinery closes the source issue after merge
+			// (engineer.go). Closing here would allow dependents to dispatch before
+			// the code lands on main.
+			if mrSubmitted {
+				fmt.Fprintf(os.Stderr, "Bead %s left open — Refinery will close after merge\n", hookedBeadID)
+			} else if unchecked := beads.HasUncheckedCriteria(hookedBead); unchecked > 0 {
+				// Acceptance criteria gate: skip close if criteria are unchecked.
 				style.PrintWarning("hooked bead %s has %d unchecked acceptance criteria — skipping close", hookedBeadID, unchecked)
 				fmt.Fprintf(os.Stderr, "  The bead will remain open for witness/mayor review.\n")
 			} else if err := bd.Close(hookedBeadID); err != nil {
