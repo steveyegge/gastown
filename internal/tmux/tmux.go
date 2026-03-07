@@ -380,12 +380,22 @@ func (t *Tmux) checkSessionAfterCreate(name, command string) error {
 	}
 
 	// Second check at 250ms: catches exec failures on loaded CI runners where
-	// process startup takes longer than 50ms. This is the fix for CI getting
-	// false negatives on TestNewSessionWithCommand_ExecEnvBadBinary. Normal
-	// long-lived sessions (Claude, shell) will still be alive here and return nil.
+	// process startup takes longer than 50ms. Normal long-lived sessions
+	// (Claude, shell) will still be alive here and return nil.
 	time.Sleep(200 * time.Millisecond)
 	if dead, err := checkPaneDead(); dead {
 		return err
+	}
+
+	// Third check at 750ms: the exec-env pattern (exec env VAR=val binary)
+	// adds shell parsing overhead that can exceed 250ms on heavily loaded CI
+	// runners. This catches those late failures without impacting normal
+	// session creation (long-lived processes are still alive at this point).
+	if strings.Contains(command, "exec env") || strings.Contains(command, "exec ") {
+		time.Sleep(500 * time.Millisecond)
+		if dead, err := checkPaneDead(); dead {
+			return err
+		}
 	}
 
 	// Pane is alive — restore default (no need to keep dead sessions around)
