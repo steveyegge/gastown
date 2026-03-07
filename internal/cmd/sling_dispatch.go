@@ -280,11 +280,12 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	// 6. Instantiate formula on bead (wisp + bond)
 	beadToHook := params.BeadID
 	attachedMoleculeID := ""
+	var allVars []string
 	if params.FormulaName != "" && formulaCooked {
 		// Auto-inject rig command vars as defaults (user --var flags override)
 		rigCmdVars := loadRigCommandVars(townRoot, params.RigName)
 		// Build per-bead vars: rig defaults first, then user vars (higher priority)
-		allVars := append(rigCmdVars, params.Vars...)
+		allVars = append(rigCmdVars, params.Vars...)
 		if spawnInfo.BaseBranch != "" && spawnInfo.BaseBranch != "main" {
 			allVars = append(allVars, fmt.Sprintf("base_branch=%s", spawnInfo.BaseBranch))
 		}
@@ -333,6 +334,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		AttachedFormula:  params.FormulaName,
 		NoMerge:          params.NoMerge,
 		Mode:             params.Mode,
+		FormulaVars:      strings.Join(allVars, "\n"),
 	}
 	// Use beadToHook for the update target (may differ from beadID when formula-on-bead)
 	if err := storeFieldsInBead(beadToHook, fieldUpdates); err != nil {

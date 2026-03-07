@@ -135,7 +135,9 @@ func showFormulaSteps(formulaName, label string) {
 
 // showFormulaStepsFull renders formula steps with full descriptions.
 // Used for polecat work formulas where step details are the primary instructions.
-func showFormulaStepsFull(formulaName string) {
+// formulaVars is a newline-separated string of key=value pairs that override
+// the formula's default variable values for {{var}} template substitution.
+func showFormulaStepsFull(formulaName, formulaVars string) {
 	content, err := formula.GetEmbeddedFormulaContent(formulaName)
 	if err != nil {
 		style.PrintWarning("could not load formula %s: %v", formulaName, err)
@@ -152,15 +154,50 @@ func showFormulaStepsFull(formulaName string) {
 		return
 	}
 
+	// Build var substitution map: formula defaults first, then overrides.
+	vars := make(map[string]string)
+	for k, v := range f.Vars {
+		if v.Default != "" {
+			vars[k] = v.Default
+		}
+	}
+	for _, line := range strings.Split(formulaVars, "\n") {
+		line = strings.TrimSpace(line)
+		if k, v, ok := strings.Cut(line, "="); ok && k != "" {
+			vars[k] = v
+		}
+	}
+
 	fmt.Println()
 	fmt.Printf("**Formula Checklist** (%d steps from %s):\n\n", len(f.Steps), formulaName)
 	for i, step := range f.Steps {
-		fmt.Printf("### Step %d: %s\n\n", i+1, step.Title)
+		title := substituteFormulaVars(step.Title, vars)
+		fmt.Printf("### Step %d: %s\n\n", i+1, title)
 		if step.Description != "" {
-			fmt.Println(step.Description)
+			fmt.Println(substituteFormulaVars(step.Description, vars))
 			fmt.Println()
 		}
 	}
+}
+
+// substituteFormulaVars replaces {{key}} placeholders in text with values from vars.
+func substituteFormulaVars(text string, vars map[string]string) string {
+	for k, v := range vars {
+		text = strings.ReplaceAll(text, "{{"+k+"}}", v)
+	}
+	return text
+}
+
+// extractFormulaVar extracts a specific key's value from a newline-separated
+// key=value string (as stored in AttachmentFields.FormulaVars).
+// Returns "" if the key is not found.
+func extractFormulaVar(formulaVars, key string) string {
+	for _, line := range strings.Split(formulaVars, "\n") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok && k == key {
+			return v
+		}
+	}
+	return ""
 }
 
 // truncateDescription truncates a multi-line description to a single line summary.

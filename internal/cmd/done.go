@@ -737,18 +737,36 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			}
 		}
 
-		// Determine target branch (auto-detect integration branch if applicable)
-		// Only if refinery integration branch auto-targeting is enabled
+		// Determine target branch for the MR.
+		// Priority: explicit --base-branch > integration branch auto-detect > rig default.
 		target := defaultBranch
-		refineryEnabled := true
-		settingsPath := filepath.Join(townRoot, rigName, "settings", "config.json")
-		if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.MergeQueue != nil {
-			refineryEnabled = settings.MergeQueue.IsRefineryIntegrationEnabled()
+
+		// Check for explicit --base-branch override (stored in formula vars at sling time).
+		// When gt sling is called with --base-branch, the value is persisted in the bead's
+		// formula_vars field. If it differs from the rig's default branch, use it as the
+		// MR target so the refinery merges into the correct branch (GH#2357).
+		if sourceIssueForNoMerge != nil {
+			if af := beads.ParseAttachmentFields(sourceIssueForNoMerge); af != nil {
+				if bb := extractFormulaVar(af.FormulaVars, "base_branch"); bb != "" && bb != defaultBranch {
+					target = bb
+					fmt.Printf("  Target branch override: %s (from --base-branch)\n", target)
+				}
+			}
 		}
-		if refineryEnabled {
-			autoTarget, err := beads.DetectIntegrationBranch(bd, g, issueID)
-			if err == nil && autoTarget != "" {
-				target = autoTarget
+
+		// Auto-detect integration branch from epic hierarchy (if enabled).
+		// Only overrides if no explicit --base-branch was set (target == defaultBranch).
+		if target == defaultBranch {
+			refineryEnabled := true
+			settingsPath := filepath.Join(townRoot, rigName, "settings", "config.json")
+			if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.MergeQueue != nil {
+				refineryEnabled = settings.MergeQueue.IsRefineryIntegrationEnabled()
+			}
+			if refineryEnabled {
+				autoTarget, err := beads.DetectIntegrationBranch(bd, g, issueID)
+				if err == nil && autoTarget != "" {
+					target = autoTarget
+				}
 			}
 		}
 

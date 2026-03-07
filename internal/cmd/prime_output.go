@@ -534,7 +534,7 @@ func outputAttachmentStatus(ctx RoleContext) {
 
 	// Show inline formula steps if formula name is known, else fall back to bd mol current
 	if attachment.AttachedFormula != "" {
-		showFormulaStepsFull(attachment.AttachedFormula)
+		showFormulaStepsFull(attachment.AttachedFormula, attachment.FormulaVars)
 	} else {
 		showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
 	}
