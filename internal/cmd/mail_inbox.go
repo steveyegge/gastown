@@ -121,7 +121,7 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 			style.Dim.Render(msg.ID),
 			msg.From)
 		fmt.Printf("      %s\n",
-			style.Dim.Render(msg.Timestamp.Format("2006-01-02 15:04")))
+			style.Dim.Render(msg.Timestamp.Local().Format("2006-01-02 15:04")))
 	}
 
 	// Ack after output so human-readable display is not delayed by bd subprocesses.
@@ -205,7 +205,7 @@ func runMailRead(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s %s%s%s\n\n", style.Bold.Render("Subject:"), msg.Subject, typeStr, priorityStr)
 	fmt.Printf("From: %s\n", msg.From)
 	fmt.Printf("To: %s\n", msg.To)
-	fmt.Printf("Date: %s\n", msg.Timestamp.Format("2006-01-02 15:04:05"))
+	fmt.Printf("Date: %s\n", msg.Timestamp.Local().Format("2006-01-02 15:04:05"))
 	fmt.Printf("ID: %s\n", style.Dim.Render(msg.ID))
 
 	if msg.ThreadID != "" {

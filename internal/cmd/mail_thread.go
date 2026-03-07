@@ -69,7 +69,7 @@ func runMailThread(cmd *cobra.Command, args []string) error {
 			style.Dim.Render(msg.ID),
 			msg.From, msg.To)
 		fmt.Printf("    %s\n",
-			style.Dim.Render(msg.Timestamp.Format("2006-01-02 15:04")))
+			style.Dim.Render(msg.Timestamp.Local().Format("2006-01-02 15:04")))
 
 		if msg.Body != "" {
 			fmt.Printf("    %s\n", msg.Body)

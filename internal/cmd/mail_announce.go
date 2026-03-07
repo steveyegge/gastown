@@ -149,7 +149,7 @@ func readAnnounceChannel(townRoot string, cfg *config.MessagingConfig, channelNa
 			style.Dim.Render(msg.ID),
 			msg.From)
 		fmt.Printf("    %s\n",
-			style.Dim.Render(msg.Created.Format("2006-01-02 15:04")))
+			style.Dim.Render(msg.Created.Local().Format("2006-01-02 15:04")))
 		if msg.Description != "" {
 			// Show first line of description as preview
 			lines := strings.SplitN(msg.Description, "\n", 2)
