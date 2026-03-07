@@ -16,6 +16,7 @@
 {"issue_id":"gt-2e5q","label":"formula"}
 {"issue_id":"gt-2y77","label":"efficiency"}
 {"issue_id":"gt-2y77","label":"format"}
+{"issue_id":"gt-3bn5g","label":"desire-path"}
 {"issue_id":"gt-4d7p","label":"zfc-violation"}
 {"issue_id":"gt-4m7r","label":"mail"}
 {"issue_id":"gt-4m7r","label":"refinery"}
@@ -109,6 +110,7 @@
 {"issue_id":"gt-gastown-crew-zhora","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-ace","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-angharad","label":"gt:agent"}
+{"issue_id":"gt-gastown-polecat-blackfinger","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-bullet","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-bullet-farmer","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-buzzard","label":"gt:agent"}
@@ -116,6 +118,7 @@
 {"issue_id":"gt-gastown-polecat-capable","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-cheedo","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-cheedo","label":"gt:agent"}
+{"issue_id":"gt-gastown-polecat-chrome","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-chumbucket","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-citadel","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-coma","label":"gt:agent"}
@@ -127,11 +130,13 @@
 {"issue_id":"gt-gastown-polecat-dinki","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-furiosa","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-furiosa","label":"gt:agent"}
+{"issue_id":"gt-gastown-polecat-fury","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-gastown","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-glory","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-goose","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-immortan","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-imperator","label":"gt:agent"}
+{"issue_id":"gt-gastown-polecat-interceptor","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-keeper","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-keeper","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-max","label":"gt:agent"}
@@ -143,8 +148,10 @@
 {"issue_id":"gt-gastown-polecat-prime","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-rictus","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-rictus","label":"gt:agent"}
+{"issue_id":"gt-gastown-polecat-road-warrior","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-rockryder","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-scrotus","label":"gt:agent"}
+{"issue_id":"gt-gastown-polecat-shiny","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-slit","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-slit","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-splendid","label":"gt:agent"}
@@ -155,6 +162,8 @@
 {"issue_id":"gt-gastown-polecat-valkyrie","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-vuvalini","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-warboy","label":"gt:agent"}
+{"issue_id":"gt-gastown-polecat-wasteland","label":"gt:agent"}
+{"issue_id":"gt-gastown-polecat-wraith","label":"gt:agent"}
 {"issue_id":"gt-gastown-polecat-wretched","label":"gt:agent"}
 {"issue_id":"gt-gastown-refinery","label":"gt:agent"}
 {"issue_id":"gt-gastown-refinery","label":"idle:2"}
@@ -312,6 +321,7 @@
 {"issue_id":"gt-wisp-a9dse","label":"rig:gastown"}
 {"issue_id":"gt-wisp-a9dse","label":"type:plugin-run"}
 {"issue_id":"gt-wisp-auq9a","label":"gt:merge-request"}
+{"issue_id":"gt-wisp-b10bm","label":"gt:merge-request"}
 {"issue_id":"gt-wisp-bkx9h","label":"gt:merge-request"}
 {"issue_id":"gt-wisp-cat3s","label":"gt:merge-request"}
 {"issue_id":"gt-wisp-eojz","label":"gt:merge-request"}
@@ -326,6 +336,7 @@
 {"issue_id":"gt-wisp-m6nu","label":"gt:merge-request"}
 {"issue_id":"gt-wisp-mbiq","label":"gt:merge-request"}
 {"issue_id":"gt-wisp-mbiq","label":"stale:polecat-nuked"}
+{"issue_id":"gt-wisp-mj9te","label":"gt:merge-request"}
 {"issue_id":"gt-wisp-mk4v","label":"gt:merge-request"}
 {"issue_id":"gt-wisp-molml","label":"idle:5"}
 {"issue_id":"gt-wisp-nlgfh","label":"idle:1"}
