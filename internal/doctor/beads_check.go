@@ -256,8 +256,8 @@ type rigsConfigBeadsConfig struct {
 }
 
 type rigsConfigFile struct {
-	Version int                         `json:"version"`
-	Rigs    map[string]rigsConfigEntry  `json:"rigs"`
+	Version int                        `json:"version"`
+	Rigs    map[string]rigsConfigEntry `json:"rigs"`
 }
 
 func loadRigsConfig(path string) (*rigsConfigFile, error) {
@@ -280,7 +280,7 @@ func saveRigsConfig(path string, cfg *rigsConfigFile) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0o644)
 }
 
 // beadShower is an interface for fetching bead information.
@@ -558,6 +558,7 @@ func (c *DatabasePrefixCheck) getDBPrefix(rigPath string) (string, error) {
 }
 
 // Fix updates database configs to match routes.jsonl prefixes.
+// Logs each change visibly to prevent silent prefix corruption (GH#2455).
 func (c *DatabasePrefixCheck) Fix(ctx *CheckContext) error {
 	// Re-run check to populate mismatches if needed
 	if len(c.mismatches) == 0 {
@@ -568,6 +569,10 @@ func (c *DatabasePrefixCheck) Fix(ctx *CheckContext) error {
 	}
 
 	for _, m := range c.mismatches {
+		// Safety: log what we're about to change so corruption is visible (GH#2455)
+		fmt.Fprintf(os.Stderr, "WARNING: database-prefix fix: %s: changing issue_prefix from %q to %q (per routes.jsonl)\n",
+			m.rigPath, m.dbPrefix, m.routesPrefix)
+
 		cmd := exec.Command("bd", "config", "set", "issue_prefix", m.routesPrefix)
 		cmd.Dir = filepath.Join(ctx.TownRoot, m.rigPath)
 		if output, err := cmd.CombinedOutput(); err != nil {
