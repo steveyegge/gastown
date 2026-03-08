@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -870,21 +871,19 @@ func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 	}
 	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
 
-	// Ensure BEADS_DOLT_PORT is set when GT_DOLT_PORT is present, so that
-	// bd subprocesses connect to the correct Dolt server (especially in tests
-	// where an ephemeral server runs on a non-default port).
-	var gtDoltPort string
+	// Ensure BEADS_DOLT_PORT is set so bd subprocesses connect to the correct
+	// Dolt server. Uses the same port resolution as the server itself
+	// (config.yaml > GT_DOLT_PORT env > default 3307).
 	hasBDP := false
 	for _, e := range filteredEnv {
-		if strings.HasPrefix(e, "GT_DOLT_PORT=") {
-			gtDoltPort = strings.TrimPrefix(e, "GT_DOLT_PORT=")
-		}
 		if strings.HasPrefix(e, "BEADS_DOLT_PORT=") {
 			hasBDP = true
+			break
 		}
 	}
-	if gtDoltPort != "" && !hasBDP {
-		filteredEnv = append(filteredEnv, "BEADS_DOLT_PORT="+gtDoltPort)
+	if !hasBDP {
+		resolvedPort := strconv.Itoa(doltserver.DefaultConfig(m.townRoot).Port)
+		filteredEnv = append(filteredEnv, "BEADS_DOLT_PORT="+resolvedPort)
 	}
 
 	// Run bd init if available (Dolt is the only backend since bd v0.51.0).
@@ -895,11 +894,10 @@ func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 		initArgs = append(initArgs, "--prefix", prefix)
 	}
 	initArgs = append(initArgs, "--server")
-	// When GT_DOLT_PORT is set (e.g., test environment with ephemeral server),
-	// pass --server-port so bd init configures the correct port in metadata.
-	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-		initArgs = append(initArgs, "--server-port", p)
-	}
+	// Always pass --server-port so bd connects to the correct Dolt server.
+	// DefaultConfig resolves the port from config.yaml > GT_DOLT_PORT env > default (3307).
+	cfg := doltserver.DefaultConfig(m.townRoot)
+	initArgs = append(initArgs, "--server-port", strconv.Itoa(cfg.Port))
 	cmd := exec.Command("bd", initArgs...)
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv
