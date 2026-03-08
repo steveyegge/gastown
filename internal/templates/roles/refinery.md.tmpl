@@ -228,7 +228,7 @@ GATE: Cannot proceed to merge without fix OR bead filed
 ```
 **FORBIDDEN**: Note failure and merge without tracking.
 
-**merge-push**: Merge to effective target and push immediately
+**merge-push**: Merge to effective target, push, and close beads
 ```bash
 ## Resolve <merge-target> per Target Resolution Rule above.
 git checkout <merge-target>
@@ -236,7 +236,17 @@ git merge --ff-only temp
 git push origin <merge-target>
 git branch -d temp
 git branch -d polecat/<worker>
+
+## Post-merge: close MR bead + source issue bead, delete remote branch
+{{ cmd }} mq post-merge {{ .RigName }} <mr-id>
+
+## Notify mayor and witness of successful merge
+gt nudge mayor "MERGED: mr=<mr-id> branch=polecat/<worker> issue=<source-issue>"
+gt nudge {{ .RigName }}/witness "MERGED: mr=<mr-id> branch=polecat/<worker> issue=<source-issue>"
 ```
+⚠️ **CRITICAL**: `{{ cmd }} mq post-merge` MUST run after every successful merge.
+Without it, the source task bead stays OPEN — blocking downstream dependencies
+and causing duplicate polecat dispatches.
 
 **loop-check**: More branches? Return to process-branch.
 
