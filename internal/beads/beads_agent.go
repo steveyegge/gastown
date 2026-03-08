@@ -636,10 +636,11 @@ func (b *Beads) ListAgentBeads() (map[string]*Issue, error) {
 	}
 	issuesByID := make(map[string]*Issue)
 	var issues []*Issue
-	if jsonErr := json.Unmarshal(out, &issues); jsonErr == nil {
-		for _, issue := range issues {
-			issuesByID[issue.ID] = issue
-		}
+	if jsonErr := json.Unmarshal(out, &issues); jsonErr != nil {
+		return nil, fmt.Errorf("parsing bd list --json output: %w", jsonErr)
+	}
+	for _, issue := range issues {
+		issuesByID[issue.ID] = issue
 	}
 
 	// Query wisps table as a fallback source.

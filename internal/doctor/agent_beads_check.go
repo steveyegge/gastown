@@ -76,11 +76,11 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	var checked int
 
 	// Build combined sets of known agent beads from both issues and wisps tables.
-	// Agent beads are ephemeral (stored in wisps), but we also check issues for
-	// backward compatibility. The wisps list doesn't include type/labels, so we
-	// track wisp IDs separately for existence checks.
-	allAgentBeads := make(map[string]*beads.Issue) // from issues table (has labels)
-	allWispIDs := make(map[string]bool)            // from wisps table (ID only)
+	// ListAgentBeads() merges both sources (issues take precedence for metadata).
+	// We track wisp IDs separately so checkAgentBead can skip label validation
+	// for wisp-sourced beads (wisps don't carry labels in list output).
+	allAgentBeads := make(map[string]*beads.Issue) // merged from issues + wisps
+	allWispIDs := make(map[string]bool)            // from wisps table (for label-skip)
 
 	// Load global agents from town beads
 	townBeadsPath := beads.GetTownBeadsPath(ctx.TownRoot)
@@ -117,8 +117,10 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	// don't expose labels in their list output).
 	checkAgentBead := func(id string) {
 		if issue, exists := allAgentBeads[id]; exists {
-			// Found in issues table — check label
-			if !beads.HasLabel(issue, "gt:agent") {
+			// Found in issues/wisps table — check label only for non-wisp beads.
+			// Wisps don't carry labels in their list output, so flagging them
+			// for missing gt:agent label is a false positive (GH#2499).
+			if !allWispIDs[id] && !beads.HasLabel(issue, "gt:agent") {
 				missingLabel = append(missingLabel, id)
 			}
 		} else if !allWispIDs[id] {
@@ -242,6 +244,11 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	// fails silently (e.g., legacy prefixes that can't be routed — GH#2127).
 	fixAgentBead := func(bd *beads.Beads, workDir, id, desc string, fields *beads.AgentFields) error {
 		if issue, exists := allAgentBeads[id]; exists {
+			// Skip label fix for wisp-sourced beads — wisps don't carry labels
+			// in their list output, so the absence is expected (GH#2499).
+			if allWispIDs[id] {
+				return nil
+			}
 			// In issues table — ensure it has the gt:agent label.
 			if !beads.HasLabel(issue, "gt:agent") {
 				// Try bd update first (works for well-routed beads).
