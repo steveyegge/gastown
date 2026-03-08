@@ -538,6 +538,17 @@ func (c *Curator) generateSummary(event *events.Event) string {
 		}
 		return "Multiple sessions died simultaneously"
 
+	case events.TypeProgress:
+		phase, _ := event.Payload["phase"].(string)
+		detail, _ := event.Payload["detail"].(string)
+		if phase != "" && detail != "" {
+			return fmt.Sprintf("%s: %s (%s)", event.Actor, phase, detail)
+		}
+		if phase != "" {
+			return fmt.Sprintf("%s: %s", event.Actor, phase)
+		}
+		return fmt.Sprintf("%s: working", event.Actor)
+
 	default:
 		return fmt.Sprintf("%s: %s", event.Actor, event.Type)
 	}

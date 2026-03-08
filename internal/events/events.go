@@ -74,6 +74,9 @@ const (
 	TypeSchedulerDispatch       = "scheduler_dispatch"        // Bead dispatched from scheduler
 	TypeSchedulerDispatchFailed = "scheduler_dispatch_failed" // Bead dispatch failed (requeued)
 	TypeSchedulerCloseRetry     = "scheduler_close_retry"     // Context close needed last-resort attempt
+
+	// Progress events (for feed visibility into agent work)
+	TypeProgress = "progress" // Agent reports current phase/step
 )
 
 // EventsFile is the name of the raw events log.
@@ -367,4 +370,17 @@ func SchedulerDispatchFailedPayload(beadID, rig, errMsg string) map[string]inter
 		"rig":   rig,
 		"error": errMsg,
 	}
+}
+
+// ProgressPayload creates a payload for progress events.
+// phase: current work phase (e.g., "reading codebase", "running tests", "pushing")
+// detail: optional extra context (e.g., file name, test output, branch name)
+func ProgressPayload(phase, detail string) map[string]interface{} {
+	p := map[string]interface{}{
+		"phase": phase,
+	}
+	if detail != "" {
+		p["detail"] = detail
+	}
+	return p
 }

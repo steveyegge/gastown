@@ -67,6 +67,35 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash(git push*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && AGENT=${GT_POLECAT:-${GT_CREW:-${GT_ROLE:-unknown}}} && gt log progress --agent \"$AGENT\" --phase pushing --detail \"$TOOL_INPUT\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git commit*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && AGENT=${GT_POLECAT:-${GT_CREW:-${GT_ROLE:-unknown}}} && gt log progress --agent \"$AGENT\" --phase committing"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(go test*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && AGENT=${GT_POLECAT:-${GT_CREW:-${GT_ROLE:-unknown}}} && gt log progress --agent \"$AGENT\" --phase \"running tests\""
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": "",

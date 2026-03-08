@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -25,6 +26,11 @@ var (
 	crashAgent    string
 	crashSession  string
 	crashExitCode int
+
+	// log progress flags
+	progressAgent  string
+	progressPhase  string
+	progressDetail string
 )
 
 var logCmd = &cobra.Command{
@@ -69,6 +75,21 @@ Examples:
 	RunE: runLogCrash,
 }
 
+var logProgressCmd = &cobra.Command{
+	Use:   "progress",
+	Short: "Emit a progress event to the activity feed",
+	Long: `Emit a progress event so the activity feed shows what agents are doing.
+
+Called by Claude Code hooks or agents to report current work phase.
+Progress events appear in 'gt feed' alongside lifecycle events.
+
+Examples:
+  gt log progress --agent gastown/polecats/Toast --phase "running tests"
+  gt log progress --agent gastown/polecats/Toast --phase "pushing" --detail "branch main"
+  gt log progress --agent gastown/crew/batty --phase "editing files" --detail "internal/cmd/log.go"`,
+	RunE: runLogProgress,
+}
+
 func init() {
 	logCmd.Flags().IntVarP(&logTail, "tail", "n", 20, "Number of events to show")
 	logCmd.Flags().StringVarP(&logType, "type", "t", "", "Filter by event type (spawn,wake,nudge,handoff,done,crash,kill)")
@@ -82,7 +103,15 @@ func init() {
 	logCrashCmd.Flags().IntVar(&crashExitCode, "exit-code", -1, "Exit code from pane")
 	_ = logCrashCmd.MarkFlagRequired("agent")
 
+	// progress subcommand flags
+	logProgressCmd.Flags().StringVar(&progressAgent, "agent", "", "Agent ID (e.g., gastown/polecats/Toast)")
+	logProgressCmd.Flags().StringVar(&progressPhase, "phase", "", "Current work phase (e.g., reading codebase, running tests)")
+	logProgressCmd.Flags().StringVar(&progressDetail, "detail", "", "Optional detail (e.g., file name, branch)")
+	_ = logProgressCmd.MarkFlagRequired("agent")
+	_ = logProgressCmd.MarkFlagRequired("phase")
+
 	logCmd.AddCommand(logCrashCmd)
+	logCmd.AddCommand(logProgressCmd)
 	rootCmd.AddCommand(logCmd)
 }
 
@@ -349,6 +378,12 @@ func runLogCrash(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// runLogProgress emits a progress event to the activity feed.
+func runLogProgress(cmd *cobra.Command, args []string) error {
+	return events.LogFeed(events.TypeProgress, progressAgent,
+		events.ProgressPayload(progressPhase, progressDetail))
 }
 
 // LogEvent is a helper that logs an event from anywhere in the codebase.
