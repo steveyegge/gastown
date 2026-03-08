@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -693,7 +694,9 @@ func runDogDone(cmd *cobra.Command, args []string) error {
 	t := tmux.NewTmux()
 	_ = t.SetRemainOnExit(sessionID, false)
 	fmt.Printf("  Session %s will terminate in 3s\n", sessionID)
-	killCmd := exec.Command("bash", "-c",
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	killCmd := exec.CommandContext(ctx, "bash", "-c",
 		fmt.Sprintf("sleep 3 && tmux kill-session -t '%s' 2>/dev/null", sessionID))
 	util.SetProcessGroup(killCmd)
 	if err := killCmd.Start(); err != nil {
