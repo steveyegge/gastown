@@ -85,12 +85,38 @@ func FindOrError(startDir string) (string, error) {
 }
 
 // FindFromCwd locates the town root from the current working directory.
+// Falls back to GT_TOWN_ROOT env var when CWD-based detection fails,
+// which can happen with symlinked rigs where the physical path is
+// outside the town root. (#2503)
 func FindFromCwd() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
+		// Fallback to GT_TOWN_ROOT env var if getcwd fails
+		if townRoot := os.Getenv("GT_TOWN_ROOT"); townRoot != "" {
+			if _, statErr := os.Stat(filepath.Join(townRoot, PrimaryMarker)); statErr == nil {
+				return townRoot, nil
+			}
+		}
 		return "", fmt.Errorf("getting current directory: %w", err)
 	}
-	return Find(cwd)
+
+	townRoot, err := Find(cwd)
+	if err != nil {
+		return "", err
+	}
+
+	// If Find returns empty (CWD outside town), fallback to GT_TOWN_ROOT.
+	// This handles symlinked rigs where os.Getwd() returns the physical path
+	// (e.g., ~/git/myproject/...) instead of the logical path (~/gt/myrig/...).
+	if townRoot == "" {
+		if envTownRoot := os.Getenv("GT_TOWN_ROOT"); envTownRoot != "" {
+			if _, statErr := os.Stat(filepath.Join(envTownRoot, PrimaryMarker)); statErr == nil {
+				return envTownRoot, nil
+			}
+		}
+	}
+
+	return townRoot, nil
 }
 
 // FindFromCwdOrError is like FindFromCwd but returns an error if not found.

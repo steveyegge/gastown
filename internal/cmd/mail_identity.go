@@ -28,10 +28,11 @@ func findMailWorkDir() (string, error) {
 //
 // Priority:
 //  1. BEADS_DIR environment variable (set by session manager for polecats)
-//  2. Walk up from CWD looking for .beads directory
+//  2. For polecat/crew worktrees: derive rig root from path
+//  3. Walk up from CWD looking for .beads directory
 //
 // Polecats use redirect-based beads access, so their worktree doesn't have a full
-// .beads directory. The session manager sets BEADS_DIR to the correct location.
+// .beads directory. We detect this case and return the rig's beads directory instead.
 func findLocalBeadsDir() (string, error) {
 	// Check BEADS_DIR environment variable first (set by session manager for polecats).
 	// This is important for polecats that use redirect-based beads access.
@@ -42,12 +43,44 @@ func findLocalBeadsDir() (string, error) {
 		}
 	}
 
-	// Fallback: walk up from CWD
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
 
+	// FIX (#2503): Detect polecat/crew worktrees and use rig's beads directory.
+	// Polecat worktrees are at: ~/gt/<rig>/polecats/<name>/<rig>/
+	// The rig's beads are at: ~/gt/<rig>/.beads
+	if strings.Contains(cwd, "/polecats/") || strings.Contains(cwd, "/crew/") {
+		townRoot, _ := workspace.FindFromCwd() // FindFromCwd now uses GT_TOWN_ROOT fallback
+		rigName := os.Getenv("GT_RIG")         // Set by session manager
+
+		// Fallback: try to extract rig name from worktree path
+		if rigName == "" {
+			if idx := strings.Index(cwd, "/polecats/"); idx != -1 {
+				remainder := cwd[idx+len("/polecats/"):]
+				parts := strings.Split(remainder, string(filepath.Separator))
+				if len(parts) >= 2 {
+					rigName = parts[1] // <polecatName>/<rigName> -> rigName
+				}
+			}
+		}
+
+		if townRoot != "" && rigName != "" {
+			rigRoot := filepath.Join(townRoot, rigName)
+			// Check for beads in rig root
+			if _, err := os.Stat(filepath.Join(rigRoot, ".beads")); err == nil {
+				return rigRoot, nil
+			}
+			// Check for beads in mayor/rig (alternative layout)
+			mayorRigPath := filepath.Join(rigRoot, "mayor", "rig")
+			if _, err := os.Stat(filepath.Join(mayorRigPath, ".beads")); err == nil {
+				return mayorRigPath, nil
+			}
+		}
+	}
+
+	// Fallback: walk up from CWD
 	path := cwd
 	for {
 		if _, err := os.Stat(filepath.Join(path, ".beads")); err == nil {

@@ -239,7 +239,12 @@ func detectSessionState(ctx RoleContext) SessionState {
 	// Fallback: query hooked/in_progress beads by assignee.
 	agentID := getAgentIdentity(ctx)
 	if agentID != "" {
-		b := beads.New(ctx.WorkDir)
+		// FIX (#2503): Use rig's beads directory, not polecat worktree's.
+		// Polecat worktrees are at: ~/gt/<rig>/polecats/<name>/<rig>/
+		// The rig's beads are at: ~/gt/<rig>/.beads
+		// We derive the rig root by walking up from the worktree.
+		rigBeadsDir := resolveRigBeadsFromWorktree(ctx.WorkDir, ctx.TownRoot)
+		b := beads.New(rigBeadsDir)
 		// Primary: agent bead's hook_bead field (authoritative, set by bd slot set during sling)
 		agentBeadID := buildAgentBeadID(agentID, ctx.Role, ctx.TownRoot)
 		if agentBeadID != "" {
@@ -361,4 +366,55 @@ func checkHandoffMarkerDryRun(workDir string) {
 
 	// Output the warning but don't remove marker
 	outputHandoffWarning(prevSession)
+}
+
+
+
+// resolveRigBeadsFromWorktree finds the rig's beads directory from a polecat worktree.
+// Polecat worktrees are at: ~/gt/<rig>/polecats/<name>/<rig>/
+// The rig's beads are at: ~/gt/<rig>/.beads (or ~/gt/<rig>/mayor/rig/.beads)
+// Falls back to the worktree's beads if we can't find the rig.
+func resolveRigBeadsFromWorktree(worktree, townRoot string) string {
+	// If not in a worktree path, just use the worktree's beads
+	if !strings.Contains(worktree, "/polecats/") && !strings.Contains(worktree, "/crew/") {
+		return beads.ResolveBeadsDir(worktree)
+	}
+
+	// Get rig name from environment variable (set by session manager).
+	// This is more reliable than path parsing, especially for symlinked rigs
+	// where the physical path is outside the town root. (#2503)
+	rigName := os.Getenv("GT_RIG")
+	if rigName == "" {
+		// Fallback: try to extract from worktree path if it contains /polecats/
+		// Path format: .../polecats/<polecatName>/<rigName>/
+		if idx := strings.Index(worktree, "/polecats/"); idx != -1 {
+			remainder := worktree[idx+len("/polecats/"):]
+			parts := strings.Split(remainder, string(filepath.Separator))
+			if len(parts) >= 2 {
+				rigName = parts[1] // <polecatName>/<rigName> -> rigName
+			}
+		}
+	}
+
+	if rigName == "" || townRoot == "" {
+		return beads.ResolveBeadsDir(worktree)
+	}
+
+	rigRoot := filepath.Join(townRoot, rigName)
+
+	// Check for beads in rig root
+	rigBeadsPath := filepath.Join(rigRoot, ".beads")
+	if _, err := os.Stat(rigBeadsPath); err == nil {
+		return beads.ResolveBeadsDir(rigRoot)
+	}
+
+	// Check for beads in mayor/rig (alternative layout)
+	mayorRigPath := filepath.Join(rigRoot, "mayor", "rig")
+	mayorBeadsPath := filepath.Join(mayorRigPath, ".beads")
+	if _, err := os.Stat(mayorBeadsPath); err == nil {
+		return beads.ResolveBeadsDir(mayorRigPath)
+	}
+
+	// Fallback to worktree
+	return beads.ResolveBeadsDir(worktree)
 }

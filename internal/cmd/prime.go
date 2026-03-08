@@ -551,7 +551,11 @@ func findAgentWork(ctx RoleContext) *beads.Issue {
 
 // findAgentWorkOnce performs a single attempt to find hooked work for an agent.
 func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
-	b := beads.New(ctx.WorkDir)
+	// FIX (#2503): Use rig's beads directory, not polecat worktree's.
+	// Polecat worktrees are at: ~/gt/<rig>/polecats/<name>/<rig>/
+	// The rig's beads are at: ~/gt/<rig>/.beads
+	rigBeadsDir := resolveRigBeadsFromWorktree(ctx.WorkDir, ctx.TownRoot)
+	b := beads.New(rigBeadsDir)
 	// Primary: agent bead's hook_bead field (authoritative, set by bd slot set during sling)
 	agentBeadID := buildAgentBeadID(agentID, ctx.Role, ctx.TownRoot)
 	if agentBeadID != "" {

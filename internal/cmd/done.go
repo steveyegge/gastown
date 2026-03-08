@@ -1216,7 +1216,19 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 		// their work bead to in_progress during work. The exact-match check caused
 		// gt done to skip closing the bead, leaving it as unassigned open work after
 		// the hook was cleared — triggering infinite dispatch loops.
-		if hookedBead, err := bd.Show(hookedBeadID); err == nil && !beads.IssueStatus(hookedBead.Status).IsTerminal() {
+		//
+		// BUG FIX (#2496): Don't close hooked bead on DEFERRED exit.
+		// DEFERRED means "pausing work" not "completing work". The bead should stay
+		// open so it can be picked up again later. Only COMPLETED and ESCALATED
+		// should close the bead.
+		if exitType == ExitDeferred {
+			fmt.Printf("%s Bead %s left open (DEFERRED — work paused, not completed)\n", style.Bold.Render("→"), hookedBeadID)
+			// Clear the assignee so the bead becomes ready for re-dispatch
+			emptyAssignee := ""
+			if err := bd.Update(hookedBeadID, beads.UpdateOptions{Assignee: &emptyAssignee}); err != nil {
+				style.PrintWarning("could not clear assignee from bead: %v", err)
+			}
+		} else if hookedBead, err := bd.Show(hookedBeadID); err == nil && !beads.IssueStatus(hookedBead.Status).IsTerminal() {
 			// BUG FIX: Close attached molecule (wisp) BEFORE closing hooked bead.
 			// When using formula-on-bead (gt sling formula --on bead), the base bead
 			// has attached_molecule pointing to the wisp. Without this fix, gt done
@@ -1244,6 +1256,33 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 						return
 					}
 					// Not found = already burned/deleted by another path, continue
+				}
+			}
+
+			// BUG FIX (#2496): Premature close guard.
+			// If the bead was attached very recently (< 60 seconds), the polecat
+			// likely "sleepwalked" through the task without actually doing any work.
+			// This catches cases where polecats immediately run gt done without
+			// reading the task or attempting implementation.
+			// Note: `attachment` was already parsed above for molecule handling.
+			if attachment == nil {
+				attachment = beads.ParseAttachmentFields(hookedBead)
+			}
+			if attachment != nil && attachment.AttachedAt != "" {
+				if attachedAt, err := time.Parse(time.RFC3339, attachment.AttachedAt); err == nil {
+					attachDuration := time.Since(attachedAt)
+					if attachDuration < 60*time.Second && os.Getenv("GT_POLECAT") != "" {
+						style.PrintWarning("bead %s was only attached %v ago — polecat may have sleepwalked", hookedBeadID, attachDuration.Round(time.Second))
+						fmt.Fprintf(os.Stderr, "  Work was dispatched but polecat completed too quickly.\n")
+						fmt.Fprintf(os.Stderr, "  Bead will be left open for re-dispatch. Use --force to override.\n")
+						// Don't close — let the bead be re-dispatched
+						// Clear the assignee so it becomes ready again
+						emptyAssignee := ""
+						if err := bd.Update(hookedBeadID, beads.UpdateOptions{Assignee: &emptyAssignee}); err != nil {
+							style.PrintWarning("could not clear assignee: %v", err)
+						}
+						return
+					}
 				}
 			}
 
