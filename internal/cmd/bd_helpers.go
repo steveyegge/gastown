@@ -98,16 +98,31 @@ func filterEnvKey(env []string, key string) []string {
 	return result
 }
 
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return strings.TrimPrefix(e, prefix)
+		}
+	}
+	return ""
+}
+
 // buildEnv constructs the final environment slice based on configured options.
 func (b *bdCmd) buildEnv() []string {
 	env := b.env
+	forceAutoCommitOff := envValue(env, "GT_FORCE_BD_AUTOCOMMIT_OFF") == "1"
 
 	// Add BD_DOLT_AUTO_COMMIT=on for sequential dependent calls.
 	// Filter existing entries first — glibc getenv() returns the first match,
 	// so an existing "off" entry would shadow the appended "on".
 	if b.autoCommit {
 		env = filterEnvKey(env, "BD_DOLT_AUTO_COMMIT")
-		env = append(env, "BD_DOLT_AUTO_COMMIT=on")
+		if forceAutoCommitOff {
+			env = append(env, "BD_DOLT_AUTO_COMMIT=off")
+		} else {
+			env = append(env, "BD_DOLT_AUTO_COMMIT=on")
+		}
 	}
 
 	// Add GT_ROOT if specified.

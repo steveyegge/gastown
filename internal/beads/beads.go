@@ -28,20 +28,31 @@ var (
 )
 
 // bdAllowStale caches whether the installed bd supports --allow-stale.
-// Detected once at first use via `bd --allow-stale version`.
+// The cache is keyed by the resolved bd path so tests and subprocess stubs that
+// replace bd on PATH get re-probed instead of reusing stale capability state.
 var (
-	bdAllowStaleOnce   sync.Once
+	bdAllowStaleMu     sync.Mutex
+	bdAllowStalePath   string
 	bdAllowStaleResult bool
 )
 
 // BdSupportsAllowStale returns true if the installed bd binary accepts --allow-stale.
 func BdSupportsAllowStale() bool {
-	bdAllowStaleOnce.Do(func() {
-		cmd := exec.Command("bd", "--allow-stale", "version") //nolint:gosec // G204: bd is a trusted internal tool
-		if err := cmd.Run(); err == nil {
-			bdAllowStaleResult = true
-		}
-	})
+	bdPath, err := exec.LookPath("bd")
+	if err != nil {
+		return false
+	}
+
+	bdAllowStaleMu.Lock()
+	defer bdAllowStaleMu.Unlock()
+
+	if bdAllowStalePath == bdPath {
+		return bdAllowStaleResult
+	}
+
+	cmd := exec.Command(bdPath, "--allow-stale", "version") //nolint:gosec // G204: bd is a trusted internal tool
+	bdAllowStaleResult = cmd.Run() == nil
+	bdAllowStalePath = bdPath
 	return bdAllowStaleResult
 }
 

@@ -230,12 +230,19 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	// cause manifest contention and 'database is read only' errors. The Dolt server
 	// handles commits — individual auto-commits are unnecessary.
 	prevAutoCommit := os.Getenv("BD_DOLT_AUTO_COMMIT")
+	prevForceOff := os.Getenv("GT_FORCE_BD_AUTOCOMMIT_OFF")
 	os.Setenv("BD_DOLT_AUTO_COMMIT", "off")
+	os.Setenv("GT_FORCE_BD_AUTOCOMMIT_OFF", "1")
 	defer func() {
 		if prevAutoCommit == "" {
 			os.Unsetenv("BD_DOLT_AUTO_COMMIT")
 		} else {
 			os.Setenv("BD_DOLT_AUTO_COMMIT", prevAutoCommit)
+		}
+		if prevForceOff == "" {
+			os.Unsetenv("GT_FORCE_BD_AUTOCOMMIT_OFF")
+		} else {
+			os.Setenv("GT_FORCE_BD_AUTOCOMMIT_OFF", prevForceOff)
 		}
 	}()
 

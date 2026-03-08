@@ -234,6 +234,27 @@ func TestBdCmd_WithAutoCommit_OverridesParentOff(t *testing.T) {
 	}
 }
 
+func TestBdCmd_WithAutoCommit_RespectsForceOffOverride(t *testing.T) {
+	baseEnv := []string{
+		"PATH=/usr/bin",
+		"BD_DOLT_AUTO_COMMIT=on",
+		"GT_FORCE_BD_AUTOCOMMIT_OFF=1",
+	}
+
+	bdc := &bdCmd{
+		args:   []string{"update", "id"},
+		env:    baseEnv,
+		stderr: os.Stderr,
+	}
+	bdc.WithAutoCommit()
+	cmd := bdc.Build()
+	envMap := parseEnv(cmd.Env)
+
+	if envMap["BD_DOLT_AUTO_COMMIT"] != "off" {
+		t.Fatalf("BD_DOLT_AUTO_COMMIT = %q, want off", envMap["BD_DOLT_AUTO_COMMIT"])
+	}
+}
+
 func TestBdCmd_MultipleAutoCommit_DedupRemovesOld(t *testing.T) {
 	// Test that WithAutoCommit() deduplicates: removes existing "off" and adds "on".
 	// This ensures glibc getenv() (first-match-wins) returns the correct value.
