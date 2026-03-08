@@ -207,24 +207,32 @@ func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error)
 	// CloneBranch ensures the crew lands on the rig's default_branch even when
 	// it differs from the remote's HEAD. Falls back gracefully for new/empty repos.
 	defaultBranch := m.rig.DefaultBranch()
+
+	// Resolve the clone URL: use GitURL if available, otherwise fall back to the
+	// rig's local path (supports local-only rigs with no remote configured, GH#2545).
+	cloneURL := m.rig.GitURL
+	if cloneURL == "" {
+		cloneURL = m.rig.Path
+	}
+
 	if m.rig.LocalRepo != "" {
-		if err := m.git.CloneBranchWithReference(m.rig.GitURL, crewPath, defaultBranch, m.rig.LocalRepo); err != nil {
+		if err := m.git.CloneBranchWithReference(cloneURL, crewPath, defaultBranch, m.rig.LocalRepo); err != nil {
 			style.PrintWarning("could not clone branch %s with reference: %v", defaultBranch, err)
 			// Try branch without reference (network fetch), then reference without branch
-			if err := m.git.CloneBranch(m.rig.GitURL, crewPath, defaultBranch); err != nil {
+			if err := m.git.CloneBranch(cloneURL, crewPath, defaultBranch); err != nil {
 				style.PrintWarning("could not clone branch %s: %v", defaultBranch, err)
-				if err := m.git.CloneWithReference(m.rig.GitURL, crewPath, m.rig.LocalRepo); err != nil {
+				if err := m.git.CloneWithReference(cloneURL, crewPath, m.rig.LocalRepo); err != nil {
 					style.PrintWarning("could not clone with reference: %v", err)
-					if err := m.git.Clone(m.rig.GitURL, crewPath); err != nil {
+					if err := m.git.Clone(cloneURL, crewPath); err != nil {
 						return nil, fmt.Errorf("cloning rig: %w", err)
 					}
 				}
 			}
 		}
 	} else {
-		if err := m.git.CloneBranch(m.rig.GitURL, crewPath, defaultBranch); err != nil {
+		if err := m.git.CloneBranch(cloneURL, crewPath, defaultBranch); err != nil {
 			style.PrintWarning("could not clone branch %s, falling back to default: %v", defaultBranch, err)
-			if err := m.git.Clone(m.rig.GitURL, crewPath); err != nil {
+			if err := m.git.Clone(cloneURL, crewPath); err != nil {
 				return nil, fmt.Errorf("cloning rig: %w", err)
 			}
 		}
