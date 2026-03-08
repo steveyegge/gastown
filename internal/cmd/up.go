@@ -175,6 +175,14 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Discover rigs early so we can prefetch while daemon/deacon/mayor start
 	rigs := discoverRigs(townRoot)
 
+	// Safety: bring current agent out of DND on startup so orchestration nudges
+	// are not silently muted after a previous incident/debug session.
+	if changed, err := disableCurrentAgentDND(townRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not reset DND state: %v\n", err)
+	} else if changed && !upQuiet {
+		fmt.Printf("%s DND was enabled; reset to normal for current agent\n", style.SuccessPrefix)
+	}
+
 	// Start daemon, deacon, mayor, and rig prefetch in parallel
 	var daemonErr error
 	var daemonPID int
@@ -413,6 +421,48 @@ func printStatus(name string, ok bool, detail string) {
 	} else {
 		fmt.Printf("%s %s: %s\n", style.ErrorPrefix, name, detail)
 	}
+}
+
+// disableCurrentAgentDND resets DND for the current role context (if muted).
+// Returns true when a change was applied.
+func disableCurrentAgentDND(townRoot string) (bool, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return false, fmt.Errorf("getting current directory: %w", err)
+	}
+
+	roleInfo, err := GetRoleWithContext(cwd, townRoot)
+	if err != nil {
+		// No role context (or not in role workspace): nothing to change.
+		return false, nil
+	}
+
+	ctx := RoleContext{
+		Role:     roleInfo.Role,
+		Rig:      roleInfo.Rig,
+		Polecat:  roleInfo.Polecat,
+		TownRoot: townRoot,
+		WorkDir:  cwd,
+	}
+	agentBeadID := getAgentBeadID(ctx)
+	if agentBeadID == "" {
+		return false, nil
+	}
+
+	bd := beads.New(townRoot)
+	level, err := bd.GetAgentNotificationLevel(agentBeadID)
+	if err != nil {
+		// Missing bead/field should not block startup.
+		return false, nil
+	}
+	if level != beads.NotifyMuted {
+		return false, nil
+	}
+
+	if err := bd.UpdateAgentNotificationLevel(agentBeadID, beads.NotifyNormal); err != nil {
+		return false, fmt.Errorf("updating notification level for %s: %w", agentBeadID, err)
+	}
+	return true, nil
 }
 
 // ensureDaemon starts the daemon if not running.
