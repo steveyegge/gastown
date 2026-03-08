@@ -283,6 +283,38 @@ func GetRigNameForPrefix(townRoot, prefix string) string {
 	return ""
 }
 
+// ResolveBeadsDirForID resolves the correct .beads directory for a given bead ID
+// based on prefix routing. currentBeadsDir is the caller's default beads directory
+// (typically the town-level .beads). If the bead ID's prefix maps to a different
+// rig via routes.jsonl, the resolved rig's beads directory is returned.
+// Returns currentBeadsDir if no routing is needed or prefix can't be resolved.
+func ResolveBeadsDirForID(currentBeadsDir, beadID string) string {
+	prefix := ExtractPrefix(beadID)
+	if prefix == "" {
+		return currentBeadsDir
+	}
+
+	routes, err := LoadRoutes(currentBeadsDir)
+	if err != nil || routes == nil {
+		return currentBeadsDir
+	}
+
+	for _, r := range routes {
+		if r.Prefix == prefix {
+			if r.Path == "." {
+				return currentBeadsDir // Town-level — already correct
+			}
+			// Rig-level bead — resolve to rig's beads directory.
+			// Derive town root from currentBeadsDir (parent of .beads).
+			townRoot := filepath.Dir(currentBeadsDir)
+			rigDir := filepath.Join(townRoot, r.Path)
+			return ResolveBeadsDir(rigDir)
+		}
+	}
+
+	return currentBeadsDir
+}
+
 // ResolveHookDir determines the directory for running bd update on a bead.
 // Since bd update doesn't support routing or redirects, we must resolve the
 // actual rig directory from the bead's prefix. hookWorkDir is only used as

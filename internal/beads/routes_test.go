@@ -218,6 +218,87 @@ func TestResolveHookDir(t *testing.T) {
 	}
 }
 
+func TestResolveBeadsDirForID(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create rig beads directory for gt- prefix
+	rigBeadsDir := filepath.Join(tmpDir, "gastown/mayor/rig/.beads")
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix": "gt-", "path": "gastown/mayor/rig"}
+{"prefix": "hq-", "path": "."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		beadID   string
+		expected string
+	}{
+		{
+			name:     "town-level bead returns currentBeadsDir",
+			beadID:   "hq-test123",
+			expected: beadsDir,
+		},
+		{
+			name:     "rig-prefixed bead resolves to rig beadsDir",
+			beadID:   "gt-abc",
+			expected: rigBeadsDir,
+		},
+		{
+			name:     "unknown prefix returns currentBeadsDir",
+			beadID:   "xx-unknown",
+			expected: beadsDir,
+		},
+		{
+			name:     "empty bead ID returns currentBeadsDir",
+			beadID:   "",
+			expected: beadsDir,
+		},
+		{
+			name:     "no hyphen returns currentBeadsDir",
+			beadID:   "nohyphen",
+			expected: beadsDir,
+		},
+		{
+			name:     "wisp bead (hq-wisp-xxx) resolves to town beads",
+			beadID:   "hq-wisp-abc123",
+			expected: beadsDir,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := ResolveBeadsDirForID(beadsDir, tc.beadID)
+			if result != tc.expected {
+				t.Errorf("ResolveBeadsDirForID(%q, %q) = %q, want %q",
+					beadsDir, tc.beadID, result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestResolveBeadsDirForID_NoRoutes(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// No routes.jsonl — should always return currentBeadsDir
+	result := ResolveBeadsDirForID(beadsDir, "gt-abc")
+	if result != beadsDir {
+		t.Errorf("expected %q, got %q", beadsDir, result)
+	}
+}
+
 func TestGetRigNameForPrefix(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
