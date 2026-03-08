@@ -543,6 +543,7 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
 			WithAutoCommit().
 			Dir(townBeads).
+			StripBeadsDir().
 			Stderr(&depStderr).
 			Run(); err != nil {
 			errMsg := strings.TrimSpace(depStderr.String())
@@ -651,6 +652,7 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 		if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
 			Dir(townBeads).
 			WithAutoCommit().
+			StripBeadsDir().
 			Stderr(&depStderr).
 			Run(); err != nil {
 			errMsg := strings.TrimSpace(depStderr.String())

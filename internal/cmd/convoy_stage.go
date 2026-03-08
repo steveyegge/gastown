@@ -711,7 +711,7 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string, title strin
 	// Track each slingable bead via bd dep add.
 	for _, beadID := range slingableIDs {
 		if out, err := BdCmd("dep", "add", convoyID, beadID, "--type=tracks").
-			Dir(townBeads).WithAutoCommit().
+			Dir(townBeads).WithAutoCommit().StripBeadsDir().
 			CombinedOutput(); err != nil {
 			return "", fmt.Errorf("bd dep add %s %s: %w\noutput: %s", convoyID, beadID, err, out)
 		}
@@ -749,7 +749,7 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 	for _, id := range desiredIDs {
 		if !currentIDs[id] {
 			if out, err := BdCmd("dep", "add", existingConvoyID, id, "--type=tracks").
-				Dir(townBeads).WithAutoCommit().
+				Dir(townBeads).WithAutoCommit().StripBeadsDir().
 				CombinedOutput(); err != nil {
 				return fmt.Errorf("bd dep add %s %s: %w\noutput: %s", existingConvoyID, id, err, out)
 			}
@@ -760,7 +760,7 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 	for id := range currentIDs {
 		if !desiredSet[id] {
 			if out, err := BdCmd("dep", "remove", existingConvoyID, id, "--type=tracks").
-				Dir(townBeads).WithAutoCommit().
+				Dir(townBeads).WithAutoCommit().StripBeadsDir().
 				CombinedOutput(); err != nil {
 				return fmt.Errorf("bd dep remove %s %s: %w\noutput: %s", existingConvoyID, id, err, out)
 			}
