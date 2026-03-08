@@ -197,15 +197,20 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("starting daemon: %w", err)
 	}
 
-	// Wait a moment for the daemon to initialize and acquire the lock
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify it started
-	running, pid, err = daemon.IsRunning(townRoot)
-	if err != nil {
-		return fmt.Errorf("checking daemon status: %w", err)
+	// Poll for daemon to initialize and acquire the lock (up to 3s)
+	var started bool
+	for range 30 {
+		time.Sleep(100 * time.Millisecond)
+		running, pid, err = daemon.IsRunning(townRoot)
+		if err != nil {
+			return fmt.Errorf("checking daemon status: %w", err)
+		}
+		if running {
+			started = true
+			break
+		}
 	}
-	if !running {
+	if !started {
 		return fmt.Errorf("daemon failed to start (check logs with 'gt daemon logs')")
 	}
 
