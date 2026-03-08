@@ -220,7 +220,7 @@ func checkPollution(port int) []PollutionRecord {
 		{"title LIKE '--%'", "--help artifacts"},
 		{"title LIKE 'Usage: %'", "CLI usage output"},
 		{"id LIKE 'offlinebrew-%'", "offlinebrew test prefix"},
-		{"id LIKE '%-wisp-%'", "wisp ID in issues table"},
+		{"id LIKE '%-wisp-%' AND (ephemeral IS NULL OR ephemeral = false)", "non-ephemeral wisp ID in issues table"},
 		{"title LIKE 'Test Issue%'", "test issue title"},
 		{"id LIKE 'test%'", "test ID prefix"},
 	}
