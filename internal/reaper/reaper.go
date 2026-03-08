@@ -32,6 +32,18 @@ func isNothingToCommit(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "nothing to commit")
 }
 
+// isTableNotFound returns true if the error indicates a missing table.
+// This happens when beads stores its data on a separate Dolt instance from
+// the gt Dolt server, so tables like issues/labels/dependencies don't exist
+// on the server the reaper connects to.
+func isTableNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "table not found") || strings.Contains(msg, "doesn't exist")
+}
+
 // DiscoverDatabases queries SHOW DATABASES on the Dolt server and returns
 // all production databases, filtering out system databases and test pollution.
 // Falls back to DefaultDatabases on any error.
@@ -213,14 +225,20 @@ func Scan(db *sql.DB, dbName string, maxAge, purgeAge, mailDeleteAge, staleIssue
 	}
 
 	// Count mail candidates.
+	// The issues/labels tables may not exist on the gt Dolt server if beads
+	// stores its data on a separate Dolt instance. Skip gracefully.
 	mailQuery := fmt.Sprintf(
 		"SELECT COUNT(*) FROM `%s`.issues WHERE status = 'closed' AND closed_at < ? AND id IN (SELECT issue_id FROM `%s`.labels WHERE label = 'gt:message')",
 		dbName, dbName)
 	if err := db.QueryRowContext(ctx, mailQuery, now.Add(-mailDeleteAge)).Scan(&result.MailCandidates); err != nil {
-		return nil, fmt.Errorf("count mail candidates: %w", err)
+		if !isTableNotFound(err) {
+			return nil, fmt.Errorf("count mail candidates: %w", err)
+		}
+		// issues/labels table not on this server — skip mail count
 	}
 
 	// Count stale issue candidates.
+	// Same caveat: issues/dependencies tables may live on a separate Dolt instance.
 	staleQuery := fmt.Sprintf(`
 		SELECT COUNT(*) FROM `+"`%s`"+`.issues i
 		WHERE i.status IN ('open', 'in_progress')
@@ -238,7 +256,10 @@ func Scan(db *sql.DB, dbName string, maxAge, purgeAge, mailDeleteAge, staleIssue
 			WHERE blocker.status IN ('open', 'in_progress')
 		)`, dbName, dbName, dbName, dbName, dbName)
 	if err := db.QueryRowContext(ctx, staleQuery, now.Add(-staleIssueAge)).Scan(&result.StaleCandidates); err != nil {
-		return nil, fmt.Errorf("count stale candidates: %w", err)
+		if !isTableNotFound(err) {
+			return nil, fmt.Errorf("count stale candidates: %w", err)
+		}
+		// issues/dependencies table not on this server — skip stale count
 	}
 
 	// Total open wisps.
@@ -490,6 +511,9 @@ func purgeOldMail(db *sql.DB, dbName string, mailDeleteAge time.Duration, dryRun
 		dbName, dbName)
 	var count int
 	if err := db.QueryRowContext(ctx, countQuery, mailCutoff).Scan(&count); err != nil {
+		if isTableNotFound(err) {
+			return 0, nil // issues/labels not on this server
+		}
 		return 0, fmt.Errorf("count mail: %w", err)
 	}
 	if count == 0 {
@@ -561,6 +585,9 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 	selectQuery := fmt.Sprintf("SELECT i.id FROM `%s`.issues i WHERE %s", dbName, whereClause)
 	rows, err := db.QueryContext(ctx, selectQuery, staleCutoff)
 	if err != nil {
+		if isTableNotFound(err) {
+			return result, nil // issues/dependencies not on this server
+		}
 		return nil, fmt.Errorf("select stale: %w", err)
 	}
 	var ids []string
