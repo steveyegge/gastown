@@ -534,7 +534,9 @@ func stripEnvPrefixes(environ []string, prefixes ...string) []string {
 
 // List returns issues matching the given options.
 func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
-	args := []string{"list", "--json"}
+	// --flat is required because bd's default tree mode doesn't output valid JSON
+	// even when --json is specified. This was introduced when bd added tree view.
+	args := []string{"list", "--json", "--flat"}
 
 	if opts.Status != "" {
 		args = append(args, "--status="+opts.Status)
