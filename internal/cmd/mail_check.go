@@ -70,6 +70,23 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 	// at the next task boundary, normal/low is informational but still
 	// checked before going idle (prevents mail from sitting unread).
 	if mailCheckInject {
+		// Auto-forward "forward to <name>:" messages before reporting unread count.
+		// This runs silently — forwarded messages get marked as read so they
+		// don't clutter the agent's inject output.
+		if unread > 0 {
+			fwd, fwdErrs := autoForwardMessages(address, workDir, true)
+			if fwd > 0 {
+				// Re-count unread after forwarding (some messages are now read)
+				_, unread, err = mailbox.Count()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "gt mail check: recount error: %v\n", err)
+				}
+			}
+			for _, e := range fwdErrs {
+				fmt.Fprintf(os.Stderr, "gt mail check: autoforward: %s\n", e)
+			}
+		}
+
 		if unread > 0 {
 			messages, listErr := mailbox.ListUnread()
 			if listErr != nil {
