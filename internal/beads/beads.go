@@ -71,8 +71,8 @@ var (
 // bdSupportsFlat returns true if the installed bd binary accepts --flat.
 func bdSupportsFlat() bool {
 	bdFlatOnce.Do(func() {
-		cmd := exec.Command("bd", "list", "--flat", "--json", "--limit=0") //nolint:gosec // G204: bd is a trusted internal tool
-		if err := cmd.Run(); err == nil {
+		out, err := exec.Command("bd", "list", "--help").Output() //nolint:gosec // G204: bd is a trusted internal tool
+		if err == nil && strings.Contains(string(out), "--flat") {
 			bdFlatResult = true
 		}
 	})
