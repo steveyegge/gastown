@@ -441,7 +441,6 @@ exit /b 0
 			RigName:     rigName,
 			PolecatName: "Toast",
 			ClonePath:   filepath.Join(townRoot, "fake-polecat"),
-
 		}, nil
 	}
 
@@ -670,7 +669,6 @@ exit /b 0
 			RigName:     rigName,
 			PolecatName: "Toast",
 			ClonePath:   fakeWorkDir,
-
 		}, nil
 	}
 
@@ -869,6 +867,9 @@ exit /b 0
 // visible via regular bd show fail due to database staleness.
 // The fix uses --allow-stale to skip the staleness check for existence verification.
 func TestVerifyBeadExistsAllowStale(t *testing.T) {
+	beads.ResetBdAllowStaleCacheForTest()
+	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
+
 	townRoot := t.TempDir()
 
 	// Create minimal workspace structure
@@ -939,6 +940,9 @@ exit /b 1
 // TestSlingWithAllowStale tests the full gt sling flow with --allow-stale fix.
 // This is an integration test for the gtl-ncq bug.
 func TestSlingWithAllowStale(t *testing.T) {
+	beads.ResetBdAllowStaleCacheForTest()
+	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
+
 	townRoot := t.TempDir()
 
 	// Create minimal workspace structure
@@ -2353,6 +2357,7 @@ exit /b 0
 		})
 	}
 }
+
 // TestSlingRejectsDeferredBead verifies that gt sling refuses to sling beads
 // with deferred status or deferral keywords in their description (gt-1326mw).
 // This prevents wasting polecat slots on low-priority deferred work.

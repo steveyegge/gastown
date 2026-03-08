@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -79,6 +80,70 @@ func TestIsFlagLikeTitle(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("IsFlagLikeTitle(%q) = %v, want %v", tt.title, got, tt.want)
 		}
+	}
+}
+
+func TestBdSupportsAllowStale_ReprobesWhenBinaryPathChanges(t *testing.T) {
+	bdAllowStaleMu.Lock()
+	prevPath := bdAllowStalePath
+	prevResult := bdAllowStaleResult
+	bdAllowStaleMu.Unlock()
+	ResetBdAllowStaleCacheForTest()
+	t.Cleanup(func() {
+		bdAllowStaleMu.Lock()
+		bdAllowStalePath = prevPath
+		bdAllowStaleResult = prevResult
+		bdAllowStaleMu.Unlock()
+	})
+
+	supportingDir := t.TempDir()
+	nonSupportingDir := t.TempDir()
+	writeAllowStaleBDStub(t, supportingDir, true)
+	writeAllowStaleBDStub(t, nonSupportingDir, false)
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", supportingDir+string(os.PathListSeparator)+origPath)
+	if !BdSupportsAllowStale() {
+		t.Fatal("expected first stub to support --allow-stale")
+	}
+
+	t.Setenv("PATH", nonSupportingDir+string(os.PathListSeparator)+origPath)
+	if BdSupportsAllowStale() {
+		t.Fatal("expected second stub to be re-probed and report no --allow-stale support")
+	}
+}
+
+func writeAllowStaleBDStub(t *testing.T, dir string, supportsAllowStale bool) {
+	t.Helper()
+
+	var scriptPath, script string
+	if runtime.GOOS == "windows" {
+		scriptPath = filepath.Join(dir, "bd.bat")
+		exitCode := "1"
+		if supportsAllowStale {
+			exitCode = "0"
+		}
+		script = fmt.Sprintf(`@echo off
+setlocal enableextensions
+if "%%1"=="--allow-stale" exit /b %s
+exit /b 1
+`, exitCode)
+	} else {
+		scriptPath = filepath.Join(dir, "bd")
+		exitCode := "1"
+		if supportsAllowStale {
+			exitCode = "0"
+		}
+		script = fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--allow-stale" ]; then
+  exit %s
+fi
+exit 1
+`, exitCode)
+	}
+
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
 	}
 }
 
