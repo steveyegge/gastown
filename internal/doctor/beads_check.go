@@ -588,6 +588,7 @@ func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
 // Fix updates database configs to match routes.jsonl prefixes.
 // Only fixes rigs with their own database; rigs that redirect to a shared
 // database are skipped by Run() and will not appear in c.mismatches.
+// Logs each change visibly to prevent silent prefix corruption (GH#2455).
 func (c *DatabasePrefixCheck) Fix(ctx *CheckContext) error {
 	if len(c.mismatches) == 0 {
 		result := c.Run(ctx)
@@ -597,6 +598,10 @@ func (c *DatabasePrefixCheck) Fix(ctx *CheckContext) error {
 	}
 
 	for _, m := range c.mismatches {
+		// Safety: log what we're about to change so corruption is visible (GH#2455)
+		fmt.Fprintf(os.Stderr, "WARNING: database-prefix fix: %s: changing issue_prefix from %q to %q (per routes.jsonl)\n",
+			m.rigPath, m.dbPrefix, m.routesPrefix)
+
 		cmd := exec.Command("bd", "config", "set", "issue_prefix", m.routesPrefix)
 		cmd.Dir = filepath.Join(ctx.TownRoot, m.rigPath)
 		if output, err := cmd.CombinedOutput(); err != nil {
