@@ -422,6 +422,7 @@ func (d *Daemon) escalate(source, message string) {
 	cmd := exec.CommandContext(ctx, "gt", "escalate", "-s", "HIGH",
 		fmt.Sprintf("%s: %s", source, message))
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = append(os.Environ(), "BD_ACTOR=daemon")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		d.logger.Printf("jsonl_git_backup: escalation failed: %v (%s)", err, strings.TrimSpace(string(output)))
 	}
