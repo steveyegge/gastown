@@ -80,6 +80,7 @@ func EnsureGitignorePatterns(worktreePath string) error {
 		".claude/",
 		".logs/",
 		"__pycache__/",
+		"state.json",
 	}
 
 	// Read existing gitignore content
