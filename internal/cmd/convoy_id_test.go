@@ -30,7 +30,9 @@ func TestGenerateShortID_ValidChars(t *testing.T) {
 
 func TestGenerateShortID_Uniqueness(t *testing.T) {
 	seen := make(map[string]bool)
-	const n = 1000
+	// 36^5 = 60M possible values; birthday paradox gives ~0.82% collision at 1000.
+	// Use 100 to keep collision probability negligible (~0.0082%).
+	const n = 100
 	for i := 0; i < n; i++ {
 		id := generateShortID()
 		if seen[id] {
