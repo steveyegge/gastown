@@ -446,6 +446,111 @@ func TestParsePluginMD_SessionHygiene(t *testing.T) {
 	}
 }
 
+func TestLoadPlugin_DetectsRunScript(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create plugin with run.sh
+	pluginDir := filepath.Join(tmpDir, "plugins", "script-plugin")
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	pluginContent := []byte("+++\nname = \"script-plugin\"\ndescription = \"Has run.sh\"\nversion = 1\n+++\n\n# Instructions\n")
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.md"), pluginContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "run.sh"), []byte("#!/bin/bash\necho hi"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	scanner := NewScanner(tmpDir, nil)
+	p, err := scanner.loadPlugin(pluginDir, LocationTown, "")
+	if err != nil {
+		t.Fatalf("loadPlugin failed: %v", err)
+	}
+	if !p.HasRunScript {
+		t.Error("expected HasRunScript=true when run.sh exists")
+	}
+}
+
+func TestLoadPlugin_NoRunScript(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	pluginDir := filepath.Join(tmpDir, "plugins", "md-only")
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	pluginContent := []byte("+++\nname = \"md-only\"\ndescription = \"No run.sh\"\nversion = 1\n+++\n\n# Instructions\n")
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.md"), pluginContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	scanner := NewScanner(tmpDir, nil)
+	p, err := scanner.loadPlugin(pluginDir, LocationTown, "")
+	if err != nil {
+		t.Fatalf("loadPlugin failed: %v", err)
+	}
+	if p.HasRunScript {
+		t.Error("expected HasRunScript=false when no run.sh")
+	}
+}
+
+func TestFormatMailBody_WithRunScript(t *testing.T) {
+	p := &Plugin{
+		Name:         "compactor-dog",
+		Description:  "Compact Dolt databases",
+		Path:         "/home/user/gt/mayor/plugins/compactor-dog",
+		HasRunScript: true,
+		Execution:    &Execution{Timeout: "5m"},
+	}
+
+	body := p.FormatMailBody()
+
+	// Should reference run.sh, not contain markdown instructions
+	if !contains(body, "run.sh") {
+		t.Error("expected mail body to reference run.sh")
+	}
+	if !contains(body, "Run it directly") {
+		t.Error("expected mail body to tell dog to run script directly")
+	}
+	if contains(body, "## Instructions") {
+		t.Error("should NOT contain '## Instructions' section when run.sh exists")
+	}
+}
+
+func TestFormatMailBody_WithoutRunScript(t *testing.T) {
+	p := &Plugin{
+		Name:         "manual-plugin",
+		Description:  "Manual instructions",
+		Path:         "/test/path",
+		Instructions: "Do this and that.",
+	}
+
+	body := p.FormatMailBody()
+
+	if !contains(body, "## Instructions") {
+		t.Error("expected '## Instructions' section for plugin without run.sh")
+	}
+	if !contains(body, "Do this and that.") {
+		t.Error("expected instructions in mail body")
+	}
+	if contains(body, "## Execution") {
+		t.Error("should NOT contain '## Execution' section without run.sh")
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && len(substr) > 0 && containsStr(s, substr)
+}
+
+func containsStr(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
 func TestScanner_RigOverridesTown(t *testing.T) {
 	// Create temp directory structure
 	tmpDir, err := os.MkdirTemp("", "plugin-test")

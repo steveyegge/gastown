@@ -44,6 +44,10 @@ type Plugin struct {
 
 	// Instructions is the markdown body (after frontmatter).
 	Instructions string `json:"instructions,omitempty"`
+
+	// HasRunScript indicates a run.sh exists alongside plugin.md.
+	// When true, dogs should execute run.sh instead of interpreting Instructions.
+	HasRunScript bool `json:"has_run_script,omitempty"`
 }
 
 // Location indicates where a plugin was discovered.
@@ -158,6 +162,11 @@ func (p *Plugin) Summary() PluginSummary {
 // FormatMailBody formats the plugin as instructions for a dog worker.
 // This is the canonical formatting used by both the daemon dispatcher
 // and the gt dog dispatch command.
+//
+// When a plugin has a run.sh script, the mail body instructs the dog to
+// execute the script directly rather than interpreting plugin.md markdown.
+// This prevents LLM confusion on plugins that use CLI tools (dolt sql, etc.)
+// which the agent might misinterpret as requiring special access.
 func (p *Plugin) FormatMailBody() string {
 	var sb strings.Builder
 
@@ -171,8 +180,22 @@ func (p *Plugin) FormatMailBody() string {
 		sb.WriteString(fmt.Sprintf("**Timeout**: %s\n", p.Execution.Timeout))
 	}
 	sb.WriteString("\n---\n\n")
-	sb.WriteString("## Instructions\n\n")
-	sb.WriteString(p.Instructions)
+
+	if p.HasRunScript {
+		// Deterministic execution: run the script, capture output, report result.
+		scriptPath := fmt.Sprintf("%s/run.sh", p.Path)
+		sb.WriteString("## Execution\n\n")
+		sb.WriteString("This plugin has an executable script. **Run it directly** — do NOT interpret the instructions manually.\n\n")
+		sb.WriteString("```bash\n")
+		sb.WriteString(fmt.Sprintf("bash %s 2>&1\n", scriptPath))
+		sb.WriteString("```\n\n")
+		sb.WriteString("Capture the exit code and output. If exit code is 0, the plugin succeeded. If non-zero, it failed.\n")
+		sb.WriteString("Include the script output in your wisp summary.\n")
+	} else {
+		sb.WriteString("## Instructions\n\n")
+		sb.WriteString(p.Instructions)
+	}
+
 	sb.WriteString("\n\n---\n\n")
 	sb.WriteString("After completion:\n")
 	sb.WriteString("1. Create a wisp to record the result (success/failure)\n")
