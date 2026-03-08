@@ -436,7 +436,7 @@ func TestSchedulerSlingDryRun(t *testing.T) {
 	}
 
 	// Verify: no convoy created (HQ beads DB should have no convoy issues)
-	cmd := exec.Command("bd", "list", "--type=convoy", "--json")
+	cmd := exec.Command("bd", "list", "--type=convoy", "--flat", "--json")
 	cmd.Dir = hqPath
 	out, err := cmd.Output()
 	if err != nil {
@@ -445,8 +445,11 @@ func TestSchedulerSlingDryRun(t *testing.T) {
 	var convoys []struct {
 		ID string `json:"id"`
 	}
-	if err := json.Unmarshal(out, &convoys); err != nil {
-		t.Fatalf("parse convoy list: %v", err)
+	// bd list --flat --json returns empty output (not "[]") when no results
+	if len(strings.TrimSpace(string(out))) > 0 {
+		if err := json.Unmarshal(out, &convoys); err != nil {
+			t.Fatalf("parse convoy list: %v\nraw: %s", err, out)
+		}
 	}
 	if len(convoys) != 0 {
 		t.Errorf("dry-run should NOT create convoys, found %d", len(convoys))
