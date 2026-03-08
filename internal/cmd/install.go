@@ -568,13 +568,27 @@ func buildBdInitArgs(townPath string) []string {
 // Town beads use the "hq-" prefix for mayor mail and cross-rig coordination.
 // Uses Dolt backend in server mode (Gas Town requires a running Dolt sql-server).
 func initTownBeads(townPath string) error {
-	// Dolt server is required — refuse to proceed without it.
-	running, _, err := doltserver.IsRunning(townPath)
-	if err != nil {
-		return fmt.Errorf("checking Dolt server: %w", err)
+	// Dolt server is required — wait for it to accept queries before proceeding.
+	// The server may have just been started by gt install and TCP reachability
+	// alone is not sufficient; we need MySQL protocol readiness.
+	cfg := doltserver.DefaultConfig(townPath)
+	dsn := fmt.Sprintf("%s@tcp(%s)/", cfg.User, cfg.HostPort())
+	var lastErr error
+	for attempt := 0; attempt < 20; attempt++ {
+		db, err := sql.Open("mysql", dsn)
+		if err == nil {
+			err = db.Ping()
+			db.Close()
+		}
+		if err == nil {
+			lastErr = nil
+			break
+		}
+		lastErr = err
+		time.Sleep(500 * time.Millisecond)
 	}
-	if !running {
-		return fmt.Errorf("Dolt server is not running (required for beads init); start it with 'gt dolt start'")
+	if lastErr != nil {
+		return fmt.Errorf("Dolt server is not ready after 10s: %w", lastErr)
 	}
 
 	// Run: bd init --prefix hq --server
