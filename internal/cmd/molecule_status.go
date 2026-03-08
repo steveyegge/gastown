@@ -366,49 +366,107 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		Role:   string(roleCtx.Role),
 	}
 
-	// Try to find agent bead and read hook slot
-	// This is the preferred method - agent beads have a hook_bead field
+	// Record agent bead ID for status output (informational only).
 	agentBeadID := buildAgentBeadID(target, roleCtx.Role, townRoot)
-	var hookBead *beads.Issue
-
 	if agentBeadID != "" {
-		// Resolve the correct beads directory for the agent bead using prefix-based
-		// routing. This matches how updateAgentHookBead resolves the directory when
-		// setting the hook (via beads.ResolveHookDir).
 		agentBeadPath := beads.ResolveHookDir(townRoot, agentBeadID, workDir)
 		agentB := b
 		if agentBeadPath != workDir {
 			agentB = beads.New(agentBeadPath)
 		}
-
-		// Try to fetch the agent bead
-		agentBead, err := agentB.Show(agentBeadID)
-		if err == nil && beads.IsAgentBead(agentBead) {
+		if agentBead, err := agentB.Show(agentBeadID); err == nil && beads.IsAgentBead(agentBead) {
 			status.AgentBeadID = agentBeadID
-
-			// Read hook_bead from the agent bead's database field (not description!)
-			// The hook_bead column is updated by `bd slot set` in UpdateAgentState.
-			// IMPORTANT: Don't use ParseAgentFields on description - the description
-			// field may contain stale data, causing the wrong issue to be hooked.
-			if agentBead.HookBead != "" {
-				// The hooked bead may be in a different database than the agent bead.
-				// Resolve its path using prefix-based routing.
-				hookBeadPath := beads.ResolveHookDir(townRoot, agentBead.HookBead, workDir)
-				hookB := b
-				if hookBeadPath != workDir {
-					hookB = beads.New(hookBeadPath)
-				}
-				hookBead, err = hookB.Show(agentBead.HookBead)
-				if err != nil {
-					// Hook bead referenced but not found - report error but continue
-					hookBead = nil
-				}
-			}
 		}
-		// If agent bead not found or not an agent type, fall through to legacy approach
 	}
 
-	// If we found a hook bead via agent bead, use it
+	// PRIMARY: Query for hooked beads by assignee (direct bead tracking).
+	// The work bead itself (status=hooked + assignee) is the authoritative source
+	// since updateAgentHookBead is a no-op (agent bead hook_bead slot deprecated).
+	// This matches findAgentWorkOnce in prime.go. (GH#2431)
+	var hookBead *beads.Issue
+
+	// Search the rig's beads directory first.
+	rigBeadsDir := workDir
+	if roleCtx.Rig != "" && townRoot != "" {
+		rigBeadsDir = filepath.Join(townRoot, roleCtx.Rig)
+	}
+	rigB := beads.New(rigBeadsDir)
+
+	hookedBeads, err := rigB.List(beads.ListOptions{
+		Status:   beads.StatusHooked,
+		Assignee: target,
+		Priority: -1,
+	})
+	if err != nil {
+		return fmt.Errorf("listing hooked beads: %w", err)
+	}
+
+	// If no hooked beads found, also check in_progress beads assigned to this agent.
+	// This handles the case where work was claimed (status changed to in_progress)
+	// but the session was interrupted before completion. The hook should persist.
+	if len(hookedBeads) == 0 {
+		inProgressBeads, err := rigB.List(beads.ListOptions{
+			Status:   "in_progress",
+			Assignee: target,
+			Priority: -1,
+		})
+		if err == nil && len(inProgressBeads) > 0 {
+			hookedBeads = inProgressBeads
+		}
+	}
+
+	// For town-level roles (mayor, deacon), scan all rigs if nothing found locally
+	if len(hookedBeads) == 0 && isTownLevelRole(target) {
+		hookedBeads = scanAllRigsForHookedBeads(townRoot, target)
+	}
+
+	// For rig-level agents (polecats, crew), also search town-level beads.
+	// When the Mayor slings an hq-* bead to a polecat, the bead lives in
+	// townRoot/.beads, not the rig's .beads database.
+	// See: https://github.com/steveyegge/gastown/issues/1438
+	if len(hookedBeads) == 0 && !isTownLevelRole(target) && townRoot != "" {
+		townB := beads.New(filepath.Join(townRoot, ".beads"))
+		if townHooked, err := townB.List(beads.ListOptions{
+			Status:   beads.StatusHooked,
+			Assignee: target,
+			Priority: -1,
+		}); err == nil && len(townHooked) > 0 {
+			hookedBeads = townHooked
+		} else if townInProgress, err := townB.List(beads.ListOptions{
+			Status:   "in_progress",
+			Assignee: target,
+			Priority: -1,
+		}); err == nil && len(townInProgress) > 0 {
+			hookedBeads = townInProgress
+		}
+	}
+
+	if len(hookedBeads) > 0 {
+		hookBead = hookedBeads[0]
+	}
+
+	// LEGACY FALLBACK: If direct query found nothing, check agent bead's hook_bead slot.
+	// The hook_bead slot is deprecated (updateAgentHookBead is a no-op since hq-l6mm5),
+	// but some agent beads may still have it populated from older sling operations.
+	if hookBead == nil && status.AgentBeadID != "" {
+		agentBeadPath := beads.ResolveHookDir(townRoot, agentBeadID, workDir)
+		agentB := b
+		if agentBeadPath != workDir {
+			agentB = beads.New(agentBeadPath)
+		}
+		if agentBead, err := agentB.Show(agentBeadID); err == nil && beads.IsAgentBead(agentBead) && agentBead.HookBead != "" {
+			hookBeadPath := beads.ResolveHookDir(townRoot, agentBead.HookBead, workDir)
+			hookB := b
+			if hookBeadPath != workDir {
+				hookB = beads.New(hookBeadPath)
+			}
+			if hb, err := hookB.Show(agentBead.HookBead); err == nil {
+				hookBead = hb
+			}
+		}
+	}
+
+	// Populate status from the discovered hook bead
 	if hookBead != nil {
 		status.HasWork = true
 		status.PinnedBead = hookBead
@@ -429,93 +487,6 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 				progress, _ := getMoleculeProgressInfo(b, attachment.AttachedMolecule)
 				status.Progress = progress
 				status.NextAction = determineNextAction(status)
-			}
-		}
-	} else {
-		// FALLBACK: Query for hooked beads (work on agent's hook).
-		// Use the rig's beads directory (townRoot/rig), not the polecat worktree,
-		// because hooked beads are stored in the rig's .beads database. (GH#2503)
-		rigB := b
-		if roleCtx.Rig != "" && townRoot != "" {
-			rigBeadsDir := filepath.Join(townRoot, roleCtx.Rig)
-			if rigBeadsDir != workDir {
-				rigB = beads.New(rigBeadsDir)
-			}
-		}
-		// First try status=hooked (work that's been slung but not yet claimed)
-		hookedBeads, err := rigB.List(beads.ListOptions{
-			Status:   beads.StatusHooked,
-			Assignee: target,
-			Priority: -1,
-		})
-		if err != nil {
-			return fmt.Errorf("listing hooked beads: %w", err)
-		}
-
-		// If no hooked beads found, also check in_progress beads assigned to this agent.
-		// This handles the case where work was claimed (status changed to in_progress)
-		// but the session was interrupted before completion. The hook should persist.
-		if len(hookedBeads) == 0 {
-			inProgressBeads, err := rigB.List(beads.ListOptions{
-				Status:   "in_progress",
-				Assignee: target,
-				Priority: -1,
-			})
-			if err == nil && len(inProgressBeads) > 0 {
-				// Use the first in_progress bead (should typically be only one)
-				hookedBeads = inProgressBeads
-			}
-		}
-
-		// For town-level roles (mayor, deacon), scan all rigs if nothing found locally
-		if len(hookedBeads) == 0 && isTownLevelRole(target) {
-			hookedBeads = scanAllRigsForHookedBeads(townRoot, target)
-		}
-
-		// For rig-level agents (polecats, crew), also search town-level beads.
-		// When the Mayor slings an hq-* bead to a polecat, the bead lives in
-		// townRoot/.beads, not the rig's .beads database.
-		// See: https://github.com/steveyegge/gastown/issues/1438
-		if len(hookedBeads) == 0 && !isTownLevelRole(target) && townRoot != "" {
-			townB := beads.New(filepath.Join(townRoot, ".beads"))
-			if townHooked, err := townB.List(beads.ListOptions{
-				Status:   beads.StatusHooked,
-				Assignee: target,
-				Priority: -1,
-			}); err == nil && len(townHooked) > 0 {
-				hookedBeads = townHooked
-			} else if townInProgress, err := townB.List(beads.ListOptions{
-				Status:   "in_progress",
-				Assignee: target,
-				Priority: -1,
-			}); err == nil && len(townInProgress) > 0 {
-				hookedBeads = townInProgress
-			}
-		}
-
-		status.HasWork = len(hookedBeads) > 0
-
-		if len(hookedBeads) > 0 {
-			// Take the first hooked bead
-			status.PinnedBead = hookedBeads[0]
-
-			// Check for attached molecule
-			attachment := beads.ParseAttachmentFields(hookedBeads[0])
-			if attachment != nil {
-				status.AttachedMolecule = attachment.AttachedMolecule
-				status.AttachedAt = attachment.AttachedAt
-				status.AttachedArgs = attachment.AttachedArgs
-
-				// Check if it's a wisp
-				status.IsWisp = strings.Contains(hookedBeads[0].Description, "wisp: true") ||
-					strings.Contains(hookedBeads[0].Description, "is_wisp: true")
-
-				// Get progress if there's an attached molecule
-				if attachment.AttachedMolecule != "" {
-					progress, _ := getMoleculeProgressInfo(b, attachment.AttachedMolecule)
-					status.Progress = progress
-					status.NextAction = determineNextAction(status)
-				}
 			}
 		}
 	}
