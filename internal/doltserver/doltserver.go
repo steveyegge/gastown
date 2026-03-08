@@ -2503,6 +2503,13 @@ func EnsureMetadata(townRoot, rigName string) error {
 		existing["dolt_database"] = rigName
 		changed = true
 	}
+	// Write dolt_server_port so bd can reconnect to the correct Dolt server
+	// across restarts without relying on environment variables (gt-ipwog).
+	wantPort := float64(DefaultConfig(townRoot).Port)
+	if existing["dolt_server_port"] != wantPort {
+		existing["dolt_server_port"] = wantPort
+		changed = true
+	}
 
 	// Ensure server connection fields match the authoritative config.
 	// bd reads dolt_server_host and dolt_server_port from metadata.json to
