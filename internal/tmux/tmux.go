@@ -363,8 +363,17 @@ func (t *Tmux) checkSessionAfterCreate(name, command string) error {
 		if strings.TrimSpace(paneDead) != "1" {
 			return false, nil
 		}
-		exitStatus, _ := t.run("display-message", "-p", "-t", name, "#{pane_dead_status}")
-		status := strings.TrimSpace(exitStatus)
+		// Pane is dead — get exit status. If tmux hasn't recorded it yet
+		// (empty string), retry briefly since the status lags behind pane_dead.
+		var status string
+		for i := 0; i < 5; i++ {
+			exitStatus, _ := t.run("display-message", "-p", "-t", name, "#{pane_dead_status}")
+			status = strings.TrimSpace(exitStatus)
+			if status != "" {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
 		if status != "" && status != "0" {
 			_ = t.KillSession(name)
 			return true, fmt.Errorf("session %q: command exited with status %s: %s", name, status, command)
