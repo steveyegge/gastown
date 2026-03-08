@@ -573,11 +573,11 @@ func initTownBeads(townPath string) error {
 	// Dolt is the only backend since bd v0.51.0; no --backend flag needed.
 	// Filter inherited BEADS_DIR so bd init targets this town, not a parent .beads.
 	bdInitArgs := []string{"init", "--prefix", "hq", "--server"}
-	// Forward GT_DOLT_PORT so bd connects to the correct server when a
-	// non-default port is configured (e.g., ephemeral test servers in CI).
-	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-		bdInitArgs = append(bdInitArgs, "--server-port", p)
-	}
+	// Always pass --server-port so bd connects to Gas Town's central Dolt
+	// server. DefaultConfig resolves the port from config.yaml, GT_DOLT_PORT
+	// env var, or the default (3307).
+	serverPort := doltserver.DefaultConfig(townPath).Port
+	bdInitArgs = append(bdInitArgs, "--server-port", strconv.Itoa(serverPort))
 	cmd := exec.Command("bd", bdInitArgs...)
 	cmd.Dir = townPath
 	cmd.Env = withBeadsDirEnv(filepath.Join(townPath, ".beads"))
