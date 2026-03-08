@@ -256,9 +256,15 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 
 	// Note: role slot no longer set - role definitions are config-based
 
-	// Hook slot no longer maintained (hq-l6mm5). Work bead status+assignee
-	// is the authoritative source. HookBead in description is still written
-	// by FormatAgentDescription for backward compat with display readers.
+	// Set hook_bead slot so gt mol status can find hooked work via the
+	// agent bead's JSON field (primary lookup path in lookupHookedWork).
+	// The fallback query (status=hooked + assignee) is unreliable for
+	// cross-database scenarios. Restoring per hq-gfg.
+	if fields != nil && fields.HookBead != "" {
+		if _, slotErr := b.run("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
+			// Non-fatal: fallback query may still find the work bead
+		}
+	}
 
 	return &issue, nil
 }
@@ -351,7 +357,15 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	}
 
 	// Note: role slot no longer set - role definitions are config-based
-	// Hook slot no longer maintained (hq-l6mm5) - work bead status+assignee is authoritative.
+
+	// Set hook_bead slot so gt mol status can find hooked work via the
+	// agent bead's JSON field (primary lookup path in lookupHookedWork).
+	// Restoring per hq-gfg.
+	if fields != nil && fields.HookBead != "" {
+		if _, slotErr := target.run("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
+			// Non-fatal: fallback query may still find the work bead
+		}
+	}
 
 	// Return the updated bead
 	return target.Show(id)
