@@ -328,7 +328,7 @@ func (b *Beads) DeleteChannelBead(name string) error {
 
 // ListChannelBeads returns all channel beads.
 func (b *Beads) ListChannelBeads() (map[string]*ChannelFields, error) {
-	out, err := b.run("list", "--label=gt:channel", "--json")
+	out, err := b.run("list", "--label=gt:channel", "--json", "--flat")
 	if err != nil {
 		return nil, err
 	}

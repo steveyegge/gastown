@@ -319,7 +319,7 @@ func (b *Beads) DeleteGroupBead(name string) error {
 
 // ListGroupBeads returns all group beads.
 func (b *Beads) ListGroupBeads() (map[string]*GroupFields, error) {
-	out, err := b.run("list", "--label=gt:group", "--json")
+	out, err := b.run("list", "--label=gt:group", "--json", "--flat")
 	if err != nil {
 		return nil, err
 	}

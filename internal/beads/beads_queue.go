@@ -272,7 +272,7 @@ func (b *Beads) UpdateQueueStatus(id, status string) error {
 
 // ListQueueBeads returns all queue beads.
 func (b *Beads) ListQueueBeads() (map[string]*Issue, error) {
-	out, err := b.run("list", "--label=gt:queue", "--json")
+	out, err := b.run("list", "--label=gt:queue", "--json", "--flat")
 	if err != nil {
 		return nil, err
 	}

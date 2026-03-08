@@ -244,7 +244,7 @@ func (b *Beads) DeleteRigBead(name string) error {
 
 // ListRigBeads returns all rig beads.
 func (b *Beads) ListRigBeads() (map[string]*RigFields, error) {
-	out, err := b.run("list", "--label=gt:rig", "--json")
+	out, err := b.run("list", "--label=gt:rig", "--json", "--flat")
 	if err != nil {
 		return nil, err
 	}
