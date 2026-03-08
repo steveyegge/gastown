@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -16,33 +17,33 @@ var roleNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 // RoleSpec is a provisional declarative Gas City role definition.
 type RoleSpec struct {
-	Version        int               `toml:"version"`
-	Role           string            `toml:"role"`
-	Scope          string            `toml:"scope"`
-	Provider       string            `toml:"provider"`
-	Description    string            `toml:"description,omitempty"`
-	PromptTemplate string            `toml:"prompt_template,omitempty"`
-	Nudge          string            `toml:"nudge,omitempty"`
-	Session        SessionSpec       `toml:"session"`
-	Capabilities   Capabilities      `toml:"capabilities"`
-	Env            map[string]string `toml:"env,omitempty"`
+	Version        int               `toml:"version" json:"version"`
+	Role           string            `toml:"role" json:"role"`
+	Scope          string            `toml:"scope" json:"scope"`
+	Provider       string            `toml:"provider" json:"provider"`
+	Description    string            `toml:"description,omitempty" json:"description,omitempty"`
+	PromptTemplate string            `toml:"prompt_template,omitempty" json:"prompt_template,omitempty"`
+	Nudge          string            `toml:"nudge,omitempty" json:"nudge,omitempty"`
+	Session        SessionSpec       `toml:"session" json:"session"`
+	Capabilities   Capabilities      `toml:"capabilities" json:"capabilities"`
+	Env            map[string]string `toml:"env,omitempty" json:"env,omitempty"`
 }
 
 // SessionSpec contains process/session launch details for a role.
 type SessionSpec struct {
-	Pattern      string `toml:"pattern"`
-	WorkDir      string `toml:"work_dir"`
-	StartCommand string `toml:"start_command,omitempty"`
-	NeedsPreSync bool   `toml:"needs_pre_sync"`
+	Pattern      string `toml:"pattern" json:"pattern"`
+	WorkDir      string `toml:"work_dir" json:"work_dir"`
+	StartCommand string `toml:"start_command,omitempty" json:"start_command,omitempty"`
+	NeedsPreSync bool   `toml:"needs_pre_sync" json:"needs_pre_sync"`
 }
 
 // Capabilities is the normalized provider capability surface for a role.
 type Capabilities struct {
-	Hooks         bool   `toml:"hooks"`
-	Resume        bool   `toml:"resume"`
-	ForkSession   bool   `toml:"fork_session"`
-	Exec          bool   `toml:"exec"`
-	ReadyStrategy string `toml:"ready_strategy"`
+	Hooks         bool   `toml:"hooks" json:"hooks"`
+	Resume        bool   `toml:"resume" json:"resume"`
+	ForkSession   bool   `toml:"fork_session" json:"fork_session"`
+	Exec          bool   `toml:"exec" json:"exec"`
+	ReadyStrategy string `toml:"ready_strategy" json:"ready_strategy"`
 }
 
 type rawRoleSpec struct {
@@ -83,8 +84,17 @@ func LoadRoleSpec(path string) (*RoleSpec, error) {
 // ParseRoleSpec parses and validates a declarative Gas City role definition.
 func ParseRoleSpec(data []byte) (*RoleSpec, error) {
 	var raw rawRoleSpec
-	if err := toml.Unmarshal(data, &raw); err != nil {
+	meta, err := toml.Decode(string(data), &raw)
+	if err != nil {
 		return nil, fmt.Errorf("decoding TOML: %w", err)
+	}
+	if undecoded := meta.Undecoded(); len(undecoded) > 0 {
+		keys := make([]string, 0, len(undecoded))
+		for _, key := range undecoded {
+			keys = append(keys, key.String())
+		}
+		sort.Strings(keys)
+		return nil, fmt.Errorf("unknown fields: %s", strings.Join(keys, ", "))
 	}
 
 	raw.Role = strings.TrimSpace(raw.Role)
@@ -158,6 +168,9 @@ func validateRawRoleSpec(raw *rawRoleSpec, preset *config.AgentPresetInfo) error
 	}
 	if strings.TrimSpace(raw.Session.WorkDir) == "" {
 		return fmt.Errorf("session.work_dir is required")
+	}
+	if raw.Scope == "town" && strings.Contains(raw.Session.WorkDir, "{rig}") {
+		return fmt.Errorf("town-scoped roles cannot include {rig} in session.work_dir")
 	}
 	if raw.Scope == "rig" && !strings.Contains(raw.Session.WorkDir, "{rig}") {
 		return fmt.Errorf("rig-scoped roles must include {rig} in session.work_dir")

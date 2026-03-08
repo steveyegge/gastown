@@ -22,10 +22,10 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:     "gt", // Updated in init() based on GT_COMMAND
-	Short:   "Gas Town - Multi-agent workspace manager",
-	Version: Version,
-	Long:    "", // Updated in init() based on GT_COMMAND
+	Use:               "gt", // Updated in init() based on GT_COMMAND
+	Short:             "Gas Town - Multi-agent workspace manager",
+	Version:           Version,
+	Long:              "", // Updated in init() based on GT_COMMAND
 	PersistentPreRunE: persistentPreRun,
 }
 
@@ -42,36 +42,37 @@ across distributed teams of AI agents working on shared codebases.`, cmdName)
 // Commands that don't require beads to be installed/checked.
 // These commands should work even when bd is missing or outdated.
 var beadsExemptCommands = map[string]bool{
-	"version":    true,
-	"help":       true,
-	"completion": true,
-	"crew":       true,
-	"polecat":    true,
-	"witness":    true,
-	"refinery":   true,
-	"status":     true,
-	"mail":       true,
-	"hook":       true,
-	"prime":      true,
-	"nudge":      true,
-	"seance":     true,
-	"doctor":     true,
-	"dolt":       true,
-	"handoff":    true,
-	"costs":      true,
-	"feed":       true,
-	"rig":        true,
-	"config":     true,
-	"install":    true,
-	"tap":        true,
-	"dnd":        true,
+	"version":       true,
+	"help":          true,
+	"completion":    true,
+	"crew":          true,
+	"polecat":       true,
+	"witness":       true,
+	"refinery":      true,
+	"status":        true,
+	"mail":          true,
+	"hook":          true,
+	"prime":         true,
+	"nudge":         true,
+	"seance":        true,
+	"doctor":        true,
+	"dolt":          true,
+	"handoff":       true,
+	"costs":         true,
+	"feed":          true,
+	"rig":           true,
+	"config":        true,
+	"gascity":       true,
+	"install":       true,
+	"tap":           true,
+	"dnd":           true,
 	"signal":        true, // Hook signal handlers must be fast, handle beads internally
 	"metrics":       true, // Metrics reads local JSONL, no beads needed
 	"krc":           true, // KRC doesn't require beads
-	"run-migration":       true, // Migration orchestrator handles its own beads checks
-	"health":              true, // Health check doesn't require beads
-	"upgrade":             true, // Post-install migration orchestrator
-	"heartbeat":           true, // Heartbeat state update — must be fast and dependency-free
+	"run-migration": true, // Migration orchestrator handles its own beads checks
+	"health":        true, // Health check doesn't require beads
+	"upgrade":       true, // Post-install migration orchestrator
+	"heartbeat":     true, // Heartbeat state update — must be fast and dependency-free
 }
 
 // Commands exempt from the town root branch warning.

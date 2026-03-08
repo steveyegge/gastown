@@ -46,6 +46,23 @@ work_dir = "{town}/{rig}/crew/{name}"
 	}
 }
 
+func TestParseRoleSpec_RejectsUnknownFields(t *testing.T) {
+	_, err := ParseRoleSpec([]byte(`
+version = 1
+role = "reviewer"
+scope = "rig"
+provider = "codex"
+unknown_top_level = true
+
+[session]
+pattern = "{prefix}-reviewer-{name}"
+work_dir = "{town}/{rig}/crew/{name}"
+`))
+	if err == nil || !strings.Contains(err.Error(), "unknown fields") {
+		t.Fatalf("ParseRoleSpec() error = %v, want unknown field validation", err)
+	}
+}
+
 func TestParseRoleSpec_RejectsUnknownProvider(t *testing.T) {
 	_, err := ParseRoleSpec([]byte(`
 version = 1
@@ -59,6 +76,22 @@ work_dir = "{town}/{rig}/crew/{name}"
 `))
 	if err == nil || !strings.Contains(err.Error(), "unknown provider") {
 		t.Fatalf("ParseRoleSpec() error = %v, want unknown provider", err)
+	}
+}
+
+func TestParseRoleSpec_RejectsRigPlaceholderForTownScope(t *testing.T) {
+	_, err := ParseRoleSpec([]byte(`
+version = 1
+role = "operator"
+scope = "town"
+provider = "claude"
+
+[session]
+pattern = "hq-operator"
+work_dir = "{town}/{rig}"
+`))
+	if err == nil || !strings.Contains(err.Error(), "town-scoped roles cannot include {rig}") {
+		t.Fatalf("ParseRoleSpec() error = %v, want town scope validation", err)
 	}
 }
 
