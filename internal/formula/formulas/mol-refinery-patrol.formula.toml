@@ -244,6 +244,19 @@ Pick next branch from queue. Attempt mechanical rebase on the MR's effective tar
 Resolve `<rebase-target>` using the **Target Resolution Rule** above.
 Do NOT hardcode `main` unless `main` is actually the resolved MR target.
 
+**Step 0.5: Verify branch still exists (race-condition guard)**
+
+Branches can disappear between queue-scan and here (e.g. cherry-picked to target directly).
+
+```bash
+git ls-remote --exit-code origin refs/heads/<polecat-branch>
+```
+
+If the branch no longer exists (exit code non-zero):
+- Close the MR bead: `bd close <mr-id> --reason "Branch no longer exists"`
+- Archive the MERGE_READY mail: `gt mail archive <message-id>`
+- Skip to loop-check — do NOT treat as a merge failure, do NOT nudge the polecat
+
 **Step 1: Checkout and attempt rebase**
 ```bash
 git checkout -b temp origin/<polecat-branch>

@@ -383,12 +383,13 @@ func (e *Engineer) Config() *MergeQueueConfig {
 
 // ProcessResult contains the result of processing a merge request.
 type ProcessResult struct {
-	Success     bool
-	MergeCommit string
-	Error       string
-	Conflict    bool
-	TestsFailed bool
-	SlotTimeout bool // Merge slot contention timeout (distinct from build/test failure)
+	Success        bool
+	MergeCommit    string
+	Error          string
+	Conflict       bool
+	TestsFailed    bool
+	SlotTimeout    bool // Merge slot contention timeout (distinct from build/test failure)
+	BranchNotFound bool // Source branch no longer exists (e.g. cleaned up after cherry-pick)
 }
 
 // doMerge performs the actual git merge operation.
@@ -404,8 +405,9 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 	}
 	if !exists {
 		return ProcessResult{
-			Success: false,
-			Error:   fmt.Sprintf("branch %s not found locally", branch),
+			Success:        false,
+			BranchNotFound: true,
+			Error:          fmt.Sprintf("branch %s not found locally", branch),
 		}
 	}
 
@@ -1005,6 +1007,13 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 	if result.SlotTimeout {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] ✗ Slot timeout: %s - %s\n", mr.ID, result.Error)
 		_, _ = fmt.Fprintln(e.output, "[Engineer] MR remains in queue for automatic retry (slot contention)")
+		return
+	}
+
+	// Branch-not-found means the remote branch was cleaned up before we could process it
+	// (e.g. cherry-picked to target directly). Skip polecat nudge — the polecat is gone.
+	if result.BranchNotFound {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] MR %s: branch %s no longer exists, skipping (queue continues)\n", mr.ID, mr.Branch)
 		return
 	}
 

@@ -296,6 +296,11 @@ func (e *Engineer) processSingleMR(ctx context.Context, mr *MRInfo, target strin
 		result.Conflicts = []*MRInfo{mr}
 	} else if processResult.TestsFailed {
 		result.Culprits = []*MRInfo{mr}
+	} else if processResult.BranchNotFound {
+		// Branch was cleaned up before we could process it (e.g. cherry-picked to target).
+		// Treat as a skip: log and move on rather than halting the queue.
+		_, _ = fmt.Fprintf(e.output, "[Batch] MR %s: branch %s not found, skipping\n", mr.ID, mr.Branch)
+		result.Conflicts = []*MRInfo{mr}
 	} else {
 		result.Error = fmt.Errorf("merge failed: %s", processResult.Error)
 	}

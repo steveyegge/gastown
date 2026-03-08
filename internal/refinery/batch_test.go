@@ -825,6 +825,37 @@ func TestGetMergeMessage_Fallback(t *testing.T) {
 	}
 }
 
+// TestProcessBatch_SingleMR_BranchNotFound verifies that a missing branch is treated as a
+// skippable condition (added to Conflicts) rather than a fatal infrastructure error.
+func TestProcessBatch_SingleMR_BranchNotFound(t *testing.T) {
+	workDir, g, cleanup := testGitRepo(t)
+	defer cleanup()
+
+	e := newTestEngineer(t, workDir, g)
+
+	// MR pointing to a branch that doesn't exist locally or remotely.
+	batch := []*MRInfo{makeMR("mr-gone", "ghost-branch", "main")}
+
+	result := e.ProcessBatch(context.Background(), batch, "main", DefaultBatchConfig())
+
+	// Must NOT be a fatal error.
+	if result.Error != nil {
+		t.Fatalf("expected no fatal error for missing branch, got: %v", result.Error)
+	}
+	// Must be skipped (added to conflicts, not merged or culprits).
+	if len(result.Merged) != 0 {
+		t.Errorf("expected no merged MRs, got %d", len(result.Merged))
+	}
+	if len(result.Conflicts) != 1 || result.Conflicts[0].ID != "mr-gone" {
+		t.Errorf("expected mr-gone in conflicts (skipped), got %v", stackedIDs(result.Conflicts))
+	}
+	// Verify the log message says "skipping" not "fatal".
+	log := e.output.(*bytes.Buffer).String()
+	if !strings.Contains(log, "skipping") {
+		t.Errorf("expected 'skipping' in log output, got: %s", log)
+	}
+}
+
 // --- Helpers ---
 
 func stackedIDs(mrs []*MRInfo) []string {
