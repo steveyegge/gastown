@@ -58,7 +58,7 @@ func DiscoverDatabases(host string, port int) []string {
 		if err := rows.Scan(&name); err != nil {
 			continue
 		}
-		if name == "information_schema" || name == "mysql" {
+		if name == "information_schema" || name == "mysql" || name == "dolt" {
 			continue
 		}
 		lower := strings.ToLower(name)
