@@ -2,10 +2,12 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/constants"
@@ -262,6 +264,20 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		}
 	}
 
+	// Propagate Dolt server port so bd subprocesses connect to the correct
+	// Dolt server instead of falling back to metadata.json (port 3307) or
+	// auto-starting rogue Dolt servers. (GH#2412)
+	//
+	// Priority: parent env GT_DOLT_PORT → dolt-state.json → default 3307.
+	// We always set BEADS_DOLT_PORT alongside GT_DOLT_PORT because bd uses
+	// BEADS_DOLT_PORT while gt uses GT_DOLT_PORT.
+	if _, alreadySet := env["GT_DOLT_PORT"]; !alreadySet {
+		if doltPort := ResolveDoltPort(cfg.TownRoot); doltPort != "" {
+			env["GT_DOLT_PORT"] = doltPort
+			env["BEADS_DOLT_PORT"] = doltPort
+		}
+	}
+
 	// Pass through cloud API credentials and provider configuration from the parent shell.
 	// Only variables explicitly listed here are forwarded; all others are blocked for isolation.
 	for _, key := range []string{
@@ -352,6 +368,36 @@ func AgentEnvSimple(role, rig, agentName string) map[string]string {
 		Rig:       rig,
 		AgentName: agentName,
 	})
+}
+
+// ResolveDoltPort returns the Dolt server port as a string.
+// Priority: GT_DOLT_PORT env var → daemon/dolt-state.json → empty.
+// This avoids importing the doltserver package (which would complicate
+// dependency ordering). Returns empty string if no port can be determined.
+func ResolveDoltPort(townRoot string) string {
+	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
+		return p
+	}
+	return readDoltPortFromState(townRoot)
+}
+
+// readDoltPortFromState reads the Dolt server port from daemon/dolt-state.json.
+func readDoltPortFromState(townRoot string) string {
+	if townRoot == "" {
+		return ""
+	}
+	stateFile := filepath.Join(townRoot, "daemon", "dolt-state.json")
+	data, err := os.ReadFile(stateFile)
+	if err != nil {
+		return ""
+	}
+	var state struct {
+		Port int `json:"port"`
+	}
+	if err := json.Unmarshal(data, &state); err != nil || state.Port == 0 {
+		return ""
+	}
+	return strconv.Itoa(state.Port)
 }
 
 // ShellQuote returns a shell-safe quoted string.

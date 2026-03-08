@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -953,6 +954,87 @@ func TestAgentEnv_OTELNoPromptNoTown(t *testing.T) {
 	}
 	if contains(attrs, "gt.town") {
 		t.Errorf("OTEL_RESOURCE_ATTRIBUTES should not have gt.town when TownRoot is empty, got: %s", attrs)
+	}
+}
+
+// TestAgentEnv_DoltPortFromEnv verifies GT_DOLT_PORT propagation from parent env. (GH#2412)
+func TestAgentEnv_DoltPortFromEnv(t *testing.T) {
+	t.Setenv("GT_DOLT_PORT", "13307")
+
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "polecat",
+		Rig:       "myrig",
+		AgentName: "Toast",
+		TownRoot:  "/town",
+	})
+
+	assertEnv(t, env, "GT_DOLT_PORT", "13307")
+	assertEnv(t, env, "BEADS_DOLT_PORT", "13307")
+}
+
+// TestAgentEnv_DoltPortFromStateFile verifies port resolution from dolt-state.json. (GH#2412)
+func TestAgentEnv_DoltPortFromStateFile(t *testing.T) {
+	// Clear parent env so state file is used
+	t.Setenv("GT_DOLT_PORT", "")
+
+	// Create a temporary town root with dolt-state.json
+	townRoot := t.TempDir()
+	daemonDir := townRoot + "/daemon"
+	if err := os.MkdirAll(daemonDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(daemonDir+"/dolt-state.json",
+		[]byte(`{"port":43211,"running":true}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "polecat",
+		Rig:       "myrig",
+		AgentName: "Toast",
+		TownRoot:  townRoot,
+	})
+
+	assertEnv(t, env, "GT_DOLT_PORT", "43211")
+	assertEnv(t, env, "BEADS_DOLT_PORT", "43211")
+}
+
+// TestAgentEnv_DoltPortNotSetWhenUnavailable verifies no port is set without env or state. (GH#2412)
+func TestAgentEnv_DoltPortNotSetWhenUnavailable(t *testing.T) {
+	t.Setenv("GT_DOLT_PORT", "")
+
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "polecat",
+		Rig:       "myrig",
+		AgentName: "Toast",
+		TownRoot:  t.TempDir(), // no daemon/dolt-state.json
+	})
+
+	assertNotSet(t, env, "GT_DOLT_PORT")
+	assertNotSet(t, env, "BEADS_DOLT_PORT")
+}
+
+// TestResolveDoltPort_EnvTakesPrecedence verifies env var over state file. (GH#2412)
+func TestResolveDoltPort_EnvTakesPrecedence(t *testing.T) {
+	t.Setenv("GT_DOLT_PORT", "9999")
+
+	// Even with a state file, env var wins
+	townRoot := t.TempDir()
+	daemonDir := townRoot + "/daemon"
+	os.MkdirAll(daemonDir, 0755)
+	os.WriteFile(daemonDir+"/dolt-state.json",
+		[]byte(`{"port":43211}`), 0644)
+
+	if got := ResolveDoltPort(townRoot); got != "9999" {
+		t.Errorf("ResolveDoltPort = %q, want %q (env should take precedence)", got, "9999")
+	}
+}
+
+// TestResolveDoltPort_EmptyTownRoot verifies graceful handling of empty town root.
+func TestResolveDoltPort_EmptyTownRoot(t *testing.T) {
+	t.Setenv("GT_DOLT_PORT", "")
+	if got := ResolveDoltPort(""); got != "" {
+		t.Errorf("ResolveDoltPort('') = %q, want empty", got)
 	}
 }
 

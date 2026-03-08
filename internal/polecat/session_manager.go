@@ -342,6 +342,12 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	if polecatGitBranch != "" {
 		envVarsToInject["GT_BRANCH"] = polecatGitBranch
 	}
+	// Inject Dolt port into startup command env so bd connects to the correct
+	// server from the very first command, preventing rogue server spawns. (GH#2412)
+	if doltPort := config.ResolveDoltPort(townRoot); doltPort != "" {
+		envVarsToInject["GT_DOLT_PORT"] = doltPort
+		envVarsToInject["BEADS_DOLT_PORT"] = doltPort
+	}
 	command = config.PrependEnv(command, envVarsToInject)
 
 	// Create session with command directly to avoid send-keys race condition.
@@ -390,6 +396,14 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Disable Dolt auto-commit in tmux session environment (gt-5cc2p).
 	// This ensures respawned processes also inherit the setting.
 	debugSession("SetEnvironment BD_DOLT_AUTO_COMMIT", m.tmux.SetEnvironment(sessionID, "BD_DOLT_AUTO_COMMIT", "off"))
+
+	// Propagate Dolt port to tmux session so respawned processes also inherit it.
+	// AgentEnv already resolves the port, but SetEnvironment ensures it survives
+	// session restarts where the startup command env may differ. (GH#2412)
+	if doltPort, ok := envVars["GT_DOLT_PORT"]; ok && doltPort != "" {
+		debugSession("SetEnvironment GT_DOLT_PORT", m.tmux.SetEnvironment(sessionID, "GT_DOLT_PORT", doltPort))
+		debugSession("SetEnvironment BEADS_DOLT_PORT", m.tmux.SetEnvironment(sessionID, "BEADS_DOLT_PORT", doltPort))
+	}
 
 	// Set GT_PROCESS_NAMES for accurate liveness detection. Custom agents may
 	// shadow built-in preset names (e.g., custom "codex" running "opencode"),
