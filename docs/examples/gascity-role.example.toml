@@ -1,0 +1,19 @@
+# Provisional Gas City role definition.
+# This prototype reuses Gas Town's existing provider registry and session conventions.
+
+version = 1
+role = "reviewer"
+scope = "rig"
+provider = "codex"
+description = "Runs bounded code review passes for a rig."
+prompt_template = "crew.md.tmpl"
+nudge = "Review the assigned diff and report concrete findings."
+
+[session]
+pattern = "{prefix}-reviewer-{name}"
+work_dir = "{town}/{rig}/crew/{name}"
+needs_pre_sync = true
+
+[env]
+GT_ROLE = "reviewer"
+GT_SCOPE = "rig"

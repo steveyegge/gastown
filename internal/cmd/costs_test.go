@@ -145,7 +145,6 @@ func TestDeriveSessionName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and clear relevant env vars
 			saved := make(map[string]string)
 			envKeys := []string{"GT_ROLE", "GT_RIG", "GT_POLECAT", "GT_CREW", "GT_TOWN"}
 			for _, key := range envKeys {
@@ -153,7 +152,6 @@ func TestDeriveSessionName(t *testing.T) {
 				os.Unsetenv(key)
 			}
 			defer func() {
-				// Restore env vars
 				for key, val := range saved {
 					if val != "" {
 						os.Setenv(key, val)
@@ -161,7 +159,6 @@ func TestDeriveSessionName(t *testing.T) {
 				}
 			}()
 
-			// Set test env vars
 			for key, val := range tt.envVars {
 				os.Setenv(key, val)
 			}
@@ -175,7 +172,6 @@ func TestDeriveSessionName(t *testing.T) {
 }
 
 func TestRunCostsRecord_NoSession_ReturnsNil(t *testing.T) {
-	// Clear all session-related env vars so no session can be derived.
 	envKeys := []string{"GT_SESSION", "GT_ROLE", "GT_RIG", "GT_POLECAT", "GT_CREW", "GT_TOWN"}
 	saved := make(map[string]string)
 	for _, key := range envKeys {
@@ -190,12 +186,10 @@ func TestRunCostsRecord_NoSession_ReturnsNil(t *testing.T) {
 		}
 	}()
 
-	// Clear the flag-based session too
 	oldSession := recordSession
 	recordSession = ""
 	defer func() { recordSession = oldSession }()
 
-	// runCostsRecord should return nil (silent skip) when no session is resolvable
 	err := runCostsRecord(nil, nil)
 	if err != nil {
 		t.Errorf("runCostsRecord() returned error %v, want nil for non-GT session", err)
@@ -203,7 +197,6 @@ func TestRunCostsRecord_NoSession_ReturnsNil(t *testing.T) {
 }
 
 func TestCostDigestPayload_ExcludesSessions(t *testing.T) {
-	// Build a digest with many sessions (simulating the 2885-session case)
 	digest := CostDigest{
 		Date:         "2026-02-14",
 		TotalUSD:     694.25,
@@ -220,7 +213,6 @@ func TestCostDigestPayload_ExcludesSessions(t *testing.T) {
 		},
 	}
 
-	// Fill sessions with realistic data
 	for i := range digest.Sessions {
 		digest.Sessions[i] = CostEntry{
 			SessionID: "gt-session-" + time.Now().Format("150405"),
@@ -232,13 +224,11 @@ func TestCostDigestPayload_ExcludesSessions(t *testing.T) {
 		}
 	}
 
-	// Marshal full digest (old format) - should be very large
 	fullJSON, err := json.Marshal(digest)
 	if err != nil {
 		t.Fatalf("marshaling full digest: %v", err)
 	}
 
-	// Marshal compact payload (new format) - should be small
 	compact := CostDigestPayload{
 		Date:         digest.Date,
 		TotalUSD:     digest.TotalUSD,
@@ -251,18 +241,15 @@ func TestCostDigestPayload_ExcludesSessions(t *testing.T) {
 		t.Fatalf("marshaling compact payload: %v", err)
 	}
 
-	// Compact payload should be dramatically smaller
 	if len(compactJSON) >= len(fullJSON) {
 		t.Errorf("compact payload (%d bytes) should be smaller than full digest (%d bytes)",
 			len(compactJSON), len(fullJSON))
 	}
 
-	// Compact payload should be under 1KB (well within Dolt limits)
 	if len(compactJSON) > 1024 {
 		t.Errorf("compact payload is %d bytes, expected under 1024", len(compactJSON))
 	}
 
-	// Verify compact payload round-trips correctly
 	var decoded CostDigestPayload
 	if err := json.Unmarshal(compactJSON, &decoded); err != nil {
 		t.Fatalf("unmarshaling compact payload: %v", err)
@@ -277,7 +264,6 @@ func TestCostDigestPayload_ExcludesSessions(t *testing.T) {
 		t.Errorf("session_count = %d, want %d", decoded.SessionCount, digest.SessionCount)
 	}
 
-	// Verify compact payload can be decoded as a CostDigest (backwards compat)
 	var asDigest CostDigest
 	if err := json.Unmarshal(compactJSON, &asDigest); err != nil {
 		t.Fatalf("unmarshaling compact payload as CostDigest: %v", err)
@@ -290,5 +276,30 @@ func TestCostDigestPayload_ExcludesSessions(t *testing.T) {
 	}
 	if len(asDigest.ByRole) != 3 {
 		t.Errorf("by_role should have 3 entries, got %d", len(asDigest.ByRole))
+	}
+}
+
+func TestBuildAgentPath(t *testing.T) {
+	tests := []struct {
+		name string
+		role string
+		rig  string
+		id   string
+		want string
+	}{
+		{name: "mayor", role: "mayor", want: "mayor"},
+		{name: "deacon", role: "deacon", want: "deacon"},
+		{name: "witness", role: "witness", rig: "gastown", want: "gastown/witness"},
+		{name: "refinery", role: "refinery", rig: "gastown", want: "gastown/refinery"},
+		{name: "crew", role: "crew", rig: "gastown", id: "max", want: "gastown/crew/max"},
+		{name: "polecat", role: "polecat", rig: "gastown", id: "toast", want: "gastown/polecats/toast"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildAgentPath(tt.role, tt.rig, tt.id); got != tt.want {
+				t.Fatalf("buildAgentPath(%q, %q, %q) = %q, want %q", tt.role, tt.rig, tt.id, got, tt.want)
+			}
+		})
 	}
 }
