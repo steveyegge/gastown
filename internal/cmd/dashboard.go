@@ -46,7 +46,11 @@ Example:
 
 func init() {
 	dashboardCmd.Flags().IntVar(&dashboardPort, "port", 8080, "HTTP port to listen on")
-	dashboardCmd.Flags().StringVar(&dashboardBind, "bind", "127.0.0.1", "Address to bind to (use 0.0.0.0 for all interfaces)")
+	defaultBind := "127.0.0.1"
+	if os.Getenv("IS_SANDBOX") != "" {
+		defaultBind = "0.0.0.0"
+	}
+	dashboardCmd.Flags().StringVar(&dashboardBind, "bind", defaultBind, "Address to bind to (use 0.0.0.0 for all interfaces)")
 	dashboardCmd.Flags().BoolVar(&dashboardOpen, "open", false, "Open browser automatically")
 	rootCmd.AddCommand(dashboardCmd)
 }

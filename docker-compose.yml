@@ -31,7 +31,7 @@ services:
       - agent-home:/home/agent
       - ${FOLDER}:/gt
     ports:
-      - "3000:3000"
+      - "${DASHBOARD_PORT:-8080}:8080"
     command: sleep infinity
 
     # Exec into the container with: docker compose exec gastown zsh
