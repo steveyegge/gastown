@@ -12,13 +12,16 @@ func TestGetRigLED(t *testing.T) {
 	}{
 		// Both running - fully active
 		{"both running", true, true, "OPERATIONAL", "🟢"},
-		{"both running parked config", true, true, "PARKED", "🟢"},
-		{"both running docked config", true, true, "DOCKED", "🟢"},
+
+		// Parked/docked takes precedence over session state
+		{"both running parked", true, true, "PARKED", "🅿️"},
+		{"both running docked", true, true, "DOCKED", "🛑"},
+		{"witness only parked", true, false, "PARKED", "🅿️"},
+		{"refinery only docked", false, true, "DOCKED", "🛑"},
 
 		// One running - partially active
 		{"witness only", true, false, "OPERATIONAL", "🟡"},
 		{"refinery only", false, true, "OPERATIONAL", "🟡"},
-		{"witness only parked", true, false, "PARKED", "🟡"},
 
 		// Nothing running - check config state
 		{"stopped operational", false, false, "OPERATIONAL", "⚫"},

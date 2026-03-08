@@ -635,20 +635,22 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 //   - 🅿️ = parked (intentionally paused)
 //   - 🛑 = docked (global shutdown)
 func GetRigLED(hasWitness, hasRefinery bool, opState string) string {
+	// Check operational state first — a parked/docked rig should always
+	// show its park/dock indicator, even if sessions are still running
+	// (e.g. daemon restarted them before seeing the state change).
+	switch opState {
+	case "PARKED":
+		return "🅿️"
+	case "DOCKED":
+		return "🛑"
+	}
 	if hasWitness && hasRefinery {
 		return "🟢"
 	}
 	if hasWitness || hasRefinery {
 		return "🟡"
 	}
-	switch opState {
-	case "PARKED":
-		return "🅿️"
-	case "DOCKED":
-		return "🛑"
-	default:
-		return "⚫"
-	}
+	return "⚫"
 }
 
 // rigStatePriority returns a sort priority for a rig's state.
