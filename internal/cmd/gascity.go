@@ -63,24 +63,26 @@ func runGascityRoleValidate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	out := cmd.OutOrStdout()
+
 	if gascityValidateJSON {
-		out, err := json.MarshalIndent(spec, "", "  ")
+		data, err := json.MarshalIndent(spec, "", "  ")
 		if err != nil {
 			return fmt.Errorf("marshaling JSON: %w", err)
 		}
-		fmt.Println(string(out))
+		_, _ = fmt.Fprintln(out, string(data))
 		return nil
 	}
 
-	fmt.Printf("%s Valid Gas City role spec\n", style.Bold.Render("✓"))
-	fmt.Printf("  File: %s\n", args[0])
-	fmt.Printf("  Role: %s\n", spec.Role)
-	fmt.Printf("  Scope: %s\n", spec.Scope)
-	fmt.Printf("  Provider: %s\n", spec.Provider)
-	fmt.Printf("  Ready Strategy: %s\n", spec.Capabilities.ReadyStrategy)
-	fmt.Printf("  Hooks: %t\n", spec.Capabilities.Hooks)
-	fmt.Printf("  Resume: %t\n", spec.Capabilities.Resume)
-	fmt.Printf("  Fork Session: %t\n", spec.Capabilities.ForkSession)
-	fmt.Printf("  Exec: %t\n", spec.Capabilities.Exec)
+	_, _ = fmt.Fprintf(out, "%s Valid Gas City role spec\n", style.Bold.Render("✓"))
+	_, _ = fmt.Fprintf(out, "  File: %s\n", args[0])
+	_, _ = fmt.Fprintf(out, "  Role: %s\n", spec.Role)
+	_, _ = fmt.Fprintf(out, "  Scope: %s\n", spec.Scope)
+	_, _ = fmt.Fprintf(out, "  Provider: %s\n", spec.Provider)
+	_, _ = fmt.Fprintf(out, "  Ready Strategy: %s\n", spec.Capabilities.ReadyStrategy)
+	_, _ = fmt.Fprintf(out, "  Hooks: %t\n", spec.Capabilities.Hooks)
+	_, _ = fmt.Fprintf(out, "  Resume: %t\n", spec.Capabilities.Resume)
+	_, _ = fmt.Fprintf(out, "  Fork Session: %t\n", spec.Capabilities.ForkSession)
+	_, _ = fmt.Fprintf(out, "  Exec: %t\n", spec.Capabilities.Exec)
 	return nil
 }

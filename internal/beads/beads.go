@@ -44,16 +44,25 @@ func BdSupportsAllowStale() bool {
 	}
 
 	bdAllowStaleMu.Lock()
-	defer bdAllowStaleMu.Unlock()
+	cachedPath := bdAllowStalePath
+	cachedResult := bdAllowStaleResult
+	bdAllowStaleMu.Unlock()
 
-	if bdAllowStalePath == bdPath {
-		return bdAllowStaleResult
+	if cachedPath == bdPath {
+		return cachedResult
 	}
 
 	cmd := exec.Command(bdPath, "--allow-stale", "version") //nolint:gosec // G204: bd is a trusted internal tool
-	bdAllowStaleResult = cmd.Run() == nil
-	bdAllowStalePath = bdPath
-	return bdAllowStaleResult
+	supported := cmd.Run() == nil
+
+	bdAllowStaleMu.Lock()
+	if bdAllowStalePath != bdPath {
+		bdAllowStalePath = bdPath
+		bdAllowStaleResult = supported
+	}
+	result := bdAllowStaleResult
+	bdAllowStaleMu.Unlock()
+	return result
 }
 
 // MaybePrependAllowStale prepends --allow-stale to args if bd supports it.

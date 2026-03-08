@@ -556,6 +556,16 @@ func captureStepCost(stepID string) StepCostData {
 
 // recordStepCompletion creates a step.completed event in beads with cost data.
 func recordStepCompletion(stepID, moleculeID string, costData StepCostData) error {
+	return recordStepEvent(stepID, moleculeID, costData, "step.completed", "Step completed", "cost_usd_end")
+}
+
+// recordStepStart creates a step.started event in beads with initial cost data.
+func recordStepStart(stepID, moleculeID string, costData StepCostData) error {
+	return recordStepEvent(stepID, moleculeID, costData, "step.started", "Step started", "cost_usd_start")
+}
+
+// recordStepEvent creates a step lifecycle event and auto-closes it as audit-only data.
+func recordStepEvent(stepID, moleculeID string, costData StepCostData, category, titlePrefix, costField string) error {
 	// Build event payload
 	payload := map[string]interface{}{
 		"step_id":     stepID,
@@ -563,7 +573,7 @@ func recordStepCompletion(stepID, moleculeID string, costData StepCostData) erro
 	}
 
 	if costData.Captured {
-		payload["cost_usd_end"] = costData.CostUSD
+		payload[costField] = costData.CostUSD
 		payload["session_id"] = costData.SessionID
 	}
 
@@ -572,41 +582,18 @@ func recordStepCompletion(stepID, moleculeID string, costData StepCostData) erro
 		return fmt.Errorf("marshaling payload: %w", err)
 	}
 
-	// Detect agent identity for actor field
-	cwd, err := os.Getwd()
+	agentPath, err := detectCurrentStepEventActor()
 	if err != nil {
-		return fmt.Errorf("getting cwd: %w", err)
+		return err
 	}
 
-	townRoot, err := workspace.FindFromCwd()
-	if err != nil {
-		return fmt.Errorf("finding workspace: %w", err)
-	}
+	title := fmt.Sprintf("%s: %s", titlePrefix, stepID)
 
-	roleInfo, err := GetRoleWithContext(cwd, townRoot)
-	if err != nil {
-		return fmt.Errorf("detecting role: %w", err)
-	}
-
-	roleCtx := RoleContext{
-		Role:     roleInfo.Role,
-		Rig:      roleInfo.Rig,
-		Polecat:  roleInfo.Polecat,
-		TownRoot: townRoot,
-		WorkDir:  cwd,
-	}
-	// Convert Role type to string and use existing buildAgentPath from costs.go
-	agentPath := buildAgentPath(string(roleCtx.Role), roleCtx.Rig, roleCtx.Polecat)
-
-	// Build event title
-	title := fmt.Sprintf("Step completed: %s", stepID)
-
-	// Create step.completed event
 	bdArgs := []string{
 		"create",
 		"--type=event",
 		"--title=" + title,
-		"--event-category=step.completed",
+		"--event-category=" + category,
 		"--event-actor=" + agentPath,
 		"--event-payload=" + string(payloadJSON),
 		"--event-target=" + stepID,
@@ -616,53 +603,41 @@ func recordStepCompletion(stepID, moleculeID string, costData StepCostData) erro
 	bdCmd := exec.Command("bd", bdArgs...)
 	output, err := bdCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("creating step.completed event: %w\nOutput: %s", err, string(output))
+		return fmt.Errorf("creating %s event: %w\nOutput: %s", category, err, string(output))
 	}
 
 	eventID := strings.TrimSpace(string(output))
+	if eventID == "" {
+		return fmt.Errorf("creating %s event: empty event ID", category)
+	}
 
 	// Auto-close the event (it's an audit event, not actionable)
 	closeCmd := exec.Command("bd", "close", eventID, "--reason=auto-closed step event")
-	if closeErr := closeCmd.Run(); closeErr != nil {
-		// Non-fatal: event was created, just couldn't auto-close
-		return fmt.Errorf("created event %s but could not auto-close: %w", eventID, closeErr)
+	if closeOutput, closeErr := closeCmd.CombinedOutput(); closeErr != nil {
+		if msg := strings.TrimSpace(string(closeOutput)); msg != "" {
+			style.PrintWarning("created %s event %s but could not auto-close it; it remains open: %v (%s)", category, eventID, closeErr, msg)
+		} else {
+			style.PrintWarning("created %s event %s but could not auto-close it; it remains open: %v", category, eventID, closeErr)
+		}
 	}
 
 	return nil
 }
 
-// recordStepStart creates a step.started event in beads with initial cost data.
-func recordStepStart(stepID, moleculeID string, costData StepCostData) error {
-	// Build event payload
-	payload := map[string]interface{}{
-		"step_id":     stepID,
-		"molecule_id": moleculeID,
-	}
-
-	if costData.Captured {
-		payload["cost_usd_start"] = costData.CostUSD
-		payload["session_id"] = costData.SessionID
-	}
-
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshaling payload: %w", err)
-	}
-
-	// Detect agent identity for actor field
+func detectCurrentStepEventActor() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("getting cwd: %w", err)
+		return "", fmt.Errorf("getting cwd: %w", err)
 	}
 
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
-		return fmt.Errorf("finding workspace: %w", err)
+		return "", fmt.Errorf("finding workspace: %w", err)
 	}
 
 	roleInfo, err := GetRoleWithContext(cwd, townRoot)
 	if err != nil {
-		return fmt.Errorf("detecting role: %w", err)
+		return "", fmt.Errorf("detecting role: %w", err)
 	}
 
 	roleCtx := RoleContext{
@@ -672,39 +647,7 @@ func recordStepStart(stepID, moleculeID string, costData StepCostData) error {
 		TownRoot: townRoot,
 		WorkDir:  cwd,
 	}
-	agentPath := buildAgentPath(string(roleCtx.Role), roleCtx.Rig, roleCtx.Polecat)
-
-	// Build event title
-	title := fmt.Sprintf("Step started: %s", stepID)
-
-	// Create step.started event
-	bdArgs := []string{
-		"create",
-		"--type=event",
-		"--title=" + title,
-		"--event-category=step.started",
-		"--event-actor=" + agentPath,
-		"--event-payload=" + string(payloadJSON),
-		"--event-target=" + stepID,
-		"--silent",
-	}
-
-	bdCmd := exec.Command("bd", bdArgs...)
-	output, err := bdCmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("creating step.started event: %w\nOutput: %s", err, string(output))
-	}
-
-	eventID := strings.TrimSpace(string(output))
-
-	// Auto-close the event (it's an audit event, not actionable)
-	closeCmd := exec.Command("bd", "close", eventID, "--reason=auto-closed step event")
-	if closeErr := closeCmd.Run(); closeErr != nil {
-		// Non-fatal: event was created, just couldn't auto-close
-		return fmt.Errorf("created event %s but could not auto-close: %w", eventID, closeErr)
-	}
-
-	return nil
+	return buildAgentPath(string(roleCtx.Role), roleCtx.Rig, roleCtx.Polecat), nil
 }
 
 // getGitRoot is defined in prime.go

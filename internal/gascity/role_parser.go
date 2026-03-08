@@ -1,6 +1,7 @@
 package gascity
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"regexp"
@@ -84,7 +85,7 @@ func LoadRoleSpec(path string) (*RoleSpec, error) {
 // ParseRoleSpec parses and validates a declarative Gas City role definition.
 func ParseRoleSpec(data []byte) (*RoleSpec, error) {
 	var raw rawRoleSpec
-	meta, err := toml.Decode(string(data), &raw)
+	meta, err := toml.NewDecoder(bytes.NewReader(data)).Decode(&raw)
 	if err != nil {
 		return nil, fmt.Errorf("decoding TOML: %w", err)
 	}

@@ -1,8 +1,8 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +35,7 @@ func TestRunGascityRoleValidate(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Seed a workspace-local registry so the validator can resolve a custom provider.
 	registry := config.AgentRegistry{
 		Version: config.CurrentAgentRegistryVersion,
 		Agents: map[string]*config.AgentPresetInfo{
@@ -82,18 +83,18 @@ work_dir = "{town}/{rig}/crew/{name}"
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
+	var output bytes.Buffer
 	cmd := &cobra.Command{}
-	output := captureGascityStdout(t, func() {
-		if err := runGascityRoleValidate(cmd, []string{specPath}); err != nil {
-			t.Fatalf("runGascityRoleValidate() error = %v", err)
-		}
-	})
-
-	if !strings.Contains(output, "Valid Gas City role spec") {
-		t.Fatalf("output = %q, want validation success message", output)
+	cmd.SetOut(&output)
+	if err := runGascityRoleValidate(cmd, []string{specPath}); err != nil {
+		t.Fatalf("runGascityRoleValidate() error = %v", err)
 	}
-	if !strings.Contains(output, "Provider: reviewbot") {
-		t.Fatalf("output = %q, want custom provider details", output)
+
+	if !strings.Contains(output.String(), "Valid Gas City role spec") {
+		t.Fatalf("output = %q, want validation success message", output.String())
+	}
+	if !strings.Contains(output.String(), "Provider: reviewbot") {
+		t.Fatalf("output = %q, want custom provider details", output.String())
 	}
 }
 
@@ -119,39 +120,18 @@ work_dir = "{town}/{rig}/crew/{name}"
 	gascityValidateJSON = true
 	t.Cleanup(func() { gascityValidateJSON = prevJSON })
 
+	var output bytes.Buffer
 	cmd := &cobra.Command{}
-	output := captureGascityStdout(t, func() {
-		if err := runGascityRoleValidate(cmd, []string{specPath}); err != nil {
-			t.Fatalf("runGascityRoleValidate() error = %v", err)
-		}
-	})
+	cmd.SetOut(&output)
+	if err := runGascityRoleValidate(cmd, []string{specPath}); err != nil {
+		t.Fatalf("runGascityRoleValidate() error = %v", err)
+	}
 
 	var decoded map[string]any
-	if err := json.Unmarshal([]byte(output), &decoded); err != nil {
-		t.Fatalf("output is not valid JSON: %v\n%s", err, output)
+	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, output.String())
 	}
 	if decoded["provider"] != "codex" {
 		t.Fatalf("provider = %v, want codex", decoded["provider"])
 	}
-}
-
-func captureGascityStdout(t *testing.T, fn func()) string {
-	t.Helper()
-
-	orig := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = w
-	defer func() { os.Stdout = orig }()
-
-	fn()
-
-	_ = w.Close()
-	buf, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(buf)
 }
