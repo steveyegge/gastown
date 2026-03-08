@@ -37,31 +37,34 @@ func runMQList(cmd *cobra.Command, args []string) error {
 
 	// Build list options - query for merge-request label
 	// Priority -1 means no priority filter (otherwise 0 would filter to P0 only)
+	//
+	// IMPORTANT: Use Status "all" instead of "open" because MR beads are
+	// ephemeral (created with --ephemeral by mq_submit). Some bd versions
+	// only query the issues table for --status=open, missing wisps entirely.
+	// Status "all" includes both issues and wisps tables. We filter by
+	// status in Go below. See FindMRForBranch (a3dd60bf) for the same fix.
 	opts := beads.ListOptions{
 		Label:    "gt:merge-request",
 		Priority: -1,
-	}
-
-	// Apply status filter if specified
-	if mqListStatus != "" {
-		opts.Status = mqListStatus
-	} else if !mqListReady {
-		// Default to open if not showing ready
-		opts.Status = "open"
+		Status:   "all",
 	}
 
 	var issues []*beads.Issue
 
 	if mqListReady {
-		// Query all open MRs and filter out blocked ones manually.
+		// Query all MRs and filter to open+unblocked in Go.
 		// Cannot use b.Ready() because it excludes ephemeral beads,
 		// and MRs are ephemeral by design (see gt-t5t6y).
-		opts.Status = "open"
-		allOpen, err := b.List(opts)
+		// Must use Status "all" (not "open") because ephemeral wisps
+		// may not appear in bd list --status=open (see a3dd60bf).
+		allMRs, err := b.List(opts)
 		if err != nil {
 			return fmt.Errorf("querying ready MRs: %w", err)
 		}
-		for _, issue := range allOpen {
+		for _, issue := range allMRs {
+			if issue.Status != "open" {
+				continue // Only open MRs can be ready
+			}
 			if len(issue.BlockedBy) > 0 || issue.BlockedByCount > 0 {
 				continue // Skip blocked issues
 			}

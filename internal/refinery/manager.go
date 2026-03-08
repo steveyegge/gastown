@@ -256,12 +256,16 @@ func (m *Manager) Stop() error {
 // Uses beads merge-request issues as the source of truth (not git branches).
 // ZFC-compliant: beads is the source of truth, no state file.
 func (m *Manager) Queue() ([]QueueItem, error) {
-	// Query beads for open merge-request issues
-	// BeadsPath() returns the git-synced beads location
+	// Query beads for merge-request issues.
+	// Use Status "all" instead of "open" because MR beads are ephemeral
+	// (created with --ephemeral by mq_submit). Some bd versions only query
+	// the issues table for --status=open, missing ephemeral wisps entirely.
+	// Status "all" includes both issues and wisps tables. We filter for
+	// open status in Go below. See FindMRForBranch (a3dd60bf) for the same fix.
 	b := beads.New(m.rig.BeadsPath())
 	issues, err := b.List(beads.ListOptions{
 		Label:    "gt:merge-request",
-		Status:   "open",
+		Status:   "all",
 		Priority: -1, // No priority filter
 	})
 	if err != nil {

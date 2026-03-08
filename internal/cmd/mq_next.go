@@ -58,10 +58,15 @@ func runMQNext(cmd *cobra.Command, args []string) error {
 	// Create beads wrapper for the rig
 	b := beads.New(r.BeadsPath())
 
-	// Query for open merge-requests (ready to process)
+	// Query for merge-requests ready to process.
+	// Use Status "all" instead of "open" because MR beads are ephemeral
+	// (created with --ephemeral by mq_submit). Some bd versions only query
+	// the issues table for --status=open, missing wisps entirely. Status
+	// "all" includes both issues and wisps tables. We filter for open
+	// status in Go below. See FindMRForBranch (a3dd60bf) for the same fix.
 	opts := beads.ListOptions{
 		Label:    "gt:merge-request",
-		Status:   "open",
+		Status:   "all",
 		Priority: -1, // No priority filter
 	}
 
@@ -70,10 +75,9 @@ func runMQNext(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("querying merge queue: %w", err)
 	}
 
-	// Filter to only ready MRs (no blockers)
+	// Filter to only ready MRs (open, no blockers)
 	var ready []*beads.Issue
 	for _, issue := range issues {
-		// Skip closed MRs (workaround for bd list not respecting --status filter)
 		if issue.Status != "open" {
 			continue
 		}
