@@ -902,3 +902,40 @@ func TestOutputContinuationDirective(t *testing.T) {
 		}
 	})
 }
+
+func TestCheckSlungWork_StandaloneFormulaUsesWorkflowOutput(t *testing.T) {
+	ctx := RoleContext{Role: RoleCrew}
+	hookedBead := &beads.Issue{
+		ID:    "gt-wisp-xyz",
+		Title: "Standalone formula work",
+		Description: strings.Join([]string{
+			"attached_formula: mol-nonexistent",
+			`attached_vars: ["version=1.2.3"]`,
+		}, "\n"),
+	}
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	found := checkSlungWork(ctx, hookedBead)
+
+	w.Close()
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	os.Stdout = oldStdout
+	output := buf.String()
+
+	if !found {
+		t.Fatalf("checkSlungWork() = false, want true")
+	}
+	if !strings.Contains(output, "ATTACHED FORMULA") {
+		t.Fatalf("expected standalone formula hook to use workflow output, got:\n%s", output)
+	}
+	if strings.Contains(output, "Bead details:") {
+		t.Fatalf("expected standalone formula hook to skip plain bead preview, got:\n%s", output)
+	}
+	if !strings.Contains(output, "--var version=1.2.3") {
+		t.Fatalf("expected standalone formula context to be shown, got:\n%s", output)
+	}
+}

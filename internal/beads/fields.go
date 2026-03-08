@@ -2,6 +2,7 @@
 package beads
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,6 +17,7 @@ type AttachmentFields struct {
 	AttachedFormula  string // Formula name (e.g., "mol-polecat-work") for inline step display
 	AttachedAt       string // ISO 8601 timestamp when attached
 	AttachedArgs     string // Natural language args passed via gt sling --args (no-tmux mode)
+	AttachedVars     []string // Formula variables passed via gt sling --var
 	DispatchedBy     string // Agent ID that dispatched this work (for completion notification)
 	NoMerge          bool   // If true, gt done skips merge queue (for upstream PRs/human review)
 	Mode             string // Execution mode: "" (normal) or "ralph" (Ralph Wiggum loop)
@@ -66,6 +68,9 @@ func ParseAttachmentFields(issue *Issue) *AttachmentFields {
 		case "attached_args", "attached-args", "attachedargs":
 			fields.AttachedArgs = value
 			hasFields = true
+		case "attached_vars", "attached-vars", "attachedvars":
+			fields.AttachedVars = parseAttachedVars(value)
+			hasFields = true
 		case "dispatched_by", "dispatched-by", "dispatchedby":
 			fields.DispatchedBy = value
 			hasFields = true
@@ -114,6 +119,9 @@ func FormatAttachmentFields(fields *AttachmentFields) string {
 	if fields.AttachedArgs != "" {
 		lines = append(lines, "attached_args: "+fields.AttachedArgs)
 	}
+	if len(fields.AttachedVars) > 0 {
+		lines = append(lines, "attached_vars: "+formatAttachedVars(fields.AttachedVars))
+	}
 	if fields.DispatchedBy != "" {
 		lines = append(lines, "dispatched_by: "+fields.DispatchedBy)
 	}
@@ -154,6 +162,9 @@ func SetAttachmentFields(issue *Issue, fields *AttachmentFields) string {
 		"attached_args":     true,
 		"attached-args":     true,
 		"attachedargs":      true,
+		"attached_vars":     true,
+		"attached-vars":     true,
+		"attachedvars":      true,
 		"dispatched_by":     true,
 		"dispatched-by":     true,
 		"dispatchedby":      true,
@@ -317,6 +328,30 @@ func FormatConvoyFields(fields *ConvoyFields) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func formatAttachedVars(vars []string) string {
+	if len(vars) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(vars)
+	if err != nil {
+		return strings.Join(vars, ", ")
+	}
+	return string(encoded)
+}
+
+func parseAttachedVars(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var vars []string
+	if strings.HasPrefix(raw, "[") {
+		if err := json.Unmarshal([]byte(raw), &vars); err == nil {
+			return vars
+		}
+	}
+	return []string{raw}
 }
 
 // SetConvoyFields updates an issue's description with the given convoy fields.

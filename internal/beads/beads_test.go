@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -760,7 +761,7 @@ func TestMRFieldsRoundTrip(t *testing.T) {
 		t.Fatal("round-trip parse returned nil")
 	}
 
-	if *parsed != *original {
+	if !reflect.DeepEqual(parsed, original) {
 		t.Errorf("round-trip mismatch:\ngot  %+v\nwant %+v", parsed, original)
 	}
 }
@@ -906,6 +907,17 @@ ATTACHED_AT: 2025-12-21T14:00:00Z`,
 				AttachedAt:       "2025-12-21T14:00:00Z",
 			},
 		},
+		{
+			name: "attached vars",
+			issue: &Issue{
+				Description: `attached_formula: mol-release
+attached_vars: ["version=1.2.3","channel=stable"]`,
+			},
+			wantFields: &AttachmentFields{
+				AttachedFormula: "mol-release",
+				AttachedVars:    []string{"version=1.2.3", "channel=stable"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -928,6 +940,9 @@ ATTACHED_AT: 2025-12-21T14:00:00Z`,
 			}
 			if fields.AttachedAt != tt.wantFields.AttachedAt {
 				t.Errorf("AttachedAt = %q, want %q", fields.AttachedAt, tt.wantFields.AttachedAt)
+			}
+			if !reflect.DeepEqual(fields.AttachedVars, tt.wantFields.AttachedVars) {
+				t.Errorf("AttachedVars = %#v, want %#v", fields.AttachedVars, tt.wantFields.AttachedVars)
 			}
 		})
 	}
@@ -965,6 +980,14 @@ attached_at: 2025-12-21T15:30:00Z`,
 				AttachedMolecule: "mol-abc",
 			},
 			want: "attached_molecule: mol-abc",
+		},
+		{
+			name: "attached vars",
+			fields: &AttachmentFields{
+				AttachedFormula: "mol-release",
+				AttachedVars:    []string{"version=1.2.3", "channel=stable"},
+			},
+			want: "attached_formula: mol-release\nattached_vars: [\"version=1.2.3\",\"channel=stable\"]",
 		},
 	}
 
@@ -1077,7 +1100,7 @@ func TestAttachmentFieldsRoundTrip(t *testing.T) {
 		t.Fatal("round-trip parse returned nil")
 	}
 
-	if *parsed != *original {
+	if !reflect.DeepEqual(parsed, original) {
 		t.Errorf("round-trip mismatch:\ngot  %+v\nwant %+v", parsed, original)
 	}
 }
@@ -1150,7 +1173,7 @@ func TestNoMergeField(t *testing.T) {
 		if parsed == nil {
 			t.Fatal("round-trip parse returned nil")
 		}
-		if *parsed != *original {
+		if !reflect.DeepEqual(parsed, original) {
 			t.Errorf("round-trip mismatch:\ngot  %+v\nwant %+v", parsed, original)
 		}
 	})

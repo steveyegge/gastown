@@ -255,6 +255,7 @@ func getBeadInfo(beadID string) (*beadInfo, error) {
 type beadFieldUpdates struct {
 	Dispatcher       string // Agent that dispatched the work
 	Args             string // Natural language instructions
+	Vars             []string // Formula variables (key=value pairs)
 	AttachedMolecule string // Wisp root ID
 	AttachedFormula  string // Formula name (e.g., "mol-polecat-work") for inline step display
 	NoMerge          bool   // Skip merge queue on completion
@@ -308,6 +309,9 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 	}
 	if updates.Args != "" {
 		fields.AttachedArgs = updates.Args
+	}
+	if len(updates.Vars) > 0 {
+		fields.AttachedVars = append([]string(nil), updates.Vars...)
 	}
 	if updates.AttachedMolecule != "" {
 		fields.AttachedMolecule = updates.AttachedMolecule

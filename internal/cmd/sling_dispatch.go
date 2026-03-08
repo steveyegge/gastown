@@ -329,6 +329,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	fieldUpdates := beadFieldUpdates{
 		Dispatcher:       actor,
 		Args:             params.Args,
+		Vars:             append([]string(nil), params.Vars...),
 		AttachedMolecule: attachedMoleculeID,
 		AttachedFormula:  params.FormulaName,
 		NoMerge:          params.NoMerge,

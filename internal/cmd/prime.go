@@ -497,18 +497,22 @@ func checkSlungWork(ctx RoleContext, hookedBead *beads.Issue) bool {
 	}
 
 	attachment := beads.ParseAttachmentFields(hookedBead)
-	hasMolecule := attachment != nil && attachment.AttachedMolecule != ""
+	hasWorkflow := hasWorkflowAttachment(attachment)
 
-	outputAutonomousDirective(ctx, hookedBead, hasMolecule)
+	outputAutonomousDirective(ctx, hookedBead, hasWorkflow)
 	outputHookedBeadDetails(hookedBead)
 
-	if hasMolecule {
+	if hasWorkflow {
 		outputMoleculeWorkflow(ctx, attachment)
 	} else {
 		outputBeadPreview(hookedBead)
 	}
 
 	return true
+}
+
+func hasWorkflowAttachment(attachment *beads.AttachmentFields) bool {
+	return attachment != nil && (attachment.AttachedMolecule != "" || attachment.AttachedFormula != "")
 }
 
 // findAgentWork looks up hooked or in-progress beads assigned to this agent.
@@ -682,6 +686,12 @@ func outputMoleculeWorkflow(ctx RoleContext, attachment *beads.AttachmentFields)
 	if attachment.AttachedMolecule != "" {
 		fmt.Printf("Molecule ID: %s\n", attachment.AttachedMolecule)
 	}
+	if len(attachment.AttachedVars) > 0 {
+		fmt.Printf("\n%s\n", style.Bold.Render("🧩 VARS (instantiated formula inputs):"))
+		for _, variable := range attachment.AttachedVars {
+			fmt.Printf("  --var %s\n", variable)
+		}
+	}
 	if attachment.AttachedArgs != "" {
 		fmt.Printf("\n%s\n", style.Bold.Render("📋 ARGS (use these to guide execution):"))
 		fmt.Printf("  %s\n", attachment.AttachedArgs)
@@ -739,6 +749,9 @@ func outputRalphLoopDirective(_ RoleContext, attachment *beads.AttachmentFields)
 func buildRalphPromptFromMolecule(attachment *beads.AttachmentFields) string {
 	var b strings.Builder
 	b.WriteString("Execute the attached molecule workflow. ")
+	if len(attachment.AttachedVars) > 0 {
+		b.WriteString("Formula vars: " + strings.Join(attachment.AttachedVars, ", ") + ". ")
+	}
 	if attachment.AttachedArgs != "" {
 		b.WriteString("Context: " + attachment.AttachedArgs + ". ")
 	}

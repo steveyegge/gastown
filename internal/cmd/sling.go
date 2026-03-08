@@ -906,6 +906,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	fieldUpdates := beadFieldUpdates{
 		Dispatcher:       actor,
 		Args:             slingArgs,
+		Vars:             append([]string(nil), slingVars...),
 		AttachedMolecule: attachedMoleculeID,
 		AttachedFormula:  formulaName,
 		NoMerge:          slingNoMerge,

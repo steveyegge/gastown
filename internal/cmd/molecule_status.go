@@ -129,6 +129,7 @@ type MoleculeStatusInfo struct {
 	AttachedFormula  string                `json:"attached_formula,omitempty"`
 	AttachedAt       string                `json:"attached_at,omitempty"`
 	AttachedArgs     string                `json:"attached_args,omitempty"`
+	AttachedVars     []string              `json:"attached_vars,omitempty"`
 	IsWisp           bool                  `json:"is_wisp"`
 	Progress         *MoleculeProgressInfo `json:"progress,omitempty"`
 	NextAction       string                `json:"next_action,omitempty"`
@@ -486,6 +487,7 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 			status.AttachedFormula = attachment.AttachedFormula
 			status.AttachedAt = attachment.AttachedAt
 			status.AttachedArgs = attachment.AttachedArgs
+			status.AttachedVars = attachment.AttachedVars
 
 			status.IsWisp = strings.Contains(hookBead.Description, "wisp: true") ||
 				strings.Contains(hookBead.Description, "is_wisp: true")
@@ -742,6 +744,15 @@ func outputMoleculeStatus(status MoleculeStatusInfo) error {
 	if status.AttachedFormula != "" {
 		fmt.Printf("%s %s\n", style.Bold.Render("📐 Formula:"), status.AttachedFormula)
 	}
+	if len(status.AttachedVars) > 0 {
+		fmt.Printf("%s\n", style.Bold.Render("🧩 Vars:"))
+		for _, variable := range status.AttachedVars {
+			fmt.Printf("   --var %s\n", variable)
+		}
+	}
+	if status.AttachedArgs != "" {
+		fmt.Printf("%s %s\n", style.Bold.Render("📋 Args:"), status.AttachedArgs)
+	}
 
 	// Show attached molecule
 	if status.AttachedMolecule != "" {
@@ -752,9 +763,6 @@ func outputMoleculeStatus(status MoleculeStatusInfo) error {
 		fmt.Printf("%s %s: %s\n", style.Bold.Render("🧬 "+molType+":"), status.AttachedMolecule, "")
 		if status.AttachedAt != "" {
 			fmt.Printf("   Attached: %s\n", status.AttachedAt)
-		}
-		if status.AttachedArgs != "" {
-			fmt.Printf("   %s %s\n", style.Bold.Render("Args:"), status.AttachedArgs)
 		}
 	} else {
 		fmt.Printf("%s\n", style.Dim.Render("No molecule attached (hooked bead still triggers autonomous work)"))
