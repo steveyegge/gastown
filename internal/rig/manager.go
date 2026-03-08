@@ -285,10 +285,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 
 	// Validate rig name: reject characters that break agent ID parsing
 	// Agent IDs use format <prefix>-<rig>-<role>[-<name>] with hyphens as delimiters
-	if strings.ContainsAny(opts.Name, "-. ") {
-		sanitized := strings.NewReplacer("-", "_", ".", "_", " ", "_").Replace(opts.Name)
+	if strings.ContainsAny(opts.Name, "-. /\\") {
+		sanitized := strings.NewReplacer("-", "_", ".", "_", " ", "_", "/", "_", "\\", "_").Replace(opts.Name)
+		sanitized = strings.TrimLeft(sanitized, "_")
 		sanitized = strings.ToLower(sanitized)
-		return nil, fmt.Errorf("rig name %q contains invalid characters; hyphens, dots, and spaces are reserved for agent ID parsing. Try %q instead (underscores are allowed)", opts.Name, sanitized)
+		return nil, fmt.Errorf("rig name %q contains invalid characters; hyphens, dots, spaces, and path separators are not allowed. Try %q instead (underscores are allowed)", opts.Name, sanitized)
 	}
 
 	// Reject reserved names that collide with town-level infrastructure.
@@ -1063,6 +1064,10 @@ func (m *Manager) ensureGitignoreEntry(gitignorePath, entry string) error {
 // deriveBeadsPrefix generates a beads prefix from a rig name.
 // Examples: "gastown" -> "gt", "my-project" -> "mp", "foo" -> "foo"
 func deriveBeadsPrefix(name string) string {
+	// Strip path separators — callers should validate names, but be defensive
+	name = filepath.Base(name)
+	name = strings.TrimLeft(name, "/\\")
+
 	// Remove common suffixes
 	name = strings.TrimSuffix(name, "-py")
 	name = strings.TrimSuffix(name, "-go")
@@ -1291,10 +1296,11 @@ func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, erro
 		return nil, ErrRigExists
 	}
 
-	if strings.ContainsAny(opts.Name, "-. ") {
-		sanitized := strings.NewReplacer("-", "_", ".", "_", " ", "_").Replace(opts.Name)
+	if strings.ContainsAny(opts.Name, "-. /\\") {
+		sanitized := strings.NewReplacer("-", "_", ".", "_", " ", "_", "/", "_", "\\", "_").Replace(opts.Name)
+		sanitized = strings.TrimLeft(sanitized, "_")
 		sanitized = strings.ToLower(sanitized)
-		return nil, fmt.Errorf("rig name %q contains invalid characters; hyphens, dots, and spaces are reserved for agent ID parsing. Try %q instead (underscores are allowed)", opts.Name, sanitized)
+		return nil, fmt.Errorf("rig name %q contains invalid characters; hyphens, dots, spaces, and path separators are not allowed. Try %q instead (underscores are allowed)", opts.Name, sanitized)
 	}
 
 	for _, reserved := range reservedRigNames {

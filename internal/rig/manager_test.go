@@ -731,6 +731,10 @@ func TestDeriveBeadsPrefix(t *testing.T) {
 		// With language suffixes stripped
 		{"myproject-py", "my"},
 		{"myproject-go", "my"},
+
+		// Path-like names (slashes stripped)
+		{"/my_app", "ma"},
+		{"/some/deep/path", "pa"},
 	}
 
 	for _, tt := range tests {
