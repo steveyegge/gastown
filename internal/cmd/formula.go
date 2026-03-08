@@ -552,10 +552,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 		}
 
 		// Track the leg with the convoy
-		if err := BdCmd("dep", "add", convoyID, legBeadID, "--type=tracks").
-			WithAutoCommit().
-			Dir(townBeads).
-			Run(); err != nil {
+		if err := addTracksDep(convoyID, legBeadID, townBeads); err != nil {
 			fmt.Printf("%s Failed to track leg %s: %v\n",
 				style.Dim.Render("Warning:"), leg.ID, err)
 		}
@@ -594,10 +591,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 				style.Dim.Render("Warning:"), err)
 		} else {
 			// Track synthesis with convoy
-			_ = BdCmd("dep", "add", convoyID, synthesisBeadID, "--type=tracks").
-				WithAutoCommit().
-				Dir(townBeads).
-				Run()
+			_ = addTracksDep(convoyID, synthesisBeadID, townBeads)
 
 			// Add dependencies: synthesis depends on all legs
 			for _, legBeadID := range legBeads {

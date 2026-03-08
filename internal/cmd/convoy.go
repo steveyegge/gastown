@@ -452,6 +452,36 @@ func runBdJSON(dir string, args ...string) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
+// addTracksDep adds a "tracks" dependency from convoyID to issueID.
+// Uses bd dep add first; falls back to SQL INSERT for cross-DB deps
+// where bd v0.59.0+ can't resolve the target issue in the local DB.
+func addTracksDep(convoyID, issueID, dir string) error {
+	var depStderr bytes.Buffer
+	if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
+		WithAutoCommit().
+		Dir(dir).
+		Stderr(&depStderr).
+		Run(); err != nil {
+		// Fallback: SQL INSERT for cross-DB deps
+		actor := os.Getenv("BD_ACTOR")
+		if actor == "" {
+			actor = "gt"
+		}
+		sqlQuery := fmt.Sprintf(
+			"INSERT INTO dependencies (issue_id, depends_on_id, type, created_at, created_by, metadata) "+
+				"VALUES ('%s', '%s', 'tracks', NOW(), '%s', '{}')",
+			convoyID, issueID, actor)
+		if _, sqlErr := BdCmd("sql", sqlQuery).Dir(dir).WithAutoCommit().CombinedOutput(); sqlErr != nil {
+			errMsg := strings.TrimSpace(depStderr.String())
+			if errMsg == "" {
+				errMsg = err.Error()
+			}
+			return fmt.Errorf("%s", errMsg)
+		}
+	}
+	return nil
+}
+
 func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	trackedIssues := args[1:]
@@ -552,18 +582,8 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	// Add 'tracks' relations for each tracked issue
 	trackedCount := 0
 	for _, issueID := range trackedIssues {
-		// Use --type=tracks for non-blocking tracking relation
-		var depStderr bytes.Buffer
-		if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
-			WithAutoCommit().
-			Dir(townBeads).
-			Stderr(&depStderr).
-			Run(); err != nil {
-			errMsg := strings.TrimSpace(depStderr.String())
-			if errMsg == "" {
-				errMsg = err.Error()
-			}
-			style.PrintWarning("couldn't track %s: %s", issueID, errMsg)
+		if err := addTracksDep(convoyID, issueID, townBeads); err != nil {
+			style.PrintWarning("couldn't track %s: %s", issueID, err)
 		} else {
 			trackedCount++
 		}
@@ -661,17 +681,8 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 	// Add 'tracks' relations for each issue
 	addedCount := 0
 	for _, issueID := range issuesToAdd {
-		var depStderr bytes.Buffer
-		if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
-			Dir(townBeads).
-			WithAutoCommit().
-			Stderr(&depStderr).
-			Run(); err != nil {
-			errMsg := strings.TrimSpace(depStderr.String())
-			if errMsg == "" {
-				errMsg = err.Error()
-			}
-			style.PrintWarning("couldn't add %s: %s", issueID, errMsg)
+		if err := addTracksDep(convoyID, issueID, townBeads); err != nil {
+			style.PrintWarning("couldn't add %s: %s", issueID, err)
 		} else {
 			addedCount++
 		}
@@ -2042,26 +2053,53 @@ func applyFreshIssueDetails(dep *trackedDependency, details *issueDetails) {
 	dep.Labels = details.Labels
 }
 
-// getTrackedIssues uses bd dep list to get issues tracked by a convoy.
+// getTrackedIssues queries the dependencies table for issues tracked by a convoy.
+// Uses bd sql to query directly, bypassing bd dep list which in v0.59.0+ filters
+// out cross-DB dependencies (target IDs that don't exist in the local DB).
 // Returns issue details including status, type, and worker info.
 func getTrackedIssues(townBeads, convoyID string) ([]trackedIssueInfo, error) {
-	// Use bd dep list to get tracked dependencies
-	// Run from town root (parent of .beads) so bd routes correctly
 	townRoot := filepath.Dir(townBeads)
+
+	// First try bd dep list (works when all tracked issues are in the same DB).
 	out, err := runBdJSON(townRoot, "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
 	if err != nil {
-		return nil, fmt.Errorf("querying tracked issues for %s: %w", convoyID, err)
+		out = nil // fall through to SQL fallback
 	}
 
-	// Parse the JSON output - bd dep list returns full issue details
 	var deps []trackedDependency
-	if err := json.Unmarshal(out, &deps); err != nil {
-		return nil, fmt.Errorf("parsing tracked issues for %s: %w", convoyID, err)
+	if out != nil {
+		if err := json.Unmarshal(out, &deps); err != nil {
+			return nil, fmt.Errorf("parsing tracked issues for %s: %w", convoyID, err)
+		}
 	}
 
 	// Unwrap external:prefix:id format from dep IDs before use
 	for i := range deps {
 		deps[i].ID = beads.ExtractIssueID(deps[i].ID)
+	}
+
+	// Fallback: if bd dep list returned no results, query via SQL to catch
+	// cross-DB deps that bd v0.59.0+ filters out (target issue not in local DB).
+	if len(deps) == 0 {
+		sqlQuery := fmt.Sprintf(
+			"SELECT depends_on_id, type FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'",
+			convoyID)
+		sqlOut, sqlErr := runBdJSON(townRoot, "sql", sqlQuery, "--json")
+		if sqlErr == nil && len(sqlOut) > 0 {
+			var sqlDeps []struct {
+				DependsOnID string `json:"depends_on_id"`
+				Type        string `json:"type"`
+			}
+			if err := json.Unmarshal(sqlOut, &sqlDeps); err == nil {
+				for _, sd := range sqlDeps {
+					depID := beads.ExtractIssueID(sd.DependsOnID)
+					deps = append(deps, trackedDependency{
+						ID:             depID,
+						DependencyType: sd.Type,
+					})
+				}
+			}
+		}
 	}
 
 	// Refresh status via cross-rig lookup. bd dep list returns status from

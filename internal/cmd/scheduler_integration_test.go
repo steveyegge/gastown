@@ -300,7 +300,7 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 	}
 
 	// Verify: convoy is resolvable via bd show from hq
-	cmd := exec.Command("bd", "show", fields.Convoy, "--json", "--allow-stale")
+	cmd := exec.Command("bd", "show", fields.Convoy, "--json")
 	cmd.Dir = hqPath
 	out, err := cmd.Output()
 	if err != nil {

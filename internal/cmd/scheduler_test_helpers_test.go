@@ -7,6 +7,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -145,7 +146,7 @@ func createTestBead(t *testing.T, dir, title string) string {
 // Runs bd show --json from dir and inspects the labels array.
 func beadHasLabel(t *testing.T, beadID, label, dir string) bool {
 	t.Helper()
-	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
+	cmd := exec.Command("bd", "show", beadID, "--json")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -171,7 +172,7 @@ func beadHasLabel(t *testing.T, beadID, label, dir string) bool {
 // getBeadDescription returns the description of a bead via bd show --json.
 func getBeadDescription(t *testing.T, beadID, dir string) string {
 	t.Helper()
-	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
+	cmd := exec.Command("bd", "show", beadID, "--json")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -221,13 +222,27 @@ func addBeadDependency(t *testing.T, blocked, blocker, dir string) {
 
 // addBeadDependencyOfType adds a dependency with a specific type (e.g., "tracks",
 // "depends_on"). The from bead must exist in the local DB at dir; the to bead can
-// be in a different DB if routes.jsonl is present in dir's .beads/.
+// be in a different DB. Uses bd sql INSERT to bypass bd v0.59.0's validation that
+// requires both issues to exist in the local DB (cross-DB deps are stored as raw
+// IDs in the dependencies table and resolved at query time via routes).
 func addBeadDependencyOfType(t *testing.T, from, to, depType, dir string) {
 	t.Helper()
+	// Try bd dep add first (works when both beads are in the same DB).
 	cmd := exec.Command("bd", "dep", "add", from, to, "--type="+depType)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("bd dep add %s %s --type=%s failed: %v\n%s", from, to, depType, err, out)
+		// Fallback: use bd sql INSERT for cross-DB deps where the target
+		// bead doesn't exist in the local DB (bd v0.59.0+ validates this).
+		sqlQuery := fmt.Sprintf(
+			"INSERT INTO dependencies (issue_id, depends_on_id, type, created_at, created_by, metadata) "+
+				"VALUES ('%s', '%s', '%s', NOW(), 'test', '{}')",
+			from, to, depType)
+		sqlCmd := exec.Command("bd", "sql", sqlQuery)
+		sqlCmd.Dir = dir
+		if sqlOut, sqlErr := sqlCmd.CombinedOutput(); sqlErr != nil {
+			t.Fatalf("bd dep add %s %s --type=%s failed: %v\n%s\nSQL fallback also failed: %v\n%s",
+				from, to, depType, err, out, sqlErr, sqlOut)
+		}
 	}
 }
 

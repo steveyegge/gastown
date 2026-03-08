@@ -296,10 +296,14 @@ type epicChild struct {
 }
 
 // getEpicChildren returns child issues of an epic via dependency lookup.
+// Uses bd dep list first, with a SQL fallback for cross-DB dependencies
+// that bd v0.59.0+ filters out (target issue not in local DB).
 func getEpicChildren(epicID string) ([]epicChild, error) {
+	epicDir := resolveBeadDir(epicID)
+
 	depCmd := exec.Command("bd", "dep", "list", epicID,
 		"--direction=down", "--type=depends_on", "--json")
-	depCmd.Dir = resolveBeadDir(epicID)
+	depCmd.Dir = epicDir
 	var stdout bytes.Buffer
 	depCmd.Stdout = &stdout
 
@@ -307,9 +311,10 @@ func getEpicChildren(epicID string) ([]epicChild, error) {
 	depCmd.Stderr = &stderr
 	if err := depCmd.Run(); err != nil {
 		if stdout.Len() == 0 && stderr.Len() == 0 {
-			return nil, nil
+			// bd dep list returned nothing — fall through to SQL fallback
+		} else {
+			return nil, fmt.Errorf("bd dep list %s: %w (stderr: %s)", epicID, err, strings.TrimSpace(stderr.String()))
 		}
-		return nil, fmt.Errorf("bd dep list %s: %w (stderr: %s)", epicID, err, strings.TrimSpace(stderr.String()))
 	}
 
 	var deps []struct {
@@ -317,8 +322,37 @@ func getEpicChildren(epicID string) ([]epicChild, error) {
 		Title  string `json:"title"`
 		Status string `json:"status"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
-		return nil, fmt.Errorf("parsing dependency list: %w", err)
+	if stdout.Len() > 0 {
+		if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
+			return nil, fmt.Errorf("parsing dependency list: %w", err)
+		}
+	}
+
+	// SQL fallback: query dependencies table directly for cross-DB deps
+	// that bd v0.59.0+ filters out from bd dep list.
+	if len(deps) == 0 {
+		sqlQuery := fmt.Sprintf(
+			"SELECT depends_on_id FROM dependencies WHERE issue_id = '%s' AND type = 'depends_on'",
+			epicID)
+		sqlCmd := exec.Command("bd", "sql", sqlQuery, "--json")
+		sqlCmd.Dir = epicDir
+		var sqlStdout bytes.Buffer
+		sqlCmd.Stdout = &sqlStdout
+		sqlCmd.Stderr = &stderr
+		if err := sqlCmd.Run(); err == nil && sqlStdout.Len() > 0 {
+			var sqlDeps []struct {
+				DependsOnID string `json:"depends_on_id"`
+			}
+			if err := json.Unmarshal(sqlStdout.Bytes(), &sqlDeps); err == nil {
+				for _, sd := range sqlDeps {
+					deps = append(deps, struct {
+						ID     string `json:"id"`
+						Title  string `json:"title"`
+						Status string `json:"status"`
+					}{ID: sd.DependsOnID})
+				}
+			}
+		}
 	}
 
 	children := make([]epicChild, 0, len(deps))

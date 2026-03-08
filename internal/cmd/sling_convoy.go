@@ -105,32 +105,58 @@ func findConvoyByDescription(townRoot, beadID string) string {
 
 // convoyTracksBead checks if a convoy has a tracks dependency on the given beadID.
 // Handles both raw bead IDs and external-formatted references (e.g., "external:gt-mol:gt-mol-xyz").
+// Uses bd dep list first, with SQL fallback for cross-DB deps (bd v0.59.0+).
 func convoyTracksBead(beadsDir, convoyID, beadID string) bool {
 	depCmd := exec.Command("bd", "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
 	depCmd.Dir = beadsDir
 
 	out, err := depCmd.Output()
 	if err != nil {
-		return false
+		out = nil
 	}
 
 	var tracked []struct {
 		ID string `json:"id"`
 	}
-	if err := json.Unmarshal(out, &tracked); err != nil {
-		return false
+	if out != nil {
+		if err := json.Unmarshal(out, &tracked); err != nil {
+			tracked = nil
+		}
 	}
 
+	// Check bd dep list results
 	for _, t := range tracked {
-		// Exact match (raw beadID stored as-is)
 		if t.ID == beadID {
 			return true
 		}
-		// External reference match: unwrap "external:prefix:beadID" format
 		if strings.HasPrefix(t.ID, "external:") {
 			parts := strings.SplitN(t.ID, ":", 3)
 			if len(parts) == 3 && parts[2] == beadID {
 				return true
+			}
+		}
+	}
+
+	// SQL fallback: query dependencies table directly for cross-DB deps
+	// that bd v0.59.0+ filters out from bd dep list.
+	if len(tracked) == 0 {
+		sqlQuery := fmt.Sprintf(
+			"SELECT depends_on_id FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'",
+			convoyID)
+		sqlCmd := exec.Command("bd", "sql", sqlQuery, "--json")
+		sqlCmd.Dir = beadsDir
+		sqlOut, sqlErr := sqlCmd.Output()
+		if sqlErr == nil {
+			var sqlDeps []struct {
+				DependsOnID string `json:"depends_on_id"`
+			}
+			if json.Unmarshal(sqlOut, &sqlDeps) == nil {
+				for _, sd := range sqlDeps {
+					depID := beads.ExtractIssueID(sd.DependsOnID)
+					if depID == beadID {
+						return true
+					}
+				}
 			}
 		}
 	}
@@ -426,14 +452,11 @@ func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy string
 	}
 
 	// Add tracking relation: convoy tracks the issue.
-	// Pass the raw beadID and let bd handle cross-rig resolution via routes.jsonl,
-	// matching what gt convoy create/add already do (convoy.go:368, convoy.go:464).
-	// Use WithAutoCommit for the same reason as above.
-	depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
-	if out, err := BdCmd(depArgs...).Dir(townRoot).WithAutoCommit().CombinedOutput(); err != nil {
+	// addTracksDep handles cross-DB deps via SQL fallback for bd v0.59.0+.
+	if err := addTracksDep(convoyID, beadID, townRoot); err != nil {
 		// Tracking failed — delete the orphan convoy to prevent accumulation
 		_ = BdCmd("close", convoyID, "-r", "tracking dep failed").Dir(townRoot).Run()
-		return "", fmt.Errorf("adding tracking relation for %s: %w\noutput: %s", beadID, err, out)
+		return "", fmt.Errorf("adding tracking relation for %s: %w", beadID, err)
 	}
 
 	return convoyID, nil
