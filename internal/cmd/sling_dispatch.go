@@ -28,8 +28,9 @@ type SlingParams struct {
 	Merge      string   // --merge (convoy strategy)
 	BaseBranch string   // --base-branch
 	Account    string   // --account
-	Agent      string   // --agent
-	NoConvoy   bool     // --no-convoy
+	Agent       string   // --agent
+	ExecWrapper []string // --exec-wrapper (parsed)
+	NoConvoy    bool     // --no-convoy
 	Owned      bool     // --owned
 	NoMerge    bool     // --no-merge
 	Force      bool     // --force
@@ -221,11 +222,12 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 
 	// 3. Spawn polecat (via spawnPolecatForSling)
 	spawnOpts := SlingSpawnOptions{
-		Force:      params.Force,
-		Account:    params.Account,
-		HookBead:   params.BeadID,
-		Agent:      params.Agent,
-		BaseBranch: params.BaseBranch,
+		Force:       params.Force,
+		Account:     params.Account,
+		HookBead:    params.BeadID,
+		Agent:       params.Agent,
+		BaseBranch:  params.BaseBranch,
+		ExecWrapper: params.ExecWrapper,
 		// Create is always true for rig targets: executeSling only handles
 		// rig-targeted dispatch (batch sling + queue dispatch), where a fresh
 		// polecat must be spawned. The single-sling path (runSling) handles

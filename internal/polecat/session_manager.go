@@ -75,6 +75,11 @@ type SessionStartOptions struct {
 	// If set, GT_AGENT is written to the tmux session environment table so that
 	// IsAgentAlive and waitForPolecatReady read the correct process names.
 	Agent string
+
+	// ExecWrapper is a command prefix for sandboxed execution.
+	// When set, the startup command becomes: exec env ... <wrapper...> claude ...
+	// Example: ["exitbox", "run", "--profile=gastown-polecat", "--"]
+	ExecWrapper []string
 }
 
 // SessionInfo contains information about a running polecat session.
@@ -300,6 +305,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 			Issue:       opts.Issue,
 			Topic:       "assigned",
 			SessionName: sessionID,
+			ExecWrapper: opts.ExecWrapper,
 		}, m.rig.Path, beacon, "")
 		if err != nil {
 			return fmt.Errorf("building startup command: %w", err)

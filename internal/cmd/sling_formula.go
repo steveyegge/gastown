@@ -91,14 +91,15 @@ func runSlingFormula(ctx context.Context, args []string) error {
 		target = args[1]
 	}
 	resolved, err := resolveTarget(target, ResolveTargetOptions{
-		DryRun:   slingDryRun,
-		Force:    slingForce,
-		Create:   slingCreate,
-		Account:  slingAccount,
-		Agent:    slingAgent,
-		NoBoot:   slingNoBoot,
-		WorkDesc: formulaName,
-		TownRoot: townRoot,
+		DryRun:      slingDryRun,
+		Force:       slingForce,
+		Create:      slingCreate,
+		Account:     slingAccount,
+		Agent:       slingAgent,
+		ExecWrapper: strings.Fields(slingExecWrapper),
+		NoBoot:      slingNoBoot,
+		WorkDesc:    formulaName,
+		TownRoot:    townRoot,
 	})
 	if err != nil {
 		return err

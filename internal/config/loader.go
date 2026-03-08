@@ -1935,6 +1935,13 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	// shadow built-in preset names (e.g., custom "codex" running "opencode"),
 	// so we resolve process names from both agent name and actual command.
 	processNames := ResolveProcessNames(rc.ResolvedAgent, rc.Command)
+	// When an ExecWrapper is configured, the pane process is the wrapper binary
+	// (e.g., "exitbox", "daytona"), not the agent. Add it to accepted process
+	// names so IsAgentAlive detects the session as alive. (G5 in design doc)
+	if len(rc.ExecWrapper) > 0 {
+		wrapperBin := filepath.Base(rc.ExecWrapper[0])
+		processNames = append(processNames, wrapperBin)
+	}
 	resolvedEnv["GT_PROCESS_NAMES"] = strings.Join(processNames, ",")
 	// Merge agent-specific env vars (e.g., OPENCODE_PERMISSION for yolo mode)
 	for k, v := range rc.Env {
@@ -2030,6 +2037,12 @@ func PrependEnv(command string, envVars map[string]string) string {
 //  2. role_agents[GT_ROLE] (if GT_ROLE is in envVars)
 //  3. Default agent resolution (rig's Agent → town's DefaultAgent → "claude")
 func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, prompt, agentOverride string) (string, error) {
+	return buildStartupCommandWithOptions(envVars, rigPath, prompt, agentOverride, nil)
+}
+
+// buildStartupCommandWithOptions is the internal implementation that supports
+// both agent override and exec wrapper override.
+func buildStartupCommandWithOptions(envVars map[string]string, rigPath, prompt, agentOverride string, execWrapper []string) (string, error) {
 	var rc *RuntimeConfig
 	var townRoot string
 
@@ -2091,6 +2104,11 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 		}
 	}
 
+	// Apply exec wrapper override from CLI flag (takes precedence over config).
+	if len(execWrapper) > 0 {
+		rc.ExecWrapper = execWrapper
+	}
+
 	// Copy env vars to avoid mutating caller map
 	resolvedEnv := make(map[string]string, len(envVars)+2)
 	for k, v := range envVars {
@@ -2114,6 +2132,12 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	}
 	// Set GT_PROCESS_NAMES for accurate liveness detection of custom agents.
 	processNamesOverride := ResolveProcessNames(agentForProcess, rc.Command)
+	// When an ExecWrapper is configured, the pane process is the wrapper binary
+	// (e.g., "exitbox", "daytona"), not the agent. Add it so liveness detection works.
+	if len(rc.ExecWrapper) > 0 {
+		wrapperBin := filepath.Base(rc.ExecWrapper[0])
+		processNamesOverride = append(processNamesOverride, wrapperBin)
+	}
 	resolvedEnv["GT_PROCESS_NAMES"] = strings.Join(processNamesOverride, ",")
 	// Merge agent-specific env vars (e.g., OPENCODE_PERMISSION for yolo mode)
 	for k, v := range rc.Env {
@@ -2151,9 +2175,10 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 // Use this (instead of Build*StartupCommand helpers) when you need full OTEL context:
 // Issue (gt.issue), Topic (gt.topic), SessionName (gt.session), etc.
 // The rigPath, prompt, and agentOverride are passed through directly.
+// If cfg.ExecWrapper is set, it overrides the RuntimeConfig's ExecWrapper.
 func BuildStartupCommandFromConfig(cfg AgentEnvConfig, rigPath, prompt, agentOverride string) (string, error) {
 	envVars := AgentEnv(cfg)
-	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
+	return buildStartupCommandWithOptions(envVars, rigPath, prompt, agentOverride, cfg.ExecWrapper)
 }
 
 // BuildAgentStartupCommand is a convenience function for starting agent sessions.

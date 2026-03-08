@@ -33,8 +33,9 @@ type SpawnedPolecatInfo struct {
 	Branch      string // Git branch name (for cleanup on rollback)
 
 	// Internal fields for deferred session start
-	account string
-	agent   string
+	account     string
+	agent       string
+	execWrapper []string
 }
 
 // AgentID returns the agent identifier (e.g., "gastown/polecats/Toast")
@@ -49,12 +50,13 @@ func (s *SpawnedPolecatInfo) SessionStarted() bool {
 
 // SlingSpawnOptions contains options for spawning a polecat via sling.
 type SlingSpawnOptions struct {
-	Force      bool   // Force spawn even if polecat has uncommitted work
-	Account    string // Claude Code account handle to use
-	Create     bool   // Create polecat if it doesn't exist (currently always true for sling)
-	HookBead   string // Bead ID to set as hook_bead at spawn time (atomic assignment)
-	Agent      string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
-	BaseBranch string // Override base branch for polecat worktree (e.g., "develop", "release/v2")
+	Force       bool     // Force spawn even if polecat has uncommitted work
+	Account     string   // Claude Code account handle to use
+	Create      bool     // Create polecat if it doesn't exist (currently always true for sling)
+	HookBead    string   // Bead ID to set as hook_bead at spawn time (atomic assignment)
+	Agent       string   // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
+	BaseBranch  string   // Override base branch for polecat worktree (e.g., "develop", "release/v2")
+	ExecWrapper []string // Command prefix for sandboxed execution (e.g., ["exitbox", "run", "--profile=gastown-polecat", "--"])
 }
 
 // SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
@@ -311,6 +313,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		Branch:      polecatObj.Branch,
 		account:     opts.Account,
 		agent:       opts.Agent,
+		execWrapper: opts.ExecWrapper,
 	}, nil
 }
 
@@ -357,6 +360,7 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	startOpts := polecat.SessionStartOptions{
 		RuntimeConfigDir: claudeConfigDir,
 		Agent:            s.agent,
+		ExecWrapper:      s.execWrapper,
 	}
 	if s.agent != "" {
 		cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(s.RigName, s.PolecatName, r.Path, "", s.agent)

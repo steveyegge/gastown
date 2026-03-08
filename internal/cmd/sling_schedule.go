@@ -57,6 +57,7 @@ type ScheduleOptions struct {
 	NoMerge     bool     // Skip merge queue on completion
 	Account     string   // Claude Code account handle
 	Agent       string   // Agent override (e.g., "gemini", "codex")
+	ExecWrapper []string // Command prefix for sandboxed execution
 	HookRawBead bool     // Hook raw bead without default formula
 	Ralph       bool     // Ralph Wiggum loop mode
 }
@@ -157,6 +158,9 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 	if opts.Agent != "" {
 		fields.Agent = opts.Agent
 	}
+	if len(opts.ExecWrapper) > 0 {
+		fields.ExecWrapper = opts.ExecWrapper
+	}
 	fields.HookRawBead = opts.HookRawBead
 	if opts.Ralph {
 		fields.Mode = "ralph"
@@ -225,6 +229,7 @@ func runBatchSchedule(beadIDs []string, rigName string) error {
 			NoMerge:     slingNoMerge,
 			Account:     slingAccount,
 			Agent:       slingAgent,
+			ExecWrapper: strings.Fields(slingExecWrapper),
 			HookRawBead: slingHookRawBead,
 			Ralph:       slingRalph,
 		})

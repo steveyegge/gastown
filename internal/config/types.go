@@ -681,6 +681,16 @@ type RuntimeConfig struct {
 	// Instructions controls the per-workspace instruction file name.
 	Instructions *RuntimeInstructionsConfig `json:"instructions,omitempty"`
 
+	// ExecWrapper is a command prefix inserted between `exec env VAR=val ...`
+	// and the agent binary. This allows injecting sandbox runtimes (exitbox,
+	// Docker, gVisor, nsjail, daytona) without modifying startup code.
+	//
+	// Example: ["exitbox", "run", "--profile=gastown-polecat", "--"]
+	// Result:  exec env ... exitbox run --profile=gastown-polecat -- claude ...
+	//
+	// Empty slice means no wrapping (default — local execution).
+	ExecWrapper []string `json:"exec_wrapper,omitempty"`
+
 	// ResolvedAgent is the agent name that was resolved during config lookup.
 	// Set by ResolveRoleAgentConfig / resolveAgentConfigInternal so that
 	// BuildStartupCommand can export GT_AGENT for process detection.
@@ -742,11 +752,18 @@ func DefaultRuntimeConfig() *RuntimeConfig {
 
 // BuildCommand returns the full command line string.
 // For use with tmux SendKeys.
+// If ExecWrapper is set, the wrapper tokens are prepended before the command,
+// e.g. "exitbox run --profile=gastown-polecat -- claude --dangerously-skip-permissions".
 func (rc *RuntimeConfig) BuildCommand() string {
 	resolved := normalizeRuntimeConfig(rc)
 
 	cmd := resolved.Command
 	args := resolved.Args
+
+	// Prepend exec wrapper if configured
+	if len(resolved.ExecWrapper) > 0 {
+		cmd = strings.Join(resolved.ExecWrapper, " ") + " " + cmd
+	}
 
 	// Combine command and args
 	if len(args) > 0 {

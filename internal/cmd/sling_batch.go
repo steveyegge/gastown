@@ -151,6 +151,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			BaseBranch:       slingBaseBranch,
 			Account:          slingAccount,
 			Agent:            slingAgent,
+			ExecWrapper:      strings.Fields(slingExecWrapper),
 			NoConvoy:         slingNoConvoy,
 			Owned:            slingOwned,
 			NoMerge:          slingNoMerge,

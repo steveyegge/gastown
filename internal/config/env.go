@@ -60,6 +60,11 @@ type AgentEnvConfig struct {
 	// Added as gt.session to OTEL_RESOURCE_ATTRIBUTES so all Claude logs from a
 	// single GT session can be correlated, and as GT_SESSION env var.
 	SessionName string
+
+	// ExecWrapper is a command prefix for sandboxed execution.
+	// When set, overrides RuntimeConfig.ExecWrapper for the startup command.
+	// Example: ["exitbox", "run", "--profile=gastown-polecat", "--"]
+	ExecWrapper []string
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.

@@ -581,4 +581,114 @@ func TestParseDurationOrDefault_AllWebTimeoutDefaults(t *testing.T) {
 	}
 }
 
+// --- ExecWrapper ---
 
+func TestBuildCommand_ExecWrapper(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		rc      RuntimeConfig
+		want    string
+	}{
+		{
+			name: "no wrapper, default command",
+			rc:   RuntimeConfig{Command: "claude", Args: []string{"--dangerously-skip-permissions"}},
+			want: "claude --dangerously-skip-permissions",
+		},
+		{
+			name: "with exitbox wrapper",
+			rc: RuntimeConfig{
+				Command:     "claude",
+				Args:        []string{"--dangerously-skip-permissions"},
+				ExecWrapper: []string{"exitbox", "run", "--profile=gastown-polecat", "--"},
+			},
+			want: "exitbox run --profile=gastown-polecat -- claude --dangerously-skip-permissions",
+		},
+		{
+			name: "with daytona wrapper",
+			rc: RuntimeConfig{
+				Command:     "claude",
+				Args:        []string{"--dangerously-skip-permissions"},
+				ExecWrapper: []string{"daytona", "exec", "furiosa-ws", "--"},
+			},
+			want: "daytona exec furiosa-ws -- claude --dangerously-skip-permissions",
+		},
+		{
+			name: "wrapper with no args",
+			rc: RuntimeConfig{
+				Command:     "claude",
+				ExecWrapper: []string{"sandbox-run"},
+			},
+			want: "sandbox-run claude --dangerously-skip-permissions",
+		},
+		{
+			name: "empty wrapper has no effect",
+			rc: RuntimeConfig{
+				Command:     "claude",
+				Args:        []string{"--dangerously-skip-permissions"},
+				ExecWrapper: []string{},
+			},
+			want: "claude --dangerously-skip-permissions",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.rc.BuildCommand()
+			if got != tt.want {
+				t.Errorf("BuildCommand() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExecWrapper_JSONRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	rc := RuntimeConfig{
+		Provider:    "claude",
+		Command:     "claude",
+		ExecWrapper: []string{"exitbox", "run", "--profile=gastown-polecat", "--"},
+	}
+
+	data, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	// Verify the JSON contains exec_wrapper
+	if !strings.Contains(string(data), `"exec_wrapper"`) {
+		t.Errorf("JSON should contain exec_wrapper field, got: %s", data)
+	}
+
+	var decoded RuntimeConfig
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if len(decoded.ExecWrapper) != 4 {
+		t.Errorf("ExecWrapper len = %d, want 4", len(decoded.ExecWrapper))
+	}
+	if decoded.ExecWrapper[0] != "exitbox" {
+		t.Errorf("ExecWrapper[0] = %q, want %q", decoded.ExecWrapper[0], "exitbox")
+	}
+}
+
+func TestExecWrapper_EmptyOmittedFromJSON(t *testing.T) {
+	t.Parallel()
+
+	rc := RuntimeConfig{
+		Provider: "claude",
+		Command:  "claude",
+	}
+
+	data, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	if strings.Contains(string(data), `"exec_wrapper"`) {
+		t.Errorf("JSON should NOT contain exec_wrapper when empty, got: %s", data)
+	}
+}

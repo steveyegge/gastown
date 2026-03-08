@@ -128,6 +128,7 @@ var (
 	slingNoBoot        bool   // --no-boot: skip wakeRigAgents (avoid witness/refinery boot and lock contention)
 	slingMaxConcurrent int    // --max-concurrent: limit concurrent spawns in batch mode
 	slingBaseBranch    string // --base-branch: override base branch for polecat worktree
+	slingExecWrapper   string // --exec-wrapper: command prefix for sandboxed execution (e.g., "exitbox run --profile=gastown-polecat --")
 	slingRalph         bool   // --ralph: enable Ralph Wiggum loop mode for multi-step workflows
 	slingFormula       string // --formula: override formula for dispatch (default: mol-polecat-work)
 )
@@ -154,6 +155,7 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingNoBoot, "no-boot", false, "Skip rig boot after polecat spawn (avoids witness/refinery lock contention)")
 	slingCmd.Flags().IntVar(&slingMaxConcurrent, "max-concurrent", 0, "Limit concurrent polecat spawns in batch mode (0 = no limit)")
 	slingCmd.Flags().StringVar(&slingBaseBranch, "base-branch", "", "Override base branch for polecat worktree (e.g., 'develop', 'release/v2')")
+	slingCmd.Flags().StringVar(&slingExecWrapper, "exec-wrapper", "", "Command prefix for sandboxed execution (e.g., 'exitbox run --profile=gastown-polecat --')")
 	slingCmd.Flags().BoolVar(&slingRalph, "ralph", false, "Enable Ralph Wiggum loop mode (fresh context per step, for multi-step workflows)")
 	slingCmd.Flags().StringVar(&slingFormula, "formula", "", "Formula to apply (default: mol-polecat-work for polecat targets)")
 
@@ -346,6 +348,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 				NoMerge:     slingNoMerge,
 				Account:     slingAccount,
 				Agent:       slingAgent,
+				ExecWrapper: strings.Fields(slingExecWrapper),
 				HookRawBead: slingHookRawBead,
 				Ralph:       slingRalph,
 			})
@@ -385,6 +388,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 			NoMerge:     slingNoMerge,
 			Account:     slingAccount,
 			Agent:       slingAgent,
+			ExecWrapper: strings.Fields(slingExecWrapper),
 			HookRawBead: slingHookRawBead,
 			Ralph:       slingRalph,
 		})
@@ -421,6 +425,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 				NoMerge:     slingNoMerge,
 				Account:     slingAccount,
 				Agent:       slingAgent,
+				ExecWrapper: strings.Fields(slingExecWrapper),
 				HookRawBead: slingHookRawBead,
 				Ralph:       slingRalph,
 			})
@@ -644,16 +649,17 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		target = args[1]
 	}
 	resolved, err := resolveTarget(target, ResolveTargetOptions{
-		DryRun:     slingDryRun,
-		Force:      force,
-		Create:     slingCreate,
-		Account:    slingAccount,
-		Agent:      slingAgent,
-		NoBoot:     slingNoBoot,
-		HookBead:   beadID,
-		BeadID:     beadID,
-		TownRoot:   townRoot,
-		BaseBranch: slingBaseBranch,
+		DryRun:      slingDryRun,
+		Force:       force,
+		Create:      slingCreate,
+		Account:     slingAccount,
+		Agent:       slingAgent,
+		ExecWrapper: strings.Fields(slingExecWrapper),
+		NoBoot:      slingNoBoot,
+		HookBead:    beadID,
+		BeadID:      beadID,
+		TownRoot:    townRoot,
+		BaseBranch:  slingBaseBranch,
 	})
 	if err != nil {
 		return err

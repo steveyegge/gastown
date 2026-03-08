@@ -423,6 +423,7 @@ func dispatchSingleBead(b capacity.PendingBead, townRoot, _ string) (*SlingResul
 		NoMerge:          dp.NoMerge,
 		Account:          dp.Account,
 		Agent:            dp.Agent,
+		ExecWrapper:      dp.ExecWrapper,
 		HookRawBead:      dp.HookRawBead,
 		Mode:             dp.Mode,
 		FormulaFailFatal: true,
