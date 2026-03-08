@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -346,6 +347,13 @@ func runLogCrash(cmd *cobra.Command, args []string) error {
 	logger := townlog.NewLogger(townRoot)
 	if err := logger.Log(eventType, crashAgent, context); err != nil {
 		return fmt.Errorf("logging event: %w", err)
+	}
+
+	// Emit feed event so crashes are visible in the activity feed (GH#2534).
+	// Previously only logged to townlog, making crashes invisible to feed consumers.
+	if eventType == townlog.EventCrash || eventType == townlog.EventKill {
+		_ = events.LogFeed(events.TypeSessionDeath, crashAgent,
+			events.SessionDeathPayload(crashSession, crashAgent, context, "tmux pane-died"))
 	}
 
 	return nil
