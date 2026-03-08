@@ -3,6 +3,7 @@ package hooks
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -122,6 +123,9 @@ func TestInstallForRole_EmptyProvider(t *testing.T) {
 }
 
 func TestInstallForRole_Permissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file permissions not supported on Windows")
+	}
 	dir := t.TempDir()
 
 	// JSON files should get 0600

@@ -3,6 +3,7 @@ package doctor
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -615,6 +616,9 @@ func TestBeadsRedirectTargetCheck_FixWithMissingConfigYaml(t *testing.T) {
 }
 
 func TestBeadsRedirectTargetCheck_FixMetadataRepairFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based permission restrictions don't apply on Windows")
+	}
 	// Target directory exists but metadata repair can't fix it (no metadata.json,
 	// and the directory is writable so EnsureConfigYAML succeeds but with empty
 	// fallback prefix — the important thing is the fallback path works).

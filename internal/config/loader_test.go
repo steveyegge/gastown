@@ -1621,7 +1621,11 @@ func TestResolveWorkerAgentConfig_WorkerSpecificOverridesRole(t *testing.T) {
 
 	// Create a fake codex binary so ValidateAgentConfig passes
 	binDir := t.TempDir()
-	codexPath := filepath.Join(binDir, "codex")
+	codexName := "codex"
+	if runtime.GOOS == "windows" {
+		codexName = "codex.exe"
+	}
+	codexPath := filepath.Join(binDir, codexName)
 	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatalf("write codex stub: %v", err)
 	}
@@ -1684,7 +1688,11 @@ func TestBuildStartupCommand_WorkerAgentsViaCrew(t *testing.T) {
 
 	// Create a fake codex binary
 	binDir := t.TempDir()
-	codexPath := filepath.Join(binDir, "codex")
+	codexName := "codex"
+	if runtime.GOOS == "windows" {
+		codexName = "codex.exe"
+	}
+	codexPath := filepath.Join(binDir, codexName)
 	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatalf("write codex stub: %v", err)
 	}

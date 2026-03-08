@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -225,6 +226,9 @@ func TestHandleExec(t *testing.T) {
 	})
 
 	t.Run("GT_PROXY_IDENTITY env var is set when CN is present", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("shell scripts not supported on Windows")
+		}
 		// Write a tiny script that prints the GT_PROXY_IDENTITY env var.
 		// The script is placed in a temp dir added to PATH so AllowedCommands
 		// can reference it by plain name (no path separator — issue 12).

@@ -183,6 +183,12 @@ func (t *Tmux) run(args ...string) (string, error) {
 
 	err := cmd.Run()
 	if err != nil {
+		// If tmux binary is not found, treat as "no server running" since
+		// there can't be any active sessions without tmux.
+		var execErr *exec.Error
+		if errors.As(err, &execErr) {
+			return "", ErrNoServer
+		}
 		return "", t.wrapError(err, stderr.String(), args)
 	}
 

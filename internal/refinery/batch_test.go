@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,15 @@ import (
 	gitpkg "github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 )
+
+// gateCheckFileNotExists returns a shell command that fails if the given file exists.
+// Cross-platform: uses "test ! -f" on Unix and "cmd /c if exist ... exit 1" on Windows.
+func gateCheckFileNotExists(filePath string) string {
+	if runtime.GOOS == "windows" {
+		return fmt.Sprintf(`cmd /c "if exist %s exit 1"`, filePath)
+	}
+	return fmt.Sprintf("test ! -f %s", filePath)
+}
 
 // testGitRepo creates a bare repo + working clone with an initial commit.
 // Returns the working dir, a cleanup func, and a git.Git for the working dir.
@@ -467,7 +477,7 @@ func TestProcessBatch_GateFailure_BisectsToFindCulprit(t *testing.T) {
 	e := newTestEngineer(t, workDir, g)
 	// Gate that fails if FAIL_MARKER exists
 	e.config.Gates = map[string]*GateConfig{
-		"check": {Cmd: fmt.Sprintf("test ! -f %s/FAIL_MARKER", workDir)},
+		"check": {Cmd: gateCheckFileNotExists(filepath.Join(workDir, "FAIL_MARKER"))},
 	}
 	e.config.GatesParallel = false
 
@@ -601,7 +611,7 @@ func TestBisectBatch_SingleMR(t *testing.T) {
 
 	e := newTestEngineer(t, workDir, g)
 	e.config.Gates = map[string]*GateConfig{
-		"check": {Cmd: fmt.Sprintf("test ! -f %s/FAIL_MARKER", workDir)},
+		"check": {Cmd: gateCheckFileNotExists(filepath.Join(workDir, "FAIL_MARKER"))},
 	}
 
 	batch := []*MRInfo{makeMR("mr-a", "feature-a", "main")}
@@ -624,7 +634,7 @@ func TestBisectBatch_TwoMRs_SecondBad(t *testing.T) {
 
 	e := newTestEngineer(t, workDir, g)
 	e.config.Gates = map[string]*GateConfig{
-		"check": {Cmd: fmt.Sprintf("test ! -f %s/FAIL_MARKER", workDir)},
+		"check": {Cmd: gateCheckFileNotExists(filepath.Join(workDir, "FAIL_MARKER"))},
 	}
 
 	batch := []*MRInfo{
@@ -650,7 +660,7 @@ func TestBisectBatch_TwoMRs_FirstBad(t *testing.T) {
 
 	e := newTestEngineer(t, workDir, g)
 	e.config.Gates = map[string]*GateConfig{
-		"check": {Cmd: fmt.Sprintf("test ! -f %s/FAIL_MARKER", workDir)},
+		"check": {Cmd: gateCheckFileNotExists(filepath.Join(workDir, "FAIL_MARKER"))},
 	}
 
 	batch := []*MRInfo{
@@ -679,7 +689,7 @@ func TestBisectBatch_FourMRs_ThirdBad(t *testing.T) {
 	e := newTestEngineer(t, workDir, g)
 	e.output = os.Stderr
 	e.config.Gates = map[string]*GateConfig{
-		"check": {Cmd: fmt.Sprintf("test ! -f %s/FAIL_MARKER", workDir)},
+		"check": {Cmd: gateCheckFileNotExists(filepath.Join(workDir, "FAIL_MARKER"))},
 	}
 
 	batch := []*MRInfo{
@@ -744,7 +754,7 @@ func TestProcessBatch_BisectAndMergeGood(t *testing.T) {
 
 	e := newTestEngineer(t, workDir, g)
 	e.config.Gates = map[string]*GateConfig{
-		"check": {Cmd: fmt.Sprintf("test ! -f %s/FAIL_MARKER", workDir)},
+		"check": {Cmd: gateCheckFileNotExists(filepath.Join(workDir, "FAIL_MARKER"))},
 	}
 
 	batch := []*MRInfo{
