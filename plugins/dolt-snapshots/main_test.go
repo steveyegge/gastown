@@ -389,6 +389,12 @@ func TestConvoyRow_SnapshotLogic(t *testing.T) {
 			wantStaged: true,
 		},
 		{
+			name:       "launched convoy needs staged tag",
+			convoy:     convoyRow{Status: "launched", HasOpenTag: true, HasStagedTag: false},
+			wantOpen:   false,
+			wantStaged: true,
+		},
+		{
 			name:       "open convoy already tagged",
 			convoy:     convoyRow{Status: "open", HasOpenTag: true, HasStagedTag: false},
 			wantOpen:   false,

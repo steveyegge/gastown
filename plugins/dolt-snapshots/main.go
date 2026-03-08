@@ -10,6 +10,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"flag"
@@ -345,7 +346,7 @@ func findConvoysNeedingSnapshots(db *sql.DB) ([]convoyRow, error) {
 		FROM hq.issues i
 		WHERE i.issue_type = 'convoy'
 			AND (
-				i.status IN ('staged_ready', 'staged_warnings', 'open')
+				i.status IN ('staged_ready', 'staged_warnings', 'launched', 'open')
 				OR (i.status = 'closed' AND i.updated_at >= NOW() - INTERVAL 24 HOUR)
 			)
 			AND EXISTS (
@@ -441,11 +442,12 @@ func resolveDependencyDB(depID string, routes map[string]string) string {
 }
 
 // createTag creates an immutable tag on a Dolt database at HEAD.
-// Uses parameterized DOLT_TAG — no SQL injection possible.
+// Uses a dedicated connection to avoid USE statement races on the shared pool.
 func createTag(db *sql.DB, dbName, tagName, message string) error {
 	// Check if tag already exists
 	var count int
-	checkQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.dolt_tags WHERE tag_name = ?", sanitizeDBName(dbName))
+	sdb := sanitizeDBName(dbName)
+	checkQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.dolt_tags WHERE tag_name = ?", sdb)
 	if err := db.QueryRow(checkQuery, tagName).Scan(&count); err != nil {
 		return fmt.Errorf("checking tag existence: %w", err)
 	}
@@ -453,14 +455,19 @@ func createTag(db *sql.DB, dbName, tagName, message string) error {
 		return nil // Already exists, idempotent
 	}
 
-	// Create tag at HEAD — no auto-commit, snapshot as-is
-	// DOLT_TAG takes the tag name and message as procedure arguments
-	createQuery := fmt.Sprintf("USE `%s`", sanitizeDBName(dbName))
-	if _, err := db.Exec(createQuery); err != nil {
+	// Use a dedicated connection for USE + DOLT_TAG to avoid races on the shared pool
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("acquiring connection: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("USE `%s`", sdb)); err != nil {
 		return fmt.Errorf("switching to database %s: %w", dbName, err)
 	}
 
-	if _, err := db.Exec("CALL DOLT_TAG(?, 'HEAD', '-m', ?)", tagName, message); err != nil {
+	if _, err := conn.ExecContext(ctx, "CALL DOLT_TAG(?, 'HEAD', '-m', ?)", tagName, message); err != nil {
 		return fmt.Errorf("creating tag: %w", err)
 	}
 
@@ -468,10 +475,12 @@ func createTag(db *sql.DB, dbName, tagName, message string) error {
 }
 
 // createBranch creates a branch on a Dolt database at HEAD.
+// Uses a dedicated connection to avoid USE statement races on the shared pool.
 func createBranch(db *sql.DB, dbName, branchName string) error {
 	// Check if branch already exists
 	var count int
-	checkQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.dolt_branches WHERE name = ?", sanitizeDBName(dbName))
+	sdb := sanitizeDBName(dbName)
+	checkQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.dolt_branches WHERE name = ?", sdb)
 	if err := db.QueryRow(checkQuery, branchName).Scan(&count); err != nil {
 		return fmt.Errorf("checking branch existence: %w", err)
 	}
@@ -479,12 +488,19 @@ func createBranch(db *sql.DB, dbName, branchName string) error {
 		return nil // Already exists, idempotent
 	}
 
-	createQuery := fmt.Sprintf("USE `%s`", sanitizeDBName(dbName))
-	if _, err := db.Exec(createQuery); err != nil {
+	// Use a dedicated connection for USE + DOLT_BRANCH to avoid races on the shared pool
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("acquiring connection: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("USE `%s`", sdb)); err != nil {
 		return fmt.Errorf("switching to database %s: %w", dbName, err)
 	}
 
-	if _, err := db.Exec("CALL DOLT_BRANCH(?, 'HEAD')", branchName); err != nil {
+	if _, err := conn.ExecContext(ctx, "CALL DOLT_BRANCH(?, 'HEAD')", branchName); err != nil {
 		return fmt.Errorf("creating branch: %w", err)
 	}
 
