@@ -198,6 +198,38 @@ func TestBuildStatusIndicator_AliveShowsRunning(t *testing.T) {
 	}
 }
 
+func TestBuildStatusIndicator_DNDMutedShowsBadge(t *testing.T) {
+	agent := AgentRuntime{Running: true, NotificationLevel: beads.NotifyMuted}
+	indicator := buildStatusIndicator(agent)
+	if !strings.Contains(indicator, "🔕") {
+		t.Fatalf("expected muted indicator to include 🔕, got %q", indicator)
+	}
+}
+
+func TestOutputStatusText_IncludesDNDSection(t *testing.T) {
+	status := TownStatus{
+		Name:     "gt",
+		Location: "/tmp/gt",
+		DND: &DNDInfo{
+			Enabled: true,
+			Level:   beads.NotifyMuted,
+			Agent:   "hq-mayor",
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := outputStatusText(&buf, status); err != nil {
+		t.Fatalf("outputStatusText error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "DND:") {
+		t.Fatalf("expected DND section in status output, got: %q", out)
+	}
+	if !strings.Contains(out, "on") {
+		t.Fatalf("expected DND state 'on' in status output, got: %q", out)
+	}
+}
+
 func TestRunStatusWatch_RejectsZeroInterval(t *testing.T) {
 	oldInterval := statusInterval
 	oldWatch := statusWatch

@@ -64,10 +64,15 @@ func (c *CheckMisclassifiedWisps) Run(ctx *CheckContext) *CheckResult {
 		// Dolt path covers rig databases only (no town-level beads).
 		// Town-level beads are rare and covered by the JSONL fallback path.
 		for _, db := range databases {
-			// The "hq" database lives at the town root itself, not townRoot/hq.
-			rigDir := filepath.Join(ctx.TownRoot, db)
-			if db == "hq" {
-				rigDir = ctx.TownRoot
+			// Look up rig path from routes using prefix (e.g., "sw" -> "sw-" -> "sallaWork/mayor/rig")
+			prefix := db + "-"
+			rigDir := beads.GetRigPathForPrefix(ctx.TownRoot, prefix)
+			if rigDir == "" {
+				// Fallback: assume database name equals rig directory name
+				rigDir = filepath.Join(ctx.TownRoot, db)
+				if db == "hq" {
+					rigDir = ctx.TownRoot
+				}
 			}
 			found, probeErrors := c.findMisclassifiedWispsDolt(rigDir, db)
 			totalProbeErrors += probeErrors

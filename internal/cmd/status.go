@@ -65,6 +65,7 @@ type TownStatus struct {
 	Name     string         `json:"name"`
 	Location string         `json:"location"`
 	Overseer *OverseerInfo  `json:"overseer,omitempty"` // Human operator
+	DND      *DNDInfo       `json:"dnd,omitempty"`      // Current agent DND status
 	Daemon   *ServiceInfo   `json:"daemon,omitempty"`   // Daemon status
 	Dolt     *DoltInfo      `json:"dolt,omitempty"`     // Dolt server status
 	Tmux     *TmuxInfo      `json:"tmux,omitempty"`     // Tmux server status
@@ -108,6 +109,13 @@ type OverseerInfo struct {
 	UnreadMail int    `json:"unread_mail"`
 }
 
+// DNDInfo represents Do Not Disturb status for the current agent context.
+type DNDInfo struct {
+	Enabled bool   `json:"enabled"`
+	Level   string `json:"level"`
+	Agent   string `json:"agent,omitempty"`
+}
+
 // AgentRuntime represents the runtime state of an agent.
 type AgentRuntime struct {
 	Name         string `json:"name"`                    // Display name (e.g., "mayor", "witness")
@@ -118,11 +126,12 @@ type AgentRuntime struct {
 	HasWork      bool   `json:"has_work"`                // Has pinned work?
 	WorkTitle    string `json:"work_title,omitempty"`    // Title of pinned work
 	HookBead     string `json:"hook_bead,omitempty"`     // Pinned bead ID from agent bead
-	State        string `json:"state,omitempty"`         // Agent state from agent bead
-	UnreadMail   int    `json:"unread_mail"`             // Number of unread messages
-	FirstSubject string `json:"first_subject,omitempty"` // Subject of first unread message
-	AgentAlias   string `json:"agent_alias,omitempty"`   // Configured agent name (e.g., "opus-46", "pi")
-	AgentInfo    string `json:"agent_info,omitempty"`    // Runtime summary (e.g., "claude/opus", "pi/kimi-k2p5")
+	State             string `json:"state,omitempty"`              // Agent state from agent bead
+	NotificationLevel string `json:"notification_level,omitempty"` // Notification level (verbose, normal, muted)
+	UnreadMail        int    `json:"unread_mail"`                  // Number of unread messages
+	FirstSubject      string `json:"first_subject,omitempty"`      // Subject of first unread message
+	AgentAlias        string `json:"agent_alias,omitempty"`        // Configured agent name (e.g., "opus-46", "pi")
+	AgentInfo         string `json:"agent_info,omitempty"`         // Runtime summary (e.g., "claude/opus", "pi/kimi-k2p5")
 }
 
 // RigStatus represents status of a single rig.
@@ -767,6 +776,7 @@ func gatherStatus() (TownStatus, error) {
 		Name:     townConfig.Name,
 		Location: townRoot,
 		Overseer: overseerInfo,
+		DND:      detectCurrentDNDStatus(townRoot),
 		Rigs:     make([]RigStatus, len(rigs)),
 	}
 
@@ -945,6 +955,23 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 			fmt.Fprintf(w, "   📬 %d unread\n", status.Overseer.UnreadMail)
 		}
 		fmt.Fprintln(w)
+	}
+
+	// Current agent notification mode (DND)
+	if status.DND != nil {
+		icon := "🔔"
+		state := "off"
+		desc := "notifications normal"
+		if status.DND.Enabled {
+			icon = "🔕"
+			state = "on"
+			desc = "notifications muted"
+		}
+		fmt.Fprintf(w, "%s %s %s", icon, style.Bold.Render("DND:"), style.Bold.Render(state))
+		if status.DND.Agent != "" {
+			fmt.Fprintf(w, " %s", style.Dim.Render("("+status.DND.Agent+")"))
+		}
+		fmt.Fprintf(w, "\n   %s\n\n", style.Dim.Render(desc))
 	}
 
 	// Infrastructure services
@@ -1222,7 +1249,12 @@ func renderAgentDetails(w io.Writer, agent AgentRuntime, indent string, hooks []
 
 	fmt.Fprintf(w, "%s  hook: %s\n", indent, hookStr)
 
-	// Line 3: Mail (if any unread)
+	// Line 4: Notification mode (DND)
+	if agent.NotificationLevel == beads.NotifyMuted {
+		fmt.Fprintf(w, "%s  notify: 🔕 muted (DND)\n", indent)
+	}
+
+	// Line 5: Mail (if any unread)
 	if agent.UnreadMail > 0 {
 		mailStr := fmt.Sprintf("📬 %d unread", agent.UnreadMail)
 		if agent.FirstSubject != "" {
@@ -1401,6 +1433,10 @@ func buildStatusIndicator(agent AgentRuntime) string {
 	// Ignore observable states: running, idle, dead, done, stopped, ""
 	}
 
+	if agent.NotificationLevel == beads.NotifyMuted {
+		indicator += style.Dim.Render(" 🔕")
+	}
+
 	return indicator
 }
 
@@ -1530,12 +1566,12 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 						agent.WorkTitle = pinnedIssue.Title
 					}
 				}
-				// Fallback to description for legacy beads without database columns
-				if agent.State == "" {
-					fields := beads.ParseAgentFields(issue.Description)
-					if fields != nil {
+				// Parse description fields for legacy slots (and notification level)
+				if fields := beads.ParseAgentFields(issue.Description); fields != nil {
+					if agent.State == "" {
 						agent.State = fields.AgentState
 					}
+					agent.NotificationLevel = fields.NotificationLevel
 				}
 			}
 
@@ -1567,6 +1603,44 @@ func populateMailInfo(agent *AgentRuntime, router *mail.Router) {
 		if messages, err := mailbox.ListUnread(); err == nil && len(messages) > 0 {
 			agent.FirstSubject = messages[0].Subject
 		}
+	}
+}
+
+// detectCurrentDNDStatus returns DND status for the currently resolved role context.
+// Returns nil when role context cannot be determined (e.g. outside agent context).
+func detectCurrentDNDStatus(townRoot string) *DNDInfo {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+
+	roleInfo, err := GetRoleWithContext(cwd, townRoot)
+	if err != nil {
+		return nil
+	}
+
+	ctx := RoleContext{
+		Role:     roleInfo.Role,
+		Rig:      roleInfo.Rig,
+		Polecat:  roleInfo.Polecat,
+		TownRoot: townRoot,
+		WorkDir:  cwd,
+	}
+	agentBeadID := getAgentBeadID(ctx)
+	if agentBeadID == "" {
+		return nil
+	}
+
+	bd := beads.New(townRoot)
+	level, err := bd.GetAgentNotificationLevel(agentBeadID)
+	if err != nil || level == "" {
+		level = beads.NotifyNormal
+	}
+
+	return &DNDInfo{
+		Enabled: level == beads.NotifyMuted,
+		Level:   level,
+		Agent:   agentBeadID,
 	}
 }
 
@@ -1670,12 +1744,12 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 						agent.WorkTitle = pinnedIssue.Title
 					}
 				}
-				// Fallback to description for legacy beads without database columns
-				if agent.State == "" {
-					fields := beads.ParseAgentFields(issue.Description)
-					if fields != nil {
+				// Parse description fields for legacy slots (and notification level)
+				if fields := beads.ParseAgentFields(issue.Description); fields != nil {
+					if agent.State == "" {
 						agent.State = fields.AgentState
 					}
+					agent.NotificationLevel = fields.NotificationLevel
 				}
 			}
 
