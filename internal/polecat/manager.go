@@ -1593,6 +1593,14 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 		return nil, fmt.Errorf("start point %s not found — fall back to full repair", startPoint)
 	}
 
+	// Discard any uncommitted changes from the previous work session.
+	// The polecat is idle, so its previous work was already submitted to the refinery.
+	if dirty, _ := polecatGit.HasUncommittedChanges(); dirty {
+		_ = polecatGit.ResetHard("HEAD")
+		// Also clean untracked files to avoid checkout conflicts
+		_, _ = polecatGit.CleanUntracked()
+	}
+
 	// Create fresh branch from start point (branch-only, no worktree add/remove)
 	branchName := m.buildBranchName(name, opts.HookBead)
 	if err := polecatGit.CheckoutNewBranch(branchName, startPoint); err != nil {

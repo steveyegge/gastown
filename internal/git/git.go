@@ -1012,6 +1012,12 @@ func (g *Git) ResetHard(ref string) error {
 	return err
 }
 
+// CleanUntracked removes untracked files and directories.
+// Equivalent to: git clean -fd
+func (g *Git) CleanUntracked() (string, error) {
+	return g.run("clean", "-fd")
+}
+
 // Rev returns the commit hash for the given ref.
 func (g *Git) Rev(ref string) (string, error) {
 	return g.run("rev-parse", ref)
