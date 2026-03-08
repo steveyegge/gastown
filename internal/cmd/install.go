@@ -556,6 +556,14 @@ func writeJSON(path string, data interface{}) error {
 	return os.WriteFile(path, content, 0644)
 }
 
+// buildBdInitArgs returns the arguments for `bd init` including the correct
+// --server-port derived from the town's Dolt configuration.
+func buildBdInitArgs(townPath string) []string {
+	cfg := doltserver.DefaultConfig(townPath)
+	return []string{"init", "--prefix", "hq", "--server",
+		"--server-port", strconv.Itoa(cfg.Port)}
+}
+
 // initTownBeads initializes town-level beads database using bd init.
 // Town beads use the "hq-" prefix for mayor mail and cross-rig coordination.
 // Uses Dolt backend in server mode (Gas Town requires a running Dolt sql-server).
@@ -572,12 +580,11 @@ func initTownBeads(townPath string) error {
 	// Run: bd init --prefix hq --server
 	// Dolt is the only backend since bd v0.51.0; no --backend flag needed.
 	// Filter inherited BEADS_DIR so bd init targets this town, not a parent .beads.
-	bdInitArgs := []string{"init", "--prefix", "hq", "--server"}
+	// Always pass --server-port so bd connects to the correct Dolt server.
+	// DefaultConfig resolves the port from config.yaml > GT_DOLT_PORT env > default (3307).
 	// Forward GT_DOLT_PORT so bd connects to the correct server when a
 	// non-default port is configured (e.g., ephemeral test servers in CI).
-	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-		bdInitArgs = append(bdInitArgs, "--server-port", p)
-	}
+	bdInitArgs := buildBdInitArgs(townPath)
 	cmd := exec.Command("bd", bdInitArgs...)
 	cmd.Dir = townPath
 	cmd.Env = withBeadsDirEnv(filepath.Join(townPath, ".beads"))
