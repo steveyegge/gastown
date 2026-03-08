@@ -22,7 +22,7 @@ When enabled:
   - Claude Code SessionStart hooks run 'gt prime' for context
   - Git repos are auto-registered as rigs (configurable)
 
-Use 'gt disable' to turn off. Use 'gt status --global' to check state.
+Use 'gt disable' to turn off. Use 'gt status' to check state.
 
 Environment overrides:
   GASTOWN_DISABLED=1  - Disable for current session only
@@ -48,7 +48,7 @@ func runEnable(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Printf("Use %s to disable, %s to check status\n",
 		style.Dim.Render("gt disable"),
-		style.Dim.Render("gt status --global"))
+		style.Dim.Render("gt status"))
 
 	return nil
 }
