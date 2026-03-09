@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -284,105 +283,6 @@ func TestIntegration(t *testing.T) {
 		}
 		t.Logf("Showed issue: %s - %s", issue.ID, issue.Title)
 	})
-}
-
-func TestParsePlainListOutput(t *testing.T) {
-	text := `? gas-wisp-yc3z7 ● P2 [epic] demo-hello
-
---------------------------------------------------------------------------------
-Total: 1 issues (0 open, 0 in progress)
-
-Status: ○ open  ◐ in_progress  ● blocked  ✓ closed  ❄ deferred`
-
-	issues := parsePlainListOutput(text)
-	if len(issues) != 1 {
-		t.Fatalf("parsePlainListOutput() len = %d, want 1", len(issues))
-	}
-	if issues[0].ID != "gas-wisp-yc3z7" {
-		t.Fatalf("issue ID = %q, want gas-wisp-yc3z7", issues[0].ID)
-	}
-	if issues[0].Priority != 2 {
-		t.Fatalf("issue Priority = %d, want 2", issues[0].Priority)
-	}
-	if issues[0].Type != "epic" {
-		t.Fatalf("issue Type = %q, want epic", issues[0].Type)
-	}
-	if issues[0].Title != "demo-hello" {
-		t.Fatalf("issue Title = %q, want demo-hello", issues[0].Title)
-	}
-}
-
-func TestListParsesPlainTextFallback(t *testing.T) {
-	tmpDir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(tmpDir, ".beads"), 0755); err != nil {
-		t.Fatalf("mkdir .beads: %v", err)
-	}
-
-	binDir := filepath.Join(tmpDir, "bin")
-	if err := os.Mkdir(binDir, 0755); err != nil {
-		t.Fatalf("mkdir bin: %v", err)
-	}
-
-	if runtime.GOOS == "windows" {
-		script := `@echo off
-setlocal enableextensions
-set "cmd=%1"
-if "%cmd%"=="--allow-stale" (
-  shift
-  set "cmd=%1"
-)
-if "%cmd%"=="list" (
-  echo ? gas-wisp-yc3z7 ● P2 [epic] demo-hello
-  echo.
-  echo --------------------------------------------------------------------------------
-  echo Total: 1 issues ^(0 open, 0 in progress^)
-  exit /b 0
-)
-if "%cmd%"=="version" exit /b 0
-exit /b 0
-`
-		if err := os.WriteFile(filepath.Join(binDir, "bd.cmd"), []byte(script), 0644); err != nil {
-			t.Fatalf("write bd.cmd: %v", err)
-		}
-	} else {
-		script := `#!/bin/sh
-cmd="$1"
-if [ "$cmd" = "--allow-stale" ]; then
-  shift
-  cmd="$1"
-fi
-case "$cmd" in
-  list)
-    cat <<'EOF'
-? gas-wisp-yc3z7 ● P2 [epic] demo-hello
-
---------------------------------------------------------------------------------
-Total: 1 issues (0 open, 0 in progress)
-EOF
-    ;;
-  version)
-    echo "bd version test"
-    ;;
-esac
-`
-		if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(script), 0755); err != nil {
-			t.Fatalf("write bd: %v", err)
-		}
-	}
-
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	b := New(tmpDir)
-	issues, err := b.List(ListOptions{Status: "hooked", Assignee: "gastown/polecats/furiosa", Priority: -1})
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(issues) != 1 {
-		t.Fatalf("List() len = %d, want 1", len(issues))
-	}
-	if issues[0].ID != "gas-wisp-yc3z7" {
-		t.Fatalf("List() issue ID = %q, want gas-wisp-yc3z7", issues[0].ID)
-	}
 }
 
 // TestParseMRFields tests parsing MR fields from issue descriptions.

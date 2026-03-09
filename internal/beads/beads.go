@@ -10,8 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -574,16 +572,12 @@ func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
 		return nil, err
 	}
 
-	// bd list --json may return plain text instead of JSON in some configurations.
-	// Handle explicit empty outputs gracefully, but parse issue table rows when
-	// possible so callers don't silently lose hooked work visibility.
+	// bd list --json may return plain text like "No issues found." instead of JSON
+	// when there are no results. Handle that explicit empty case gracefully.
 	if len(out) == 0 || !isJSONBytes(out) {
 		text := strings.TrimSpace(string(out))
 		if text == "" || strings.Contains(text, "No issues found.") {
 			return nil, nil
-		}
-		if issues := parsePlainListOutput(text); len(issues) > 0 {
-			return issues, nil
 		}
 		return nil, fmt.Errorf("bd list --json returned non-JSON output: %q", firstLine(text))
 	}
@@ -611,30 +605,6 @@ func isJSONBytes(b []byte) bool {
 		}
 	}
 	return false
-}
-
-var plainListRowRE = regexp.MustCompile(`^\S+\s+(\S+)\s+\S+\s+P(\d+)\s+\[([^\]]+)\]\s+(.+?)\s*$`)
-
-func parsePlainListOutput(text string) []*Issue {
-	var issues []*Issue
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		m := plainListRowRE.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		priority, _ := strconv.Atoi(m[2])
-		issues = append(issues, &Issue{
-			ID:       m[1],
-			Priority: priority,
-			Type:     m[3],
-			Title:    m[4],
-		})
-	}
-	return issues
 }
 
 func firstLine(text string) string {
