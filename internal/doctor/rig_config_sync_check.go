@@ -24,6 +24,7 @@ type RigConfigSyncCheck struct {
 	missingRigBeads  []rigBeadInfo     // Rigs missing identity beads
 	missingDoltDB    []string          // Rigs missing Dolt database
 	missingPrefixCfg []string          // Rigs missing issue-prefix in config.yaml
+	dbNameMismatches []dbMismatch      // Dolt database name doesn't match prefix
 }
 
 type prefixMismatch struct {
@@ -36,6 +37,13 @@ type rigBeadInfo struct {
 	rigName string
 	prefix  string
 	gitURL  string
+}
+
+type dbMismatch struct {
+	rigName     string
+	prefix      string
+	currentDB   string
+	expectedDB  string
 }
 
 // NewRigConfigSyncCheck creates a new rig config sync check.
@@ -69,6 +77,7 @@ func (c *RigConfigSyncCheck) Run(ctx *CheckContext) *CheckResult {
 	c.missingRigBeads = nil
 	c.missingDoltDB = nil
 	c.missingPrefixCfg = nil
+	c.dbNameMismatches = nil
 	var details []string
 
 	for rigName, entry := range rigsConfig.Rigs {
@@ -141,11 +150,48 @@ func (c *RigConfigSyncCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Check if Dolt database exists
-		if configPrefix != "" {
-			if !c.doltDatabaseExists(ctx, configPrefix) {
-				c.missingDoltDB = append(c.missingDoltDB, rigName)
-				details = append(details, fmt.Sprintf("Rig %s Dolt database '%s' not found on server", rigName, configPrefix))
+		// Read database name from metadata.json
+		metadataBytes, err := os.ReadFile(metadataPath)
+		if err != nil {
+			details = append(details, fmt.Sprintf("Rig %s could not read metadata.json: %v", rigName, err))
+			continue
+		}
+
+		var metadata struct {
+			DoltDatabase string `json:"dolt_database"`
+			DoltMode     string `json:"dolt_mode"`
+		}
+		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+			details = append(details, fmt.Sprintf("Rig %s has invalid metadata.json: %v", rigName, err))
+			continue
+		}
+
+		// Check if Dolt database exists (only for server mode)
+		if metadata.DoltMode == "server" {
+			// Database name should match the prefix
+			expectedDBName := configPrefix
+			if expectedDBName == "" {
+				expectedDBName = metadata.DoltDatabase // fallback to what's in metadata
+			}
+
+			if expectedDBName != "" {
+				// Check if database name matches prefix
+				if metadata.DoltDatabase != expectedDBName {
+					c.dbNameMismatches = append(c.dbNameMismatches, dbMismatch{
+						rigName:    rigName,
+						prefix:     configPrefix,
+						currentDB:  metadata.DoltDatabase,
+						expectedDB: expectedDBName,
+					})
+					details = append(details, fmt.Sprintf(
+						"Rig %s database name mismatch: metadata has '%s', should be '%s' (prefix)",
+						rigName, metadata.DoltDatabase, expectedDBName))
+				}
+
+				if !c.doltDatabaseExists(ctx, metadata.DoltDatabase) {
+					c.missingDoltDB = append(c.missingDoltDB, rigName)
+					details = append(details, fmt.Sprintf("Rig %s Dolt database '%s' not found on server", rigName, metadata.DoltDatabase))
+				}
 			}
 		}
 
@@ -164,7 +210,7 @@ func (c *RigConfigSyncCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Check for summary
-	issueCount := len(c.missingConfig) + len(c.prefixMismatches) + len(c.missingRigBeads) + len(c.missingDoltDB) + len(c.missingPrefixCfg)
+	issueCount := len(c.missingConfig) + len(c.prefixMismatches) + len(c.missingRigBeads) + len(c.missingDoltDB) + len(c.missingPrefixCfg) + len(c.dbNameMismatches)
 	if issueCount == 0 {
 		return &CheckResult{
 			Name:    c.Name(),
@@ -188,6 +234,9 @@ func (c *RigConfigSyncCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 	if len(c.missingPrefixCfg) > 0 {
 		parts = append(parts, fmt.Sprintf("%d missing issue-prefix", len(c.missingPrefixCfg)))
+	}
+	if len(c.dbNameMismatches) > 0 {
+		parts = append(parts, fmt.Sprintf("%d DB name mismatch(es)", len(c.dbNameMismatches)))
 	}
 
 	return &CheckResult{
@@ -290,6 +339,54 @@ func (c *RigConfigSyncCheck) Fix(ctx *CheckContext) error {
 		cmd.Dir = mayorRigPath
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("could not initialize Dolt DB for %s: %w\n%s", rigName, err, string(output))
+		}
+	}
+
+	// Fix database name mismatches - rename database to match prefix
+	for _, mismatch := range c.dbNameMismatches {
+		rigPath := filepath.Join(ctx.TownRoot, mismatch.rigName)
+		metadataPath := filepath.Join(rigPath, "mayor", "rig", ".beads", "metadata.json")
+
+		// Read current metadata
+		metadataBytes, err := os.ReadFile(metadataPath)
+		if err != nil {
+			return fmt.Errorf("could not read metadata.json for %s: %w", mismatch.rigName, err)
+		}
+
+		var metadata map[string]interface{}
+		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+			return fmt.Errorf("could not parse metadata.json for %s: %w", mismatch.rigName, err)
+		}
+
+		// Update database name to match prefix
+		metadata["dolt_database"] = mismatch.expectedDB
+
+		// Write updated metadata
+		newMetadata, err := json.MarshalIndent(metadata, "", "  ")
+		if err != nil {
+			return fmt.Errorf("could not serialize metadata.json for %s: %w", mismatch.rigName, err)
+		}
+
+		if err := os.WriteFile(metadataPath, newMetadata, 0644); err != nil {
+			return fmt.Errorf("could not write metadata.json for %s: %w", mismatch.rigName, err)
+		}
+
+		// Rename the Dolt database directory
+		dataDir := filepath.Join(ctx.TownRoot, ".dolt-data")
+		oldDBPath := filepath.Join(dataDir, mismatch.currentDB)
+		newDBPath := filepath.Join(dataDir, mismatch.expectedDB)
+
+		if _, err := os.Stat(oldDBPath); err == nil {
+			// Check if new path already exists
+			if _, err := os.Stat(newDBPath); err == nil {
+				// New path exists - this is a conflict, skip rename
+				// The database with the correct name already exists
+			} else {
+				// Rename the database directory
+				if err := os.Rename(oldDBPath, newDBPath); err != nil {
+					return fmt.Errorf("could not rename database %s to %s: %w", mismatch.currentDB, mismatch.expectedDB, err)
+				}
+			}
 		}
 	}
 
