@@ -75,9 +75,10 @@ Delivery modes (--mode):
              but guarantees immediate delivery. Use only when you need to
              break through (e.g., stuck agent, emergency).
 
-Queue and wait-idle modes require the target agent to support hooks
-(UserPromptSubmit) for drain. Agents without hook support should use
---mode=immediate.
+Queue and wait-idle modes require a drain mechanism. Claude agents drain
+via UserPromptSubmit hook; other agents use a background nudge-poller
+that periodically drains and injects via tmux. If neither is available,
+use --mode=immediate.
 
 This is the ONLY way to send messages to Claude sessions.
 Do not use raw tmux send-keys elsewhere.
