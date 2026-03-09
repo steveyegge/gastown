@@ -4,6 +4,39 @@
   "enabledPlugins": {
     "beads@beads-marketplace": false
   },
+  "permissions": {
+    "deny": [
+      "Bash(sudo *)",
+      "Bash(rm -rf /*)",
+      "Bash(gt rig unpark*)",
+      "Bash(gt rig undock*)",
+      "Bash(gt rig start*)",
+      "Bash(gt rig restart*)",
+      "Bash(gt rig reboot*)",
+      "Bash(gt rig remove*)",
+      "Bash(gt rig add*)",
+      "Bash(gt shutdown*)",
+      "Bash(gt dolt stop*)",
+      "Bash(gt dolt start*)",
+      "Bash(gt polecat nuke*)",
+      "Bash(gt deacon stop*)",
+      "Bash(gt deacon start*)",
+      "Read(.env)",
+      "Read(**/.env*)"
+    ],
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "Task(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "mcp__*"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -30,6 +63,24 @@
           {
             "type": "command",
             "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git push --force*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git push -f*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
           }
         ]
       }
