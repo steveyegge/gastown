@@ -302,7 +302,8 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map
 		}
 
 		m.logger("Convoy: close detected: %s (from %s)", issueID, name)
-		convoy.CheckConvoysForIssue(m.ctx, hqStore, m.townRoot, issueID, "Convoy", m.logger, m.gtPath, m.isRigParked)
+		resolver := convoy.NewStoreResolver(m.townRoot, stores)
+		convoy.CheckConvoysForIssue(m.ctx, hqStore, m.townRoot, issueID, "Convoy", m.logger, m.gtPath, m.isRigParked, resolver)
 	}
 }
 

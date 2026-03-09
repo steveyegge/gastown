@@ -72,7 +72,7 @@ func TestIsSlingableType(t *testing.T) {
 func TestIsIssueBlocked_NoStore(t *testing.T) {
 	// isIssueBlocked with nil store should fail-open (return false, not panic).
 	// This covers the "store unavailable" failure mode (F-17).
-	result := isIssueBlocked(context.Background(), nil, "test-any-id")
+	result := isIssueBlocked(context.Background(), nil, "test-any-id", nil)
 	if result {
 		t.Error("isIssueBlocked should fail-open (return false) with nil store")
 	}
@@ -216,7 +216,7 @@ func TestIsIssueBlocked_NoDeps(t *testing.T) {
 		t.Fatalf("CreateIssue: %v", err)
 	}
 
-	if isIssueBlocked(ctx, store, issue.ID) {
+	if isIssueBlocked(ctx, store, issue.ID, nil) {
 		t.Error("isIssueBlocked should return false for issue with no dependencies")
 	}
 }
@@ -274,7 +274,7 @@ func TestIsIssueBlocked_BlockedByOpenBlocker(t *testing.T) {
 		t.Fatal("expected at least 1 dependency to be created")
 	}
 
-	result := isIssueBlocked(ctx, store, blocked.ID)
+	result := isIssueBlocked(ctx, store, blocked.ID, nil)
 
 	// GetDependenciesWithMetadata may not work in embedded Dolt mode
 	// (nested query limitation). If it fails, isIssueBlocked returns false
@@ -335,7 +335,7 @@ func TestIsIssueBlocked_NotBlockedByClosedBlocker(t *testing.T) {
 
 	// Even if GetDependenciesWithMetadata works, the blocker is closed so
 	// isIssueBlocked should return false.
-	if isIssueBlocked(ctx, store, blocked.ID) {
+	if isIssueBlocked(ctx, store, blocked.ID, nil) {
 		t.Error("isIssueBlocked should return false when the only blocker is closed")
 	}
 }
@@ -385,7 +385,7 @@ func TestIsIssueBlocked_ParentChildDoesNotBlock(t *testing.T) {
 	}
 
 	// parent-child deps should NOT block dispatch
-	if isIssueBlocked(ctx, store, child.ID) {
+	if isIssueBlocked(ctx, store, child.ID, nil) {
 		t.Error("isIssueBlocked should return false for parent-child dependency (not a blocking type)")
 	}
 }
@@ -397,7 +397,7 @@ func TestIsIssueBlocked_FailOpenOnNonexistentIssue(t *testing.T) {
 	ctx := context.Background()
 
 	// Querying deps for a nonexistent issue should fail-open (return false)
-	if isIssueBlocked(ctx, store, "test-nonexistent-issue") {
+	if isIssueBlocked(ctx, store, "test-nonexistent-issue", nil) {
 		t.Error("isIssueBlocked should fail-open (return false) for nonexistent issue")
 	}
 }
@@ -451,7 +451,7 @@ func TestIsIssueBlocked_MergeBlocksStillBlockedWhenClosedWithoutMerge(t *testing
 		t.Fatalf("AddDependency: %v", err)
 	}
 
-	result := isIssueBlocked(ctx, store, blocked.ID)
+	result := isIssueBlocked(ctx, store, blocked.ID, nil)
 
 	// Check if GetDependenciesWithMetadata works in embedded mode
 	if !result {
@@ -510,7 +510,7 @@ func TestIsIssueBlocked_MergeBlocksUnblockedWhenMerged(t *testing.T) {
 	}
 
 	// Blocker is closed with "Merged in mr-xyz" — should NOT be blocked
-	if isIssueBlocked(ctx, store, blocked.ID) {
+	if isIssueBlocked(ctx, store, blocked.ID, nil) {
 		// Check if it's the embedded Dolt issue
 		_, metaErr := store.GetDependenciesWithMetadata(ctx, blocked.ID)
 		if metaErr != nil {
@@ -573,7 +573,7 @@ func TestIsIssueBlocked_MergeBlocksUnblockedOnTombstone(t *testing.T) {
 	}
 
 	// Tombstone always unblocks, regardless of dep type
-	if isIssueBlocked(ctx, store, blocked.ID) {
+	if isIssueBlocked(ctx, store, blocked.ID, nil) {
 		_, metaErr := store.GetDependenciesWithMetadata(ctx, blocked.ID)
 		if metaErr != nil {
 			t.Skipf("GetDependenciesWithMetadata not supported in embedded mode: %v", metaErr)
@@ -806,7 +806,7 @@ func TestFeedNextReadyIssue_DispatchesFirstReadyIssue(t *testing.T) {
 	gtPath, logPath := makeGTStub(t, 0)
 	logger, _ := makeLogger()
 
-	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return false })
+	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return false }, nil)
 
 	// Verify gt was called with the ready issue
 	logData, err := os.ReadFile(logPath)
@@ -883,7 +883,7 @@ func TestFeedNextReadyIssue_SkipsEpicAndDispatchesTask(t *testing.T) {
 	gtPath, logPath := makeGTStub(t, 0)
 	logger, _ := makeLogger()
 
-	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return false })
+	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return false }, nil)
 
 	logData, err := os.ReadFile(logPath)
 	if err != nil {
@@ -986,7 +986,7 @@ func TestFeedNextReadyIssue_SkipsBlockedIssue(t *testing.T) {
 	gtPath, logPath := makeGTStub(t, 0)
 	logger, logMsgs := makeLogger()
 
-	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return false })
+	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return false }, nil)
 
 	logData, err := os.ReadFile(logPath)
 	if err != nil {
@@ -1069,7 +1069,7 @@ func TestFeedNextReadyIssue_NoReadyIssues_LogsMessage(t *testing.T) {
 	gtPath, _ := makeGTStub(t, 0)
 	logger, logMsgs := makeLogger()
 
-	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return false })
+	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return false }, nil)
 
 	// Verify "no ready issues to feed" was logged
 	found := false
@@ -1136,7 +1136,7 @@ func TestFeedNextReadyIssue_SkipsParkedRig(t *testing.T) {
 	logger, logMsgs := makeLogger()
 
 	// isRigParked always returns true
-	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return true })
+	feedNextReadyIssue(ctx, store, townRoot, convoy.ID, "test", logger, gtPath, func(string) bool { return true }, nil)
 
 	// gt should NOT have been called
 	if _, err := os.ReadFile(logPath); err == nil {
@@ -1594,7 +1594,7 @@ func TestGetConvoyTrackedIssues_CrossRigFallback(t *testing.T) {
 	townRoot, _ := setupTownRootWithCrossRig(t, 0,
 		`[{"id":"oag-19dd9","status":"closed","assignee":"gastown/polecats/alpha","priority":2,"issue_type":"task"}]`)
 
-	tracked := getConvoyTrackedIssues(ctx, store, convoy.ID, townRoot)
+	tracked := getConvoyTrackedIssues(ctx, store, convoy.ID, townRoot, nil)
 
 	// Find the cross-rig bead in tracked results
 	var found *trackedIssue
