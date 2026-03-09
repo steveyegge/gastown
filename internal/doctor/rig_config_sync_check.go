@@ -343,6 +343,7 @@ func (c *RigConfigSyncCheck) Fix(ctx *CheckContext) error {
 	}
 
 	// Fix database name mismatches - rename database to match prefix
+	renamedDBs := false
 	for _, mismatch := range c.dbNameMismatches {
 		rigPath := filepath.Join(ctx.TownRoot, mismatch.rigName)
 		metadataPath := filepath.Join(rigPath, "mayor", "rig", ".beads", "metadata.json")
@@ -386,6 +387,21 @@ func (c *RigConfigSyncCheck) Fix(ctx *CheckContext) error {
 				if err := os.Rename(oldDBPath, newDBPath); err != nil {
 					return fmt.Errorf("could not rename database %s to %s: %w", mismatch.currentDB, mismatch.expectedDB, err)
 				}
+				renamedDBs = true
+			}
+		}
+	}
+
+	// If we renamed databases, restart the Dolt server to pick up the changes
+	if renamedDBs {
+		if running, pid, _ := doltserver.IsRunning(ctx.TownRoot); running && pid > 0 {
+			// Stop the server
+			if err := doltserver.Stop(ctx.TownRoot); err != nil {
+				return fmt.Errorf("could not stop Dolt server for restart: %w", err)
+			}
+			// Start the server again
+			if err := doltserver.Start(ctx.TownRoot); err != nil {
+				return fmt.Errorf("could not restart Dolt server: %w", err)
 			}
 		}
 	}
