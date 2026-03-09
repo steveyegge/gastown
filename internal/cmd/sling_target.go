@@ -78,6 +78,8 @@ func resolveSelfTarget() (agentID string, pane string, hookRoot string, err erro
 		agentID = fmt.Sprintf("%s/polecats/%s", roleInfo.Rig, roleInfo.Polecat)
 	case RoleCrew:
 		agentID = fmt.Sprintf("%s/crew/%s", roleInfo.Rig, roleInfo.Polecat)
+	case RoleDog:
+		agentID = fmt.Sprintf("deacon/dogs/%s", roleInfo.Polecat)
 	default:
 		return "", "", "", fmt.Errorf("cannot determine agent identity (role: %s)", roleInfo.Role)
 	}
