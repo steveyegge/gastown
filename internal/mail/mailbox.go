@@ -161,11 +161,13 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 			return nil, err
 		}
 
+		// bd v0.58.0 returns plain text (e.g. "No issues found.") for
+		// empty result sets instead of JSON. Skip non-JSON output.
+		if !isJSON(stdout) {
+			continue
+		}
 		var msgs []BeadsMessage
 		if err := json.Unmarshal(stdout, &msgs); err != nil {
-			if len(stdout) == 0 || string(stdout) == "null" || !isJSON(stdout) {
-				continue
-			}
 			return nil, err
 		}
 
@@ -200,11 +202,11 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 			continue
 		}
 
+		if !isJSON(stdout) {
+			continue
+		}
 		var msgs []BeadsMessage
 		if err := json.Unmarshal(stdout, &msgs); err != nil {
-			if len(stdout) == 0 || string(stdout) == "null" || !isJSON(stdout) {
-				continue
-			}
 			continue // Non-fatal for CC
 		}
 

@@ -620,6 +620,12 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 	}
 
 	fields := ParseAgentFields(issue.Description)
+	// Prefer the structured agent_state column when present.
+	// Some writers (for example, `bd agent state`) update the DB column directly
+	// without rewriting the description text, so description-derived state can be stale.
+	if issue.AgentState != "" {
+		fields.AgentState = issue.AgentState
+	}
 	return issue, fields, nil
 }
 
