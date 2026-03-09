@@ -10,8 +10,34 @@ set -euo pipefail
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly GITHUB_TOKEN="${GITHUB_TOKEN:-}"
-readonly RIGS=("beads" "debt_buying" "gleam" "laser" "payment_portal" "shuffle" "teleport" "gastown")
-readonly DOGS_DIR="/Users/seanbearden/gt/deacon/dogs/charlie"
+
+# Discover town root — walk up from script dir until we find .gt or rigs.json
+find_town_root() {
+    local dir="$SCRIPT_DIR"
+    while [ "$dir" != "/" ]; do
+        if [ -f "$dir/rigs.json" ] || [ -d "$dir/.gt" ]; then
+            echo "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    # Fallback: GT_TOWN_ROOT env var
+    if [ -n "${GT_TOWN_ROOT:-}" ]; then
+        echo "$GT_TOWN_ROOT"
+        return 0
+    fi
+    return 1
+}
+
+TOWN_ROOT="$(find_town_root)" || { echo "ERROR: cannot find town root" >&2; exit 1; }
+
+# Discover rigs dynamically from rigs.json
+if [ -f "$TOWN_ROOT/rigs.json" ]; then
+    mapfile -t RIGS < <(jq -r 'keys[]' "$TOWN_ROOT/rigs.json" 2>/dev/null)
+else
+    echo "ERROR: rigs.json not found at $TOWN_ROOT/rigs.json" >&2
+    exit 1
+fi
 
 # Color codes for output
 readonly RED='\033[0;31m'
@@ -53,9 +79,9 @@ main() {
 
     # Iterate through all rigs
     for rig in "${RIGS[@]}"; do
-        local repo_path="$DOGS_DIR/$rig"
+        local repo_path="$TOWN_ROOT/$rig"
 
-        # Verify repository exists
+        # Verify repository exists (rig root should be a git clone)
         if [ ! -d "$repo_path/.git" ]; then
             log_info "Repository not found or not a git repo: $repo_path"
             continue
