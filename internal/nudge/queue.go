@@ -22,6 +22,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/observer"
 )
 
 // Priority levels for nudge delivery.
@@ -179,6 +180,7 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 	// it (which would permanently drop the nudge).
 	staleThreshold := nudgeConfig(townRoot).StaleClaimThresholdD()
 	now := time.Now()
+	var orphanCount int
 	for _, entry := range entries {
 		if !strings.Contains(entry.Name(), ".claimed") {
 			continue
@@ -188,6 +190,7 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 			continue
 		}
 		if now.Sub(info.ModTime()) > staleThreshold {
+			orphanCount++
 			orphanPath := filepath.Join(dir, entry.Name())
 			// Strip everything from ".claimed" onward to restore original .json filename
 			name := entry.Name()
@@ -207,6 +210,7 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 	})
 
 	var nudges []QueuedNudge
+	var expiredCount int
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -253,6 +257,7 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 
 		// Skip expired nudges — stale messages create noise, not value.
 		if !n.ExpiresAt.IsZero() && now.After(n.ExpiresAt) {
+			expiredCount++
 			if rmErr := os.Remove(claimPath); rmErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to remove expired nudge %s: %v\n", entry.Name(), rmErr)
 			}
@@ -273,6 +278,11 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 		if rmErr := os.Remove(claimPath); rmErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to remove processed claim %s: %v\n", entry.Name(), rmErr)
 		}
+	}
+
+	// Notify adapter observer of drain results (fire-and-forget).
+	if len(nudges) > 0 || expiredCount > 0 || orphanCount > 0 {
+		observer.QueueDrain(session, len(nudges), expiredCount, orphanCount)
 	}
 
 	return nudges, nil

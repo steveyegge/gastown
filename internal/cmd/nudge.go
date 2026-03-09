@@ -16,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/nudge"
+	"github.com/steveyegge/gastown/internal/observer"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
@@ -156,6 +157,9 @@ var idleWatcherPollInterval = 1 * time.Second
 // For "wait-idle" mode: waits for idle, then delivers or falls back to queue.
 func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 	townRoot, _ := workspace.FindFromCwd()
+
+	// Notify adapter observer (fire-and-forget, non-blocking).
+	observer.PreSend(sender, sessionName, nudgeModeFlag, len(message))
 
 	// Use the requested mode, but force queue mode for ACP sessions.
 	// ACP agents don't have tmux panes to send-keys to.
@@ -345,12 +349,25 @@ var validNudgePriorities = map[string]bool{
 }
 
 func runNudge(cmd *cobra.Command, args []string) (retErr error) {
+	nudgeStart := time.Now()
 	defer func() {
 		target := ""
 		if len(args) > 0 {
 			target = args[0]
 		}
 		telemetry.RecordNudge(context.Background(), target, retErr)
+
+		// Observer hook: emit delivery result (fire-and-forget).
+		latencyMs := time.Since(nudgeStart).Milliseconds()
+		sender := "unknown"
+		if roleInfo, err := GetRole(); err == nil {
+			sender = roleInfo.ActorString()
+		}
+		if retErr != nil {
+			observer.DeliveryFailure(sender, target, nudgeModeFlag, retErr, latencyMs)
+		} else {
+			observer.DeliverySuccess(sender, target, nudgeModeFlag, latencyMs)
+		}
 	}()
 	// Validate --mode and --priority before doing anything else.
 	if !validNudgeModes[nudgeModeFlag] {
