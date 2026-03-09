@@ -401,11 +401,44 @@ func TestParsePluginMD_GitHubSheriff(t *testing.T) {
 }
 
 func TestParsePluginMD_SessionHygiene(t *testing.T) {
-	// Verify the actual session-hygiene plugin.md parses correctly.
-	pluginDir := filepath.Join("..", "..", "plugins", "session-hygiene")
+	// Use a temp dir with a fixture plugin.md and run.sh so the test
+	// doesn't depend on the local filesystem layout (fails in CI).
+	pluginDir := t.TempDir()
+
+	pluginContent := []byte(`+++
+name = "session-hygiene"
+description = "Clean up zombie tmux sessions and orphaned dog sessions"
+version = 2
+
+[gate]
+type = "cooldown"
+duration = "30m"
+
+[tracking]
+labels = ["plugin:session-hygiene", "category:cleanup"]
+digest = true
+
+[execution]
+timeout = "5m"
+notify_on_failure = true
+severity = "low"
++++
+
+# Session Hygiene
+
+Deterministic cleanup of zombie tmux sessions and orphaned dog sessions.
+`)
+
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.md"), pluginContent, 0644); err != nil {
+		t.Fatalf("writing plugin.md fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "run.sh"), []byte("#!/bin/bash\necho ok\n"), 0755); err != nil {
+		t.Fatalf("writing run.sh fixture: %v", err)
+	}
+
 	content, err := os.ReadFile(filepath.Join(pluginDir, "plugin.md"))
 	if err != nil {
-		t.Skipf("session-hygiene plugin not found (expected in plugins/): %v", err)
+		t.Fatalf("reading plugin.md fixture: %v", err)
 	}
 
 	plugin, err := parsePluginMD(content, pluginDir, LocationRig, "gastown")
