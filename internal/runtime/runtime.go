@@ -59,6 +59,9 @@ func StartupFallbackCommands(role string, rc *config.RuntimeConfig) []string {
 	if rc == nil {
 		rc = config.DefaultRuntimeConfig()
 	}
+	if rc.Provider == "copilot" {
+		return nil
+	}
 	if rc.Hooks != nil && rc.Hooks.Provider != "" && rc.Hooks.Provider != "none" {
 		return nil
 	}
@@ -137,6 +140,9 @@ type StartupFallbackInfo struct {
 func GetStartupFallbackInfo(rc *config.RuntimeConfig) *StartupFallbackInfo {
 	if rc == nil {
 		rc = config.DefaultRuntimeConfig()
+	}
+	if rc.Provider == "copilot" {
+		return &StartupFallbackInfo{}
 	}
 
 	hasHooks := rc.Hooks != nil && rc.Hooks.Provider != "" && rc.Hooks.Provider != "none"

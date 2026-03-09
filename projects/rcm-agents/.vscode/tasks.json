@@ -1,0 +1,130 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        // ----------------------------------------------------------------
+        // Prerequisite checks
+        // ----------------------------------------------------------------
+        {
+            "label": "Validate Denial Management Prerequisites",
+            "type": "aitk",
+            "command": "debug-check-prerequisites",
+            "args": {
+                "portOccupancy": [5679, 8087]
+            }
+        },
+        {
+            "label": "Validate Eligibility Verification Prerequisites",
+            "type": "aitk",
+            "command": "debug-check-prerequisites",
+            "args": {
+                "portOccupancy": [5680, 8088]
+            }
+        },
+
+        // ----------------------------------------------------------------
+        // Denial Management Agent
+        // ----------------------------------------------------------------
+        {
+            "label": "Run Denial Management Agent (HTTP)",
+            "type": "shell",
+            "command": "${command:python.interpreterPath} -m debugpy --listen 127.0.0.1:5679 -m agentdev run ${workspaceFolder}/denial_management/main.py --verbose --port 8087 -- --server",
+            "isBackground": true,
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": ["Validate Denial Management Prerequisites"],
+            "problemMatcher": {
+                "pattern": [
+                    {
+                        "regexp": "^.*$",
+                        "file": 0,
+                        "location": 1,
+                        "message": 2
+                    }
+                ],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".*",
+                    "endsPattern": "Application startup complete|running on|Started server process"
+                }
+            }
+        },
+        {
+            "label": "Open Denial Management Inspector",
+            "type": "shell",
+            "command": "echo '${input:openDenialInspector}'",
+            "presentation": {
+                "reveal": "never"
+            },
+            "dependsOn": ["Run Denial Management Agent (HTTP)"]
+        },
+
+        // ----------------------------------------------------------------
+        // Eligibility Verification Agent
+        // ----------------------------------------------------------------
+        {
+            "label": "Run Eligibility Verification Agent (HTTP)",
+            "type": "shell",
+            "command": "${command:python.interpreterPath} -m debugpy --listen 127.0.0.1:5680 -m agentdev run ${workspaceFolder}/eligibility_verification/main.py --verbose --port 8088 -- --server",
+            "isBackground": true,
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": ["Validate Eligibility Verification Prerequisites"],
+            "problemMatcher": {
+                "pattern": [
+                    {
+                        "regexp": "^.*$",
+                        "file": 0,
+                        "location": 1,
+                        "message": 2
+                    }
+                ],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".*",
+                    "endsPattern": "Application startup complete|running on|Started server process"
+                }
+            }
+        },
+        {
+            "label": "Open Eligibility Verification Inspector",
+            "type": "shell",
+            "command": "echo '${input:openEligibilityInspector}'",
+            "presentation": {
+                "reveal": "never"
+            },
+            "dependsOn": ["Run Eligibility Verification Agent (HTTP)"]
+        },
+
+        // ----------------------------------------------------------------
+        // Utility
+        // ----------------------------------------------------------------
+        {
+            "label": "Terminate All Tasks",
+            "command": "echo ${input:terminate}",
+            "type": "shell",
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "openDenialInspector",
+            "type": "command",
+            "command": "ai-mlstudio.openTestTool",
+            "args": {"triggeredFrom": "tasks", "port": 8087}
+        },
+        {
+            "id": "openEligibilityInspector",
+            "type": "command",
+            "command": "ai-mlstudio.openTestTool",
+            "args": {"triggeredFrom": "tasks", "port": 8088}
+        },
+        {
+            "id": "terminate",
+            "type": "command",
+            "command": "workbench.action.tasks.terminate",
+            "args": "terminateAll"
+        }
+    ]
+}

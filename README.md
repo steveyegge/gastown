@@ -1,10 +1,10 @@
 # Gas Town
 
-**Multi-agent orchestration system for Claude Code with persistent work tracking**
+**Multi-agent orchestration system for Claude Code (and Copilot SDK) with persistent work tracking**
 
 ## Overview
 
-Gas Town is a workspace manager that lets you coordinate multiple Claude Code agents working on different tasks. Instead of losing context when agents restart, Gas Town persists work state in git-backed hooks, enabling reliable multi-agent workflows.
+Gas Town is a workspace manager that lets you coordinate multiple coding agents (Claude Code by default, with Copilot SDK and other runtimes available) working on different tasks. Instead of losing context when agents restart, Gas Town persists work state in git-backed hooks, enabling reliable multi-agent workflows.
 
 ### What Problem Does This Solve?
 
@@ -91,6 +91,7 @@ Git-backed issue tracking system that stores work state as structured data.
 - **sqlite3** - for convoy database queries (usually pre-installed on macOS/Linux)
 - **tmux 3.0+** - recommended for full experience
 - **Claude Code CLI** (default runtime) - [claude.ai/code](https://claude.ai/code)
+- **GitHub Copilot CLI** (optional runtime for Copilot SDK) - [docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli)
 - **Codex CLI** (optional runtime) - [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli)
 
 ### Setup
@@ -208,6 +209,7 @@ Run individual runtime instances manually. Gas Town just tracks state.
 gt convoy create "Fix bugs" gt-abc12   # Create convoy (sling auto-creates if skipped)
 gt sling gt-abc12 myproject            # Assign to worker
 claude --resume                        # Agent reads mail, runs work (Claude)
+# or: gt copilot run                   # Copilot SDK worker loop (Copilot)
 # or: codex                            # Start Codex in the workspace
 gt convoy list                         # Check progress
 ```
@@ -297,9 +299,9 @@ Gas Town supports multiple AI coding runtimes. Per-rig runtime settings are in `
 ```json
 {
   "runtime": {
-    "provider": "codex",
-    "command": "codex",
-    "args": [],
+    "provider": "copilot",
+    "command": "gt",
+    "args": ["copilot", "run"],
     "prompt_mode": "none"
   }
 }
@@ -308,6 +310,7 @@ Gas Town supports multiple AI coding runtimes. Per-rig runtime settings are in `
 **Notes:**
 
 - Claude uses hooks in `.claude/settings.json` for mail injection and startup.
+- Copilot SDK uses the Copilot CLI server and runs as `gt copilot run` inside the worker workspace.
 - For Codex, set `project_doc_fallback_filenames = ["CLAUDE.md"]` in
   `~/.codex/config.toml` so role instructions are picked up.
 - For runtimes without hooks (e.g., Codex), Gas Town sends a startup fallback
@@ -336,7 +339,7 @@ gt mayor start --agent auggie           # Run Mayor with a specific agent alias
 gt prime                    # Context recovery (run inside existing session)
 ```
 
-**Built-in agent presets**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`
+**Built-in agent presets**: `claude`, `copilot`, `gemini`, `codex`, `cursor`, `auggie`, `amp`
 
 ### Convoy (Work Tracking)
 

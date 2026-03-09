@@ -257,7 +257,7 @@ type CrewConfig struct {
 // without modifying startup code.
 type RuntimeConfig struct {
 	// Provider selects runtime-specific defaults and integration behavior.
-	// Known values: "claude", "codex", "generic". Default: "claude".
+	// Known values: "claude", "copilot", "codex", "opencode", "generic". Default: "claude".
 	Provider string `json:"provider,omitempty"`
 
 	// Command is the CLI command to invoke (e.g., "claude", "aider").
@@ -474,6 +474,8 @@ func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 
 func defaultRuntimeCommand(provider string) string {
 	switch provider {
+	case "copilot":
+		return "gt"
 	case "codex":
 		return "codex"
 	case "opencode":
@@ -514,6 +516,8 @@ func defaultRuntimeArgs(provider string) []string {
 	switch provider {
 	case "claude":
 		return []string{"--dangerously-skip-permissions"}
+	case "copilot":
+		return []string{"copilot", "run"}
 	default:
 		return nil
 	}
@@ -521,6 +525,8 @@ func defaultRuntimeArgs(provider string) []string {
 
 func defaultPromptMode(provider string) string {
 	switch provider {
+	case "copilot":
+		return "none"
 	case "codex":
 		return "none"
 	case "opencode":
@@ -550,6 +556,8 @@ func defaultHooksProvider(provider string) string {
 		return "claude"
 	case "opencode":
 		return "opencode"
+	case "copilot":
+		return "none"
 	default:
 		return "none"
 	}
@@ -580,6 +588,9 @@ func defaultHooksFile(provider string) string {
 func defaultProcessNames(provider, command string) []string {
 	if provider == "claude" {
 		return []string{"node"}
+	}
+	if provider == "copilot" {
+		return []string{"gt"}
 	}
 	if provider == "opencode" {
 		// OpenCode runs as Node.js process, need both for IsAgentRunning detection.
@@ -621,6 +632,9 @@ func defaultInstructionsFile(provider string) string {
 		return "AGENTS.md"
 	}
 	if provider == "opencode" {
+		return "AGENTS.md"
+	}
+	if provider == "copilot" {
 		return "AGENTS.md"
 	}
 	return "CLAUDE.md"

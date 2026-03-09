@@ -17,7 +17,7 @@ func isClaudeCmd(cmd string) bool {
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	presets := []AgentPreset{AgentClaude, AgentCopilot, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -25,11 +25,9 @@ func TestBuiltinPresets(t *testing.T) {
 			t.Errorf("GetAgentPreset(%s) returned nil", preset)
 			continue
 		}
-
 		if info.Command == "" {
 			t.Errorf("preset %s has empty Command", preset)
 		}
-
 		// All presets should have ProcessNames for agent detection
 		if len(info.ProcessNames) == 0 {
 			t.Errorf("preset %s has empty ProcessNames", preset)
@@ -45,12 +43,13 @@ func TestGetAgentPresetByName(t *testing.T) {
 		wantNil bool
 	}{
 		{"claude", AgentClaude, false},
+		{"copilot", AgentCopilot, false},
 		{"gemini", AgentGemini, false},
 		{"codex", AgentCodex, false},
 		{"cursor", AgentCursor, false},
 		{"auggie", AgentAuggie, false},
 		{"amp", AgentAmp, false},
-		{"aider", "", true},               // Not built-in, can be added via config
+		{"aider", "", true},                // Not built-in, can be added via config
 		{"opencode", AgentOpenCode, false}, // Built-in multi-model CLI agent
 		{"unknown", "", true},
 	}
@@ -78,6 +77,7 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		wantCommand string
 	}{
 		{AgentClaude, "claude"}, // Note: claude may resolve to full path
+		{AgentCopilot, "gt"},
 		{AgentGemini, "gemini"},
 		{AgentCodex, "codex"},
 		{AgentCursor, "cursor-agent"},
@@ -112,7 +112,7 @@ func TestRuntimeConfigFromPresetReturnsNilEnvForPresetsWithoutEnv(t *testing.T) 
 	}
 
 	// Claude preset doesn't have Env, so it should be nil
-	if rc.Env != nil && len(rc.Env) > 0 {
+	if len(rc.Env) > 0 {
 		t.Errorf("Expected nil/empty Env for Claude preset, got %v", rc.Env)
 	}
 }
@@ -124,13 +124,14 @@ func TestIsKnownPreset(t *testing.T) {
 		want bool
 	}{
 		{"claude", true},
+		{"copilot", true},
 		{"gemini", true},
 		{"codex", true},
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
-		{"aider", false},    // Not built-in, can be added via config
-		{"opencode", true},  // Built-in multi-model CLI agent
+		{"aider", false},   // Not built-in, can be added via config
+		{"opencode", true}, // Built-in multi-model CLI agent
 		{"unknown", false},
 		{"chatgpt", false},
 	}
@@ -337,6 +338,7 @@ func TestSupportsSessionResume(t *testing.T) {
 		want      bool
 	}{
 		{"claude", true},
+		{"copilot", false},
 		{"gemini", true},
 		{"codex", true},
 		{"cursor", true},
@@ -361,11 +363,12 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 		want      string
 	}{
 		{"claude", "CLAUDE_SESSION_ID"},
+		{"copilot", ""},
 		{"gemini", "GEMINI_SESSION_ID"},
-		{"codex", ""},    // Codex uses JSONL output instead
-		{"cursor", ""},   // Cursor uses --resume with chatId directly
-		{"auggie", ""},   // Auggie uses --resume directly
-		{"amp", ""},      // AMP uses 'threads continue' subcommand
+		{"codex", ""},  // Codex uses JSONL output instead
+		{"cursor", ""}, // Cursor uses --resume with chatId directly
+		{"auggie", ""}, // Auggie uses --resume directly
+		{"amp", ""},    // AMP uses 'threads continue' subcommand
 		{"unknown", ""},
 	}
 
@@ -385,6 +388,7 @@ func TestGetProcessNames(t *testing.T) {
 		want      []string
 	}{
 		{"claude", []string{"node", "claude"}},
+		{"copilot", []string{"gt"}},
 		{"gemini", []string{"gemini"}},
 		{"codex", []string{"codex"}},
 		{"cursor", []string{"cursor-agent"}},
@@ -413,7 +417,7 @@ func TestGetProcessNames(t *testing.T) {
 func TestListAgentPresetsMatchesConstants(t *testing.T) {
 	t.Parallel()
 	// Ensure all AgentPreset constants are returned by ListAgentPresets
-	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	allConstants := []AgentPreset{AgentClaude, AgentCopilot, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
 	presets := ListAgentPresets()
 
 	// Convert to map for quick lookup
@@ -449,6 +453,11 @@ func TestAgentCommandGeneration(t *testing.T) {
 			preset:       AgentClaude,
 			wantCommand:  "claude",
 			wantContains: []string{"--dangerously-skip-permissions"},
+		},
+		{
+			preset:       AgentCopilot,
+			wantCommand:  "gt",
+			wantContains: []string{"copilot", "run"},
 		},
 		{
 			preset:       AgentGemini,

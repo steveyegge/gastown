@@ -1,0 +1,24 @@
+# Eligibility Verification Agent — Python Dependencies
+# Pin versions to avoid breaking changes in pre-release packages
+
+# Microsoft Agent Framework
+# NOTE: agent-framework-azure-ai==1.0.0b260107 (originally requested) requires
+# azure-ai-projects model classes not yet available on PyPI. Using RC2 instead:
+agent-framework-core==1.0.0rc2
+agent-framework-azure-ai==1.0.0rc2
+
+# Azure Identity (sync DefaultAzureCredential for AzureOpenAIChatClient)
+azure-identity>=1.17.0
+
+# HTTP server
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+
+# Environment variable loading
+python-dotenv>=1.0.0
+
+# Debugging support (VSCode Python Debugger)
+debugpy
+
+# AI Toolkit Agent Inspector CLI (pre-release)
+agent-dev-cli>=0.0.1b260119

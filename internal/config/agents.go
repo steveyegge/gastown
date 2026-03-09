@@ -17,6 +17,8 @@ type AgentPreset string
 const (
 	// AgentClaude is Claude Code (default).
 	AgentClaude AgentPreset = "claude"
+	// AgentCopilot is GitHub Copilot SDK.
+	AgentCopilot AgentPreset = "copilot"
 	// AgentGemini is Gemini CLI.
 	AgentGemini AgentPreset = "gemini"
 	// AgentCodex is OpenAI Codex.
@@ -117,6 +119,17 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SupportsForkSession: true,
 		NonInteractive:      nil, // Claude is native non-interactive
 	},
+	AgentCopilot: {
+		Name:                AgentCopilot,
+		Command:             "gt",
+		Args:                []string{"copilot", "run"},
+		ProcessNames:        []string{"gt"},
+		SessionIDEnv:        "",
+		ResumeFlag:          "",
+		ResumeStyle:         "",
+		SupportsHooks:       false,
+		SupportsForkSession: false,
+	},
 	AgentGemini: {
 		Name:                AgentGemini,
 		Command:             "gemini",
@@ -137,7 +150,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Command:             "codex",
 		Args:                []string{"--yolo"},
 		ProcessNames:        []string{"codex"}, // Codex CLI binary
-		SessionIDEnv:        "", // Codex captures from JSONL output
+		SessionIDEnv:        "",                // Codex captures from JSONL output
 		ResumeFlag:          "resume",
 		ResumeStyle:         "subcommand",
 		SupportsHooks:       false, // Use env/files instead
@@ -193,10 +206,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			"OPENCODE_PERMISSION": `{"*":"allow"}`,
 		},
 		ProcessNames:        []string{"opencode", "node", "bun"}, // Runs as Node.js or Bun
-		SessionIDEnv:        "",                           // OpenCode manages sessions internally
-		ResumeFlag:          "",                           // No resume support yet
+		SessionIDEnv:        "",                                  // OpenCode manages sessions internally
+		ResumeFlag:          "",                                  // No resume support yet
 		ResumeStyle:         "",
-		SupportsHooks:       true,  // Uses .opencode/plugin/gastown.js
+		SupportsHooks:       true, // Uses .opencode/plugin/gastown.js
 		SupportsForkSession: false,
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "run",
@@ -363,9 +376,13 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	}
 
 	rc := &RuntimeConfig{
-		Command: info.Command,
-		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
-		Env:     envCopy,
+		Provider: "",
+		Command:  info.Command,
+		Args:     append([]string(nil), info.Args...), // Copy to avoid mutation
+		Env:      envCopy,
+	}
+	if preset == AgentCopilot {
+		rc.Provider = "copilot"
 	}
 
 	// Resolve command path for claude preset (handles alias installations)

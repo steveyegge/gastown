@@ -1,380 +1,396 @@
-<mxfile host="Electron" modified="2026-03-05T00:00:00.000Z" agent="5.0 (Windows)" version="24.0.0" type="device">
-  <diagram name="Azure Deployment Architecture" id="azure-deploy-arch">
-    <mxGraphModel dx="1800" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1300" math="0" shadow="1">
-      <root>
-        <mxCell id="0" />
-        <mxCell id="1" parent="0" />
-
-        <!-- ══════════════════════════════════════════════════════════════
-             PAGE TITLE
-             ══════════════════════════════════════════════════════════════ -->
-        <mxCell id="page-title" value="AI Asset Marketplace — Azure Deployment Architecture" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=24;fontStyle=1;fontColor=#0072C6;" vertex="1" parent="1">
-          <mxGeometry x="200" y="18" width="1520" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="page-sub" value="Resource Group: rg-ai-marketplace-dev  |  Region: East US  |  Subscription: a7fecb91-4553-4aca-976e-274add998c8d" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=11;fontColor=#555555;fontStyle=2;" vertex="1" parent="1">
-          <mxGeometry x="200" y="50" width="1520" height="20" as="geometry" />
-        </mxCell>
-
-        <!-- ══════════════════════════════════════════════════════════════
-             CLIENT ZONE
-             ══════════════════════════════════════════════════════════════ -->
-        <mxCell id="zone-clients" value="Clients" style="swimlane;startSize=28;fillColor=#f0f7ff;strokeColor=#0072C6;fontStyle=1;fontSize=13;fontColor=#0072C6;rounded=1;arcSize=3;" vertex="1" parent="1">
-          <mxGeometry x="20" y="76" width="160" height="280" as="geometry" />
-        </mxCell>
-
-        <mxCell id="icon-browser" value="Web Browser" style="shape=mxgraph.azure2.browser;fillColor=#0072C6;strokeColor=none;fontColor=#333333;fontSize=10;labelPosition=bottom;verticalLabelPosition=top;verticalAlign=bottom;" vertex="1" parent="zone-clients">
-          <mxGeometry x="30" y="38" width="50" height="50" as="geometry" />
-        </mxCell>
-        <mxCell id="icon-mobile" value="External App / API Client" style="shape=mxgraph.azure2.mobile;fillColor=#0072C6;strokeColor=none;fontColor=#333333;fontSize=10;labelPosition=bottom;verticalLabelPosition=top;verticalAlign=bottom;" vertex="1" parent="zone-clients">
-          <mxGeometry x="85" y="38" width="50" height="50" as="geometry" />
-        </mxCell>
-        <mxCell id="icon-entra-client" value="MSAL Browser&#xa;OAuth2 PKCE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#0072C6;fontSize=9;" vertex="1" parent="zone-clients">
-          <mxGeometry x="15" y="140" width="130" height="50" as="geometry" />
-        </mxCell>
-        <mxCell id="icon-tanstack" value="TanStack Query&#xa;fetch /api/*" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#0072C6;fontSize=9;" vertex="1" parent="zone-clients">
-          <mxGeometry x="15" y="210" width="130" height="50" as="geometry" />
-        </mxCell>
-
-        <!-- ══════════════════════════════════════════════════════════════
-             AZURE RESOURCE GROUP BOUNDARY
-             ══════════════════════════════════════════════════════════════ -->
-        <mxCell id="zone-rg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f9ff;strokeColor=#0072C6;strokeWidth=2;dashed=1;arcSize=2;verticalAlign=top;fontSize=12;fontStyle=1;fontColor=#0072C6;" vertex="1" parent="1">
-          <mxGeometry x="200" y="76" width="1540" height="1190" as="geometry" />
-        </mxCell>
-        <mxCell id="zone-rg-label" value="☁  Azure Resource Group: rg-ai-marketplace-dev" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=12;fontStyle=1;fontColor=#0072C6;" vertex="1" parent="1">
-          <mxGeometry x="215" y="82" width="400" height="24" as="geometry" />
-        </mxCell>
-
-        <!-- ══════════════════════════════════════════════════════════════
-             AZURE ENTRA ID  (top-right, outside RG)
-             ══════════════════════════════════════════════════════════════ -->
-        <mxCell id="zone-entra" value="Azure Entra ID" style="swimlane;startSize=28;fillColor=#f3e6ff;strokeColor=#5C2D91;fontStyle=1;fontSize=12;fontColor=#5C2D91;rounded=1;arcSize=4;" vertex="1" parent="1">
-          <mxGeometry x="1720" y="76" width="180" height="220" as="geometry" />
-        </mxCell>
-        <mxCell id="icon-entra" value="Entra ID&#xa;Tenant: 16b3c013" style="shape=mxgraph.azure2.azure_active_directory;fillColor=#5C2D91;strokeColor=none;fontColor=#333333;fontSize=10;labelPosition=bottom;verticalLabelPosition=top;verticalAlign=bottom;" vertex="1" parent="zone-entra">
-          <mxGeometry x="65" y="35" width="50" height="50" as="geometry" />
-        </mxCell>
-        <mxCell id="entra-detail" value="• App Registration (MSAL)&#xa;• Service Principal&#xa;• ClientSecretCredential&#xa;  AZURE_AD_CLIENT_ID&#xa;• JWT token issuance&#xa;• APIM JWT validation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8d5ff;strokeColor=#5C2D91;fontSize=9;align=left;" vertex="1" parent="zone-entra">
-          <mxGeometry x="8" y="130" width="164" height="78" as="geometry" />
-        </mxCell>
-
-        <!-- ══════════════════════════════════════════════════════════════
-             APIM — AI GATEWAY  (top center of RG)
-             ══════════════════════════════════════════════════════════════ -->
-        <mxCell id="zone-apim" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6ffe6;strokeColor=#007A00;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
-          <mxGeometry x="480" y="110" width="960" height="230" as="geometry" />
-        </mxCell>
-        <mxCell id="apim-label" value="Azure API Management  —  AI Gateway" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=14;fontStyle=1;fontColor=#007A00;" vertex="1" parent="1">
-          <mxGeometry x="540" y="116" width="380" height="22" as="geometry" />
-        </mxCell>
-
-        <mxCell id="icon-apim" value="APIM&#xa;ai-marketplace-apim" style="shape=mxgraph.azure2.api_management;fillColor=#7FBA00;strokeColor=none;fontColor=#333333;fontSize=10;labelPosition=bottom;verticalLabelPosition=top;verticalAlign=bottom;" vertex="1" parent="1">
-          <mxGeometry x="500" y="150" width="60" height="60" as="geometry" />
-        </mxCell>
-
-        <mxCell id="apim-policy-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fff0;strokeColor=#7FBA00;fontSize=9;" vertex="1" parent="1">
-          <mxGeometry x="590" y="138" width="830" height="90" as="geometry" />
-        </mxCell>
-        <mxCell id="apim-policy-title" value="APIM Inbound Policies" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;fontStyle=1;fontColor=#007A00;" vertex="1" parent="1">
-          <mxGeometry x="598" y="140" width="200" height="16" as="geometry" />
-        </mxCell>
-
-        <mxCell id="policy-jwt" value="🔐 JWT Validation&#xa;validate-jwt (Entra ID)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
-          <mxGeometry x="598" y="157" width="145" height="62" as="geometry" />
-        </mxCell>
-        <mxCell id="policy-ratelimit" value="⏱ Rate Limiting&#xa;rate-limit-by-key&#xa;tokens-per-minute (TPM)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
-          <mxGeometry x="752" y="157" width="145" height="62" as="geometry" />
-        </mxCell>
-        <mxCell id="policy-cache" value="⚡ Semantic Caching&#xa;azure-openai-semantic-&#xa;cache-lookup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
-          <mxGeometry x="906" y="157" width="145" height="62" as="geometry" />
-        </mxCell>
-        <mxCell id="policy-lb" value="⚖ Load Balancing&#xa;Round-robin across&#xa;Foundry deployments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
-          <mxGeometry x="1060" y="157" width="145" height="62" as="geometry" />
-        </mxCell>
-        <mxCell id="policy-logging" value="📊 Logging&#xa;emit-metric (tokens)&#xa;App Insights telemetry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
-          <mxGeometry x="1214" y="157" width="145" height="62" as="geometry" />
-        </mxCell>
-
-        <!-- APIM routes row -->
-        <mxCell id="apim-routes-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fff0;strokeColor=#7FBA00;fontSize=9;" vertex="1" parent="1">
-          <mxGeometry x="590" y="235" width="830" height="90" as="geometry" />
-        </mxCell>
-        <mxCell id="apim-routes-title" value="APIM API Products / Routes" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;fontStyle=1;fontColor=#007A00;" vertex="1" parent="1">
-          <mxGeometry x="598" y="237" width="220" height="16" as="geometry" />
-        </mxCell>
-        <mxCell id="route-web" value="/web/* → Container App&#xa;(Next.js SSR)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="1">
-          <mxGeometry x="598" y="254" width="155" height="62" as="geometry" />
-        </mxCell>
-        <mxCell id="route-catalog" value="/api/catalog/* → Functions&#xa;Assets, ratings, versions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6823a;fontSize=9;" vertex="1" parent="1">
-          <mxGeometry x="761" y="254" width="155" height="62" as="geometry" />
-        </mxCell>
-        <mxCell id="route-workflow" value="/api/workflows/* → Functions&#xa;Workflow CRUD, sessions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6823a;fontSize=9;" vertex="1" parent="1">
-          <mxGeometry x="924" y="254" width="155" height="62" as="geometry" />
-        </mxCell>
-        <mxCell id="route-models" value="/api/models/* → Next.js API&#xa;Foundry model catalog &amp; cards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e6ff;strokeColor=#9673a6;fontSize=9;" vertex="1" parent="1">
-          <mxGeometry x="1087" y="254" width="155" height="62" as="geometry" />
-        </mxCell>
-        <mxCell id="route-ai" value="/openai/* → AI Foundry&#xa;Chat, embeddings, completions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;" vertex="1" parent="1">
-          <mxGeometry x="1250" y="254" width="155" height="62" as="geometry" />
-        </mxCell>
-
-        <!-- ══════════════════════════════════════════════════════════════
-             ROW 1 — COMPUTE SERVICES
-             ══════════════════════════════════════════════════════════════ -->
-
-        <!-- Container Apps (Next.js Web) -->
-        <mxCell id="zone-containerapps" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#388E3C;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
-          <mxGeometry x="220" y="380" width="320" height="310" as="geometry" />
-        </mxCell>
-        <mxCell id="icon-containerapps" value="Azure Container Apps&#xa;ai-marketplace-web-dev" style="shape=mxgraph.azure2.container_apps;fillColor=#388E3C;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="230" y="388" width="46" height="46" as="geometry" />
-        </mxCell>
-        <mxCell id="ca-detail" value="Next.js 16  (Node 20 Alpine)&#xa;Docker → ACR → Container App&#xa;&#xa;App Router Pages:&#xa;  /               Marketplace&#xa;  /orchestration  Workflow Builder&#xa;  /models/[id]    Model Card&#xa;  /assets/[id]    Asset Detail&#xa;&#xa;Next.js API Routes:&#xa;  /api/auth-config&#xa;  /api/models  /api/models/sync&#xa;  /api/foundry/[id]&#xa;  /api/aml/compute&#xa;&#xa;Server libs:&#xa;  foundry-client.ts (AIProjectClient)&#xa;  azure-ml-client.ts (AML REST)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f8f1;strokeColor=#388E3C;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="230" y="444" width="300" height="236" as="geometry" />
-        </mxCell>
-
-        <!-- Azure Functions -->
-        <mxCell id="zone-functions" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#F57F17;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
-          <mxGeometry x="560" y="380" width="320" height="310" as="geometry" />
-        </mxCell>
-        <mxCell id="icon-functions" value="Azure Functions (Flex Consumption)&#xa;apps/api  · TypeScript · Node 20" style="shape=mxgraph.azure2.function;fillColor=#F57F17;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="570" y="388" width="46" height="46" as="geometry" />
-        </mxCell>
-        <mxCell id="fn-detail" value="Function Groups:&#xa;&#xa;  • /catalog/assets&#xa;  • /catalog/ratings&#xa;  • /catalog/versions&#xa;&#xa;  • /publisher/submissions&#xa;  • /publisher/review&#xa;&#xa;  • /workflows  (CRUD)&#xa;&#xa;  • /workspace/projects&#xa;  • /workspace/user-config&#xa;&#xa;  • /sessions/create&#xa;  • /data/data-sources&#xa;&#xa;lib/cosmos/client.ts → Cosmos DB" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#F57F17;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="570" y="444" width="300" height="236" as="geometry" />
-        </mxCell>
-
-        <!-- Azure AI Foundry -->
-        <mxCell id="zone-foundry" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#1565C0;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
-          <mxGeometry x="900" y="380" width="320" height="310" as="geometry" />
-        </mxCell>
-        <mxCell id="icon-foundry" value="Azure AI Foundry Project&#xa;aoai-q2w5uxlkh4c6o-project" style="shape=mxgraph.azure2.machine_learning;fillColor=#1565C0;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="910" y="388" width="46" height="46" as="geometry" />
-        </mxCell>
-        <mxCell id="foundry-detail" value="18 Live Model Deployments:&#xa;&#xa;  GPT-4o · GPT-5 Chat · GPT-5.2&#xa;  GPT-5 Mini · GPT-5 Codex&#xa;  o1 · DeepSeek-R1-0528&#xa;  GPT-OSS-120B · GPT-4 · GPT-4.1&#xa;  GPT-3.5-Turbo&#xa;  Mistral Document AI 2505&#xa;  GPT-Image-1.5&#xa;  GPT-4o-Mini Realtime&#xa;  GPT-4o-Mini TTS&#xa;  text-embedding-ada-002&#xa;  text-embedding-3-small&#xa;  text-embedding-3-large&#xa;&#xa;SDK: @azure/ai-projects&#xa;AIProjectClient.fromEndpoint()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f4fd;strokeColor=#1565C0;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="910" y="444" width="300" height="236" as="geometry" />
-        </mxCell>
-
-        <!-- Azure AI Hub Workspace -->
-        <mxCell id="zone-aihub" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaf6;strokeColor=#283593;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
-          <mxGeometry x="1240" y="380" width="290" height="310" as="geometry" />
-        </mxCell>
-        <mxCell id="icon-aihub" value="Azure AI Hub Workspace&#xa;aimarket-hub (East US)" style="shape=mxgraph.azure2.machine_learning;fillColor=#283593;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="1250" y="388" width="46" height="46" as="geometry" />
-        </mxCell>
-        <mxCell id="aihub-detail" value="Capabilities:&#xa;&#xa;  • Evaluations REST API&#xa;    GET .../evaluations/runs&#xa;    (requires AI Hub, NOT&#xa;     AI Services endpoint)&#xa;&#xa;  • AML Model Registry&#xa;    ClinicalBERT-RCM&#xa;    Claims-Predictor-XL&#xa;    Custom BYOM models&#xa;&#xa;  • AML Compute Clusters&#xa;    GET /api/aml/compute&#xa;&#xa;  • Connected AI Services&#xa;    (Azure OpenAI link)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef0fb;strokeColor=#283593;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1250" y="444" width="270" height="236" as="geometry" />
-        </mxCell>
-
-        <!-- ══════════════════════════════════════════════════════════════
-             ROW 2 — DATA / INFRASTRUCTURE SERVICES
-             ══════════════════════════════════════════════════════════════ -->
-
-        <!-- Cosmos DB -->
-        <mxCell id="zone-cosmos" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbe9e7;strokeColor=#BF360C;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
-          <mxGeometry x="220" y="720" width="280" height="260" as="geometry" />
-        </mxCell>
-        <mxCell id="icon-cosmos" value="Azure Cosmos DB (NoSQL)" style="shape=mxgraph.azure2.cosmos_db;fillColor=#BF360C;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="230" y="728" width="46" height="46" as="geometry" />
-        </mxCell>
-        <mxCell id="cosmos-detail" value="Database: ai-marketplace&#xa;&#xa;10 Containers:&#xa;  • assets          • workflows&#xa;  • publishers      • sessions&#xa;  • ratings         • submissions&#xa;  • reviews         • data-sources&#xa;  • workspace       • user-config&#xa;&#xa;Partition: /partitionKey&#xa;TTL on sessions: 24h&#xa;Serverless throughput" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3f0;strokeColor=#BF360C;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="230" y="780" width="260" height="190" as="geometry" />
-        </mxCell>
-
-        <!-- Key Vault -->
-        <mxCell id="zone-keyvault" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#6A1B9A;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
-          <mxGeometry x="520" y="720" width="240" height="260" as="geometry" />
-        </mxCell>
-        <mxCell id="icon-keyvault" value="Azure Key Vault" style="shape=mxgraph.azure2.key_vaults;fillColor=#6A1B9A;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="530" y="728" width="46" height="46" as="geometry" />
-        </mxCell>
-        <mxCell id="kv-detail" value="Secrets:&#xa;&#xa;  • COSMOS_KEY&#xa;  • AZURE_AD_CLIENT_SECRET&#xa;  • APPLICATIONINSIGHTS_&#xa;    CONNECTION_STRING&#xa;  • AZURE_AI_PROJECT_&#xa;    ENDPOINT&#xa;&#xa;  Managed Identity&#xa;  access from Functions&#xa;  and Container App" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#faf0ff;strokeColor=#6A1B9A;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="530" y="780" width="220" height="190" as="geometry" />
-        </mxCell>
-
-        <!-- Container Registry -->
-        <mxCell id="zone-acr" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2f1;strokeColor=#00695C;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
-          <mxGeometry x="780" y="720" width="240" height="260" as="geometry" />
-        </mxCell>
-        <mxCell id="icon-acr" value="Azure Container Registry&#xa;aimktacrp7a65r22" style="shape=mxgraph.azure2.container_registries;fillColor=#00695C;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="790" y="728" width="46" height="46" as="geometry" />
-        </mxCell>
-        <mxCell id="acr-detail" value="Docker Images:&#xa;&#xa;  • ai-marketplace-web&#xa;    (Next.js standalone)&#xa;&#xa;  Built by:&#xa;    azd deploy --service web&#xa;    multi-stage Dockerfile&#xa;    node:20-alpine builder&#xa;&#xa;  Tagged:&#xa;    azd-deploy-{timestamp}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f8f5;strokeColor=#00695C;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="790" y="780" width="220" height="190" as="geometry" />
-        </mxCell>
-
-        <!-- App Insights + Monitor -->
-        <mxCell id="zone-monitor" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaf6;strokeColor=#1A237E;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
-          <mxGeometry x="1040" y="720" width="240" height="260" as="geometry" />
-        </mxCell>
-        <mxCell id="icon-appinsights" value="Application Insights&#xa;+ Azure Monitor" style="shape=mxgraph.azure2.application_insights;fillColor=#1A237E;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="1050" y="728" width="46" height="46" as="geometry" />
-        </mxCell>
-        <mxCell id="monitor-detail" value="Telemetry Sources:&#xa;&#xa;  • Container App traces&#xa;  • Functions invocations&#xa;  • APIM API metrics&#xa;  • Foundry model calls&#xa;    (via AIProjectClient&#xa;     .telemetry)&#xa;&#xa;  Metrics:&#xa;    Token usage per model&#xa;    Request latency (p50/p95)&#xa;    Error rates by service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef0fb;strokeColor=#1A237E;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1050" y="780" width="220" height="190" as="geometry" />
-        </mxCell>
-
-        <!-- CI/CD Zone -->
-        <mxCell id="zone-cicd" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce4ec;strokeColor=#880E4F;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
-          <mxGeometry x="1300" y="720" width="240" height="260" as="geometry" />
-        </mxCell>
-        <mxCell id="cicd-title" value="CI/CD Pipeline" style="text;html=1;strokeColor=none;fillColor=none;fontSize=12;fontStyle=1;fontColor=#880E4F;" vertex="1" parent="1">
-          <mxGeometry x="1310" y="726" width="220" height="20" as="geometry" />
-        </mxCell>
-        <mxCell id="cicd-detail" value="GitHub  (feature/go-copilotsdk)&#xa;    ↓  git push&#xa;&#xa;Azure Developer CLI (azd)&#xa;  azd up   (full provision)&#xa;  azd deploy --service web&#xa;  azd env get-values&#xa;&#xa;Bicep IaC (infra/):&#xa;  main.bicep&#xa;  • modules/cosmos.bicep&#xa;  • modules/containerapp.bicep&#xa;  • modules/functions.bicep&#xa;  • modules/keyvault.bicep&#xa;  • modules/appinsights.bicep&#xa;  • modules/containerregistry.bicep&#xa;  • ai-hub/main.bicep" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce4ec;strokeColor=#880E4F;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1310" y="750" width="220" height="220" as="geometry" />
-        </mxCell>
-
-        <!-- ══════════════════════════════════════════════════════════════
-             ARROWS — Client → APIM
-             ══════════════════════════════════════════════════════════════ -->
-        <mxCell id="e-client-apim" value="HTTPS (all requests)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#0072C6;fontColor=#0072C6;fontSize=9;fontStyle=1;" edge="1" parent="1" source="zone-clients" target="zone-apim">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- APIM → Container Apps -->
-        <mxCell id="e-apim-ca" value="/web/*" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.17;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#388E3C;fontColor=#388E3C;fontSize=9;strokeWidth=2;" edge="1" parent="1" source="zone-apim" target="zone-containerapps">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- APIM → Functions -->
-        <mxCell id="e-apim-fn" value="/api/catalog/*&#xa;/api/workflows/*" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.39;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#F57F17;fontColor=#F57F17;fontSize=9;strokeWidth=2;" edge="1" parent="1" source="zone-apim" target="zone-functions">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- APIM → Foundry (direct) -->
-        <mxCell id="e-apim-foundry" value="/openai/*&#xa;model calls" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.62;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#1565C0;fontColor=#1565C0;fontSize=9;strokeWidth=2;" edge="1" parent="1" source="zone-apim" target="zone-foundry">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- APIM → AI Hub -->
-        <mxCell id="e-apim-aihub" value="/api/models/*&#xa;eval runs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.83;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#283593;fontColor=#283593;fontSize=9;strokeWidth=2;" edge="1" parent="1" source="zone-apim" target="zone-aihub">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- Container Apps → Next.js API routes → Foundry -->
-        <mxCell id="e-ca-foundry" value="AIProjectClient&#xa;deployments / agents" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.4;exitDx=0;exitDy=0;entryX=0;entryY=0.4;entryDx=0;entryDy=0;strokeColor=#1565C0;fontColor=#1565C0;fontSize=8;dashed=1;" edge="1" parent="1" source="zone-containerapps" target="zone-foundry">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- Container Apps → AI Hub (evals) -->
-        <mxCell id="e-ca-aihub" value="REST evals&#xa;(optional)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.7;exitDx=0;exitDy=0;entryX=0;entryY=0.7;entryDx=0;entryDy=0;strokeColor=#283593;fontColor=#283593;fontSize=8;dashed=1;" edge="1" parent="1" source="zone-containerapps" target="zone-aihub">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="880" y="597" />
-              <mxPoint x="880" y="627" />
-              <mxPoint x="1240" y="627" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- Functions → Cosmos -->
-        <mxCell id="e-fn-cosmos" value="CosmosClient&#xa;SDK (HTTPS 443)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.3;exitY=1;exitDx=0;exitDy=0;entryX=0.9;entryY=0;entryDx=0;entryDy=0;strokeColor=#BF360C;fontColor=#BF360C;fontSize=8;strokeWidth=2;" edge="1" parent="1" source="zone-functions" target="zone-cosmos">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- Functions → Key Vault -->
-        <mxCell id="e-fn-kv" value="Managed Identity&#xa;secret read" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#6A1B9A;fontColor=#6A1B9A;fontSize=8;dashed=1;" edge="1" parent="1" source="zone-functions" target="zone-keyvault">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- Container App image pull from ACR -->
-        <mxCell id="e-acr-ca" value="docker pull&#xa;(latest image)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeColor=#00695C;fontColor=#00695C;fontSize=8;strokeWidth=2;" edge="1" parent="1" source="zone-acr" target="zone-containerapps">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- CI/CD → ACR docker push -->
-        <mxCell id="e-cicd-acr" value="docker push" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0;exitY=0.4;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#880E4F;fontColor=#880E4F;fontSize=8;strokeWidth=2;" edge="1" parent="1" source="zone-cicd" target="zone-acr">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- CI/CD → Functions (deploy) -->
-        <mxCell id="e-cicd-fn" value="npm deploy&#xa;azd deploy" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0;exitY=0.3;exitDx=0;exitDy=0;entryX=1;entryY=0.8;entryDx=0;entryDy=0;strokeColor=#880E4F;fontColor=#880E4F;fontSize=8;strokeWidth=2;" edge="1" parent="1" source="zone-cicd" target="zone-functions">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="1280" y="796" />
-              <mxPoint x="1280" y="630" />
-              <mxPoint x="900" y="630" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- Entra → APIM JWT validation -->
-        <mxCell id="e-entra-apim" value="JWKS endpoint&#xa;token validation" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.3;entryDx=0;entryDy=0;strokeColor=#5C2D91;fontColor=#5C2D91;fontSize=8;dashed=1;strokeWidth=2;" edge="1" parent="1" source="zone-entra" target="zone-apim">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- Foundry / Functions → App Insights -->
-        <mxCell id="e-foundry-monitor" value="telemetry&#xa;traces / tokens" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#1A237E;fontColor=#1A237E;fontSize=8;dashed=1;" edge="1" parent="1" source="zone-foundry" target="zone-monitor">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- APIM → App Insights (logging policy) -->
-        <mxCell id="e-apim-monitor" value="emit-metric&#xa;APIM diagnostics" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.7;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#1A237E;fontColor=#1A237E;fontSize=8;dashed=1;" edge="1" parent="1" source="zone-apim" target="zone-monitor">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="1155" y="350" />
-              <mxPoint x="1155" y="710" />
-              <mxPoint x="1160" y="710" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- Container App → Key Vault -->
-        <mxCell id="e-ca-kv" value="secret read" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.4;exitY=1;exitDx=0;exitDy=0;entryX=0.1;entryY=0;entryDx=0;entryDy=0;strokeColor=#6A1B9A;fontColor=#6A1B9A;fontSize=8;dashed=1;" edge="1" parent="1" source="zone-containerapps" target="zone-keyvault">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- ══════════════════════════════════════════════════════════════
-             LEGEND
-             ══════════════════════════════════════════════════════════════ -->
-        <mxCell id="legend" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9f9f9;strokeColor=#999999;arcSize=3;" vertex="1" parent="1">
-          <mxGeometry x="1560" y="720" width="170" height="310" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-t" value="Legend" style="text;html=1;strokeColor=none;fillColor=none;fontSize=11;fontStyle=1;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="726" width="80" height="18" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-solid" value="━━  Data / API call" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="748" width="150" height="16" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-dashed" value="╌╌  Auth / Token / Telemetry" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="766" width="150" height="16" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-ca" value="🟢  Container Apps (Web)" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="790" width="150" height="16" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-fn" value="🟡  Azure Functions (API)" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="808" width="150" height="16" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-foundry" value="🔵  AI Foundry / AI Hub" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="826" width="150" height="16" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-cosmos" value="🔴  Cosmos DB" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="844" width="150" height="16" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-kv" value="🟣  Key Vault" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="862" width="150" height="16" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-acr" value="🟩  Container Registry" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="880" width="150" height="16" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-monitor" value="🔷  App Insights / Monitor" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="898" width="150" height="16" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-apim" value="🟢✦  APIM (AI Gateway)" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="916" width="150" height="16" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-entra" value="🟣  Entra ID (auth)" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="934" width="150" height="16" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-cicd" value="🔴╌  CI/CD (GitHub + azd)" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="952" width="150" height="16" as="geometry" />
-        </mxCell>
-        <mxCell id="leg-date" value="Generated: 2026-03-05" style="text;html=1;strokeColor=none;fillColor=none;fontSize=8;fontStyle=2;fontColor=#888888;align=left;" vertex="1" parent="1">
-          <mxGeometry x="1570" y="994" width="150" height="16" as="geometry" />
-        </mxCell>
-
-      </root>
-    </mxGraphModel>
-  </diagram>
+<mxfile host="65bd71144e">
+    <diagram name="Azure Deployment Architecture" id="azure-deploy-arch">
+        <mxGraphModel dx="356" dy="536" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1300" math="0" shadow="1">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="page-title" value="AI Asset Marketplace — Azure Deployment Architecture" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=24;fontStyle=1;fontColor=#0072C6;" parent="1" vertex="1">
+                    <mxGeometry x="200" y="18" width="1520" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="page-sub" value="Resource Group: rg-ai-marketplace-dev  |  Region: East US  |  Subscription: a7fecb91-4553-4aca-976e-274add998c8d" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=11;fontColor=#555555;fontStyle=2;" parent="1" vertex="1">
+                    <mxGeometry x="200" y="50" width="1520" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-clients" value="Clients" style="swimlane;startSize=28;fillColor=#f0f7ff;strokeColor=#0072C6;fontStyle=1;fontSize=13;fontColor=#0072C6;rounded=1;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="20" y="76" width="160" height="310" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-browser" value="Web Browser" style="shape=mxgraph.azure2.user;fillColor=#0072C6;strokeColor=none;fontColor=#333333;fontSize=10;labelPosition=bottom;verticalLabelPosition=top;verticalAlign=bottom;" parent="zone-clients" vertex="1">
+                    <mxGeometry x="15" y="38" width="50" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-mobile" value="API Client" style="shape=mxgraph.azure2.app_service_api_apps;fillColor=#0072C6;strokeColor=none;fontColor=#333333;fontSize=10;labelPosition=bottom;verticalLabelPosition=top;verticalAlign=bottom;" parent="zone-clients" vertex="1">
+                    <mxGeometry x="90" y="38" width="50" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-entra-client" value="MSAL Browser&#xa;OAuth2 PKCE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#0072C6;fontSize=9;" parent="zone-clients" vertex="1">
+                    <mxGeometry x="10" y="145" width="140" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-tanstack" value="TanStack Query&#xa;fetch /api/*" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#0072C6;fontSize=9;" parent="zone-clients" vertex="1">
+                    <mxGeometry x="10" y="205" width="140" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-rg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f9ff;strokeColor=#0072C6;strokeWidth=2;dashed=1;arcSize=2;verticalAlign=top;fontSize=12;fontStyle=1;fontColor=#0072C6;" parent="1" vertex="1">
+                    <mxGeometry x="200" y="76" width="1540" height="1190" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-rg" value="rg-ai-marketplace-dev" style="shape=mxgraph.azure2.resource_groups;fillColor=#0072C6;strokeColor=none;fontColor=#0072C6;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=6;fontStyle=1;" vertex="1" parent="1">
+                    <mxGeometry x="210" y="80" width="28" height="28" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-entra" value="Azure Entra ID" style="swimlane;startSize=28;fillColor=#f3e6ff;strokeColor=#5C2D91;fontStyle=1;fontSize=12;fontColor=#5C2D91;rounded=1;arcSize=4;" parent="1" vertex="1">
+                    <mxGeometry x="1720" y="76" width="180" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-entra" value="Entra ID&#xa;Tenant: 16b3c013" style="shape=mxgraph.azure2.entra_id;fillColor=#5C2D91;strokeColor=none;fontColor=#333333;fontSize=10;labelPosition=bottom;verticalLabelPosition=top;verticalAlign=bottom;" parent="zone-entra" vertex="1">
+                    <mxGeometry x="65" y="35" width="50" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="entra-detail" value="• App Registration (MSAL)&#xa;• Service Principal&#xa;• ClientSecretCredential&#xa;  AZURE_AD_CLIENT_ID&#xa;• JWT token issuance&#xa;• APIM JWT validation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8d5ff;strokeColor=#5C2D91;fontSize=9;align=left;" parent="zone-entra" vertex="1">
+                    <mxGeometry x="8" y="138" width="164" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-apim" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6ffe6;strokeColor=#007A00;strokeWidth=2;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="480" y="110" width="960" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="apim-label" value="Azure API Management  —  AI Gateway" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=14;fontStyle=1;fontColor=#007A00;" parent="1" vertex="1">
+                    <mxGeometry x="540" y="116" width="380" height="22" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-apim" value="APIM&#xa;ai-marketplace-apim" style="shape=mxgraph.azure2.api_management;fillColor=#7FBA00;strokeColor=none;fontColor=#333333;fontSize=10;labelPosition=bottom;verticalLabelPosition=top;verticalAlign=bottom;" parent="1" vertex="1">
+                    <mxGeometry x="492" y="146" width="60" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="apim-policy-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fff0;strokeColor=#7FBA00;fontSize=9;" parent="1" vertex="1">
+                    <mxGeometry x="590" y="118" width="830" height="95" as="geometry"/>
+                </mxCell>
+                <mxCell id="apim-policy-title" value="APIM Inbound Policies" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;fontStyle=1;fontColor=#007A00;" parent="1" vertex="1">
+                    <mxGeometry x="598" y="120" width="200" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="policy-jwt-icon" value="" style="shape=mxgraph.azure2.entra_id;fillColor=#5C2D91;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="599" y="137" width="22" height="22" as="geometry"/>
+                </mxCell>
+                <mxCell id="policy-jwt" value="JWT Validation&#xa;validate-jwt (Entra ID)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="1" vertex="1">
+                    <mxGeometry x="598" y="137" width="145" height="67" as="geometry"/>
+                </mxCell>
+                <mxCell id="policy-ratelimit-icon" value="" style="shape=mxgraph.azure2.quota;fillColor=#0072C6;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="753" y="137" width="22" height="22" as="geometry"/>
+                </mxCell>
+                <mxCell id="policy-ratelimit" value="Rate Limiting&#xa;rate-limit-by-key&#xa;tokens-per-minute (TPM)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="1" vertex="1">
+                    <mxGeometry x="752" y="137" width="145" height="67" as="geometry"/>
+                </mxCell>
+                <mxCell id="policy-cache-icon" value="" style="shape=mxgraph.azure2.azure_cache_redis;fillColor=#D83B01;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="907" y="137" width="22" height="22" as="geometry"/>
+                </mxCell>
+                <mxCell id="policy-cache" value="Semantic Caching&#xa;azure-openai-semantic-&#xa;cache-lookup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="1" vertex="1">
+                    <mxGeometry x="906" y="137" width="145" height="67" as="geometry"/>
+                </mxCell>
+                <mxCell id="policy-lb-icon" value="" style="shape=mxgraph.azure2.load_balancers;fillColor=#0072C6;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1061" y="137" width="22" height="22" as="geometry"/>
+                </mxCell>
+                <mxCell id="policy-lb" value="Load Balancing&#xa;Round-robin across&#xa;Foundry deployments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="137" width="145" height="67" as="geometry"/>
+                </mxCell>
+                <mxCell id="policy-logging-icon" value="" style="shape=mxgraph.azure2.monitor;fillColor=#1A237E;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1215" y="137" width="22" height="22" as="geometry"/>
+                </mxCell>
+                <mxCell id="policy-logging" value="Logging&#xa;emit-metric (tokens)&#xa;App Insights telemetry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="1" vertex="1">
+                    <mxGeometry x="1214" y="137" width="145" height="67" as="geometry"/>
+                </mxCell>
+                <mxCell id="apim-routes-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fff0;strokeColor=#7FBA00;fontSize=9;" parent="1" vertex="1">
+                    <mxGeometry x="590" y="220" width="830" height="105" as="geometry"/>
+                </mxCell>
+                <mxCell id="apim-routes-title" value="APIM API Products / Routes" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;fontStyle=1;fontColor=#007A00;" parent="1" vertex="1">
+                    <mxGeometry x="598" y="222" width="220" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="route-web-icon" value="" style="shape=mxgraph.azure2.container_apps;fillColor=#388E3C;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="599" y="240" width="20" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="route-web" value="/web/* → Container App&#xa;(Next.js SSR)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" parent="1" vertex="1">
+                    <mxGeometry x="598" y="239" width="155" height="77" as="geometry"/>
+                </mxCell>
+                <mxCell id="route-catalog-icon" value="" style="shape=mxgraph.azure2.function_apps;fillColor=#F57F17;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="762" y="240" width="20" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="route-catalog" value="/api/catalog/* → Functions&#xa;Assets, ratings, versions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6823a;fontSize=9;" parent="1" vertex="1">
+                    <mxGeometry x="761" y="239" width="155" height="77" as="geometry"/>
+                </mxCell>
+                <mxCell id="route-workflow-icon" value="" style="shape=mxgraph.azure2.function_apps;fillColor=#F57F17;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="925" y="240" width="20" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="route-workflow" value="/api/workflows/* → Functions&#xa;Workflow CRUD, sessions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6823a;fontSize=9;" parent="1" vertex="1">
+                    <mxGeometry x="924" y="239" width="155" height="77" as="geometry"/>
+                </mxCell>
+                <mxCell id="route-models-icon" value="" style="shape=mxgraph.azure2.machine_learning;fillColor=#1565C0;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1088" y="240" width="20" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="route-models" value="/api/models/* → Next.js API&#xa;Foundry model catalog &amp; cards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e6ff;strokeColor=#9673a6;fontSize=9;" parent="1" vertex="1">
+                    <mxGeometry x="1087" y="239" width="155" height="77" as="geometry"/>
+                </mxCell>
+                <mxCell id="route-ai-icon" value="" style="shape=mxgraph.azure2.azure_openai;fillColor=#1565C0;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1251" y="240" width="20" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="route-ai" value="/openai/* → AI Foundry&#xa;Chat, embeddings, completions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;" parent="1" vertex="1">
+                    <mxGeometry x="1250" y="239" width="155" height="77" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-containerapps" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#388E3C;strokeWidth=2;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="220" y="390" width="320" height="310" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-containerapps" value="Azure Container Apps&#xa;ai-marketplace-web-dev" style="shape=mxgraph.azure2.container_apps;fillColor=#388E3C;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="230" y="398" width="46" height="46" as="geometry"/>
+                </mxCell>
+                <mxCell id="ca-detail" value="Next.js 16  (Node 20 Alpine)&#xa;Docker → ACR → Container App&#xa;&#xa;App Router Pages:&#xa;  /               Marketplace&#xa;  /orchestration  Workflow Builder&#xa;  /models/[id]    Model Card&#xa;  /assets/[id]    Asset Detail&#xa;&#xa;Next.js API Routes:&#xa;  /api/auth-config&#xa;  /api/models  /api/models/sync&#xa;  /api/foundry/[id]&#xa;  /api/aml/compute&#xa;&#xa;Server libs:&#xa;  foundry-client.ts (AIProjectClient)&#xa;  azure-ml-client.ts (AML REST)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f8f1;strokeColor=#388E3C;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="230" y="454" width="300" height="236" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-functions" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#F57F17;strokeWidth=2;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="560" y="390" width="320" height="310" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-functions" value="Azure Functions (Flex Consumption)&#xa;apps/api  · TypeScript · Node 20" style="shape=mxgraph.azure2.function_apps;fillColor=#F57F17;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="570" y="398" width="46" height="46" as="geometry"/>
+                </mxCell>
+                <mxCell id="fn-detail" value="Function Groups:&#xa;&#xa;  • /catalog/assets&#xa;  • /catalog/ratings&#xa;  • /catalog/versions&#xa;&#xa;  • /publisher/submissions&#xa;  • /publisher/review&#xa;&#xa;  • /workflows  (CRUD)&#xa;&#xa;  • /workspace/projects&#xa;  • /workspace/user-config&#xa;&#xa;  • /sessions/create&#xa;  • /data/data-sources&#xa;&#xa;lib/cosmos/client.ts → Cosmos DB" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#F57F17;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="570" y="454" width="300" height="236" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-foundry" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#1565C0;strokeWidth=2;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="900" y="390" width="320" height="310" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-foundry" value="Azure AI Foundry Project&#xa;aoai-q2w5uxlkh4c6o-project" style="shape=mxgraph.azure2.azure_openai;fillColor=#1565C0;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="910" y="398" width="46" height="46" as="geometry"/>
+                </mxCell>
+                <mxCell id="foundry-detail" value="18 Live Model Deployments:&#xa;&#xa;  GPT-4o · GPT-5 Chat · GPT-5.2&#xa;  GPT-5 Mini · GPT-5 Codex&#xa;  o1 · DeepSeek-R1-0528&#xa;  GPT-OSS-120B · GPT-4 · GPT-4.1&#xa;  GPT-3.5-Turbo&#xa;  Mistral Document AI 2505&#xa;  GPT-Image-1.5&#xa;  GPT-4o-Mini Realtime&#xa;  GPT-4o-Mini TTS&#xa;  text-embedding-ada-002&#xa;  text-embedding-3-small&#xa;  text-embedding-3-large&#xa;&#xa;SDK: @azure/ai-projects&#xa;AIProjectClient.fromEndpoint()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f4fd;strokeColor=#1565C0;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="910" y="454" width="300" height="236" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-aihub" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaf6;strokeColor=#283593;strokeWidth=2;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="1240" y="390" width="290" height="310" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-aihub" value="Azure AI Hub Workspace&#xa;aimarket-hub (East US)" style="shape=mxgraph.azure2.machine_learning;fillColor=#283593;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="1250" y="398" width="46" height="46" as="geometry"/>
+                </mxCell>
+                <mxCell id="aihub-detail" value="Capabilities:&#xa;&#xa;  • Evaluations REST API&#xa;    GET .../evaluations/runs&#xa;    (requires AI Hub, NOT&#xa;     AI Services endpoint)&#xa;&#xa;  • AML Model Registry&#xa;    ClinicalBERT-RCM&#xa;    Claims-Predictor-XL&#xa;    Custom BYOM models&#xa;&#xa;  • AML Compute Clusters&#xa;    GET /api/aml/compute&#xa;&#xa;  • Connected AI Services&#xa;    (Azure OpenAI link)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef0fb;strokeColor=#283593;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1250" y="454" width="270" height="236" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-cosmos" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbe9e7;strokeColor=#BF360C;strokeWidth=2;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="220" y="730" width="280" height="260" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-cosmos" value="Azure Cosmos DB (NoSQL)" style="shape=mxgraph.azure2.azure_cosmos_db;fillColor=#BF360C;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="230" y="738" width="46" height="46" as="geometry"/>
+                </mxCell>
+                <mxCell id="cosmos-detail" value="Database: ai-marketplace&#xa;&#xa;10 Containers:&#xa;  • assets          • workflows&#xa;  • publishers      • sessions&#xa;  • ratings         • submissions&#xa;  • reviews         • data-sources&#xa;  • workspace       • user-config&#xa;&#xa;Partition: /partitionKey&#xa;TTL on sessions: 24h&#xa;Serverless throughput" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3f0;strokeColor=#BF360C;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="230" y="790" width="260" height="190" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-keyvault" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#6A1B9A;strokeWidth=2;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="520" y="730" width="240" height="284" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-keyvault" value="Azure Key Vault" style="shape=mxgraph.azure2.key_vaults;fillColor=#6A1B9A;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="530" y="738" width="46" height="46" as="geometry"/>
+                </mxCell>
+                <mxCell id="kv-detail" value="Secrets:&#xa;&#xa;  • COSMOS_KEY&#xa;  • AZURE_AD_CLIENT_SECRET&#xa;  • APPLICATIONINSIGHTS_&#xa;    CONNECTION_STRING&#xa;  • AZURE_AI_PROJECT_&#xa;    ENDPOINT&#xa;  • ARIZE_API_KEY&#xa;  • ARIZE_SPACE_KEY&#xa;&#xa;  Managed Identity&#xa;  access from Functions&#xa;  and Container App" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#faf0ff;strokeColor=#6A1B9A;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="530" y="790" width="220" height="214" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-acr" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2f1;strokeColor=#00695C;strokeWidth=2;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="780" y="730" width="240" height="260" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-acr" value="Azure Container Registry&#xa;aimktacrp7a65r22" style="shape=mxgraph.azure2.container_registries;fillColor=#00695C;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="790" y="738" width="46" height="46" as="geometry"/>
+                </mxCell>
+                <mxCell id="acr-detail" value="Docker Images:&#xa;&#xa;  • ai-marketplace-web&#xa;    (Next.js standalone)&#xa;&#xa;  Built by:&#xa;    azd deploy --service web&#xa;    multi-stage Dockerfile&#xa;    node:20-alpine builder&#xa;&#xa;  Tagged:&#xa;    azd-deploy-{timestamp}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f8f5;strokeColor=#00695C;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="790" y="790" width="220" height="190" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-monitor" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8eaf6;strokeColor=#1A237E;strokeWidth=2;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="1040" y="730" width="240" height="260" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-appinsights" value="Application Insights" style="shape=mxgraph.azure2.application_insights;fillColor=#1A237E;strokeColor=none;fontColor=#333333;fontSize=11;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="1050" y="735" width="46" height="46" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-monitor" value="Azure Monitor" style="shape=mxgraph.azure2.monitor;fillColor=#1A237E;strokeColor=none;fontColor=#333333;fontSize=10;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=6;" vertex="1" parent="1">
+                    <mxGeometry x="1175" y="742" width="32" height="32" as="geometry"/>
+                </mxCell>
+                <mxCell id="monitor-detail" value="Telemetry Sources:&#xa;&#xa;  • Container App traces&#xa;  • Functions invocations&#xa;  • APIM API metrics&#xa;  • Foundry model calls&#xa;    (via AIProjectClient&#xa;     .telemetry)&#xa;&#xa;  Metrics:&#xa;    Token usage per model&#xa;    Request latency (p50/p95)&#xa;    Error rates by service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef0fb;strokeColor=#1A237E;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1050" y="790" width="220" height="190" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-cicd" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce4ec;strokeColor=#880E4F;strokeWidth=2;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="1300" y="730" width="240" height="260" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-github" value="GitHub Actions&#xa;(feature/go-copilotsdk)" style="shape=mxgraph.github.github;fillColor=#24292E;strokeColor=none;fontColor=#333333;fontSize=10;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=8;fontStyle=1;" vertex="1" parent="1">
+                    <mxGeometry x="1310" y="736" width="46" height="46" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-azd" value="Azure Dev CLI (azd)" style="shape=mxgraph.azure2.azure_devops;fillColor=#0072C6;strokeColor=none;fontColor=#333333;fontSize=10;labelPosition=right;verticalLabelPosition=middle;verticalAlign=middle;align=left;spacingLeft=6;" vertex="1" parent="1">
+                    <mxGeometry x="1310" y="792" width="32" height="32" as="geometry"/>
+                </mxCell>
+                <mxCell id="cicd-detail" value="azd up   (full provision)&#xa;azd deploy --service web&#xa;azd env get-values&#xa;&#xa;Bicep IaC (infra/):&#xa;  main.bicep&#xa;  • modules/cosmos.bicep&#xa;  • modules/containerapp.bicep&#xa;  • modules/functions.bicep&#xa;  • modules/keyvault.bicep&#xa;  • modules/appinsights.bicep&#xa;  • modules/containerregistry.bicep&#xa;  • ai-hub/main.bicep" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce4ec;strokeColor=#880E4F;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1310" y="835" width="220" height="145" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-client-apim" value="HTTPS (all requests)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#0072C6;fontColor=#0072C6;fontSize=9;fontStyle=1;" parent="1" source="zone-clients" target="zone-apim" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-apim-ca" value="/web/*" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.17;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#388E3C;fontColor=#388E3C;fontSize=9;strokeWidth=2;" parent="1" source="zone-apim" target="zone-containerapps" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-apim-fn" value="/api/catalog/*&#xa;/api/workflows/*" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.39;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#F57F17;fontColor=#F57F17;fontSize=9;strokeWidth=2;" parent="1" source="zone-apim" target="zone-functions" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-apim-foundry" value="/openai/*&#xa;model calls" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.62;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#1565C0;fontColor=#1565C0;fontSize=9;strokeWidth=2;" parent="1" source="zone-apim" target="zone-foundry" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-apim-aihub" value="/api/models/*&#xa;eval runs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.83;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#283593;fontColor=#283593;fontSize=9;strokeWidth=2;" parent="1" source="zone-apim" target="zone-aihub" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-ca-foundry" value="AIProjectClient&#xa;deployments / agents" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.4;exitDx=0;exitDy=0;entryX=0;entryY=0.4;entryDx=0;entryDy=0;strokeColor=#1565C0;fontColor=#1565C0;fontSize=8;dashed=1;" parent="1" source="zone-containerapps" target="zone-foundry" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-ca-aihub" value="REST evals&#xa;(optional)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.7;exitDx=0;exitDy=0;entryX=0;entryY=0.7;entryDx=0;entryDy=0;strokeColor=#283593;fontColor=#283593;fontSize=8;dashed=1;" parent="1" source="zone-containerapps" target="zone-aihub" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="880" y="607"/>
+                            <mxPoint x="880" y="637"/>
+                            <mxPoint x="1240" y="637"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e-fn-cosmos" value="CosmosClient&#xa;SDK (HTTPS 443)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.3;exitY=1;exitDx=0;exitDy=0;entryX=0.9;entryY=0;entryDx=0;entryDy=0;strokeColor=#BF360C;fontColor=#BF360C;fontSize=8;strokeWidth=2;" parent="1" source="zone-functions" target="zone-cosmos" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-fn-kv" value="Managed Identity&#xa;secret read" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#6A1B9A;fontColor=#6A1B9A;fontSize=8;dashed=1;" parent="1" source="zone-functions" target="zone-keyvault" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-acr-ca" value="docker pull&#xa;(latest image)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeColor=#00695C;fontColor=#00695C;fontSize=8;strokeWidth=2;" parent="1" source="zone-acr" target="zone-containerapps" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-cicd-acr" value="docker push" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0;exitY=0.4;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#880E4F;fontColor=#880E4F;fontSize=8;strokeWidth=2;" parent="1" source="zone-cicd" target="zone-acr" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-cicd-fn" value="npm deploy&#xa;azd deploy" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0;exitY=0.3;exitDx=0;exitDy=0;entryX=1;entryY=0.8;entryDx=0;entryDy=0;strokeColor=#880E4F;fontColor=#880E4F;fontSize=8;strokeWidth=2;" parent="1" source="zone-cicd" target="zone-functions" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1280" y="806"/>
+                            <mxPoint x="1280" y="640"/>
+                            <mxPoint x="900" y="640"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e-entra-apim" value="JWKS endpoint&#xa;token validation" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.3;entryDx=0;entryDy=0;strokeColor=#5C2D91;fontColor=#5C2D91;fontSize=8;dashed=1;strokeWidth=2;" parent="1" source="zone-entra" target="zone-apim" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-foundry-monitor" value="telemetry&#xa;traces / tokens" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#1A237E;fontColor=#1A237E;fontSize=8;dashed=1;" parent="1" source="zone-foundry" target="zone-monitor" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-apim-monitor" value="emit-metric&#xa;APIM diagnostics" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.7;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#1A237E;fontColor=#1A237E;fontSize=8;dashed=1;" parent="1" source="zone-apim" target="zone-monitor" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1155" y="360"/>
+                            <mxPoint x="1155" y="720"/>
+                            <mxPoint x="1160" y="720"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e-ca-kv" value="secret read" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.4;exitY=1;exitDx=0;exitDy=0;entryX=0.1;entryY=0;entryDx=0;entryDy=0;strokeColor=#6A1B9A;fontColor=#6A1B9A;fontSize=8;dashed=1;" parent="1" source="zone-containerapps" target="zone-keyvault" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9f9f9;strokeColor=#999999;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="1560" y="730" width="178" height="360" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-t" value="Legend" style="text;html=1;strokeColor=none;fillColor=none;fontSize=11;fontStyle=1;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1564" y="734" width="80" height="18" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-solid" value="━━  Data / API call" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1564" y="754" width="164" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-dashed" value="╌╌  Auth / Token / Telemetry" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1564" y="772" width="164" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-ca-icon" value="" style="shape=mxgraph.azure2.container_apps;fillColor=#388E3C;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1564" y="794" width="16" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-ca" value="Container Apps (Web)" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1584" y="794" width="148" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-fn-icon" value="" style="shape=mxgraph.azure2.function_apps;fillColor=#F57F17;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1564" y="814" width="16" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-fn" value="Azure Functions (API)" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1584" y="814" width="148" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-foundry-icon" value="" style="shape=mxgraph.azure2.azure_openai;fillColor=#1565C0;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1564" y="834" width="16" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-foundry" value="AI Foundry / Azure OpenAI" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1584" y="834" width="148" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-aihub-icon" value="" style="shape=mxgraph.azure2.machine_learning;fillColor=#283593;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1564" y="854" width="16" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-aihub" value="AI Hub / ML Workspace" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
+                    <mxGeometry x="1584" y="854" width="148" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-cosmos-icon" value="" style="shape=mxgraph.azure2.azure_cosmos_db;fillColor=#BF360C;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1564" y="874" width="16" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-cosmos" value="Cosmos DB (NoSQL)" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1584" y="874" width="148" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-kv-icon" value="" style="shape=mxgraph.azure2.key_vaults;fillColor=#6A1B9A;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1564" y="894" width="16" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-kv" value="Key Vault" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1584" y="894" width="148" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-acr-icon" value="" style="shape=mxgraph.azure2.container_registries;fillColor=#00695C;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1564" y="914" width="16" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-acr" value="Container Registry" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1584" y="914" width="148" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-monitor-icon" value="" style="shape=mxgraph.azure2.application_insights;fillColor=#1A237E;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1564" y="934" width="16" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-monitor" value="App Insights / Monitor" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1584" y="934" width="148" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-apim-icon" value="" style="shape=mxgraph.azure2.api_management;fillColor=#7FBA00;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1564" y="954" width="16" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-apim" value="APIM (AI Gateway)" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1584" y="954" width="148" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-entra-icon" value="" style="shape=mxgraph.azure2.entra_id;fillColor=#5C2D91;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1564" y="974" width="16" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-entra" value="Entra ID (auth)" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1584" y="974" width="148" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-cicd-icon" value="" style="shape=mxgraph.azure2.azure_devops;fillColor=#0072C6;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1564" y="994" width="16" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-cicd" value="CI/CD (GitHub + azd)" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1584" y="994" width="148" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-arize-icon" value="" style="rounded=1;fillColor=#F26522;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1564" y="1014" width="16" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-arize" value="Arize (AI Observability)" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;align=left;" vertex="1" parent="1">
+                    <mxGeometry x="1584" y="1014" width="148" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg-date" value="Generated: 2026-03-05" style="text;html=1;strokeColor=none;fillColor=none;fontSize=8;fontStyle=2;fontColor=#888888;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="1564" y="1074" width="164" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="zone-arize" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3EC;strokeColor=#E65100;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
+                    <mxGeometry x="1756" y="390" width="180" height="620" as="geometry"/>
+                </mxCell>
+                <mxCell id="icon-arize" value="Arize AI&#xa;Observability" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F26522;strokeColor=none;fontColor=#FFFFFF;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+                    <mxGeometry x="1766" y="395" width="160" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="arize-subtitle" value="(external SaaS)" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;fontStyle=2;fontColor=#E65100;align=center;" vertex="1" parent="1">
+                    <mxGeometry x="1766" y="450" width="160" height="14" as="geometry"/>
+                </mxCell>
+                <mxCell id="arize-detail" value="LLM Tracing (OTel):&#xa;  • arize-otel Node.js SDK&#xa;  • Prompt / response pairs&#xa;  • Token usage per call&#xa;  • Latency per model span&#xa;&#xa;Model Monitoring:&#xa;  • Performance metrics&#xa;  • Embedding drift&#xa;  • Custom evaluations&#xa;&#xa;Config (from Key Vault):&#xa;  ARIZE_API_KEY&#xa;  ARIZE_SPACE_KEY&#xa;&#xa;Ingest endpoint:&#xa;  otlp.arize.com:443&#xa;  (OTel HTTPS exporter)&#xa;&#xa;Dashboard:&#xa;  app.arize.com" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3EC;strokeColor=#E65100;fontSize=9;align=left;" vertex="1" parent="1">
+                    <mxGeometry x="1766" y="468" width="160" height="528" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-foundry-arize" value="OTel traces&#xa;model spans" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.4;exitDx=0;exitDy=0;entryX=0;entryY=0.2;entryDx=0;entryDy=0;strokeColor=#E65100;fontColor=#E65100;fontSize=8;dashed=1;strokeWidth=2;" edge="1" parent="1" source="zone-foundry" target="zone-arize">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1540" y="514"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e-fn-arize" value="API spans" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.6;exitDx=0;exitDy=0;entryX=0;entryY=0.53;entryDx=0;entryDy=0;strokeColor=#E65100;fontColor=#E65100;fontSize=8;dashed=1;" edge="1" parent="1" source="zone-functions" target="zone-arize">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="880" y="720"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e-monitor-arize" value="parallel&#xa;telemetry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.76;entryDx=0;entryDy=0;strokeColor=#E65100;fontColor=#E65100;fontSize=8;dashed=1;" edge="1" parent="1" source="zone-monitor" target="zone-arize">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
 </mxfile>
