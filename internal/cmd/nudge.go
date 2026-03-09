@@ -368,6 +368,9 @@ func runNudge(cmd *cobra.Command, args []string) (retErr error) {
 		} else {
 			observer.DeliverySuccess(sender, target, nudgeModeFlag, latencyMs)
 		}
+		// Wait for in-flight observer notifications before process exit.
+		// Short timeout — fail-open if adapter is slow.
+		observer.Flush(3 * time.Second)
 	}()
 	// Validate --mode and --priority before doing anything else.
 	if !validNudgeModes[nudgeModeFlag] {

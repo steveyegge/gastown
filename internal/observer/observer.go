@@ -54,6 +54,7 @@ var (
 	clientMu sync.Once
 	endpoint string
 	disabled bool
+	inflight sync.WaitGroup
 )
 
 func init() {
@@ -98,7 +99,9 @@ func Notify(event Event) {
 	// even if the package-level var changes (e.g., during tests).
 	url := endpoint
 
+	inflight.Add(1)
 	go func() {
+		defer inflight.Done()
 		req, err := http.NewRequest("POST", url, bytes.NewReader(data))
 		if err != nil {
 			return
@@ -111,6 +114,24 @@ func Notify(event Event) {
 		}
 		_ = resp.Body.Close()
 	}()
+}
+
+// Flush blocks until all in-flight notifications complete or the timeout
+// expires. Call this before process exit to ensure delivery-success/failure
+// events aren't lost when the process terminates.
+func Flush(timeout time.Duration) {
+	if disabled {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		inflight.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	}
 }
 
 // PreSend emits a pre-send event before nudge delivery begins.
