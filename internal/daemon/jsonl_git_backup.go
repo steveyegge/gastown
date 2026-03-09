@@ -47,12 +47,11 @@ var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 // scrubQuery is the WHERE clause for filtering ephemeral data.
 // Kept separate from Sprintf to avoid %% confusion.
-// The query selects only durable work product (bugs, features, tasks, epics, chores).
+// The query selects durable work product (bugs, features, tasks, epics, chores, convoys).
 const scrubWhereClause = ` WHERE (ephemeral IS NULL OR ephemeral != 1)` +
 	` AND status != 'tombstone'` +
-	` AND issue_type NOT IN ('message', 'event', 'agent', 'convoy', 'molecule', 'role', 'merge-request', 'rig')` +
+	` AND issue_type NOT IN ('message', 'event', 'agent', 'molecule', 'role', 'merge-request', 'rig')` +
 	` AND id NOT LIKE '%-wisp-%'` +
-	` AND id NOT LIKE '%-cv-%'` +
 	` AND id NOT LIKE 'test%'` +
 	` AND id NOT LIKE 'beads\_t%'` +
 	` AND id NOT LIKE 'beads\_pt%'` +
