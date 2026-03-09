@@ -147,13 +147,10 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 	messages := make([]*Message, 0)
 
 	// Query 1: assignee match (per identity variant)
+	// Use bd query --json (bd list --json does not produce JSON in bd 0.59.x).
 	for _, id := range identities {
-		args := []string{"list",
-			"--label", "gt:message",
-			"--assignee", id,
-			"--json",
-			"--limit", "0",
-		}
+		query := fmt.Sprintf(`label="gt:message" AND assignee="%s"`, id)
+		args := []string{"query", query, "--json"}
 
 		ctx, cancel := bdReadCtx()
 		stdout, err := runBdCommand(ctx, args, m.workDir, beadsDir)
@@ -194,12 +191,8 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 	// Query 2: CC match — fetch messages with cc:<identity> label
 	for _, id := range identities {
 		ccLabel := "cc:" + id
-		args := []string{"list",
-			"--label", "gt:message",
-			"--label", ccLabel,
-			"--json",
-			"--limit", "0",
-		}
+		query := fmt.Sprintf(`label="gt:message" AND label="%s"`, ccLabel)
+		args := []string{"query", query, "--json"}
 
 		ctx, cancel := bdReadCtx()
 		stdout, err := runBdCommand(ctx, args, m.workDir, beadsDir)
