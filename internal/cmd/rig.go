@@ -586,6 +586,29 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 			rigBeadID := beads.RigBeadIDWithPrefix(newRig.Config.Prefix, name)
 			fmt.Printf("  Created rig identity bead: %s\n", rigBeadID)
 		}
+
+		// Create agent beads for the rig (witness, refinery)
+		// This ensures they exist before the daemon tries to start them
+		prefix := newRig.Config.Prefix
+		witnessID := beads.WitnessBeadIDWithPrefix(prefix, name)
+		if _, err := bd.CreateAgentBead(witnessID,
+			fmt.Sprintf("Witness for %s - monitors polecat health and progress.", name),
+			&beads.AgentFields{RoleType: "witness", Rig: name, AgentState: "idle"},
+		); err != nil {
+			fmt.Printf("  %s Could not create witness agent bead: %v\n", style.Warning.Render("!"), err)
+		} else {
+			fmt.Printf("  Created agent bead: %s\n", witnessID)
+		}
+
+		refineryID := beads.RefineryBeadIDWithPrefix(prefix, name)
+		if _, err := bd.CreateAgentBead(refineryID,
+			fmt.Sprintf("Refinery for %s - processes merge queue.", name),
+			&beads.AgentFields{RoleType: "refinery", Rig: name, AgentState: "idle"},
+		); err != nil {
+			fmt.Printf("  %s Could not create refinery agent bead: %v\n", style.Warning.Render("!"), err)
+		} else {
+			fmt.Printf("  Created agent bead: %s\n", refineryID)
+		}
 	}
 
 	// Sync hooks for the new rig's targets
@@ -1141,6 +1164,33 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 				fmt.Printf("  %s Could not create rig identity bead: %v\n", style.Warning.Render("!"), err)
 			} else {
 				fmt.Printf("  %s Created rig identity bead: %s\n", style.Success.Render("✓"), rigBeadID)
+			}
+		}
+
+		// Create agent beads for the rig (witness, refinery)
+		// This ensures they exist before the daemon tries to start them
+		prefix := result.BeadsPrefix
+		witnessID := beads.WitnessBeadIDWithPrefix(prefix, name)
+		if _, err := bd.Show(witnessID); err != nil {
+			if _, err := bd.CreateAgentBead(witnessID,
+				fmt.Sprintf("Witness for %s - monitors polecat health and progress.", name),
+				&beads.AgentFields{RoleType: "witness", Rig: name, AgentState: "idle"},
+			); err != nil {
+				fmt.Printf("  %s Could not create witness agent bead: %v\n", style.Warning.Render("!"), err)
+			} else {
+				fmt.Printf("  %s Created agent bead: %s\n", style.Success.Render("✓"), witnessID)
+			}
+		}
+
+		refineryID := beads.RefineryBeadIDWithPrefix(prefix, name)
+		if _, err := bd.Show(refineryID); err != nil {
+			if _, err := bd.CreateAgentBead(refineryID,
+				fmt.Sprintf("Refinery for %s - processes merge queue.", name),
+				&beads.AgentFields{RoleType: "refinery", Rig: name, AgentState: "idle"},
+			); err != nil {
+				fmt.Printf("  %s Could not create refinery agent bead: %v\n", style.Warning.Render("!"), err)
+			} else {
+				fmt.Printf("  %s Created agent bead: %s\n", style.Success.Render("✓"), refineryID)
 			}
 		}
 	}
