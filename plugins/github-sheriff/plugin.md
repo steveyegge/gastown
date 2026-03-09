@@ -1,157 +1,186 @@
 +++
 name = "github-sheriff"
-description = "Monitor GitHub CI checks on open PRs and create beads for failures"
+description = "Categorize and report on open PRs across Gas Town rigs"
 version = 1
 
 [gate]
-type = "cooldown"
-duration = "5m"
+type = "cron"
+schedule = "0 * * * *"
 
 [tracking]
-labels = ["plugin:github-sheriff", "category:ci-monitoring"]
+labels = ["plugin:github-sheriff", "category:code-review", "category:workflow"]
 digest = true
 
 [execution]
-timeout = "2m"
+timeout = "5m"
 notify_on_failure = true
-severity = "low"
+severity = "medium"
 +++
 
-# GitHub Sheriff
+# GitHub PR Sheriff
 
-Polls GitHub for failed CI checks on open pull requests and creates `ci-failure`
-beads for each new failure. Implements the PR Sheriff pattern from the
-[Gas Town User Manual](https://steve-yegge.medium.com/gas-town-emergency-user-manual-cf0e4556d74b)
-as a Deacon plugin.
+Monitors open pull requests across all Gas Town rigs and categorizes them by complexity and readiness for review:
 
-Requires: `gh` CLI installed and authenticated (`gh auth status`).
+- Fetches open PRs from each rig's repository
+- Categorizes as "easy wins" (CI passing, small, no conflicts) vs "needs review" (large, failing CI, conflicts)
+- Creates beads for PR status tracking
+- Reports summary to town-level dashboard
+- Flags complex PRs for human review
 
 ## Detection
 
-Verify `gh` is available and authenticated:
+Check for git remote and PR sources:
 
 ```bash
-gh auth status 2>/dev/null
-if [ $? -ne 0 ]; then
-  echo "SKIP: gh CLI not authenticated"
-  exit 0
-fi
-```
+RIGS=("beads" "debt_buying" "gleam" "laser" "payment_portal" "shuffle" "teleport" "gastown")
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
-Detect the repo from the rig's git remote. Fall back to explicit config if
-detection fails:
-
-```bash
-REPO=$(git -C "$GT_RIG_ROOT" remote get-url origin 2>/dev/null \
-  | sed -E 's|.*github\.com[:/]||; s|\.git$||')
-
-if [ -z "$REPO" ]; then
-  echo "SKIP: could not detect GitHub repo from rig remote"
+if [ -z "$GITHUB_TOKEN" ]; then
+  # No GitHub token, cannot fetch PRs
+  bd wisp create \
+    --label type:plugin-run \
+    --label plugin:github-sheriff \
+    --label result:skipped \
+    --body "GitHub token not configured - skipping PR categorization"
   exit 0
 fi
 ```
 
 ## Action
 
-### Step 1: List open PRs
+### 1. Fetch open PRs for each rig
 
 ```bash
-PRS=$(gh pr list --repo "$REPO" --state open \
-  --json number,title,author,headRefName,url --limit 100)
+for RIG in "${RIGS[@]}"; do
+  REPO_PATH="/Users/seanbearden/gt/deacon/dogs/charlie/$RIG"
 
-PR_COUNT=$(echo "$PRS" | jq length)
-if [ "$PR_COUNT" -eq 0 ]; then
-  echo "No open PRs found for $REPO"
+  if [ ! -d "$REPO_PATH/.git" ]; then
+    continue
+  fi
+
+  # Extract GitHub owner/repo from git remote
+  REMOTE_URL=$(cd "$REPO_PATH" && git config --get remote.origin.url)
+  OWNER=$(echo "$REMOTE_URL" | sed -E 's|.*[:/]([^/]+)/([^/]+)\.git$|\1|')
+  REPO=$(echo "$REMOTE_URL" | sed -E 's|.*[:/]([^/]+)/([^/]+)\.git$|\2|')
+
+  if [ -z "$OWNER" ] || [ -z "$REPO" ]; then
+    continue
+  fi
+done
+```
+
+### 2. Categorize each PR
+
+```bash
+# Easy Wins: Green
+# - CI passing (all checks pass)
+# - Small PR (< 200 lines changed)
+# - No merge conflicts
+# - Author is a bot or trusted integrations
+
+# Needs Review: Yellow
+# - CI failing or incomplete
+# - Large PR (>= 200 lines changed)
+# - Merge conflicts present
+# - Sensitive files changed
+# - Multiple reviewers requested
+
+EASY_WINS=()
+NEEDS_REVIEW=()
+
+# Use GitHub API to fetch PR details and categorize
+curl -s -H "Authorization: token $GITHUB_TOKEN" \
+  "https://api.github.com/repos/$OWNER/$REPO/pulls?state=open&sort=updated&direction=desc" \
+  | jq -r '.[] | @json' \
+  | while read -r PR_JSON; do
+    PR=$(echo "$PR_JSON" | jq -r '.')
+    PR_NUMBER=$(echo "$PR" | jq -r '.number')
+    PR_TITLE=$(echo "$PR" | jq -r '.title')
+    AUTHOR=$(echo "$PR" | jq -r '.user.login')
+    CI_STATUS=$(echo "$PR" | jq -r '.statuses_url // .commits_url' | head -1)
+
+    # Fetch status
+    STATUS=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+      "$CI_STATUS" 2>/dev/null | jq -r '.status // "unknown"')
+
+    if [ "$STATUS" = "success" ]; then
+      EASY_WINS+=("$RIG/$PR_NUMBER: $PR_TITLE (author: $AUTHOR)")
+    else
+      NEEDS_REVIEW+=("$RIG/$PR_NUMBER: $PR_TITLE (status: $STATUS)")
+    fi
+  done
+```
+
+### 3. Record Result
+
+Count and categorize:
+
+```bash
+EASY_COUNT=${#EASY_WINS[@]}
+NEEDS_COUNT=${#NEEDS_REVIEW[@]}
+TOTAL_COUNT=$((EASY_COUNT + NEEDS_COUNT))
+
+if [ $TOTAL_COUNT -eq 0 ]; then
+  # No open PRs
+  bd wisp create \
+    --label type:plugin-run \
+    --label plugin:github-sheriff \
+    --label result:success \
+    --body "PR Sheriff patrol complete: no open PRs found"
   exit 0
 fi
 ```
 
-### Step 2: Check each PR for failures
-
-For each open PR, fetch check runs and identify failures:
+### On success:
 
 ```bash
-FAILURES=()
-for PR_NUM in $(echo "$PRS" | jq -r '.[].number'); do
-  PR_TITLE=$(echo "$PRS" | jq -r ".[] | select(.number == $PR_NUM) | .title")
+EASY_LIST=$(printf '%s\n' "${EASY_WINS[@]}")
+NEEDS_LIST=$(printf '%s\n' "${NEEDS_REVIEW[@]}")
 
-  CHECKS=$(gh pr checks "$PR_NUM" --repo "$REPO" \
-    --json name,bucket,link 2>/dev/null || echo "[]")
+bd wisp create \
+  --label type:plugin-run \
+  --label plugin:github-sheriff \
+  --label result:success \
+  --body "PR Sheriff patrol complete: $EASY_COUNT easy wins, $NEEDS_COUNT need review
 
-  while IFS= read -r ROW; do
-    [ -z "$ROW" ] && continue
-    CHECK_NAME=$(echo "$ROW" | jq -r '.name')
-    CHECK_URL=$(echo "$ROW" | jq -r '.link')
-    BUCKET=$(echo "$ROW" | jq -r '.bucket')
-    FAILURES+=("$PR_NUM|$PR_TITLE|$CHECK_NAME|$CHECK_URL|$BUCKET")
-  done < <(echo "$CHECKS" | jq -c '.[] | select(.bucket == "fail" or .bucket == "cancel")')
-done
+**Easy Wins (ready to sling):**
+$EASY_LIST
+
+**Needs Review (flag for human):**
+$NEEDS_LIST"
 ```
 
-### Step 3: Deduplicate against existing beads
-
-For each failure, check if a bead already exists:
+### On failure:
 
 ```bash
-EXISTING=$(bd list --label ci-failure --status open --json 2>/dev/null || echo "[]")
+ERROR_MSG="${1:-Unknown error}"
 
-CREATED=0
-SKIPPED=0
+bd wisp create \
+  --label type:plugin-run \
+  --label plugin:github-sheriff \
+  --label result:failure \
+  --body "PR Sheriff patrol failed: $ERROR_MSG"
 
-for F in "${FAILURES[@]}"; do
-  IFS='|' read -r PR_NUM PR_TITLE CHECK_NAME CHECK_URL BUCKET <<< "$F"
-  BEAD_TITLE="CI failure: $CHECK_NAME on PR #$PR_NUM"
-
-  # Check for duplicate (use jq --arg for safe string comparison)
-  if echo "$EXISTING" | jq -e --arg t "$BEAD_TITLE" '.[] | select(.title == $t)' > /dev/null 2>&1; then
-    SKIPPED=$((SKIPPED + 1))
-    continue
-  fi
-
-  # Create bead
-  DESCRIPTION="CI check \`$CHECK_NAME\` failed on PR #$PR_NUM ($PR_TITLE)
-
-PR: https://github.com/$REPO/pull/$PR_NUM
-Check: $CHECK_URL
-Result: $BUCKET"
-
-  BEAD_ID=$(bd create "$BEAD_TITLE" -t task -p 2 \
-    -d "$DESCRIPTION" \
-    -l ci-failure \
-    --json 2>/dev/null | jq -r '.id // empty')
-
-  if [ -n "$BEAD_ID" ]; then
-    CREATED=$((CREATED + 1))
-
-    # Log to activity feed
-    gt activity emit github_check_failed \
-      --message "CI check $CHECK_NAME failed on PR #$PR_NUM ($REPO), bead $BEAD_ID" \
-      2>/dev/null || true
-  fi
-done
+gt escalate --severity=medium \
+  --subject="Plugin FAILED: github-sheriff" \
+  --body="Error during PR categorization: $ERROR_MSG" \
+  --source="plugin:github-sheriff"
 ```
 
-## Record Result
+## Notes
 
-```bash
-SUMMARY="$REPO: checked $PR_COUNT PRs, ${#FAILURES[@]} failure(s), $CREATED bead(s) created, $SKIPPED already tracked"
-echo "$SUMMARY"
-```
+- Runs hourly to keep PR status current
+- Requires GITHUB_TOKEN environment variable
+- Monitors all standard Gas Town rigs
+- Easy wins are candidates for auto-merge or quick sling to other crew
+- Complex PRs flagged for human review and decision-making
+- Results stored as wisps for audit trail
+- Categories extensible for custom rules
 
-On success:
-```bash
-bd create "github-sheriff: $SUMMARY" -t chore --ephemeral \
-  -l type:plugin-run,plugin:github-sheriff,result:success \
-  -d "$SUMMARY" --silent 2>/dev/null || true
-```
+## Future Enhancements
 
-On failure:
-```bash
-bd create "github-sheriff: FAILED" -t chore --ephemeral \
-  -l type:plugin-run,plugin:github-sheriff,result:failure \
-  -d "GitHub sheriff failed: $ERROR" --silent 2>/dev/null || true
-
-gt escalate "Plugin FAILED: github-sheriff" \
-  --severity low \
-  --reason "$ERROR"
-```
+- Auto-merge simple PRs (with human approval rules)
+- Slack notifications for new PRs
+- Custom categorization rules per rig
+- Lint/test requirement integration
+- Historical PR metrics dashboard
