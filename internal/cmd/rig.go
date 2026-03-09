@@ -1119,6 +1119,32 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 		}
 	}
 
+	// Create rig identity bead if prefix is set
+	if result.BeadsPrefix != "" {
+		mayorRigBeads := filepath.Join(rigPath, "mayor", "rig", ".beads")
+		beadsWorkDir := rigPath
+		if _, err := os.Stat(mayorRigBeads); err == nil {
+			beadsWorkDir = filepath.Join(rigPath, "mayor", "rig")
+		}
+
+		bd := beads.New(beadsWorkDir)
+		rigBeadID := beads.RigBeadIDWithPrefix(result.BeadsPrefix, name)
+
+		// Check if bead already exists
+		if _, err := bd.Show(rigBeadID); err != nil {
+			fields := &beads.RigFields{
+				Repo:   result.GitURL,
+				Prefix: result.BeadsPrefix,
+				State:  beads.RigStateActive,
+			}
+			if _, err := bd.CreateRigBead(name, fields); err != nil {
+				fmt.Printf("  %s Could not create rig identity bead: %v\n", style.Warning.Render("!"), err)
+			} else {
+				fmt.Printf("  %s Created rig identity bead: %s\n", style.Success.Render("✓"), rigBeadID)
+			}
+		}
+	}
+
 	// Print results
 	fmt.Printf("\n%s Rig %s adopted\n", style.Success.Render("✓"), name)
 	if result.FromConfig {
