@@ -1274,19 +1274,17 @@ func Start(townRoot string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to save state: %v\n", err)
 	}
 
-	// Wait for the server to be accepting connections, not just alive.
-	// IsRunning only checks PID — we need CheckServerReachable to confirm
-	// the port is listening. Retry with backoff since startup takes time.
+	// Wait for the server to be accepting connections.
+	// Don't use IsRunning() here — it treats "process alive, port not yet
+	// listening" as a stale PID and destructively deletes the PID file we
+	// just wrote. Instead, check the spawned process directly via signal 0.
 	var lastErr error
 	for attempt := 0; attempt < 10; attempt++ {
 		time.Sleep(500 * time.Millisecond)
 
-		running, _, err = IsRunning(townRoot)
-		if err != nil {
-			return fmt.Errorf("verifying server started: %w", err)
-		}
-		if !running {
-			return fmt.Errorf("Dolt server failed to start (check logs with 'gt dolt logs')")
+		// Check if the process we just started is still alive.
+		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
+			return fmt.Errorf("Dolt server process exited during startup (check logs with 'gt dolt logs')")
 		}
 
 		if err := CheckServerReachable(townRoot); err == nil {
