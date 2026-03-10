@@ -1,67 +1,45 @@
 package formula
 
 import (
-	"os"
-	"path/filepath"
+	"io/fs"
 	"strings"
 	"testing"
 )
 
-// TestParseRealFormulas tests parsing actual formula files from the filesystem.
-// This is an integration test that validates our parser against real-world files.
+// TestParseRealFormulas tests parsing all embedded formula files.
+// Composition formulas (extends/compose) are now also resolved and validated.
 func TestParseRealFormulas(t *testing.T) {
-	// Find formula files - they're in various .beads/formulas directories
-	formulaDirs := []string{
-		"/Users/stevey/gt/gastown/polecats/slit/.beads/formulas",
-		"/Users/stevey/gt/gastown/mayor/rig/.beads/formulas",
+	// Formulas that use aspect-oriented features not yet implemented.
+	skipFormulas := map[string]string{
+		"security-audit.formula.toml": "uses aspect-oriented features (advice/pointcuts)",
 	}
 
-	var formulaFiles []string
-	for _, dir := range formulaDirs {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue // Skip if directory doesn't exist
+	entries, err := fs.ReadDir(formulasFS, "formulas")
+	if err != nil {
+		t.Fatalf("reading embedded formulas: %v", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".formula.toml") {
+			continue
 		}
-		for _, e := range entries {
-			if filepath.Ext(e.Name()) == ".toml" {
-				formulaFiles = append(formulaFiles, filepath.Join(dir, e.Name()))
-			}
-		}
-	}
-
-	if len(formulaFiles) == 0 {
-		t.Skip("No formula files found to test")
-	}
-
-	// Known files that use advanced features not yet supported:
-	// - Composition (extends, compose): shiny-enterprise, shiny-secure
-	// - Aspect-oriented (advice, pointcuts): security-audit
-	skipAdvanced := map[string]string{
-		"shiny-enterprise.formula.toml": "uses formula composition (extends)",
-		"shiny-secure.formula.toml":     "uses formula composition (extends)",
-		"security-audit.formula.toml":   "uses aspect-oriented features (advice/pointcuts)",
-	}
-
-	for _, path := range formulaFiles {
-		t.Run(filepath.Base(path), func(t *testing.T) {
-			baseName := filepath.Base(path)
-			if reason, ok := skipAdvanced[baseName]; ok {
-				t.Skipf("Skipping advanced formula: %s", reason)
+		name := entry.Name()
+		t.Run(name, func(t *testing.T) {
+			if reason, ok := skipFormulas[name]; ok {
+				t.Skipf("skipping: %s", reason)
 				return
 			}
 
-			f, err := ParseFile(path)
+			data, err := formulasFS.ReadFile("formulas/" + name)
 			if err != nil {
-				// Check if this is a composition formula (has extends)
-				if strings.Contains(err.Error(), "requires at least one") {
-					t.Skipf("Skipping: likely a composition formula - %v", err)
-					return
-				}
-				t.Errorf("ParseFile failed: %v", err)
-				return
+				t.Fatalf("reading formula: %v", err)
 			}
 
-			// Basic sanity checks
+			f, err := Parse(data)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+
 			if f.Name == "" {
 				t.Error("Formula name is empty")
 			}
@@ -69,7 +47,17 @@ func TestParseRealFormulas(t *testing.T) {
 				t.Errorf("Invalid formula type: %s", f.Type)
 			}
 
-			// Type-specific checks
+			// Resolve composition formulas (extends/compose).
+			if len(f.Extends) > 0 || f.Compose != nil {
+				resolved, err := Resolve(f, nil)
+				if err != nil {
+					t.Fatalf("Resolve: %v", err)
+				}
+				f = resolved
+				t.Logf("Resolved composition formula with %d steps", len(f.Steps))
+			}
+
+			// Type-specific checks on the (possibly resolved) formula.
 			switch f.Type {
 			case TypeConvoy:
 				if len(f.Legs) == 0 {
@@ -80,7 +68,6 @@ func TestParseRealFormulas(t *testing.T) {
 				if len(f.Steps) == 0 {
 					t.Error("Workflow formula has no steps")
 				}
-				// Test topological sort
 				order, err := f.TopologicalSort()
 				if err != nil {
 					t.Errorf("TopologicalSort failed: %v", err)

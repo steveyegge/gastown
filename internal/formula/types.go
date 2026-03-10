@@ -45,11 +45,34 @@ type Formula struct {
 	Steps []Step           `toml:"steps"`
 	Vars  map[string]Var   `toml:"vars"`
 
+	// Composition-specific
+	Extends []string      `toml:"extends"` // Parent formula names to inherit steps from.
+	Compose *ComposeRules `toml:"compose"` // Composition rules applied after inheritance.
+
 	// Expansion-specific
 	Template []Template `toml:"template"`
 
 	// Aspect-specific (similar to convoy but for analysis)
 	Aspects []Aspect `toml:"aspects"`
+}
+
+// ComposeRules defines how a formula can be composed with others.
+type ComposeRules struct {
+	// Expand replaces a single target step with an expansion formula's template steps.
+	Expand []*ExpandRule `toml:"expand"`
+
+	// Aspects lists aspect formula names to apply to this formula.
+	// (Reserved for future implementation.)
+	Aspects []string `toml:"aspects"`
+}
+
+// ExpandRule replaces a target step with the template steps from an expansion formula.
+type ExpandRule struct {
+	// Target is the step ID to replace.
+	Target string `toml:"target"`
+
+	// With is the name of the expansion formula whose template steps replace the target.
+	With string `toml:"with"`
 }
 
 // Aspect represents a parallel analysis aspect in an aspect formula.
