@@ -158,34 +158,15 @@ compiled from live broadcast testing and direct crew responses.
 
 - **Sent**: 5 nudges (immediate mode) at 23:14 AEDT
 - **Fan-out time**: ~10s sequential (1.2-3.0s per target)
-- **Responded**: 4/5 via mail (the requested channel!)
+- **Responded**: 5/5 via mail (the requested channel!)
   - CC: Option D (Hybrid) — biggest problem: silent failure modes
   - Charlie: Option D (Hybrid) — biggest problem: silent failure modes
   - Timmy: Option D (Hybrid) — biggest problem: adapter.connect() reliability
   - Tooly: Option D (Hybrid) — biggest problem: no broadcast primitive
-- **Missing**: Neil (no response yet)
-- **Channel compliance**: 4/4 replied via mail as requested (vs 0/5 in test #1!)
+  - Neil: Option D (Hybrid) — biggest problem: no broadcast primitive
+- **Channel compliance**: 5/5 replied via mail as requested (vs 0/5 in test #1!)
 - **Consensus**: Unanimous Option D (Hybrid: WS online + mail fallback)
 
 **Key improvement over test #1**: `--mode=immediate` + explicit mail instructions
-yielded 100% channel compliance from responders (vs 0% with wait-idle).
-
-- **Via mail** (requested channel): 0/5
-- **Via nudge-back**: 5/5
-- **Confirmed non-receipt**: 1 (Timmy — nudge returned ✓ but never arrived)
-
-### Broadcast Test #2 Results (immediate mode, st-zmn.2)
-
-- **Sent**: 5 nudges (immediate mode) at 23:14 AEDT
-- **Fan-out time**: ~10s sequential (1.2-3.0s per target)
-- **Responded**: 4/5 via mail (the requested channel!)
-  - CC: Option D (Hybrid) — biggest problem: silent failure modes
-  - Charlie: Option D (Hybrid) — biggest problem: silent failure modes
-  - Timmy: Option D (Hybrid) — biggest problem: adapter.connect() reliability
-  - Tooly: Option D (Hybrid) — biggest problem: no broadcast primitive
-- **Missing**: Neil (no response yet)
-- **Channel compliance**: 4/4 replied via mail as requested (vs 0/5 in test #1!)
-- **Consensus**: Unanimous Option D (Hybrid: WS online + mail fallback)
-
-**Key improvement over test #1**: `--mode=immediate` + explicit mail instructions
-yielded 100% channel compliance from responders (vs 0% with wait-idle).
+yielded 100% channel compliance (vs 0% with wait-idle). Neil required a
+follow-up nudge + WS message before responding (latency ~22min).
