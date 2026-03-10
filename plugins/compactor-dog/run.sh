@@ -300,7 +300,7 @@ for entry in "${CANDIDATES[@]}"; do
       continue
     fi
     POST_COUNT=$(dolt_query "$DB" "SELECT COUNT(*) FROM \`$TABLE\`" 2>/dev/null | head -1)
-    PRE=$(grep -P "^${TABLE}\t" "$PRE_COUNTS_FILE" 2>/dev/null | cut -f2)
+    PRE=$(grep "^${TABLE}	" "$PRE_COUNTS_FILE" 2>/dev/null | cut -f2)
     if [[ -z "$PRE" ]]; then
       log "  WARNING: Table $TABLE appeared after compaction (new table?)"
       continue
