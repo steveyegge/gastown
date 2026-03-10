@@ -248,6 +248,15 @@ const (
 
 	// RoleDeacon is the deacon agent role.
 	RoleDeacon = "deacon"
+
+	// RoleArtisan is the artisan (specialized worker) agent role.
+	RoleArtisan = "artisan"
+
+	// RoleArchitect is the architect (codebase oracle) agent role.
+	RoleArchitect = "architect"
+
+	// RoleConductor is the conductor (planner/router) agent role.
+	RoleConductor = "conductor"
 )
 
 // Role emojis - centralized for easy customization.

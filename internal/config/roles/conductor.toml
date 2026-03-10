@@ -1,0 +1,23 @@
+# Conductor role definition
+# Planner and router — plans phases, splits beads, routes to artisans. One per rig.
+
+role = "conductor"
+scope = "rig"
+nudge = "Check for unrouted beads and monitor in-flight work."
+prompt_template = "conductor.md.tmpl"
+
+[session]
+pattern = "{prefix}-conductor"
+work_dir = "{town}/{rig}/conductor"
+needs_pre_sync = false
+start_command = "exec claude --dangerously-skip-permissions"
+
+[env]
+GT_ROLE = "conductor"
+GT_SCOPE = "rig"
+
+[health]
+ping_timeout = "30s"
+consecutive_failures = 3
+kill_cooldown = "5m"
+stuck_threshold = "3h"

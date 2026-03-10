@@ -1,0 +1,23 @@
+# Artisan role definition
+# Specialized long-lived workers with domain expertise. Multiple per rig.
+
+role = "artisan"
+scope = "rig"
+nudge = "Check your hook and mail. You are a specialist — apply your expertise."
+prompt_template = "artisan.md.tmpl"
+
+[session]
+pattern = "{prefix}-artisan-{name}"
+work_dir = "{town}/{rig}/artisans/{name}"
+needs_pre_sync = true
+start_command = "exec claude --dangerously-skip-permissions"
+
+[env]
+GT_ROLE = "artisan"
+GT_SCOPE = "rig"
+
+[health]
+ping_timeout = "30s"
+consecutive_failures = 3
+kill_cooldown = "5m"
+stuck_threshold = "3h"

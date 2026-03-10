@@ -1,0 +1,23 @@
+# Architect role definition
+# Codebase oracle — examines code, answers questions, designs specs. One per rig.
+
+role = "architect"
+scope = "rig"
+nudge = "Check your mail for consultation requests and your hook for examination work."
+prompt_template = "architect.md.tmpl"
+
+[session]
+pattern = "{prefix}-architect"
+work_dir = "{town}/{rig}/architect"
+needs_pre_sync = false
+start_command = "exec claude --dangerously-skip-permissions"
+
+[env]
+GT_ROLE = "architect"
+GT_SCOPE = "rig"
+
+[health]
+ping_timeout = "30s"
+consecutive_failures = 3
+kill_cooldown = "5m"
+stuck_threshold = "4h"

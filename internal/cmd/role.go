@@ -208,8 +208,8 @@ func GetRoleWithContext(cwd, townRoot string) (RoleInfo, error) {
 
 		// If env is incomplete (missing rig/polecat for roles that need them),
 		// fill gaps from cwd detection and mark as incomplete
-		needsRig := parsedRole == RoleWitness || parsedRole == RoleRefinery || parsedRole == RolePolecat || parsedRole == RoleCrew
-		needsPolecat := parsedRole == RolePolecat || parsedRole == RoleCrew || parsedRole == RoleDog
+		needsRig := parsedRole == RoleWitness || parsedRole == RoleRefinery || parsedRole == RolePolecat || parsedRole == RoleCrew || parsedRole == RoleArtisan || parsedRole == RoleArchitect || parsedRole == RoleConductor
+		needsPolecat := parsedRole == RolePolecat || parsedRole == RoleCrew || parsedRole == RoleDog || parsedRole == RoleArtisan
 
 		if needsRig && info.Rig == "" && cwdCtx.Rig != "" {
 			info.Rig = cwdCtx.Rig
@@ -330,6 +330,25 @@ func detectRole(cwd, townRoot string) RoleInfo {
 		return ctx
 	}
 
+	// Check for artisan: <rig>/artisans/<name>/
+	if len(parts) >= 3 && parts[1] == "artisans" {
+		ctx.Role = RoleArtisan
+		ctx.Polecat = parts[2]
+		return ctx
+	}
+
+	// Check for architect: <rig>/architect/
+	if len(parts) >= 2 && parts[1] == "architect" {
+		ctx.Role = RoleArchitect
+		return ctx
+	}
+
+	// Check for conductor: <rig>/conductor/
+	if len(parts) >= 2 && parts[1] == "conductor" {
+		ctx.Role = RoleConductor
+		return ctx
+	}
+
 	// Default: could be rig root - treat as unknown
 	return ctx
 }
@@ -386,6 +405,15 @@ func parseRoleString(s string) (Role, string, string) {
 			return RoleCrew, rig, parts[2]
 		}
 		return RoleCrew, rig, ""
+	case "artisans":
+		if len(parts) >= 3 {
+			return RoleArtisan, rig, parts[2]
+		}
+		return RoleArtisan, rig, ""
+	case constants.RoleArchitect:
+		return RoleArchitect, rig, ""
+	case constants.RoleConductor:
+		return RoleConductor, rig, ""
 	default:
 		// Might be rig/polecatName format
 		return RolePolecat, rig, parts[1]
@@ -424,6 +452,21 @@ func (info RoleInfo) ActorString() string {
 			return fmt.Sprintf("%s/crew/%s", info.Rig, info.Polecat)
 		}
 		return "crew"
+	case RoleArtisan:
+		if info.Rig != "" && info.Polecat != "" {
+			return fmt.Sprintf("%s/artisans/%s", info.Rig, info.Polecat)
+		}
+		return "artisan"
+	case RoleArchitect:
+		if info.Rig != "" {
+			return fmt.Sprintf("%s/architect", info.Rig)
+		}
+		return "architect"
+	case RoleConductor:
+		if info.Rig != "" {
+			return fmt.Sprintf("%s/conductor", info.Rig)
+		}
+		return "conductor"
 	case RoleBoot:
 		return "deacon-boot"
 	default:
@@ -458,6 +501,21 @@ func getRoleHome(role Role, rig, polecat, townRoot string) string {
 			return ""
 		}
 		return filepath.Join(townRoot, rig, "crew", polecat)
+	case RoleArtisan:
+		if rig == "" || polecat == "" {
+			return ""
+		}
+		return filepath.Join(townRoot, rig, "artisans", polecat)
+	case RoleArchitect:
+		if rig == "" {
+			return ""
+		}
+		return filepath.Join(townRoot, rig, "architect")
+	case RoleConductor:
+		if rig == "" {
+			return ""
+		}
+		return filepath.Join(townRoot, rig, "conductor")
 	case RoleBoot:
 		return filepath.Join(townRoot, "deacon", "dogs", "boot")
 	case RoleDog:
@@ -611,6 +669,9 @@ func runRoleList(cmd *cobra.Command, args []string) error {
 		{RoleRefinery, "Per-rig merge queue processor"},
 		{RolePolecat, "Worker with persistent identity, ephemeral sessions"},
 		{RoleCrew, "Persistent worker with own worktree"},
+		{RoleArtisan, "Specialized long-lived worker with domain expertise"},
+		{RoleArchitect, "Codebase oracle, examiner, spec designer"},
+		{RoleConductor, "Planner, splitter, router, phase enforcer"},
 	}
 
 	fmt.Println("Available roles:")

@@ -48,9 +48,12 @@ const (
 	RoleWitness  Role = "witness"
 	RoleRefinery Role = "refinery"
 	RolePolecat  Role = "polecat"
-	RoleCrew     Role = "crew"
-	RoleDog      Role = "dog"
-	RoleUnknown  Role = "unknown"
+	RoleCrew      Role = "crew"
+	RoleDog       Role = "dog"
+	RoleArtisan   Role = "artisan"
+	RoleArchitect Role = "architect"
+	RoleConductor Role = "conductor"
+	RoleUnknown   Role = "unknown"
 )
 
 var primeCmd = &cobra.Command{
