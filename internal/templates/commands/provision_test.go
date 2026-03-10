@@ -77,12 +77,45 @@ func TestBuildCommand_Copilot(t *testing.T) {
 	}
 }
 
+func TestBuildCommand_Review_Claude(t *testing.T) {
+	cmd := Commands[1] // review
+	content, err := BuildCommand(cmd, "claude")
+	if err != nil {
+		t.Fatalf("BuildCommand failed: %v", err)
+	}
+
+	// Check frontmatter
+	if !strings.Contains(content, "description: Review code changes with structured grading") {
+		t.Error("missing description")
+	}
+	if !strings.Contains(content, "allowed-tools:") {
+		t.Error("missing allowed-tools for Claude")
+	}
+	if !strings.Contains(content, "argument-hint:") {
+		t.Error("missing argument-hint for Claude")
+	}
+
+	// Check body
+	if !strings.Contains(content, "$ARGUMENTS") {
+		t.Error("missing $ARGUMENTS in body")
+	}
+	if !strings.Contains(content, "CRITICAL") {
+		t.Error("missing CRITICAL severity in body")
+	}
+	if !strings.Contains(content, "Grade") {
+		t.Error("missing Grade in body")
+	}
+}
+
 func TestNames(t *testing.T) {
 	names := Names()
-	if len(names) == 0 {
-		t.Error("no commands registered")
+	if len(names) < 2 {
+		t.Errorf("expected at least 2 commands, got %d", len(names))
 	}
 	if names[0] != "handoff" {
 		t.Errorf("expected handoff, got %s", names[0])
+	}
+	if names[1] != "review" {
+		t.Errorf("expected review, got %s", names[1])
 	}
 }

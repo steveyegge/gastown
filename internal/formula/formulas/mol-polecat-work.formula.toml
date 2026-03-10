@@ -224,7 +224,17 @@ id = "self-review"
 title = "Self-review changes"
 needs = ["implement"]
 description = """
-Review your own changes before the build check.
+Review your own changes before the build check. Use `/review --branch` for
+structured grading, or do a manual review.
+
+**Option A: Use /review (recommended)**
+```bash
+/review --branch
+```
+This gives you a structured grade (A-F) with CRITICAL/MAJOR/MINOR findings
+and specific fix suggestions. Fix any CRITICAL or MAJOR issues before proceeding.
+
+**Option B: Manual review**
 
 **1. Review the diff:**
 ```bash
@@ -253,7 +263,8 @@ git diff --stat origin/{{base_branch}}...HEAD
 
 If you accidentally modified unrelated files, remove those changes.
 
-**Exit criteria:** Changes are clean, reviewed, and ready for build check."""
+**Exit criteria:** Changes are clean, reviewed (Grade B or better if using /review),
+and ready for build check."""
 
 [[steps]]
 id = "build-check"

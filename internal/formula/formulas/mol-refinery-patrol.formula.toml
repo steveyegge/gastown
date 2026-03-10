@@ -61,6 +61,10 @@ source of truth.
 | delete_merged_branches | true | Whether to delete source branches after merge |
 | judgment_enabled | false | Enable quality review for merges (true/false) |
 | review_depth | standard | Review depth: quick, standard, or deep |
+| review_enabled | false | Enable /review code review gating (replaces judgment_enabled) |
+| review_blocking | false | Whether grade C/D blocks merges (triggers FIX_NEEDED) |
+| review_pass_grade | B | Minimum passing grade (A, B, C, or D) |
+| review_max_retries | 3 | Max times to bounce back to polecat for review fixes |
 
 ## Target Resolution Rule
 
@@ -135,6 +139,22 @@ default = "false"
 [vars.review_depth]
 description = "Review depth: quick, standard, or deep"
 default = "standard"
+
+[vars.review_enabled]
+description = "Enable /review code review gating for merges (true/false). Supersedes judgment_enabled when true."
+default = "false"
+
+[vars.review_blocking]
+description = "Whether grade C/D triggers FIX_NEEDED in refinery (vs just logging findings)"
+default = "false"
+
+[vars.review_pass_grade]
+description = "Minimum passing grade in refinery: A, B, C, or D (default: B)"
+default = "B"
+
+[vars.review_max_retries]
+description = "Max times to bounce back to polecat for review fixes before proceeding"
+default = "3"
 
 [[steps]]
 id = "inbox-check"
@@ -373,86 +393,202 @@ Track results: pass count, fail count, specific failures."""
 
 [[steps]]
 id = "quality-review"
-title = "Quality review merge diff"
+title = "Code review merge diff"
 needs = ["run-tests"]
 description = """
+**Config: review_enabled = {{review_enabled}}**
 **Config: judgment_enabled = {{judgment_enabled}}**
 **Config: review_depth = {{review_depth}}**
+**Config: review_blocking = {{review_blocking}}**
+**Config: review_pass_grade = {{review_pass_grade}}**
+**Config: review_max_retries = {{review_max_retries}}**
 
-Review the merge diff for quality issues. This step is measurement-only (Phase 1):
-reviews are recorded but do NOT gate merges.
+Review the merge diff using /review grading (A-F with CRITICAL/MAJOR/MINOR).
 
-**Step 1: Check if quality review is enabled**
+**Step 1: Check if review is enabled**
 
-If judgment_enabled is not "true", skip this step entirely and proceed to
-handle-failures. Log: "Quality review skipped (judgment_enabled=false)"
+If review_enabled is "true": use the new grading system (this step).
+Else if judgment_enabled is "true": fall back to legacy scoring (0.0-1.0).
+Else: skip this step entirely. Log: "Code review skipped (review_enabled=false)"
 
 **Step 2: Get the merge diff**
 
+Determine `<review-target>` using the **Target Resolution Rule** above.
+
 ```bash
-git diff origin/main...temp
+git diff origin/<review-target>...temp
 ```
 
 If the diff is empty, skip with: "No diff to review"
 
-**Step 3: Review the diff**
+**Step 3: Review the diff (CRITICAL/MAJOR/MINOR grading)**
 
-Review the diff yourself using your judgment. Assess:
+Review the diff yourself. For each issue found, classify by severity:
 
-1. **Correctness**: Logic errors, off-by-one, nil/null handling, race conditions
-2. **Security**: Injection, auth bypass, secrets in code, unsafe deserialization
-3. **Clarity**: Naming, structure, comments where non-obvious
-4. **Style**: Consistency with surrounding code, idiomatic patterns
+**CRITICAL** - Must fix before merge:
+- Security vulnerabilities (injection, auth bypass, secrets in code)
+- Data loss risks (missing transactions, unsafe deletes)
+- Correctness bugs (race conditions, nil dereference, logic errors)
+
+**MAJOR** - Should fix before merge:
+- Logic errors that may not crash but produce wrong results
+- Missing error handling on external calls
+- API contract violations
+- Missing tests for critical paths
+
+**MINOR** - Nice to fix:
+- Style inconsistencies with surrounding code
+- Naming issues (unclear or misleading names)
+- Missing comments on non-obvious logic
+- Minor code smells
 
 Depth is controlled by review_depth:
-- `quick`: Focus on correctness and security only. Skim for obvious issues.
-- `standard`: All four categories. Moderate detail.
+- `quick`: Focus on CRITICAL only. Skim for security and correctness.
+- `standard`: All severities. Moderate detail.
 - `deep`: Thorough line-by-line review. Flag even minor style issues.
 
-**Step 4: Score and recommend**
+For each issue, note:
+- File and line number
+- Severity (CRITICAL, MAJOR, MINOR)
+- Description of the issue
+- Suggested fix (specific, actionable)
 
-Assign a score from 0.0 to 1.0:
-- 0.9-1.0: Excellent — no issues or only trivial nits
-- 0.7-0.89: Good — minor issues only
-- 0.45-0.69: Needs work — significant issues found
-- 0.0-0.44: Breach — critical issues (security, correctness)
+**Step 4: Assign grade**
 
-Recommendation:
-- `approve`: Score >= 0.45
-- `request_changes`: Score < 0.45
+Grade is determined by the highest severity issue found:
+
+| Grade | Criteria | Verdict |
+|-------|----------|---------|
+| **A** | No CRITICAL, MAJOR, or MINOR issues | PASS |
+| **B** | MINOR issues only (no CRITICAL or MAJOR) | PASS |
+| **C** | MAJOR issues present (no CRITICAL) | FAIL |
+| **D** | CRITICAL issues present | FAIL |
+| **F** | Unreviewable (empty diff, binary files, generated code only) | SKIP |
 
 **Step 5: Record the result as a wisp**
 
-Record the quality review result. This is fail-open: if the command fails,
-log the error and continue — never block the merge.
+Map grade to legacy score for trend tracking compatibility:
+- A → 1.0, B → 0.8, C → 0.55, D → 0.3, F → 0.0
 
 ```bash
-bd create "quality-review: Score <score>, <recommendation>" -t chore --ephemeral \\
-  -l type:plugin-run,plugin:quality-review-result,worker:<polecat-name>,rig:<rig-name>,score:<score>,recommendation:<approve|request_changes>,result:success \\
-  -d "Score: <score>, <recommendation>. Issues: <count> (<summary>)" \\
+bd create "code-review: Grade <grade>, <PASS|FAIL>" -t chore --ephemeral \\
+  -l type:plugin-run,plugin:quality-review-result,worker:<polecat-name>,rig:<rig-name>,score:<mapped-score>,grade:<grade>,recommendation:<approve|request_changes>,result:success \\
+  -d "Grade: <grade>. CRITICAL: <count>, MAJOR: <count>, MINOR: <count>. Verdict: <PASS|FAIL>" \\
   --silent 2>/dev/null || true
 ```
 
-**Step 6: Handle breach scores (measurement-only)**
+**Step 6: Determine merge/block action**
 
-If score < 0.45 (breach threshold):
-- Add a note to your merge summary: "Warning: Quality review breach (score: X.XX)"
-- List the critical/major issues found
-- Do NOT block the merge — Phase 1 is measurement-only
-- Proceed to handle-failures normally
+Compare the assigned grade against review_pass_grade (default: B):
+- Grade meets or exceeds pass grade → PASS (proceed to handle-failures)
+- Grade below pass grade → review fails
 
-Track: review score, recommendation, issue count, duration."""
+If review fails AND review_blocking is "true":
+- Set review_failed = true (used by handle-failures)
+- Store the full structured review output:
+  ```
+  Grade: <grade>
+
+  CRITICAL (<count> issues)
+    <file>:<line> — <description>
+      Suggested fix: <actionable fix>
+
+  MAJOR (<count> issues)
+    <file>:<line> — <description>
+      Suggested fix: <actionable fix>
+
+  MINOR (<count> issues)
+    <file>:<line> — <description>
+      Suggested fix: <actionable fix>
+
+  Summary: <N> CRITICAL, <N> MAJOR, <N> MINOR
+  Verdict: FAIL
+  ```
+- Proceed to handle-failures (which will send FIX_NEEDED)
+
+If review fails AND review_blocking is "false":
+- Log: "Warning: Code review failed (Grade: <grade>) but review_blocking=false, proceeding"
+- List the issues found for the merge summary
+- Proceed to handle-failures normally (no block)
+
+Grade A or B always passes regardless of review_blocking.
+
+Track: grade, verdict, issue counts by severity, review duration."""
 
 [[steps]]
 id = "handle-failures"
-title = "Handle quality check or test failures"
+title = "Handle quality check, test, or code review failures"
 needs = ["quality-review"]
 description = """
 **VERIFICATION GATE**: This step enforces the Beads Promise.
+**Config: review_blocking = {{review_blocking}}**
+**Config: review_max_retries = {{review_max_retries}}**
 
-If all checks and tests PASSED: This step auto-completes. Proceed to merge.
+If all checks, tests, AND code review PASSED: This step auto-completes. Proceed to merge.
 
-If any check or test FAILED:
+## Code Review Failure (FailureType: code-review)
+
+If quality-review step set review_failed = true (grade below pass grade AND review_blocking = true):
+
+1. **Log detailed findings on the bead** so the polecat can read them:
+   ```bash
+   bd update <issue-id> --notes "Code review findings (Grade: <grade>):
+
+   <full structured review output from quality-review step>
+
+   Fix the issues above and resubmit with 'gt done'."
+   ```
+
+2. **Check retry count**: Check the MR bead for a `review_retries` label.
+   - If review_retries >= review_max_retries: Log "Max review retries reached, proceeding with merge"
+     and skip the FIX_NEEDED flow. Proceed to merge-push.
+   - Otherwise: increment retry count and continue with FIX_NEEDED.
+
+3. **Reopen the source issue** for rework:
+   ```bash
+   bd update <issue-id> --status=open --assignee=""
+   bd sync
+   ```
+
+4. **Send MERGE_FAILED with code-review details** to witness:
+   ```bash
+   gt mail send <rig>/witness -s "MERGE_FAILED <polecat-name>" --stdin <<'BODY'
+   Branch: <branch>
+   Issue: <issue-id>
+   Polecat: <polecat-name>
+   Rig: <rig>
+   FailureType: code-review
+   Grade: <grade>
+   Error: Code review failed (Grade: <grade>). <N> CRITICAL, <N> MAJOR, <N> MINOR issues found.
+
+   Review findings:
+   <full structured review output with file:line and suggested fixes>
+   BODY
+   ```
+
+5. **Close the MR bead** with review failure reason:
+   ```bash
+   bd close <mr-bead-id> --reason "Code review failed (Grade: <grade>): <N> CRITICAL, <N> MAJOR, <N> MINOR"
+   ```
+
+6. **Do NOT delete the branch** — the polecat needs it to apply fixes.
+   (Unlike test/build failures where a fresh branch is created, code review
+   failures preserve the branch for incremental fixes.)
+
+7. Archive the MERGE_READY message and skip to loop-check.
+
+**CODE REVIEW REJECTION CHECKLIST**:
+- [ ] Review findings logged on source issue (bd update --notes)
+- [ ] Retry count checked and incremented
+- [ ] Source issue reopened (bd update --status=open --assignee="")
+- [ ] MERGE_FAILED sent to witness with FailureType: code-review + full findings
+- [ ] MR bead closed with review grade
+- [ ] Branch PRESERVED (not deleted)
+- [ ] MERGE_READY mail archived
+
+## Quality Check / Test Failure (existing flow)
+
+If any quality check or test FAILED:
 1. Diagnose: Is this a branch regression or pre-existing on the target branch?
 2. If branch caused it:
    - Abort merge
@@ -495,12 +631,13 @@ If any check or test FAILED:
 - [ ] Source issue reopened (bd update <issue-id> --status=open --assignee="")
 - [ ] MERGE_FAILED notification sent to witness
 - [ ] MR bead closed with rejection reason
-- [ ] Rejected branch deleted from remote
-- [ ] MERGE_READY message archived
+- [ ] Rejected branch deleted from remote (except for code-review failures)
+- [ ] MERGE_READY mail archived
 
 **GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
 - All quality checks and tests passing, OR
 - Bead filed (or existing duplicate confirmed) for the pre-existing failure
+- Code review passed (or review_blocking=false, or max retries reached)
 
 FORBIDDEN: Writing application code, exploring polecat implementations, or
 re-implementing fixes. You are a mechanical merge processor.
