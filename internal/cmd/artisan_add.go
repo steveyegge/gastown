@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/artisan"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -27,6 +29,15 @@ func runArtisanAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	rigPath := fmt.Sprintf("%s/%s", townRoot, rigName)
+
+	// Validate specialty against configured specialties
+	specialties, err := config.LoadSpecialties(rigPath)
+	if err != nil {
+		return fmt.Errorf("loading specialties: %w", err)
+	}
+	if specialties.GetSpecialty(artisanSpecialty) == nil {
+		return fmt.Errorf("unknown specialty %q — valid specialties: %s", artisanSpecialty, strings.Join(specialties.Names(), ", "))
+	}
 
 	mgr := artisan.NewManager(rigName, rigPath, townRoot)
 	worker, err := mgr.Add(name, artisanSpecialty)
