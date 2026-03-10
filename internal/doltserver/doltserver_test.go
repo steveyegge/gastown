@@ -3792,3 +3792,164 @@ func TestWriteServerConfig_Overwrites(t *testing.T) {
 		t.Error("new config should have updated log level")
 	}
 }
+
+// TestBuildDatabaseToRigMap tests the database name to rig name mapping.
+func TestBuildDatabaseToRigMap(t *testing.T) {
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test with empty routes file
+	result := buildDatabaseToRigMap(townRoot)
+	if len(result) != 0 {
+		t.Errorf("empty routes: expected empty map, got %v", result)
+	}
+
+	// Test with typical routes.jsonl
+	routesContent := `{"prefix":"hq-","path":"."}
+{"prefix":"bd-","path":"beads/mayor/rig"}
+{"prefix":"gt-","path":"gastown/mayor/rig"}
+{"prefix":"sw-","path":"sallaWork/mayor/rig"}
+{"prefix":"hq-cv-","path":"."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result = buildDatabaseToRigMap(townRoot)
+
+	// Check expected mappings
+	expected := map[string]string{
+		"bd": "beads",
+		"gt": "gastown",
+		"sw": "sallaWork",
+	}
+
+	for db, rig := range expected {
+		if got, want := result[db], rig; got != want {
+			t.Errorf("database %q: got rig %q, want %q", db, got, want)
+		}
+	}
+
+	// HQ routes with path "." should not be included (path[0] == ".")
+	if _, exists := result["hq"]; exists {
+		t.Error("hq database should not be in map (path is '.')")
+	}
+	if _, exists := result["hq-cv"]; exists {
+		t.Error("hq-cv database should not be in map (path is '.')")
+	}
+}
+
+// TestEnsureAllMetadata_UsesRigNames verifies that EnsureAllMetadata correctly
+// maps database names to rig names using routes.jsonl.
+// This is a regression test for the bug where databases named "bd", "gt", "sw"
+// were incorrectly used as rig names, creating stub directories at /gt/bd/, /gt/gt/, /gt/sw/
+// instead of the correct /gt/beads/, /gt/gastown/, /gt/sallaWork/.
+func TestEnsureAllMetadata_UsesRigNames(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create databases in .dolt-data with prefix names (as Dolt server does)
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	setupDoltDB(t, dataDir, "hq")
+	setupDoltDB(t, dataDir, "bd")
+	setupDoltDB(t, dataDir, "gt")
+
+	// Create routes.jsonl with correct mappings
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	routesContent := `{"prefix":"hq-","path":"."}
+{"prefix":"bd-","path":"beads/mayor/rig"}
+{"prefix":"gt-","path":"gastown/mayor/rig"}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create correct rig beads directories (not the buggy stub paths)
+	if err := os.MkdirAll(filepath.Join(townRoot, "beads", "mayor", "rig", ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "gastown", "mayor", "rig", ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run EnsureAllMetadata
+	updated, errs := EnsureAllMetadata(townRoot)
+	if len(errs) > 0 {
+		t.Errorf("unexpected errors: %v", errs)
+	}
+
+	// Verify metadata was created in correct locations
+	hqMeta := filepath.Join(townRoot, ".beads", "metadata.json")
+	beadsMeta := filepath.Join(townRoot, "beads", "mayor", "rig", ".beads", "metadata.json")
+	gastownMeta := filepath.Join(townRoot, "gastown", "mayor", "rig", ".beads", "metadata.json")
+
+	// Buggy paths that should NOT exist
+	buggyBdMeta := filepath.Join(townRoot, "bd", ".beads", "metadata.json")
+	buggyGtMeta := filepath.Join(townRoot, "gt", ".beads", "metadata.json")
+
+	if _, err := os.Stat(hqMeta); os.IsNotExist(err) {
+		t.Error("hq metadata.json should exist")
+	}
+	if _, err := os.Stat(beadsMeta); os.IsNotExist(err) {
+		t.Error("beads metadata.json should exist in correct path")
+	}
+	if _, err := os.Stat(gastownMeta); os.IsNotExist(err) {
+		t.Error("gastown metadata.json should exist in correct path")
+	}
+
+	// Verify buggy paths were NOT created
+	if _, err := os.Stat(buggyBdMeta); err == nil {
+		t.Error("buggy path bd/.beads/metadata.json should NOT exist")
+	}
+	if _, err := os.Stat(buggyGtMeta); err == nil {
+		t.Error("buggy path gt/.beads/metadata.json should NOT exist")
+	}
+
+	// Verify correct number of updates
+	if len(updated) != 3 {
+		t.Errorf("expected 3 updated databases, got %d: %v", len(updated), updated)
+	}
+}
+
+// TestEnsureAllMetadata_FallbackToDbName tests that EnsureAllMetadata falls back
+// to using the database name as rig name when no route is found.
+func TestEnsureAllMetadata_FallbackToDbName(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create database
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	setupDoltDB(t, dataDir, "unknownrig")
+
+	// Create empty routes.jsonl
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create rig beads dir with same name as database
+	if err := os.MkdirAll(filepath.Join(townRoot, "unknownrig", ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, errs := EnsureAllMetadata(townRoot)
+	if len(errs) > 0 {
+		t.Errorf("unexpected errors: %v", errs)
+	}
+	if len(updated) != 1 {
+		t.Errorf("expected 1 updated, got %d: %v", len(updated), updated)
+	}
+
+	// Verify metadata was created
+	metaPath := filepath.Join(townRoot, "unknownrig", ".beads", "metadata.json")
+	if _, err := os.Stat(metaPath); os.IsNotExist(err) {
+		t.Error("metadata.json should exist for unknown rig")
+	}
+}

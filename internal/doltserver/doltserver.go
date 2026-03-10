@@ -2539,14 +2539,33 @@ func EnsureMetadata(townRoot, rigName string) error {
 // EnsureAllMetadata updates metadata.json for all rig databases known to the
 // Dolt server. This is the fix for the split-brain problem where worktrees
 // each have their own isolated database.
+//
+// Database names in .dolt-data use prefixes (e.g., "bd", "gt", "sw"), but
+// EnsureMetadata expects rig names (e.g., "beads", "gastown", "sallaWork").
+// This function maps database names to rig names using routes.jsonl.
 func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 	databases, err := ListDatabases(townRoot)
 	if err != nil {
 		return nil, []error{fmt.Errorf("listing databases: %w", err)}
 	}
 
+	// Build a map from database name (prefix without hyphen) to rig name.
+	// routes.jsonl has format: {"prefix":"bd-","path":"beads/mayor/rig"}
+	// We extract rig name as the first component of the path.
+	dbToRig := buildDatabaseToRigMap(townRoot)
+
 	for _, dbName := range databases {
-		if err := EnsureMetadata(townRoot, dbName); err != nil {
+		// Map database name to rig name (e.g., "bd" -> "beads")
+		rigName := dbName
+		if mapped, ok := dbToRig[dbName]; ok {
+			rigName = mapped
+		}
+		// Special case: "hq" database maps to "hq" rig (town-level)
+		if dbName == "hq" {
+			rigName = "hq"
+		}
+
+		if err := EnsureMetadata(townRoot, rigName); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", dbName, err))
 		} else {
 			updated = append(updated, dbName)
@@ -2554,6 +2573,28 @@ func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 	}
 
 	return updated, errs
+}
+
+// buildDatabaseToRigMap loads routes.jsonl and builds a map from database name
+// (prefix without hyphen) to rig name (first component of the path).
+// For example: "bd" -> "beads", "gt" -> "gastown", "sw" -> "sallaWork"
+func buildDatabaseToRigMap(townRoot string) map[string]string {
+	result := make(map[string]string)
+	beadsDir := filepath.Join(townRoot, ".beads")
+	routes, err := beads.LoadRoutes(beadsDir)
+	if err != nil {
+		return result // Return empty map on error
+	}
+	for _, route := range routes {
+		// Extract rig name from path (first component before "/")
+		// e.g., "beads/mayor/rig" -> "beads", "gastown/mayor/rig" -> "gastown"
+		prefix := strings.TrimSuffix(route.Prefix, "-")
+		parts := strings.Split(route.Path, "/")
+		if len(parts) > 0 && parts[0] != "" && parts[0] != "." {
+			result[prefix] = parts[0]
+		}
+	}
+	return result
 }
 
 // FindRigBeadsDir returns the .beads directory path for a rig (read-only lookup).
