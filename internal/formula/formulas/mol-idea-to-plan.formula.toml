@@ -48,6 +48,7 @@ via mail before proceeding.
 |----------|----------|-------------|
 | problem | yes | Your idea / feature / problem statement |
 | context | no | Additional context: constraints, related code, prior decisions |
+| profile | no | Path to tavern-profile.yaml (auto-discovered from repo root if not set) |
 """
 formula = "mol-idea-to-plan"
 type = "workflow"
@@ -63,6 +64,21 @@ Read the conversation context and produce a structured PRD draft.
 - The `{{problem}}` variable (human's raw idea description)
 - Any prior conversation context (messages, notes, sketches)
 - `{{context}}` if provided
+- Project profile (see below)
+
+**Load project profile:**
+If `{{profile}}` is set, read the file at that path. Otherwise, auto-discover:
+check if `tavern-profile.yaml` exists in the repo root. If found, read it.
+
+When a profile is available, use its structured context (project description,
+architecture, tech stack, constraints, needs) to inform the PRD draft. Include
+a `## Project Profile` section near the top of the PRD that summarizes the
+relevant profile details for this feature. Store the profile path for downstream:
+```bash
+echo "profile_path=<resolved-path>" >> .prd-reviews/{{review_id}}/state.env
+```
+
+If no profile is found, proceed normally — this is optional context.
 
 **Your task:**
 Pick a short slug for this review (e.g., "notification-levels", "merge-queue-v2") and use it
@@ -73,6 +89,10 @@ Write a structured PRD draft to `.prd-reviews/{{review_id}}/prd-draft.md`
 Use this structure:
 ```markdown
 # PRD: <feature name>
+
+## Project Profile
+(Summarize relevant details from tavern-profile.yaml: tech stack, architecture,
+constraints. Omit this section if no profile was loaded.)
 
 ## Problem Statement
 (What problem are we solving? For whom? Why now?)
@@ -105,7 +125,7 @@ A draft that exposes uncertainty is more useful than one that hides it.
 echo "prd_draft=.prd-reviews/{{review_id}}/prd-draft.md" >> .prd-reviews/{{review_id}}/state.env
 ```
 
-**Exit criteria:** Draft PRD file exists. Rough but readable."""
+**Exit criteria:** Draft PRD file exists. Rough but readable. Profile loaded if available."""
 
 [[steps]]
 id = "prd-review"
@@ -115,6 +135,15 @@ description = """
 Pour the mol-prd-review convoy to run 6 parallel PRD reviewers.
 
 **1. Pour the convoy:**
+
+If a profile was loaded in the intake step, include it as context:
+```bash
+gt formula run mol-prd-review \\
+  --problem="{{problem}}" \\
+  --context="See .prd-reviews/{{review_id}}/prd-draft.md. {{context}}. Project profile: {{profile}}"
+```
+
+If no profile was loaded, omit the profile reference:
 ```bash
 gt formula run mol-prd-review \\
   --problem="{{problem}}" \\
@@ -207,6 +236,16 @@ description = """
 Pour the design convoy to generate an implementation plan from the refined PRD.
 
 **1. Pour the design convoy:**
+
+If a profile was loaded in the intake step (check `.prd-reviews/{{review_id}}/state.env`
+for `profile_path`), include it as context:
+```bash
+gt formula run design \\
+  --problem="{{problem}}" \\
+  --context="PRD with clarifications: .prd-reviews/{{review_id}}/prd-draft.md. {{context}}. Project profile: {{profile}}"
+```
+
+If no profile was loaded:
 ```bash
 gt formula run design \\
   --problem="{{problem}}" \\
@@ -417,5 +456,10 @@ required = true
 
 [vars.context]
 description = "Additional context: constraints, related code, prior decisions, linked beads"
+required = false
+default = ""
+
+[vars.profile]
+description = "Path to tavern-profile.yaml. Auto-discovered from repo root if not provided."
 required = false
 default = ""
