@@ -455,10 +455,25 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 		target = agentID
 	}
 
-	// Find beads directory
+	// Find beads directory.
+	// For remote rig-level targets (e.g. "myndy_monorepo/refinery"), resolve the
+	// rig's actual beads dir using the same rig-aware routing as runHook (attach).
+	// Without this, gt hook show always queries whatever DB is local (typically HQ),
+	// missing wisps stored in the target rig's database.
 	workDir, err := findLocalBeadsDir()
 	if err != nil {
 		return fmt.Errorf("not in a beads workspace: %w", err)
+	}
+	if len(args) > 0 && !isTownLevelRole(target) {
+		townRoot, townErr := workspace.FindFromCwd()
+		if townErr == nil && townRoot != "" {
+			agentBeadID := agentIDToBeadID(target, townRoot)
+			if agentBeadID != "" {
+				rigName := strings.Split(target, "/")[0]
+				fallbackPath := filepath.Join(townRoot, rigName)
+				workDir = beads.ResolveHookDir(townRoot, agentBeadID, fallbackPath)
+			}
+		}
 	}
 
 	b := beads.New(workDir)
