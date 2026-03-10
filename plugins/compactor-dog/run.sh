@@ -243,6 +243,23 @@ for entry in "${CANDIDATES[@]}"; do
 
   log "  Pre-flight: $TABLE_COUNT tables recorded"
 
+  # Step 3a.5: Pull from remote before compaction to preserve shared ancestry.
+  # Without this, flatten rewrites the commit graph and DoltHub push can never
+  # fast-forward again (see gt-mkd1).
+  HAS_REMOTE=false
+  REMOTE_NAME=$(dolt_query "$DB" "SELECT name FROM dolt_remotes LIMIT 1" 2>/dev/null | head -1)
+  if [[ -n "$REMOTE_NAME" ]]; then
+    HAS_REMOTE=true
+    log "  Remote detected ('$REMOTE_NAME'). Pulling to sync before compaction..."
+    if ! dolt_exec "$DB" "CALL DOLT_PULL('$REMOTE_NAME')"; then
+      log "  ERROR: Pull from remote failed for $DB — skipping compaction to avoid data loss"
+      ERRORS=$((ERRORS + 1))
+      ERROR_DETAILS="${ERROR_DETAILS}${DB}: remote pull failed (skipped to avoid divergence)\n"
+      continue
+    fi
+    log "  Remote pull complete."
+  fi
+
   # Step 3b: Find root (earliest) commit hash.
   ROOT_HASH=$(dolt_query "$DB" "SELECT commit_hash FROM dolt_log ORDER BY date ASC LIMIT 1" 2>/dev/null | head -1)
   if [[ -z "$ROOT_HASH" ]]; then
@@ -326,6 +343,21 @@ for entry in "${CANDIDATES[@]}"; do
     log "  GC complete."
   else
     log "  WARNING: dolt_gc failed for $DB (non-fatal)"
+  fi
+
+  # Step 5b: Push compacted history to remote to maintain sync.
+  # This MUST be a force-push because flatten rewrites the commit graph.
+  # Safe here because: (1) we pulled first, (2) integrity is verified.
+  if $HAS_REMOTE; then
+    log "  Pushing compacted history to remote ('$REMOTE_NAME')..."
+    if ! dolt_exec "$DB" "CALL DOLT_PUSH('--force', '$REMOTE_NAME')"; then
+      log "  WARNING: Force-push to remote failed for $DB"
+      log "  Remote will be out of sync — manual 'dolt push --force' may be needed"
+      ERROR_DETAILS="${ERROR_DETAILS}${DB}: force-push failed (local compacted, remote diverged)\n"
+      ERRORS=$((ERRORS + 1))
+    else
+      log "  Remote push complete."
+    fi
   fi
 
   COMPACTED=$((COMPACTED + 1))
