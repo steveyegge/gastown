@@ -535,6 +535,12 @@ func (g *Git) Status() (*GitStatus, error) {
 		return status, nil
 	}
 
+	// Get skip-worktree files once (sparse checkout). These appear as 'D' in
+	// --porcelain output but are not real deletions — they are hidden by the
+	// sparse-checkout cone. Filtering them prevents gt done from blocking on
+	// 897+ phantom deletions in polecat sparse worktrees.
+	skipWorktree := g.skipWorktreeFiles()
+
 	status.Clean = false
 	for _, line := range strings.Split(out, "\n") {
 		if len(line) < 3 {
@@ -549,13 +555,42 @@ func (g *Git) Status() (*GitStatus, error) {
 		case strings.Contains(code, "A"):
 			status.Added = append(status.Added, file)
 		case strings.Contains(code, "D"):
-			status.Deleted = append(status.Deleted, file)
+			// Skip files hidden by sparse-checkout (skip-worktree bit set).
+			if !skipWorktree[file] {
+				status.Deleted = append(status.Deleted, file)
+			}
 		case strings.Contains(code, "?"):
 			status.Untracked = append(status.Untracked, file)
 		}
 	}
 
+	// Recheck clean: if all entries were skip-worktree deletions, we're actually clean.
+	if len(status.Modified) == 0 && len(status.Added) == 0 &&
+		len(status.Deleted) == 0 && len(status.Untracked) == 0 {
+		status.Clean = true
+	}
+
 	return status, nil
+}
+
+// skipWorktreeFiles returns a set of file paths that have the skip-worktree
+// bit set (sparse-checkout hidden files). Uses `git ls-files -v` and filters
+// for lines starting with 'S' (uppercase = skip-worktree). Non-fatal: returns
+// empty map on error so callers degrade gracefully.
+func (g *Git) skipWorktreeFiles() map[string]bool {
+	out, err := g.run("ls-files", "-v")
+	if err != nil || out == "" {
+		return nil
+	}
+	result := make(map[string]bool)
+	for _, line := range strings.Split(out, "\n") {
+		// Format: "<flag> <path>" where flag is uppercase letter for skip-worktree
+		if len(line) < 3 || line[0] != 'S' {
+			continue
+		}
+		result[line[2:]] = true
+	}
+	return result
 }
 
 // CurrentBranch returns the current branch name.
