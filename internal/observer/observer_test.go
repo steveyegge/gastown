@@ -36,7 +36,7 @@ func TestNotify_SendsCorrectJSON(t *testing.T) {
 		disabled = oldDisabled
 	}()
 
-	PreSend("crew/dunks", "crew/timmy", "immediate", 42)
+	PreSend("crew/dunks", "crew/timmy", "immediate", "normal", 42)
 
 	select {
 	case <-done:
@@ -59,6 +59,9 @@ func TestNotify_SendsCorrectJSON(t *testing.T) {
 	if received.Mode != "immediate" {
 		t.Errorf("mode = %q, want %q", received.Mode, "immediate")
 	}
+	if received.Priority != "normal" {
+		t.Errorf("priority = %q, want %q", received.Priority, "normal")
+	}
 	if received.MsgLength != 42 {
 		t.Errorf("message_length = %d, want %d", received.MsgLength, 42)
 	}
@@ -79,7 +82,7 @@ func TestNotify_FailOpen_AdapterDown(t *testing.T) {
 	}()
 
 	start := time.Now()
-	PreSend("a", "b", "immediate", 10)
+	PreSend("a", "b", "immediate", "normal", 10)
 	elapsed := time.Since(start)
 
 	// Notify is non-blocking — should return nearly instantly
@@ -105,7 +108,7 @@ func TestNotify_Disabled(t *testing.T) {
 		disabled = oldDisabled
 	}()
 
-	PreSend("a", "b", "immediate", 10)
+	PreSend("a", "b", "immediate", "normal", 10)
 	time.Sleep(200 * time.Millisecond) // give goroutine time to run if it leaked
 
 	if calls != 0 {
@@ -136,7 +139,7 @@ func TestDeliverySuccess_Payload(t *testing.T) {
 		disabled = oldDisabled
 	}()
 
-	DeliverySuccess("crew/dunks", "crew/timmy", "wait-idle", 350)
+	DeliverySuccess("crew/dunks", "crew/timmy", "wait-idle", "normal", 350)
 
 	select {
 	case <-done:
@@ -178,7 +181,7 @@ func TestDeliveryFailure_Payload(t *testing.T) {
 		disabled = oldDisabled
 	}()
 
-	DeliveryFailure("crew/dunks", "crew/timmy", "immediate", fmt.Errorf("session not found"), 100)
+	DeliveryFailure("crew/dunks", "crew/timmy", "immediate", "urgent", fmt.Errorf("session not found"), 100)
 
 	select {
 	case <-done:

@@ -159,7 +159,7 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 	townRoot, _ := workspace.FindFromCwd()
 
 	// Notify adapter observer (fire-and-forget, non-blocking).
-	observer.PreSend(sender, sessionName, nudgeModeFlag, len(message))
+	observer.PreSend(sender, sessionName, nudgeModeFlag, nudgePriorityFlag, len(message))
 
 	// Use the requested mode, but force queue mode for ACP sessions.
 	// ACP agents don't have tmux panes to send-keys to.
@@ -364,9 +364,9 @@ func runNudge(cmd *cobra.Command, args []string) (retErr error) {
 			sender = roleInfo.ActorString()
 		}
 		if retErr != nil {
-			observer.DeliveryFailure(sender, target, nudgeModeFlag, retErr, latencyMs)
+			observer.DeliveryFailure(sender, target, nudgeModeFlag, nudgePriorityFlag, retErr, latencyMs)
 		} else {
-			observer.DeliverySuccess(sender, target, nudgeModeFlag, latencyMs)
+			observer.DeliverySuccess(sender, target, nudgeModeFlag, nudgePriorityFlag, latencyMs)
 		}
 		// Wait for in-flight observer notifications before process exit.
 		// Short timeout — fail-open if adapter is slow.

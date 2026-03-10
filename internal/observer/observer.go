@@ -38,6 +38,7 @@ type Event struct {
 	From      string `json:"from"`
 	To        string `json:"to"`
 	Mode      string `json:"mode,omitempty"`
+	Priority  string `json:"priority,omitempty"`
 	MsgLength int    `json:"message_length,omitempty"`
 	Timestamp string `json:"ts"`
 	Error     string `json:"error,omitempty"`
@@ -135,29 +136,31 @@ func Flush(timeout time.Duration) {
 }
 
 // PreSend emits a pre-send event before nudge delivery begins.
-func PreSend(from, to, mode string, msgLength int) {
+func PreSend(from, to, mode, priority string, msgLength int) {
 	Notify(Event{
 		Type:      EventPreSend,
 		From:      from,
 		To:        to,
 		Mode:      mode,
+		Priority:  priority,
 		MsgLength: msgLength,
 	})
 }
 
 // DeliverySuccess emits a success event after nudge delivery completes.
-func DeliverySuccess(from, to, mode string, latencyMs int64) {
+func DeliverySuccess(from, to, mode, priority string, latencyMs int64) {
 	Notify(Event{
 		Type:      EventDeliverySuccess,
 		From:      from,
 		To:        to,
 		Mode:      mode,
+		Priority:  priority,
 		LatencyMs: latencyMs,
 	})
 }
 
 // DeliveryFailure emits a failure event when nudge delivery fails.
-func DeliveryFailure(from, to, mode string, deliveryErr error, latencyMs int64) {
+func DeliveryFailure(from, to, mode, priority string, deliveryErr error, latencyMs int64) {
 	errStr := ""
 	if deliveryErr != nil {
 		errStr = deliveryErr.Error()
@@ -167,6 +170,7 @@ func DeliveryFailure(from, to, mode string, deliveryErr error, latencyMs int64) 
 		From:      from,
 		To:        to,
 		Mode:      mode,
+		Priority:  priority,
 		Error:     errStr,
 		LatencyMs: latencyMs,
 	})
