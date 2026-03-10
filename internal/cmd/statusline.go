@@ -296,6 +296,11 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	}
 	var rigs []rigInfo
 	for rigName, status := range rigStatuses {
+		// Skip docked rigs — they're intentionally disabled and don't need display.
+		// Reserve 🛑 for error states (crashed agents, unreachable Dolt, etc.).
+		if status.opState == "DOCKED" {
+			continue
+		}
 		rigs = append(rigs, rigInfo{name: rigName, status: status})
 	}
 

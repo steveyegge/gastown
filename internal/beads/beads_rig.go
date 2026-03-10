@@ -249,6 +249,9 @@ func (b *Beads) ListRigBeads() (map[string]*RigFields, error) {
 		return nil, err
 	}
 
+	if !isJSONBytes(out) {
+		return nil, nil
+	}
 	var issues []*Issue
 	if err := json.Unmarshal(out, &issues); err != nil {
 		return nil, fmt.Errorf("parsing bd list output: %w", err)

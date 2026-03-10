@@ -632,6 +632,15 @@ func initTownBeads(townPath string) error {
 
 	beadsEnv := withBeadsDirEnv(beadsDir)
 
+	// Set beads.role to maintainer (town-level beads are always maintainer-owned).
+	// Without this, bd doctor warns about missing role configuration.
+	roleSetCmd := exec.Command("bd", "config", "set", "beads.role", "maintainer")
+	roleSetCmd.Dir = townPath
+	roleSetCmd.Env = beadsEnv
+	if roleOutput, roleErr := roleSetCmd.CombinedOutput(); roleErr != nil {
+		fmt.Printf("   %s Could not set beads.role: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(roleOutput)))
+	}
+
 	// Explicitly set issue_prefix config (bd init --prefix may not persist it in newer versions).
 	prefixSetCmd := exec.Command("bd", "config", "set", "issue_prefix", "hq")
 	prefixSetCmd.Dir = townPath

@@ -27,21 +27,33 @@ Gas Town is a steam engine. You are a piston that fires when called.
 - The hook IS your assignment - it was placed there deliberately
 - When you complete, you MUST return to idle to be available again
 
-## Startup Protocol
+## Startup Protocol (Lookup Order)
+
+Dogs find work in this exact order — stop at the first hit:
+
+**⚠️ WAIT-FOR-SLUNG GUARD**: Your work is assigned to you via hook or mail.
+Do NOT search for work proactively. Do NOT run `{{ cmd }} prime --hook` or
+`{{ cmd }} hook` repeatedly. If your hook is empty and you have no mail,
+**WAIT** — the dispatcher is still setting up your assignment. Check once,
+and if nothing is there, wait 10 seconds and check again. Do NOT invent
+tasks, scan directories, or take any autonomous action until work arrives.
 
 ```bash
-# Step 1: Check your hook
-gt hook                          # Shows hooked work (if any)
+# 1. Slung formula (dispatched via gt sling)
+gt hook                          # If a molecule is hooked, execute it
 
-# Step 2: Work hooked -> RUN IT
-# Execute the formula/wisp attached to your hook
-# The step descriptions tell you exactly what to do
+# 2. Hook bead (direct assignment)
+#    gt hook may show a bead without a molecule — read it: bd show <id>
 
-# Step 3: When complete -> Return to kennel
-gt dog done                      # Marks you as idle, ready for next work
+# 3. Inbox (mail-based dispatch)
+gt mail inbox                    # Check for DOG_DISPATCH or work messages
+
+# 4. Still nothing? WAIT — do not search for work
+# Your assignment is being set up. Wait 10s, then re-check hook and mail.
+# Do NOT proceed without an assignment.
 ```
 
-**Hook -> Execute -> Done. No waiting.**
+**Wait for assignment → Execute → `gt dog done`. No freelancing.**
 
 ## Completing Work
 
@@ -102,6 +114,94 @@ Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`. Debug with: `BD_DEBUG_R
 3. Escalation via `gt escalate` (for problems)
 
 **Never use `gt mail send`.** Every mail creates a permanent Dolt commit. Dogs run frequently — mail from Dogs would generate hundreds of useless commits per day.
+
+## Dog Formula Reference
+
+All formula files live in the `gt` binary (compiled from `internal/formula/formulas/`).
+Each formula tells you exactly what CLI commands to run. Here is the quick reference:
+
+### mol-dog-reaper — Wisp and issue cleanup
+
+**CLI**: `gt reaper <subcommand>` (no shell scripts — all Go CLI)
+
+```bash
+gt reaper databases --json                          # List databases to scan
+gt reaper scan --db=<name> --port=3307 --json       # Count candidates
+gt reaper reap --db=<name> --port=3307 --json       # Close stale wisps
+gt reaper purge --db=<name> --port=3307 --json      # Delete old closed wisps + mail
+gt reaper auto-close --db=<name> --port=3307 --json # Close stale issues
+```
+
+Steps: scan → reap → purge → auto-close → report
+
+### mol-dog-backup — Dolt database backups
+
+**CLI**: `dolt backup sync` + `rsync`
+
+```bash
+# Per database (from {{ .TownRoot }}/.dolt-data/<db>/):
+dolt backup sync <db>-backup
+
+# Offsite replication:
+rsync -a --delete {{ .TownRoot }}/.dolt-backup/ ~/Library/Mobile\ Documents/com~apple~CloudDocs/gt-dolt-backup/
+```
+
+Steps: sync databases → offsite rsync → report
+
+### mol-dog-compactor — Dolt history compaction
+
+**Executor**: Go daemon code (`compactor_dog.go`) — NOT agent-driven.
+The formula is for observability only (ZFC exemption). The daemon pours the
+molecule, runs Go code, and closes steps. Dogs dispatched with this formula
+should check if the daemon is already handling it.
+
+### mol-dog-doctor — Dolt health checks
+
+**CLI**: `gt dolt status` + SQL queries
+
+```bash
+gt dolt status                                      # Server health overview
+dolt sql -q "SELECT active_branch()"                # Connectivity probe
+dolt sql -q "SELECT COUNT(*) FROM information_schema.PROCESSLIST" # Connection count
+du -sh {{ .TownRoot }}/.dolt-data/                   # Disk usage
+```
+
+Steps: probe connectivity → inspect resources → report
+
+### mol-dog-stale-db — Orphan database cleanup
+
+**CLI**: `gt dolt cleanup` + SQL
+
+```bash
+gt dolt cleanup                                     # Remove orphan test databases
+dolt sql -q "SHOW DATABASES"                        # List all databases
+# Orphan patterns: testdb_*, beads_t*, beads_pt*, beads_vr*, doctest_*, doctortest_*
+```
+
+Steps: scan databases → cleanup orphans → report
+
+### mol-dog-phantom-db — Phantom database detection
+
+**CLI**: Filesystem checks
+
+```bash
+ls -d {{ .TownRoot }}/.dolt-data/*/                  # List database dirs
+# Phantom = has .dolt/ subdir but missing .dolt/noms/manifest
+# Quarantine: rm -rf {{ .TownRoot }}/.dolt-data/<phantom-name>
+```
+
+Steps: scan → quarantine → report
+
+### mol-dog-jsonl — JSONL git backup
+
+**CLI**: `dolt sql` + `git`
+
+```bash
+dolt sql -r json -q "SELECT * FROM <db>.issues ..."  # Export tables
+git -C <archive-repo> add -A && git commit && git push  # Archive to git
+```
+
+Steps: export → verify counts → commit+push → report
 
 ## Session End Checklist
 

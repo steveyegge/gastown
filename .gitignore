@@ -19,8 +19,9 @@
 .DS_Store
 Thumbs.db
 
-# Claude Code local state
+# Claude Code local state (but track commands/skills)
 .claude/
+!.claude/commands/
 
 # Test
 coverage.out

@@ -18,7 +18,7 @@
     "sessionEnd": [
       {
         "type": "command",
-        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt costs record",
+        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt costs record &",
         "timeoutSec": 10
       }
     ]

@@ -240,6 +240,10 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 // outputWitnessPatrolContext shows patrol molecule status for the Witness.
 // Witness AUTO-BONDS its patrol molecule on startup if one isn't already running.
 func outputWitnessPatrolContext(ctx RoleContext) {
+	if stopped, reason := IsRigParkedOrDocked(ctx.TownRoot, ctx.Rig); stopped {
+		fmt.Printf("\n⏸️  Rig %s is %s — skipping patrol wisp generation.\n", ctx.Rig, reason)
+		return
+	}
 	cfg := PatrolConfig{
 		RoleName:        "witness",
 		PatrolMolName:   constants.MolWitnessPatrol,
@@ -259,6 +263,10 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 // outputRefineryPatrolContext shows patrol molecule status for the Refinery.
 // Refinery AUTO-BONDS its patrol molecule on startup if one isn't already running.
 func outputRefineryPatrolContext(ctx RoleContext) {
+	if stopped, reason := IsRigParkedOrDocked(ctx.TownRoot, ctx.Rig); stopped {
+		fmt.Printf("\n⏸️  Rig %s is %s — skipping patrol wisp generation.\n", ctx.Rig, reason)
+		return
+	}
 	cfg := PatrolConfig{
 		RoleName:        "refinery",
 		PatrolMolName:   constants.MolRefineryPatrol,

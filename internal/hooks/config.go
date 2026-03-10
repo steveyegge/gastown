@@ -797,7 +797,7 @@ func DefaultBase() *HooksConfig {
 				Hooks: []Hook{
 					{
 						Type:    "command",
-						Command: fmt.Sprintf("%s && gt costs record", pathSetup),
+						Command: fmt.Sprintf("%s && gt costs record &", pathSetup),
 					},
 				},
 			},

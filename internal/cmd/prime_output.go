@@ -406,6 +406,13 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("   - If mol attached → **RUN IT** (no human input needed)")
 		fmt.Println("   - If no mol → await user instruction")
 	case RoleWitness:
+		if stopped, reason := IsRigParkedOrDocked(ctx.TownRoot, ctx.Rig); stopped {
+			fmt.Println()
+			fmt.Println("---")
+			fmt.Println()
+			fmt.Printf("Rig %s is %s. No patrol needed. Exit cleanly.\n", ctx.Rig, reason)
+			return
+		}
 		fmt.Println()
 		fmt.Println("---")
 		fmt.Println()
@@ -431,6 +438,13 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("DO NOT wait. DO NOT escalate. DO NOT send idle alerts.")
 		fmt.Println("Just run `" + cli.Name() + " done` and exit.")
 	case RoleRefinery:
+		if stopped, reason := IsRigParkedOrDocked(ctx.TownRoot, ctx.Rig); stopped {
+			fmt.Println()
+			fmt.Println("---")
+			fmt.Println()
+			fmt.Printf("Rig %s is %s. No patrol needed. Exit cleanly.\n", ctx.Rig, reason)
+			return
+		}
 		fmt.Println()
 		fmt.Println("---")
 		fmt.Println()

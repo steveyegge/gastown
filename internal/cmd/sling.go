@@ -53,6 +53,7 @@ Target Resolution:
   gt sling gt-abc crew                  # Crew worker in current rig
   gt sling gp-abc greenplace               # Auto-spawn polecat in rig
   gt sling gt-abc greenplace/Toast         # Specific polecat
+  gt sling gt-abc gastown --crew mel    # Crew member mel in gastown
   gt sling gt-abc mayor                 # Mayor
   gt sling gt-abc deacon/dogs           # Auto-dispatch to idle dog
   gt sling gt-abc deacon/dogs/alpha     # Specific dog
@@ -130,6 +131,7 @@ var (
 	slingBaseBranch    string // --base-branch: override base branch for polecat worktree
 	slingRalph         bool   // --ralph: enable Ralph Wiggum loop mode for multi-step workflows
 	slingFormula       string // --formula: override formula for dispatch (default: mol-polecat-work)
+	slingCrew          string // --crew: target a crew member in the specified rig
 )
 
 func init() {
@@ -156,6 +158,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingBaseBranch, "base-branch", "", "Override base branch for polecat worktree (e.g., 'develop', 'release/v2')")
 	slingCmd.Flags().BoolVar(&slingRalph, "ralph", false, "Enable Ralph Wiggum loop mode (fresh context per step, for multi-step workflows)")
 	slingCmd.Flags().StringVar(&slingFormula, "formula", "", "Formula to apply (default: mol-polecat-work for polecat targets)")
+	slingCmd.Flags().StringVar(&slingCrew, "crew", "", "Target a crew member in the specified rig (e.g., --crew mel with target gastown → gastown/crew/mel)")
 
 	slingCmd.AddCommand(slingRespawnResetCmd)
 	rootCmd.AddCommand(slingCmd)
@@ -272,6 +275,16 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	// Note: Internal agent IDs like "mayor/" are outputs, not user inputs.
 	for i := range args {
 		args[i] = strings.TrimRight(args[i], "/")
+	}
+
+	// --crew flag: expand target from "<rig>" to "<rig>/crew/<name>"
+	// e.g., "gt sling gt-abc gastown --crew mel" → target becomes "gastown/crew/mel"
+	if slingCrew != "" {
+		if len(args) < 2 {
+			return fmt.Errorf("--crew requires a rig target argument (e.g., gt sling <bead> <rig> --crew %s)", slingCrew)
+		}
+		target := args[len(args)-1]
+		args[len(args)-1] = target + "/crew/" + slingCrew
 	}
 
 	// Validate target format early, before any dispatch path (bead, formula, batch)

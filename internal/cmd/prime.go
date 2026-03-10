@@ -551,8 +551,15 @@ func findAgentWork(ctx RoleContext) *beads.Issue {
 
 // findAgentWorkOnce performs a single attempt to find hooked work for an agent.
 func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
-	b := beads.New(ctx.WorkDir)
-	// Primary: agent bead's hook_bead field (authoritative, set by bd slot set during sling)
+	// Use rig root for beads queries instead of ctx.WorkDir. Polecat worktrees
+	// rely on .beads/redirect which can fail to resolve in edge cases, causing
+	// polecats to miss hooked work and exit immediately. The rig root directory
+	// always has the authoritative .beads/ database. (GH#2503)
+	b := beads.New(rigBeadsRoot(ctx))
+
+	// Agent bead's hook_bead field. NOTE: updateAgentHookBead was made a no-op
+	// (see sling_helpers.go), so HookBead is typically empty. Kept for backward
+	// compatibility with agent beads that still have hook_bead set.
 	agentBeadID := buildAgentBeadID(agentID, ctx.Role, ctx.TownRoot)
 	if agentBeadID != "" {
 		agentBeadDir := beads.ResolveHookDir(ctx.TownRoot, agentBeadID, ctx.WorkDir)
@@ -613,6 +620,20 @@ func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
 		return nil
 	}
 	return hookedBeads[0]
+}
+
+// rigBeadsRoot returns the directory to use for beads queries.
+// For rig-level agents (polecats, crew, witness, refinery), returns the rig
+// root (e.g., ~/gt/myrig/) which has the authoritative .beads/ database.
+// For town-level agents, returns ctx.WorkDir unchanged.
+//
+// This avoids relying on .beads/redirect in polecat worktrees, which can
+// fail to resolve and cause polecats to see no hooked work. (GH#2503)
+func rigBeadsRoot(ctx RoleContext) string {
+	if ctx.Rig != "" && ctx.TownRoot != "" {
+		return filepath.Join(ctx.TownRoot, ctx.Rig)
+	}
+	return ctx.WorkDir
 }
 
 // outputAutonomousDirective displays the AUTONOMOUS WORK MODE header and instructions.

@@ -32,7 +32,7 @@
     ],
     "stop": [
       {
-        "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt costs record"
+        "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt costs record &"
       }
     ]
   }
