@@ -22,6 +22,7 @@ compiled from live broadcast testing and direct crew responses.
 | Priority field | Observer payloads include priority metadata | Production |
 
 **Known limitations**:
+
 - Nudge ✓ means "tmux accepted keystrokes", NOT "agent received message"
 - No broadcast primitive — fan-out requires N individual sends
 - No response tracking — can't detect who hasn't replied
@@ -45,6 +46,7 @@ compiled from live broadcast testing and direct crew responses.
 | tmux socket | Connects to gt tmux for session management | Production |
 
 **Known limitations**:
+
 - WS identity mismatch: claudecode.nvim identifies as generic 'nvim-claude' not crew name
 - Direct WS messages fall back to nudge queue when identity doesn't match
 - REST API requires double-quote JSON (single quotes fail silently)
@@ -65,6 +67,7 @@ compiled from live broadcast testing and direct crew responses.
 | Lifecycle subscription | Subscribe to agent connect/disconnect events | Production |
 
 **Known limitations**:
+
 - No adapter broadcast primitive yet (tracked as ta-a33.2)
 - Fan-out = N individual sends for now
 - Most crew haven't called `adapter.connect()` — WS is underutilized
@@ -83,6 +86,7 @@ compiled from live broadcast testing and direct crew responses.
 | WS Quick Start Guide | Documentation for crew mesh setup | Delivered via mail |
 
 **Known limitations**:
+
 - MCP tool discovery is static — new tools need session restart
 - `crew_messages` is pull-based (polling), not push-based (event-driven)
 
@@ -100,6 +104,7 @@ compiled from live broadcast testing and direct crew responses.
 | `ctx_index` / `ctx_search` | BM25 full-text search over indexed content | Production |
 
 **Known limitations**:
+
 - Did not respond to broadcast test (silent throughout st-zmn testing)
 - Peer discovery requires context-mode MCP to be running
 - Knowledge sharing is read-only — no write-back or update notification
@@ -118,6 +123,7 @@ compiled from live broadcast testing and direct crew responses.
 | Topology awareness | Knows rig/crew/polecat structure | Production |
 
 **Known limitations**:
+
 - Coordination is manual — no automated orchestration
 - No built-in consensus or quorum mechanism
 - Mail creates permanent Dolt commits (heavyweight for routine comms)
@@ -140,19 +146,46 @@ compiled from live broadcast testing and direct crew responses.
 
 ### Problems Identified (8 total)
 
-1. **No delivery confirmation** — nudge ✓ ≠ received
-2. **No response tracking** — can't detect who hasn't replied
-3. **Response channel mismatch** — asked for mail, got nudge
-4. **No acknowledgment primitive** — no "received" vs "completed" signal
-5. **WS identity mismatch** — generic 'nvim-claude' prevents per-crew routing
-6. **Nudge delivery unreliable** — Timmy confirmed non-receipt despite ✓
-7. **Agent capability blindness** — agents don't know their own runtime
-8. **Static MCP tool discovery** — new tools need session restart
-
-### Broadcast Test Results
+### Broadcast Test #1 Results (wait-idle mode, st-zmn.1 era)
 
 - **Sent**: 4 nudges (wait-idle mode)
 - **Responded**: 5/6 crew (Neil, Timmy, CC, Tooly, Charlie silent)
 - **Via mail** (requested channel): 0/5
 - **Via nudge-back**: 5/5
 - **Confirmed non-receipt**: 1 (Timmy — nudge returned ✓ but never arrived)
+
+### Broadcast Test #2 Results (immediate mode, st-zmn.2)
+
+- **Sent**: 5 nudges (immediate mode) at 23:14 AEDT
+- **Fan-out time**: ~10s sequential (1.2-3.0s per target)
+- **Responded**: 4/5 via mail (the requested channel!)
+  - CC: Option D (Hybrid) — biggest problem: silent failure modes
+  - Charlie: Option D (Hybrid) — biggest problem: silent failure modes
+  - Timmy: Option D (Hybrid) — biggest problem: adapter.connect() reliability
+  - Tooly: Option D (Hybrid) — biggest problem: no broadcast primitive
+- **Missing**: Neil (no response yet)
+- **Channel compliance**: 4/4 replied via mail as requested (vs 0/5 in test #1!)
+- **Consensus**: Unanimous Option D (Hybrid: WS online + mail fallback)
+
+**Key improvement over test #1**: `--mode=immediate` + explicit mail instructions
+yielded 100% channel compliance from responders (vs 0% with wait-idle).
+
+- **Via mail** (requested channel): 0/5
+- **Via nudge-back**: 5/5
+- **Confirmed non-receipt**: 1 (Timmy — nudge returned ✓ but never arrived)
+
+### Broadcast Test #2 Results (immediate mode, st-zmn.2)
+
+- **Sent**: 5 nudges (immediate mode) at 23:14 AEDT
+- **Fan-out time**: ~10s sequential (1.2-3.0s per target)
+- **Responded**: 4/5 via mail (the requested channel!)
+  - CC: Option D (Hybrid) — biggest problem: silent failure modes
+  - Charlie: Option D (Hybrid) — biggest problem: silent failure modes
+  - Timmy: Option D (Hybrid) — biggest problem: adapter.connect() reliability
+  - Tooly: Option D (Hybrid) — biggest problem: no broadcast primitive
+- **Missing**: Neil (no response yet)
+- **Channel compliance**: 4/4 replied via mail as requested (vs 0/5 in test #1!)
+- **Consensus**: Unanimous Option D (Hybrid: WS online + mail fallback)
+
+**Key improvement over test #1**: `--mode=immediate` + explicit mail instructions
+yielded 100% channel compliance from responders (vs 0% with wait-idle).
