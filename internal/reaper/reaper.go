@@ -482,7 +482,7 @@ func purgeClosedWisps(db *sql.DB, dbName string, purgeAge time.Duration, dryRun 
 		DefaultBatchSize)
 	auxTables := []string{"wisp_labels", "wisp_comments", "wisp_events", "wisp_dependencies"}
 
-	totalDeleted, err := batchDeleteRows(ctx, db, dbName, idQuery, deleteCutoff, "wisps", auxTables)
+	totalDeleted, err := batchDeleteRows(ctx, db, idQuery, deleteCutoff, "wisps", auxTables)
 	if err != nil {
 		return totalDeleted, anomalies, err
 	}
@@ -545,7 +545,7 @@ func purgeOldMail(db *sql.DB, dbName string, mailDeleteAge time.Duration, dryRun
 		dbName, dbName, DefaultBatchSize)
 	auxTables := []string{"labels", "comments", "events", "dependencies"}
 
-	totalDeleted, err := batchDeleteRows(ctx, db, dbName, idQuery, mailCutoff, "issues", auxTables)
+	totalDeleted, err := batchDeleteRows(ctx, db, idQuery, mailCutoff, "issues", auxTables)
 	if err != nil {
 		return totalDeleted, err
 	}
@@ -668,7 +668,7 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 }
 
 // batchDeleteRows deletes rows from a primary table and its auxiliary tables in batches.
-func batchDeleteRows(ctx context.Context, db *sql.DB, dbName string, idQuery string, cutoffArg time.Time, primaryTable string, auxTables []string) (int, error) {
+func batchDeleteRows(ctx context.Context, db *sql.DB, idQuery string, cutoffArg time.Time, primaryTable string, auxTables []string) (int, error) {
 	totalDeleted := 0
 	for {
 		idRows, err := db.QueryContext(ctx, idQuery, cutoffArg)
