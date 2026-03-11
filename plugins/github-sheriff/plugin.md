@@ -119,12 +119,12 @@ while IFS= read -r PR_JSON; do
   )')
 
   # Categorize PR
-  if [ "$MERGEABLE" = "MERGEABLE" ] && $CI_PASS && [ "$TOTAL_CHANGES" -lt 200 ]; then
+  if [ "$MERGEABLE" = "MERGEABLE" ] && [ "$CI_PASS" = true ] && [ "$TOTAL_CHANGES" -lt 200 ]; then
     EASY_WINS+=("PR #$PR_NUM: $PR_TITLE (by $AUTHOR, +$ADDITIONS/-$DELETIONS)")
   else
     REASONS=""
     [ "$MERGEABLE" != "MERGEABLE" ] && REASONS+="conflicts "
-    ! $CI_PASS && REASONS+="ci-failing "
+    [ "$CI_PASS" != true ] && REASONS+="ci-failing "
     [ "$TOTAL_CHANGES" -ge 200 ] && REASONS+="large(${TOTAL_CHANGES}loc) "
     NEEDS_REVIEW+=("PR #$PR_NUM: $PR_TITLE (by $AUTHOR, ${REASONS% })")
   fi
