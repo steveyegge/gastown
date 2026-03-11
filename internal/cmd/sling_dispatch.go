@@ -36,6 +36,8 @@ type SlingParams struct {
 	HookRawBead bool    // --hook-raw-bead
 	NoBoot     bool     // --no-boot
 	Mode       string   // --ralph: "" (normal) or "ralph"
+	Artisan    string   // --artisan: target a specific artisan
+	Specialty  string   // --specialty: artisan specialty filter
 
 	// Execution behavior (set by caller, not serialized to queue)
 	SkipCook         bool   // Batch optimization: formula already cooked

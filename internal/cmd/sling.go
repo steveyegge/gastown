@@ -132,6 +132,8 @@ var (
 	slingRalph         bool   // --ralph: enable Ralph Wiggum loop mode for multi-step workflows
 	slingFormula       string // --formula: override formula for dispatch (default: mol-polecat-work)
 	slingCrew          string // --crew: target a crew member in the specified rig
+	slingArtisan       string // --artisan: target a specific artisan in the specified rig
+	slingSpecialty     string // --specialty: artisan specialty filter
 )
 
 func init() {
@@ -159,6 +161,8 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingRalph, "ralph", false, "Enable Ralph Wiggum loop mode (fresh context per step, for multi-step workflows)")
 	slingCmd.Flags().StringVar(&slingFormula, "formula", "", "Formula to apply (default: mol-polecat-work for polecat targets)")
 	slingCmd.Flags().StringVar(&slingCrew, "crew", "", "Target a crew member in the specified rig (e.g., --crew mel with target gastown → gastown/crew/mel)")
+	slingCmd.Flags().StringVar(&slingArtisan, "artisan", "", "Target a specific artisan (e.g., --artisan frontend-1)")
+	slingCmd.Flags().StringVar(&slingSpecialty, "specialty", "", "Artisan specialty filter (e.g., --specialty frontend)")
 
 	slingCmd.AddCommand(slingRespawnResetCmd)
 	rootCmd.AddCommand(slingCmd)
@@ -174,6 +178,12 @@ dispatches to prevent spawn storms. After investigating the root cause,
 use this command to allow re-dispatch.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runSlingRespawnReset,
+}
+
+// artisanTargetExpansion expands a rig name and artisan name into the
+// full artisan target path: "<rig>/artisans/<artisanName>".
+func artisanTargetExpansion(rig, artisanName string) string {
+	return rig + "/artisans/" + artisanName
 }
 
 func runSlingRespawnReset(_ *cobra.Command, args []string) error {
@@ -277,6 +287,11 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		args[i] = strings.TrimRight(args[i], "/")
 	}
 
+	// --crew and --artisan are mutually exclusive
+	if slingCrew != "" && slingArtisan != "" {
+		return fmt.Errorf("--crew and --artisan are mutually exclusive (specify one target type)")
+	}
+
 	// --crew flag: expand target from "<rig>" to "<rig>/crew/<name>"
 	// e.g., "gt sling gt-abc gastown --crew mel" → target becomes "gastown/crew/mel"
 	if slingCrew != "" {
@@ -285,6 +300,16 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		}
 		target := args[len(args)-1]
 		args[len(args)-1] = target + "/crew/" + slingCrew
+	}
+
+	// --artisan flag: expand target from "<rig>" to "<rig>/artisans/<name>"
+	// e.g., "gt sling gt-abc gastown --artisan frontend-1" → target becomes "gastown/artisans/frontend-1"
+	if slingArtisan != "" {
+		if len(args) < 2 {
+			return fmt.Errorf("--artisan requires a rig target argument (e.g., gt sling <bead> <rig> --artisan %s)", slingArtisan)
+		}
+		target := args[len(args)-1]
+		args[len(args)-1] = artisanTargetExpansion(target, slingArtisan)
 	}
 
 	// Validate target format early, before any dispatch path (bead, formula, batch)
