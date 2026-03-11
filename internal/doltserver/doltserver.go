@@ -1434,20 +1434,51 @@ func Start(townRoot string) error {
 	// Quarantine corrupted/phantom database dirs before server launch.
 	// Dolt auto-discovers ALL dirs in --data-dir. A phantom dir with a broken
 	// noms store (missing manifest) crashes the ENTIRE server. (gt-hs1i2)
+	//
+	// Safety: move to .quarantine/ instead of deleting, and skip large databases
+	// that are likely legitimate but temporarily corrupted. (gt-xvh)
 	if entries, readErr := os.ReadDir(config.DataDir); readErr == nil {
 		for _, entry := range entries {
 			if !entry.IsDir() {
 				continue
 			}
-			doltDir := filepath.Join(config.DataDir, entry.Name(), ".dolt")
+			name := entry.Name()
+			if strings.HasPrefix(name, ".") {
+				continue // Skip hidden dirs (.dolt, .doltcfg, .quarantine, etc.)
+			}
+			dbDir := filepath.Join(config.DataDir, name)
+			doltDir := filepath.Join(dbDir, ".dolt")
 			if _, statErr := os.Stat(doltDir); statErr != nil {
 				continue // Not a dolt dir at all — skip
 			}
 			manifest := filepath.Join(doltDir, "noms", "manifest")
-			if _, statErr := os.Stat(manifest); statErr != nil {
-				// Corrupted phantom — remove it so Dolt won't try to load it
-				fmt.Fprintf(os.Stderr, "Quarantine: removing corrupted database dir %q (missing noms/manifest)\n", entry.Name())
-				_ = os.RemoveAll(filepath.Join(config.DataDir, entry.Name()))
+			if _, statErr := os.Stat(manifest); statErr == nil {
+				continue // Manifest exists — healthy database
+			}
+			// Missing manifest — this database would crash the server.
+			// Check size: large databases (>1MB) are likely legitimate databases
+			// with a transient corruption, not empty phantoms. Move instead of delete.
+			size := dirSize(dbDir)
+			quarantineDir := filepath.Join(config.DataDir, ".quarantine")
+			if err := os.MkdirAll(quarantineDir, 0755); err != nil {
+				fmt.Fprintf(os.Stderr, "Quarantine: failed to create quarantine dir: %v\n", err)
+				continue
+			}
+			dest := filepath.Join(quarantineDir, fmt.Sprintf("%s.%d", name, time.Now().Unix()))
+			if err := os.Rename(dbDir, dest); err != nil {
+				// Cross-device rename fails — fall back to removal only for tiny dirs
+				if size > 1<<20 { // >1MB — refuse to destroy, just warn
+					fmt.Fprintf(os.Stderr, "Quarantine: SKIPPING large database %q (%s, missing noms/manifest) — move failed: %v\n",
+						name, formatBytes(size), err)
+					fmt.Fprintf(os.Stderr, "  Manual fix: mv %s %s\n", dbDir, dest)
+				} else {
+					fmt.Fprintf(os.Stderr, "Quarantine: removing small phantom database dir %q (%s, missing noms/manifest)\n",
+						name, formatBytes(size))
+					_ = os.RemoveAll(dbDir)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "Quarantine: moved database %q to %s (%s, missing noms/manifest)\n",
+					name, dest, formatBytes(size))
 			}
 		}
 	}
@@ -2606,12 +2637,25 @@ func RemoveDatabase(townRoot, dbName string, force bool) error {
 		return fmt.Errorf("database %q not found at %s", dbName, dbPath)
 	}
 
-	// Safety check: if DB has real data and force is not set, refuse. (gt-q8f6n)
+	// Safety check: if DB has real data and force is not set, refuse. (gt-q8f6n, gt-xvh)
 	// This prevents destroying legitimate databases that happen to be unreferenced.
 	running, _, _ := IsRunning(townRoot)
-	if running && !force {
-		if hasData, _ := databaseHasUserTables(townRoot, dbName); hasData {
-			return fmt.Errorf("database %q has user tables — use --force to remove", dbName)
+	if !force {
+		if running {
+			// Server is up — check via SQL for user tables
+			if hasData, _ := databaseHasUserTables(townRoot, dbName); hasData {
+				return fmt.Errorf("database %q has user tables — use --force to remove", dbName)
+			}
+		} else {
+			// Server is down — check via filesystem size as a safety proxy. (gt-xvh)
+			// Databases with >1MB of data are almost certainly not empty orphans.
+			// Without the server, we can't query tables, so size is the best heuristic.
+			size := dirSize(dbPath)
+			const safeRemoveThreshold = 1 << 20 // 1MB
+			if size > safeRemoveThreshold {
+				return fmt.Errorf("database %q has %s of data (server offline, cannot verify contents) — start server or use --force to remove",
+					dbName, formatBytes(size))
+			}
 		}
 	}
 
