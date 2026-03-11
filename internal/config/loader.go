@@ -1950,7 +1950,7 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	// Apply exec wrapper from rig/town settings if not already set on the resolved config.
 	// ExecWrapper is a deployment-level setting (sandbox/container) independent of agent choice.
 	if len(rc.ExecWrapper) == 0 {
-		rc.ExecWrapper = resolveExecWrapper(townRoot, rigPath)
+		rc.ExecWrapper = resolveExecWrapper(rigPath)
 	}
 
 	// Copy env vars to avoid mutating caller map
@@ -2140,7 +2140,7 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 
 	// Apply exec wrapper from rig/town settings if not already set on the resolved config.
 	if len(rc.ExecWrapper) == 0 {
-		rc.ExecWrapper = resolveExecWrapper(townRoot, rigPath)
+		rc.ExecWrapper = resolveExecWrapper(rigPath)
 	}
 
 	// Copy env vars to avoid mutating caller map
@@ -2307,7 +2307,7 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 // resolveExecWrapper loads the exec_wrapper from rig settings.
 // ExecWrapper is a deployment-level setting (sandbox/container) that wraps the agent binary.
 // It is independent of agent choice — exitbox wraps Claude, Codex, or any other runtime.
-func resolveExecWrapper(townRoot, rigPath string) []string {
+func resolveExecWrapper(rigPath string) []string {
 	if rigPath != "" {
 		if rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath)); err == nil && rigSettings != nil {
 			if rigSettings.Runtime != nil && len(rigSettings.Runtime.ExecWrapper) > 0 {
