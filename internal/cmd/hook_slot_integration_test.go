@@ -34,6 +34,17 @@ func setupHookTestTown(t *testing.T) (townRoot, polecatDir, rigPrefix string) {
 
 	townRoot = t.TempDir()
 
+	// Create workspace marker so FindFromCwd resolves to the correct town root
+	// (without this, Find() picks up gastown/mayor/ as a secondary marker
+	// and returns the rig dir instead of the real town root)
+	mayorDir := filepath.Join(townRoot, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("mkdir mayor: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test"}`+"\n"), 0644); err != nil {
+		t.Fatalf("write town.json: %v", err)
+	}
+
 	// Create town-level .beads directory
 	townBeadsDir := filepath.Join(townRoot, ".beads")
 	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {

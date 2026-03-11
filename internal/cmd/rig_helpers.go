@@ -75,6 +75,13 @@ func hasRigBeadLabel(townRoot, rigName, label string) bool {
 			prefix = entry.BeadsConfig.Prefix
 		}
 	}
+	// Fallback: try rig's own config.json if town registry didn't have the prefix
+	if prefix == "" {
+		rigConfigPath := filepath.Join(rigPath, "config.json")
+		if rigConfig, err := config.LoadRigConfig(rigConfigPath); err == nil && rigConfig.Beads != nil {
+			prefix = rigConfig.Beads.Prefix
+		}
+	}
 	if prefix == "" {
 		return false
 	}
@@ -118,14 +125,20 @@ func IsRigParkedOrDocked(townRoot, rigName string) (bool, string) {
 	}
 
 	// Single bead lookup for both parked and docked labels.
-	// Look up the beads prefix from rigs.json (the rig registry) instead of
-	// <rigPath>/config.json which doesn't exist for most rigs.
+	// Look up the beads prefix from rigs.json (the rig registry), with fallback
+	// to the rig's own config.json for isolated/test scenarios.
 	rigPath := filepath.Join(townRoot, rigName)
 	prefix := ""
 	rigsConfigPath := constants.MayorRigsPath(townRoot)
 	if rigsConfig, err := config.LoadRigsConfig(rigsConfigPath); err == nil {
 		if entry, ok := rigsConfig.Rigs[rigName]; ok && entry.BeadsConfig != nil {
 			prefix = entry.BeadsConfig.Prefix
+		}
+	}
+	if prefix == "" {
+		rigConfigPath := filepath.Join(rigPath, "config.json")
+		if rigConfig, err := config.LoadRigConfig(rigConfigPath); err == nil && rigConfig.Beads != nil {
+			prefix = rigConfig.Beads.Prefix
 		}
 	}
 	if prefix == "" {

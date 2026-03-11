@@ -470,7 +470,12 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 			agentBeadID := agentIDToBeadID(target, townRoot)
 			if agentBeadID != "" {
 				rigName := strings.Split(target, "/")[0]
-				fallbackPath := filepath.Join(townRoot, rigName)
+				var fallbackPath string
+				if rigName == "mayor" || rigName == "deacon" {
+					fallbackPath = townRoot
+				} else {
+					fallbackPath = filepath.Join(townRoot, rigName, "mayor", "rig")
+				}
 				workDir = beads.ResolveHookDir(townRoot, agentBeadID, fallbackPath)
 			}
 		}
