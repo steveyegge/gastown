@@ -461,6 +461,16 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a beads workspace: %w", err)
 	}
 
+	// For rig-scoped agents, resolve the correct beads directory via prefix
+	// routing. findLocalBeadsDir() walks up from CWD and finds the wrong
+	// .beads dir when called from mayor context. Use ResolveHookDir to route
+	// to the agent's rig DB (mirrors the approach in runMoleculeStatus).
+	if townRoot, townErr := findTownRoot(); townErr == nil && townRoot != "" {
+		if agentBeadID := buildAgentBeadID(target, RoleUnknown, townRoot); agentBeadID != "" {
+			workDir = beads.ResolveHookDir(townRoot, agentBeadID, workDir)
+		}
+	}
+
 	b := beads.New(workDir)
 	// Query for hooked beads assigned to the target
 	hookedBeads, err := b.List(beads.ListOptions{
