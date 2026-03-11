@@ -1,0 +1,39 @@
+{
+  "repo_id": "repo_019cdb2f-d991-7327-978d-08eb5ee015f6",
+  "type": "git",
+  "init_at": "2026-03-11T04:37:52Z",
+  "init_by_email": "dmgwizz@gmail.com",
+  "init_by_name": "dunks411",
+  "repo_salt": "4c782bc59de8cba4a1cf1632aa6adaaac47e50ca",
+  "endpoint": "https://sageox.ai",
+  "fingerprint": {
+    "first_commit": "4c782bc59de8cba4a1cf1632aa6adaaac47e50ca",
+    "monthly_checkpoints": {
+      "2025-12": "4c782bc59de8cba4a1cf1632aa6adaaac47e50ca",
+      "2026-01": "4bafbfb0f76fdece07b6185b328067eceeb2bff6",
+      "2026-02": "88666ecb7a7a53adfebd410d319096019c9daa4f",
+      "2026-03": "ecfa322f7c43844ca0bafd4b1994dec322e31e72"
+    },
+    "ancestry_samples": [
+      "4c782bc59de8cba4a1cf1632aa6adaaac47e50ca",
+      "4d66bfd8a4f986aa94ddc5f90dc37e299081070a",
+      "c75430a04bc12f7cc5e29eff52e3dbb79699b2a6",
+      "185d8bf6884a288750d88fd11d54328d3fb8b18f",
+      "794ef9c2936c86909636ec0009a7b52fa0f68ffa",
+      "515d8f82ce4b1c5a2ca344e37803d76f10183213",
+      "2af8e6d190220c1e03b488500ffbc4a2a29714d0",
+      "e831b2cb1f0e647b0e9f5736693ea8d8064ed382",
+      "4c05af335173adb56dfc121fcf7bc5acd8ba81bb"
+    ],
+    "remote_hashes": [
+      "sha256:1953d89551390d4d5da3143e579044e1c0d2e8bc07505393c609f45153e70f6b",
+      "sha256:192b3cb8d2148c75bdc3ef0bb58ff8b84697f7ec288b6929b03b0473cd5cf22d"
+    ]
+  },
+  "team_urls": {
+    "sfgt": "https://git.sageox.ai/sageox-team_td0w9ekb1p/team-context.git"
+  },
+  "urls_cached_at": "2026-03-11T04:37:54Z",
+  "version": "0.4.0",
+  "updated_at": "2026-03-11T04:37:54Z"
+}

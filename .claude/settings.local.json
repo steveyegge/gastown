@@ -1,0 +1,70 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "if command -v ox \u003e/dev/null 2\u003e\u00261; then AGENT_ENV=claude-code ox agent hook PostToolUse 2\u003e\u00261 || true; else echo 'This repo uses SageOx: install https://github.com/sageox/ox for optimized team context.'; fi",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "command": "if command -v ox \u003e/dev/null 2\u003e\u00261; then AGENT_ENV=claude-code ox agent hook PreCompact 2\u003e\u00261 || true; else echo 'This repo uses SageOx: install https://github.com/sageox/ox for optimized team context.'; fi",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "command": "if command -v ox \u003e/dev/null 2\u003e\u00261; then AGENT_ENV=claude-code ox agent hook SessionEnd 2\u003e\u00261 || true; else echo 'This repo uses SageOx: install https://github.com/sageox/ox for optimized team context.'; fi",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "if command -v ox \u003e/dev/null 2\u003e\u00261; then AGENT_ENV=claude-code ox agent hook SessionStart 2\u003e\u00261 || true; else echo 'This repo uses SageOx: install https://github.com/sageox/ox for optimized team context.'; fi",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "if command -v ox \u003e/dev/null 2\u003e\u00261; then AGENT_ENV=claude-code ox agent hook Stop 2\u003e\u00261 || true; else echo 'This repo uses SageOx: install https://github.com/sageox/ox for optimized team context.'; fi",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "if command -v ox \u003e/dev/null 2\u003e\u00261; then AGENT_ENV=claude-code ox agent hook UserPromptSubmit 2\u003e\u00261 || true; else echo 'This repo uses SageOx: install https://github.com/sageox/ox for optimized team context.'; fi",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ]
+  }
+}

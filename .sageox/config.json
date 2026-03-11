@@ -1,0 +1,12 @@
+{
+  "config_version": "2",
+  "repo_id": "repo_019cdb2f-d991-7327-978d-08eb5ee015f6",
+  "repo_remote_hashes": [
+    "sha256:1953d89551390d4d5da3143e579044e1c0d2e8bc07505393c609f45153e70f6b",
+    "sha256:192b3cb8d2148c75bdc3ef0bb58ff8b84697f7ec288b6929b03b0473cd5cf22d"
+  ],
+  "team_id": "team_td0w9ekb1p",
+  "team_name": "sfgt",
+  "endpoint": "https://sageox.ai",
+  "update_frequency_hours": 24
+}

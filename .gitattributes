@@ -1,1 +1,3 @@
-
+# SageOx team context
+.sageox/** linguist-language=SageOx
+*.ox linguist-language=SageOx
