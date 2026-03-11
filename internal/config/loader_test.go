@@ -4994,3 +4994,72 @@ func TestResolveRoleAgentConfig_EphemeralDefaultPreservesNonClaudeOverride(t *te
 		t.Errorf("expected gemini for polecat (non-Claude rig override with tier default), got Command=%q", rc.Command)
 	}
 }
+
+func TestBuildStartupCommand_ExecWrapper(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Create a rig settings with exec_wrapper configured
+	rigSettings := NewRigSettings()
+	rigSettings.Runtime = &RuntimeConfig{
+		Command:     "claude",
+		ExecWrapper: []string{"exitbox", "run", "--profile=gastown-polecat", "--"},
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "polecat"}, rigPath, "hello")
+
+	// Must contain exec wrapper tokens
+	if !strings.Contains(cmd, "exitbox run --profile=gastown-polecat --") {
+		t.Errorf("expected exec wrapper in command, got: %q", cmd)
+	}
+
+	// The wrapper + agent command should appear as a contiguous sequence
+	// "exitbox run --profile=gastown-polecat -- claude"
+	if !strings.Contains(cmd, "exitbox run --profile=gastown-polecat -- claude") {
+		t.Errorf("expected wrapper immediately before claude command, got: %q", cmd)
+	}
+
+	// Env vars (exec env ...) must appear before the wrapper
+	envIdx := strings.Index(cmd, "exec env")
+	wrapperIdx := strings.Index(cmd, "exitbox run")
+	if envIdx == -1 || wrapperIdx == -1 || envIdx >= wrapperIdx {
+		t.Errorf("expected 'exec env' before wrapper, got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_ExecWrapper(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Create rig settings with exec_wrapper
+	rigSettings := NewRigSettings()
+	rigSettings.Runtime = &RuntimeConfig{
+		Command:     "claude",
+		ExecWrapper: []string{"daytona", "exec", "furiosa-ws", "--"},
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": "polecat"},
+		rigPath, "hello", "",
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	if !strings.Contains(cmd, "daytona exec furiosa-ws --") {
+		t.Errorf("expected exec wrapper in command, got: %q", cmd)
+	}
+
+	// The wrapper + agent command should appear as a contiguous sequence
+	if !strings.Contains(cmd, "daytona exec furiosa-ws -- claude") {
+		t.Errorf("expected wrapper immediately before claude command, got: %q", cmd)
+	}
+}

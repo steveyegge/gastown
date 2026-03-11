@@ -650,6 +650,157 @@ func TestFormatMailBody_WithRunScript(t *testing.T) {
 	}
 }
 
+func TestParsePluginMD_ExecWrapper(t *testing.T) {
+	content := []byte(`+++
+name = "exitbox-sandbox"
+description = "Sandbox polecat execution with exitbox"
+version = 1
+
+[execution]
+type = "exec-wrapper"
+wrapper = ["exitbox", "run", "--profile=gastown-polecat", "--"]
++++
+
+# Exitbox Sandbox
+
+Wraps polecat sessions in an exitbox sandbox for filesystem and network isolation.
+`)
+
+	p, err := parsePluginMD(content, "/test/exitbox-sandbox", LocationRig, "gastown")
+	if err != nil {
+		t.Fatalf("parsePluginMD failed: %v", err)
+	}
+
+	if p.Name != "exitbox-sandbox" {
+		t.Errorf("expected name 'exitbox-sandbox', got %q", p.Name)
+	}
+	if p.Execution == nil {
+		t.Fatal("expected execution to be non-nil")
+	}
+	if p.Execution.Type != ExecTypeExecWrapper {
+		t.Errorf("expected execution type 'exec-wrapper', got %q", p.Execution.Type)
+	}
+	if len(p.Execution.Wrapper) != 4 {
+		t.Fatalf("expected 4 wrapper tokens, got %d: %v", len(p.Execution.Wrapper), p.Execution.Wrapper)
+	}
+	if p.Execution.Wrapper[0] != "exitbox" {
+		t.Errorf("expected wrapper[0]='exitbox', got %q", p.Execution.Wrapper[0])
+	}
+	if p.Execution.Wrapper[3] != "--" {
+		t.Errorf("expected wrapper[3]='--', got %q", p.Execution.Wrapper[3])
+	}
+	if !p.IsExecWrapper() {
+		t.Error("expected IsExecWrapper() to return true")
+	}
+	args := p.ExecWrapperArgs()
+	if len(args) != 4 {
+		t.Errorf("expected ExecWrapperArgs to return 4 tokens, got %d", len(args))
+	}
+}
+
+func TestPlugin_IsExecWrapper_False(t *testing.T) {
+	// Regular plugin should not be an exec-wrapper
+	p := &Plugin{
+		Name: "regular",
+		Execution: &Execution{
+			Timeout: "5m",
+		},
+	}
+	if p.IsExecWrapper() {
+		t.Error("expected IsExecWrapper() to return false for regular plugin")
+	}
+	if args := p.ExecWrapperArgs(); args != nil {
+		t.Errorf("expected ExecWrapperArgs to return nil, got %v", args)
+	}
+}
+
+func TestPlugin_ExecWrapperSummary(t *testing.T) {
+	p := &Plugin{
+		Name:     "exitbox-sandbox",
+		Location: LocationRig,
+		RigName:  "gastown",
+		Execution: &Execution{
+			Type:    ExecTypeExecWrapper,
+			Wrapper: []string{"exitbox", "run", "--"},
+		},
+	}
+
+	summary := p.Summary()
+	if summary.ExecutionType != ExecTypeExecWrapper {
+		t.Errorf("expected execution type 'exec-wrapper', got %q", summary.ExecutionType)
+	}
+}
+
+func TestScanner_DiscoverExecWrappers(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "plugin-wrapper-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create a regular plugin
+	regularDir := filepath.Join(tmpDir, "plugins", "regular")
+	if err := os.MkdirAll(regularDir, 0755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(regularDir, "plugin.md"), []byte(`+++
+name = "regular"
+description = "Regular plugin"
+version = 1
+
+[execution]
+timeout = "5m"
++++
+
+# Regular
+`), 0644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	// Create an exec-wrapper plugin
+	wrapperDir := filepath.Join(tmpDir, "plugins", "sandbox")
+	if err := os.MkdirAll(wrapperDir, 0755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wrapperDir, "plugin.md"), []byte(`+++
+name = "sandbox"
+description = "Sandbox wrapper"
+version = 1
+
+[execution]
+type = "exec-wrapper"
+wrapper = ["exitbox", "run", "--"]
++++
+
+# Sandbox
+`), 0644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	scanner := NewScanner(tmpDir, nil)
+
+	// DiscoverAll should find both
+	all, err := scanner.DiscoverAll()
+	if err != nil {
+		t.Fatalf("DiscoverAll failed: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("expected 2 plugins, got %d", len(all))
+	}
+
+	// DiscoverExecWrappers should find only the wrapper
+	wrappers, err := scanner.DiscoverExecWrappers()
+	if err != nil {
+		t.Fatalf("DiscoverExecWrappers failed: %v", err)
+	}
+	if len(wrappers) != 1 {
+		t.Fatalf("expected 1 exec-wrapper, got %d", len(wrappers))
+	}
+	if wrappers[0].Name != "sandbox" {
+		t.Errorf("expected wrapper name 'sandbox', got %q", wrappers[0].Name)
+	}
+}
+
 func TestFormatMailBody_WithoutRunScript(t *testing.T) {
 	p := &Plugin{
 		Name:         "test-plugin",
