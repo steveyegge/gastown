@@ -1745,15 +1745,19 @@ func TestResolveWorkerAgentConfig_TownCrewAgents(t *testing.T) {
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "myrig")
 
-	// Create a fake codex binary (needs .exe on Windows for exec.LookPath)
+	// Create fake agent binaries (needs .exe on Windows for exec.LookPath).
+	// Both codex and claude stubs are needed: codex for town crew_agents,
+	// claude for the rig worker_agents override subtest.
 	binDir := t.TempDir()
-	codexName := "codex"
+	ext := ""
 	if runtime.GOOS == "windows" {
-		codexName = "codex.exe"
+		ext = ".exe"
 	}
-	codexPath := filepath.Join(binDir, codexName)
-	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-		t.Fatalf("write codex stub: %v", err)
+	for _, name := range []string{"codex", "claude"} {
+		stubPath := filepath.Join(binDir, name+ext)
+		if err := os.WriteFile(stubPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+			t.Fatalf("write %s stub: %v", name, err)
+		}
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
