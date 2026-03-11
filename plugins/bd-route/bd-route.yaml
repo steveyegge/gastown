@@ -1,0 +1,15 @@
+# bd-route: Auto-routing rules for bd create commands
+#
+# Each rule maps keywords to a rig. When a bd create command's title/description
+# matches keywords from exactly ONE rule, --rig is auto-added.
+# If zero or multiple rules match, the command passes through unchanged.
+#
+# Keywords are matched case-insensitively as substrings.
+
+rules:
+  - match: ["lambda", "clickhouse", "terraform", "nextjs", "supabase", "sazabi", "buildkite", "deploy", "migration", "schema", "infra"]
+    rig: monorepo
+  - match: ["gastown", "polecat", "witness", "refinery", "gt ", "gt-", "dolt", "mayor", "rig ", "worktree", "mol-", "formula"]
+    rig: gastown
+  - match: ["beads", "bd ", "bd-", "bead ", "dolt-server", "routes.jsonl"]
+    rig: beads
