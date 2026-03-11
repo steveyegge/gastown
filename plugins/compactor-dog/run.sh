@@ -243,21 +243,40 @@ for entry in "${CANDIDATES[@]}"; do
 
   log "  Pre-flight: $TABLE_COUNT tables recorded"
 
-  # Step 3a.5: Pull from remote before compaction to preserve shared ancestry.
+  # Step 3a.5: Fetch from remote before compaction to check for divergence.
   # Without this, flatten rewrites the commit graph and DoltHub push can never
   # fast-forward again (see gt-mkd1).
+  # NOTE: We use DOLT_FETCH instead of DOLT_PULL because a live Dolt server
+  # always has uncommitted working set changes, making DOLT_PULL fail with
+  # "cannot merge with uncommitted changes".
   HAS_REMOTE=false
   REMOTE_NAME=$(dolt_query "$DB" "SELECT name FROM dolt_remotes LIMIT 1" 2>/dev/null | head -1)
   if [[ -n "$REMOTE_NAME" ]]; then
     HAS_REMOTE=true
-    log "  Remote detected ('$REMOTE_NAME'). Pulling to sync before compaction..."
-    if ! dolt_exec "$DB" "CALL DOLT_PULL('$REMOTE_NAME')"; then
-      log "  ERROR: Pull from remote failed for $DB — skipping compaction to avoid data loss"
+    log "  Remote detected ('$REMOTE_NAME'). Fetching to check for divergence..."
+    if ! dolt_exec "$DB" "CALL DOLT_FETCH('$REMOTE_NAME')"; then
+      log "  ERROR: Fetch from remote failed for $DB — skipping compaction to avoid data loss"
       ERRORS=$((ERRORS + 1))
-      ERROR_DETAILS="${ERROR_DETAILS}${DB}: remote pull failed (skipped to avoid divergence)\n"
+      ERROR_DETAILS="${ERROR_DETAILS}${DB}: remote fetch failed (skipped to avoid divergence)\n"
       continue
     fi
-    log "  Remote pull complete."
+    # Verify local HEAD is at or ahead of remote HEAD.
+    # If remote has commits we don't have, compaction would lose them.
+    LOCAL_HEAD=$(dolt_query "$DB" "SELECT commit_hash FROM dolt_log ORDER BY date DESC LIMIT 1" 2>/dev/null | head -1)
+    REMOTE_HEAD=$(dolt_query "$DB" "SELECT commit_hash FROM dolt_remote_branches WHERE name = '${REMOTE_NAME}/main'" 2>/dev/null | head -1)
+    if [[ -n "$REMOTE_HEAD" && -n "$LOCAL_HEAD" && "$REMOTE_HEAD" != "$LOCAL_HEAD" ]]; then
+      # Check if remote HEAD is an ancestor of local HEAD (local is ahead — safe)
+      IS_ANCESTOR=$(dolt_query "$DB" "SELECT COUNT(*) FROM dolt_log WHERE commit_hash = '$REMOTE_HEAD'" 2>/dev/null | head -1)
+      if [[ "$IS_ANCESTOR" == "0" ]]; then
+        log "  ERROR: Remote has commits not in local history — skipping compaction to avoid data loss"
+        log "  Local HEAD:  ${LOCAL_HEAD:0:12}"
+        log "  Remote HEAD: ${REMOTE_HEAD:0:12}"
+        ERRORS=$((ERRORS + 1))
+        ERROR_DETAILS="${ERROR_DETAILS}${DB}: remote ahead of local (skipped to avoid data loss)\n"
+        continue
+      fi
+    fi
+    log "  Remote fetch complete. Local is at or ahead of remote."
   fi
 
   # Step 3b: Find root (earliest) commit hash.
