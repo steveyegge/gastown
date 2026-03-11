@@ -30,8 +30,8 @@ type hookInput struct {
 //
 // Priority (env vars first so non-Claude runtimes skip the stdin read entirely):
 //  1. GT_SESSION_ID / CLAUDE_SESSION_ID env var  — set by the hook command
-//  2. Persisted .runtime/session_id              — written by a prior SessionStart hook
-//  3. Stdin JSON (Claude Code format)            — Claude sends {"session_id":…,"source":…}
+//  2. Stdin JSON (Claude Code format)            — Claude sends {"session_id":…,"source":…}
+//  3. Persisted .runtime/session_id              — written by a prior SessionStart hook
 //  4. Auto-generate UUID
 //
 // Source is resolved from GT_HOOK_SOURCE env, stdin JSON, or empty.
@@ -54,13 +54,9 @@ func readHookSessionID() (sessionID, source string) {
 		return id, source
 	}
 
-	// 2. Persisted session ID from a prior hook invocation (e.g., PreCompress
-	//    reusing the session ID that SessionStart wrote to .runtime/session_id)
-	if id := ReadPersistedSessionID(); id != "" {
-		return id, source
-	}
-
-	// 3. Try reading stdin JSON (Claude Code format)
+	// 2. Try reading stdin JSON (Claude Code format).
+	//    Checked before persisted file so a fresh Claude session always wins
+	//    over a potentially stale .runtime/session_id from a previous session.
 	if input := readStdinJSON(); input != nil {
 		if input.SessionID != "" {
 			// Stdin source overrides env source when both are present
@@ -69,6 +65,12 @@ func readHookSessionID() (sessionID, source string) {
 			}
 			return input.SessionID, source
 		}
+	}
+
+	// 3. Persisted session ID from a prior hook invocation (e.g., PreCompress
+	//    reusing the session ID that SessionStart wrote to .runtime/session_id)
+	if id := ReadPersistedSessionID(); id != "" {
+		return id, source
 	}
 
 	// 4. Auto-generate

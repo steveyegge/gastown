@@ -78,7 +78,7 @@ func TestReadHookSessionID_SourceFromEnv(t *testing.T) {
 }
 
 // TestReadHookSessionID_AutoGeneratesFallback verifies a UUID is generated
-// when no env vars or persisted file are available.
+// when no env vars, stdin, or persisted file are available.
 func TestReadHookSessionID_AutoGeneratesFallback(t *testing.T) {
 	t.Setenv("GT_SESSION_ID", "")
 	t.Setenv("CLAUDE_SESSION_ID", "")
