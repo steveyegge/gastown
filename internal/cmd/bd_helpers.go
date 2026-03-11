@@ -13,13 +13,13 @@ import (
 // It provides a fluent API for configuring environment variables,
 // working directory, and I/O settings common to bd CLI invocations.
 type bdCmd struct {
-	args       []string
-	dir        string
-	env        []string
-	stderr     io.Writer
-	autoCommit bool
-	gtRoot     string
-	beadsDir   string
+	args           []string
+	dir            string
+	env            []string
+	stderr         io.Writer
+	autoCommitMode string
+	gtRoot         string
+	beadsDir       string
 }
 
 // BdCmd creates a new bd command builder with the given arguments.
@@ -42,7 +42,15 @@ func BdCmd(args ...string) *bdCmd {
 // This is used for sequential dependent bd calls where each call
 // needs to see the changes from previous calls.
 func (b *bdCmd) WithAutoCommit() *bdCmd {
-	b.autoCommit = true
+	b.autoCommitMode = "on"
+	return b
+}
+
+// WithAutoCommitOff sets BD_DOLT_AUTO_COMMIT=off in the environment.
+// Use this for writes that must participate in the caller's larger transaction
+// without forcing an immediate Dolt commit.
+func (b *bdCmd) WithAutoCommitOff() *bdCmd {
+	b.autoCommitMode = "off"
 	return b
 }
 
@@ -98,16 +106,31 @@ func filterEnvKey(env []string, key string) []string {
 	return result
 }
 
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return strings.TrimPrefix(e, prefix)
+		}
+	}
+	return ""
+}
+
 // buildEnv constructs the final environment slice based on configured options.
 func (b *bdCmd) buildEnv() []string {
 	env := b.env
+	forceAutoCommitOff := envValue(env, "GT_FORCE_BD_AUTOCOMMIT_OFF") == "1"
 
 	// Add BD_DOLT_AUTO_COMMIT=on for sequential dependent calls.
 	// Filter existing entries first — glibc getenv() returns the first match,
 	// so an existing "off" entry would shadow the appended "on".
-	if b.autoCommit {
+	if b.autoCommitMode != "" {
 		env = filterEnvKey(env, "BD_DOLT_AUTO_COMMIT")
-		env = append(env, "BD_DOLT_AUTO_COMMIT=on")
+		if forceAutoCommitOff || b.autoCommitMode == "off" {
+			env = append(env, "BD_DOLT_AUTO_COMMIT=off")
+		} else {
+			env = append(env, "BD_DOLT_AUTO_COMMIT=on")
+		}
 	}
 
 	// Add GT_ROOT if specified.

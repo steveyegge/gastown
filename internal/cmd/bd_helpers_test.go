@@ -172,6 +172,9 @@ func TestBdCmd_Chaining(t *testing.T) {
 	if bdc.WithAutoCommit() != bdc {
 		t.Error("WithAutoCommit() should return receiver for chaining")
 	}
+	if bdc.WithAutoCommitOff() != bdc {
+		t.Error("WithAutoCommitOff() should return receiver for chaining")
+	}
 	if bdc.WithGTRoot("/test") != bdc {
 		t.Error("WithGTRoot() should return receiver for chaining")
 	}
@@ -231,6 +234,47 @@ func TestBdCmd_WithAutoCommit_OverridesParentOff(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("found %d BD_DOLT_AUTO_COMMIT entries, want exactly 1 (dedup must remove old entry)", count)
+	}
+}
+
+func TestBdCmd_WithAutoCommit_RespectsForceOffOverride(t *testing.T) {
+	baseEnv := []string{
+		"PATH=/usr/bin",
+		"BD_DOLT_AUTO_COMMIT=on",
+		"GT_FORCE_BD_AUTOCOMMIT_OFF=1",
+	}
+
+	bdc := &bdCmd{
+		args:   []string{"update", "id"},
+		env:    baseEnv,
+		stderr: os.Stderr,
+	}
+	bdc.WithAutoCommit()
+	cmd := bdc.Build()
+	envMap := parseEnv(cmd.Env)
+
+	if envMap["BD_DOLT_AUTO_COMMIT"] != "off" {
+		t.Fatalf("BD_DOLT_AUTO_COMMIT = %q, want off", envMap["BD_DOLT_AUTO_COMMIT"])
+	}
+}
+
+func TestBdCmd_WithAutoCommitOff_OverridesParentOn(t *testing.T) {
+	baseEnv := []string{
+		"PATH=/usr/bin",
+		"BD_DOLT_AUTO_COMMIT=on",
+	}
+
+	bdc := &bdCmd{
+		args:   []string{"update", "id"},
+		env:    baseEnv,
+		stderr: os.Stderr,
+	}
+	bdc.WithAutoCommitOff()
+	cmd := bdc.Build()
+	envMap := parseEnv(cmd.Env)
+
+	if envMap["BD_DOLT_AUTO_COMMIT"] != "off" {
+		t.Fatalf("BD_DOLT_AUTO_COMMIT = %q, want off", envMap["BD_DOLT_AUTO_COMMIT"])
 	}
 }
 
@@ -296,16 +340,17 @@ func TestBdCmd_AllCombinations(t *testing.T) {
 	baseEnv := []string{"BD_DOLT_AUTO_COMMIT=off", "PATH=/usr/bin"}
 
 	tests := []struct {
-		name             string
-		autoCommit       bool
-		gtRoot           string
-		wantAutoCommitOn bool
-		wantGTRoot       bool
+		name           string
+		autoCommitMode string
+		gtRoot         string
+		wantAutoCommit string
+		wantGTRoot     bool
 	}{
-		{"none", false, "", false, false},
-		{"autocommit only", true, "", true, false},
-		{"gtroot only", false, "/town", false, true},
-		{"autocommit+gtroot", true, "/town", true, true},
+		{"none", "", "", "off", false},
+		{"autocommit only", "on", "", "on", false},
+		{"autocommit off only", "off", "", "off", false},
+		{"gtroot only", "", "/town", "off", true},
+		{"autocommit+gtroot", "on", "/town", "on", true},
 	}
 
 	for _, tt := range tests {
@@ -316,8 +361,8 @@ func TestBdCmd_AllCombinations(t *testing.T) {
 				stderr: os.Stderr,
 			}
 
-			if tt.autoCommit {
-				bdc.autoCommit = true
+			if tt.autoCommitMode != "" {
+				bdc.autoCommitMode = tt.autoCommitMode
 			}
 			bdc.gtRoot = tt.gtRoot
 
@@ -325,15 +370,8 @@ func TestBdCmd_AllCombinations(t *testing.T) {
 			envMap := parseEnv(cmd.Env)
 
 			// Check BD_DOLT_AUTO_COMMIT
-			if tt.wantAutoCommitOn {
-				if envMap["BD_DOLT_AUTO_COMMIT"] != "on" {
-					t.Errorf("BD_DOLT_AUTO_COMMIT = %q, want 'on'", envMap["BD_DOLT_AUTO_COMMIT"])
-				}
-			} else {
-				// When not explicitly set via WithAutoCommit, should keep original
-				if envMap["BD_DOLT_AUTO_COMMIT"] != "off" {
-					t.Errorf("BD_DOLT_AUTO_COMMIT = %q, want 'off' (original value)", envMap["BD_DOLT_AUTO_COMMIT"])
-				}
+			if envMap["BD_DOLT_AUTO_COMMIT"] != tt.wantAutoCommit {
+				t.Errorf("BD_DOLT_AUTO_COMMIT = %q, want %q", envMap["BD_DOLT_AUTO_COMMIT"], tt.wantAutoCommit)
 			}
 
 			// Check GT_ROOT
