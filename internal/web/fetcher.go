@@ -51,6 +51,9 @@ var fetcherGetSessionEnv = func(sessionName, key string) (string, error) {
 
 // runBdCmd executes a bd command with the configured cmdTimeout in the specified beads directory.
 func (f *LiveConvoyFetcher) runBdCmd(beadsDir string, args ...string) (*bytes.Buffer, error) {
+	// bd v0.59+ requires --flat for list --json to produce JSON output
+	args = beads.InjectFlatForListJSON(args)
+
 	ctx, cancel := context.WithTimeout(context.Background(), f.cmdTimeout)
 	defer cancel()
 

@@ -125,6 +125,7 @@ func TestAgentEnv_Dog(t *testing.T) {
 	})
 
 	assertEnv(t, env, "GT_ROLE", "dog")
+	assertEnv(t, env, "GT_DOG_NAME", "alpha")
 	assertEnv(t, env, "BD_ACTOR", "deacon/dogs/alpha")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "alpha")
 	assertEnv(t, env, "GT_ROOT", "/town")

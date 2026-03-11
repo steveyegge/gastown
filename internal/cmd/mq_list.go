@@ -36,14 +36,12 @@ func runMQList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build list options - query for merge-request label.
-	// Ephemeral=true routes the query to the wisps table via "bd query"
-	// instead of "bd list", which only searches the issues table (GH#2446).
-	// MR beads are created as ephemeral (wisps) and live in a separate table.
+	// Use ListMergeRequests to query both the issues table and wisps table,
+	// since MRs are created as ephemeral (wisps) by gt mq submit (GH#2446).
 	// Priority -1 means no priority filter (otherwise 0 would filter to P0 only).
 	opts := beads.ListOptions{
-		Label:     "gt:merge-request",
-		Priority:  -1,
-		Ephemeral: true,
+		Label:    "gt:merge-request",
+		Priority: -1,
 	}
 
 	// Apply status filter if specified
@@ -61,7 +59,7 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		// Cannot use b.Ready() because it excludes ephemeral beads,
 		// and MRs are ephemeral by design (see gt-t5t6y).
 		opts.Status = "open"
-		allOpen, err := b.List(opts)
+		allOpen, err := b.ListMergeRequests(opts)
 		if err != nil {
 			return fmt.Errorf("querying ready MRs: %w", err)
 		}
@@ -72,7 +70,7 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			issues = append(issues, issue)
 		}
 	} else {
-		issues, err = b.List(opts)
+		issues, err = b.ListMergeRequests(opts)
 		if err != nil {
 			return fmt.Errorf("querying merge queue: %w", err)
 		}

@@ -6,18 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/channelevents"
 )
 
 func TestEmitEvent(t *testing.T) {
 	t.Run("basic event creation", func(t *testing.T) {
-		dir := t.TempDir()
-		channel := "test-channel"
-		channelDir := filepath.Join(dir, "events", channel)
-		os.MkdirAll(channelDir, 0755)
+		townRoot := t.TempDir()
 
-		// EmitEvent uses workspace.FindFromCwd which won't work in tests,
-		// so we test the file writing logic directly via the channel dir.
-		path, err := emitEventToDir(channelDir, "MERGE_READY", []string{"polecat=nux", "branch=feat/test"})
+		path, err := channelevents.EmitToTown(townRoot, "test-channel", "MERGE_READY", []string{"polecat=nux", "branch=feat/test"})
 		if err != nil {
 			t.Fatalf("EmitEvent failed: %v", err)
 		}
@@ -58,8 +55,8 @@ func TestEmitEvent(t *testing.T) {
 	})
 
 	t.Run("empty payload", func(t *testing.T) {
-		dir := t.TempDir()
-		path, err := emitEventToDir(dir, "PATROL_WAKE", nil)
+		townRoot := t.TempDir()
+		path, err := channelevents.EmitToTown(townRoot, "test-channel", "PATROL_WAKE", nil)
 		if err != nil {
 			t.Fatalf("EmitEvent failed: %v", err)
 		}
@@ -87,10 +84,10 @@ func TestEmitEvent(t *testing.T) {
 	})
 
 	t.Run("multiple events unique paths", func(t *testing.T) {
-		dir := t.TempDir()
+		townRoot := t.TempDir()
 		paths := make(map[string]bool)
 		for i := 0; i < 5; i++ {
-			path, err := emitEventToDir(dir, "TEST", nil)
+			path, err := channelevents.EmitToTown(townRoot, "test-channel", "TEST", nil)
 			if err != nil {
 				t.Fatalf("EmitEvent failed on iteration %d: %v", i, err)
 			}
@@ -102,8 +99,8 @@ func TestEmitEvent(t *testing.T) {
 	})
 
 	t.Run("malformed payload pair ignored", func(t *testing.T) {
-		dir := t.TempDir()
-		path, err := emitEventToDir(dir, "TEST", []string{"valid=yes", "no-equals-sign"})
+		townRoot := t.TempDir()
+		path, err := channelevents.EmitToTown(townRoot, "test-channel", "TEST", []string{"valid=yes", "no-equals-sign"})
 		if err != nil {
 			t.Fatalf("EmitEvent failed: %v", err)
 		}
@@ -127,36 +124,36 @@ func TestEmitEvent(t *testing.T) {
 }
 
 func TestEmitEventChannelValidation(t *testing.T) {
-	dir := t.TempDir()
+	townRoot := t.TempDir()
 
 	// Valid channel name should succeed
-	_, err := emitEventImpl(dir, "valid-channel", "TEST", nil)
+	_, err := channelevents.EmitToTown(townRoot, "valid-channel", "TEST", nil)
 	if err != nil {
 		t.Errorf("valid channel name rejected: %v", err)
 	}
 
 	// Path traversal should be rejected
-	_, err = emitEventImpl(dir, "../etc", "TEST", nil)
+	_, err = channelevents.EmitToTown(townRoot, "../etc", "TEST", nil)
 	if err == nil {
 		t.Error("expected error for path traversal channel name, got nil")
 	}
 
 	// Slash in channel should be rejected
-	_, err = emitEventImpl(dir, "foo/bar", "TEST", nil)
+	_, err = channelevents.EmitToTown(townRoot, "foo/bar", "TEST", nil)
 	if err == nil {
 		t.Error("expected error for channel with slash, got nil")
 	}
 
 	// Empty channel should be rejected
-	_, err = emitEventImpl(dir, "", "TEST", nil)
+	_, err = channelevents.EmitToTown(townRoot, "", "TEST", nil)
 	if err == nil {
 		t.Error("expected error for empty channel name, got nil")
 	}
 }
 
 func TestEmitEventPIDInFilename(t *testing.T) {
-	dir := t.TempDir()
-	path, err := emitEventImpl(dir, "test-channel", "TEST", nil)
+	townRoot := t.TempDir()
+	path, err := channelevents.EmitToTown(townRoot, "test-channel", "TEST", nil)
 	if err != nil {
 		t.Fatalf("emit failed: %v", err)
 	}
@@ -197,10 +194,4 @@ func TestEmitEventResult(t *testing.T) {
 	if decoded.Type != result.Type {
 		t.Errorf("type = %q, want %q", decoded.Type, result.Type)
 	}
-}
-
-// emitEventToDir is a test helper that writes an event directly to a directory,
-// bypassing workspace resolution.
-func emitEventToDir(dir, eventType string, payloadPairs []string) (string, error) {
-	return emitEventImpl(dir, "test-channel", eventType, payloadPairs)
 }

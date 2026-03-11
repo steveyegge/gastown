@@ -367,6 +367,13 @@ func runNudge(cmd *cobra.Command, args []string) (retErr error) {
 
 	// Check DND status for target (unless force flag or channel target)
 	townRoot, _ := workspace.FindFromCwd()
+	if townRoot != "" {
+		// Initialize tmux socket and prefix registry so NewTmux() connects
+		// to the correct town socket. Without this, nudge from non-agent
+		// contexts (e.g., crew workspaces without GT_TOWN_SOCKET) falls
+		// through to the sentinel socket and fails to find sessions.
+		_ = session.InitRegistry(townRoot)
+	}
 	if townRoot != "" && !nudgeForceFlag {
 		shouldSend, level, _ := shouldNudgeTarget(townRoot, target, nudgeForceFlag)
 		if !shouldSend {

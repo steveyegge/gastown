@@ -223,7 +223,139 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 		}
 	}
 
+	// Query 3: Wisps table — ephemeral messages (protocol/lifecycle) are stored
+	// as wisps by shouldBeWisp(), but bd list only queries the issues table.
+	wispMessages := m.listWispMessages(beadsDir, identities, seen)
+	messages = append(messages, wispMessages...)
+
 	return messages, nil
+}
+
+// listWispMessages queries the wisps table for ephemeral messages matching the identity.
+// Protocol/lifecycle messages are stored as wisps by shouldBeWisp(), but bd list only
+// queries the issues table. Uses bd sql --json for full wisp data.
+func (m *Mailbox) listWispMessages(beadsDir string, identities []string, seen map[string]bool) []*Message {
+	var messages []*Message
+
+	// Query 3a: assignee match via SQL on wisps table
+	for _, id := range identities {
+		wispMsgs := m.queryWispMessagesByAssignee(beadsDir, id)
+		for _, bm := range wispMsgs {
+			if seen[bm.ID] {
+				continue
+			}
+			if bm.Status == "open" || bm.Status == "hooked" {
+				seen[bm.ID] = true
+				messages = append(messages, bm.ToMessage())
+			}
+		}
+	}
+
+	// Query 3b: CC match via SQL on wisps table
+	for _, id := range identities {
+		wispMsgs := m.queryWispMessagesByCC(beadsDir, id)
+		for _, bm := range wispMsgs {
+			if seen[bm.ID] {
+				continue
+			}
+			if bm.Status == "open" {
+				seen[bm.ID] = true
+				messages = append(messages, bm.ToMessage())
+			}
+		}
+	}
+
+	return messages
+}
+
+// queryWispMessagesByAssignee queries wisps table for messages assigned to identity.
+func (m *Mailbox) queryWispMessagesByAssignee(beadsDir, identity string) []BeadsMessage {
+	query := fmt.Sprintf(
+		"SELECT w.id, w.title, w.description, w.status, w.priority, w.assignee, w.created_at, w.updated_at, "+
+			"GROUP_CONCAT(al.label) as labels_csv "+
+			"FROM wisps w "+
+			"JOIN wisp_labels l ON w.id = l.issue_id "+
+			"JOIN wisp_labels al ON w.id = al.issue_id "+
+			"WHERE l.label = 'gt:message' AND w.status IN ('open', 'hooked') AND w.assignee = '%s' "+
+			"GROUP BY w.id, w.title, w.description, w.status, w.priority, w.assignee, w.created_at, w.updated_at",
+		escapeSQLString(identity))
+	return m.runWispSQL(beadsDir, query)
+}
+
+// queryWispMessagesByCC queries wisps table for messages where identity is CC'd.
+func (m *Mailbox) queryWispMessagesByCC(beadsDir, identity string) []BeadsMessage {
+	ccLabel := "cc:" + identity
+	query := fmt.Sprintf(
+		"SELECT w.id, w.title, w.description, w.status, w.priority, w.assignee, w.created_at, w.updated_at, "+
+			"GROUP_CONCAT(al.label) as labels_csv "+
+			"FROM wisps w "+
+			"JOIN wisp_labels l1 ON w.id = l1.issue_id "+
+			"JOIN wisp_labels l2 ON w.id = l2.issue_id "+
+			"JOIN wisp_labels al ON w.id = al.issue_id "+
+			"WHERE l1.label = 'gt:message' AND l2.label = '%s' AND w.status IN ('open', 'hooked') "+
+			"GROUP BY w.id, w.title, w.description, w.status, w.priority, w.assignee, w.created_at, w.updated_at",
+		escapeSQLString(ccLabel))
+	return m.runWispSQL(beadsDir, query)
+}
+
+// wispSQLRow represents a row from the wisps SQL query with aggregated labels.
+type wispSQLRow struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+	Priority    int    `json:"priority"`
+	Assignee    string `json:"assignee"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+	LabelsCSV   string `json:"labels_csv"`
+}
+
+// runWispSQL executes a bd sql --json query and converts results to BeadsMessages.
+func (m *Mailbox) runWispSQL(beadsDir, query string) []BeadsMessage {
+	args := []string{"sql", "--json", query}
+	ctx, cancel := bdReadCtx()
+	stdout, err := runBdCommand(ctx, args, m.workDir, beadsDir)
+	cancel()
+	if err != nil {
+		return nil // Wisps table may not exist yet
+	}
+	if !isJSON(stdout) {
+		return nil
+	}
+
+	var rows []wispSQLRow
+	if err := json.Unmarshal(stdout, &rows); err != nil {
+		return nil
+	}
+
+	msgs := make([]BeadsMessage, 0, len(rows))
+	for _, row := range rows {
+		bm := BeadsMessage{
+			ID:          row.ID,
+			Title:       row.Title,
+			Description: row.Description,
+			Status:      row.Status,
+			Priority:    row.Priority,
+			Assignee:    row.Assignee,
+			Wisp:        true,
+		}
+		if t, err := time.Parse(time.RFC3339, row.CreatedAt); err == nil {
+			bm.CreatedAt = t
+		} else if t, err := time.Parse("2006-01-02 15:04:05 +0000 UTC", row.CreatedAt); err == nil {
+			bm.CreatedAt = t
+		}
+		if row.LabelsCSV != "" {
+			bm.Labels = strings.Split(row.LabelsCSV, ",")
+		}
+		msgs = append(msgs, bm)
+	}
+	return msgs
+}
+
+// escapeSQLString escapes single quotes for SQL string literals.
+func escapeSQLString(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
 }
 
 // identityVariants returns all identity formats to query.

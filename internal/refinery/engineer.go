@@ -1285,7 +1285,7 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 	// Query beads for all open merge-request issues.
 	// Cannot use ReadyWithType here because bd ready excludes ephemeral beads,
 	// and MRs are ephemeral by design. Use List + manual blocker check instead.
-	issues, err := e.beads.List(beads.ListOptions{
+	issues, err := e.beads.ListMergeRequests(beads.ListOptions{
 		Status:   "open",
 		Label:    "gt:merge-request",
 		Priority: -1, // No priority filter
@@ -1348,7 +1348,7 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 // This queries beads for blocked merge-request issues.
 func (e *Engineer) ListBlockedMRs() ([]*MRInfo, error) {
 	// Query all merge-request issues (both ready and blocked)
-	issues, err := e.beads.List(beads.ListOptions{
+	issues, err := e.beads.ListMergeRequests(beads.ListOptions{
 		Status:   "open",
 		Label:    "gt:merge-request",
 		Priority: -1, // No priority filter
@@ -1390,7 +1390,7 @@ func (e *Engineer) ListBlockedMRs() ([]*MRInfo, error) {
 // so agents can detect orphaned MRs. Designed for agent-side queue health analysis
 // (ZFC: Go transports data, agent decides what's interesting).
 func (e *Engineer) ListAllOpenMRs() ([]*MRInfo, error) {
-	issues, err := e.beads.List(beads.ListOptions{
+	issues, err := e.beads.ListMergeRequests(beads.ListOptions{
 		Status:   "open",
 		Label:    "gt:merge-request",
 		Priority: -1,
@@ -1426,7 +1426,7 @@ func (e *Engineer) ListAllOpenMRs() ([]*MRInfo, error) {
 // ListQueueAnomalies finds stale claims and orphaned branches in open MRs.
 // This gives Witness/Refinery patrols deterministic signals for deadlock risk.
 func (e *Engineer) ListQueueAnomalies(now time.Time) ([]*MRAnomaly, error) {
-	issues, err := e.beads.List(beads.ListOptions{
+	issues, err := e.beads.ListMergeRequests(beads.ListOptions{
 		Status:   "open",
 		Label:    "gt:merge-request",
 		Priority: -1,
@@ -1596,7 +1596,7 @@ type convoyInfo struct {
 // are complete. Returns the list of convoys that were closed.
 func (e *Engineer) checkAndCloseCompletedConvoys(townRoot, townBeads string) []convoyInfo {
 	// List all open convoys
-	listCmd := exec.Command("bd", "list", "--type=convoy", "--status=open", "--json")
+	listCmd := exec.Command("bd", "list", "--type=convoy", "--status=open", "--json", "--flat")
 	listCmd.Dir = townBeads
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout

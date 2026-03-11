@@ -273,7 +273,7 @@ func (d *testDAG) BdStubScript() string {
 	// --- handle: list --parent=<id> --json | list --parent <id> --json ---
 	for id := range d.beads {
 		childrenJSON := d.childrenJSONFor(id)
-		sb.WriteString(fmt.Sprintf("  list\\ --parent=%s\\ --json|list\\ --parent\\ %s\\ --json|list\\ --json\\ --parent=%s|list\\ --json\\ --parent\\ %s)\n", id, id, id, id))
+		sb.WriteString(fmt.Sprintf("  list\\ --parent=%s\\ --json*|list\\ --parent\\ %s\\ --json*|list\\ --json*--parent=%s*|list\\ --json*--parent\\ %s*)\n", id, id, id, id))
 		sb.WriteString(fmt.Sprintf("    echo '%s'\n", childrenJSON))
 		sb.WriteString("    exit 0\n")
 		sb.WriteString("    ;;\n")

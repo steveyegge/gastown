@@ -90,6 +90,12 @@ The Dog uses this to understand the state before deciding what to reap.`,
 		}
 		defer db.Close()
 
+		if ok, err := reaper.HasReaperSchema(db); err != nil {
+			return fmt.Errorf("check reaper schema on %s: %w", reaperDB, err)
+		} else if !ok {
+			return fmt.Errorf("database %s missing wisps/issues tables (beads schema not initialized on this server)", reaperDB)
+		}
+
 		result, err := reaper.Scan(db, reaperDB, maxAge, purgeAge, mailAge, staleAge)
 		if err != nil {
 			return fmt.Errorf("scan %s: %w", reaperDB, err)
@@ -134,6 +140,12 @@ Returns the count of reaped wisps. Use --dry-run to preview.`,
 			return fmt.Errorf("connect to %s: %w", reaperDB, err)
 		}
 		defer db.Close()
+
+		if ok, err := reaper.HasReaperSchema(db); err != nil {
+			return fmt.Errorf("check reaper schema on %s: %w", reaperDB, err)
+		} else if !ok {
+			return fmt.Errorf("database %s missing wisps/issues tables (beads schema not initialized on this server)", reaperDB)
+		}
 
 		result, err := reaper.Reap(db, reaperDB, maxAge, reaperDryRun)
 		if err != nil {
@@ -180,6 +192,12 @@ Returns counts of purged rows. Use --dry-run to preview.`,
 			return fmt.Errorf("connect to %s: %w", reaperDB, err)
 		}
 		defer db.Close()
+
+		if ok, err := reaper.HasReaperSchema(db); err != nil {
+			return fmt.Errorf("check reaper schema on %s: %w", reaperDB, err)
+		} else if !ok {
+			return fmt.Errorf("database %s missing wisps/issues tables (beads schema not initialized on this server)", reaperDB)
+		}
 
 		result, err := reaper.Purge(db, reaperDB, purgeAge, mailAge, reaperDryRun)
 		if err != nil {
@@ -286,6 +304,16 @@ Normally the daemon dispatches a Dog to execute the mol-dog-reaper formula.`,
 			db, err := reaper.OpenDB("127.0.0.1", reaperPort, dbName, 30*time.Second, 30*time.Second)
 			if err != nil {
 				fmt.Printf("%s: connect error: %v\n", dbName, err)
+				continue
+			}
+
+			if ok, err := reaper.HasReaperSchema(db); err != nil {
+				fmt.Printf("%s: schema check error: %v\n", dbName, err)
+				db.Close()
+				continue
+			} else if !ok {
+				fmt.Printf("%s: skipped (no reaper schema)\n", dbName)
+				db.Close()
 				continue
 			}
 

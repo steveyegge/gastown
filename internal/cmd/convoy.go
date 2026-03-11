@@ -26,13 +26,19 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+var convoyIDEntropy io.Reader = rand.Reader
+
 // generateShortID generates a collision-resistant convoy ID suffix using base36.
 // 5 chars of base36 gives ~60M possible values (36^5 = 60,466,176).
 // Birthday paradox: ~1% collision at ~1,100 IDs — safe for convoy volumes. (#2063)
 func generateShortID() string {
+	return generateShortIDFromReader(convoyIDEntropy)
+}
+
+func generateShortIDFromReader(r io.Reader) string {
 	const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
 	b := make([]byte, 5)
-	_, _ = rand.Read(b)
+	_, _ = io.ReadFull(r, b)
 	for i := range b {
 		b[i] = alphabet[int(b[i])%len(alphabet)]
 	}
@@ -423,9 +429,12 @@ func getTownBeadsDir() (string, error) {
 // fails, the error includes bd's stderr for diagnostics instead of a bare
 // "exit status 1".
 func runBdJSON(dir string, args ...string) ([]byte, error) {
+	// bd v0.59+ requires --flat for list --json to produce JSON output
+	args = beads.InjectFlatForListJSON(args)
+	var stdout, stderr bytes.Buffer
 	cmd := exec.Command("bd", args...)
 	cmd.Dir = dir
-	var stdout, stderr bytes.Buffer
+	cmd.Env = filterEnvKey(os.Environ(), "BEADS_DIR")
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -1292,7 +1301,7 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 	stranded := []strandedConvoyInfo{} // Initialize as empty slice for proper JSON encoding
 
 	// List all open convoys
-	out, err := runBdJSON(townBeads, "list", "--type=convoy", "--status=open", "--json")
+	out, err := runBdJSON(filepath.Dir(townBeads), "list", "--type=convoy", "--status=open", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("listing convoys: %w", err)
 	}
@@ -1453,7 +1462,7 @@ func checkAndCloseCompletedConvoys(townBeads string, dryRun bool) ([]struct{ ID,
 	var closed []struct{ ID, Title string }
 
 	// List all open convoys
-	out, err := runBdJSON(townBeads, "list", "--type=convoy", "--status=open", "--json")
+	out, err := runBdJSON(filepath.Dir(townBeads), "list", "--type=convoy", "--status=open", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("listing convoys: %w", err)
 	}
@@ -1587,6 +1596,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	convoyID := args[0]
+	townRoot := filepath.Dir(townBeads)
 
 	// Check if it's a numeric shortcut (e.g., "1" instead of "hq-cv-xyz")
 	if n, err := strconv.Atoi(convoyID); err == nil && n > 0 {
@@ -1598,13 +1608,8 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get convoy details
-	showArgs := []string{"show", convoyID, "--json"}
-	showCmd := exec.Command("bd", showArgs...)
-	showCmd.Dir = townBeads
-	var stdout bytes.Buffer
-	showCmd.Stdout = &stdout
-
-	if err := showCmd.Run(); err != nil {
+	out, err := runBdJSON(townRoot, "show", convoyID, "--json")
+	if err != nil {
 		return fmt.Errorf("convoy '%s' not found", convoyID)
 	}
 
@@ -1619,7 +1624,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 		DependsOn   []string `json:"depends_on,omitempty"`
 		Labels      []string `json:"labels,omitempty"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &convoys); err != nil {
+	if err := json.Unmarshal(out, &convoys); err != nil {
 		return fmt.Errorf("parsing convoy data: %w", err)
 	}
 
@@ -1739,7 +1744,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 
 func showAllConvoyStatus(townBeads string) error {
 	// List all convoy-type issues
-	out, err := runBdJSON(townBeads, "list", "--type=convoy", "--status=open", "--json")
+	out, err := runBdJSON(filepath.Dir(townBeads), "list", "--type=convoy", "--status=open", "--json")
 	if err != nil {
 		return fmt.Errorf("listing convoys: %w", err)
 	}
@@ -1784,6 +1789,7 @@ func runConvoyList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	townRoot := filepath.Dir(townBeads)
 
 	// List convoy-type issues
 	listArgs := []string{"list", "--type=convoy", "--json"}
@@ -1794,7 +1800,7 @@ func runConvoyList(cmd *cobra.Command, args []string) error {
 	}
 	// Default (no flags) = open only (bd's default behavior)
 
-	out, err := runBdJSON(townBeads, listArgs...)
+	out, err := runBdJSON(townRoot, listArgs...)
 	if err != nil {
 		return fmt.Errorf("listing convoys: %w", err)
 	}
@@ -2299,11 +2305,8 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 	args := append([]string{"show"}, issueIDs...)
 	args = append(args, "--json")
 
-	showCmd := exec.Command("bd", args...)
-	var stdout bytes.Buffer
-	showCmd.Stdout = &stdout
-
-	if err := showCmd.Run(); err != nil {
+	out, err := runBdJSON(".", args...)
+	if err != nil {
 		// Batch failed - fall back to individual lookups for robustness
 		// This handles cases where some IDs are invalid/missing
 		for _, id := range issueIDs {
@@ -2315,7 +2318,7 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 	}
 
 	var issues []issueDetailsJSON
-	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+	if err := json.Unmarshal(out, &issues); err != nil {
 		return result
 	}
 
@@ -2330,20 +2333,17 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 // Prefer getIssueDetailsBatch for multiple issues to avoid N+1 subprocess calls.
 func getIssueDetails(issueID string) *issueDetails {
 	// Use bd show with routing - it should find the issue in the right rig
-	showCmd := exec.Command("bd", "show", issueID, "--json")
-	var stdout bytes.Buffer
-	showCmd.Stdout = &stdout
-
-	if err := showCmd.Run(); err != nil {
+	out, err := runBdJSON(".", "show", issueID, "--json")
+	if err != nil {
 		return nil
 	}
 	// Handle bd exit 0 bug: empty stdout means not found
-	if stdout.Len() == 0 {
+	if len(out) == 0 {
 		return nil
 	}
 
 	var issues []issueDetailsJSON
-	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil || len(issues) == 0 {
+	if err := json.Unmarshal(out, &issues); err != nil || len(issues) == 0 {
 		return nil
 	}
 
@@ -2411,7 +2411,7 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 		go func(beadsDir string) {
 			defer wg.Done()
 
-			cmd := exec.Command("bd", "list", "--type=agent", "--status=open", "--json", "--limit=0")
+			cmd := exec.Command("bd", "list", "--type=agent", "--status=open", "--json", "--flat", "--limit=0")
 			cmd.Dir = beadsDir
 			var stdout bytes.Buffer
 			cmd.Stdout = &stdout
@@ -2526,7 +2526,7 @@ func runConvoyTUI() error {
 // Numbers correspond to the order shown in 'gt convoy list'.
 func resolveConvoyNumber(townBeads string, n int) (string, error) {
 	// Get convoy list (same query as runConvoyList)
-	out, err := runBdJSON(townBeads, "list", "--type=convoy", "--json")
+	out, err := runBdJSON(filepath.Dir(townBeads), "list", "--type=convoy", "--json")
 	if err != nil {
 		return "", fmt.Errorf("listing convoys: %w", err)
 	}

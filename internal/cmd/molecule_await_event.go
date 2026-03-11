@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/channelevents"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -28,8 +28,8 @@ var (
 	awaitEventCleanup     bool
 )
 
-// validChannelName restricts channel names to safe characters (no path traversal).
-var validChannelName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+// validChannelName is a convenience alias for the canonical regex in channelevents.
+var validChannelName = channelevents.ValidChannelName
 
 var moleculeAwaitEventCmd = &cobra.Command{
 	Use:   "await-event",

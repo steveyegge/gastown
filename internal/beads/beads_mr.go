@@ -27,10 +27,9 @@ func (b *Beads) FindMRForBranchAny(branch string) (*Issue, error) {
 func (b *Beads) findMRForBranch(branch string, skipClosed bool) (*Issue, error) {
 	branchPrefix := "branch: " + branch + "\n"
 
-	issues, err := b.List(ListOptions{
-		Status:    "all",
-		Label:     "gt:merge-request",
-		Ephemeral: true,
+	issues, err := b.ListMergeRequests(ListOptions{
+		Status: "all",
+		Label:  "gt:merge-request",
 	})
 	if err != nil {
 		return nil, err

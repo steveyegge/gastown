@@ -236,6 +236,14 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 
 		// Nudge refinery to pick up the new MR
 		nudgeRefinery(rigName, "MERGE_READY received - check inbox for pending work")
+
+		// GH#2599: Back-link source issue to MR bead for discoverability.
+		if issueID != "" {
+			comment := fmt.Sprintf("MR created: %s", mrIssue.ID)
+			if _, err := bd.Run("comments", "add", issueID, comment); err != nil {
+				style.PrintWarning("could not back-link source issue %s to MR %s: %v", issueID, mrIssue.ID, err)
+			}
+		}
 	}
 
 	// Success output

@@ -582,7 +582,10 @@ func ensureGitIgnore(gitRepo, entry string) {
 		content += "\n"
 	}
 	content += entry + "\n"
-	_ = os.WriteFile(ignorePath, []byte(content), 0644) //nolint:gosec // G306: permissions are intentional
+	if err := os.WriteFile(ignorePath, []byte(content), 0644); err != nil {
+		// Non-fatal: spike-baseline writes still work without the ignore entry.
+		return
+	}
 }
 
 // removeSpikeBaseline removes the spike baseline file after a successful commit.

@@ -478,9 +478,7 @@ func dagSlingableIDs(dag *ConvoyDAG) []string {
 // against the town beads directory and unwraps external:prefix:id references.
 func convoyTrackedBeadIDs(townBeads, convoyID string) (map[string]bool, error) {
 	townRoot := filepath.Dir(townBeads)
-	depCmd := exec.Command("bd", "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
-	depCmd.Dir = townRoot
-	out, err := depCmd.Output()
+	out, err := runBdJSON(townRoot, "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("bd dep list %s --direction=down --type=tracks: %w", convoyID, err)
 	}
@@ -509,7 +507,7 @@ func findOverlappingConvoys(slingableIDs []string) ([]overlappingConvoy, error) 
 	}
 
 	// List all convoys (--all includes every status).
-	out, err := runBdJSON(townBeads, "list", "--type=convoy", "--all", "--json")
+	out, err := runBdJSON(filepath.Dir(townBeads), "list", "--type=convoy", "--all", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("listing convoys: %w", err)
 	}
@@ -1362,7 +1360,7 @@ func bdDepList(beadID string) ([]bdDepResult, error) {
 // directory. We resolve the correct .beads directory from the bead's prefix via
 // routes.jsonl so this works regardless of the caller's working directory.
 func bdListChildren(parentID string) ([]bdShowResult, error) {
-	cmd := exec.Command("bd", "list", "--parent="+parentID, "--json")
+	cmd := exec.Command("bd", "list", "--parent="+parentID, "--json", "--flat")
 	if dir := beadsDirForID(parentID); dir != "" {
 		cmd.Dir = dir
 	}

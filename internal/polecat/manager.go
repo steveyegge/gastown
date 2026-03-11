@@ -2010,6 +2010,11 @@ func (m *Manager) unassignWorkBeads(name string) {
 			if beads.IsAgentBead(issue) {
 				continue
 			}
+			// Skip protected beads (standing orders, role defs, etc.) —
+			// they should retain their status and assignee across polecat lifecycles.
+			if beads.IsProtectedBead(issue) {
+				continue
+			}
 			openStatus := "open"
 			empty := ""
 			if err := m.beads.Update(issue.ID, beads.UpdateOptions{

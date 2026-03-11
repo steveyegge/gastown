@@ -2,6 +2,7 @@
 package beads
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -178,14 +179,39 @@ func ComputeRedirectTarget(townRoot, worktreePath string) (string, error) {
 		return "", fmt.Errorf("cannot create redirect in canonical beads location (mayor/rig)")
 	}
 
-	rigRoot := filepath.Join(townRoot, parts[0])
+	rigName := parts[0]
+	rigRoot := filepath.Join(townRoot, rigName)
+	townBeadsPath := filepath.Join(townRoot, ".beads")
 	rigBeadsPath := filepath.Join(rigRoot, ".beads")
 	mayorBeadsPath := filepath.Join(rigRoot, "mayor", "rig", ".beads")
 
-	// Check rig-level .beads first, fall back to mayor/rig/.beads (tracked beads architecture).
-	// For dolt backend, the actual database lives at mayor/rig/.beads/dolt/, not at rig/.beads/.
-	// The rig-root .beads/ only has metadata.json (runtime state). If rig/.beads exists but has
-	// no database (no dolt/), redirect to mayor/rig/.beads where the DB is.
+	// Check rig-level .beads first: if the rig has its own database
+	// (metadata.json with dolt_database), crew must use rig-level beads
+	// so they see the correct prefix (e.g., lc- for laneassist, not hq-).
+	if rigHasOwnDB(rigBeadsPath) {
+		depth := len(parts) - 1
+		upPath := strings.Repeat("../", depth)
+		return upPath + ".beads", nil
+	}
+
+	// Rig has no own database — try town-level .beads (has routes.jsonl,
+	// config.yaml, Dolt server info, and hq- prefix).
+	townBeadsHasDB := false
+	if info, err := os.Stat(townBeadsPath); err == nil && info.IsDir() {
+		if _, err := os.Stat(filepath.Join(townBeadsPath, "dolt")); err == nil {
+			townBeadsHasDB = true
+		} else if _, err := os.Stat(filepath.Join(townBeadsPath, "config.yaml")); err == nil {
+			townBeadsHasDB = true
+		}
+	}
+
+	if townBeadsHasDB {
+		depth := len(parts)
+		upPath := strings.Repeat("../", depth)
+		return upPath + ".beads", nil
+	}
+
+	// Neither rig nor town has a database — fall back to rig-level beads.
 	usesMayorFallback := false
 	rigBeadsExists := false
 	if _, err := os.Stat(rigBeadsPath); err == nil {
@@ -207,7 +233,7 @@ func ComputeRedirectTarget(townRoot, worktreePath string) (string, error) {
 		// Rig .beads doesn't exist or has no database — check mayor/rig/.beads
 		if _, err := os.Stat(mayorBeadsPath); os.IsNotExist(err) {
 			if !rigBeadsExists {
-				return "", fmt.Errorf("no beads found at %s or %s", rigBeadsPath, mayorBeadsPath)
+				return "", fmt.Errorf("no beads found at %s, %s, or %s", townBeadsPath, rigBeadsPath, mayorBeadsPath)
 			}
 			// Rig .beads exists but has no DB and mayor path doesn't exist either.
 			// Fall through to use rig path (best effort).
@@ -326,4 +352,22 @@ func IsLocalBeadsDir(cwd, resolvedPath string) bool {
 	cleanResolved, _ := filepath.Abs(resolvedPath)
 	cleanLocal, _ := filepath.Abs(localBeads)
 	return cleanResolved == cleanLocal
+}
+
+// rigHasOwnDB checks if a rig's .beads/metadata.json declares its own
+// dolt_database. Rigs with their own database (e.g., laneassist with "lc-"
+// prefix) must not be redirected to town-level beads ("hq-" prefix).
+func rigHasOwnDB(rigBeadsPath string) bool {
+	metadataPath := filepath.Join(rigBeadsPath, "metadata.json")
+	data, err := os.ReadFile(metadataPath) //nolint:gosec // G304: trusted beads path
+	if err != nil {
+		return false
+	}
+	var meta struct {
+		DoltDatabase string `json:"dolt_database"`
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return false
+	}
+	return meta.DoltDatabase != ""
 }

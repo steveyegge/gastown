@@ -223,13 +223,15 @@ var doltSyncCmd = &cobra.Command{
 	Short: "Push Dolt databases to DoltHub remotes",
 	Long: `Push all local Dolt databases to their configured DoltHub remotes.
 
+When the Dolt server is running, pushes via SQL (CALL DOLT_PUSH) so the server
+stays up and running agents are not disrupted. Falls back to CLI push (which
+requires stopping the server) only when the server is not running.
+
 This command automates the tedious process of pushing each database individually:
-  1. Stops the Dolt server (required for CLI push)
-  2. Optionally purges closed ephemeral beads (--gc)
-  3. Iterates databases in .dolt-data/
-  4. For each database with a configured remote, runs dolt push
-  5. Reports success/failure per database
-  6. Restarts the Dolt server
+  1. Optionally purges closed ephemeral beads (--gc)
+  2. Iterates databases in .dolt-data/
+  3. For each database with a configured remote, pushes via SQL or CLI
+  4. Reports success/failure per database
 
 Use --db to sync a single database, --dry-run to preview, or --force for force-push.
 Use --gc to purge closed ephemeral beads (wisps, convoys) before pushing.
@@ -1404,10 +1406,9 @@ func runDoltSync(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check server state
-	wasRunning, pid, _ := doltserver.IsRunning(townRoot)
+	wasRunning, _, _ := doltserver.IsRunning(townRoot)
 
-	// GC phase: purge closed ephemeral beads BEFORE stopping the server.
-	// bd purge needs SQL access via the running Dolt server.
+	// GC phase: purge closed ephemeral beads (requires running server).
 	purgeResults := make(map[string]struct {
 		purged int
 		err    error
@@ -1434,77 +1435,22 @@ func runDoltSync(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Park all rigs before stopping the server.
-	// This stops witnesses/refineries so they don't detect the outage
-	// and restart the server while we're pushing.
-	var parkedRigs []string
-	if wasRunning && !doltSyncDry {
-		rigs, discoverErr := discoverAllRigs(townRoot)
-		if discoverErr != nil {
-			fmt.Printf("%s Could not discover rigs (continuing without parking): %v\n",
-				style.Warning.Render("!"), discoverErr)
-		} else {
-			for _, r := range rigs {
-				name := r.Name
-				if IsRigParked(townRoot, name) {
-					continue // already parked, don't touch it
-				}
-				if err := parkOneRig(name); err != nil {
-					fmt.Printf("%s Failed to park %s: %v\n", style.Warning.Render("!"), name, err)
-				} else {
-					parkedRigs = append(parkedRigs, name)
-				}
-			}
-		}
-	}
-
-	if wasRunning {
-		fmt.Printf("Stopping Dolt server (PID %d)...\n", pid)
-		if err := doltserver.Stop(townRoot); err != nil {
-			// If --gc ran, the server may have exited during the purge window (TOCTOU).
-			// Re-check actual state rather than matching error strings — Stop() can fail
-			// with various race-related errors (not running, process gone, etc.).
-			if doltSyncGC {
-				if stillRunning, _, _ := doltserver.IsRunning(townRoot); !stillRunning {
-					fmt.Printf("%s Dolt server already stopped (exited during GC)\n", style.Bold.Render("~"))
-				} else {
-					return fmt.Errorf("stopping Dolt server: %w", err)
-				}
-			} else {
-				return fmt.Errorf("stopping Dolt server: %w", err)
-			}
-		} else {
-			fmt.Printf("%s Dolt server stopped\n", style.Bold.Render("✓"))
-		}
-
-		// Guarantee restart even if push fails
-		defer func() {
-			fmt.Printf("\nRestarting Dolt server...\n")
-			if startErr := doltserver.Start(townRoot); startErr != nil {
-				fmt.Printf("%s Failed to restart Dolt server: %v\n", style.Bold.Render("✗"), startErr)
-				fmt.Printf("  Start manually with: %s\n", style.Dim.Render("gt dolt start"))
-			} else {
-				// Start() now verifies the server is accepting connections,
-				// so if we get here it's genuinely ready.
-				fmt.Printf("%s Dolt server restarted (accepting connections)\n", style.Bold.Render("✓"))
-			}
-
-			// Unpark rigs that we parked
-			for _, name := range parkedRigs {
-				if err := unparkOneRig(name); err != nil {
-					fmt.Printf("%s Failed to unpark %s: %v\n", style.Warning.Render("!"), name, err)
-				}
-			}
-		}()
-	}
-
 	opts := doltserver.SyncOptions{
 		Force:  doltSyncForce,
 		DryRun: doltSyncDry,
 		Filter: doltSyncDB,
 	}
 
-	results := doltserver.SyncDatabases(townRoot, opts)
+	// Use SQL push through the running server (no downtime).
+	// Fall back to CLI push (with server stop/restart) only when server isn't running.
+	var results []doltserver.SyncResult
+	if wasRunning {
+		fmt.Printf("Pushing via SQL (server stays running)...\n")
+		results = doltserver.SyncDatabasesSQL(townRoot, opts)
+	} else {
+		fmt.Printf("Server not running — using CLI push...\n")
+		results = doltserver.SyncDatabases(townRoot, opts)
+	}
 
 	if len(results) == 0 {
 		fmt.Println("No databases to sync.")

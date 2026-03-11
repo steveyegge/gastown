@@ -105,11 +105,7 @@ func TestGetAgentBeadID_UsesRigPrefix(t *testing.T) {
 }
 
 func TestPrimeFlagCombinations(t *testing.T) {
-	// Find the gt binary - we need to test CLI flag validation
-	gtBin, err := exec.LookPath("gt")
-	if err != nil {
-		t.Skip("gt binary not found in PATH")
-	}
+	gtBin := buildGT(t)
 
 	cases := []struct {
 		name      string
@@ -635,11 +631,7 @@ func TestExplain(t *testing.T) {
 
 // TestDryRunSkipsSideEffects tests that --dry-run skips various side effects via CLI.
 func TestDryRunSkipsSideEffects(t *testing.T) {
-	// Find the gt binary
-	gtBin, err := exec.LookPath("gt")
-	if err != nil {
-		t.Skip("gt binary not found in PATH")
-	}
+	gtBin := buildGT(t)
 
 	// Create a temp workspace
 	townRoot := t.TempDir()

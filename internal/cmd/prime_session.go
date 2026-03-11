@@ -27,29 +27,65 @@ type hookInput struct {
 }
 
 // readHookSessionID reads session ID from available sources in hook mode.
-// Priority: stdin JSON, GT_SESSION_ID env, CLAUDE_SESSION_ID env, auto-generate.
+//
+// Priority (env vars first so non-Claude runtimes skip the stdin read entirely):
+//  1. GT_SESSION_ID / CLAUDE_SESSION_ID env var  — set by the hook command
+//  2. Stdin JSON (Claude Code format)            — Claude sends {"session_id":…,"source":…}
+//  3. Persisted .runtime/session_id              — written by a prior SessionStart hook
+//  4. Auto-generate UUID
+//
+// Source is resolved from GT_HOOK_SOURCE env, stdin JSON, or empty.
+// Non-Claude runtimes (Gemini CLI, etc.) should set GT_SESSION_ID and
+// GT_HOOK_SOURCE in their hook commands to get full --hook behavior with
+// zero stdin delay. Example:
+//
+//	SessionStart: "export GT_SESSION_ID=$(uuidgen) GT_HOOK_SOURCE=startup && gt prime --hook"
+//	PreCompress:  "export GT_HOOK_SOURCE=compact && gt prime --hook"
 func readHookSessionID() (sessionID, source string) {
-	// 1. Try reading stdin JSON (Claude Code format)
+	// Source can come from env (any runtime) or stdin JSON (Claude only).
+	// Check env first so it's available even when stdin provides the session ID.
+	source = os.Getenv("GT_HOOK_SOURCE")
+
+	// 1. Environment variables (fast path — skips stdin read entirely)
+	if id := os.Getenv("GT_SESSION_ID"); id != "" {
+		return id, source
+	}
+	if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
+		return id, source
+	}
+
+	// 2. Try reading stdin JSON (Claude Code format).
+	//    Checked before persisted file so a fresh Claude session always wins
+	//    over a potentially stale .runtime/session_id from a previous session.
 	if input := readStdinJSON(); input != nil {
 		if input.SessionID != "" {
-			return input.SessionID, input.Source
+			// Stdin source overrides env source when both are present
+			if input.Source != "" {
+				source = input.Source
+			}
+			return input.SessionID, source
 		}
 	}
 
-	// 2. Environment variables
-	if id := os.Getenv("GT_SESSION_ID"); id != "" {
-		return id, ""
-	}
-	if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
-		return id, ""
+	// 3. Persisted session ID from a prior hook invocation (e.g., PreCompress
+	//    reusing the session ID that SessionStart wrote to .runtime/session_id)
+	if id := ReadPersistedSessionID(); id != "" {
+		return id, source
 	}
 
-	// 3. Auto-generate
-	return uuid.New().String(), ""
+	// 4. Auto-generate
+	return uuid.New().String(), source
 }
 
+// stdinReadTimeout is how long readStdinJSON waits for data before giving up.
+// This is a safety net for runtimes that pipe stdin without sending data AND
+// don't set GT_SESSION_ID. Claude Code sends JSON on the first tick, so 500ms
+// is generous. Non-Claude runtimes should set GT_SESSION_ID to skip this entirely.
+const stdinReadTimeout = 500 * time.Millisecond
+
 // readStdinJSON attempts to read and parse JSON from stdin.
-// Returns nil if stdin is empty, not a pipe, or invalid JSON.
+// Returns nil if stdin is empty, not a pipe, invalid JSON, or no data
+// arrives within stdinReadTimeout.
 func readStdinJSON() *hookInput {
 	// Check if stdin has data (non-blocking)
 	stat, err := os.Stdin.Stat()
@@ -63,10 +99,31 @@ func readStdinJSON() *hookInput {
 		return nil
 	}
 
-	// Read first line (JSON should be on one line)
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadString('\n')
-	if err != nil && line == "" {
+	// Read with timeout: some LLM runtimes pipe stdin without sending data,
+	// which would block ReadString forever. Use a goroutine + timer so we
+	// fall through to env-var / auto-generate paths after stdinReadTimeout.
+	type readResult struct {
+		line string
+		err  error
+	}
+	ch := make(chan readResult, 1)
+	go func() {
+		reader := bufio.NewReader(os.Stdin)
+		line, err := reader.ReadString('\n')
+		ch <- readResult{line, err}
+	}()
+
+	var line string
+	select {
+	case r := <-ch:
+		if r.err != nil && r.line == "" {
+			return nil
+		}
+		line = r.line
+	case <-time.After(stdinReadTimeout):
+		// The goroutine above is still blocked on ReadString and will leak.
+		// This is intentional — gt prime is a short-lived CLI command that
+		// exits shortly after, so the goroutine is cleaned up by process exit.
 		return nil
 	}
 

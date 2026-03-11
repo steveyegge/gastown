@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/channelevents"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -609,7 +610,7 @@ func nudgeWitness(rigName, message string) {
 	// Emit a file event so the witness's await-event unblocks instantly.
 	townRoot, _ := workspace.FindFromCwd()
 	if townRoot != "" {
-		_, _ = EmitEventToTown(townRoot, "witness", "POLECAT_DONE", []string{
+		_, _ = channelevents.EmitToTown(townRoot, "witness", "POLECAT_DONE", []string{
 			"source=polecat",
 			"message=" + message,
 		})
@@ -644,7 +645,7 @@ func nudgeRefinery(rigName, message string) {
 	// This is the programmatic bridge between mq submit and the event system.
 	townRoot, _ := workspace.FindFromCwd()
 	if townRoot != "" {
-		_, _ = EmitEventToTown(townRoot, "refinery", "MQ_SUBMIT", []string{
+		_, _ = channelevents.EmitToTown(townRoot, "refinery", "MQ_SUBMIT", []string{
 			"source=sling",
 			"message=" + message,
 		})

@@ -4,6 +4,20 @@ import (
 	"testing"
 )
 
+type uniqueBase36Reader struct {
+	n uint64
+}
+
+func (r *uniqueBase36Reader) Read(p []byte) (int, error) {
+	v := r.n
+	r.n++
+	for i := len(p) - 1; i >= 0; i-- {
+		p[i] = byte(v % 36)
+		v /= 36
+	}
+	return len(p), nil
+}
+
 func TestGenerateShortID_Length(t *testing.T) {
 	id := generateShortID()
 	if len(id) != 5 {
@@ -31,8 +45,9 @@ func TestGenerateShortID_ValidChars(t *testing.T) {
 func TestGenerateShortID_Uniqueness(t *testing.T) {
 	seen := make(map[string]bool)
 	const n = 1000
+	reader := &uniqueBase36Reader{}
 	for i := 0; i < n; i++ {
-		id := generateShortID()
+		id := generateShortIDFromReader(reader)
 		if seen[id] {
 			t.Errorf("collision after %d IDs: %q", i, id)
 		}

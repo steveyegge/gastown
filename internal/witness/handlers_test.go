@@ -1,6 +1,7 @@
 package witness
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1825,5 +1826,70 @@ func TestZombieAgentSelfReportedStuck_Classification(t *testing.T) {
 	// Should imply active work (agent is alive and asking for help)
 	if !ZombieAgentSelfReportedStuck.ImpliesActiveWork() {
 		t.Error("ZombieAgentSelfReportedStuck should imply active work")
+	}
+}
+
+func TestNotifyRefineryMergeReady_EmitsChannelEvent(t *testing.T) {
+	// Create a fake town root with the workspace marker so workspace.Find recognizes it
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", "town.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set GT_TEST_NUDGE_LOG to prevent actual tmux operations in nudgeRefinery
+	t.Setenv("GT_TEST_NUDGE_LOG", filepath.Join(t.TempDir(), "nudge.log"))
+
+	result := &HandlerResult{}
+	// notifyRefineryMergeReady takes workDir and calls workspace.Find(workDir) internally
+	notifyRefineryMergeReady(townRoot, "dashboard", result)
+
+	// Verify that a MERGE_READY event file was created in the refinery channel
+	eventDir := filepath.Join(townRoot, "events", "refinery")
+	entries, err := os.ReadDir(eventDir)
+	if err != nil {
+		t.Fatalf("reading event dir: %v", err)
+	}
+
+	var eventFiles []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".event") {
+			eventFiles = append(eventFiles, e.Name())
+		}
+	}
+
+	if len(eventFiles) == 0 {
+		t.Fatal("expected at least one .event file in ~/gt/events/refinery/, got none")
+	}
+
+	// Read and verify the event content
+	data, err := os.ReadFile(filepath.Join(eventDir, eventFiles[0]))
+	if err != nil {
+		t.Fatalf("reading event file: %v", err)
+	}
+
+	var event map[string]interface{}
+	if err := json.Unmarshal(data, &event); err != nil {
+		t.Fatalf("parsing event JSON: %v", err)
+	}
+
+	if event["type"] != "MERGE_READY" {
+		t.Errorf("event type = %v, want MERGE_READY", event["type"])
+	}
+	if event["channel"] != "refinery" {
+		t.Errorf("event channel = %v, want refinery", event["channel"])
+	}
+
+	payload, ok := event["payload"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("payload is not a map: %T", event["payload"])
+	}
+	if payload["source"] != "witness" {
+		t.Errorf("payload.source = %v, want witness", payload["source"])
+	}
+	if payload["rig"] != "dashboard" {
+		t.Errorf("payload.rig = %v, want dashboard", payload["rig"])
 	}
 }

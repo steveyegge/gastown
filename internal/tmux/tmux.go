@@ -350,6 +350,11 @@ func (t *Tmux) NewSessionWithCommandAndEnv(name, workDir, command string, env ma
 	if err := validateSessionName(name); err != nil {
 		return err
 	}
+
+	// Kill stale same-named sessions on other sockets to prevent split-brain.
+	// This is best-effort: failures are silently ignored.
+	t.killSplitBrainSession(name)
+
 	if workDir != "" {
 		info, err := os.Stat(workDir)
 		if err != nil {
@@ -722,6 +727,24 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 		return nil
 	}
 	return err
+}
+
+// killSplitBrainSession kills a same-named session on the "default" tmux socket
+// if this Tmux instance targets a different socket. This prevents split-brain
+// where stale sessions on the wrong socket shadow the real ones, causing nudge
+// and other session-discovery commands to fail.
+//
+// Best-effort: all errors are silently ignored. The stale session may not exist,
+// the default server may not be running, etc. — none of these should block
+// session creation on the correct socket.
+func (t *Tmux) killSplitBrainSession(name string) {
+	if t.socketName == "" || t.socketName == "default" || t.socketName == noTownSocket {
+		return // Already on default or no town context — nothing to clean up
+	}
+	other := NewTmuxWithSocket("default")
+	if running, _ := other.HasSession(name); running {
+		_ = other.KillSessionWithProcesses(name)
+	}
 }
 
 // collectReparentedGroupMembers returns process group members that have been

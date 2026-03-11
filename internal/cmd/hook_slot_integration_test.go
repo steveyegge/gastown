@@ -12,8 +12,10 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/testutil"
 )
 
@@ -34,15 +36,19 @@ func setupHookTestTown(t *testing.T) (townRoot, polecatDir, rigPrefix string) {
 
 	townRoot = t.TempDir()
 
-	// Create workspace marker so FindFromCwd resolves to the correct town root
-	// (without this, Find() picks up gastown/mayor/ as a secondary marker
-	// and returns the rig dir instead of the real town root)
-	mayorDir := filepath.Join(townRoot, "mayor")
-	if err := os.MkdirAll(mayorDir, 0755); err != nil {
-		t.Fatalf("mkdir mayor: %v", err)
+	// Create a real town marker so workspace discovery resolves the outer town
+	// root instead of stopping at the nested rig mayor directory.
+	townMayorDir := filepath.Join(townRoot, "mayor")
+	if err := os.MkdirAll(townMayorDir, 0755); err != nil {
+		t.Fatalf("mkdir town mayor: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test"}`+"\n"), 0644); err != nil {
-		t.Fatalf("write town.json: %v", err)
+	if err := config.SaveTownConfig(filepath.Join(townMayorDir, "town.json"), &config.TownConfig{
+		Type:      "town",
+		Version:   config.CurrentTownVersion,
+		Name:      "hook-test-town",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("write town config: %v", err)
 	}
 
 	// Create town-level .beads directory

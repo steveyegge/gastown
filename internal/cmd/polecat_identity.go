@@ -804,7 +804,7 @@ type IssueInfo struct {
 // queryAssignedIssues queries beads for issues assigned to a specific agent.
 func queryAssignedIssues(rigPath, assignee, status string) ([]IssueInfo, error) {
 	// Use bd list with filters
-	args := []string{"list", "--assignee=" + assignee, "--json"}
+	args := []string{"list", "--assignee=" + assignee, "--json", "--flat"}
 	if status != "" {
 		args = append(args, "--status="+status)
 	}

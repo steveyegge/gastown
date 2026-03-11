@@ -8,10 +8,12 @@ import (
 	"testing"
 )
 
-// isClaudeCmd checks if a command is claude (either "claude" or a path ending in "/claude").
+// isClaudeCmd checks if a command resolves to the claude binary on any platform.
 // Note: Named differently from loader_test.go's isClaudeCommand to avoid redeclaration.
 func isClaudeCmd(cmd string) bool {
-	return cmd == "claude" || strings.HasSuffix(cmd, "/claude")
+	base := filepath.Base(cmd)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	return base == "claude"
 }
 
 func TestBuiltinPresets(t *testing.T) {

@@ -155,7 +155,7 @@ func ScanStaleHooks(townRoot string, cfg *StaleHookConfig) (*StaleHookScanResult
 
 // listHookedBeads returns all beads with status=hooked.
 func listHookedBeads(townRoot string) ([]*HookedBead, error) {
-	cmd := exec.Command("bd", "list", "--status=hooked", "--json", "--limit=0")
+	cmd := exec.Command("bd", "list", "--status=hooked", "--json", "--flat", "--limit=0")
 	cmd.Dir = townRoot
 
 	output, err := cmd.Output()

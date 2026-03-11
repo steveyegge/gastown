@@ -10,7 +10,7 @@ import (
 )
 
 // TestInitRegistry_SocketFromTownName verifies GT_TMUX_SOCKET socket selection:
-//   - unset / "default" / "auto" → per-town socket derived from town directory name
+//   - unset / "default" / "auto" → use the default tmux socket (empty name)
 //   - explicit value              → that value verbatim
 func TestInitRegistry_SocketFromTownName(t *testing.T) {
 	origTMUX := os.Getenv("TMUX")
@@ -75,13 +75,11 @@ func TestInitRegistry_SocketFromTownName(t *testing.T) {
 			_ = InitRegistry(townRoot)
 
 			got := tmux.GetDefaultSocket()
-			// Socket should start with the sanitized basename
-			base := sanitizeTownName(tt.townDir)
-			if !strings.HasPrefix(got, base+"-") {
-				t.Errorf("after InitRegistry(%q) with GT_TMUX_SOCKET=%q:\n  socket = %q, want prefix %q-",
-					townRoot, tt.gtTmuxSocket, got, base)
+			if got != "" {
+				t.Errorf("after InitRegistry(%q) with GT_TMUX_SOCKET=%q:\n  socket = %q, want default socket \"\"",
+					townRoot, tt.gtTmuxSocket, got)
 			}
-			// Socket should be deterministic
+
 			tmux.SetDefaultSocket("")
 			_ = InitRegistry(townRoot)
 			got2 := tmux.GetDefaultSocket()
@@ -122,13 +120,8 @@ func TestInitRegistry_SocketFromTownName(t *testing.T) {
 		_ = InitRegistry(townB)
 		socketB := tmux.GetDefaultSocket()
 
-		if socketA == socketB {
-			t.Errorf("same-basename towns got identical sockets: %q", socketA)
-		}
-
-		// Both should start with "gt-"
-		if !strings.HasPrefix(socketA, "gt-") || !strings.HasPrefix(socketB, "gt-") {
-			t.Errorf("sockets should start with 'gt-': A=%q, B=%q", socketA, socketB)
+		if socketA != "" || socketB != "" {
+			t.Errorf("default socket should stay empty across towns: A=%q, B=%q", socketA, socketB)
 		}
 	})
 }
