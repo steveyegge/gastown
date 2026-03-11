@@ -1745,9 +1745,13 @@ func TestResolveWorkerAgentConfig_TownCrewAgents(t *testing.T) {
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "myrig")
 
-	// Create a fake codex binary
+	// Create a fake codex binary (needs .exe on Windows for exec.LookPath)
 	binDir := t.TempDir()
-	codexPath := filepath.Join(binDir, "codex")
+	codexName := "codex"
+	if runtime.GOOS == "windows" {
+		codexName = "codex.exe"
+	}
+	codexPath := filepath.Join(binDir, codexName)
 	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatalf("write codex stub: %v", err)
 	}

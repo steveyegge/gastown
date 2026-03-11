@@ -143,6 +143,7 @@ func pollerAlive(townRoot, session string) (int, bool) {
 
 	proc, err := os.FindProcess(pid)
 	if err != nil {
+		_ = os.Remove(pidPath) // stale PID — clean up
 		return 0, false
 	}
 

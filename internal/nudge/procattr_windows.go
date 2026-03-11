@@ -8,20 +8,27 @@ import (
 )
 
 // detachedProcAttr returns SysProcAttr for Windows.
-// On Windows, CREATE_NEW_PROCESS_GROUP detaches the child.
+// CREATE_NEW_PROCESS_GROUP detaches the child from the parent's console group.
 func detachedProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
 		CreationFlags: 0x00000200, // CREATE_NEW_PROCESS_GROUP
 	}
 }
 
-// isProcessAlive checks if a process is running.
-// On Windows, FindProcess always succeeds, so we attempt signal 0.
+// isProcessAlive checks if a process is running on Windows.
+// Uses syscall.OpenProcess directly (no x/sys/windows dependency) for
+// maximum CI compatibility. If we can open the process handle, it's alive.
 func isProcessAlive(proc *os.Process) bool {
-	return proc.Signal(syscall.Signal(0)) == nil
+	const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+	h, err := syscall.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(proc.Pid))
+	if err != nil {
+		return false // can't open → not running (or access denied)
+	}
+	syscall.CloseHandle(h)
+	return true
 }
 
-// terminateProcess kills the process on Windows.
+// terminateProcess kills the process on Windows (no graceful SIGTERM).
 func terminateProcess(proc *os.Process) error {
 	return proc.Kill()
 }
