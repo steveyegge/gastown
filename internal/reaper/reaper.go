@@ -668,7 +668,7 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 }
 
 // batchDeleteRows deletes rows from a primary table and its auxiliary tables in batches.
-func batchDeleteRows(ctx context.Context, db *sql.DB, dbName string, idQuery string, cutoffArg time.Time, primaryTable string, auxTables []string) (int, error) {
+func batchDeleteRows(ctx context.Context, db *sql.DB, _ string, idQuery string, cutoffArg time.Time, primaryTable string, auxTables []string) (int, error) {
 	totalDeleted := 0
 	for {
 		idRows, err := db.QueryContext(ctx, idQuery, cutoffArg)
