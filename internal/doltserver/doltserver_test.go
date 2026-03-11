@@ -533,6 +533,10 @@ func TestEnsureMetadata_HQ(t *testing.T) {
 	if metadata["custom_field"] != "preserved" {
 		t.Errorf("custom_field was not preserved: %v", metadata["custom_field"])
 	}
+	// dolt_server_port must be written to prevent bd from spawning rogue local servers
+	if metadata["dolt_server_port"] != float64(DefaultPort) {
+		t.Errorf("dolt_server_port = %v, want %v", metadata["dolt_server_port"], DefaultPort)
+	}
 }
 
 func TestEnsureMetadata_Rig(t *testing.T) {
@@ -564,6 +568,9 @@ func TestEnsureMetadata_Rig(t *testing.T) {
 	if metadata["dolt_database"] != "myrig" {
 		t.Errorf("dolt_database = %v, want myrig", metadata["dolt_database"])
 	}
+	if metadata["dolt_server_port"] != float64(DefaultPort) {
+		t.Errorf("dolt_server_port = %v, want %v", metadata["dolt_server_port"], DefaultPort)
+	}
 }
 
 func TestEnsureMetadata_Idempotent(t *testing.T) {
@@ -594,6 +601,35 @@ func TestEnsureMetadata_Idempotent(t *testing.T) {
 
 	if metadata["dolt_database"] != "hq" {
 		t.Errorf("dolt_database = %v, want hq", metadata["dolt_database"])
+	}
+}
+
+func TestEnsureMetadata_PortFromEnv(t *testing.T) {
+	townRoot := t.TempDir()
+
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GT_DOLT_PORT", "4444")
+
+	if err := EnsureMetadata(townRoot, "hq"); err != nil {
+		t.Fatalf("EnsureMetadata failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(beadsDir, "metadata.json"))
+	if err != nil {
+		t.Fatalf("reading metadata: %v", err)
+	}
+
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatalf("parsing metadata: %v", err)
+	}
+
+	if metadata["dolt_server_port"] != float64(4444) {
+		t.Errorf("dolt_server_port = %v, want 4444", metadata["dolt_server_port"])
 	}
 }
 
