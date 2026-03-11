@@ -33,6 +33,10 @@ type Rig struct {
 	// Crew workers are user-managed persistent workspaces.
 	Crew []string `json:"crew,omitempty"`
 
+	// Artisans is the list of artisan names in this rig.
+	// Artisans are long-lived specialized workers.
+	Artisans []string `json:"artisans,omitempty"`
+
 	// HasWitness indicates if the rig has a witness agent.
 	HasWitness bool `json:"has_witness"`
 
@@ -48,6 +52,7 @@ type Rig struct {
 var AgentDirs = []string{
 	"polecats",
 	"crew",
+	"artisans",
 	"refinery/rig",
 	"witness",
 	"mayor/rig",
@@ -58,6 +63,7 @@ type RigSummary struct {
 	Name         string `json:"name"`
 	PolecatCount int    `json:"polecat_count"`
 	CrewCount    int    `json:"crew_count"`
+	ArtisanCount int    `json:"artisan_count"`
 	HasWitness   bool   `json:"has_witness"`
 	HasRefinery  bool   `json:"has_refinery"`
 }
@@ -68,6 +74,7 @@ func (r *Rig) Summary() RigSummary {
 		Name:         r.Name,
 		PolecatCount: len(r.Polecats),
 		CrewCount:    len(r.Crew),
+		ArtisanCount: len(r.Artisans),
 		HasWitness:   r.HasWitness,
 		HasRefinery:  r.HasRefinery,
 	}

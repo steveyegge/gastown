@@ -523,7 +523,7 @@ func TestRoleNames(t *testing.T) {
 	}
 
 	names := tmpl.RoleNames()
-	expected := []string{"mayor", "witness", "refinery", "polecat", "crew", "deacon", "boot"}
+	expected := []string{"mayor", "witness", "refinery", "polecat", "crew", "deacon", "boot", "artisan", "architect", "conductor"}
 
 	if len(names) != len(expected) {
 		t.Errorf("RoleNames() = %v, want %v", names, expected)

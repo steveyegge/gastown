@@ -49,6 +49,12 @@ func outputPrimeContext(ctx RoleContext) (string, error) {
 		roleName = "boot"
 	case RoleDog:
 		roleName = "dog"
+	case RoleArtisan:
+		roleName = constants.RoleArtisan
+	case RoleArchitect:
+		roleName = constants.RoleArchitect
+	case RoleConductor:
+		roleName = constants.RoleConductor
 	default:
 		// Unknown role - use fallback
 		outputPrimeContextFallback(ctx)
@@ -105,9 +111,52 @@ func outputPrimeContextFallback(ctx RoleContext) {
 		outputCrewContext(ctx)
 	case RoleBoot:
 		outputBootContext(ctx)
+	case RoleArtisan:
+		outputArtisanContext(ctx)
+	case RoleArchitect:
+		outputArchitectContext(ctx)
+	case RoleConductor:
+		outputConductorContext(ctx)
 	default:
 		outputUnknownContext(ctx)
 	}
+}
+
+func outputArtisanContext(ctx RoleContext) {
+	fmt.Printf("%s\n\n", style.Bold.Render("# Artisan Worker Context"))
+	fmt.Printf("You are artisan **%s** in rig: %s\n\n",
+		style.Bold.Render(ctx.Polecat), style.Bold.Render(ctx.Rig))
+	fmt.Println("## Key Commands")
+	fmt.Println("- `" + cli.Name() + " mol status` - Show molecule status")
+	fmt.Println("- `" + cli.Name() + " mail inbox` - Check your inbox")
+	fmt.Println("- `" + cli.Name() + " prime` - Reload context")
+	fmt.Println("- `" + cli.Name() + " done` - Signal work complete")
+	fmt.Println()
+	fmt.Printf("Artisan: %s | Rig: %s\n",
+		style.Dim.Render(ctx.Polecat), style.Dim.Render(ctx.Rig))
+}
+
+func outputArchitectContext(ctx RoleContext) {
+	fmt.Printf("%s\n\n", style.Bold.Render("# Architect Context"))
+	fmt.Printf("You are the **Architect** (codebase oracle) for rig: %s\n\n", style.Bold.Render(ctx.Rig))
+	fmt.Println("## Key Commands")
+	fmt.Println("- `" + cli.Name() + " mail inbox` - Check consultation requests")
+	fmt.Println("- `" + cli.Name() + " mail send <target> -s \"Subject\" --stdin` - Reply with analysis")
+	fmt.Println("- `" + cli.Name() + " prime` - Reload context")
+	fmt.Println()
+	fmt.Printf("Rig: %s\n", style.Dim.Render(ctx.Rig))
+}
+
+func outputConductorContext(ctx RoleContext) {
+	fmt.Printf("%s\n\n", style.Bold.Render("# Conductor Context"))
+	fmt.Printf("You are the **Conductor** (orchestrator) for rig: %s\n\n", style.Bold.Render(ctx.Rig))
+	fmt.Println("## Key Commands")
+	fmt.Println("- `" + cli.Name() + " mol status` - Show molecule status")
+	fmt.Println("- `" + cli.Name() + " mail inbox` - Check your inbox")
+	fmt.Println("- `" + cli.Name() + " mail send <target> -s \"Subject\" --stdin` - Send messages")
+	fmt.Println("- `" + cli.Name() + " prime` - Reload context")
+	fmt.Println()
+	fmt.Printf("Rig: %s\n", style.Dim.Render(ctx.Rig))
 }
 
 func outputMayorContext(ctx RoleContext) {
@@ -492,6 +541,36 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context)")
 		fmt.Println("2. Run `" + cli.Name() + " boot triage` immediately")
 		fmt.Println("3. When triage completes, exit cleanly")
+	case RoleArtisan:
+		fmt.Println()
+		fmt.Println("---")
+		fmt.Println()
+		fmt.Println("**STARTUP PROTOCOL**: You are an Artisan. Please:")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Printf("2. Announce: \"%s Artisan %s, checking in.\"\n", ctx.Rig, ctx.Polecat)
+		fmt.Println("3. Check hook: `" + cli.Name() + " hook`")
+		fmt.Println("   - If work hooked -> **RUN IT** (apply your specialty expertise)")
+		fmt.Println("   - If hook empty -> check mail: `" + cli.Name() + " mail inbox`")
+		fmt.Println("4. If no work found -> run `" + cli.Name() + " done` and exit")
+	case RoleArchitect:
+		fmt.Println()
+		fmt.Println("---")
+		fmt.Println()
+		fmt.Println("**STARTUP PROTOCOL**: You are the Architect. Please:")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context)")
+		fmt.Println("2. Check mail: `" + cli.Name() + " mail inbox` for consultation requests")
+		fmt.Println("3. If consultations pending -> read, analyze codebase, and reply")
+		fmt.Println("4. If no consultations -> await requests")
+	case RoleConductor:
+		fmt.Println()
+		fmt.Println("---")
+		fmt.Println()
+		fmt.Println("**STARTUP PROTOCOL**: You are the Conductor. Please:")
+		fmt.Println("1. Run `" + cli.Name() + " prime` (loads full context, mail, and pending work)")
+		fmt.Println("2. Check hook: `" + cli.Name() + " hook`")
+		fmt.Println("   - If work hooked -> **RUN IT** (begin planning workflow)")
+		fmt.Println("   - If hook empty -> check mail: `" + cli.Name() + " mail inbox`")
+		fmt.Println("3. If new bead assigned -> consult Architect, generate plan, route to workers")
 	}
 }
 
@@ -640,8 +719,8 @@ func outputState(ctx RoleContext, jsonOutput bool) {
 // outputCheckpointContext reads and displays any previous session checkpoint.
 // This enables crash recovery by showing what the previous session was working on.
 func outputCheckpointContext(ctx RoleContext) {
-	// Only applies to polecats and crew workers
-	if ctx.Role != RolePolecat && ctx.Role != RoleCrew {
+	// Only applies to polecats, crew workers, and artisans
+	if ctx.Role != RolePolecat && ctx.Role != RoleCrew && ctx.Role != RoleArtisan {
 		return
 	}
 
