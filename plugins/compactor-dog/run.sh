@@ -24,7 +24,7 @@ DOLT_PORT="${DOLT_PORT:-3307}"
 DOLT_USER="${DOLT_USER:-root}"
 COMMIT_THRESHOLD="${COMMIT_THRESHOLD:-500}"
 # Default production databases (matches reaper.DefaultDatabases)
-DEFAULT_DBS="hq,bd,gt"
+DEFAULT_DBS="hq,gt,property_scrapers,wa"
 DRY_RUN=false
 CHECK_ONLY=false
 LOGFILE=""
@@ -76,11 +76,13 @@ validate_name() {
   return 0
 }
 
-# Validate that a value looks like a Dolt commit hash (hex string).
+# Validate that a value looks like a Dolt commit hash (base32 encoding).
+# Dolt uses noms/prolly tree hashes encoded in base32 (lowercase a-z, 0-9),
+# not hex. The original ^[a-fA-F0-9]+$ regex was incorrect.
 validate_hash() {
   local hash="$1"
   local context="$2"
-  if [[ ! "$hash" =~ ^[a-fA-F0-9]+$ ]]; then
+  if [[ ! "$hash" =~ ^[a-z0-9]+$ ]]; then
     log "ERROR: Unsafe $context hash rejected: '$hash'"
     return 1
   fi
