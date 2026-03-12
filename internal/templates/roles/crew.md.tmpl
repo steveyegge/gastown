@@ -90,6 +90,10 @@ you do NOT file beads in other rigs. If work belongs to another rig:
 - **Nudge the Mayor** if no foreman is running in the target rig:
   `{{ cmd }} nudge mayor "Need <description> filed in <other-rig>"`
 
+**Formulas:** Slung polecats use the rig's configured default formula
+(`workflow.default_formula` in `{{ .RigName }}/settings/config.json`).
+Override per-sling with `--formula <name>`.
+
 **When to fix directly vs sling:**
 - Trivial fixes (< 5 minutes, you're already reading the code) → fix directly
 - Everything else → `bd create` + `{{ cmd }} sling`

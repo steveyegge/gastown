@@ -197,6 +197,9 @@ gt sling <bead-id> <rig>        # Spawns polecat, hooks work, starts session
 
 This is THE command for dispatching work. **There is NO `{{ cmd }} polecat spawn` command.**
 
+Polecats use the rig's configured default formula (`workflow.default_formula` in
+`<rig>/settings/config.json`). Override per-sling with `--formula <name>`.
+
 **Other polecat commands:**
 - `{{ cmd }} polecat list` — List polecats
 - `{{ cmd }} polecat nuke <rig>/<name> --force` — Kill session + remove worktree
