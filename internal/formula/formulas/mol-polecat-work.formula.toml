@@ -135,6 +135,17 @@ gt mail send <rig>/witness -s "HELP: Unclear requirements" -m "Issue: {{issue}}
 Question: <what you need clarified>"
 ```
 
+**7. Fetch relevant rally_tavern knowledge (DURING phase):**
+```bash
+gt rally lookup <primary-tag-for-this-work> 2>/dev/null
+# e.g.: gt rally lookup security
+#        gt rally lookup dolt
+#        gt rally lookup flask
+```
+If results are returned, review them before starting implementation — they contain
+battle-tested practices and known solutions from prior rig work. If `gt rally` is
+unavailable or returns nothing, proceed normally.
+
 **Exit criteria:** You understand the work and can begin implementation."""
 
 [[steps]]

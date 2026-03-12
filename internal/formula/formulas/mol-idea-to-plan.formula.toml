@@ -80,6 +80,16 @@ echo "profile_path=<resolved-path>" >> .prd-reviews/{{review_id}}/state.env
 
 If no profile is found, proceed normally — this is optional context.
 
+**Load rally_tavern knowledge (BEFORE phase):**
+After loading the project profile, fetch relevant knowledge from rally_tavern:
+```bash
+gt rally search --profile 2>/dev/null
+```
+If this returns results, include them in a `## Relevant Knowledge` section in the PRD draft.
+These are battle-tested practices and solutions from prior work across all rigs — they help
+avoid known pitfalls and reuse existing solutions. If the command is unavailable or rally_tavern
+is absent, skip silently.
+
 **Your task:**
 Pick a short slug for this review (e.g., "notification-levels", "merge-queue-v2") and use it
 as `{{review_id}}` in all paths below. This ID is reused by downstream steps.
