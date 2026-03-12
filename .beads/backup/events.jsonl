@@ -287,3 +287,4 @@
 {"actor":"dog","comment":"Added label: plugin:rebuild-gt","created_at":"2026-03-11T15:16:46Z","event_type":"label_added","id":385,"issue_id":"gt-4ul","new_value":null,"old_value":null}
 {"actor":"dog","comment":"Added label: rig:gastown","created_at":"2026-03-11T15:16:46Z","event_type":"label_added","id":386,"issue_id":"gt-4ul","new_value":null,"old_value":null}
 {"actor":"dog","comment":"Added label: result:success","created_at":"2026-03-11T15:16:46Z","event_type":"label_added","id":387,"issue_id":"gt-4ul","new_value":null,"old_value":null}
+{"actor":"mayor","comment":null,"created_at":"2026-03-11T20:39:40Z","event_type":"created","id":388,"issue_id":"gt-29z","new_value":"","old_value":""}
