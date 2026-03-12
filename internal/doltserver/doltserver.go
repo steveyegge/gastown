@@ -957,7 +957,7 @@ func KillImposters(townRoot string) error {
 	return nil
 }
 
-// StopIdleMonitors finds and kills any "bd dolt idle-monitor" processes
+// StopIdleMonitors finds and terminates "bd dolt idle-monitor" processes
 // associated with this town. These background processes auto-spawn rogue
 // Dolt servers from per-rig .beads/dolt/ directories when the canonical
 // server is unreachable, creating a race condition during restart.
@@ -972,6 +972,9 @@ func StopIdleMonitors(townRoot string) int {
 		return 0
 	}
 
+	config := DefaultConfig(townRoot)
+	portStr := strconv.Itoa(config.Port)
+
 	stopped := 0
 	for _, line := range strings.Split(string(output), "\n") {
 		line = strings.TrimSpace(line)
@@ -981,13 +984,26 @@ func StopIdleMonitors(townRoot string) int {
 		if !strings.Contains(line, "dolt") {
 			continue
 		}
-		// Match processes whose working directory or args reference this town
-		if !strings.Contains(line, absRoot) && !strings.Contains(line, townRoot) {
-			// Also match by port — idle-monitors for this town's port
-			config := DefaultConfig(townRoot)
-			if !strings.Contains(line, strconv.Itoa(config.Port)) {
-				continue
+
+		// Scope to this town: match by path in args
+		matchesTown := strings.Contains(line, absRoot) || strings.Contains(line, townRoot)
+		if !matchesTown {
+			// Check for --port <portStr> as a discrete argument to avoid
+			// false matches on PIDs or other numeric substrings
+			args := strings.Fields(line)
+			for i, arg := range args {
+				if (arg == "--port" || arg == "-p") && i+1 < len(args) && args[i+1] == portStr {
+					matchesTown = true
+					break
+				}
+				if arg == "--port="+portStr {
+					matchesTown = true
+					break
+				}
 			}
+		}
+		if !matchesTown {
+			continue
 		}
 
 		fields := strings.Fields(line)
