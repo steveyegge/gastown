@@ -957,6 +957,31 @@ func KillImposters(townRoot string) error {
 	return nil
 }
 
+// containsPathBoundary checks whether line contains path as a complete path
+// (not a prefix of a longer path). The character after the match must be a
+// path separator, whitespace, or end-of-string.
+func containsPathBoundary(line, path string) bool {
+	if path == "" {
+		return false
+	}
+	for start := 0; start < len(line); {
+		idx := strings.Index(line[start:], path)
+		if idx < 0 {
+			return false
+		}
+		end := start + idx + len(path)
+		if end >= len(line) {
+			return true
+		}
+		c := line[end]
+		if c == filepath.Separator || c == ' ' || c == '\t' {
+			return true
+		}
+		start = start + idx + 1
+	}
+	return false
+}
+
 // StopIdleMonitors finds and terminates "bd dolt idle-monitor" processes
 // associated with this town. These background processes auto-spawn rogue
 // Dolt servers from per-rig .beads/dolt/ directories when the canonical
@@ -985,8 +1010,9 @@ func StopIdleMonitors(townRoot string) int {
 			continue
 		}
 
-		// Scope to this town: match by path in args
-		matchesTown := strings.Contains(line, absRoot) || strings.Contains(line, townRoot)
+		// Scope to this town: match by path in args using path-boundary check
+		// to avoid false matches on sibling paths (e.g., /tmp/gt matching /tmp/gt-old)
+		matchesTown := containsPathBoundary(line, absRoot) || containsPathBoundary(line, townRoot)
 		if !matchesTown {
 			// Check for --port <portStr> as a discrete argument to avoid
 			// false matches on PIDs or other numeric substrings
