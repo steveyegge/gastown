@@ -102,6 +102,38 @@ func getTmuxSessionPIDs() map[int]bool {
 	return pids
 }
 
+// getACPSessionPIDs returns a set of PIDs belonging to active ACP (Agent Client Protocol) sessions.
+// ACP sessions run outside of tmux and would otherwise be killed by the zombie-scan.
+// We protect the ACP proxy process and all its children (including the opencode agent).
+func getACPSessionPIDs() map[int]bool {
+	pids := make(map[int]bool)
+
+	// Find all town roots by looking for mayor-acp.pid files
+	// Common locations: ~/gt, ~/town-*, etc.
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return pids
+	}
+
+	// Build process tree once
+	childMap := buildChildMap()
+
+	// Check the primary town root (~/gt)
+	pidPath := filepath.Join(homeDir, "gt", "mayor", "mayor-acp.pid")
+	if data, err := os.ReadFile(pidPath); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+			// Check if process is still alive
+			if processExists(pid) {
+				pids[pid] = true
+				// Add all child processes (including the opencode agent)
+				addDescendants(pid, childMap, pids)
+			}
+		}
+	}
+
+	return pids
+}
+
 // sigkillGracePeriod is how long (in seconds) we wait after sending SIGTERM
 // before escalating to SIGKILL. If a process was sent SIGTERM and is still
 // around after this period, we use SIGKILL on the next cleanup cycle.
@@ -372,6 +404,13 @@ func FindOrphanedClaudeProcesses() ([]OrphanedProcess, error) {
 	// These should not be killed even if they show TTY "?" during startup.
 	protectedPIDs := getTmuxSessionPIDs()
 
+	// Also protect ACP sessions (opencode agents running outside tmux)
+	// ACP sessions have their own lifecycle management and should not be killed
+	acpPIDs := getACPSessionPIDs()
+	for pid := range acpPIDs {
+		protectedPIDs[pid] = true
+	}
+
 	// Use ps to get PID, TTY, command, and elapsed time for all processes
 	// TTY "?" indicates no controlling terminal
 	// etime is elapsed time in [[DD-]HH:]MM:SS format (portable across Linux/macOS)
@@ -471,6 +510,13 @@ type ZombieProcess struct {
 func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
 	// Get ALL valid PIDs (panes + their children) from active tmux sessions
 	validPIDs := getTmuxSessionPIDs()
+
+	// Also protect ACP sessions (opencode agents running outside tmux)
+	// ACP sessions have their own lifecycle management and should not be killed
+	acpPIDs := getACPSessionPIDs()
+	for pid := range acpPIDs {
+		validPIDs[pid] = true
+	}
 
 	// SAFETY CHECK: If no valid PIDs found, tmux might be down or no sessions exist.
 	// Returning empty is safer than marking all Claude processes as zombies.

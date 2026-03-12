@@ -52,7 +52,7 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"cursor", AgentCursor, false},
 		{"auggie", AgentAuggie, false},
 		{"amp", AgentAmp, false},
-		{"aider", "", true},               // Not built-in, can be added via config
+		{"aider", "", true},                // Not built-in, can be added via config
 		{"opencode", AgentOpenCode, false}, // Built-in multi-model CLI agent
 		{"copilot", AgentCopilot, false},   // Built-in GitHub Copilot CLI agent
 		{"pi", AgentPi, false},             // Pi Coding Agent
@@ -135,11 +135,11 @@ func TestIsKnownPreset(t *testing.T) {
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
-		{"aider", false},    // Not built-in, can be added via config
-		{"opencode", true},  // Built-in multi-model CLI agent
-		{"copilot", true},   // Built-in GitHub Copilot CLI agent
-		{"pi", true},        // Pi Coding Agent
-		{"omp", true},       // Oh My Pi
+		{"aider", false},   // Not built-in, can be added via config
+		{"opencode", true}, // Built-in multi-model CLI agent
+		{"copilot", true},  // Built-in GitHub Copilot CLI agent
+		{"pi", true},       // Pi Coding Agent
+		{"omp", true},      // Oh My Pi
 		{"unknown", false},
 		{"chatgpt", false},
 	}
@@ -578,11 +578,11 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 	}{
 		{"claude", "CLAUDE_SESSION_ID"},
 		{"gemini", "GEMINI_SESSION_ID"},
-		{"codex", ""},    // Codex uses JSONL output instead
-		{"cursor", ""},   // Cursor uses --resume with chatId directly
-		{"auggie", ""},   // Auggie uses --resume directly
-		{"amp", ""},      // AMP uses 'threads continue' subcommand
-		{"copilot", ""},  // Copilot stores session IDs on disk, not in env
+		{"codex", ""},   // Codex uses JSONL output instead
+		{"cursor", ""},  // Cursor uses --resume with chatId directly
+		{"auggie", ""},  // Auggie uses --resume directly
+		{"amp", ""},     // AMP uses 'threads continue' subcommand
+		{"copilot", ""}, // Copilot stores session IDs on disk, not in env
 		{"unknown", ""},
 	}
 
@@ -1258,5 +1258,343 @@ func TestAllHookSupportingAgentsHaveHookFields(t *testing.T) {
 		if preset.HooksSettingsFile == "" {
 			t.Errorf("agent %q: SupportsHooks=true but HooksSettingsFile is empty", name)
 		}
+	}
+}
+
+func TestResolveACPConfig(t *testing.T) {
+	t.Parallel()
+	ResetRegistryForTesting()
+	t.Cleanup(ResetRegistryForTesting)
+
+	tests := []struct {
+		name      string
+		agentName string
+		command   string
+		wantCmd   string
+	}{
+		{
+			name:      "built-in preset with matching command",
+			agentName: "opencode",
+			command:   "opencode",
+			wantCmd:   "acp",
+		},
+		{
+			name:      "custom agent shadowing built-in with same command",
+			agentName: "opencode",
+			command:   "opencode",
+			wantCmd:   "acp",
+		},
+		{
+			name:      "unknown agent with known command",
+			agentName: "my-custom-model",
+			command:   "opencode",
+			wantCmd:   "acp",
+		},
+		{
+			name:      "unknown agent with unknown command",
+			agentName: "my-custom-agent",
+			command:   "my-binary",
+			wantCmd:   "",
+		},
+		{
+			name:      "path-resolved command matches built-in preset",
+			agentName: "opencode",
+			command:   "/usr/local/bin/opencode",
+			wantCmd:   "acp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveACPConfig(tt.agentName, tt.command)
+			if tt.wantCmd == "" {
+				if got != nil {
+					t.Errorf("ResolveACPConfig(%q, %q) = %v, want nil", tt.agentName, tt.command, got)
+				}
+			} else {
+				if got == nil {
+					t.Fatalf("ResolveACPConfig(%q, %q) = nil, want config with command %q", tt.agentName, tt.command, tt.wantCmd)
+				}
+				if got.Command != tt.wantCmd {
+					t.Errorf("ResolveACPConfig(%q, %q).Command = %q, want %q", tt.agentName, tt.command, got.Command, tt.wantCmd)
+				}
+			}
+		})
+	}
+}
+
+func TestSupportsACPWithCustomAgent(t *testing.T) {
+	ResetRegistryForTesting()
+	t.Cleanup(ResetRegistryForTesting)
+
+	// Register a custom agent that uses 'opencode' command but doesn't have ACP config
+	RegisterAgentForTesting("custom-model", AgentPresetInfo{
+		Name:    "custom-model",
+		Command: "opencode",
+	})
+
+	if !SupportsACP("custom-model") {
+		t.Error("SupportsACP(custom-model) = false, want true (uses opencode command)")
+	}
+
+	acpCfg := GetACPConfig("custom-model")
+	if acpCfg == nil {
+		t.Fatal("GetACPConfig(custom-model) = nil, want config")
+	}
+	if acpCfg.Command != "acp" {
+		t.Errorf("GetACPConfig(custom-model).Command = %q, want acp", acpCfg.Command)
+	}
+}
+
+func TestGetACPCommand(t *testing.T) {
+	t.Parallel()
+	ResetRegistryForTesting()
+	t.Cleanup(ResetRegistryForTesting)
+
+	tests := []struct {
+		agentName string
+		want      string
+	}{
+		{"opencode", "acp"},
+		{"claude", ""},
+		{"gemini", ""},
+		{"codex", ""},
+		{"cursor", ""},
+		{"auggie", ""},
+		{"amp", ""},
+		{"copilot", ""},
+		{"pi", ""},
+		{"unknown-agent", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.agentName, func(t *testing.T) {
+			if got := GetACPCommand(tt.agentName); got != tt.want {
+				t.Errorf("GetACPCommand(%q) = %q, want %q", tt.agentName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestACPConfig(t *testing.T) {
+	ResetRegistryForTesting()
+	t.Cleanup(ResetRegistryForTesting)
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "agents.json")
+
+	customRegistry := AgentRegistry{
+		Version: CurrentAgentRegistryVersion,
+		Agents: map[string]*AgentPresetInfo{
+			"custom-agent": {
+				Name:    "custom-agent",
+				Command: "custom-agent",
+				ACP: &ACPConfig{
+					Command: "acp",
+				},
+			},
+			"legacy-agent": {
+				Name:    "legacy-agent",
+				Command: "legacy-agent",
+				ACP:     nil,
+			},
+		},
+	}
+
+	data, err := json.Marshal(customRegistry)
+	if err != nil {
+		t.Fatalf("failed to marshal test config: %v", err)
+	}
+
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	if err := LoadAgentRegistry(configPath); err != nil {
+		t.Fatalf("LoadAgentRegistry failed: %v", err)
+	}
+
+	if !SupportsACP("custom-agent") {
+		t.Error("SupportsACP(custom-agent) = false, want true (has ACP)")
+	}
+
+	if GetACPCommand("custom-agent") != "acp" {
+		t.Errorf("GetACPCommand(custom-agent) = %q, want acp", GetACPCommand("custom-agent"))
+	}
+
+	if SupportsACP("legacy-agent") {
+		t.Error("SupportsACP(legacy-agent) = true, want false (no ACP)")
+	}
+
+	if GetACPCommand("legacy-agent") != "" {
+		t.Errorf("GetACPCommand(legacy-agent) = %q, want empty", GetACPCommand("legacy-agent"))
+	}
+
+	agentInfo := GetAgentPresetByName("custom-agent")
+	if agentInfo == nil {
+		t.Fatal("custom-agent not found after loading registry")
+	}
+	if agentInfo.ACP == nil || agentInfo.ACP.Command != "acp" {
+		t.Errorf("AgentPresetInfo.ACP.Command = %q, want acp", agentInfo.ACP.Command)
+	}
+}
+
+// TestACPModes tests the three ACP invocation modes:
+// - Native mode: Binary is already an ACP adapter
+// - Subcommand mode: Agent has ACP as a subcommand
+// - Flag mode: Agent uses flags to enable ACP
+func TestACPModes(t *testing.T) {
+	ResetRegistryForTesting()
+	t.Cleanup(ResetRegistryForTesting)
+
+	tests := []struct {
+		name      string
+		rc        *RuntimeConfig
+		wantACP   bool
+		wantMode  string
+		wantCmd   string
+		wantArgs  []string
+	}{
+		{
+			name: "native mode - claude-agent-acp",
+			rc: &RuntimeConfig{
+				Command: "claude-agent-acp",
+				ACP: &ACPConfig{
+					Mode: ACPModeNative,
+				},
+			},
+			wantACP:  true,
+			wantMode: ACPModeNative,
+			wantCmd:  "",
+			wantArgs: nil,
+		},
+		{
+			name: "subcommand mode - opencode acp",
+			rc: &RuntimeConfig{
+				Command: "opencode",
+				ACP: &ACPConfig{
+					Command: "acp",
+					Args:    []string{"--debug"},
+				},
+			},
+			wantACP:  true,
+			wantMode: "", // Mode is not set, defaults to subcommand behavior
+			wantCmd:  "acp",
+			wantArgs: []string{"--debug"},
+		},
+		{
+			name: "subcommand mode with explicit mode",
+			rc: &RuntimeConfig{
+				Command: "opencode",
+				ACP: &ACPConfig{
+					Mode:    ACPModeSubcommand,
+					Command: "acp",
+				},
+			},
+			wantACP:  true,
+			wantMode: ACPModeSubcommand,
+			wantCmd:  "acp",
+			wantArgs: nil,
+		},
+		{
+			name: "flag mode - gemini --acp",
+			rc: &RuntimeConfig{
+				Command: "gemini",
+				ACP: &ACPConfig{
+					Mode: ACPModeFlag,
+					Args: []string{"--acp"},
+				},
+			},
+			wantACP:  true,
+			wantMode: ACPModeFlag,
+			wantCmd:  "",
+			wantArgs: []string{"--acp"},
+		},
+		{
+			name: "native mode with args",
+			rc: &RuntimeConfig{
+				Command: "claude-agent-acp",
+				ACP: &ACPConfig{
+					Mode: ACPModeNative,
+					Args: []string{"--debug"},
+				},
+			},
+			wantACP:  true,
+			wantMode: ACPModeNative,
+			wantCmd:  "",
+			wantArgs: []string{"--debug"},
+		},
+		{
+			name: "inherited ACP from preset",
+			rc: &RuntimeConfig{
+				Command: "opencode",
+			},
+			wantACP:  true,
+			wantMode: "", // Default, treated as subcommand
+			wantCmd:  "acp",
+			wantArgs: nil,
+		},
+		{
+			name: "no ACP support",
+			rc: &RuntimeConfig{
+				Command: "claude",
+			},
+			wantACP:  false,
+			wantMode: "",
+			wantCmd:  "",
+			wantArgs: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotACP := RuntimeConfigSupportsACP(tt.rc)
+			if gotACP != tt.wantACP {
+				t.Errorf("RuntimeConfigSupportsACP() = %v, want %v", gotACP, tt.wantACP)
+			}
+
+			if tt.wantACP {
+				acpConfig := GetACPConfigFromRuntime(tt.rc)
+				if acpConfig == nil {
+					t.Fatalf("GetACPConfigFromRuntime() = nil, want config")
+				}
+				if acpConfig.Mode != tt.wantMode {
+					t.Errorf("ACP.Mode = %q, want %q", acpConfig.Mode, tt.wantMode)
+				}
+				if acpConfig.Command != tt.wantCmd {
+					t.Errorf("ACP.Command = %q, want %q", acpConfig.Command, tt.wantCmd)
+				}
+				if tt.wantArgs != nil {
+					if len(acpConfig.Args) != len(tt.wantArgs) {
+						t.Errorf("ACP.Args length = %d, want %d", len(acpConfig.Args), len(tt.wantArgs))
+					} else {
+						for i, arg := range tt.wantArgs {
+							if acpConfig.Args[i] != arg {
+								t.Errorf("ACP.Args[%d] = %q, want %q", i, acpConfig.Args[i], arg)
+							}
+						}
+					}
+				}
+			} else {
+				acpConfig := GetACPConfigFromRuntime(tt.rc)
+				if acpConfig != nil {
+					t.Errorf("GetACPConfigFromRuntime() = %+v, want nil", acpConfig)
+				}
+			}
+		})
+	}
+}
+
+// TestACPModeConstants verifies the ACP mode constants.
+func TestACPModeConstants(t *testing.T) {
+	if ACPModeNative != "native" {
+		t.Errorf("ACPModeNative = %q, want native", ACPModeNative)
+	}
+	if ACPModeSubcommand != "subcommand" {
+		t.Errorf("ACPModeSubcommand = %q, want subcommand", ACPModeSubcommand)
+	}
+	if ACPModeFlag != "flag" {
+		t.Errorf("ACPModeFlag = %q, want flag", ACPModeFlag)
 	}
 }

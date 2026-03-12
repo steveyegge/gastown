@@ -312,6 +312,10 @@ func startCoreAgents(townRoot string, agentOverride string, mu *sync.Mutex) erro
 				mu.Lock()
 				fmt.Printf("  %s Mayor already running\n", style.Dim.Render("○"))
 				mu.Unlock()
+			} else if errors.Is(err, mayor.ErrACPActive) {
+				mu.Lock()
+				fmt.Printf("  %s Mayor already running (ACP mode)\n", style.Dim.Render("○"))
+				mu.Unlock()
 			} else {
 				errMu.Lock()
 				if firstErr == nil {

@@ -1164,6 +1164,30 @@ func TestResolveAgentConfigWithOverride(t *testing.T) {
 			t.Fatal("expected error for unknown agent override")
 		}
 	})
+
+	t.Run("override with subcommand", func(t *testing.T) {
+		rc, name, err := ResolveAgentConfigWithOverride(townRoot, rigPath, "opencode acp")
+		if err != nil {
+			t.Fatalf("ResolveAgentConfigWithOverride: %v", err)
+		}
+		if name != "opencode" {
+			t.Fatalf("name = %q, want %q", name, "opencode")
+		}
+		if rc.Command != "opencode" {
+			t.Fatalf("rc.Command = %q, want %q", rc.Command, "opencode")
+		}
+		// Verify "acp" was appended to Args
+		found := false
+		for _, arg := range rc.Args {
+			if arg == "acp" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("rc.Args = %v, want it to contain %q", rc.Args, "acp")
+		}
+	})
 }
 
 func TestBuildPolecatStartupCommandWithAgentOverride(t *testing.T) {
@@ -1746,11 +1770,19 @@ func TestResolveWorkerAgentConfig_TownCrewAgents(t *testing.T) {
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "myrig")
 
-	// Create a fake codex binary
+	// Create fake agent binaries (needs .exe on Windows for exec.LookPath).
+	// Both codex and claude stubs are needed: codex for town crew_agents,
+	// claude for the rig worker_agents override subtest.
 	binDir := t.TempDir()
-	codexPath := filepath.Join(binDir, "codex")
-	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-		t.Fatalf("write codex stub: %v", err)
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+	}
+	for _, name := range []string{"codex", "claude"} {
+		stubPath := filepath.Join(binDir, name+ext)
+		if err := os.WriteFile(stubPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+			t.Fatalf("write %s stub: %v", name, err)
+		}
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -4993,5 +5025,74 @@ func TestResolveRoleAgentConfig_EphemeralDefaultPreservesNonClaudeOverride(t *te
 	// preserve explicit non-Claude overrides
 	if rc.Command != "gemini" {
 		t.Errorf("expected gemini for polecat (non-Claude rig override with tier default), got Command=%q", rc.Command)
+	}
+}
+
+func TestBuildStartupCommand_ExecWrapper(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Create a rig settings with exec_wrapper configured
+	rigSettings := NewRigSettings()
+	rigSettings.Runtime = &RuntimeConfig{
+		Command:     "claude",
+		ExecWrapper: []string{"exitbox", "run", "--profile=gastown-polecat", "--"},
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "polecat"}, rigPath, "hello")
+
+	// Must contain exec wrapper tokens
+	if !strings.Contains(cmd, "exitbox run --profile=gastown-polecat --") {
+		t.Errorf("expected exec wrapper in command, got: %q", cmd)
+	}
+
+	// The wrapper + agent command should appear as a contiguous sequence
+	// "exitbox run --profile=gastown-polecat -- claude"
+	if !strings.Contains(cmd, "exitbox run --profile=gastown-polecat -- claude") {
+		t.Errorf("expected wrapper immediately before claude command, got: %q", cmd)
+	}
+
+	// Env vars (exec env ...) must appear before the wrapper
+	envIdx := strings.Index(cmd, "exec env")
+	wrapperIdx := strings.Index(cmd, "exitbox run")
+	if envIdx == -1 || wrapperIdx == -1 || envIdx >= wrapperIdx {
+		t.Errorf("expected 'exec env' before wrapper, got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_ExecWrapper(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Create rig settings with exec_wrapper
+	rigSettings := NewRigSettings()
+	rigSettings.Runtime = &RuntimeConfig{
+		Command:     "claude",
+		ExecWrapper: []string{"daytona", "exec", "furiosa-ws", "--"},
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": "polecat"},
+		rigPath, "hello", "",
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	if !strings.Contains(cmd, "daytona exec furiosa-ws --") {
+		t.Errorf("expected exec wrapper in command, got: %q", cmd)
+	}
+
+	// The wrapper + agent command should appear as a contiguous sequence
+	if !strings.Contains(cmd, "daytona exec furiosa-ws -- claude") {
+		t.Errorf("expected wrapper immediately before claude command, got: %q", cmd)
 	}
 }

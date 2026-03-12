@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -251,8 +252,10 @@ func runUp(cmd *cobra.Command, args []string) error {
 		defer startupWg.Done()
 		mayorMgr := mayor.NewManager(townRoot)
 		if err := mayorMgr.Start(""); err != nil {
-			if err == mayor.ErrAlreadyRunning {
+			if errors.Is(err, mayor.ErrAlreadyRunning) {
 				mayorResult = agentStartResult{name: "Mayor", ok: true, detail: mayorMgr.SessionName()}
+			} else if errors.Is(err, mayor.ErrACPActive) {
+				mayorResult = agentStartResult{name: "Mayor", ok: true, detail: "ACP active"}
 			} else {
 				mayorResult = agentStartResult{name: "Mayor", ok: false, detail: err.Error()}
 			}

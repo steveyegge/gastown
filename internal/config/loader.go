@@ -1109,8 +1109,16 @@ func resolveAgentConfigWithOverrideInternal(townRoot, rigPath, agentOverride str
 
 	// Determine which agent name to use
 	agentName := ""
+	var extraArgs []string
 	if agentOverride != "" {
-		agentName = agentOverride
+		// Handle agent overrides with subcommands (e.g., "opencode acp")
+		parts := strings.Fields(agentOverride)
+		if len(parts) > 0 {
+			agentName = parts[0]
+			if len(parts) > 1 {
+				extraArgs = parts[1:]
+			}
+		}
 	} else if rigSettings != nil && rigSettings.Agent != "" {
 		agentName = rigSettings.Agent
 	} else if townSettings.DefaultAgent != "" {
@@ -1121,28 +1129,46 @@ func resolveAgentConfigWithOverrideInternal(townRoot, rigPath, agentOverride str
 
 	// If an override is requested, validate it exists
 	if agentOverride != "" {
+		var rc *RuntimeConfig
 		// Check rig-level custom agents first
 		if rigSettings != nil && rigSettings.Agents != nil {
 			if custom, ok := rigSettings.Agents[agentName]; ok && custom != nil {
-				return fillRuntimeDefaults(custom), agentName, nil
+				rc = fillRuntimeDefaults(custom)
 			}
 		}
 		// Then check town-level custom agents
-		if townSettings.Agents != nil {
+		if rc == nil && townSettings.Agents != nil {
 			if custom, ok := townSettings.Agents[agentName]; ok && custom != nil {
-				return fillRuntimeDefaults(custom), agentName, nil
+				rc = fillRuntimeDefaults(custom)
 			}
 		}
 		// Then check built-in presets
-		if preset := GetAgentPresetByName(agentName); preset != nil {
-			return RuntimeConfigFromPreset(AgentPreset(agentName)), agentName, nil
+		if rc == nil {
+			if preset := GetAgentPresetByName(agentName); preset != nil {
+				rc = RuntimeConfigFromPreset(AgentPreset(agentName))
+			}
 		}
-		return nil, "", fmt.Errorf("agent '%s' not found", agentName)
+
+		if rc == nil {
+			return nil, "", fmt.Errorf("agent '%s' not found", agentName)
+		}
+
+		// Append extra arguments from the override
+		if len(extraArgs) > 0 {
+			rc.Args = append(rc.Args, extraArgs...)
+		}
+		return rc, agentName, nil
 	}
 
 	// Normal lookup path (no override)
 	rc := lookupAgentConfig(agentName, townSettings, rigSettings)
 	rc.ResolvedAgent = agentName
+
+	// If we have extra arguments from the override, append them to the config
+	if len(extraArgs) > 0 {
+		rc.Args = append(rc.Args, extraArgs...)
+	}
+
 	return rc, agentName, nil
 }
 
@@ -1642,6 +1668,12 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		copy(result.Args, rc.Args)
 	}
 
+	// Deep copy ExecWrapper slice
+	if rc.ExecWrapper != nil {
+		result.ExecWrapper = make([]string, len(rc.ExecWrapper))
+		copy(result.ExecWrapper, rc.ExecWrapper)
+	}
+
 	// Deep copy Env map
 	if len(rc.Env) > 0 {
 		result.Env = make(map[string]string, len(rc.Env))
@@ -1681,6 +1713,18 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 	if rc.Instructions != nil {
 		result.Instructions = &RuntimeInstructionsConfig{
 			File: rc.Instructions.File,
+		}
+	}
+
+	// Deep copy ACP config
+	if rc.ACP != nil {
+		result.ACP = &ACPConfig{
+			Mode:    rc.ACP.Mode,
+			Command: rc.ACP.Command,
+		}
+		if rc.ACP.Args != nil {
+			result.ACP.Args = make([]string, len(rc.ACP.Args))
+			copy(result.ACP.Args, rc.ACP.Args)
 		}
 	}
 
@@ -1734,6 +1778,19 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 			if _, ok := result.Env[k]; !ok {
 				result.Env[k] = v
 			}
+		}
+	}
+
+	// Auto-fill ACP config from preset if not explicitly set.
+	// This allows custom agents to inherit ACP support from their base preset.
+	if result.ACP == nil && preset != nil && preset.ACP != nil {
+		result.ACP = &ACPConfig{
+			Mode:    preset.ACP.Mode,
+			Command: preset.ACP.Command,
+		}
+		if preset.ACP.Args != nil {
+			result.ACP.Args = make([]string, len(preset.ACP.Args))
+			copy(result.ACP.Args, preset.ACP.Args)
 		}
 	}
 
@@ -1941,6 +1998,12 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 		}
 	}
 
+	// Apply exec wrapper from rig/town settings if not already set on the resolved config.
+	// ExecWrapper is a deployment-level setting (sandbox/container) independent of agent choice.
+	if len(rc.ExecWrapper) == 0 {
+		rc.ExecWrapper = resolveExecWrapper(rigPath)
+	}
+
 	// Copy env vars to avoid mutating caller map
 	resolvedEnv := make(map[string]string, len(envVars)+2)
 	for k, v := range envVars {
@@ -1988,6 +2051,12 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 		// running agent via pane_current_command (which shows the direct
 		// process, not child processes).
 		cmd = "exec env " + strings.Join(exports, " ") + " "
+	}
+
+	// Insert exec wrapper between env vars and agent command if configured.
+	// Example: exec env VAR=val ... exitbox run --profile=foo -- claude ...
+	if len(rc.ExecWrapper) > 0 {
+		cmd += strings.Join(rc.ExecWrapper, " ") + " "
 	}
 
 	// Add runtime command
@@ -2120,6 +2189,11 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 		}
 	}
 
+	// Apply exec wrapper from rig/town settings if not already set on the resolved config.
+	if len(rc.ExecWrapper) == 0 {
+		rc.ExecWrapper = resolveExecWrapper(rigPath)
+	}
+
 	// Copy env vars to avoid mutating caller map
 	resolvedEnv := make(map[string]string, len(envVars)+2)
 	for k, v := range envVars {
@@ -2165,6 +2239,11 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 		// running agent via pane_current_command (which shows the direct
 		// process, not child processes).
 		cmd = "exec env " + strings.Join(exports, " ") + " "
+	}
+
+	// Insert exec wrapper between env vars and agent command if configured.
+	if len(rc.ExecWrapper) > 0 {
+		cmd += strings.Join(rc.ExecWrapper, " ") + " "
 	}
 
 	if prompt != "" {
@@ -2274,6 +2353,20 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 		Prompt:    prompt,
 	})
 	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
+}
+
+// resolveExecWrapper loads the exec_wrapper from rig settings.
+// ExecWrapper is a deployment-level setting (sandbox/container) that wraps the agent binary.
+// It is independent of agent choice — exitbox wraps Claude, Codex, or any other runtime.
+func resolveExecWrapper(rigPath string) []string {
+	if rigPath != "" {
+		if rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath)); err == nil && rigSettings != nil {
+			if rigSettings.Runtime != nil && len(rigSettings.Runtime.ExecWrapper) > 0 {
+				return rigSettings.Runtime.ExecWrapper
+			}
+		}
+	}
+	return nil
 }
 
 // ExpectedPaneCommands returns tmux pane command names that indicate the runtime is running.

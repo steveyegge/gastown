@@ -1261,6 +1261,14 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 		// DEFERRED exits preserve the bead: work is paused, not done. The bead
 		// stays open/in_progress so it can be resumed on the next session.
 		if hookedBead, err := bd.Show(hookedBeadID); err == nil && !beads.IssueStatus(hookedBead.Status).IsTerminal() {
+			// Guard: never close a rig identity bead. Polecats dispatched with the
+			// rig bead as their hook (via mol-polecat-work) must not close permanent
+			// infrastructure. Skip close and fall through to idle state update.
+			if beads.HasLabel(hookedBead, "gt:rig") {
+				fmt.Fprintf(os.Stderr, "Note: hooked bead %s is a rig identity bead (gt:rig) — skipping close\n", hookedBeadID)
+				goto doneStateUpdate
+			}
+
 			// BUG FIX: Close attached molecule (wisp) BEFORE closing hooked bead.
 			// When using formula-on-bead (gt sling formula --on bead), the base bead
 			// has attached_molecule pointing to the wisp. Without this fix, gt done
@@ -1302,6 +1310,7 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 		}
 	}
 
+doneStateUpdate:
 	// No ClearHookBead call needed — agent bead hook slot is no longer maintained (hq-l6mm5).
 
 	// Purge closed ephemeral beads (wisps) accumulated during this and prior sessions.

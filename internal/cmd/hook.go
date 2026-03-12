@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -389,6 +390,20 @@ func runHook(_ *cobra.Command, args []string) error {
 		break
 	}
 
+	// Emit a propulsion signal if the target is the mayor.
+	// This allows the ACP propeller to react to hook changes event-driven.
+	if agentID == "mayor/" {
+		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+			session := "hq-mayor"
+			message := fmt.Sprintf("Hook updated: attached bead %s", beadID)
+			_ = nudge.Enqueue(townRoot, session, nudge.QueuedNudge{
+				Sender:   "hook",
+				Message:  message,
+				Priority: nudge.PriorityNormal,
+			})
+		}
+	}
+
 	if targetAgent != "" {
 		fmt.Printf("%s Work attached to %s's hook\n", style.Bold.Render("✓"), agentID)
 	} else {
@@ -470,7 +485,12 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 			agentBeadID := agentIDToBeadID(target, townRoot)
 			if agentBeadID != "" {
 				rigName := strings.Split(target, "/")[0]
-				fallbackPath := filepath.Join(townRoot, rigName)
+				var fallbackPath string
+				if rigName == "mayor" || rigName == "deacon" {
+					fallbackPath = townRoot
+				} else {
+					fallbackPath = filepath.Join(townRoot, rigName, "mayor", "rig")
+				}
 				workDir = beads.ResolveHookDir(townRoot, agentBeadID, fallbackPath)
 			}
 		}

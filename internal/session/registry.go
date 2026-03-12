@@ -123,7 +123,7 @@ func InitRegistry(townRoot string) error {
 	var errs []error
 
 	// Determine the tmux socket name from GT_TMUX_SOCKET env var:
-	//   unset / "default" / "auto" → use the default tmux socket (no -L flag)
+	//   unset / "default" / "auto" → use the default tmux socket (empty name)
 	//   any other value            → use that name as-is
 	socket := os.Getenv("GT_TMUX_SOCKET")
 	switch socket {

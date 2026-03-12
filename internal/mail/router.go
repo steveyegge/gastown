@@ -1636,6 +1636,15 @@ func (r *Router) notifyRecipient(msg *Message) error {
 		}
 		return err
 	}
+	// No tmux session found - enqueue nudge for ACP/propeller delivery
+	// This handles headless ACP mode where there's no tmux session
+	if r.townRoot != "" && len(sessionIDs) > 0 {
+		notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
+		return nudge.Enqueue(r.townRoot, sessionIDs[0], nudge.QueuedNudge{
+			Sender:  msg.From,
+			Message: notification,
+		})
+	}
 
 	return nil // No active session found
 }

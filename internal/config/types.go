@@ -711,6 +711,17 @@ type RuntimeConfig struct {
 	// Instructions controls the per-workspace instruction file name.
 	Instructions *RuntimeInstructionsConfig `json:"instructions,omitempty"`
 
+	// ACP configures ACP (Agent Communication Protocol) support.
+	// When set, the agent can run in ACP mode. If nil, ACP support is
+	// determined by matching the Command to a known preset with ACP config.
+	ACP *ACPConfig `json:"acp,omitempty"`
+
+	// ExecWrapper is a command prefix inserted between environment variables
+	// and the agent binary in the startup command. Used for sandboxed execution.
+	// Example: ["exitbox", "run", "--profile=gastown-polecat", "--"]
+	// Produces: exec env VAR=val ... exitbox run --profile=gastown-polecat -- claude ...
+	ExecWrapper []string `json:"exec_wrapper,omitempty"`
+
 	// ResolvedAgent is the agent name that was resolved during config lookup.
 	// Set by ResolveRoleAgentConfig / resolveAgentConfigInternal so that
 	// BuildStartupCommand can export GT_AGENT for process detection.

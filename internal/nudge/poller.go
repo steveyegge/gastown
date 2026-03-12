@@ -19,8 +19,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/util"
 )
@@ -152,4 +155,117 @@ func pollerAlive(townRoot, session string) (int, bool) {
 	}
 
 	return pid, true
+}
+
+// Watcher provides a filesystem-event-driven interface to the nudge queue.
+// This is an ACP-safe alternative to polling and is preferred for long-running
+// watchers like ACP Propeller.
+type Watcher struct {
+	townRoot string
+	session  string
+	dir      string
+	closed   chan struct{}
+	wg       sync.WaitGroup
+	events   chan struct{}
+}
+
+// NewWatcher creates a new watcher for the given town root and session.
+// The watcher observes nudge queue writes and signals via the Events() channel.
+func NewWatcher(townRoot, session string) (*Watcher, error) {
+	dir := queueDir(townRoot, session)
+	// Ensure the directory exists so watch can start immediately.
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("creating nudge queue dir: %w", err)
+	}
+
+	w := &Watcher{
+		townRoot: townRoot,
+		session:  session,
+		dir:      dir,
+		closed:   make(chan struct{}),
+		events:   make(chan struct{}, 1), // buffer one signal for coalescing
+	}
+
+	w.wg.Add(1)
+	go w.watch()
+	return w, nil
+}
+
+// Events returns a channel that receives a struct{} when the queue may have
+// changed. Multiple changes within a short window are coalesced.
+func (w *Watcher) Events() <-chan struct{} {
+	return w.events
+}
+
+// Close stops the watcher and releases resources.
+func (w *Watcher) Close() error {
+	select {
+	case <-w.closed:
+		return fmt.Errorf("watcher already closed")
+	default:
+	}
+	close(w.closed)
+	w.wg.Wait()
+	return nil
+}
+
+func (w *Watcher) watch() {
+	defer w.wg.Done()
+
+	// Use fsnotify directly.
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		// Log but don't block; fallback behavior is explicit in callers.
+		fmt.Fprintf(os.Stderr, "nudge watcher init failed for %s: %v\n", w.dir, err)
+		return
+	}
+	defer watcher.Close()
+
+	// Watch the directory.
+	if err := watcher.Add(w.dir); err != nil {
+		fmt.Fprintf(os.Stderr, "nudge watcher failed to add dir %s: %v\n", w.dir, err)
+		return
+	}
+
+	// Coalescing window.
+	coalesceTimer := time.NewTicker(100 * time.Millisecond)
+	defer coalesceTimer.Stop()
+
+	pending := false
+	for {
+		select {
+		case <-w.closed:
+			return
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			// Only care about file creation/modification in the queue dir
+			if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
+				// Filter: only .json files in the queue directory
+				if strings.HasSuffix(event.Name, ".json") && filepath.Dir(event.Name) == w.dir {
+					pending = true
+				}
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(os.Stderr, "nudge watcher error: %v\n", err)
+		case <-coalesceTimer.C:
+			if pending {
+				pending = false
+				select {
+				case w.events <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}
+}
+
+// WatcherForSession returns a Watcher for a specific session or an error if
+// creation fails (e.g., filesystem issues). Callers should handle cleanup.
+func WatcherForSession(townRoot, session string) (*Watcher, error) {
+	return NewWatcher(townRoot, session)
 }

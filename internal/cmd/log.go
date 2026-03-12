@@ -20,6 +20,7 @@ var (
 	logAgent  string
 	logSince  string
 	logFollow bool
+	logAcp    bool
 
 	// log crash flags
 	crashAgent    string
@@ -75,6 +76,7 @@ func init() {
 	logCmd.Flags().StringVarP(&logAgent, "agent", "a", "", "Filter by agent prefix (e.g., gastown/, greenplace/crew/max)")
 	logCmd.Flags().StringVar(&logSince, "since", "", "Show events since duration (e.g., 1h, 30m, 24h)")
 	logCmd.Flags().BoolVarP(&logFollow, "follow", "f", false, "Follow log output (like tail -f)")
+	logCmd.Flags().BoolVar(&logAcp, "acp", false, "View ACP debug logs (requires GT_ACP_DEBUG=1)")
 
 	// crash subcommand flags
 	logCrashCmd.Flags().StringVar(&crashAgent, "agent", "", "Agent ID (e.g., greenplace/Toast)")
@@ -90,6 +92,11 @@ func runLog(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Handle --acp flag to view ACP debug logs
+	if logAcp {
+		return viewACPLogs(townRoot)
 	}
 
 	logPath := fmt.Sprintf("%s/logs/town.log", townRoot)
@@ -176,6 +183,44 @@ func followLog(logPath string) error {
 	tailCmd.Stderr = os.Stderr
 
 	return tailCmd.Run()
+}
+
+// viewACPLogs displays the ACP debug log file.
+func viewACPLogs(townRoot string) error {
+	logPath := fmt.Sprintf("%s/logs/acp.log", townRoot)
+
+	// If following, use tail -f
+	if logFollow {
+		return followLog(logPath)
+	}
+
+	// Check if log file exists
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		fmt.Printf("%s No ACP log file. Set GT_ACP_DEBUG=1 to enable logging.\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	// Read the log file
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		return fmt.Errorf("reading ACP log: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+
+	// Apply tail limit
+	if logTail > 0 && len(lines) > logTail {
+		lines = lines[len(lines)-logTail:]
+	}
+
+	// Print lines
+	for _, line := range lines {
+		if line != "" {
+			fmt.Println(line)
+		}
+	}
+
+	return nil
 }
 
 // printEvent prints a single event with styling.

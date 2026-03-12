@@ -3,6 +3,7 @@ package plugin
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -112,10 +113,12 @@ func TestSyncPlugins_CopiesExtraFiles(t *testing.T) {
 		t.Errorf("run.sh content wrong: %s", data)
 	}
 
-	// Verify executable permission preserved
-	info, _ := os.Stat(filepath.Join(dstDir, "my-plugin", "run.sh"))
-	if info.Mode()&0111 == 0 {
-		t.Error("run.sh lost executable permission")
+	// Verify executable permission preserved (skip on Windows where permission bits aren't meaningful)
+	if runtime.GOOS != "windows" {
+		info, _ := os.Stat(filepath.Join(dstDir, "my-plugin", "run.sh"))
+		if info.Mode()&0111 == 0 {
+			t.Error("run.sh lost executable permission")
+		}
 	}
 }
 

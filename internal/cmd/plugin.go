@@ -285,7 +285,12 @@ func printPluginSummary(p *plugin.Plugin) {
 		desc = desc[:47] + "..."
 	}
 
-	fmt.Printf("    %s %s\n", style.Bold.Render(p.Name), style.Dim.Render(fmt.Sprintf("[%s]", gateType)))
+	typeTag := gateType
+	if p.IsExecWrapper() {
+		typeTag = "exec-wrapper"
+	}
+
+	fmt.Printf("    %s %s\n", style.Bold.Render(p.Name), style.Dim.Render(fmt.Sprintf("[%s]", typeTag)))
 	if desc != "" {
 		fmt.Printf("      %s\n", style.Dim.Render(desc))
 	}
@@ -369,6 +374,12 @@ func outputPluginShowText(p *plugin.Plugin) error {
 	if p.Execution != nil {
 		fmt.Println()
 		fmt.Printf("%s\n", style.Bold.Render("Execution:"))
+		if p.Execution.Type != "" {
+			fmt.Printf("  Type: %s\n", p.Execution.Type)
+		}
+		if len(p.Execution.Wrapper) > 0 {
+			fmt.Printf("  Wrapper: %s\n", strings.Join(p.Execution.Wrapper, " "))
+		}
 		if p.Execution.Timeout != "" {
 			fmt.Printf("  Timeout: %s\n", p.Execution.Timeout)
 		}
