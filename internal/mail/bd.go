@@ -76,6 +76,27 @@ func runBdCommand(ctx context.Context, args []string, workDir, beadsDir string, 
 
 	runErr := cmd.Run()
 
+	// If bd doesn't support --flat (pre-v0.59), retry without it.
+	if runErr != nil && strings.Contains(stderr.String(), "unknown flag: --flat") {
+		retryArgs := make([]string, 0, len(args))
+		for _, a := range args {
+			if a != "--flat" {
+				retryArgs = append(retryArgs, a)
+			}
+		}
+		stdout.Reset()
+		stderr.Reset()
+		cmd = exec.CommandContext(ctx, "bd", retryArgs...) //nolint:gosec // G204: bd is a trusted internal tool
+		cmd.Dir = workDir
+		env2 := append(cmd.Environ(), "BEADS_DIR="+beadsDir)
+		env2 = append(env2, extraEnv...)
+		env2 = append(env2, telemetry.OTELEnvForSubprocess()...)
+		cmd.Env = env2
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		runErr = cmd.Run()
+	}
+
 	if runErr != nil {
 		return nil, &bdError{
 			Err:    runErr,
