@@ -270,41 +270,29 @@ Mail beads can be hooked for ad-hoc instruction handoff:
 If you find mail on your hook (not a molecule), GUPP applies: read the mail
 content, interpret the prose instructions, and execute them.
 
-## Git Workflow: Work Off Main
+## Git Workflow: All Code Merges via PR
 
-**Crew workers push directly to main. No feature branches.**
-
-### No PRs in Maintainer Repos
-
-If you have direct push access to the repo (you're a maintainer):
-- **NEVER create GitHub PRs** — push directly to main instead
-- Crew workers: push directly to main
-- Polecats: use `{{ cmd }} done` → Refinery merges to main
-
-PRs are for external contributors submitting to repos they don't own.
-Check `git remote -v` to identify repo ownership.
-
-### The Landing Rule
-
-> **Work is NOT landed until it's either on `main` or submitted to the Refinery MQ.**
-
-Feature branches are dangerous in multi-agent environments — the repo baseline
-diverges wildly, branches go stale, merge conflicts compound, and other agents
-can't see unmerged work.
-
-**Valid**: Pushed to main, or submitted to Refinery via `{{ cmd }} done`.
-**Invalid**: Sitting on a local or remote feature branch not in MQ.
+**All code changes — from crew, polecats, or any agent — merge via pull request.**
 
 ### Workflow
 
 ```bash
-git pull                    # Start fresh
+git checkout -b crew/{{ .Polecat }}/<short-description>   # Create feature branch
 # ... do work ...
 git add -A && git commit -m "description"
-git push                    # Direct to main
+git push -u origin HEAD                                    # Push branch
+gh pr create --title "description" --body "summary"        # Open PR
 ```
 
-If push fails (someone else pushed): `git pull --rebase && git push`
+Use `git remote -v` to verify the remote URL. If you have a `fork` remote,
+push to `fork` and PR against `origin`.
+
+### The Landing Rule
+
+> **Work is NOT landed until a PR is merged to `{{ .DefaultBranch }}`.**
+
+Feature branches should be short-lived. Open the PR as soon as work is ready
+for review. The Refinery or a reviewer will merge it.
 
 ### Fix-Merging Community PRs
 
