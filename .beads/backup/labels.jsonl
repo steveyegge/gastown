@@ -4,6 +4,10 @@
 {"issue_id":"gt-4ed","label":"from:theoutlived/witness"}
 {"issue_id":"gt-4ed","label":"gt:message"}
 {"issue_id":"gt-4ed","label":"read"}
+{"issue_id":"gt-4ul","label":"plugin:rebuild-gt"}
+{"issue_id":"gt-4ul","label":"result:success"}
+{"issue_id":"gt-4ul","label":"rig:gastown"}
+{"issue_id":"gt-4ul","label":"type:plugin-run"}
 {"issue_id":"gt-4yr","label":"plugin:github-sheriff"}
 {"issue_id":"gt-4yr","label":"result:success"}
 {"issue_id":"gt-4yr","label":"type:plugin-run"}
