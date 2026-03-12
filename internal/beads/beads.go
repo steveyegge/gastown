@@ -101,28 +101,10 @@ func MaybePrependAllowStaleWithEnv(env []string, args []string) []string {
 	return args
 }
 
-// InjectFlatForListJSON adds --flat to bd list commands that use --json.
-// bd v0.59+ tree-format output ignores --json; --flat is required for JSON.
-// Exported for use by other packages that call bd list directly.
+// InjectFlatForListJSON is a no-op retained for API compatibility.
+// bd list --json now produces JSON output directly without --flat.
+// Deprecated: will be removed in a future version.
 func InjectFlatForListJSON(args []string) []string {
-	// Only apply to top-level "bd list" commands (args[0] == "list"),
-	// not subcommands like "bd dep list" where --flat is unsupported.
-	if len(args) == 0 || args[0] != "list" {
-		return args
-	}
-	hasJSON := false
-	hasFlat := false
-	for _, a := range args[1:] {
-		switch {
-		case a == "--json":
-			hasJSON = true
-		case a == "--flat":
-			hasFlat = true
-		}
-	}
-	if hasJSON && !hasFlat {
-		return append(args, "--flat")
-	}
 	return args
 }
 
@@ -399,12 +381,6 @@ func (b *Beads) run(args ...string) (_ []byte, retErr error) {
 	defer func() {
 		telemetry.RecordBDCall(context.Background(), args, float64(time.Since(start).Milliseconds()), retErr, stdout.Bytes(), stderr.String())
 	}()
-	// bd v0.59+ requires --flat for --json to produce JSON output on "list" commands.
-	// Without --flat, bd list --json silently returns human-readable tree format,
-	// causing all JSON parsing to fail. Inject --flat before --allow-stale prepend
-	// (which changes args[0] from "list" to "--allow-stale").
-	args = InjectFlatForListJSON(args)
-
 	// Conditionally use --allow-stale to prevent failures when db is temporarily stale
 	// (e.g., after daemon is killed during shutdown). Only if bd supports it.
 	beadsDir := b.beadsDir
@@ -427,27 +403,6 @@ func (b *Beads) run(args ...string) (_ []byte, retErr error) {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
-
-	// If bd doesn't support --flat, retry without it. The retry is done here
-	// (not in callers like List) so that InjectFlatForListJSON doesn't re-add
-	// --flat on the retry path.
-	if err != nil && strings.Contains(stderr.String(), "unknown flag: --flat") {
-		retryArgs := make([]string, 0, len(fullArgs))
-		for _, a := range fullArgs {
-			if a != "--flat" {
-				retryArgs = append(retryArgs, a)
-			}
-		}
-		stdout.Reset()
-		stderr.Reset()
-		cmd = exec.Command("bd", retryArgs...) //nolint:gosec // G204: bd is a trusted internal tool
-		cmd.Dir = b.workDir
-		cmd.Env = runEnv
-		cmd.Env = append(cmd.Env, telemetry.OTELEnvForSubprocess()...)
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		err = cmd.Run()
-	}
 
 	if err != nil {
 		return nil, b.wrapError(err, stderr.String(), args)
@@ -660,9 +615,7 @@ func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
 		return b.listEphemeral(opts)
 	}
 
-	// --flat is required because bd's default tree mode doesn't output valid JSON
-	// even when --json is specified. This was introduced when bd added tree view.
-	args := []string{"list", "--json", "--flat"}
+	args := []string{"list", "--json"}
 
 	if opts.Status != "" {
 		args = append(args, "--status="+opts.Status)

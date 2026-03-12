@@ -67,12 +67,9 @@ type BdCli struct {
 func DefaultBdCli() *BdCli {
 	return &BdCli{
 		Exec: func(workDir string, args ...string) (string, error) {
-			// bd v0.59+ requires --flat for list --json to produce JSON
-			args = beads.InjectFlatForListJSON(args)
 			return util.ExecWithOutput(workDir, "bd", args...)
 		},
 		Run: func(workDir string, args ...string) error {
-			args = beads.InjectFlatForListJSON(args)
 			return util.ExecRun(workDir, "bd", args...)
 		},
 	}

@@ -1892,11 +1892,6 @@ func runConvoyList(cmd *cobra.Command, args []string) error {
 	} else if convoyListAll {
 		listArgs = append(listArgs, "--all")
 	}
-	// --flat is required because bd's tree mode doesn't produce valid JSON
-	// even with --json (bd v0.59+). Appended last so flag order matches
-	// bd's expected argument pattern.
-	listArgs = append(listArgs, "--flat")
-
 	out, err := runBdJSON(townBeads, listArgs...)
 	if err != nil {
 		return fmt.Errorf("listing convoys: %w", err)
