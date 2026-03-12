@@ -116,6 +116,10 @@ install: check-up-to-date build
 			echo "Daemon restarted." || \
 			echo "Warning: daemon restart failed (start manually with: gt daemon start)"; \
 	fi
+	@# Sync plugins from build repo to town runtime directories.
+	@# Prevents drift when plugin fixes merge but runtime dirs are stale.
+	@$(INSTALL_DIR)/$(BINARY) plugin sync --source $(CURDIR)/plugins 2>/dev/null && \
+		echo "Plugins synced." || true
 
 # safe-install: Replace binary WITHOUT restarting daemon or killing sessions.
 # Use this for automated rebuilds (e.g., rebuild-gt plugin). Sessions pick up

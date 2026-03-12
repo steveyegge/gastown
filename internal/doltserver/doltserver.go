@@ -2457,7 +2457,23 @@ func RepairWorkspace(townRoot string, ws BrokenWorkspace) (string, error) {
 // For the "hq" rig, it writes to <townRoot>/.beads/metadata.json.
 // For other rigs, it writes to mayor/rig/.beads/metadata.json if that path exists,
 // otherwise to <townRoot>/<rigName>/.beads/metadata.json.
-func EnsureMetadata(townRoot, rigName string) error {
+// EnsureMetadata ensures that the .beads/metadata.json for a rig has correct
+// Dolt server configuration.  rigName is the rig's directory name (e.g.
+// "beads_el"). When dolt_database is absent the default is rigName, which is
+// correct for rigs whose Dolt database name matches their directory name.
+// Callers that know the rig uses a short DB prefix (e.g. "be" for "beads_el")
+// should pass it as doltDatabase so metadata.json gets the right value.
+func EnsureMetadata(townRoot, rigName string, doltDatabase ...string) error {
+	// Determine the Dolt database name to write when the field is absent.
+	// Default: rigName (correct when db-name == rig-dir-name, e.g. "gastown_el").
+	// Callers from EnsureAllMetadata pass the actual DB prefix ("be", "sw") so
+	// that rigs with short prefixes get the correct database name, not the full
+	// rig directory name.
+	effectiveDB := rigName
+	if len(doltDatabase) > 0 && doltDatabase[0] != "" {
+		effectiveDB = doltDatabase[0]
+	}
+
 	// Use FindOrCreateRigBeadsDir to atomically resolve and create the directory,
 	// avoiding the TOCTOU race where the directory state changes between
 	// FindRigBeadsDir's Stat check and our subsequent file operations.
@@ -2500,7 +2516,7 @@ func EnsureMetadata(townRoot, rigName string) error {
 		changed = true
 	}
 	if existing["dolt_database"] == nil || existing["dolt_database"] == "" {
-		existing["dolt_database"] = rigName
+		existing["dolt_database"] = effectiveDB
 		changed = true
 	}
 
@@ -2536,26 +2552,60 @@ func EnsureMetadata(townRoot, rigName string) error {
 	return nil
 }
 
+// buildRigPrefixMap reads rigs.json and returns a map from Dolt database name
+// (beads prefix without the trailing hyphen) to the rig directory name.
+// Example: {"be": "beads_el", "sw": "sooper_whisper"}.
+// Rigs where the database name equals the directory name are not included.
+func buildRigPrefixMap(townRoot string) map[string]string {
+	result := make(map[string]string)
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	data, err := os.ReadFile(rigsPath)
+	if err != nil {
+		return result
+	}
+	var parsed struct {
+		Rigs map[string]struct {
+			Beads struct {
+				Prefix string `json:"prefix"`
+			} `json:"beads"`
+		} `json:"rigs"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return result
+	}
+	for rigName, info := range parsed.Rigs {
+		prefix := strings.TrimSuffix(info.Beads.Prefix, "-")
+		if prefix != "" && prefix != rigName {
+			result[prefix] = rigName
+		}
+	}
+	return result
+}
+
 // EnsureAllMetadata updates metadata.json for all rig databases known to the
 // Dolt server. This is the fix for the split-brain problem where worktrees
 // each have their own isolated database.
 //
-// Database names in .dolt-data use prefixes (e.g., "bd", "gt", "sw"), but
-// EnsureMetadata expects rig names (e.g., "beads", "gastown", "sallaWork").
-// This function maps database names to rig names using routes.jsonl.
+// For rigs that use a short DB prefix (e.g. database "be" for the "beads_el"
+// rig), EnsureAllMetadata resolves the rig name from rigs.json and writes the
+// correct dolt_database value ("be") so that convoy event polling connects to
+// the right database instead of a non-existent "beads_el" database.
 func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 	databases, err := ListDatabases(townRoot)
 	if err != nil {
 		return nil, []error{fmt.Errorf("listing databases: %w", err)}
 	}
 
-	// Build a map from database name (prefix without hyphen) to rig name.
-	// routes.jsonl has format: {"prefix":"bd-","path":"beads/mayor/rig"}
-	// We extract rig name as the first component of the path.
+	// Map from DB prefix to rig directory name, e.g. "be" -> "beads_el".
+	// Merge routes.jsonl (routes) and rigs.json (prefixes); rigs.json wins on
+	// conflict. Rigs where db-name == rig-dir-name are not in this map and fall
+	// through to the default behavior (rigName = dbName).
 	dbToRig := buildDatabaseToRigMap(townRoot)
+	for k, v := range buildRigPrefixMap(townRoot) {
+		dbToRig[k] = v
+	}
 
 	for _, dbName := range databases {
-		// Map database name to rig name (e.g., "bd" -> "beads")
 		rigName := dbName
 		if mapped, ok := dbToRig[dbName]; ok {
 			rigName = mapped
@@ -2564,8 +2614,9 @@ func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 		if dbName == "hq" {
 			rigName = "hq"
 		}
-
-		if err := EnsureMetadata(townRoot, rigName); err != nil {
+		// Pass dbName explicitly so EnsureMetadata writes the correct
+		// dolt_database value ("be") rather than the rig dir name ("beads_el").
+		if err := EnsureMetadata(townRoot, rigName, dbName); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", dbName, err))
 		} else {
 			updated = append(updated, dbName)

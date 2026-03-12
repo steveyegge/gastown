@@ -249,7 +249,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		existingConvoy := isTrackedByConvoy(params.BeadID)
 		if existingConvoy == "" {
 			var err error
-			convoyID, err = createAutoConvoy(params.BeadID, info.Title, params.Owned, params.Merge)
+			convoyID, err = createAutoConvoy(params.BeadID, info.Title, params.Owned, params.Merge, params.BaseBranch)
 			if err != nil {
 				fmt.Printf("  %s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
 			} else {

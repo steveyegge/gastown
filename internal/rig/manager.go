@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -550,11 +551,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 				initArgs = append(initArgs, "--prefix", opts.BeadsPrefix)
 			}
 			initArgs = append(initArgs, "--server")
-			// Forward GT_DOLT_PORT so bd connects to the correct server
-			// (e.g., ephemeral test servers in CI).
-			if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-				initArgs = append(initArgs, "--server-port", p)
-			}
+			// Always pass --server-port so bd connects to gt's central Dolt
+			// server. Without this, bd auto-starts its own server on a random
+			// port, causing "database not found" errors. (GH #2405)
+			doltCfg := doltserver.DefaultConfig(m.townRoot)
+			initArgs = append(initArgs, "--server-port", strconv.Itoa(doltCfg.Port))
 			cmd := exec.Command("bd", initArgs...)
 			cmd.Dir = mayorRigPath
 			if output, err := cmd.CombinedOutput(); err != nil {
@@ -930,11 +931,10 @@ func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 		initArgs = append(initArgs, "--prefix", prefix)
 	}
 	initArgs = append(initArgs, "--server")
-	// When GT_DOLT_PORT is set (e.g., test environment with ephemeral server),
-	// pass --server-port so bd init configures the correct port in metadata.
-	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-		initArgs = append(initArgs, "--server-port", p)
-	}
+	// Always pass --server-port so bd connects to gt's central Dolt server.
+	// Without this, bd auto-starts its own server on a random port. (GH #2405)
+	doltCfg := doltserver.DefaultConfig(m.townRoot)
+	initArgs = append(initArgs, "--server-port", strconv.Itoa(doltCfg.Port))
 	cmd := exec.Command("bd", initArgs...)
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv

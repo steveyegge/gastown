@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/formula"
+	"github.com/steveyegge/gastown/internal/plugin"
 )
 
 // PatrolMoleculesExistCheck verifies that patrol formulas are accessible.
@@ -416,6 +417,95 @@ func (c *PatrolPluginsAccessibleCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 	return nil
+}
+
+// PatrolPluginDriftCheck detects when runtime plugins are out of sync with source.
+type PatrolPluginDriftCheck struct {
+	FixableCheck
+	sourceDir string
+	targetDir string
+}
+
+// NewPatrolPluginDriftCheck creates a new plugin drift check.
+func NewPatrolPluginDriftCheck() *PatrolPluginDriftCheck {
+	return &PatrolPluginDriftCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "patrol-plugin-drift",
+				CheckDescription: "Check if runtime plugins match source repo",
+				CheckCategory:    CategoryPatrol,
+			},
+		},
+	}
+}
+
+// Run checks for plugin drift between source and runtime.
+func (c *PatrolPluginDriftCheck) Run(ctx *CheckContext) *CheckResult {
+	c.targetDir = filepath.Join(ctx.TownRoot, "plugins")
+
+	sourceDir, err := plugin.FindGastownSource(ctx.TownRoot)
+	if err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "Plugin source not found (skipping drift check)",
+		}
+	}
+	c.sourceDir = sourceDir
+
+	// Skip if source and target are the same directory
+	srcAbs, _ := filepath.Abs(sourceDir)
+	tgtAbs, _ := filepath.Abs(c.targetDir)
+	if srcAbs == tgtAbs {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "Source and runtime are same directory",
+		}
+	}
+
+	report, err := plugin.DetectDrift(sourceDir, c.targetDir)
+	if err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusError,
+			Message: "Failed to check plugin drift",
+			Details: []string{err.Error()},
+		}
+	}
+
+	if !report.HasDrift() {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "Runtime plugins match source",
+		}
+	}
+
+	var details []string
+	for _, d := range report.Drifted {
+		details = append(details, fmt.Sprintf("%s: content differs", d.Name))
+	}
+	for _, name := range report.Missing {
+		details = append(details, fmt.Sprintf("%s: missing from runtime", name))
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("%d plugin(s) out of sync", len(report.Drifted)+len(report.Missing)),
+		Details: details,
+		FixHint: "Run 'gt plugin sync' to update runtime plugins",
+	}
+}
+
+// Fix syncs plugins from source to runtime.
+func (c *PatrolPluginDriftCheck) Fix(ctx *CheckContext) error {
+	if c.sourceDir == "" || c.targetDir == "" {
+		return fmt.Errorf("drift check did not run; cannot fix")
+	}
+	_, err := plugin.SyncPlugins(c.sourceDir, c.targetDir, false)
+	return err
 }
 
 // discoverRigs finds all registered rigs.

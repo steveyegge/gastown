@@ -283,6 +283,36 @@ func TestMailThresholds_Defaults(t *testing.T) {
 	if got := mail.MaxConcurrentAckOpsV(); got != DefaultMailMaxConcurrentAcks {
 		t.Errorf("MaxConcurrentAckOps: got %v, want %v", got, DefaultMailMaxConcurrentAcks)
 	}
+	if got := mail.ReplyReminderDelayD(); got != DefaultMailReplyReminderDelay {
+		t.Errorf("ReplyReminderDelay: got %v, want %v", got, DefaultMailReplyReminderDelay)
+	}
+}
+
+func TestMailThresholds_ReplyReminderDelayOverride(t *testing.T) {
+	t.Parallel()
+
+	op := &OperationalConfig{
+		Mail: &MailThresholds{
+			ReplyReminderDelay: "1m",
+		},
+	}
+	if got := op.GetMailConfig().ReplyReminderDelayD(); got != time.Minute {
+		t.Errorf("ReplyReminderDelay override: got %v, want 1m", got)
+	}
+}
+
+func TestMailThresholds_ReplyReminderDelayDisabled(t *testing.T) {
+	t.Parallel()
+
+	// "0s" disables reply reminders.
+	op := &OperationalConfig{
+		Mail: &MailThresholds{
+			ReplyReminderDelay: "0s",
+		},
+	}
+	if got := op.GetMailConfig().ReplyReminderDelayD(); got != 0 {
+		t.Errorf("ReplyReminderDelay disabled: got %v, want 0", got)
+	}
 }
 
 func TestWebThresholds_Overrides(t *testing.T) {
@@ -362,5 +392,117 @@ func TestWitnessThresholds_Overrides(t *testing.T) {
 	}
 	if got := wit.DoneIntentRecentGraceD(); got != 15*time.Second {
 		t.Errorf("DoneIntentRecentGrace: got %v, want 15s", got)
+	}
+}
+
+func TestPressureThresholds_Defaults(t *testing.T) {
+	t.Parallel()
+
+	var op *OperationalConfig
+	dt := op.GetDaemonConfig()
+
+	if got := dt.PressureCPUThresholdV(); got != DefaultPressureCPUThreshold {
+		t.Errorf("PressureCPUThreshold: got %v, want %v", got, DefaultPressureCPUThreshold)
+	}
+	if got := dt.PressureMemThresholdGBV(); got != DefaultPressureMemThresholdGB {
+		t.Errorf("PressureMemThresholdGB: got %v, want %v", got, DefaultPressureMemThresholdGB)
+	}
+	if got := dt.PressureMaxSessionsV(); got != DefaultPressureMaxSessions {
+		t.Errorf("PressureMaxSessions: got %v, want %v", got, DefaultPressureMaxSessions)
+	}
+}
+
+func TestPressureThresholds_Overrides(t *testing.T) {
+	t.Parallel()
+
+	cpu := 0.5
+	mem := 8.0
+	sessions := 10
+	dt := &DaemonThresholds{
+		PressureCPUThreshold:   &cpu,
+		PressureMemThresholdGB: &mem,
+		PressureMaxSessions:    &sessions,
+	}
+	if got := dt.PressureCPUThresholdV(); got != 0.5 {
+		t.Errorf("PressureCPUThreshold: got %v, want 0.5", got)
+	}
+	if got := dt.PressureMemThresholdGBV(); got != 8.0 {
+		t.Errorf("PressureMemThresholdGB: got %v, want 8.0", got)
+	}
+	if got := dt.PressureMaxSessionsV(); got != 10 {
+		t.Errorf("PressureMaxSessions: got %v, want 10", got)
+	}
+}
+
+func TestPressureThresholds_DisabledWithZero(t *testing.T) {
+	t.Parallel()
+
+	zero := 0.0
+	zeroInt := 0
+	dt := &DaemonThresholds{
+		PressureCPUThreshold:   &zero,
+		PressureMemThresholdGB: &zero,
+		PressureMaxSessions:    &zeroInt,
+	}
+	if dt.PressureCPUThresholdV() != 0 {
+		t.Error("zero CPU threshold should disable check")
+	}
+	if dt.PressureMemThresholdGBV() != 0 {
+		t.Error("zero mem threshold should disable check")
+	}
+	if dt.PressureMaxSessionsV() != 0 {
+		t.Error("zero max sessions should mean unlimited")
+	}
+}
+
+func TestPressureThresholds_NilReceiver(t *testing.T) {
+	t.Parallel()
+
+	var dt *DaemonThresholds
+	if dt.PressureCPUThresholdV() != DefaultPressureCPUThreshold {
+		t.Error("nil DaemonThresholds should return default CPU threshold")
+	}
+	if dt.PressureMemThresholdGBV() != DefaultPressureMemThresholdGB {
+		t.Error("nil DaemonThresholds should return default mem threshold")
+	}
+	if dt.PressureMaxSessionsV() != DefaultPressureMaxSessions {
+		t.Error("nil DaemonThresholds should return default max sessions")
+	}
+}
+
+func TestPressureThresholds_JSON(t *testing.T) {
+	t.Parallel()
+
+	jsonData := `{
+		"daemon": {
+			"pressure_cpu_threshold": 0.7,
+			"pressure_mem_threshold_gb": 4.0,
+			"pressure_max_sessions": 8
+		}
+	}`
+
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "settings")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var raw struct {
+		Daemon *DaemonThresholds `json:"daemon"`
+	}
+	if err := json.Unmarshal([]byte(jsonData), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw.Daemon.PressureCPUThresholdV() != 0.7 {
+		t.Errorf("JSON CPU threshold: got %v, want 0.7", raw.Daemon.PressureCPUThresholdV())
+	}
+	if raw.Daemon.PressureMemThresholdGBV() != 4.0 {
+		t.Errorf("JSON mem threshold: got %v, want 4.0", raw.Daemon.PressureMemThresholdGBV())
+	}
+	if raw.Daemon.PressureMaxSessionsV() != 8 {
+		t.Errorf("JSON max sessions: got %v, want 8", raw.Daemon.PressureMaxSessionsV())
 	}
 }

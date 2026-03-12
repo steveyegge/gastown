@@ -19,10 +19,14 @@ severity = "low"
 
 # GitHub Sheriff
 
-Polls GitHub for failed CI checks on open pull requests and creates `ci-failure`
-beads for each new failure. Implements the PR Sheriff pattern from the
+Polls GitHub for open pull requests, categorizes them by readiness, and creates
+`ci-failure` beads for new failures. Implements the PR Sheriff pattern from the
 [Gas Town User Manual](https://steve-yegge.medium.com/gas-town-emergency-user-manual-cf0e4556d74b)
 as a Deacon plugin.
+
+Categorizes each PR as:
+- **Easy win**: CI passing, small (<200 LOC changed), no merge conflicts
+- **Needs review**: CI failing, large, or has conflicts
 
 Requires: `gh` CLI installed and authenticated (`gh auth status`).
 
@@ -53,11 +57,15 @@ fi
 
 ## Action
 
-### Step 1: List open PRs
+### Step 1: List open PRs with full details
+
+Fetch all open PRs in a single GraphQL call via `gh`. This returns additions,
+deletions, mergeable status, and CI check results without per-PR API overhead:
 
 ```bash
 PRS=$(gh pr list --repo "$REPO" --state open \
-  --json number,title,author,headRefName,url --limit 100)
+  --json number,title,author,additions,deletions,mergeable,statusCheckRollup,url \
+  --limit 100)
 
 PR_COUNT=$(echo "$PRS" | jq length)
 if [ "$PR_COUNT" -eq 0 ]; then
@@ -66,29 +74,75 @@ if [ "$PR_COUNT" -eq 0 ]; then
 fi
 ```
 
-### Step 2: Check each PR for failures
+### Step 2: Categorize each PR
 
-For each open PR, fetch check runs and identify failures:
+Process each PR using process substitution (not a pipe) so array modifications
+persist after the loop:
 
 ```bash
+EASY_WINS=()
+NEEDS_REVIEW=()
 FAILURES=()
-for PR_NUM in $(echo "$PRS" | jq -r '.[].number'); do
-  PR_TITLE=$(echo "$PRS" | jq -r ".[] | select(.number == $PR_NUM) | .title")
 
-  CHECKS=$(gh pr checks "$PR_NUM" --repo "$REPO" \
-    --json name,bucket,link 2>/dev/null || echo "[]")
+while IFS= read -r PR_JSON; do
+  [ -z "$PR_JSON" ] && continue
 
-  while IFS= read -r ROW; do
-    [ -z "$ROW" ] && continue
-    CHECK_NAME=$(echo "$ROW" | jq -r '.name')
-    CHECK_URL=$(echo "$ROW" | jq -r '.link')
-    BUCKET=$(echo "$ROW" | jq -r '.bucket')
-    FAILURES+=("$PR_NUM|$PR_TITLE|$CHECK_NAME|$CHECK_URL|$BUCKET")
-  done < <(echo "$CHECKS" | jq -c '.[] | select(.bucket == "fail" or .bucket == "cancel")')
-done
+  PR_NUM=$(echo "$PR_JSON" | jq -r '.number')
+  PR_TITLE=$(echo "$PR_JSON" | jq -r '.title')
+  AUTHOR=$(echo "$PR_JSON" | jq -r '.author.login')
+  ADDITIONS=$(echo "$PR_JSON" | jq -r '.additions // 0')
+  DELETIONS=$(echo "$PR_JSON" | jq -r '.deletions // 0')
+  MERGEABLE=$(echo "$PR_JSON" | jq -r '.mergeable')
+  TOTAL_CHANGES=$((ADDITIONS + DELETIONS))
+
+  # Determine CI status from statusCheckRollup
+  TOTAL_CHECKS=$(echo "$PR_JSON" | jq '.statusCheckRollup | length')
+  PASSING_CHECKS=$(echo "$PR_JSON" | jq '[.statusCheckRollup[] | select(
+    .conclusion == "SUCCESS" or .conclusion == "NEUTRAL" or
+    .conclusion == "SKIPPED" or .state == "SUCCESS"
+  )] | length')
+
+  if [ "$TOTAL_CHECKS" -gt 0 ] && [ "$TOTAL_CHECKS" -eq "$PASSING_CHECKS" ]; then
+    CI_PASS=true
+  else
+    CI_PASS=false
+  fi
+
+  # Collect individual check failures for bead creation
+  while IFS= read -r CHECK; do
+    [ -z "$CHECK" ] && continue
+    CHECK_NAME=$(echo "$CHECK" | jq -r '.name')
+    CHECK_URL=$(echo "$CHECK" | jq -r '.detailsUrl // .targetUrl // empty')
+    FAILURES+=("$PR_NUM|$PR_TITLE|$CHECK_NAME|$CHECK_URL")
+  done < <(echo "$PR_JSON" | jq -c '.statusCheckRollup[] | select(
+    .conclusion == "FAILURE" or .conclusion == "CANCELLED" or
+    .conclusion == "TIMED_OUT" or .state == "FAILURE" or .state == "ERROR"
+  )')
+
+  # Categorize PR
+  if [ "$MERGEABLE" = "MERGEABLE" ] && [ "$CI_PASS" = true ] && [ "$TOTAL_CHANGES" -lt 200 ]; then
+    EASY_WINS+=("PR #$PR_NUM: $PR_TITLE (by $AUTHOR, +$ADDITIONS/-$DELETIONS)")
+  else
+    REASONS=""
+    [ "$MERGEABLE" != "MERGEABLE" ] && REASONS+="conflicts "
+    [ "$CI_PASS" != true ] && REASONS+="ci-failing "
+    [ "$TOTAL_CHANGES" -ge 200 ] && REASONS+="large(${TOTAL_CHANGES}loc) "
+    NEEDS_REVIEW+=("PR #$PR_NUM: $PR_TITLE (by $AUTHOR, ${REASONS% })")
+  fi
+done < <(echo "$PRS" | jq -c '.[]')
+
+# Report categorized PRs
+if [ ${#EASY_WINS[@]} -gt 0 ]; then
+  echo "Easy wins (${#EASY_WINS[@]}):"
+  printf '  %s\n' "${EASY_WINS[@]}"
+fi
+if [ ${#NEEDS_REVIEW[@]} -gt 0 ]; then
+  echo "Needs review (${#NEEDS_REVIEW[@]}):"
+  printf '  %s\n' "${NEEDS_REVIEW[@]}"
+fi
 ```
 
-### Step 3: Deduplicate against existing beads
+### Step 3: Deduplicate CI failures against existing beads
 
 For each failure, check if a bead already exists:
 
@@ -99,7 +153,7 @@ CREATED=0
 SKIPPED=0
 
 for F in "${FAILURES[@]}"; do
-  IFS='|' read -r PR_NUM PR_TITLE CHECK_NAME CHECK_URL BUCKET <<< "$F"
+  IFS='|' read -r PR_NUM PR_TITLE CHECK_NAME CHECK_URL <<< "$F"
   BEAD_TITLE="CI failure: $CHECK_NAME on PR #$PR_NUM"
 
   # Check for duplicate (use jq --arg for safe string comparison)
@@ -108,12 +162,11 @@ for F in "${FAILURES[@]}"; do
     continue
   fi
 
-  # Create bead
   DESCRIPTION="CI check \`$CHECK_NAME\` failed on PR #$PR_NUM ($PR_TITLE)
 
-PR: https://github.com/$REPO/pull/$PR_NUM
-Check: $CHECK_URL
-Result: $BUCKET"
+PR: https://github.com/$REPO/pull/$PR_NUM"
+  [ -n "$CHECK_URL" ] && DESCRIPTION="$DESCRIPTION
+Check: $CHECK_URL"
 
   BEAD_ID=$(bd create "$BEAD_TITLE" -t task -p 2 \
     -d "$DESCRIPTION" \
@@ -123,7 +176,6 @@ Result: $BUCKET"
   if [ -n "$BEAD_ID" ]; then
     CREATED=$((CREATED + 1))
 
-    # Log to activity feed
     gt activity emit github_check_failed \
       --message "CI check $CHECK_NAME failed on PR #$PR_NUM ($REPO), bead $BEAD_ID" \
       2>/dev/null || true
@@ -134,7 +186,7 @@ done
 ## Record Result
 
 ```bash
-SUMMARY="$REPO: checked $PR_COUNT PRs, ${#FAILURES[@]} failure(s), $CREATED bead(s) created, $SKIPPED already tracked"
+SUMMARY="$REPO: $PR_COUNT PRs — ${#EASY_WINS[@]} easy win(s), ${#NEEDS_REVIEW[@]} need review, ${#FAILURES[@]} failure(s), $CREATED bead(s) created, $SKIPPED already tracked"
 echo "$SUMMARY"
 ```
 

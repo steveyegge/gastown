@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -474,25 +473,18 @@ func dagSlingableIDs(dag *ConvoyDAG) []string {
 }
 
 // convoyTrackedBeadIDs returns the set of bead IDs tracked by a convoy.
-// It calls `bd dep list <convoyID> --direction=down --type=tracks --json`
-// against the town beads directory and unwraps external:prefix:id references.
+// Uses bdDepListRawIDs to query the raw dependencies table, which works
+// for cross-database deps where tracked issues live in a different Dolt
+// database (e.g., ds-* issues tracked by an hq-cv-* convoy). See GH #2624.
 func convoyTrackedBeadIDs(townBeads, convoyID string) (map[string]bool, error) {
-	townRoot := filepath.Dir(townBeads)
-	out, err := runBdJSON(townRoot, "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
+	trackedIDs, err := bdDepListRawIDs(townBeads, convoyID, "down", "tracks")
 	if err != nil {
-		return nil, fmt.Errorf("bd dep list %s --direction=down --type=tracks: %w", convoyID, err)
+		return nil, fmt.Errorf("tracked deps for %s: %w", convoyID, err)
 	}
 
-	var tracked []struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(out, &tracked); err != nil {
-		return nil, fmt.Errorf("parsing tracked deps for %s: %w", convoyID, err)
-	}
-
-	ids := make(map[string]bool, len(tracked))
-	for _, t := range tracked {
-		ids[beads.ExtractIssueID(t.ID)] = true
+	ids := make(map[string]bool, len(trackedIDs))
+	for _, id := range trackedIDs {
+		ids[id] = true
 	}
 	return ids, nil
 }
@@ -507,7 +499,7 @@ func findOverlappingConvoys(slingableIDs []string) ([]overlappingConvoy, error) 
 	}
 
 	// List all convoys (--all includes every status).
-	out, err := runBdJSON(filepath.Dir(townBeads), "list", "--type=convoy", "--all", "--json")
+	out, err := runBdJSON(townBeads, "list", "--type=convoy", "--all", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("listing convoys: %w", err)
 	}
@@ -1360,7 +1352,7 @@ func bdDepList(beadID string) ([]bdDepResult, error) {
 // directory. We resolve the correct .beads directory from the bead's prefix via
 // routes.jsonl so this works regardless of the caller's working directory.
 func bdListChildren(parentID string) ([]bdShowResult, error) {
-	cmd := exec.Command("bd", "list", "--parent="+parentID, "--json", "--flat")
+	cmd := exec.Command("bd", "list", "--parent="+parentID, "--json")
 	if dir := beadsDirForID(parentID); dir != "" {
 		cmd.Dir = dir
 	}

@@ -369,8 +369,8 @@ Key files:
 - `internal/cmd/done.go` — work submission, sandbox sync, idle transition
 - `internal/cmd/sling.go` + `polecat_spawn.go` — idle reuse, branch-only repair
 - `internal/cmd/handoff.go` — session cycling for all roles
-- `internal/witness/handlers.go` — cleanup pipeline, POLECAT_DONE routing
-- `internal/polecat/manager.go` — zombie/stale detection, pool management
+- `internal/witness/handlers.go` — cleanup pipeline, POLECAT_DONE routing, zombie/orphan detection
+- `internal/polecat/manager.go` — stale detection, idle reuse (`FindIdlePolecat`, `ReuseIdlePolecat`), pool management
 
 ## Related Documentation
 

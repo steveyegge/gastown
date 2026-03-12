@@ -169,7 +169,7 @@ and `AllocateAndAdd()`. Pre-allocation is unnecessary because idle polecats are
 reused automatically. Pool size enforcement is a future optimization, not a blocker.
 
 ### Phase 3: Sandbox sync — SHIPPED
-- DONE → IDLE transition syncs worktree to main (`done.go` lines 969-995)
+- DONE → IDLE transition syncs worktree to main (`done.go`)
 - IDLE → WORKING creates fresh branch (no worktree add) via `ReuseIdlePolecat()`
 - `gt sling` prefers idle polecats via `FindIdlePolecat()`
 - Branch-only reuse eliminates ~5s worktree creation overhead
@@ -181,8 +181,8 @@ reused automatically. Pool size enforcement is a future optimization, not a bloc
 - `gt handoff` works for all roles (Mayor, Crew, Witness, Refinery, Polecats)
 
 ### Phase 5: One-time cleanup — PARTIALLY SHIPPED
-- Polecat branch cleanup after merge: PR #2437 (open, awaiting review)
-- Refinery notifies mayor after merge: PR #2436 (open, awaiting review)
+- Polecat branch cleanup after merge: SHIPPED (landed to main; PRs #2436/#2437 closed)
+- Refinery notifies mayor after merge: not yet shipped
 - Pool reconciliation (`ReconcilePool`): not yet implemented
 
 ### Implementation Status Summary
@@ -196,8 +196,8 @@ reused automatically. Pool size enforcement is a future optimization, not a bloc
 | Cleanup pipeline (POLECAT_DONE → MERGE_READY → MERGED) | SHIPPED | `internal/witness/handlers.go`, `internal/refinery/engineer.go` |
 | Idle polecat heresy fix (skip healthy idle) | SHIPPED | `internal/witness/handlers.go` |
 | Restart-first policy (no auto-nuke) | SHIPPED | `internal/polecat/manager.go` |
-| Polecat branch always deleted after merge | PR #2437 | `internal/refinery/engineer.go` |
-| Refinery notifies mayor after merge | PR #2436 | `internal/refinery/engineer.go` |
+| Polecat branch always deleted after merge | SHIPPED | `internal/refinery/engineer.go` |
+| Refinery notifies mayor after merge | NOT SHIPPED | — |
 | Pool size enforcement | DEFERRED | — |
 | `ReconcilePool()` | DEFERRED | — |
 | `gt polecat pool init` command | DEFERRED | — |

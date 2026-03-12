@@ -1065,7 +1065,7 @@ func (g *Git) WorktreeAdd(path, branch string) error {
 	); err != nil {
 		return err
 	}
-	return InitSubmodules(path)
+	return InitSubmodules(path, g.submoduleReferencePath())
 }
 
 // WorktreeAddFromRef creates a new worktree at the given path with a new branch
@@ -1080,7 +1080,7 @@ func (g *Git) WorktreeAddFromRef(path, branch, startPoint string) error {
 	); err != nil {
 		return err
 	}
-	return InitSubmodules(path)
+	return InitSubmodules(path, g.submoduleReferencePath())
 }
 
 // WorktreeAddDetached creates a new worktree at the given path with a detached HEAD.
@@ -1092,7 +1092,7 @@ func (g *Git) WorktreeAddDetached(path, ref string) error {
 	); err != nil {
 		return err
 	}
-	return InitSubmodules(path)
+	return InitSubmodules(path, g.submoduleReferencePath())
 }
 
 // WorktreeAddExisting creates a new worktree at the given path for an existing branch.
@@ -1104,7 +1104,7 @@ func (g *Git) WorktreeAddExisting(path, branch string) error {
 	); err != nil {
 		return err
 	}
-	return InitSubmodules(path)
+	return InitSubmodules(path, g.submoduleReferencePath())
 }
 
 // WorktreeAddExistingForce creates a new worktree even if the branch is already checked out elsewhere.
@@ -1113,7 +1113,63 @@ func (g *Git) WorktreeAddExistingForce(path, branch string) error {
 	if _, err := g.run("worktree", "add", "--force", path, branch); err != nil {
 		return err
 	}
-	return InitSubmodules(path)
+	return InitSubmodules(path, g.submoduleReferencePath())
+}
+
+// submoduleReferencePath returns the mayor/rig path to use as --reference
+// for submodule init. For bare repos (.repo.git), this resolves to the
+// sibling mayor/rig directory which contains the initialized submodules.
+// Returns empty string if no suitable reference path exists or if the
+// reference repo is a shallow clone (git rejects shallow references).
+func (g *Git) submoduleReferencePath() string {
+	// For bare repos, the gitDir is <rig>/.repo.git
+	// The reference clone is at <rig>/mayor/rig/
+	if g.gitDir != "" {
+		rigDir := filepath.Dir(g.gitDir)
+		mayorRig := filepath.Join(rigDir, "mayor", "rig")
+		if isValidSubmoduleReference(mayorRig) {
+			return mayorRig
+		}
+	}
+
+	// For regular clones (workDir-based), the workDir itself could be mayor/rig
+	// but we don't want to reference ourselves. Check for a sibling .repo.git
+	// to find the rig root, then use mayor/rig.
+	if g.workDir != "" {
+		dir := g.workDir
+		for i := 0; i < 4; i++ {
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			if _, err := os.Stat(filepath.Join(parent, ".repo.git")); err == nil {
+				mayorRig := filepath.Join(parent, "mayor", "rig")
+				if mayorRig != g.workDir && isValidSubmoduleReference(mayorRig) {
+					return mayorRig
+				}
+				break
+			}
+			dir = parent
+		}
+	}
+
+	return ""
+}
+
+// isValidSubmoduleReference checks if a path is suitable as a --reference
+// for git submodule update. It must have .gitmodules and not be a shallow clone
+// (git rejects shallow repos as references).
+func isValidSubmoduleReference(repoPath string) bool {
+	if _, err := os.Stat(filepath.Join(repoPath, ".gitmodules")); err != nil {
+		return false
+	}
+	// Check if shallow — git rev-parse --is-shallow-repository
+	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--is-shallow-repository")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != "true"
 }
 
 // IsSparseCheckoutConfigured checks if sparse checkout is enabled for a given repo/worktree.
@@ -1697,12 +1753,28 @@ type SubmoduleChange struct {
 
 // InitSubmodules initializes and updates submodules if .gitmodules exists.
 // This is a no-op for repos without submodules.
-func InitSubmodules(repoPath string) error {
+//
+// If referencePath is non-empty and contains submodules, --reference is used
+// to share git objects from a local clone instead of fetching from remote.
+// This makes submodule init near-instant for large submodules (e.g. 655MB gitlabhq).
+func InitSubmodules(repoPath string, referencePath ...string) error {
 	gitmodules := filepath.Join(repoPath, ".gitmodules")
 	if _, err := os.Stat(gitmodules); os.IsNotExist(err) {
 		return nil
 	}
-	cmd := exec.Command("git", "-C", repoPath, "submodule", "update", "--init", "--recursive")
+
+	args := []string{"-C", repoPath, "submodule", "update", "--init", "--recursive"}
+
+	// Use --reference to share objects from a local clone (avoids remote fetch)
+	if len(referencePath) > 0 && referencePath[0] != "" {
+		refPath := referencePath[0]
+		refModules := filepath.Join(refPath, ".gitmodules")
+		if _, err := os.Stat(refModules); err == nil {
+			args = append(args, "--reference", refPath)
+		}
+	}
+
+	cmd := exec.Command("git", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

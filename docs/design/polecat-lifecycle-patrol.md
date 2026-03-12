@@ -3,7 +3,7 @@
 > **Bead:** gt-t6muy
 > **Date:** 2026-02-20
 > **Author:** capable (gastown polecat)
-> **Status:** Implemented — core lifecycle shipped, PRs #2436/#2437 pending
+> **Status:** Implemented — core lifecycle shipped, branch cleanup shipped, mayor notify pending
 > **Updated:** 2026-03-07 (gt-o8g8 implementation audit by bear)
 > **Related:** gt-dtw9u (Witness monitoring), gt-qpwv4 (Completion detection),
 > gt-6qyt1 (Refinery queue), gt-budeb (Auto-nuke), gt-5j3ia (Swarm aggregation),
@@ -633,19 +633,18 @@ All core lifecycle operations are implemented and running in production:
 | Session cycling | `gt handoff` | `handoff.go` — all roles, preserves sandbox and identity |
 | Step completion | `bd close` + `gt handoff` | Step cleanup: session dies, sandbox lives |
 | Work submission | `gt done` | `done.go` — push, MR, sandbox sync, set idle |
-| Idle polecat reuse | `gt sling` | `FindIdlePolecat()` + `ReuseIdlePolecat()` — branch-only repair |
-| Zombie detection | Witness patrol | `DetectZombiePolecats()` — restart-first, no auto-nuke |
-| Stale detection | Witness patrol | `DetectStalePolecats()` — tmux-based, protects paused states |
-| Orphan recovery | Witness patrol | `DetectOrphanedBeads()` — reset and re-dispatch |
+| Idle polecat reuse | `gt sling` | `polecat/manager.go`: `FindIdlePolecat()` + `ReuseIdlePolecat()` — branch-only repair |
+| Zombie detection | Witness patrol | `witness/handlers.go`: `DetectZombiePolecats()` — restart-first, no auto-nuke |
+| Stale detection | Witness patrol | `polecat/manager.go`: `DetectStalePolecats()` — tmux-based, protects paused states |
+| Orphan recovery | Witness patrol | `witness/handlers.go`: `DetectOrphanedBeads()` — reset and re-dispatch |
 | Cleanup pipeline | Mail-based | POLECAT_DONE → Witness → MERGE_READY → Refinery → MERGED |
 | Merge queue | Refinery | Squash-merge, close MR and issue, convoy check |
 
-### Pending (open PRs)
+### Pending
 
-| PR | Description | Impact |
-|----|-------------|--------|
-| #2437 | Always delete polecat branches after merge | Prevents branch pollution |
-| #2436 | Refinery notifies mayor after merge | Unblocks dependent work dispatch |
+| Feature | Description | Impact |
+|---------|-------------|--------|
+| Refinery notifies mayor after merge | PRs #2436/#2437 closed; branch cleanup shipped, mayor notify not yet | Unblocks dependent work dispatch |
 
 ### Deferred (design only)
 

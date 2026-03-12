@@ -34,6 +34,7 @@ type strandedConvoyInfo struct {
 	ReadyCount   int       `json:"ready_count"`
 	ReadyIssues  []string  `json:"ready_issues"`
 	CreatedAt    time.Time `json:"created_at"`
+	BaseBranch   string    `json:"base_branch,omitempty"`
 }
 
 // ConvoyManager monitors beads events for issue closes and periodically scans for stranded convoys.
@@ -302,7 +303,8 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map
 		}
 
 		m.logger("Convoy: close detected: %s (from %s)", issueID, name)
-		convoy.CheckConvoysForIssue(m.ctx, hqStore, m.townRoot, issueID, "Convoy", m.logger, m.gtPath, m.isRigParked)
+		resolver := convoy.NewStoreResolver(m.townRoot, stores)
+		convoy.CheckConvoysForIssue(m.ctx, hqStore, m.townRoot, issueID, "Convoy", m.logger, m.gtPath, m.isRigParked, resolver)
 	}
 }
 
@@ -428,7 +430,11 @@ func (m *ConvoyManager) feedFirstReady(c strandedConvoyInfo) {
 
 		m.logger("Convoy %s: feeding %s to %s", c.ID, issueID, rig)
 
-		cmd := exec.CommandContext(m.ctx, m.gtPath, "sling", issueID, rig, "--no-boot")
+		slingArgs := []string{"sling", issueID, rig, "--no-boot"}
+		if c.BaseBranch != "" {
+			slingArgs = append(slingArgs, "--base-branch="+c.BaseBranch)
+		}
+		cmd := exec.CommandContext(m.ctx, m.gtPath, slingArgs...)
 		cmd.Dir = m.townRoot
 		util.SetProcessGroup(cmd)
 		var stderr bytes.Buffer

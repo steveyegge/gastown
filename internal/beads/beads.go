@@ -427,6 +427,28 @@ func (b *Beads) run(args ...string) (_ []byte, retErr error) {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+
+	// If bd doesn't support --flat, retry without it. The retry is done here
+	// (not in callers like List) so that InjectFlatForListJSON doesn't re-add
+	// --flat on the retry path.
+	if err != nil && strings.Contains(stderr.String(), "unknown flag: --flat") {
+		retryArgs := make([]string, 0, len(fullArgs))
+		for _, a := range fullArgs {
+			if a != "--flat" {
+				retryArgs = append(retryArgs, a)
+			}
+		}
+		stdout.Reset()
+		stderr.Reset()
+		cmd = exec.Command("bd", retryArgs...) //nolint:gosec // G204: bd is a trusted internal tool
+		cmd.Dir = b.workDir
+		cmd.Env = runEnv
+		cmd.Env = append(cmd.Env, telemetry.OTELEnvForSubprocess()...)
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err = cmd.Run()
+	}
+
 	if err != nil {
 		return nil, b.wrapError(err, stderr.String(), args)
 	}
@@ -438,7 +460,7 @@ func (b *Beads) run(args ...string) (_ []byte, retErr error) {
 		return nil, b.wrapError(fmt.Errorf("command produced no output"), stderr.String(), args)
 	}
 
-	return stdout.Bytes(), nil
+	return stripStdoutWarnings(stdout.Bytes()), nil
 }
 
 // runWithRouting executes a bd command without setting BEADS_DIR, allowing bd's
@@ -473,7 +495,7 @@ func (b *Beads) runWithRouting(args ...string) (_ []byte, retErr error) { //noli
 		return nil, b.wrapError(fmt.Errorf("command produced no output"), stderr.String(), args)
 	}
 
-	return stdout.Bytes(), nil
+	return stripStdoutWarnings(stdout.Bytes()), nil
 }
 
 // Run executes a bd command and returns stdout.
@@ -672,15 +694,6 @@ func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
 	}
 
 	out, err := b.run(args...)
-	if err != nil && strings.Contains(err.Error(), "unknown flag: --flat") {
-		fallbackArgs := make([]string, 0, len(args)-1)
-		for _, arg := range args {
-			if arg != "--flat" {
-				fallbackArgs = append(fallbackArgs, arg)
-			}
-		}
-		out, err = b.run(fallbackArgs...)
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -750,6 +763,31 @@ func (b *Beads) listEphemeral(opts ListOptions) ([]*Issue, error) {
 	}
 
 	return issues, nil
+}
+
+// stripStdoutWarnings removes warning/diagnostic lines that bd may emit to stdout.
+// bd sometimes prints "warning: ..." lines to stdout instead of stderr, which
+// corrupts JSON output. This strips those lines so downstream JSON parsing works.
+func stripStdoutWarnings(data []byte) []byte {
+	if !bytes.Contains(data, []byte("warning:")) {
+		return data
+	}
+
+	lines := bytes.Split(data, []byte("\n"))
+	var cleaned [][]byte
+	stripped := false
+	for _, line := range lines {
+		if bytes.HasPrefix(bytes.TrimSpace(line), []byte("warning:")) {
+			stripped = true
+			continue
+		}
+		cleaned = append(cleaned, line)
+	}
+
+	if !stripped {
+		return data
+	}
+	return bytes.Join(cleaned, []byte("\n"))
 }
 
 // isJSONBytes returns true if the byte slice starts with [ or { (after whitespace).

@@ -6,7 +6,8 @@
 // Protocol Message Types:
 //   - MERGE_READY: Witness → Refinery (branch ready for merge)
 //   - MERGED: Refinery → Witness (merge succeeded, cleanup ok)
-//   - MERGE_FAILED: Refinery → Witness (merge failed, needs rework)
+//   - MERGE_FAILED: Refinery → Witness (merge failed, needs rework) [LEGACY]
+//   - FIX_NEEDED: Refinery → Polecat (merge failed, fix and resubmit)
 //   - REWORK_REQUEST: Refinery → Witness (rebase needed)
 package protocol
 
@@ -31,8 +32,16 @@ const (
 
 	// TypeMergeFailed is sent from Refinery to Witness when a merge attempt
 	// failed (tests, build, or other non-conflict error).
+	// LEGACY: New code should use TypeFixNeeded (sent directly to polecat).
 	// Subject format: "MERGE_FAILED <polecat-name>"
 	TypeMergeFailed MessageType = "MERGE_FAILED"
+
+	// TypeFixNeeded is sent from Refinery directly to the Polecat when a
+	// merge attempt failed (tests, build, lint, etc.). The polecat reads
+	// failure details, fixes the code, and resubmits the MR.
+	// This replaces the old MERGE_FAILED → Witness → Polecat flow.
+	// Subject format: "FIX_NEEDED <polecat-name>"
+	TypeFixNeeded MessageType = "FIX_NEEDED"
 
 	// TypeReworkRequest is sent from Refinery to Witness when a polecat's
 	// branch needs rebasing due to conflicts with the target branch.
@@ -56,6 +65,7 @@ func ParseMessageType(subject string) MessageType {
 		TypeMergeReady,
 		TypeMerged,
 		TypeMergeFailed,
+		TypeFixNeeded,
 		TypeReworkRequest,
 		TypeConvoyNeedsFeeding,
 	}
@@ -143,6 +153,41 @@ type MergeFailedPayload struct {
 
 	// TargetBranch is the branch we tried to merge into.
 	TargetBranch string `json:"target_branch"`
+}
+
+// FixNeededPayload contains the data for a FIX_NEEDED message.
+// Sent by Refinery directly to the Polecat when merge fails due to tests,
+// build, lint, or other quality checks. The polecat fixes and resubmits.
+type FixNeededPayload struct {
+	// Branch is the source branch that failed to merge.
+	Branch string `json:"branch"`
+
+	// Issue is the beads issue ID.
+	Issue string `json:"issue"`
+
+	// Polecat is the worker name.
+	Polecat string `json:"polecat"`
+
+	// Rig is the rig name.
+	Rig string `json:"rig"`
+
+	// FailedAt is when the failure occurred.
+	FailedAt time.Time `json:"failed_at"`
+
+	// FailureType categorizes the failure (tests, build, lint, typecheck, etc.).
+	FailureType string `json:"failure_type"`
+
+	// Error is the error message/output from the failed check.
+	Error string `json:"error"`
+
+	// TargetBranch is the branch we tried to merge into.
+	TargetBranch string `json:"target_branch"`
+
+	// MRBeadID is the merge-request bead ID (preserved for resubmission).
+	MRBeadID string `json:"mr_bead_id,omitempty"`
+
+	// AttemptNumber tracks how many fix attempts have been made.
+	AttemptNumber int `json:"attempt_number"`
 }
 
 // ReworkRequestPayload contains the data for a REWORK_REQUEST message.

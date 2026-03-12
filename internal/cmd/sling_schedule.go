@@ -173,7 +173,7 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 	if !opts.NoConvoy {
 		existingConvoy := isTrackedByConvoy(beadID)
 		if existingConvoy == "" {
-			convoyID, err := createAutoConvoy(beadID, info.Title, opts.Owned, opts.Merge)
+			convoyID, err := createAutoConvoy(beadID, info.Title, opts.Owned, opts.Merge, opts.BaseBranch)
 			if err != nil {
 				fmt.Printf("%s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
 			} else {

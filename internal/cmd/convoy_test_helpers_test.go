@@ -227,6 +227,39 @@ func (d *testDAG) BdStubScript() string {
 		sb.WriteString("    ;;\n")
 	}
 
+	// --- handle: sql "SELECT ..." --json (bdDepListRawIDs) ---
+	// bdDepListRawIDs calls: bd sql "SELECT depends_on_id FROM dependencies WHERE issue_id = '<id>' AND type = 'tracks'" --json
+	// or: bd sql "SELECT issue_id FROM dependencies WHERE depends_on_id = '<id>' AND type = 'tracks'" --json
+	sb.WriteString("  sql\\ *)\n")
+	sb.WriteString("    # Handle SQL queries for dependency lookups\n")
+	// For "down" direction (convoy → tracked beads): match on issue_id = '<convoyID>'
+	for id, b := range d.beads {
+		if b.Type == "convoy" {
+			trackedSQLJSON := d.trackedBeadsSQLJSONFor(id)
+			sb.WriteString(`    case "$ALL_ARGS" in` + "\n")
+			sb.WriteString(fmt.Sprintf("      *\"issue_id = '%s'\"*)\n", id))
+			sb.WriteString(fmt.Sprintf("        echo '%s'\n", trackedSQLJSON))
+			sb.WriteString("        exit 0\n")
+			sb.WriteString("        ;;\n")
+			sb.WriteString("    esac\n")
+		}
+	}
+	// For "up" direction (bead → tracking convoys): match on depends_on_id = '<beadID>'
+	for id := range d.beads {
+		trackersJSON := d.trackersSQLJSONFor(id)
+		if trackersJSON != "[]" {
+			sb.WriteString(`    case "$ALL_ARGS" in` + "\n")
+			sb.WriteString(fmt.Sprintf("      *\"depends_on_id = '%s'\"*)\n", id))
+			sb.WriteString(fmt.Sprintf("        echo '%s'\n", trackersJSON))
+			sb.WriteString("        exit 0\n")
+			sb.WriteString("        ;;\n")
+			sb.WriteString("    esac\n")
+		}
+	}
+	sb.WriteString("    echo '[]'\n")
+	sb.WriteString("    exit 0\n")
+	sb.WriteString("    ;;\n")
+
 	// --- handle: dep list --direction=down (tracked beads for convoys) ---
 	// Must come before generic dep list handler.
 	sb.WriteString("  dep\\ list\\ *--direction=down*)\n")
@@ -509,6 +542,48 @@ func (d *testDAG) trackedBeadsJSONFor(convoyID string) string {
 		// tracks deps: IssueID is the convoy, DependsOnID is the tracked bead.
 		if dep.Type == "tracks" && dep.IssueID == convoyID {
 			out = append(out, idOnly{ID: dep.DependsOnID})
+		}
+	}
+	if out == nil {
+		return "[]"
+	}
+	raw, _ := json.Marshal(out)
+	return string(raw)
+}
+
+// trackedBeadsSQLJSONFor returns the JSON array for `bd sql "SELECT depends_on_id
+// FROM dependencies WHERE issue_id = '<convoyID>' AND type = 'tracks'" --json`.
+// Returns [{"depends_on_id":"<id>"},...] for each tracked bead.
+func (d *testDAG) trackedBeadsSQLJSONFor(convoyID string) string {
+	type sqlRow struct {
+		DependsOnID string `json:"depends_on_id"`
+	}
+
+	var out []sqlRow
+	for _, dep := range d.deps {
+		if dep.Type == "tracks" && dep.IssueID == convoyID {
+			out = append(out, sqlRow{DependsOnID: dep.DependsOnID})
+		}
+	}
+	if out == nil {
+		return "[]"
+	}
+	raw, _ := json.Marshal(out)
+	return string(raw)
+}
+
+// trackersSQLJSONFor returns the JSON array for `bd sql "SELECT issue_id
+// FROM dependencies WHERE depends_on_id = '<beadID>' AND type = 'tracks'" --json`.
+// Returns [{"issue_id":"<convoyID>"},...] for each convoy tracking this bead.
+func (d *testDAG) trackersSQLJSONFor(beadID string) string {
+	type sqlRow struct {
+		IssueID string `json:"issue_id"`
+	}
+
+	var out []sqlRow
+	for _, dep := range d.deps {
+		if dep.Type == "tracks" && dep.DependsOnID == beadID {
+			out = append(out, sqlRow{IssueID: dep.IssueID})
 		}
 	}
 	if out == nil {

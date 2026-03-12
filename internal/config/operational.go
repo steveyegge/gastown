@@ -48,6 +48,13 @@ const (
 	DefaultRecoveryHeartbeatInterval       = 3 * time.Minute
 	DefaultBootSpawnCooldown               = 2 * time.Minute
 	DefaultDeaconGracePeriod               = 5 * time.Minute
+
+	// Pressure check defaults — fully opt-in. All zero = disabled.
+	// Configure in settings/config.json under operational.daemon to enable.
+	// Example: {"pressure_cpu_threshold": 3.0, "pressure_mem_threshold_gb": 0.5}
+	DefaultPressureCPUThreshold   = 0.0
+	DefaultPressureMemThresholdGB = 0.0
+	DefaultPressureMaxSessions    = 0
 )
 
 // Deacon defaults.
@@ -87,6 +94,7 @@ const (
 	DefaultMailBdReadTimeout      = 60 * time.Second
 	DefaultMailBdWriteTimeout     = 60 * time.Second
 	DefaultMailMaxConcurrentAcks  = 8
+	DefaultMailReplyReminderDelay = 30 * time.Second
 )
 
 // Web defaults.
@@ -384,6 +392,30 @@ func (d *DaemonThresholds) DeaconGracePeriodD() time.Duration {
 	return DefaultDeaconGracePeriod
 }
 
+// PressureCPUThresholdV returns the configured or default CPU pressure threshold (load per core).
+func (d *DaemonThresholds) PressureCPUThresholdV() float64 {
+	if d != nil && d.PressureCPUThreshold != nil {
+		return *d.PressureCPUThreshold
+	}
+	return DefaultPressureCPUThreshold
+}
+
+// PressureMemThresholdGBV returns the configured or default memory pressure threshold in GB.
+func (d *DaemonThresholds) PressureMemThresholdGBV() float64 {
+	if d != nil && d.PressureMemThresholdGB != nil {
+		return *d.PressureMemThresholdGB
+	}
+	return DefaultPressureMemThresholdGB
+}
+
+// PressureMaxSessionsV returns the configured or default max concurrent sessions (0 = unlimited).
+func (d *DaemonThresholds) PressureMaxSessionsV() int {
+	if d != nil && d.PressureMaxSessions != nil {
+		return *d.PressureMaxSessions
+	}
+	return DefaultPressureMaxSessions
+}
+
 // --- Deacon accessors ---
 
 // GetDeaconConfig returns the deacon thresholds, never nil.
@@ -606,6 +638,15 @@ func (m *MailThresholds) MaxConcurrentAckOpsV() int {
 		return *m.MaxConcurrentAckOps
 	}
 	return DefaultMailMaxConcurrentAcks
+}
+
+// ReplyReminderDelayD returns the configured or default reply reminder delay.
+// A zero duration means reply reminders are disabled.
+func (m *MailThresholds) ReplyReminderDelayD() time.Duration {
+	if m != nil {
+		return ParseDurationOrDefault(m.ReplyReminderDelay, DefaultMailReplyReminderDelay)
+	}
+	return DefaultMailReplyReminderDelay
 }
 
 // --- Web accessors ---

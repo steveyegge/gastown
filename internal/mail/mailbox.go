@@ -2,6 +2,7 @@ package mail
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -167,6 +168,12 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 			continue
 		}
 		var msgs []BeadsMessage
+		trimmed := bytes.TrimSpace(stdout)
+		if len(trimmed) == 0 || string(trimmed) == "null" || (trimmed[0] != '[' && trimmed[0] != '{') {
+			// bd v0.58.0 returns plain text (e.g. "No issues found.") for
+			// empty result sets instead of JSON. Skip non-JSON output.
+			continue
+		}
 		if err := json.Unmarshal(stdout, &msgs); err != nil {
 			return nil, err
 		}
@@ -206,6 +213,10 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 			continue
 		}
 		var msgs []BeadsMessage
+		trimmedCC := bytes.TrimSpace(stdout)
+		if len(trimmedCC) == 0 || string(trimmedCC) == "null" || (trimmedCC[0] != '[' && trimmedCC[0] != '{') {
+			continue
+		}
 		if err := json.Unmarshal(stdout, &msgs); err != nil {
 			continue // Non-fatal for CC
 		}

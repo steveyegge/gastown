@@ -1556,6 +1556,10 @@ func (r *Router) GetMailbox(address string) (*Mailbox, error) {
 //     the next turn boundary.
 //  3. For the overseer (human operator), always use a visible banner.
 //
+// After a successful notification, a deferred reply-reminder nudge is also
+// enqueued (after a configurable delay, default 30s) to prompt the recipient
+// to reply via gt mail send rather than in chat.
+//
 // Supports mayor/, deacon/, rig/crew/name, rig/polecats/name, and rig/name addresses.
 // Respects agent DND/muted state - skips notification if recipient has DND enabled.
 func (r *Router) notifyRecipient(msg *Message) error {
@@ -1602,6 +1606,7 @@ func (r *Router) notifyRecipient(msg *Message) error {
 		if waitErr == nil {
 			// Agent is idle — deliver directly for immediate wakeup.
 			if err := r.tmux.NudgeSession(sessionID, notification); err == nil {
+				r.enqueueReplyReminder(msg, sessionID)
 				return nil
 			} else if errors.Is(err, tmux.ErrSessionNotFound) {
 				continue
@@ -1615,16 +1620,53 @@ func (r *Router) notifyRecipient(msg *Message) error {
 		} else if r.townRoot != "" {
 			// Timeout (agent busy) — queue for cooperative delivery
 			// at the next turn boundary.
-			return nudge.Enqueue(r.townRoot, sessionID, nudge.QueuedNudge{
+			if err := nudge.Enqueue(r.townRoot, sessionID, nudge.QueuedNudge{
 				Sender:  msg.From,
 				Message: notification,
-			})
+			}); err != nil {
+				return err
+			}
+			r.enqueueReplyReminder(msg, sessionID)
+			return nil
 		}
 		// No town root available — last resort direct delivery.
-		return r.tmux.NudgeSession(sessionID, notification)
+		err = r.tmux.NudgeSession(sessionID, notification)
+		if err == nil {
+			r.enqueueReplyReminder(msg, sessionID)
+		}
+		return err
 	}
 
 	return nil // No active session found
+}
+
+// enqueueReplyReminder queues a deferred nudge reminding the recipient to reply
+// via gt mail send rather than in chat. Best-effort: errors are logged, not returned.
+//
+// Skipped when:
+//   - No town root (can't use nudge queue)
+//   - Message type is TypeReply (recipient is already replying)
+//   - Configured delay is zero or negative (feature disabled)
+func (r *Router) enqueueReplyReminder(msg *Message, sessionID string) {
+	if r.townRoot == "" {
+		return
+	}
+	if msg.Type == TypeReply {
+		return // Already a reply — reminder would be redundant
+	}
+	delay := config.LoadOperationalConfig(r.townRoot).GetMailConfig().ReplyReminderDelayD()
+	if delay <= 0 {
+		return // Disabled by config
+	}
+	reminder := nudge.QueuedNudge{
+		Sender:       "system",
+		Message:      fmt.Sprintf("Remember to reply to %s (subject: %q) via `gt mail send %s` — not in chat.", msg.From, msg.Subject, msg.From),
+		Priority:     nudge.PriorityNormal,
+		DeliverAfter: time.Now().Add(delay),
+	}
+	if err := nudge.Enqueue(r.townRoot, sessionID, reminder); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to enqueue reply reminder for %s: %v\n", sessionID, err)
+	}
 }
 
 // IsRecipientMuted checks if a mail recipient has DND/muted notifications enabled.

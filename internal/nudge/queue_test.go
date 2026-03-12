@@ -499,6 +499,194 @@ func TestConcurrentEnqueueNoDuplicateLoss(t *testing.T) {
 	}
 }
 
+// --- DeliverAfter tests ---
+
+// TestDrainSkipsDeferredNudge verifies that a nudge with a future DeliverAfter
+// is not returned by Drain and remains in the queue.
+func TestDrainSkipsDeferredNudge(t *testing.T) {
+	townRoot := t.TempDir()
+	session := "gt-test-deferred"
+
+	deferred := QueuedNudge{
+		Sender:       "system",
+		Message:      "reply reminder",
+		DeliverAfter: time.Now().Add(10 * time.Second), // far future
+	}
+	if err := Enqueue(townRoot, session, deferred); err != nil {
+		t.Fatalf("Enqueue deferred: %v", err)
+	}
+
+	nudges, err := Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(nudges) != 0 {
+		t.Fatalf("Drain returned %d nudges, want 0 (deferred not ready)", len(nudges))
+	}
+
+	// File should still be in queue (not discarded)
+	pending, err := Pending(townRoot, session)
+	if err != nil {
+		t.Fatalf("Pending: %v", err)
+	}
+	if pending != 1 {
+		t.Errorf("Pending = %d, want 1 (deferred nudge still in queue)", pending)
+	}
+}
+
+// TestDrainDeliversDeferredNudgeWhenReady verifies that a nudge with a past
+// DeliverAfter is delivered normally.
+func TestDrainDeliversDeferredNudgeWhenReady(t *testing.T) {
+	townRoot := t.TempDir()
+	session := "gt-test-deferred-ready"
+
+	ready := QueuedNudge{
+		Sender:       "system",
+		Message:      "reply reminder",
+		DeliverAfter: time.Now().Add(-1 * time.Second), // already past
+	}
+	if err := Enqueue(townRoot, session, ready); err != nil {
+		t.Fatalf("Enqueue ready: %v", err)
+	}
+
+	nudges, err := Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(nudges) != 1 {
+		t.Fatalf("Drain returned %d nudges, want 1 (deferred is ready)", len(nudges))
+	}
+	if nudges[0].Message != "reply reminder" {
+		t.Errorf("got message %q, want %q", nudges[0].Message, "reply reminder")
+	}
+}
+
+// TestDrainMixedDeferredAndReady verifies that only ready nudges are returned
+// when a mix of deferred and immediately-deliverable nudges are queued.
+func TestDrainMixedDeferredAndReady(t *testing.T) {
+	townRoot := t.TempDir()
+	session := "gt-test-mixed-deferred"
+
+	// Enqueue: immediate, then deferred, then immediate (interleaved order).
+	n1 := QueuedNudge{Sender: "mayor", Message: "immediate-1"}
+	if err := Enqueue(townRoot, session, n1); err != nil {
+		t.Fatalf("Enqueue n1: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+
+	deferred := QueuedNudge{
+		Sender:       "system",
+		Message:      "deferred",
+		DeliverAfter: time.Now().Add(60 * time.Second),
+	}
+	if err := Enqueue(townRoot, session, deferred); err != nil {
+		t.Fatalf("Enqueue deferred: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+
+	n2 := QueuedNudge{Sender: "witness", Message: "immediate-2"}
+	if err := Enqueue(townRoot, session, n2); err != nil {
+		t.Fatalf("Enqueue n2: %v", err)
+	}
+
+	nudges, err := Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(nudges) != 2 {
+		t.Fatalf("Drain returned %d nudges, want 2 (deferred stays in queue)", len(nudges))
+	}
+	if nudges[0].Message != "immediate-1" {
+		t.Errorf("nudges[0].Message = %q, want %q", nudges[0].Message, "immediate-1")
+	}
+	if nudges[1].Message != "immediate-2" {
+		t.Errorf("nudges[1].Message = %q, want %q", nudges[1].Message, "immediate-2")
+	}
+
+	// Deferred nudge remains in queue
+	pending, err := Pending(townRoot, session)
+	if err != nil {
+		t.Fatalf("Pending after drain: %v", err)
+	}
+	if pending != 1 {
+		t.Errorf("Pending = %d, want 1 (deferred nudge still in queue)", pending)
+	}
+}
+
+// TestDeferredNudgeDeliveredAfterDelay uses a very short DeliverAfter to confirm
+// that the same nudge is skipped on first Drain and delivered on a second Drain
+// after the deadline elapses.
+func TestDeferredNudgeDeliveredAfterDelay(t *testing.T) {
+	townRoot := t.TempDir()
+	session := "gt-test-deferred-sequence"
+
+	shortDelay := QueuedNudge{
+		Sender:       "system",
+		Message:      "reply via mail",
+		DeliverAfter: time.Now().Add(50 * time.Millisecond),
+	}
+	if err := Enqueue(townRoot, session, shortDelay); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// First Drain: not ready yet.
+	nudges, err := Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("first Drain: %v", err)
+	}
+	if len(nudges) != 0 {
+		t.Fatalf("first Drain: got %d nudges, want 0 (deferred not ready)", len(nudges))
+	}
+
+	// Wait for deadline.
+	time.Sleep(60 * time.Millisecond)
+
+	// Second Drain: ready now.
+	nudges, err = Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("second Drain: %v", err)
+	}
+	if len(nudges) != 1 {
+		t.Fatalf("second Drain: got %d nudges, want 1 (deferred now ready)", len(nudges))
+	}
+	if nudges[0].Message != "reply via mail" {
+		t.Errorf("got message %q, want %q", nudges[0].Message, "reply via mail")
+	}
+
+	// Queue should now be empty.
+	pending, err := Pending(townRoot, session)
+	if err != nil {
+		t.Fatalf("Pending: %v", err)
+	}
+	if pending != 0 {
+		t.Errorf("Pending = %d, want 0 (deferred nudge delivered)", pending)
+	}
+}
+
+// TestZeroDeliverAfterIsImmediate verifies that a zero DeliverAfter (unset)
+// is treated as immediately deliverable (not deferred).
+func TestZeroDeliverAfterIsImmediate(t *testing.T) {
+	townRoot := t.TempDir()
+	session := "gt-test-zero-deliver-after"
+
+	n := QueuedNudge{
+		Sender:  "mayor",
+		Message: "no delay",
+		// DeliverAfter intentionally left zero
+	}
+	if err := Enqueue(townRoot, session, n); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	nudges, err := Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(nudges) != 1 {
+		t.Fatalf("got %d nudges, want 1 (zero DeliverAfter = immediate)", len(nudges))
+	}
+}
+
 func TestConcurrentDrainNoDoubleDeli(t *testing.T) {
 	townRoot := t.TempDir()
 	session := "gt-test-drain-race"

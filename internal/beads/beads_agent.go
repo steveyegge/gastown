@@ -221,11 +221,8 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 			"--description=" + description,
 			"--type=agent",
 			"--labels=gt:agent",
+			"--ephemeral",
 		}
-		// Persistent polecats (gt-4ac): agent beads are non-ephemeral (issues table).
-		// They persist across polecat lifecycles and survive Dolt GC.
-		// Previously used --ephemeral (wisps table) but persistent polecats need
-		// durable agent state for idle detection and reuse.
 		if NeedsForceForID(id) {
 			a = append(a, "--force")
 		}
@@ -237,8 +234,8 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		return a
 	}
 
-	// Create non-ephemeral agent bead (issues table). Persistent polecats (gt-4ac)
-	// need durable agent beads that survive across work assignments.
+	// Create ephemeral agent bead (wisps table). Agent operational state has
+	// zero git history consumers (gt-bewatn.9).
 	out, err := b.run(buildArgs()...)
 	if err != nil {
 		out, err = b.run(buildArgs()...)
@@ -347,13 +344,11 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	if _, err := target.run("update", id, "--type=agent"); err != nil {
 		return nil, fmt.Errorf("fixing agent bead type: %w", err)
 	}
-	// Persistent polecats (gt-4ac): agent beads are non-ephemeral.
-	// Migrate any existing ephemeral (wisp) beads to the issues table
-	// by removing the ephemeral flag. This ensures agent state persists
-	// across polecat lifecycles for idle detection and reuse.
-	if _, err := target.run("update", id, "--persistent"); err != nil {
-		// Non-fatal: the bead is functional either way
-		// --persistent promotes wisp to issues table (bd update --help)
+	// Ensure agent bead is ephemeral (wisp) — agent operational state has
+	// zero git history consumers (gt-bewatn.9)
+	if _, err := target.run("update", id, "--ephemeral"); err != nil {
+		// Non-fatal: the bead is functional without ephemeral flag
+		_ = err
 	}
 
 	// Note: role slot no longer set - role definitions are config-based

@@ -10,30 +10,35 @@ The Refinery is the Engineer in the engine room. You process polecat branches, m
 The Refinery receives MERGE_READY mail from Witnesses when polecats complete work:
 
 ```
-Witness                    Refinery                      Git
-   │                          │                           │
-   │ MERGE_READY              │                           │
-   │─────────────────────────>│                           │
-   │                          │                           │
-   │                    (verify branch)                   │
-   │                          │ fetch & rebase            │
-   │                          │──────────────────────────>│
-   │                          │                           │
-   │                    (run tests)                       │
-   │                          │                           │
-   │                    (quality review, if enabled)      │
-   │                          │                           │
-   │                    (if pass)                         │
-   │                          │ merge & push              │
-   │                          │──────────────────────────>│
-   │                          │                           │
-   │ MERGED                   │                           │
-   │<─────────────────────────│                           │
-   │                          │                           │
+Witness                    Refinery                      Git        Polecat
+   │                          │                           │            │
+   │ MERGE_READY              │                           │            │
+   │─────────────────────────>│                           │            │
+   │                          │                           │            │
+   │                    (verify branch)                   │            │
+   │                          │ fetch & rebase            │            │
+   │                          │──────────────────────────>│            │
+   │                          │                           │            │
+   │                    (run tests)                       │            │
+   │                          │                           │            │
+   │                    (if pass)                         │            │
+   │                          │ merge & push              │            │
+   │                          │──────────────────────────>│            │
+   │ MERGED                   │                           │            │
+   │<─────────────────────────│                           │            │
+   │                          │                           │            │
+   │                    (if fail)                         │            │
+   │                          │          FIX_NEEDED       │            │
+   │                          │───────────────────────────────────────>│
+   │                          │                           │   (fix code)
+   │                          │                           │  (resubmit)
 ```
 
 After successful merge, Refinery sends MERGED mail back to Witness so it can
 complete cleanup (nuke the polecat worktree).
+
+On failure, Refinery sends FIX_NEEDED directly to the Polecat. The polecat
+fixes the code in-place and resubmits the MR without losing context.
 
 ## CRITICAL: Read Step Instructions Before Acting
 
@@ -48,23 +53,20 @@ source of truth.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| wisp_type | {{wisp_type}} | Type of wisp created for this molecule |
-| integration_branch_refinery_enabled | {{integration_branch_refinery_enabled}} | Whether refinery merges to integration branches |
-| integration_branch_auto_land | {{integration_branch_auto_land}} | Whether to auto-land integration branches when epic children all closed |
-| run_tests | {{run_tests}} | Whether to run tests before merging |
-| setup_command | {{setup_command}} | Setup/install command (e.g., `pnpm install`). Empty = skip. |
-| typecheck_command | {{typecheck_command}} | Type check command (e.g., `tsc --noEmit`). Empty = skip. |
-| lint_command | {{lint_command}} | Lint command (e.g., `eslint .`). Empty = skip. |
-| test_command | {{test_command}} | Test command to run (if run_tests is true) |
-| build_command | {{build_command}} | Build command (e.g., `go build ./...`). Empty = skip. |
-| target_branch | {{target_branch}} | Default target branch for merges |
-| delete_merged_branches | {{delete_merged_branches}} | Whether to delete source branches after merge |
-| judgment_enabled | {{judgment_enabled}} | Enable quality review for merges (true/false) |
-| review_depth | {{review_depth}} | Review depth: quick, standard, or deep |
-| review_enabled | {{review_enabled}} | Enable /review code review gating (replaces judgment_enabled) |
-| review_blocking | {{review_blocking}} | Whether grade C/D blocks merges (triggers FIX_NEEDED) |
-| review_pass_grade | {{review_pass_grade}} | Minimum passing grade (A, B, C, or D) |
-| review_max_retries | {{review_max_retries}} | Max times to bounce back to polecat for review fixes |
+| wisp_type | patrol | Type of wisp created for this molecule |
+| integration_branch_refinery_enabled | true | Whether refinery merges to integration branches |
+| integration_branch_auto_land | false | Whether to auto-land integration branches when epic children all closed |
+| run_tests | true | Whether to run tests before merging |
+| setup_command | (empty) | Setup/install command (e.g., `pnpm install`). Empty = skip. |
+| typecheck_command | (empty) | Type check command (e.g., `tsc --noEmit`). Empty = skip. |
+| lint_command | (empty) | Lint command (e.g., `eslint .`). Empty = skip. |
+| test_command | go test ./... | Test command to run (if run_tests is true) |
+| build_command | (empty) | Build command (e.g., `go build ./...`). Empty = skip. |
+| target_branch | main | Default target branch for merges |
+| delete_merged_branches | true | Whether to delete source branches after merge |
+| judgment_enabled | false | Enable quality review for merges (true/false) |
+| review_depth | standard | Review depth: quick, standard, or deep |
+| merge_strategy | direct | Merge strategy: 'direct' (ff-only merge+push) or 'pr' (GitHub PR) |
 
 ## Target Resolution Rule
 
@@ -85,7 +87,7 @@ resolve that placeholder with this rule:
 You MUST process steps in strict DAG order. Walk through each step sequentially,
 unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 10
+version = 12
 
 [vars]
 [vars.wisp_type]
@@ -117,8 +119,8 @@ description = "Lint command (e.g., eslint .). Empty = skip."
 default = ""
 
 [vars.test_command]
-description = "Test command to run (if run_tests is true). Auto-detected from rig settings."
-default = ""
+description = "Test command to run (if run_tests is true)"
+default = "go test ./..."
 
 [vars.build_command]
 description = "Build command (e.g., go build ./...). Empty = skip."
@@ -140,21 +142,9 @@ default = "false"
 description = "Review depth: quick, standard, or deep"
 default = "standard"
 
-[vars.review_enabled]
-description = "Enable /review code review gating for merges (true/false). Takes priority over judgment_enabled when true."
-default = "false"
-
-[vars.review_blocking]
-description = "Whether grade C/D triggers FIX_NEEDED in refinery (vs just logging findings)"
-default = "false"
-
-[vars.review_pass_grade]
-description = "Minimum passing grade in refinery: A, B, C, or D (default: B)"
-default = "B"
-
-[vars.review_max_retries]
-description = "Max times to bounce back to polecat for review fixes before proceeding"
-default = "3"
+[vars.merge_strategy]
+description = "Merge strategy: 'direct' (ff-only merge + push) or 'pr' (create GitHub PR). Default: direct."
+default = "direct"
 
 [[steps]]
 id = "inbox-check"
@@ -393,234 +383,117 @@ Track results: pass count, fail count, specific failures."""
 
 [[steps]]
 id = "quality-review"
-title = "Code review merge diff"
+title = "Quality review merge diff"
 needs = ["run-tests"]
 description = """
-**Config: review_enabled = {{review_enabled}}**
 **Config: judgment_enabled = {{judgment_enabled}}**
 **Config: review_depth = {{review_depth}}**
-**Config: review_blocking = {{review_blocking}}**
-**Config: review_pass_grade = {{review_pass_grade}}**
-**Config: review_max_retries = {{review_max_retries}}**
 
-Review the merge diff using /review grading (A-F with CRITICAL/MAJOR/MINOR).
+Review the merge diff for quality issues. This step is measurement-only (Phase 1):
+reviews are recorded but do NOT gate merges.
 
-**Step 1: Check if review is enabled**
+**Step 1: Check if quality review is enabled**
 
-If review_enabled is "true": use the new grading system (this step).
-Else if judgment_enabled is "true": fall back to legacy scoring (0.0-1.0).
-Else: skip this step entirely. Log: "Code review skipped (review_enabled=false)"
+If judgment_enabled is not "true", skip this step entirely and proceed to
+handle-failures. Log: "Quality review skipped (judgment_enabled=false)"
 
 **Step 2: Get the merge diff**
 
-Determine `<review-target>` using the **Target Resolution Rule** above.
-
 ```bash
-git diff origin/<review-target>...temp
+git diff origin/main...temp
 ```
 
 If the diff is empty, skip with: "No diff to review"
 
-**Step 3: Review the diff (CRITICAL/MAJOR/MINOR grading)**
+**Step 3: Review the diff**
 
-Review the diff yourself. For each issue found, classify by severity:
+Review the diff yourself using your judgment. Assess:
 
-**CRITICAL** - Must fix before merge:
-- Security vulnerabilities (injection, auth bypass, secrets in code)
-- Data loss risks (missing transactions, unsafe deletes)
-- Correctness bugs (race conditions, nil dereference, logic errors)
-
-**MAJOR** - Should fix before merge:
-- Logic errors that may not crash but produce wrong results
-- Missing error handling on external calls
-- API contract violations
-- Missing tests for critical paths
-
-**MINOR** - Nice to fix:
-- Style inconsistencies with surrounding code
-- Naming issues (unclear or misleading names)
-- Missing comments on non-obvious logic
-- Minor code smells
+1. **Correctness**: Logic errors, off-by-one, nil/null handling, race conditions
+2. **Security**: Injection, auth bypass, secrets in code, unsafe deserialization
+3. **Clarity**: Naming, structure, comments where non-obvious
+4. **Style**: Consistency with surrounding code, idiomatic patterns
 
 Depth is controlled by review_depth:
-- `quick`: Focus on CRITICAL only. Skim for security and correctness.
-- `standard`: All severities. Moderate detail.
+- `quick`: Focus on correctness and security only. Skim for obvious issues.
+- `standard`: All four categories. Moderate detail.
 - `deep`: Thorough line-by-line review. Flag even minor style issues.
 
-For each issue, note:
-- File and line number
-- Severity (CRITICAL, MAJOR, MINOR)
-- Description of the issue
-- Suggested fix (specific, actionable)
+**Step 4: Score and recommend**
 
-**Step 4: Assign grade**
+Assign a score from 0.0 to 1.0:
+- 0.9-1.0: Excellent — no issues or only trivial nits
+- 0.7-0.89: Good — minor issues only
+- 0.45-0.69: Needs work — significant issues found
+- 0.0-0.44: Breach — critical issues (security, correctness)
 
-Grade is determined by the highest severity issue found:
-
-| Grade | Criteria | Verdict |
-|-------|----------|---------|
-| **A** | No CRITICAL, MAJOR, or MINOR issues | PASS |
-| **B** | MINOR issues only (no CRITICAL or MAJOR) | PASS |
-| **C** | MAJOR issues present (no CRITICAL) | FAIL |
-| **D** | CRITICAL issues present | FAIL |
-| **F** | Unreviewable (empty diff, binary files, generated code only) | SKIP |
+Recommendation:
+- `approve`: Score >= 0.45
+- `request_changes`: Score < 0.45
 
 **Step 5: Record the result as a wisp**
 
-Map grade to legacy score for trend tracking compatibility:
-- A → 1.0, B → 0.8, C → 0.55, D → 0.3, F → 0.0
+Record the quality review result. This is fail-open: if the command fails,
+log the error and continue — never block the merge.
 
 ```bash
-bd create "code-review: Grade <grade>, <PASS|FAIL>" -t chore --ephemeral \\
-  -l type:plugin-run,plugin:quality-review-result,worker:<polecat-name>,rig:<rig-name>,score:<mapped-score>,grade:<grade>,recommendation:<approve|request_changes>,result:success \\
-  -d "Grade: <grade>. CRITICAL: <count>, MAJOR: <count>, MINOR: <count>. Verdict: <PASS|FAIL>" \\
+bd create "quality-review: Score <score>, <recommendation>" -t chore --ephemeral \\
+  -l type:plugin-run,plugin:quality-review-result,worker:<polecat-name>,rig:<rig-name>,score:<score>,recommendation:<approve|request_changes>,result:success \\
+  -d "Score: <score>, <recommendation>. Issues: <count> (<summary>)" \\
   --silent 2>/dev/null || true
 ```
 
-**Step 6: Determine merge/block action**
+**Step 6: Handle breach scores (measurement-only)**
 
-Compare the assigned grade against review_pass_grade (default: B):
-- Grade meets or exceeds pass grade → PASS (proceed to handle-failures)
-- Grade below pass grade → review fails
+If score < 0.45 (breach threshold):
+- Add a note to your merge summary: "Warning: Quality review breach (score: X.XX)"
+- List the critical/major issues found
+- Do NOT block the merge — Phase 1 is measurement-only
+- Proceed to handle-failures normally
 
-If review fails AND review_blocking is "true":
-- Set review_failed = true (used by handle-failures)
-- Store the full structured review output:
-  ```
-  Grade: <grade>
-
-  CRITICAL (<count> issues)
-    <file>:<line> — <description>
-      Suggested fix: <actionable fix>
-
-  MAJOR (<count> issues)
-    <file>:<line> — <description>
-      Suggested fix: <actionable fix>
-
-  MINOR (<count> issues)
-    <file>:<line> — <description>
-      Suggested fix: <actionable fix>
-
-  Summary: <N> CRITICAL, <N> MAJOR, <N> MINOR
-  Verdict: FAIL
-  ```
-- Proceed to handle-failures (which will send FIX_NEEDED)
-
-If review fails AND review_blocking is "false":
-- Log: "Warning: Code review failed (Grade: <grade>) but review_blocking=false, proceeding"
-- List the issues found for the merge summary
-- Proceed to handle-failures normally (no block)
-
-Grade A or B always passes regardless of review_blocking.
-
-Track: grade, verdict, issue counts by severity, review duration."""
+Track: review score, recommendation, issue count, duration."""
 
 [[steps]]
 id = "handle-failures"
-title = "Handle quality check, test, or code review failures"
+title = "Handle quality check or test failures"
 needs = ["quality-review"]
 description = """
 **VERIFICATION GATE**: This step enforces the Beads Promise.
-**Config: review_blocking = {{review_blocking}}**
-**Config: review_max_retries = {{review_max_retries}}**
 
-If all checks, tests, AND code review PASSED: This step auto-completes. Proceed to merge.
+If all checks and tests PASSED: This step auto-completes. Proceed to merge.
 
-## Code Review Failure (FailureType: code-review)
-
-If quality-review step set review_failed = true (grade below pass grade AND review_blocking = true):
-
-1. **Log detailed findings on the bead** so the polecat can read them:
-   ```bash
-   bd update <issue-id> --notes "Code review findings (Grade: <grade>):
-
-   <full structured review output from quality-review step>
-
-   Fix the issues above and resubmit with 'gt done'."
-   ```
-
-2. **Check retry count**: Check the MR bead for a `review_retries` label.
-   - If review_retries >= review_max_retries: Log "Max review retries reached, proceeding with merge"
-     and skip the FIX_NEEDED flow. Proceed to merge-push.
-   - Otherwise: increment retry count and continue with FIX_NEEDED.
-
-3. **Reopen the source issue** for rework:
-   ```bash
-   bd update <issue-id> --status=open --assignee=""
-   bd sync
-   ```
-
-4. **Send MERGE_FAILED with code-review details** to witness:
-   ```bash
-   gt mail send <rig>/witness -s "MERGE_FAILED <polecat-name>" --stdin <<'BODY'
-   Branch: <branch>
-   Issue: <issue-id>
-   Polecat: <polecat-name>
-   Rig: <rig>
-   FailureType: code-review
-   Grade: <grade>
-   Error: Code review failed (Grade: <grade>). <N> CRITICAL, <N> MAJOR, <N> MINOR issues found.
-
-   Review findings:
-   <full structured review output with file:line and suggested fixes>
-   BODY
-   ```
-
-5. **Close the MR bead** with review failure reason:
-   ```bash
-   bd close <mr-bead-id> --reason "Code review failed (Grade: <grade>): <N> CRITICAL, <N> MAJOR, <N> MINOR"
-   ```
-
-6. **Do NOT delete the branch** — the polecat needs it to apply fixes.
-   (Unlike test/build failures where a fresh branch is created, code review
-   failures preserve the branch for incremental fixes.)
-
-7. Archive the MERGE_READY message and skip to loop-check.
-
-**CODE REVIEW REJECTION CHECKLIST**:
-- [ ] Review findings logged on source issue (bd update --notes)
-- [ ] Retry count checked and incremented
-- [ ] Source issue reopened (bd update --status=open --assignee="")
-- [ ] MERGE_FAILED sent to witness with FailureType: code-review + full findings
-- [ ] MR bead closed with review grade
-- [ ] Branch PRESERVED (not deleted)
-- [ ] MERGE_READY mail archived
-
-## Quality Check / Test Failure (existing flow)
-
-If any quality check or test FAILED:
+If any check or test FAILED:
 1. Diagnose: Is this a branch regression or pre-existing on the target branch?
 2. If branch caused it:
    - Abort merge (clean up temp branch)
-   - **WRITE FAILURE CONTEXT to the bead** so the next polecat can make a targeted fix:
+   - **Send FIX_NEEDED directly to the polecat** (event-driven lifecycle):
      ```bash
-     bd update <issue-id> --append-notes "MERGE REJECTION ($(date -u +%Y-%m-%dT%H:%M:%SZ)):
+     gt mail send <rig>/polecats/<polecat-name> -s "FIX_NEEDED <polecat-name>" --stdin <<'BODY'
      Branch: <branch>
-     Failure-Type: <tests|build|lint|typecheck>
-     Error: <first 500 chars of error output>
-     Polecat: <polecat-name>"
-     ```
-   - **REOPEN the source issue** so it returns to the ready queue:
-     ```bash
-     bd update <issue-id> --status=open --assignee=""
-     bd sync
-     ```
-   - Notify witness of rejection using the MERGE_FAILED protocol:
-     ```bash
-     gt mail send <rig>/witness -s "MERGE_FAILED <polecat-name>" -m "Branch: <branch>
      Issue: <issue-id>
      Polecat: <polecat-name>
      Rig: <rig>
-     FailureType: <tests|build|lint|typecheck>
-     Error: <failure description>"
+     Target: <target-branch>
+     Failed-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+     Failure-Type: <tests|build|lint|typecheck>
+     Error: <failure description/output>
+     MR-Bead-ID: <mr-bead-id>
+     Attempt-Number: <N>
+     BODY
      ```
-   - Close the MR bead as rejected:
+   - **Update the bead** with failure details so they survive session death:
      ```bash
-     bd close <mr-bead-id> --reason "Rejected: <failure description>"
+     bd update <issue-id> --notes "Merge failure (attempt <N>): <failure-type> - <error summary>"
      ```
-   - **Keep the branch** — do NOT delete it. The next polecat can reuse the
-     branch to avoid redoing work. The branch contains all the original commits
-     plus any context the previous polecat built up.
+   - **Do NOT close the MR bead** — the polecat will resubmit
+   - **Do NOT delete the branch** — the polecat needs it for the fix
+   - **Do NOT reopen the source issue** — the polecat is still working on it
+   - **Do NOT send MERGE_FAILED to witness** — FIX_NEEDED goes to polecat directly
+   - Clean up temp branch and skip to loop-check:
+     ```bash
+     git checkout {{target_branch}}
+     git branch -D temp
+     ```
    - Archive the MERGE_READY message
    - Skip to loop-check
 3. If pre-existing on the target branch:
@@ -634,18 +507,15 @@ If any quality check or test FAILED:
    - FORBIDDEN: Writing code to fix quality check or test failures. You merge branches, you do not develop.
    - Proceed with the merge if the failure is pre-existing (not caused by the branch).
 
-**REJECTION CHECKLIST** (all required before skipping to loop-check):
-- [ ] Failure context written to bead (bd update --append-notes)
-- [ ] Source issue reopened (bd update <issue-id> --status=open --assignee="")
-- [ ] MERGE_FAILED notification sent to witness
-- [ ] MR bead closed with rejection reason
-- [ ] Branch preserved (NOT deleted — next polecat reuses it)
-- [ ] MERGE_READY mail archived
+**FIX_NEEDED CHECKLIST** (all required before skipping to loop-check):
+- [ ] FIX_NEEDED sent to polecat (with failure details)
+- [ ] Bead updated with failure notes
+- [ ] Temp branch cleaned up (NOT the polecat branch!)
+- [ ] MERGE_READY message archived
 
 **GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
 - All quality checks and tests passing, OR
 - Bead filed (or existing duplicate confirmed) for the pre-existing failure
-- Code review passed (or review_blocking=false, or max retries reached)
 
 FORBIDDEN: Writing application code, exploring polecat implementations, or
 re-implementing fixes. You are a mechanical merge processor.
@@ -662,16 +532,21 @@ Merge and push. CRITICAL: Notifications come IMMEDIATELY after push.
 **Config: integration_branch_refinery_enabled = {{integration_branch_refinery_enabled}}**
 **Config: target_branch = {{target_branch}}**
 **Config: delete_merged_branches = {{delete_merged_branches}}**
+**Config: merge_strategy = {{merge_strategy}}**
 
-**Step 1: Merge and Push**
+**Step 1: Merge (strategy-dependent)**
+
 Determine `<merge-target>` using the **Target Resolution Rule** above.
+
+**If merge_strategy = "direct" (default):**
+
 ```bash
 git checkout <merge-target>
 git merge --ff-only temp
 git push origin <merge-target>
 ```
 
-**Step 1.5: VERIFY PUSH SUCCEEDED (CRITICAL - PATCH-003)**
+**Step 1.5 (direct only): VERIFY PUSH SUCCEEDED (CRITICAL - PATCH-003)**
 
 Push can fail silently (network, auth, hooks). IMMEDIATELY verify:
 ```bash
@@ -691,17 +566,71 @@ echo "Remote: $REMOTE_SHA"
 - Debug the push failure (check `git push` output, network, auth)
 - Retry push and verify again before proceeding
 
+**If merge_strategy = "pr":**
+
+Push the rebased branch and create a GitHub PR instead of direct merge.
+
+```bash
+# Push the rebased polecat branch (force-push since we rebased)
+git checkout temp
+git push origin temp:refs/heads/<polecat-branch> --force-with-lease
+
+# Create the PR using bead metadata for title/description
+PR_URL=$(gh pr create \
+  --base <merge-target> \
+  --head <polecat-branch> \
+  --title "<issue-title> (<issue-id>)" \
+  --body "## Summary
+
+Automated merge from polecat branch.
+
+- **Issue**: <issue-id>
+- **Polecat**: <polecat-name>
+- **Branch**: <polecat-branch>
+- **Tests**: Passed (verified by refinery)
+
+---
+*Created by Gas Town Refinery*")
+echo "PR created: $PR_URL"
+```
+
+If the PR already exists for this branch, `gh pr create` will fail. In that case,
+find the existing PR:
+```bash
+PR_URL=$(gh pr view <polecat-branch> --json url -q '.url')
+```
+
+**Step 1.5 (pr only): VERIFY PR CREATED**
+
+```bash
+gh pr view <polecat-branch> --json url,state -q '.url + " " + .state'
+```
+
+If the PR was not created or is in an unexpected state, debug and retry.
+
 ⚠️ **STOP HERE - DO NOT PROCEED UNTIL STEPS 1.5 AND 2-3 COMPLETE**
 
 **Step 2: Send MERGED Notification (REQUIRED - DO THIS IMMEDIATELY)**
 
-RIGHT NOW, before any cleanup, send MERGED mail to Witness:
+RIGHT NOW, before any cleanup, send MERGED mail to Witness.
 
+**If merge_strategy = "direct":**
 ```bash
 gt mail send <rig>/witness -s "MERGED <polecat-name>" -m "Branch: <branch>
 Issue: <issue-id>
 Merged-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
+
+**If merge_strategy = "pr":**
+```bash
+gt mail send <rig>/witness -s "MERGED <polecat-name>" -m "Branch: <branch>
+Issue: <issue-id>
+PR: ${PR_URL}
+Merged-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+```
+
+Note: In PR mode, "MERGED" means "PR created and ready for review/merge".
+The actual merge happens when the PR is merged on GitHub (by maintainer or CI).
 
 This signals the Witness to nuke the polecat worktree. WITHOUT THIS NOTIFICATION,
 POLECAT WORKTREES ACCUMULATE INDEFINITELY AND THE LIFECYCLE BREAKS.
@@ -722,6 +651,10 @@ bd list --type=merge-request --status=open | grep <polecat-name>
 
 Verify the command output shows all steps succeeded (✓ for each).
 
+**Note**: In PR mode, the source branch is NOT deleted (it's the PR head branch).
+`delete_merged_branches` is ignored when merge_strategy=pr — the branch is cleaned
+up when the PR is merged on GitHub.
+
 **Step 4: Archive the MERGE_READY mail (REQUIRED)**
 ```bash
 gt mail archive <merge-ready-message-id>
@@ -734,7 +667,7 @@ git branch -d temp
 ```
 
 **VERIFICATION GATE**: You CANNOT proceed to loop-check without:
-- [x] MERGED mail sent to witness
+- [x] MERGED mail sent to witness (with PR URL if merge_strategy=pr)
 - [x] Post-merge cleanup completed (MR closed, source issue closed, branch deleted)
 - [x] MERGE_READY mail archived
 

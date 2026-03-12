@@ -62,6 +62,9 @@ type QueuedNudge struct {
 	Priority  string    `json:"priority"`
 	Timestamp time.Time `json:"timestamp"`
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
+	// DeliverAfter, if non-zero, defers delivery until this time has passed.
+	// Drain skips (but does not discard) the nudge until the deadline is met.
+	DeliverAfter time.Time `json:"deliver_after,omitempty"`
 }
 
 // queueDir returns the nudge queue directory for a given session.
@@ -234,6 +237,14 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 		if !n.ExpiresAt.IsZero() && now.After(n.ExpiresAt) {
 			if rmErr := os.Remove(claimPath); rmErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to remove expired nudge %s: %v\n", entry.Name(), rmErr)
+			}
+			continue
+		}
+
+		// Deferred nudge: not ready yet — unclaim and leave in queue.
+		if !n.DeliverAfter.IsZero() && now.Before(n.DeliverAfter) {
+			if renameErr := os.Rename(claimPath, path); renameErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to unclaim deferred nudge %s: %v\n", entry.Name(), renameErr)
 			}
 			continue
 		}

@@ -453,7 +453,9 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 	}
 	if len(subChanges) > 0 {
 		// Ensure submodules are initialized in the refinery worktree
-		if initErr := git.InitSubmodules(e.git.WorkDir()); initErr != nil {
+		// Use mayor/rig as reference to avoid re-fetching from remote
+		mayorRig := filepath.Join(e.rig.Path, "mayor", "rig")
+		if initErr := git.InitSubmodules(e.git.WorkDir(), mayorRig); initErr != nil {
 			return ProcessResult{
 				Success: false,
 				Error:   fmt.Sprintf("failed to init submodules in refinery worktree: %v", initErr),
@@ -977,10 +979,15 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 		} else {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted local branch: %s\n", mr.Branch)
 		}
-		if err := e.git.DeleteRemoteBranch("origin", mr.Branch); err != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete remote branch %s: %v\n", mr.Branch, err)
-		} else {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted remote branch: %s\n", mr.Branch)
+		// Remote delete — only polecat branches. Non-polecat branches may belong
+		// to contributor forks with open upstream PRs; deleting them from origin
+		// causes GitHub to auto-close those PRs via head_ref_delete. (GH#2669)
+		if isPolecat {
+			if err := e.git.DeleteRemoteBranch("origin", mr.Branch); err != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete remote branch %s: %v\n", mr.Branch, err)
+			} else {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted remote branch: %s\n", mr.Branch)
+			}
 		}
 	}
 

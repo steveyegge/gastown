@@ -5,30 +5,46 @@ This molecule guides a polecat through a complete work assignment. Each step
 has clear entry/exit criteria and specific commands to run. A polecat can
 crash after any step and resume from the last completed step.
 
-## Polecat Contract (Self-Cleaning Model)
+## Polecat Contract (Event-Driven Lifecycle)
 
-You are a self-cleaning worker. You:
+You are an event-driven worker. You:
 1. Receive work via your hook (formula checklist + issue)
 2. Work through formula steps in order (shown inline at prime time)
-3. Complete and self-clean via `gt done` (submit + nuke yourself)
-4. You are GONE - Refinery merges from MQ
+3. Submit your MR and enter awaiting_verdict state
+4. Refinery processes your MR:
+   - MERGED → you self-clean via `gt done` (gone)
+   - FIX_NEEDED → you read failure, fix code, resubmit (loop)
+5. You only die when refinery confirms merge
 
-**Self-cleaning:** When you run `gt done`, you push your work, submit to MQ,
-nuke your sandbox, and exit. There is no idle state. Done means gone.
+**Event-driven:** After submitting your MR, you stay alive waiting for the
+refinery verdict. If the merge fails, you fix the code in-place without
+losing context. Only on MERGED do you self-clean.
 
 **Important:** This formula defines the workflow template. Steps are shown inline
 when you run `gt prime` — there are no separate step beads to close. Work through
-the checklist, then run `gt done`.
+the checklist, await the verdict, then run `gt done` when merged.
 
 **Speed principle:** You run the full gate suite AFTER rebasing onto the target
 branch (pre-verify step). This enables the refinery to fast-path merge your MR
 in ~5 seconds instead of re-running gates. If pre-verification is skipped or
 stale, the refinery falls through to normal gate execution.
 
+**Lifecycle:**
+```
+spawning → working → mr_submitted → awaiting_verdict
+                                          │
+                          ┌───────────────┴───────────────┐
+                          ▼                               ▼
+                    FIX_NEEDED                          MERGED
+                          │                               │
+                    (fix & resubmit)                  (gt done → gone)
+                          │
+                    awaiting_verdict (loop)
+```
+
 **You do NOT:**
 - Push directly to main (Refinery merges from MQ)
 - Close your own issue (Refinery closes after merge)
-- Wait for merge (you're gone after `gt done`)
 - Fix pre-existing failures on main (Refinery owns main health)
 
 ## Variables
@@ -48,9 +64,11 @@ stale, the refinery falls through to normal gate execution.
 | Situation | Action |
 |-----------|--------|
 | Build fails | Fix it. Do not proceed if it won't compile. |
+| FIX_NEEDED from refinery | Read failure details, fix code, resubmit |
 | Blocked on external | Mail Witness for help, mark yourself stuck |
 | Context filling | Use gt handoff to cycle to fresh session |
-| Unsure what to do | Mail Witness, don't guess |"""
+| Unsure what to do | Mail Witness, don't guess |
+| Max fix attempts exceeded | Mail Witness, enter stuck state |"""
 formula = "mol-polecat-work"
 version = 9
 
@@ -464,36 +482,156 @@ The refinery will run gates normally (slower but still correct).
 **Exit criteria:** Branch rebased onto latest origin/{{base_branch}}, all configured gates pass."""
 
 [[steps]]
-id = "submit-and-exit"
-title = "Submit work and self-clean"
+id = "submit-mr"
+title = "Submit MR and enter awaiting_verdict"
 needs = ["pre-verify"]
 description = """
-Submit your work and clean up. You cease to exist after this step.
-
-**Self-Cleaning Model:**
-Once you run `gt done`, you're gone. The command:
-1. Pushes your branch to origin
-2. Creates an MR bead in the merge queue
-3. Nukes your sandbox (worktree removal)
-4. Exits your session immediately
+Submit your MR to the merge queue but stay alive for the verdict.
 
 **Pre-flight: Verify you have actual work to submit (HARD GATE):**
 ```bash
 git log origin/{{base_branch}}..HEAD --oneline
 ```
-This MUST show at least 1 commit. If it shows nothing, do NOT run `gt done`.
-`gt done` will reject zero-commit branches for polecats.
+This MUST show at least 1 commit. If it shows nothing, do NOT submit.
+
+**Report-only tasks (no commits — audits, reviews, research):**
+If this is a report-only task with findings persisted to the bead,
+run `gt done --cleanup-status clean` and skip remaining steps.
+
+**Push and submit MR:**
+```bash
+git push origin HEAD
+
+# Submit to merge queue (creates MR bead, does NOT nuke sandbox)
+gt mq submit {{issue}}
+```
+
+Track the MR bead ID from the submit output — you need it for resubmission.
+
+**Enter awaiting_verdict state:**
+After submission, you are in the `awaiting_verdict` state. The refinery will
+process your MR and send you one of:
+- **MERGED**: Your work was merged successfully → proceed to self-clean step
+- **FIX_NEEDED**: Tests/build/lint failed → proceed to await-verdict step
+
+**Exit criteria:** MR submitted to merge queue, polecat in awaiting_verdict state."""
+
+[[steps]]
+id = "await-verdict"
+title = "Wait for refinery verdict"
+needs = ["submit-mr"]
+description = """
+Wait for the refinery to process your MR and send you a verdict.
+
+**Check for verdict signal:**
+
+First check your mail for FIX_NEEDED or MERGED messages:
+```bash
+gt mail inbox
+```
+
+If no verdict yet, use await-signal to wait:
+```bash
+gt mol step await-signal --agent-bead <your-agent-bead> \
+  --backoff-base 30s --backoff-mult 2 --backoff-max 5m
+```
+
+**On MERGED signal:**
+The refinery merged your work successfully. Proceed to self-clean step.
+
+**On FIX_NEEDED signal:**
+The refinery found failures in your MR. The FIX_NEEDED message contains:
+- Failure-Type: tests, build, lint, typecheck
+- Error: the actual error output
+- Attempt-Number: how many fix attempts so far
+
+**Fix procedure (on FIX_NEEDED):**
+
+1. **Read the failure details** from your mail:
+```bash
+gt mail inbox
+# Read the FIX_NEEDED message for failure details
+```
+
+2. **Also check the bead for updated failure notes:**
+```bash
+bd show {{issue}}
+```
+
+3. **Fix the code:**
+   - Diagnose the failure based on the error output
+   - Make targeted fixes (don't refactor unrelated code)
+   - Commit your fix:
+     ```bash
+     git add <files>
+     git commit -m "fix: address <failure-type> failure ({{issue}})"
+     ```
+
+4. **Re-run the failing checks locally:**
+   - If failure was tests: run `{{test_command}}`
+   - If failure was build: run `{{build_command}}`
+   - If failure was lint: run `{{lint_command}}`
+   - If failure was typecheck: run `{{typecheck_command}}`
+
+5. **Rebase and push:**
+```bash
+git fetch origin {{base_branch}}
+git rebase origin/{{base_branch}}
+git push origin HEAD --force-with-lease
+```
+
+6. **Resubmit to merge queue:**
+```bash
+gt mq submit {{issue}} --resubmit
+```
+
+7. **Loop back to awaiting_verdict** — wait for the next verdict.
+
+**Max retry limit:** If Attempt-Number >= 3, do NOT keep retrying.
+Instead, escalate:
+```bash
+gt mail send <rig>/witness -s "HELP: Cannot fix merge failure after 3 attempts" \
+  --stdin <<'BODY'
+Issue: {{issue}}
+Failure-Type: <type>
+Error: <error>
+Attempts: 3
+I've tried to fix this failure 3 times and cannot resolve it.
+Please advise or reassign.
+BODY
+```
+
+**If your session is dying (context filling):**
+Use handoff to preserve your state:
+```bash
+gt handoff -s "Awaiting verdict for {{issue}}" -m "MR submitted, waiting for refinery.
+Attempt: <N>
+Last failure: <type if any>"
+```
+
+**Exit criteria:** Received MERGED signal from refinery."""
+
+[[steps]]
+id = "self-clean"
+title = "Self-clean after merge confirmation"
+needs = ["await-verdict"]
+description = """
+The refinery confirmed your work was merged. Self-clean and exit.
+
+**Verify MERGED signal:**
+Confirm you received a MERGED signal (not just timing out):
+```bash
+gt mail inbox
+# Should show MERGED message for your branch
+```
 
 **Run gt done:**
 ```bash
-# For code tasks with pre-verification (recommended — enables fast-path merge):
+# With pre-verification (if you ran gates before submitting):
 gt done --pre-verified
 
-# For code tasks without pre-verification (gates skipped or failed):
+# Without pre-verification:
 gt done
-
-# For report-only tasks (no commits — audits, reviews, research):
-gt done --cleanup-status clean
 ```
 
 You should see output like:
@@ -507,16 +645,10 @@ You should see output like:
 ✓ Session exiting
 ```
 
-**What happens next (not your concern):**
-- Refinery batches MRs and runs gates on the merged stack
-- If green: all MRs in the batch merge to {{base_branch}} at once
-- If red: Refinery bisects to isolate the culprit, merges the good ones
-- Refinery fixes failures itself (inline or via helper polecats)
-- Refinery closes your issue after successful merge
+**You are GONE after this.** The refinery has already merged your work.
+`gt done` at this point is just cleanup (nuke sandbox, close session).
 
-You are NOT involved in any of that. You're gone. Done means gone.
-
-**Exit criteria:** Work submitted, sandbox nuked, session exited."""
+**Exit criteria:** Sandbox nuked, session exited."""
 
 [vars]
 [vars.issue]

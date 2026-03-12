@@ -738,6 +738,10 @@ case "$*" in
   "show hq-cv-ext --json")
     echo '[{"id":"hq-cv-ext","title":"Ext convoy","status":"staged_ready","issue_type":"convoy"}]'
     ;;
+  sql\ *"issue_id = 'hq-cv-ext'"*)
+    # bdDepListRawIDs down: return tracked bead IDs
+    echo '[{"depends_on_id":"external:ghostty:ghostty-1i4.3"},{"depends_on_id":"external:ghostty:ghostty-1i4.4"}]'
+    ;;
   "dep list hq-cv-ext --direction=down --type=tracks --json")
     echo '[{"id":"external:ghostty:ghostty-1i4.3"},{"id":"external:ghostty:ghostty-1i4.4"}]'
     ;;
@@ -749,6 +753,10 @@ case "$*" in
     ;;
   "show ghostty-1i4.4 --json")
     echo '[{"id":"ghostty-1i4.4","title":"Task 2","status":"open","issue_type":"task"}]'
+    ;;
+  show\ *--json)
+    # Batch show fallback - return details for any known IDs
+    echo '[{"id":"ghostty-1i4.3","title":"Task 1","status":"open","issue_type":"task"},{"id":"ghostty-1i4.4","title":"Task 2","status":"open","issue_type":"task"}]'
     ;;
   "dep list ghostty-1i4.3 --json"|"dep list ghostty-1i4.4 --json")
     echo '[]'
