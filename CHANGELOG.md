@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-03-11
+
+### Added
+
+- **Event-driven polecat lifecycle** — Polecats now use FIX_NEEDED feedback loop
+  with awaiting_verdict state, replacing polling-based lifecycle (gt-k0h).
+- **Cross-database convoy resolution** — CLI-side dep resolution for multi-rig
+  towns where bd SQL JOINs fail across databases (GH#2624, GH#2625).
+- **Plugin sync** — `gt plugin sync` auto-deploys plugins after build (hq-o9gna).
+- **Compactor dog** — Executable `run.sh` for Dolt database compaction with
+  DoltHub remote sync, validation, and dry-run support.
+- **GitHub sheriff v2** — Single API call PR categorization with structured output.
+- **Mail reply reminders** — Deferred nudge delivery for unanswered mail.
+- **Git hygiene dog** — Automated repo cleanup plugin (gt-cdm).
+- **Crew agent assignment** — Town-level `crew_agents` config for per-crew
+  agent runtime selection.
+- **Partial clones** — `gt rig add` supports `--reference` for submodule init
+  and sparse checkout.
+- **Formula composition** — `extends` and `compose/expand` support for formulas.
+- **Background nudge poller** — Queue-based nudge delivery for non-Claude agents.
+- **Review command** — `/review` with A-F grading and refinery integration (#2636).
+- **Escalation channels** — Email, Slack, SMS, and log notification channels.
+- **Pressure checks** — Opt-in CPU/memory pressure gating before agent spawns.
+- **MVGT integration guide** — Comprehensive Wasteland federation guide for
+  non-Gas-Town systems.
+- **Crew specialization design** — Capability-based dispatch design doc.
+
+### Changed
+
+- **Refinery merge strategy** — Configurable direct vs PR mode (gt-fln).
+- **Polecat lifecycle patrol** — Redesigned formula for event-driven model.
+- **Session hygiene** — Converted from plugin.md to deterministic `run.sh`.
+- **DND auto-reset** — Muted mode auto-resets on `gt up`.
+- **Nudge degradation** — Wait-idle gracefully degrades to queue for agents
+  without prompt detection.
+
+### Fixed
+
+- **Install bootstrap** — `gt install` now waits for MySQL readiness and always
+  passes `--server-port` to `bd init` (GH#2572, GH#2573).
+- **Rig add database creation** — `InitRig` runs CREATE DATABASE on live server
+  before schema migration.
+- **Boot triage loop** — Removed ZFC-violating decision engine that consumed
+  unbounded tokens on failed installs.
+- **Polecat spawn storm** — Two-layer circuit breaker caps respawns and total
+  active polecats (clown show #22).
+- **Standing-order beads** — Protected from AutoClose reaper and polecat
+  removal status reset.
+- **Tmux socket split-brain** — Prevented nudge failures from socket mismatch
+  (GH#2442).
+- **Reaper Sprintf bugs** — Fixed format string issues and missing schema guard
+  (GH#2469).
+- **bd JSON corruption** — Strip bd stdout warnings before JSON parsing.
+- **Remote branch deletion** — Restricted to polecat branches only (GH#2669).
+- **EnsureAllMetadata** — Uses rig name and correct DB prefix (GH#2668).
+- **Ephemeral beads** — Auto-purge closed ephemeral beads on session end.
+- **MR back-link** — Source issue linked to MR bead on creation.
+- **Convoy routing** — Town root and BEADS_DIR properly stripped for bd
+  subprocess calls.
+- **CI stability** — Resolved lint warnings (unparam, misspell) and 5 test
+  failures on main.
+
 ## [0.11.0] - 2026-03-05
 
 ### Added

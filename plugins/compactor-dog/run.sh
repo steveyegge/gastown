@@ -24,7 +24,7 @@ DOLT_PORT="${DOLT_PORT:-3307}"
 DOLT_USER="${DOLT_USER:-root}"
 COMMIT_THRESHOLD="${COMMIT_THRESHOLD:-500}"
 # Default production databases (matches reaper.DefaultDatabases)
-DEFAULT_DBS="hq,bd,gastown"
+DEFAULT_DBS="hq,bd,gt"
 DRY_RUN=false
 CHECK_ONLY=false
 LOGFILE=""
@@ -41,7 +41,7 @@ while [[ $# -gt 0 ]]; do
     --help|-h)
       echo "Usage: $0 [--threshold N] [--databases db1,db2,...] [--dry-run] [--check-only]"
       echo "  --threshold N        Commit count before compaction (default: 500)"
-      echo "  --databases db1,...  Comma-separated database list (default: hq,bd,gastown)"
+      echo "  --databases db1,...  Comma-separated database list (default: hq,bd,gt)"
       echo "  --dry-run            Report only, don't compact"
       echo "  --check-only         Monitor and report only (no compaction)"
       exit 0

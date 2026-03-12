@@ -75,6 +75,36 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "0.12.0",
+		Date:    "2026-03-11",
+		Changes: []string{
+			"NEW: Event-driven polecat lifecycle with FIX_NEEDED feedback loop",
+			"NEW: Cross-database convoy dependency resolution for multi-rig towns",
+			"NEW: gt plugin sync — auto-deploy plugins after build",
+			"NEW: Compactor dog plugin for Dolt database compaction",
+			"NEW: GitHub sheriff v2 — single API call PR categorization",
+			"NEW: Mail reply reminders via deferred nudge delivery",
+			"NEW: Background nudge-queue poller for non-Claude agents",
+			"NEW: /review command with A-F grading and refinery integration",
+			"NEW: Opt-in CPU/memory pressure checks before agent spawns",
+			"NEW: Formula composition (extends + compose/expand)",
+			"NEW: Crew agent assignment — per-crew runtime selection",
+			"NEW: Partial clones and sparse checkout for gt rig add",
+			"CHANGED: Refinery configurable merge strategy (direct vs PR mode)",
+			"CHANGED: Session hygiene converted to deterministic run.sh",
+			"CHANGED: Nudge wait-idle degrades to queue for non-Claude agents",
+			"FIX: Install bootstrap — MySQL readiness wait + always pass --server-port",
+			"FIX: Rig add runs CREATE DATABASE before schema migration",
+			"FIX: Boot triage loop removed (was consuming unbounded tokens)",
+			"FIX: Polecat spawn storm circuit breaker (caps respawns + active count)",
+			"FIX: Standing-order beads protected from AutoClose reaper",
+			"FIX: Tmux socket split-brain causing nudge failures",
+			"FIX: bd JSON corruption from stdout warnings",
+			"FIX: Remote branch deletion restricted to polecat branches only",
+			"FIX: Convoy routing — town root and BEADS_DIR properly stripped",
+		},
+	},
+	{
 		Version: "0.11.0",
 		Date:    "2026-03-05",
 		Changes: []string{
