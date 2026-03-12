@@ -16,7 +16,7 @@ DOLT_USER="${DOLT_USER:-root}"
 DOLT_DATA_DIR="${DOLT_DATA_DIR:-$HOME/gt/.dolt-data}"
 JSONL_EXPORT_DIR="$HOME/gt/.dolt-archive/jsonl"
 BACKUP_REPO="$HOME/gt/.dolt-archive/git"
-DEFAULT_DBS="hq,bd,gastown"
+DEFAULT_DBS="hq,gt,property_scrapers,wa"
 SKIP_GIT=false
 SKIP_DOLT_PUSH=false
 
@@ -79,26 +79,28 @@ for DB in "${PROD_DBS[@]}"; do
 
   log "Exporting $DB..."
 
-  # Try bd export first (native beads export)
-  if bd export --db "$DB" --format jsonl > "$EXPORT_FILE" 2>/dev/null; then
+  # Map database name to its rig working directory for bd export.
+  # bd export requires running from the rig directory that owns the database.
+  case "$DB" in
+    hq)                 BD_WORKDIR="$HOME/gt" ;;
+    gt)                 BD_WORKDIR="$HOME/gt/gastown/mayor/rig" ;;
+    property_scrapers)  BD_WORKDIR="$HOME/gt/property_scrapers" ;;
+    wa)                 BD_WORKDIR="$HOME/gt/whatsapp_automation" ;;
+    *)                  BD_WORKDIR="$HOME/gt" ;;
+  esac
+
+  # Use bd export from the rig directory (bd export -o <file> has no --format flag).
+  if (cd "$BD_WORKDIR" && bd export -o "$EXPORT_FILE" 2>/dev/null) && [[ -s "$EXPORT_FILE" ]]; then
     LINE_COUNT=$(wc -l < "$EXPORT_FILE" | tr -d ' ')
     FILE_SIZE=$(du -h "$EXPORT_FILE" | cut -f1)
     log "  $DB: $LINE_COUNT issues exported ($FILE_SIZE) [bd export]"
     ln -sf "$(basename "$EXPORT_FILE")" "$LATEST_LINK"
     EXPORTED=$((EXPORTED + 1))
   else
-    # Fallback: query Dolt directly for issues table
-    if dolt_query_json "$DB" "SELECT * FROM issues ORDER BY id" > "$EXPORT_FILE" 2>/dev/null && [[ -s "$EXPORT_FILE" ]]; then
-      LINE_COUNT=$(wc -l < "$EXPORT_FILE" | tr -d ' ')
-      log "  $DB: exported via SQL ($LINE_COUNT lines)"
-      ln -sf "$(basename "$EXPORT_FILE")" "$LATEST_LINK"
-      EXPORTED=$((EXPORTED + 1))
-    else
-      log "  WARN: $DB export failed"
-      rm -f "$EXPORT_FILE"
-      EXPORT_FAILED=$((EXPORT_FAILED + 1))
-      EXPORT_ERRORS="${EXPORT_ERRORS}${DB} "
-    fi
+    log "  WARN: $DB export failed"
+    rm -f "$EXPORT_FILE"
+    EXPORT_FAILED=$((EXPORT_FAILED + 1))
+    EXPORT_ERRORS="${EXPORT_ERRORS}${DB} "
   fi
 done
 
