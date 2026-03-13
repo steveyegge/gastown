@@ -2703,6 +2703,9 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	if err := t.SetAgentsBinding(session); err != nil {
 		return fmt.Errorf("setting agents binding: %w", err)
 	}
+	if err := t.SetRigMenuBinding(session); err != nil {
+		return fmt.Errorf("setting rig menu binding: %w", err)
+	}
 	if err := t.SetCycleBindings(session); err != nil {
 		return fmt.Errorf("setting cycle bindings: %w", err)
 	}
@@ -2853,7 +2856,8 @@ func (t *Tmux) isGTBinding(table, key string) bool {
 	}
 	// Unguarded form: direct GT commands set by EnsureBindingsOnSocket.
 	return strings.Contains(output, "gt agents menu") ||
-		strings.Contains(output, "gt feed --window")
+		strings.Contains(output, "gt feed --window") ||
+		strings.Contains(output, "gt rig menu")
 }
 
 // isGTBindingWithClient checks if the given key has a GT binding that includes
@@ -3092,6 +3096,25 @@ func (t *Tmux) SetAgentsBinding(session string) error {
 	return err
 }
 
+// SetRigMenuBinding configures C-b r to open the rig menu popup.
+// This runs `gt rig menu` which displays a tmux display-menu with all rigs
+// and per-rig actions (start, stop, park, etc.).
+func (t *Tmux) SetRigMenuBinding(session string) error {
+	if t.isGTBinding("prefix", "r") {
+		return nil
+	}
+	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
+	fallback := t.getKeyBinding("prefix", "r")
+	if fallback == "" {
+		fallback = ":"
+	}
+	_, err := t.run("bind-key", "-T", "prefix", "r",
+		"if-shell", ifShell,
+		"run-shell 'gt rig menu'",
+		fallback)
+	return err
+}
+
 // EnsureBindingsOnSocket sets the gt agents menu and feed keybindings on a
 // specific tmux socket. This is used during gt up to ensure the bindings work
 // even when the user is on a different socket than the town socket.
@@ -3154,6 +3177,25 @@ func EnsureBindingsOnSocket(socket, townSocket string) error {
 			_, _ = t.run("bind-key", "-T", "prefix", "a",
 				"if-shell", ifShell,
 				"run-shell '"+feedCmd+"'",
+				fallback)
+		}
+	}
+
+	// Rig menu binding (prefix + r)
+	rigMenuCmd := "gt rig menu"
+	if townSocket != "" {
+		rigMenuCmd = fmt.Sprintf("GT_TOWN_SOCKET=%s gt rig menu", townSocket)
+	}
+	if !t.isGTBinding("prefix", "r") {
+		ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
+		fallback := t.getKeyBinding("prefix", "r")
+		if fallback == "" || fallback == ":" {
+			_, _ = t.run("bind-key", "-T", "prefix", "r",
+				"run-shell", rigMenuCmd)
+		} else {
+			_, _ = t.run("bind-key", "-T", "prefix", "r",
+				"if-shell", ifShell,
+				"run-shell '"+rigMenuCmd+"'",
 				fallback)
 		}
 	}
