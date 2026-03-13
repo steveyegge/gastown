@@ -466,6 +466,27 @@ func AgentEnvSimple(role, rig, agentName string) map[string]string {
 	})
 }
 
+// ValidateEnvKey reports whether key is a valid POSIX environment variable name.
+// Valid keys match [A-Za-z_][A-Za-z0-9_]* — i.e. they start with a letter or
+// underscore and contain only letters, digits, and underscores. Empty keys are
+// invalid.
+func ValidateEnvKey(key string) bool {
+	if len(key) == 0 {
+		return false
+	}
+	first := key[0]
+	if !((first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z') || first == '_') {
+		return false
+	}
+	for i := 1; i < len(key); i++ {
+		c := key[i]
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 // ShellQuote returns a shell-safe quoted string.
 // Values containing special characters are wrapped in single quotes.
 // Single quotes within the value are escaped using the '\” idiom.

@@ -154,7 +154,7 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 	polecatInfos, err := polecatMgr.List()
 	if err == nil && len(polecatInfos) > 0 {
 		fmt.Printf("  Stopping %d polecat session(s)...\n", len(polecatInfos))
-		if err := polecatMgr.StopAll(false); err != nil {
+		if err := polecatMgr.StopAll(cmd.Context(), false); err != nil {
 			fmt.Printf("  %s Failed to stop polecat sessions: %v\n", style.Warning.Render("!"), err)
 		} else {
 			stoppedAgents = append(stoppedAgents, fmt.Sprintf("%d polecat session(s) stopped", len(polecatInfos)))

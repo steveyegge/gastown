@@ -1667,7 +1667,7 @@ func runRigShutdown(cmd *cobra.Command, args []string) error {
 	infos, err := polecatMgr.ListPolecats()
 	if err == nil && len(infos) > 0 {
 		fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
-		if err := polecatMgr.StopAll(rigShutdownForce); err != nil {
+		if err := polecatMgr.StopAll(cmd.Context(), rigShutdownForce); err != nil {
 			errors = append(errors, fmt.Sprintf("polecat sessions: %v", err))
 		}
 	}
@@ -1918,7 +1918,7 @@ func runRigStop(cmd *cobra.Command, args []string) error {
 		infos, err := polecatMgr.ListPolecats()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
-			if err := polecatMgr.StopAll(rigStopForce); err != nil {
+			if err := polecatMgr.StopAll(cmd.Context(), rigStopForce); err != nil {
 				errors = append(errors, fmt.Sprintf("polecat sessions: %v", err))
 			}
 		}
@@ -2020,7 +2020,7 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 		infos, err := polecatMgr.ListPolecats()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("    Stopping %d polecat session(s)...\n", len(infos))
-			if err := polecatMgr.StopAll(rigRestartForce); err != nil {
+			if err := polecatMgr.StopAll(cmd.Context(), rigRestartForce); err != nil {
 				stopErrors = append(stopErrors, fmt.Sprintf("polecat sessions: %v", err))
 			}
 		}

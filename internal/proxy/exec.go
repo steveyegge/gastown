@@ -100,7 +100,7 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 		execCtx, cancel = context.WithTimeout(execCtx, s.execTimeout)
 		defer cancel()
 	}
-	out, errOut, exitCode := runCommand(execCtx, argv, identity)
+	out, errOut, exitCode := s.runCommand(execCtx, argv, identity)
 
 	// Audit log (do not log full argv — it may contain tokens or secrets).
 	if exitCode == 0 {
@@ -134,7 +134,7 @@ func subForLog(argv []string) string {
 	}
 	s := argv[1]
 	if len(s) > 128 {
-		return s[:128] + "..."
+		s = s[:128] + "…"
 	}
 	return s
 }
@@ -203,7 +203,7 @@ func (s *Server) limiterFor(identity string) *rate.Limiter {
 	return v.(*rate.Limiter)
 }
 
-func runCommand(ctx context.Context, argv []string, identity string) (stdout, stderr string, exitCode int) {
+func (s *Server) runCommand(ctx context.Context, argv []string, identity string) (stdout, stderr string, exitCode int) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	var outBuf, errBuf strings.Builder
 	cmd.Stdout = &outBuf
@@ -214,6 +214,24 @@ func runCommand(ctx context.Context, argv []string, identity string) (stdout, st
 	env := minimalEnv()
 	if identity != "" {
 		env = append(env, "GT_PROXY_IDENTITY="+identity)
+	}
+	// Set GT_TOWN so gt/bd commands find the workspace.
+	if s.cfg.TownRoot != "" {
+		env = append(env, "GT_TOWN="+s.cfg.TownRoot)
+		cmd.Dir = s.cfg.TownRoot
+	}
+	// Derive polecat identity env vars from the client cert identity
+	// (format: "<rig>/<name>"). This ensures gt prime and other commands
+	// run with the correct role context on the host side.
+	if parts := strings.SplitN(identity, "/", 2); len(parts) == 2 {
+		rig, name := parts[0], parts[1]
+		env = append(env,
+			"GT_ROLE="+rig+"/polecats/"+name,
+			"GT_RIG="+rig,
+			"GT_POLECAT="+name,
+			"BD_ACTOR="+rig+"/polecats/"+name,
+			"GIT_AUTHOR_NAME="+name,
+		)
 	}
 	cmd.Env = env
 	err := cmd.Run()

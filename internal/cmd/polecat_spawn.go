@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -370,7 +371,7 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 		}
 		startOpts.Command = cmd
 	}
-	if err := polecatSessMgr.Start(s.PolecatName, startOpts); err != nil {
+	if err := polecatSessMgr.Start(context.Background(), s.PolecatName, startOpts); err != nil {
 		return "", fmt.Errorf("starting session: %w", err)
 	}
 

@@ -474,7 +474,7 @@ func stopAllPolecats(t *tmux.Tmux, townRoot string, rigNames []string, force boo
 				fmt.Printf("  %s [%s] %s would stop\n", style.Dim.Render("○"), rigName, info.Polecat)
 				continue
 			}
-			err := polecatMgr.Stop(info.Polecat, force)
+			err := polecatMgr.Stop(context.Background(), info.Polecat, force)
 			if err == nil {
 				stopped++
 				fmt.Printf("  %s [%s] %s stopped\n", style.SuccessPrefix, rigName, info.Polecat)

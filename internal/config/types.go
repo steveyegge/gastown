@@ -14,12 +14,13 @@ import (
 
 // TownConfig represents the main town identity (mayor/town.json).
 type TownConfig struct {
-	Type       string    `json:"type"`                  // "town"
-	Version    int       `json:"version"`               // schema version
-	Name       string    `json:"name"`                  // town identifier (internal)
-	Owner      string    `json:"owner,omitempty"`       // owner email (entity identity)
-	PublicName string    `json:"public_name,omitempty"` // public display name
-	CreatedAt  time.Time `json:"created_at"`
+	Type           string    `json:"type"`                    // "town"
+	Version        int       `json:"version"`                 // schema version
+	Name           string    `json:"name"`                    // town identifier (internal)
+	Owner          string    `json:"owner,omitempty"`         // owner email (entity identity)
+	PublicName     string    `json:"public_name,omitempty"`   // public display name
+	InstallationID string    `json:"installation_id,omitempty"` // unique installation identifier for workspace naming
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // MayorConfig represents town-level behavioral configuration (mayor/config.json).
@@ -651,6 +652,51 @@ type RigSettings struct {
 	// Takes precedence over RoleAgents["crew"] but is overridden by explicit --agent flags.
 	// Example: {"denali": "codex", "glacier": "gemini"}
 	WorkerAgents map[string]string `json:"worker_agents,omitempty"`
+
+	// RemoteBackend configures remote sandbox execution (e.g., Daytona workspaces).
+	// When set, sandbox lifecycle hooks manage workspace creation, cert injection,
+	// and cleanup around session start/stop.
+	RemoteBackend *RemoteBackendConfig `json:"remote_backend,omitempty"`
+}
+
+// RemoteBackend holds the provider identity for a rig's remote backend.
+// Used by reconciliation logic to determine which rigs use Daytona workspaces.
+type RemoteBackend struct {
+	// Provider identifies the remote backend type (e.g., "daytona").
+	Provider string `json:"provider,omitempty"`
+}
+
+// RemoteBackendConfig configures remote sandbox execution for a rig.
+// Used by DaytonaSandbox to provision workspaces, inject certificates,
+// and manage workspace lifecycle around polecat sessions.
+type RemoteBackendConfig struct {
+	// Image is the container image for workspace creation.
+	Image string `json:"image,omitempty"`
+
+	// Snapshot is a pre-built snapshot ID to use instead of Image.
+	Snapshot string `json:"snapshot,omitempty"`
+
+	// Dockerfile is an inline Dockerfile (alternative to Image/Snapshot).
+	Dockerfile string `json:"dockerfile,omitempty"`
+
+	// Profile is the execution profile name for workspace resource allocation.
+	Profile string `json:"profile,omitempty"`
+
+	// ProxyAddr is the proxy server address (host:port).
+	// Defaults to the standard proxy address if empty.
+	ProxyAddr string `json:"proxy_addr,omitempty"`
+
+	// AutoStopInterval is the idle duration before the workspace is automatically
+	// stopped by the remote backend. Zero means use the backend's default.
+	AutoStopInterval time.Duration `json:"auto_stop_interval,omitempty"`
+
+	// AutoStop controls whether the workspace is stopped when the polecat
+	// session ends. If false, the workspace remains running for reuse.
+	AutoStop bool `json:"auto_stop,omitempty"`
+
+	// AutoDelete controls whether the workspace is deleted when the polecat
+	// session ends. If false, the workspace is retained for reuse.
+	AutoDelete bool `json:"auto_delete,omitempty"`
 }
 
 // CrewConfig represents crew workspace settings for a rig.
@@ -721,6 +767,13 @@ type RuntimeConfig struct {
 	// Example: ["exitbox", "run", "--profile=gastown-polecat", "--"]
 	// Produces: exec env VAR=val ... exitbox run --profile=gastown-polecat -- claude ...
 	ExecWrapper []string `json:"exec_wrapper,omitempty"`
+
+	// ExecWrapperInnerEnv holds environment variables injected after the
+	// exec-wrapper delimiter (inside the remote container). These are distinct
+	// from Env which is set in the outer (tmux) context.
+	// Examples: GT_PROXY_URL, GT_PROXY_CERT, GIT_SSL_CERT.
+	// Values support template expansion (e.g. {{proxy_addr}}).
+	ExecWrapperInnerEnv map[string]string `json:"exec_wrapper_inner_env,omitempty"`
 
 	// ResolvedAgent is the agent name that was resolved during config lookup.
 	// Set by ResolveRoleAgentConfig / resolveAgentConfigInternal so that

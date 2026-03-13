@@ -271,7 +271,7 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
-	if err := polecatMgr.Start(polecatName, opts); err != nil {
+	if err := polecatMgr.Start(cmd.Context(), polecatName, opts); err != nil {
 		return fmt.Errorf("starting session: %w", err)
 	}
 
@@ -305,7 +305,7 @@ func runSessionStop(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("Stopping session for %s/%s...\n", rigName, polecatName)
 	}
-	if err := polecatMgr.Stop(polecatName, sessionForce); err != nil {
+	if err := polecatMgr.Stop(cmd.Context(), polecatName, sessionForce); err != nil {
 		return fmt.Errorf("stopping session: %w", err)
 	}
 
@@ -518,7 +518,7 @@ func runSessionRestart(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("Stopping session for %s/%s...\n", rigName, polecatName)
 		}
-		if err := polecatMgr.Stop(polecatName, sessionForce); err != nil {
+		if err := polecatMgr.Stop(cmd.Context(), polecatName, sessionForce); err != nil {
 			return fmt.Errorf("stopping session: %w", err)
 		}
 
@@ -537,7 +537,7 @@ func runSessionRestart(cmd *cobra.Command, args []string) error {
 	// Start fresh session
 	fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
 	opts := polecat.SessionStartOptions{}
-	if err := polecatMgr.Start(polecatName, opts); err != nil {
+	if err := polecatMgr.Start(cmd.Context(), polecatName, opts); err != nil {
 		return fmt.Errorf("starting session: %w", err)
 	}
 

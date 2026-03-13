@@ -17,8 +17,10 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/proxy"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/sandbox"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -41,16 +43,61 @@ var (
 
 // SessionManager handles polecat session lifecycle.
 type SessionManager struct {
-	tmux *tmux.Tmux
-	rig  *rig.Rig
+	tmux          *tmux.Tmux
+	rig           *rig.Rig
+	sandbox       sandbox.Lifecycle    // nil for local-only rigs
+	settings      *config.RigSettings  // for exec-wrapper resolution
+	installPrefix string               // shortened installation identifier (gt-<installID>)
+	proxyCA       *proxy.CA            // CA for issuing mTLS client certificates
+}
+
+// SessionManagerOption configures optional SessionManager fields.
+type SessionManagerOption func(*SessionManager)
+
+// WithSandbox sets the sandbox lifecycle for remote execution backends.
+// When non-nil, SessionManager calls PreStart/PostStop around session creation/destruction.
+func WithSandbox(s sandbox.Lifecycle) SessionManagerOption {
+	return func(sm *SessionManager) {
+		sm.sandbox = s
+	}
+}
+
+// WithProxyCA sets the CA used for issuing mTLS client certificates.
+// When set, the CA is passed to sandbox PreStart/PostStop via SandboxOpts.ProxyCA.
+func WithProxyCA(ca *proxy.CA) SessionManagerOption {
+	return func(sm *SessionManager) {
+		sm.proxyCA = ca
+	}
+}
+
+// WithSettings sets the rig settings for exec-wrapper resolution.
+func WithSettings(s *config.RigSettings) SessionManagerOption {
+	return func(sm *SessionManager) {
+		sm.settings = s
+	}
+}
+
+// WithInstallPrefix sets the shortened installation identifier (gt-<installID>)
+// used to populate SandboxOpts.InstallPrefix for workspace scoping.
+func WithInstallPrefix(prefix string) SessionManagerOption {
+	return func(sm *SessionManager) {
+		sm.installPrefix = prefix
+	}
 }
 
 // NewSessionManager creates a new polecat session manager for a rig.
-func NewSessionManager(t *tmux.Tmux, r *rig.Rig) *SessionManager {
-	return &SessionManager{
+// Optional SessionManagerOption values can be passed to configure sandbox
+// lifecycle and rig settings. Existing callers that pass only (tmux, rig)
+// continue to work unchanged.
+func NewSessionManager(t *tmux.Tmux, r *rig.Rig, opts ...SessionManagerOption) *SessionManager {
+	sm := &SessionManager{
 		tmux: t,
 		rig:  r,
 	}
+	for _, opt := range opts {
+		opt(sm)
+	}
+	return sm
 }
 
 // SessionStartOptions configures polecat session startup.
@@ -75,6 +122,10 @@ type SessionStartOptions struct {
 	// If set, GT_AGENT is written to the tmux session environment table so that
 	// IsAgentAlive and waitForPolecatReady read the correct process names.
 	Agent string
+
+	// Branch is the git branch for sandbox workspace creation.
+	// Used by sandbox.PreStart to set the initial branch in the remote workspace.
+	Branch string
 }
 
 // SessionInfo contains information about a running polecat session.
@@ -206,7 +257,12 @@ func (m *SessionManager) polecatSlot(polecat string) int {
 }
 
 // Start creates and starts a new session for a polecat.
-func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
+// The provided context controls cancellation of sandbox operations (PreStart).
+// If ctx is nil, context.Background() is used for backward compatibility.
+func (m *SessionManager) Start(ctx context.Context, polecat string, opts SessionStartOptions) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if !m.hasPolecat(polecat) {
 		return fmt.Errorf("%w: %s", ErrPolecatNotFound, polecat)
 	}
@@ -230,10 +286,16 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		}
 	}
 
-	// Determine working directory
+	// Determine working directory.
+	// Remote polecats (sandbox != nil) use the marker directory (no local worktree);
+	// local polecats use the git worktree clone path.
 	workDir := opts.WorkDir
 	if workDir == "" {
-		workDir = m.clonePath(polecat)
+		if m.sandbox != nil {
+			workDir = m.polecatDir(polecat) // marker dir for tmux cwd
+		} else {
+			workDir = m.clonePath(polecat) // local git worktree
+		}
 	}
 
 	// Validate issue exists and isn't tombstoned BEFORE creating session.
@@ -241,6 +303,27 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	if opts.Issue != "" {
 		if err := m.validateIssue(opts.Issue, workDir); err != nil {
 			return err
+		}
+	}
+
+	// Run sandbox PreStart if configured.
+	// This creates/starts the remote workspace, issues mTLS certs, and returns
+	// inner env vars to inject after the exec-wrapper's -- delimiter.
+	var sandboxInnerEnv map[string]string
+	if m.sandbox != nil {
+		sandboxOpts := sandbox.SandboxOpts{
+			Rig:           m.rig.Name,
+			Polecat:       polecat,
+			InstallPrefix: m.installPrefix,
+			WorkspaceName: m.sandbox.WorkspaceName(m.rig.Name, polecat),
+			RigSettings:   m.settings,
+			ProxyCA:       m.proxyCA,
+			Branch:        opts.Branch,
+		}
+		var preErr error
+		sandboxInnerEnv, preErr = m.sandbox.PreStart(ctx, sandboxOpts)
+		if preErr != nil {
+			return fmt.Errorf("sandbox pre-start: %w", preErr)
 		}
 	}
 
@@ -305,6 +388,13 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 			return fmt.Errorf("building startup command: %w", err)
 		}
 	}
+	// Inject sandbox inner env vars between the exec-wrapper's -- delimiter and the
+	// agent command. These are returned by sandbox.PreStart and include proxy config,
+	// cert paths, and git author metadata for the remote workspace environment.
+	if len(sandboxInnerEnv) > 0 {
+		command = config.InjectInnerEnv(command, sandboxInnerEnv)
+	}
+
 	// Prepend runtime config dir env if needed
 	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
 		command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: opts.RuntimeConfigDir})
@@ -344,9 +434,34 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	}
 	command = config.PrependEnv(command, envVarsToInject)
 
+	// Extract cert serial from sandbox inner env for rollback and tmux storage.
+	var certSerial string
+	if sandboxInnerEnv != nil {
+		certSerial = sandboxInnerEnv["GT_CERT_SERIAL"]
+	}
+
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := m.tmux.NewSessionWithCommand(sessionID, workDir, command); err != nil {
+		// Rollback: if sandbox was pre-started, clean up on tmux failure.
+		if m.sandbox != nil {
+			rollbackOpts := sandbox.SandboxOpts{
+				Rig:           m.rig.Name,
+				Polecat:       polecat,
+				InstallPrefix: m.installPrefix,
+				WorkspaceName: m.sandbox.WorkspaceName(m.rig.Name, polecat),
+				RigSettings:   m.settings,
+				ProxyCA:       m.proxyCA,
+				CertSerial:    certSerial,
+			}
+			// Use a separate context with timeout for rollback since the original
+			// ctx may already be canceled (which triggered the failure path).
+			rollbackCtx, rollbackCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer rollbackCancel()
+			if postErr := m.sandbox.PostStop(rollbackCtx, rollbackOpts); postErr != nil {
+				debugSession("sandbox rollback after tmux failure", postErr)
+			}
+		}
 		return fmt.Errorf("creating session: %w", err)
 	}
 
@@ -386,6 +501,12 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	debugSession("SetEnvironment GT_TOWN_ROOT", m.tmux.SetEnvironment(sessionID, "GT_TOWN_ROOT", townRoot))
 	// Set GT_RUN in the session environment so respawned processes also inherit it.
 	debugSession("SetEnvironment GT_RUN", m.tmux.SetEnvironment(sessionID, "GT_RUN", runID))
+
+	// Store cert serial in tmux session environment so PostStop can revoke
+	// the correct certificate. The serial survives session restarts.
+	if certSerial != "" {
+		debugSession("SetEnvironment GT_CERT_SERIAL", m.tmux.SetEnvironment(sessionID, "GT_CERT_SERIAL", certSerial))
+	}
 
 	// Disable Dolt auto-commit in tmux session environment (gt-5cc2p).
 	// This ensures respawned processes also inherit the setting.
@@ -519,7 +640,12 @@ func (m *SessionManager) isSessionStale(sessionID string) bool {
 }
 
 // Stop terminates a polecat session.
-func (m *SessionManager) Stop(polecat string, force bool) error {
+// The provided context controls cancellation of sandbox operations (PostStop).
+// If ctx is nil, context.Background() is used for backward compatibility.
+func (m *SessionManager) Stop(ctx context.Context, polecat string, force bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	sessionID := m.SessionName(polecat)
 
 	running, err := m.tmux.HasSession(sessionID)
@@ -528,6 +654,13 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 	}
 	if !running {
 		return ErrSessionNotFound
+	}
+
+	// Read cert serial from tmux env BEFORE killing the session.
+	// The serial was stored by Start() after PreStart issued the certificate.
+	var certSerial string
+	if m.sandbox != nil {
+		certSerial, _ = m.tmux.GetEnvironment(sessionID, "GT_CERT_SERIAL")
 	}
 
 	// Try graceful shutdown first
@@ -540,6 +673,23 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 	// This prevents orphan bash processes from Claude's Bash tool surviving session termination.
 	if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
+	}
+
+	// Run sandbox PostStop if configured (cert revocation, workspace stop/delete).
+	// PostStop errors are non-fatal — reconciliation handles cleanup of anything missed.
+	if m.sandbox != nil {
+		opts := sandbox.SandboxOpts{
+			Rig:           m.rig.Name,
+			Polecat:       polecat,
+			InstallPrefix: m.installPrefix,
+			WorkspaceName: m.sandbox.WorkspaceName(m.rig.Name, polecat),
+			RigSettings:   m.settings,
+			ProxyCA:       m.proxyCA,
+			CertSerial:    certSerial,
+		}
+		if err := m.sandbox.PostStop(ctx, opts); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: sandbox post-stop failed for %s: %v\n", polecat, err)
+		}
 	}
 
 	return nil
@@ -721,7 +871,12 @@ func (m *SessionManager) Inject(polecat, message string) error {
 }
 
 // StopAll terminates all polecat sessions for this rig.
-func (m *SessionManager) StopAll(force bool) error {
+// The provided context controls cancellation of sandbox operations.
+// If ctx is nil, context.Background() is used for backward compatibility.
+func (m *SessionManager) StopAll(ctx context.Context, force bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	infos, err := m.ListPolecats()
 	if err != nil {
 		return err
@@ -729,7 +884,7 @@ func (m *SessionManager) StopAll(force bool) error {
 
 	var errs []error
 	for _, info := range infos {
-		if err := m.Stop(info.Polecat, force); err != nil {
+		if err := m.Stop(ctx, info.Polecat, force); err != nil {
 			errs = append(errs, fmt.Errorf("stopping %s: %w", info.Polecat, err))
 		}
 	}

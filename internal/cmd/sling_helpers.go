@@ -28,10 +28,9 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-// resolveBeadDir returns the directory to run bd commands for a given bead ID.
-// Uses prefix-based routing to find the correct rig directory.
-// Falls back to rigs.json prefix mapping, then town root.
-func resolveBeadDir(beadID string) string {
+// resolveBeadDir returns the directory to run bd commands.
+// Always returns town root; bd's own prefix routing handles rig dispatch.
+func resolveBeadDir(_ /* beadID */ string) string {
 	// Always return town root. bd's own prefix routing (routes.jsonl at town
 	// level) handles dispatching to the correct rig database. Returning the
 	// rig path caused bd to discover rig-local .beads/ with broken nested

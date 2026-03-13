@@ -22,7 +22,7 @@ import (
 // Dangerous subcommands (e.g. gt polecat, gt rig, gt admin, gt nuke) are excluded.
 const defaultAllowedSubcmds = "" +
 	"gt:prime,hook,done,mail,nudge,mol,status,handoff,version,convoy,sling;" +
-	"bd:create,update,close,show,list,ready,dep,export,prime,stats,blocked,doctor"
+	"bd:create,update,close,show,list,ready,dep,export,prime,stats,blocked,doctor,mol,slot,sync"
 
 func main() {
 	var (
@@ -43,14 +43,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Resolve town root early so we can derive config/ca defaults from it.
+	resolvedTownRoot := *townRoot
+	if resolvedTownRoot == "" {
+		if v := os.Getenv("GT_TOWN"); v != "" {
+			resolvedTownRoot = v
+		} else {
+			resolvedTownRoot = filepath.Join(home, "gt")
+		}
+	}
+
 	// Determine config file path and load it.
 	cfgPath := *configFile
 	if cfgPath == "" {
-		cfgPath = filepath.Join(home, "gt", ".runtime", "proxy", "config.json")
+		cfgPath = filepath.Join(resolvedTownRoot, ".runtime", "proxy", "config.json")
 	}
 	fileCfg, err := loadConfig(cfgPath)
 	if err != nil {
-		slog.Error("failed to load config file", "path", cfgPath, "err", err)
+		slog.Error("failed to load config file", "path", cfgPath, "err", err) //nolint:gosec // G706: cfgPath is from CLI flag or hardcoded default, not user input
 		os.Exit(1)
 	}
 
@@ -78,16 +88,11 @@ func main() {
 		*allowedSubcmds = buildAllowedSubcmds(fileCfg.AllowedSubcommands)
 	}
 
-	if *caDir == "" {
-		*caDir = filepath.Join(home, "gt", ".runtime", "ca")
-	}
+	// Town root was already resolved above for config loading.
+	*townRoot = resolvedTownRoot
 
-	if *townRoot == "" {
-		if v := os.Getenv("GT_TOWN"); v != "" {
-			*townRoot = v
-		} else {
-			*townRoot = filepath.Join(home, "gt")
-		}
+	if *caDir == "" {
+		*caDir = filepath.Join(*townRoot, ".runtime", "ca")
 	}
 
 	ca, err := proxy.LoadOrGenerateCA(*caDir)

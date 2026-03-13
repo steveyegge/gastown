@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -935,7 +936,7 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 		}
 
 		// This polecat has work - start it using SessionManager
-		if err := polecatMgr.Start(polecatName, polecat.SessionStartOptions{}); err != nil {
+		if err := polecatMgr.Start(context.Background(), polecatName, polecat.SessionStartOptions{}); err != nil {
 			if err == polecat.ErrSessionRunning {
 				started = append(started, polecatName)
 			} else {

@@ -2,9 +2,10 @@ package mayor
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
-	"syscall"
 	"testing"
 )
 
@@ -75,6 +76,9 @@ func TestIsACPActive_InvalidPid(t *testing.T) {
 }
 
 func TestIsACPActive_DeadProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix signal(0) for process liveness check")
+	}
 	tmpDir := t.TempDir()
 	mayorDir := filepath.Join(tmpDir, "mayor")
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
@@ -100,6 +104,9 @@ func TestIsACPActive_DeadProcess(t *testing.T) {
 }
 
 func TestIsACPActive_CurrentProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix signal(0) for process liveness check")
+	}
 	tmpDir := t.TempDir()
 	mayorDir := filepath.Join(tmpDir, "mayor")
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
@@ -118,6 +125,9 @@ func TestIsACPActive_CurrentProcess(t *testing.T) {
 }
 
 func TestCleanupVetoChecker_ShouldVetoCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix signal(0) for process liveness check")
+	}
 	tmpDir := t.TempDir()
 	mayorDir := filepath.Join(tmpDir, "mayor")
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
@@ -147,6 +157,9 @@ func TestCleanupVetoChecker_ShouldVetoCleanup(t *testing.T) {
 }
 
 func TestCleanupVetoChecker_VetoIfActive(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix signal(0) for process liveness check")
+	}
 	tmpDir := t.TempDir()
 	mayorDir := filepath.Join(tmpDir, "mayor")
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
@@ -175,6 +188,9 @@ func TestCleanupVetoChecker_VetoIfActive(t *testing.T) {
 }
 
 func TestCleanupVetoChecker_GetACPExpiry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix signal(0) for process liveness check")
+	}
 	tmpDir := t.TempDir()
 	mayorDir := filepath.Join(tmpDir, "mayor")
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
@@ -217,16 +233,21 @@ func containsSubstring(s, substr string) bool {
 }
 
 func TestRemoveACPPid_RemovesStalePid(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires Unix signal(0) for process liveness check")
+	}
 	tmpDir := t.TempDir()
 	mayorDir := filepath.Join(tmpDir, "mayor")
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
 		t.Fatalf("failed to create mayor dir: %v", err)
 	}
 
-	initialPid := syscall.Getpid() - 10000
-	if initialPid < 1 {
-		initialPid = 1
+	// Spawn and wait for a short-lived process to get a guaranteed-dead PID.
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to run helper process: %v", err)
 	}
+	initialPid := cmd.ProcessState.Pid()
 	pidPath := ACPPidFilePath(tmpDir)
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(initialPid)), 0644); err != nil {
 		t.Fatalf("failed to write stale PID file: %v", err)

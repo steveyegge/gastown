@@ -76,6 +76,12 @@ func TestValidateReceivePackRefs(t *testing.T) {
 		assert.NoError(t, validateReceivePackRefs(body, polecat))
 	})
 
+	t.Run("slash-separated branch format is allowed", func(t *testing.T) {
+		// Branch format: polecat/<name>/<issue>@<timestamp>
+		body := receivePackBody("refs/heads/polecat/furiosa/gtd-abc@mmfb8vft")
+		assert.NoError(t, validateReceivePackRefs(body, polecat))
+	})
+
 	t.Run("ref to main is denied", func(t *testing.T) {
 		body := receivePackBody("refs/heads/main")
 		err := validateReceivePackRefs(body, polecat)

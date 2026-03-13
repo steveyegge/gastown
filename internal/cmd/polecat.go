@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1261,7 +1262,7 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 	// Step 1: Kill tmux session unconditionally to prevent ghost sessions
 	// when IsRunning fails to detect the session.
 	sessMgr := polecat.NewSessionManager(t, r)
-	if err := sessMgr.Stop(polecatName, true); err != nil {
+	if err := sessMgr.Stop(context.Background(), polecatName, true); err != nil {
 		if !errors.Is(err, polecat.ErrSessionNotFound) {
 			fmt.Printf("  %s session kill failed: %v\n", style.Warning.Render("⚠"), err)
 		}

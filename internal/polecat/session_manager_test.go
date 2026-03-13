@@ -1,6 +1,8 @@
 package polecat
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/sandbox"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -106,7 +109,7 @@ func TestStartPolecatNotFound(t *testing.T) {
 	}
 	m := NewSessionManager(tmux.NewTmux(), r)
 
-	err := m.Start("Unknown", SessionStartOptions{})
+	err := m.Start(context.Background(), "Unknown", SessionStartOptions{})
 	if err == nil {
 		t.Error("expected error for unknown polecat")
 	}
@@ -165,7 +168,7 @@ func TestStopNotFound(t *testing.T) {
 	}
 	m := NewSessionManager(tmux.NewTmux(), r)
 
-	err := m.Stop("Toast", false)
+	err := m.Stop(context.Background(), "Toast", false)
 	if err != ErrSessionNotFound {
 		t.Errorf("Stop = %v, want ErrSessionNotFound", err)
 	}
@@ -617,5 +620,474 @@ func TestPolecatSlot(t *testing.T) {
 	}
 	if slot := sm.polecatSlot("beta"); slot != 1 {
 		t.Errorf("with hidden dir: polecatSlot(beta) = %d, want 1", slot)
+	}
+}
+
+// mockSandboxLifecycle implements sandbox.Lifecycle for testing SessionManager
+// sandbox integration.
+type mockSandboxLifecycle struct {
+	preStartCalls  []sandbox.SandboxOpts
+	postStopCalls  []sandbox.SandboxOpts
+	reconcileCalls []sandbox.ReconcileOpts
+	preStartErr    error
+	postStopErr    error
+	preStartEnv    map[string]string
+	installPrefix  string
+}
+
+func newMockSandbox(prefix string) *mockSandboxLifecycle {
+	return &mockSandboxLifecycle{
+		installPrefix: prefix,
+		preStartEnv: map[string]string{
+			"GT_PROXY_URL": "https://127.0.0.1:9876",
+		},
+	}
+}
+
+func (m *mockSandboxLifecycle) PreStart(ctx context.Context, opts sandbox.SandboxOpts) (map[string]string, error) {
+	m.preStartCalls = append(m.preStartCalls, opts)
+	if m.preStartErr != nil {
+		return nil, m.preStartErr
+	}
+	return m.preStartEnv, nil
+}
+
+func (m *mockSandboxLifecycle) PostStop(ctx context.Context, opts sandbox.SandboxOpts) error {
+	m.postStopCalls = append(m.postStopCalls, opts)
+	return m.postStopErr
+}
+
+func (m *mockSandboxLifecycle) Reconcile(ctx context.Context, opts sandbox.ReconcileOpts) error {
+	m.reconcileCalls = append(m.reconcileCalls, opts)
+	return nil
+}
+
+func (m *mockSandboxLifecycle) WorkspaceName(rig, polecat string) string {
+	return m.installPrefix + "-" + rig + "--" + polecat
+}
+
+// TestSessionManager_Start_SandboxFailure verifies that Start returns a wrapped
+// error when sandbox.PreStart fails, and that no tmux session is created.
+func TestSessionManager_Start_SandboxFailure(t *testing.T) {
+	requireTmux(t)
+	setupTestRegistryForSession(t)
+
+	root := t.TempDir()
+	polecatName := "marble"
+	// Create polecat directory so hasPolecat passes.
+	if err := os.MkdirAll(filepath.Join(root, "polecats", polecatName), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sbx := newMockSandbox("gt-test")
+	sbx.preStartErr = errors.New("workspace quota exceeded")
+
+	r := &rig.Rig{
+		Name:     "testrig",
+		Path:     root,
+		Polecats: []string{polecatName},
+	}
+	sm := NewSessionManager(tmux.NewTmux(), r, WithSandbox(sbx), WithSettings(&config.RigSettings{
+		RemoteBackend: &config.RemoteBackendConfig{
+			Image:   "test:latest",
+			Profile: "standard",
+		},
+	}))
+
+	err := sm.Start(context.Background(), polecatName, SessionStartOptions{})
+	if err == nil {
+		t.Fatal("Start() should fail when sandbox PreStart returns error")
+	}
+
+	// Error should wrap the sandbox error.
+	if !strings.Contains(err.Error(), "sandbox pre-start") {
+		t.Errorf("error should mention sandbox pre-start, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "workspace quota exceeded") {
+		t.Errorf("error should wrap original error, got: %v", err)
+	}
+
+	// PreStart should have been called exactly once.
+	if len(sbx.preStartCalls) != 1 {
+		t.Fatalf("expected 1 PreStart call, got %d", len(sbx.preStartCalls))
+	}
+
+	// Verify the SandboxOpts passed to PreStart.
+	opts := sbx.preStartCalls[0]
+	if opts.Rig != "testrig" {
+		t.Errorf("PreStart opts.Rig = %q, want %q", opts.Rig, "testrig")
+	}
+	if opts.Polecat != polecatName {
+		t.Errorf("PreStart opts.Polecat = %q, want %q", opts.Polecat, polecatName)
+	}
+	expectedWsName := "gt-test-testrig--" + polecatName
+	if opts.WorkspaceName != expectedWsName {
+		t.Errorf("PreStart opts.WorkspaceName = %q, want %q", opts.WorkspaceName, expectedWsName)
+	}
+
+	// No tmux session should have been created.
+	sessionID := sm.SessionName(polecatName)
+	running, _ := tmux.NewTmux().HasSession(sessionID)
+	if running {
+		_ = tmux.NewTmux().KillSession(sessionID)
+		t.Error("tmux session should not exist after sandbox PreStart failure")
+	}
+}
+
+// TestSessionManager_Start_NoSandbox verifies that when no sandbox is configured,
+// Start proceeds without calling any sandbox lifecycle hooks and uses the local
+// clone path for the working directory.
+func TestSessionManager_Start_NoSandbox(t *testing.T) {
+	// This test verifies the nil-sandbox path in Start().
+	// Without sandbox, Start() should use clonePath (local git worktree)
+	// and never touch any sandbox methods.
+
+	root := t.TempDir()
+	polecatName := "jasper"
+	// Create polecat directory structure.
+	if err := os.MkdirAll(filepath.Join(root, "polecats", polecatName), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{
+		Name:     "localrig",
+		Path:     root,
+		Polecats: []string{polecatName},
+	}
+
+	// Create SessionManager WITHOUT sandbox (default local mode).
+	sm := NewSessionManager(tmux.NewTmux(), r)
+
+	// Verify sandbox is nil.
+	if sm.sandbox != nil {
+		t.Fatal("expected sandbox to be nil for default SessionManager")
+	}
+
+	// Verify workDir resolution goes through clonePath, not polecatDir.
+	// When sandbox is nil, Start() uses clonePath(polecat).
+	// When sandbox is non-nil, Start() uses polecatDir(polecat).
+	clonePath := sm.clonePath(polecatName)
+	polecatDir := sm.polecatDir(polecatName)
+
+	// Without the new-structure subdir existing, clonePath defaults to
+	// polecats/<name>/<rigname>/ (new structure).
+	expectedClone := filepath.Join(root, "polecats", polecatName, "localrig")
+	if clonePath != expectedClone {
+		t.Errorf("clonePath = %q, want %q", clonePath, expectedClone)
+	}
+	expectedDir := filepath.Join(root, "polecats", polecatName)
+	if polecatDir != expectedDir {
+		t.Errorf("polecatDir = %q, want %q", polecatDir, expectedDir)
+	}
+}
+
+// TestSessionManager_Start_WithSandbox verifies that Start calls sandbox.PreStart
+// with the correct SandboxOpts and uses the polecatDir (marker directory) as the
+// working directory instead of the clone path.
+func TestSessionManager_Start_WithSandbox(t *testing.T) {
+	requireTmux(t)
+
+	// When sandbox is configured, Start() should:
+	// 1. Use polecatDir (not clonePath) as workDir
+	// 2. Call PreStart with correct opts before creating tmux session
+	// 3. Pass the returned inner env vars to the session
+
+	root := t.TempDir()
+	polecatName := "agate"
+	if err := os.MkdirAll(filepath.Join(root, "polecats", polecatName), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sbx := newMockSandbox("gt-xyz")
+	settings := &config.RigSettings{
+		RemoteBackend: &config.RemoteBackendConfig{
+			Image:   "gastown:latest",
+			Profile: "standard",
+		},
+	}
+
+	r := &rig.Rig{
+		Name:     "remotrig",
+		Path:     root,
+		Polecats: []string{polecatName},
+	}
+	sm := NewSessionManager(tmux.NewTmux(), r, WithSandbox(sbx), WithSettings(settings), WithInstallPrefix("gt-xyz"))
+
+	// Verify sandbox is set.
+	if sm.sandbox == nil {
+		t.Fatal("expected sandbox to be non-nil")
+	}
+
+	// Verify workDir resolution uses polecatDir when sandbox is set.
+	// This is the marker directory for tmux cwd (no local worktree).
+	expectedWorkDir := filepath.Join(root, "polecats", polecatName)
+
+	// Start() will use this path when sandbox != nil and opts.WorkDir == "".
+	polecatDir := sm.polecatDir(polecatName)
+	if polecatDir != expectedWorkDir {
+		t.Errorf("polecatDir = %q, want %q", polecatDir, expectedWorkDir)
+	}
+
+	// Verify WorkspaceName is deterministic and correct.
+	wsName := sm.sandbox.WorkspaceName("remotrig", polecatName)
+	expectedWs := "gt-xyz-remotrig--" + polecatName
+	if wsName != expectedWs {
+		t.Errorf("WorkspaceName = %q, want %q", wsName, expectedWs)
+	}
+
+	// Verify the SandboxOpts that Start() would construct.
+	// We test this by calling Start with a failing sandbox to capture the opts
+	// without needing the full config/tmux infrastructure.
+	captureErr := errors.New("capture-opts-sentinel")
+	sbx.preStartErr = captureErr
+
+	_ = sm.Start(context.Background(), polecatName, SessionStartOptions{Branch: "feat/test-branch"})
+
+	if len(sbx.preStartCalls) != 1 {
+		t.Fatalf("expected 1 PreStart call, got %d", len(sbx.preStartCalls))
+	}
+
+	opts := sbx.preStartCalls[0]
+	if opts.Rig != "remotrig" {
+		t.Errorf("opts.Rig = %q, want %q", opts.Rig, "remotrig")
+	}
+	if opts.Polecat != polecatName {
+		t.Errorf("opts.Polecat = %q, want %q", opts.Polecat, polecatName)
+	}
+	if opts.InstallPrefix != "gt-xyz" {
+		t.Errorf("opts.InstallPrefix = %q, want %q", opts.InstallPrefix, "gt-xyz")
+	}
+	if opts.WorkspaceName != expectedWs {
+		t.Errorf("opts.WorkspaceName = %q, want %q", opts.WorkspaceName, expectedWs)
+	}
+	if opts.RigSettings != settings {
+		t.Error("opts.RigSettings should point to the configured settings")
+	}
+	if opts.Branch != "feat/test-branch" {
+		t.Errorf("opts.Branch = %q, want %q", opts.Branch, "feat/test-branch")
+	}
+}
+
+// TestSessionManager_Stop_WithSandbox verifies that Stop calls sandbox.PostStop
+// after killing the tmux session, with the correct SandboxOpts.
+func TestSessionManager_Stop_WithSandbox(t *testing.T) {
+	requireTmux(t)
+	setupTestRegistryForSession(t)
+
+	root := t.TempDir()
+	polecatName := fmt.Sprintf("flint-%d", testSessionCounter.Add(1))
+
+	// Create polecat directory.
+	if err := os.MkdirAll(filepath.Join(root, "polecats", polecatName), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sbx := newMockSandbox("gt-abc")
+	settings := &config.RigSettings{
+		RemoteBackend: &config.RemoteBackendConfig{
+			Image:    "gastown:latest",
+			AutoStop: true,
+		},
+	}
+
+	r := &rig.Rig{
+		Name:     "gastown",
+		Path:     root,
+		Polecats: []string{polecatName},
+	}
+	tm := tmux.NewTmux()
+	sm := NewSessionManager(tm, r, WithSandbox(sbx), WithSettings(settings), WithInstallPrefix("gt-abc"))
+
+	// Create a tmux session manually to simulate a running polecat.
+	sessionID := sm.SessionName(polecatName)
+	if err := tm.NewSession(sessionID, os.TempDir()); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	t.Cleanup(func() { _ = tm.KillSession(sessionID) })
+
+	// Verify the session exists.
+	running, err := tm.HasSession(sessionID)
+	if err != nil || !running {
+		t.Fatal("expected tmux session to be running")
+	}
+
+	// Stop the session (force to avoid graceful shutdown timeout).
+	if err := sm.Stop(context.Background(), polecatName, true); err != nil {
+		t.Fatalf("Stop() error: %v", err)
+	}
+
+	// PostStop should have been called exactly once.
+	if len(sbx.postStopCalls) != 1 {
+		t.Fatalf("expected 1 PostStop call, got %d", len(sbx.postStopCalls))
+	}
+
+	// Verify PostStop opts.
+	opts := sbx.postStopCalls[0]
+	if opts.Rig != "gastown" {
+		t.Errorf("PostStop opts.Rig = %q, want %q", opts.Rig, "gastown")
+	}
+	if opts.Polecat != polecatName {
+		t.Errorf("PostStop opts.Polecat = %q, want %q", opts.Polecat, polecatName)
+	}
+	if opts.InstallPrefix != "gt-abc" {
+		t.Errorf("PostStop opts.InstallPrefix = %q, want %q", opts.InstallPrefix, "gt-abc")
+	}
+	expectedWs := "gt-abc-gastown--" + polecatName
+	if opts.WorkspaceName != expectedWs {
+		t.Errorf("PostStop opts.WorkspaceName = %q, want %q", opts.WorkspaceName, expectedWs)
+	}
+	if opts.RigSettings != settings {
+		t.Error("PostStop opts.RigSettings should point to the configured settings")
+	}
+
+	// tmux session should be gone.
+	running, _ = tm.HasSession(sessionID)
+	if running {
+		t.Error("tmux session should have been killed")
+	}
+}
+
+// TestSessionManager_Stop_WithSandbox_PostStopError verifies that Stop succeeds
+// even when sandbox.PostStop returns an error (non-fatal behavior).
+func TestSessionManager_Stop_WithSandbox_PostStopError(t *testing.T) {
+	requireTmux(t)
+	setupTestRegistryForSession(t)
+
+	root := t.TempDir()
+	polecatName := fmt.Sprintf("slate-%d", testSessionCounter.Add(1))
+
+	if err := os.MkdirAll(filepath.Join(root, "polecats", polecatName), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sbx := newMockSandbox("gt-abc")
+	sbx.postStopErr = errors.New("cert revocation timeout")
+
+	r := &rig.Rig{
+		Name:     "gastown",
+		Path:     root,
+		Polecats: []string{polecatName},
+	}
+	tm := tmux.NewTmux()
+	sm := NewSessionManager(tm, r, WithSandbox(sbx), WithSettings(&config.RigSettings{
+		RemoteBackend: &config.RemoteBackendConfig{},
+	}))
+
+	// Create tmux session.
+	sessionID := sm.SessionName(polecatName)
+	if err := tm.NewSession(sessionID, os.TempDir()); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	t.Cleanup(func() { _ = tm.KillSession(sessionID) })
+
+	// Stop should succeed even though PostStop will error.
+	err := sm.Stop(context.Background(), polecatName, true)
+	if err != nil {
+		t.Fatalf("Stop() should succeed despite PostStop error, got: %v", err)
+	}
+
+	// PostStop was still called.
+	if len(sbx.postStopCalls) != 1 {
+		t.Fatalf("expected 1 PostStop call, got %d", len(sbx.postStopCalls))
+	}
+}
+
+// TestSessionManager_Stop_NoSandbox verifies that Stop works normally without
+// a sandbox configured (no PostStop calls).
+func TestSessionManager_Stop_NoSandbox(t *testing.T) {
+	requireTmux(t)
+	setupTestRegistryForSession(t)
+
+	root := t.TempDir()
+	polecatName := fmt.Sprintf("onyx-%d", testSessionCounter.Add(1))
+
+	if err := os.MkdirAll(filepath.Join(root, "polecats", polecatName), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{
+		Name:     "gastown",
+		Path:     root,
+		Polecats: []string{polecatName},
+	}
+	tm := tmux.NewTmux()
+	// No sandbox — default local mode.
+	sm := NewSessionManager(tm, r)
+
+	sessionID := sm.SessionName(polecatName)
+	if err := tm.NewSession(sessionID, os.TempDir()); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	t.Cleanup(func() { _ = tm.KillSession(sessionID) })
+
+	if err := sm.Stop(context.Background(), polecatName, true); err != nil {
+		t.Fatalf("Stop() error: %v", err)
+	}
+
+	// Session should be gone.
+	running, _ := tm.HasSession(sessionID)
+	if running {
+		t.Error("tmux session should have been killed")
+	}
+}
+
+// TestWithSandbox_Option verifies that the WithSandbox functional option
+// correctly sets the sandbox field on SessionManager.
+func TestWithSandbox_Option(t *testing.T) {
+	r := &rig.Rig{Name: "testrig"}
+
+	// Without option: sandbox is nil.
+	sm := NewSessionManager(tmux.NewTmux(), r)
+	if sm.sandbox != nil {
+		t.Error("default SessionManager should have nil sandbox")
+	}
+
+	// With option: sandbox is set.
+	sbx := newMockSandbox("gt-test")
+	sm = NewSessionManager(tmux.NewTmux(), r, WithSandbox(sbx))
+	if sm.sandbox == nil {
+		t.Error("SessionManager with WithSandbox should have non-nil sandbox")
+	}
+}
+
+// TestWithInstallPrefix_Option verifies that the WithInstallPrefix functional option
+// correctly sets the installPrefix field on SessionManager.
+func TestWithInstallPrefix_Option(t *testing.T) {
+	r := &rig.Rig{Name: "testrig"}
+
+	// Without option: installPrefix is empty.
+	sm := NewSessionManager(tmux.NewTmux(), r)
+	if sm.installPrefix != "" {
+		t.Error("default SessionManager should have empty installPrefix")
+	}
+
+	// With option: installPrefix is set.
+	sm = NewSessionManager(tmux.NewTmux(), r, WithInstallPrefix("gt-abc123"))
+	if sm.installPrefix != "gt-abc123" {
+		t.Errorf("installPrefix = %q, want %q", sm.installPrefix, "gt-abc123")
+	}
+}
+
+// TestWithSettings_Option verifies that the WithSettings functional option
+// correctly sets the settings field on SessionManager.
+func TestWithSettings_Option(t *testing.T) {
+	r := &rig.Rig{Name: "testrig"}
+
+	// Without option: settings is nil.
+	sm := NewSessionManager(tmux.NewTmux(), r)
+	if sm.settings != nil {
+		t.Error("default SessionManager should have nil settings")
+	}
+
+	// With option: settings is set.
+	settings := &config.RigSettings{
+		RemoteBackend: &config.RemoteBackendConfig{Image: "test:latest"},
+	}
+	sm = NewSessionManager(tmux.NewTmux(), r, WithSettings(settings))
+	if sm.settings == nil {
+		t.Error("SessionManager with WithSettings should have non-nil settings")
+	}
+	if sm.settings.RemoteBackend.Image != "test:latest" {
+		t.Errorf("settings.RemoteBackend.Image = %q, want %q", sm.settings.RemoteBackend.Image, "test:latest")
 	}
 }

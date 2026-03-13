@@ -127,6 +127,7 @@ type PatrolsConfig struct {
 	DoctorDog      *DoctorDogConfig       `json:"doctor_dog,omitempty"`
 	CompactorDog           *CompactorDogConfig            `json:"compactor_dog,omitempty"`
 	ScheduledMaintenance   *ScheduledMaintenanceConfig    `json:"scheduled_maintenance,omitempty"`
+	DaytonaReconcile       *DaytonaReconcileConfig        `json:"daytona_reconcile,omitempty"`
 	RestartTracker         *RestartTrackerConfig          `json:"restart_tracker,omitempty"`
 }
 
@@ -286,6 +287,12 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 			return false
 		}
 		return config.Patrols.ScheduledMaintenance.Enabled
+	}
+	if patrol == "daytona_reconcile" {
+		if config == nil || config.Patrols == nil || config.Patrols.DaytonaReconcile == nil {
+			return false
+		}
+		return config.Patrols.DaytonaReconcile.Enabled
 	}
 
 	if config == nil || config.Patrols == nil {

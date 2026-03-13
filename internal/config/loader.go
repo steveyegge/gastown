@@ -1956,7 +1956,7 @@ func ExtractSimpleRole(gtRole string) string {
 // If envVars contains GT_ROLE, the function uses role-based agent resolution
 // (ResolveRoleAgentConfig) to select the appropriate agent for the role.
 // This enables per-role model selection via role_agents in settings.
-func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) string {
+func BuildStartupCommand(envVars map[string]string, rigPath, prompt string, innerEnvOpt ...map[string]string) string {
 	var rc *RuntimeConfig
 	var townRoot string
 
@@ -1998,10 +1998,21 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 		}
 	}
 
-	// Apply exec wrapper from rig/town settings if not already set on the resolved config.
-	// ExecWrapper is a deployment-level setting (sandbox/container) independent of agent choice.
-	if len(rc.ExecWrapper) == 0 {
-		rc.ExecWrapper = resolveExecWrapper(rigPath)
+	// Build WrapperContext from envVars for template expansion in exec wrapper.
+	wrapperCtx := wrapperContextFromEnv(envVars)
+
+	// Apply exec wrapper and inner env from rig/town settings if not already set.
+	// Uses a single LoadRigSettings call to avoid redundant file reads.
+	if len(rc.ExecWrapper) == 0 || len(rc.ExecWrapperInnerEnv) == 0 {
+		wrapper, innerEnv := resolveExecWrapperConfig(rigPath, wrapperCtx)
+		if len(rc.ExecWrapper) == 0 {
+			rc.ExecWrapper = wrapper
+		} else if wrapperCtx != (WrapperContext{}) {
+			rc.ExecWrapper = ExpandWrapper(rc.ExecWrapper, wrapperCtx)
+		}
+		if len(rc.ExecWrapperInnerEnv) == 0 {
+			rc.ExecWrapperInnerEnv = innerEnv
+		}
 	}
 
 	// Copy env vars to avoid mutating caller map
@@ -2058,6 +2069,9 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	if len(rc.ExecWrapper) > 0 {
 		cmd += strings.Join(rc.ExecWrapper, " ") + " "
 	}
+
+	// Inject inner env DURING assembly — between wrapper and agent command.
+	cmd += applyInnerEnv(rc, envVars, innerEnvOpt...)
 
 	// Add runtime command
 	if prompt != "" {
@@ -2120,6 +2134,186 @@ func PrependEnv(command string, envVars map[string]string) string {
 	return "export " + strings.Join(exports, " ") + " && " + command
 }
 
+// applyInnerEnv merges inner env from rc.ExecWrapperInnerEnv and an optional
+// override map, expands template variables, and returns a shell fragment to
+// insert between the exec wrapper and agent command. Returns "" if no inner env
+// is configured.
+func applyInnerEnv(rc *RuntimeConfig, envVars map[string]string, innerEnvOpt ...map[string]string) string {
+	// Merge inner env from rc.ExecWrapperInnerEnv and optional parameter.
+	// The optional parameter overrides rc values for the same key.
+	var innerEnv map[string]string
+	if len(rc.ExecWrapperInnerEnv) > 0 {
+		innerEnv = make(map[string]string, len(rc.ExecWrapperInnerEnv))
+		for k, v := range rc.ExecWrapperInnerEnv {
+			innerEnv[k] = v
+		}
+	}
+	if len(innerEnvOpt) > 0 && len(innerEnvOpt[0]) > 0 {
+		if innerEnv == nil {
+			innerEnv = make(map[string]string, len(innerEnvOpt[0]))
+		}
+		for k, v := range innerEnvOpt[0] {
+			innerEnv[k] = v
+		}
+	}
+
+	if len(innerEnv) == 0 {
+		return ""
+	}
+
+	// Expand template variables in inner env values.
+	ctx := WrapperContext{
+		Rig:     envVars["GT_RIG"],
+		Polecat: envVars["GT_POLECAT"],
+	}
+	if ctx.Polecat == "" {
+		ctx.Polecat = envVars["GT_CREW"]
+	}
+	innerEnv = ExpandInnerEnvValues(innerEnv, ctx)
+	return FormatInnerEnvBlock(innerEnv)
+}
+
+// FormatInnerEnvBlock builds a shell fragment "env K=V K2=V2 " from the given
+// env map. Keys are sorted for deterministic output. Returns "" if the map is
+// empty or nil.
+func FormatInnerEnvBlock(innerEnv map[string]string) string {
+	if len(innerEnv) == 0 {
+		return ""
+	}
+
+	keys := make([]string, 0, len(innerEnv))
+	for k := range innerEnv {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var envParts []string
+	for _, k := range keys {
+		envParts = append(envParts, fmt.Sprintf("%s=%s", k, ShellQuote(innerEnv[k])))
+	}
+	return "env " + strings.Join(envParts, " ") + " "
+}
+
+// InjectInnerEnv inserts 'env K=V ...' between the exec-wrapper's -- delimiter
+// and the agent command in a startup command string.
+//
+// NOTE: This function exists for external callers who only have a finished
+// command string. BuildStartupCommand and BuildStartupCommandWithAgentOverride
+// inject inner env during assembly and do NOT use this function.
+//
+// Limitations of post-hoc string parsing:
+//   - The ' -- ' delimiter is specific to daytona/exitbox wrapper conventions
+//     and not guaranteed for all exec-wrappers.
+//   - The fallback parser doesn't handle double-quoted values.
+//   - Agent commands containing '=' may be misidentified as env vars.
+//
+// It transforms:
+//
+//	exec env OUTER=val ... <wrapper-args> -- agent-cmd
+//
+// into:
+//
+//	exec env OUTER=val ... <wrapper-args> -- env INNER=val ... agent-cmd
+//
+// If there is no -- delimiter, the inner env block is prepended directly
+// before the agent command (after any 'exec env ...' prefix).
+// An empty innerEnv map returns the command unchanged.
+// Env var keys are sorted for deterministic output.
+func InjectInnerEnv(command string, innerEnv map[string]string) string {
+	if len(innerEnv) == 0 {
+		return command
+	}
+
+	// Build sorted env assignments, skipping invalid keys
+	keys := make([]string, 0, len(innerEnv))
+	for k := range innerEnv {
+		if !ValidateEnvKey(k) {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	if len(keys) == 0 {
+		return command
+	}
+
+	var envParts []string
+	for _, k := range keys {
+		envParts = append(envParts, fmt.Sprintf("%s=%s", k, ShellQuote(innerEnv[k])))
+	}
+	envBlock := "env " + strings.Join(envParts, " ") + " "
+
+	// Look for -- delimiter (exec wrapper boundary)
+	delimIdx := strings.Index(command, " -- ")
+	if delimIdx >= 0 {
+		// Insert env block after "-- "
+		insertPos := delimIdx + 4 // len(" -- ")
+		return command[:insertPos] + envBlock + command[insertPos:]
+	}
+
+	// No -- delimiter. Insert before the agent command.
+	// The command may start with "exec env K=V ... " — find the end of env vars.
+	// Strategy: if command starts with "exec env ", find the last env assignment
+	// (KEY=VALUE pattern) and insert after it.
+	if strings.HasPrefix(command, "exec env ") {
+		// Find where env assignments end and the agent command begins.
+		// Env assignments are KEY=VALUE (possibly quoted). The agent command
+		// is the first token that doesn't match KEY=VALUE.
+		prefix := "exec env "
+		rest := command[len(prefix):]
+		// Split into tokens respecting shell quoting
+		pos := 0
+		for pos < len(rest) {
+			// Skip whitespace
+			for pos < len(rest) && rest[pos] == ' ' {
+				pos++
+			}
+			if pos >= len(rest) {
+				break
+			}
+			// Check if this token looks like KEY=VALUE
+			eqIdx := -1
+			tokenStart := pos
+			for i := pos; i < len(rest) && rest[i] != ' '; i++ {
+				if rest[i] == '=' && eqIdx == -1 {
+					eqIdx = i - tokenStart
+				}
+				// Handle single-quoted values
+				if rest[i] == '\'' {
+					i++
+					for i < len(rest) && rest[i] != '\'' {
+						i++
+					}
+				}
+			}
+			if eqIdx <= 0 {
+				// Not a KEY=VALUE token — this is the agent command
+				return prefix + rest[:pos] + envBlock + rest[pos:]
+			}
+			// Skip past this KEY=VALUE token
+			for pos < len(rest) && rest[pos] != ' ' {
+				if rest[pos] == '\'' {
+					pos++
+					for pos < len(rest) && rest[pos] != '\'' {
+						pos++
+					}
+					if pos < len(rest) {
+						pos++
+					}
+				} else {
+					pos++
+				}
+			}
+		}
+		// All tokens were env vars — append env block at the end
+		return command + " " + envBlock
+	}
+
+	// No exec env prefix — just prepend the env block
+	return envBlock + command
+}
+
 // BuildStartupCommandWithAgentOverride builds a startup command like BuildStartupCommand,
 // but uses agentOverride if non-empty.
 //
@@ -2127,7 +2321,7 @@ func PrependEnv(command string, envVars map[string]string) string {
 //  1. agentOverride (explicit override)
 //  2. role_agents[GT_ROLE] (if GT_ROLE is in envVars)
 //  3. Default agent resolution (rig's Agent → town's DefaultAgent → "claude")
-func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, prompt, agentOverride string) (string, error) {
+func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, prompt, agentOverride string, innerEnvOpt ...map[string]string) (string, error) {
 	var rc *RuntimeConfig
 	var townRoot string
 
@@ -2189,9 +2383,21 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 		}
 	}
 
-	// Apply exec wrapper from rig/town settings if not already set on the resolved config.
-	if len(rc.ExecWrapper) == 0 {
-		rc.ExecWrapper = resolveExecWrapper(rigPath)
+	// Build WrapperContext from envVars for template expansion in exec wrapper.
+	wrapperCtx := wrapperContextFromEnv(envVars)
+
+	// Apply exec wrapper and inner env from rig/town settings if not already set.
+	// Uses a single LoadRigSettings call to avoid redundant file reads.
+	if len(rc.ExecWrapper) == 0 || len(rc.ExecWrapperInnerEnv) == 0 {
+		wrapper, innerEnv := resolveExecWrapperConfig(rigPath, wrapperCtx)
+		if len(rc.ExecWrapper) == 0 {
+			rc.ExecWrapper = wrapper
+		} else if wrapperCtx != (WrapperContext{}) {
+			rc.ExecWrapper = ExpandWrapper(rc.ExecWrapper, wrapperCtx)
+		}
+		if len(rc.ExecWrapperInnerEnv) == 0 {
+			rc.ExecWrapperInnerEnv = innerEnv
+		}
 	}
 
 	// Copy env vars to avoid mutating caller map
@@ -2245,6 +2451,9 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	if len(rc.ExecWrapper) > 0 {
 		cmd += strings.Join(rc.ExecWrapper, " ") + " "
 	}
+
+	// Inject inner env DURING assembly — between wrapper and agent command.
+	cmd += applyInnerEnv(rc, envVars, innerEnvOpt...)
 
 	if prompt != "" {
 		cmd += rc.BuildCommandWithPrompt(prompt)
@@ -2355,18 +2564,75 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
 }
 
-// resolveExecWrapper loads the exec_wrapper from rig settings.
-// ExecWrapper is a deployment-level setting (sandbox/container) that wraps the agent binary.
-// It is independent of agent choice — exitbox wraps Claude, Codex, or any other runtime.
-func resolveExecWrapper(rigPath string) []string {
-	if rigPath != "" {
-		if rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath)); err == nil && rigSettings != nil {
-			if rigSettings.Runtime != nil && len(rigSettings.Runtime.ExecWrapper) > 0 {
-				return rigSettings.Runtime.ExecWrapper
-			}
+// resolveExecWrapperConfig loads rig settings once and returns both exec_wrapper
+// and exec_wrapper_inner_env. This avoids redundant LoadRigSettings calls when
+// both values are needed (e.g., in BuildStartupCommand).
+func resolveExecWrapperConfig(rigPath string, ctx WrapperContext) (wrapper []string, innerEnv map[string]string) {
+	if rigPath == "" {
+		return nil, nil
+	}
+	rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath))
+	if err != nil || rigSettings == nil || rigSettings.Runtime == nil {
+		return nil, nil
+	}
+	if len(rigSettings.Runtime.ExecWrapper) > 0 {
+		wrapper = rigSettings.Runtime.ExecWrapper
+		if ctx != (WrapperContext{}) {
+			wrapper = ExpandWrapper(wrapper, ctx)
 		}
 	}
-	return nil
+	if len(rigSettings.Runtime.ExecWrapperInnerEnv) > 0 {
+		innerEnv = rigSettings.Runtime.ExecWrapperInnerEnv
+	}
+	return wrapper, innerEnv
+}
+
+// resolveExecWrapperInnerEnv loads exec_wrapper_inner_env from rig settings.
+// Returns nil if no inner env is configured.
+func resolveExecWrapperInnerEnv(rigPath string) map[string]string {
+	_, innerEnv := resolveExecWrapperConfig(rigPath, WrapperContext{})
+	return innerEnv
+}
+
+// resolveExecWrapper loads the exec_wrapper from rig settings and optionally
+// expands template variables via ExpandWrapper(). If ctx is zero-value,
+// template expansion is skipped (backwards-compatible).
+// ExecWrapper is a deployment-level setting (sandbox/container) that wraps the agent binary.
+// It is independent of agent choice — exitbox wraps Claude, Codex, or any other runtime.
+// wrapperContextFromEnv constructs a WrapperContext from envVars for template
+// expansion in exec wrapper args. This mirrors the context construction used for
+// inner env expansion (see InjectInnerEnv call sites) so that exec_wrapper
+// templates like {{rig}} and {{workspace}} expand correctly in BuildStartupCommand.
+func wrapperContextFromEnv(envVars map[string]string) WrapperContext {
+	ctx := WrapperContext{
+		Rig:           envVars["GT_RIG"],
+		Polecat:       envVars["GT_POLECAT"],
+		InstallPrefix: envVars["GT_INSTALL_PREFIX"],
+		WorkDir:       envVars["GT_WORK_DIR"],
+	}
+	if ctx.Polecat == "" {
+		ctx.Polecat = envVars["GT_CREW"]
+	}
+	// Compute workspace name if we have enough context.
+	if ctx.Rig != "" {
+		prefix := ctx.InstallPrefix
+		if prefix == "" {
+			prefix = "gt"
+		}
+		worker := ctx.Polecat
+		if worker != "" {
+			ctx.WorkspaceName = prefix + "-" + ctx.Rig + "--" + worker
+		} else {
+			ctx.WorkspaceName = prefix + "-" + ctx.Rig
+		}
+	}
+	return ctx
+}
+
+
+func resolveExecWrapper(rigPath string, ctx WrapperContext) []string {
+	wrapper, _ := resolveExecWrapperConfig(rigPath, ctx)
+	return wrapper
 }
 
 // ExpectedPaneCommands returns tmux pane command names that indicate the runtime is running.
