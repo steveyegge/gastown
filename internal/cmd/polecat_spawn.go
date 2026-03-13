@@ -231,14 +231,6 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		}
 	}
 
-	// Rig-level max_polecats hard cap: enforce before allocating a new polecat.
-	// Idle reuse (above) is always allowed — it doesn't create a new slot.
-	// Only block when we'd need to allocate a fresh polecat and the rig is at capacity.
-	maxPolecats := r.GetIntConfig("max_polecats")
-	if err := checkMaxPolecatsCap(rigName, maxPolecats, polecatMgr); err != nil {
-		return nil, err
-	}
-
 	// Determine base branch for polecat worktree
 	baseBranch := opts.BaseBranch
 	if baseBranch == "" && opts.HookBead != "" {
@@ -518,26 +510,4 @@ func verifyWorktreeExists(clonePath string) error {
 	return nil
 }
 
-// polecatCounter abstracts working-polecat counting for testability.
-type polecatCounter interface {
-	CountWorkingPolecats() (int, error)
-}
 
-// checkMaxPolecatsCap returns an error if the rig's max_polecats limit would be
-// exceeded by allocating a new polecat. Returns nil if unlimited (maxPolecats <= 0)
-// or under the limit.
-func checkMaxPolecatsCap(rigName string, maxPolecats int, counter polecatCounter) error {
-	if maxPolecats <= 0 {
-		return nil // Unlimited
-	}
-	workingCount, err := counter.CountWorkingPolecats()
-	if err != nil {
-		return nil // Can't count — don't block spawning
-	}
-	if workingCount >= maxPolecats {
-		return fmt.Errorf("rig %s: polecat limit reached (%d/%d active). "+
-			"Wait for an idle slot or raise max_polecats with: gt rig config set %s max_polecats N",
-			rigName, workingCount, maxPolecats, rigName)
-	}
-	return nil
-}

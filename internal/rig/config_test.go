@@ -38,8 +38,10 @@ func TestGetConfig_SystemDefaults(t *testing.T) {
 
 	// Test int default
 	maxPolecats := rig.GetIntConfig("max_polecats")
-	if maxPolecats != 10 {
-		t.Errorf("expected max_polecats=10, got %d", maxPolecats)
+	// max_polecats defaults to 0 (unlimited) — cap only applies when explicitly set.
+	// Changed from 10 to 0 so existing rigs without explicit config are not suddenly capped.
+	if maxPolecats != 0 {
+		t.Errorf("expected max_polecats=0 (unlimited default), got %d", maxPolecats)
 	}
 }
 

@@ -624,6 +624,10 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 // This eliminates the TOCTOU race between AllocateName and AddWithOptions
 // (GH#2215) by holding the pool lock through directory creation, ensuring
 // no concurrent process can allocate the same name.
+//
+// The rig-level max_polecats cap is also enforced under the pool lock to prevent
+// the count→allocate TOCTOU where two concurrent slings both read a count of
+// maxPolecats-1, both pass the check, and both allocate (overshooting by 1+).
 func (m *Manager) AllocateAndAdd(opts AddOptions) (string, *Polecat, error) {
 	// Hold pool lock across allocation + directory creation to close the
 	// race window where a concurrent AllocateName could miss the pending
@@ -634,6 +638,25 @@ func (m *Manager) AllocateAndAdd(opts AddOptions) (string, *Polecat, error) {
 	}
 
 	m.reconcilePoolInternal()
+
+	// Enforce rig-level max_polecats cap under the pool lock.
+	// Must be inside the lock so count+allocate is atomic — see AllocateAndAdd docstring.
+	// max_polecats <= 0 means unlimited (default, preserving pre-cap behavior).
+	// Idle reuse via FindIdlePolecat (caller) is always allowed — it doesn't create a new slot.
+	maxPolecats := m.rig.GetIntConfig("max_polecats")
+	if maxPolecats > 0 {
+		workingCount, countErr := m.CountWorkingPolecats()
+		if countErr != nil {
+			// Fail open: if we can't count, don't block spawning.
+			// Log so operators know the cap is temporarily unenforced.
+			style.PrintWarning("max_polecats: could not count working polecats for rig %s (cap unenforced): %v", m.rig.Name, countErr)
+		} else if workingCount >= maxPolecats {
+			_ = poolLock.Unlock()
+			return "", nil, fmt.Errorf("rig %s: polecat limit reached (%d/%d active). "+
+				"Wait for an idle slot or raise max_polecats with: gt rig config set %s max_polecats N",
+				m.rig.Name, workingCount, maxPolecats, m.rig.Name)
+		}
+	}
 
 	name, err := m.namePool.Allocate()
 	if err != nil {
@@ -1847,7 +1870,18 @@ func (m *Manager) List() ([]*Polecat, error) {
 }
 
 // CountWorkingPolecats returns the number of polecats currently in StateWorking.
-// Idle, done, stuck, and zombie polecats are not counted.
+//
+// Idle and done polecats are not counted — they hold no active slot.
+// Zombie polecats (orphaned tmux sessions without a worktree) are also excluded:
+// they are tracked separately and cleaned up by ReconcilePool / reconcilePoolInternal,
+// which kills their sessions. Counting zombies would cause the cap to fire during
+// cleanup windows, preventing recovery spawns.
+//
+// Note: this uses the same List()-based state derivation as gt polecat list and
+// countActivePolecats(). It differs from countActivePolecats() in that it only
+// counts StateWorking, not all non-idle states. The max_polecats cap is intentionally
+// narrower: a Done polecat has finished its work and its slot should be considered
+// free even before explicit cleanup.
 func (m *Manager) CountWorkingPolecats() (int, error) {
 	polecats, err := m.List()
 	if err != nil {
