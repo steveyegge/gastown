@@ -111,10 +111,13 @@ Omit category-specific fields that don't apply. Omit empty optional fields.
 
 ```bash
 cd /Users/jeremy/gt/rally_tavern
-git add mayor/rig/knowledge/
+git add -f mayor/rig/knowledge/<category>s/<filename>
 git commit -m "Add: <title> (from <nominated_by>, <nomination_id>)"
 git push
 ```
+
+Note: `mayor/` is in rally_tavern's .gitignore for operational dirs, but
+knowledge files are tracked. Always use `git add -f` for new entries.
 
 **d. Reply to the nominator (optional but appreciated):**
 

@@ -157,10 +157,13 @@ Omit empty optional fields. Keep it clean.
 Commit the new file:
 ```bash
 cd ~/gt/rally_tavern
-git add mayor/rig/knowledge/
+git add -f mayor/rig/knowledge/<category>s/<filename>
 git commit -m "Add: <title> (from <nominated_by>, <nomination_id>)"
 git push
 ```
+
+Note: `mayor/` is in rally_tavern's .gitignore for operational files, but
+knowledge files are tracked. Use `git add -f` for new entries.
 
 Reply to the nominator:
 ```bash
@@ -219,7 +222,7 @@ last_verified: <reported_at from report>
 ```
 ```bash
 cd ~/gt/rally_tavern
-git add mayor/rig/knowledge/
+git add -f mayor/rig/knowledge/<path/to/file>
 git commit -m "Verify: <entry_id> (confirmed by <reported_by>)"
 git push
 ```
