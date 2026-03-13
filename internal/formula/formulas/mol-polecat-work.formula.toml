@@ -150,18 +150,24 @@ git status
 git branch --show-current
 ```
 
-**2. Check for a prior branch from a rejected MR:**
+**2. Check for a prior attempt branch:**
 
-If the bead notes contain "MERGE REJECTION" with a branch name, check if that
-branch still exists on the remote. Reusing it preserves all previous work:
+If `{{prior_branch}}` is set, a previous polecat attempted this issue. Reuse
+their work instead of starting from scratch — cherry-pick their commits onto
+your fresh branch:
 ```bash
 git fetch origin
-# Check for prior branch
-git branch -r | grep <prior-branch>
-# If found, check it out:
-git checkout -b <prior-branch> origin/<prior-branch>
-git rebase origin/{{base_branch}}
+# Create your own fresh branch (isolation guarantee)
+git checkout -b polecat/<name> origin/{{base_branch}}
+
+# If prior_branch is set, cherry-pick prior work:
+# git log origin/{{prior_branch}} --oneline --not origin/{{base_branch}}
+# git cherry-pick <commits>
+# Or if all commits are good:
+# git cherry-pick origin/{{base_branch}}..origin/{{prior_branch}}
 ```
+Prior failure reason (if known): {{prior_failure}}
+Fix the issues from the prior attempt rather than reimplementing from scratch.
 
 **If no prior branch, create a fresh one:**
 ```bash
@@ -677,4 +683,12 @@ default = ""
 
 [vars.build_command]
 description = "Command to run build. Empty = skip."
+default = ""
+
+[vars.prior_branch]
+description = "Branch from a prior polecat attempt on the same issue. Cherry-pick or diff against this to reuse prior work instead of starting from scratch. Empty = no prior attempt."
+default = ""
+
+[vars.prior_failure]
+description = "Failure reason from the prior attempt (e.g., conflict, tests, build). Empty = unknown or no prior attempt."
 default = ""
