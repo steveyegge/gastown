@@ -205,7 +205,15 @@ func ComputeRedirectTarget(townRoot, worktreePath string) (string, error) {
 		}
 	}
 
-	if townBeadsHasDB {
+	// Only use town-level beads if the rig doesn't have its own redirect chain.
+	// Rigs using Dolt server (not embedded DB) have a .beads/redirect file pointing
+	// to mayor/rig/.beads — this must take priority over the town fallback.
+	rigHasRedirect := false
+	if _, err := os.Stat(filepath.Join(rigBeadsPath, "redirect")); err == nil {
+		rigHasRedirect = true
+	}
+
+	if townBeadsHasDB && !rigHasRedirect {
 		depth := len(parts)
 		upPath := strings.Repeat("../", depth)
 		return upPath + ".beads", nil
