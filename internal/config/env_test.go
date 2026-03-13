@@ -1219,3 +1219,41 @@ func TestAgentEnv_NoDoltPortWithoutConfig(t *testing.T) {
 	assertNotSet(t, env, "GT_DOLT_PORT")
 	assertNotSet(t, env, "BEADS_DOLT_PORT")
 }
+
+func TestValidateEnvKey(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		key   string
+		valid bool
+	}{
+		// Valid keys
+		{"uppercase", "ALPHA_NUMERIC", true},
+		{"leading underscore", "_LEADING_UNDERSCORE", true},
+		{"simple", "A123", true},
+		{"single letter", "A", true},
+		{"single underscore", "_", true},
+		{"mixed case", "myVar_99", true},
+		{"all lowercase", "path", true},
+
+		// Invalid keys
+		{"empty", "", false},
+		{"starts with digit", "1ABC", false},
+		{"contains space", "FOO BAR", false},
+		{"contains semicolon", "FOO;BAR", false},
+		{"contains dollar", "$HOME", false},
+		{"contains backtick", "FOO`cmd`", false},
+		{"contains equals", "FOO=bar", false},
+		{"contains hyphen", "FOO-BAR", false},
+		{"shell injection", "$(cmd)", false},
+		{"newline in key", "FOO\nBAR", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ValidateEnvKey(tt.key)
+			if got != tt.valid {
+				t.Errorf("ValidateEnvKey(%q) = %v, want %v", tt.key, got, tt.valid)
+			}
+		})
+	}
+}

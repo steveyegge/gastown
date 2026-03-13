@@ -722,6 +722,13 @@ type RuntimeConfig struct {
 	// Produces: exec env VAR=val ... exitbox run --profile=gastown-polecat -- claude ...
 	ExecWrapper []string `json:"exec_wrapper,omitempty"`
 
+	// ExecWrapperInnerEnv holds environment variables injected after the
+	// exec-wrapper delimiter (inside the remote container). These are distinct
+	// from Env which is set in the outer (tmux) context.
+	// Examples: GT_PROXY_URL, GT_PROXY_CERT, GIT_SSL_CERT.
+	// Values support template expansion (e.g. {{proxy_addr}}).
+	ExecWrapperInnerEnv map[string]string `json:"exec_wrapper_inner_env,omitempty"`
+
 	// ResolvedAgent is the agent name that was resolved during config lookup.
 	// Set by ResolveRoleAgentConfig / resolveAgentConfigInternal so that
 	// BuildStartupCommand can export GT_AGENT for process detection.

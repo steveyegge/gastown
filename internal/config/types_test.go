@@ -270,6 +270,127 @@ func TestGeminiProviderDefaults(t *testing.T) {
 	})
 }
 
+// --- RuntimeConfig.ExecWrapperInnerEnv ---
+
+func TestRuntimeConfig_ExecWrapperInnerEnv_JSONRoundTrip(t *testing.T) {
+	t.Parallel()
+	original := &RuntimeConfig{
+		Provider:    "claude",
+		Command:     "claude",
+		ExecWrapper: []string{"exitbox", "run", "--"},
+		ExecWrapperInnerEnv: map[string]string{
+			"GT_PROXY_URL":  "http://{{proxy_addr}}:8080",
+			"GT_PROXY_CERT": "/etc/ssl/proxy.pem",
+			"GIT_SSL_CERT":  "/etc/ssl/git.pem",
+		},
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var loaded RuntimeConfig
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if loaded.Provider != original.Provider {
+		t.Errorf("Provider = %q, want %q", loaded.Provider, original.Provider)
+	}
+	if loaded.Command != original.Command {
+		t.Errorf("Command = %q, want %q", loaded.Command, original.Command)
+	}
+	if len(loaded.ExecWrapperInnerEnv) != len(original.ExecWrapperInnerEnv) {
+		t.Fatalf("ExecWrapperInnerEnv len = %d, want %d",
+			len(loaded.ExecWrapperInnerEnv), len(original.ExecWrapperInnerEnv))
+	}
+	for k, want := range original.ExecWrapperInnerEnv {
+		got, ok := loaded.ExecWrapperInnerEnv[k]
+		if !ok {
+			t.Errorf("ExecWrapperInnerEnv missing key %q", k)
+		} else if got != want {
+			t.Errorf("ExecWrapperInnerEnv[%q] = %q, want %q", k, got, want)
+		}
+	}
+}
+
+func TestRuntimeConfig_ExecWrapperInnerEnv_MissingYieldsNil(t *testing.T) {
+	t.Parallel()
+	input := `{"provider":"claude","command":"claude"}`
+
+	var rc RuntimeConfig
+	if err := json.Unmarshal([]byte(input), &rc); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if rc.ExecWrapperInnerEnv != nil {
+		t.Errorf("ExecWrapperInnerEnv = %v, want nil", rc.ExecWrapperInnerEnv)
+	}
+}
+
+func TestRuntimeConfig_ExecWrapperInnerEnv_EmptyMapYieldsEmptyMap(t *testing.T) {
+	t.Parallel()
+	input := `{"provider":"claude","exec_wrapper_inner_env":{}}`
+
+	var rc RuntimeConfig
+	if err := json.Unmarshal([]byte(input), &rc); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if rc.ExecWrapperInnerEnv == nil {
+		t.Fatal("ExecWrapperInnerEnv = nil, want empty map")
+	}
+	if len(rc.ExecWrapperInnerEnv) != 0 {
+		t.Errorf("ExecWrapperInnerEnv len = %d, want 0", len(rc.ExecWrapperInnerEnv))
+	}
+}
+
+func TestRuntimeConfig_ExistingFieldsUnchangedWithInnerEnv(t *testing.T) {
+	t.Parallel()
+	input := `{
+		"provider": "claude",
+		"command": "claude",
+		"args": ["--dangerously-skip-permissions"],
+		"env": {"SOME_VAR": "val"},
+		"initial_prompt": "hello",
+		"prompt_mode": "arg",
+		"exec_wrapper": ["exitbox", "run", "--"],
+		"exec_wrapper_inner_env": {"GT_PROXY_URL": "http://localhost:8080"}
+	}`
+
+	var rc RuntimeConfig
+	if err := json.Unmarshal([]byte(input), &rc); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if rc.Provider != "claude" {
+		t.Errorf("Provider = %q, want %q", rc.Provider, "claude")
+	}
+	if rc.Command != "claude" {
+		t.Errorf("Command = %q, want %q", rc.Command, "claude")
+	}
+	if len(rc.Args) != 1 || rc.Args[0] != "--dangerously-skip-permissions" {
+		t.Errorf("Args = %v, want [--dangerously-skip-permissions]", rc.Args)
+	}
+	if rc.Env["SOME_VAR"] != "val" {
+		t.Errorf("Env[SOME_VAR] = %q, want %q", rc.Env["SOME_VAR"], "val")
+	}
+	if rc.InitialPrompt != "hello" {
+		t.Errorf("InitialPrompt = %q, want %q", rc.InitialPrompt, "hello")
+	}
+	if rc.PromptMode != "arg" {
+		t.Errorf("PromptMode = %q, want %q", rc.PromptMode, "arg")
+	}
+	if len(rc.ExecWrapper) != 3 {
+		t.Errorf("ExecWrapper len = %d, want 3", len(rc.ExecWrapper))
+	}
+	if rc.ExecWrapperInnerEnv["GT_PROXY_URL"] != "http://localhost:8080" {
+		t.Errorf("ExecWrapperInnerEnv[GT_PROXY_URL] = %q, want %q",
+			rc.ExecWrapperInnerEnv["GT_PROXY_URL"], "http://localhost:8080")
+	}
+}
+
 func TestTownSettings_WithoutNewFields_LoadsDefaults(t *testing.T) {
 	t.Parallel()
 	// Simulate a pre-existing settings/config.json that has NO new config fields.
