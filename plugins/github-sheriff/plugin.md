@@ -144,13 +144,21 @@ fi
 
 ### Step 3: Deduplicate CI failures against existing beads
 
-For each failure, check if a bead already exists:
+For each failure, check if a bead already exists. Only create beads for repos
+we own (`athosmartins/*`) — upstream repos generate noise with no actionable fixes:
 
 ```bash
 EXISTING=$(bd list --label ci-failure --status open --json 2>/dev/null || echo "[]")
 
 CREATED=0
 SKIPPED=0
+
+# Only create CI failure beads for repos we own
+REPO_OWNER=$(echo "$REPO" | cut -d'/' -f1)
+if [ "$REPO_OWNER" != "athosmartins" ]; then
+  echo "Skipping CI failure beads for upstream repo $REPO (not athosmartins)"
+  SKIPPED=${#FAILURES[@]}
+else
 
 for F in "${FAILURES[@]}"; do
   IFS='|' read -r PR_NUM PR_TITLE CHECK_NAME CHECK_URL <<< "$F"
@@ -181,6 +189,8 @@ Check: $CHECK_URL"
       2>/dev/null || true
   fi
 done
+
+fi
 ```
 
 ## Record Result
