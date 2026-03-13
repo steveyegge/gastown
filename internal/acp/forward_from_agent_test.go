@@ -273,7 +273,9 @@ func TestForwardFromAgent_PropulsionTriggers(t *testing.T) {
 	}
 
 	// Test reset on prompt response
+	p.promptMux.Lock()
 	p.activePromptID = "test-prompt"
+	p.promptMux.Unlock()
 	responseMsg := JSONRPCMessage{
 		JSONRPC: "2.0",
 		ID:      "test-prompt",
@@ -288,7 +290,9 @@ func TestForwardFromAgent_PropulsionTriggers(t *testing.T) {
 	}
 
 	// 1. Verify that output is forwarded again after reset
+	p.promptMux.Lock()
 	p.activePromptID = "test-prompt-2"
+	p.promptMux.Unlock()
 	msgAfterReset := JSONRPCMessage{
 		JSONRPC: "2.0",
 		Method:  "test/after-reset",
@@ -299,7 +303,7 @@ func TestForwardFromAgent_PropulsionTriggers(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Read received messages to verify forwarding
-	receivedMsgs := []JSONRPCMessage{}
+	msgChan := make(chan JSONRPCMessage, 10)
 	decoder := json.NewDecoder(stdoutReader)
 
 	// We need to read everything that was sent to stdoutWriter
@@ -310,12 +314,28 @@ func TestForwardFromAgent_PropulsionTriggers(t *testing.T) {
 		for {
 			var msg JSONRPCMessage
 			if err := decoder.Decode(&msg); err != nil {
+				close(msgChan)
 				return
 			}
-			receivedMsgs = append(receivedMsgs, msg)
+			msgChan <- msg
 		}
 	}()
-	time.Sleep(100 * time.Millisecond)
+
+	// Drain channel with a timeout to collect messages
+	var receivedMsgs []JSONRPCMessage
+	drainTimer := time.After(200 * time.Millisecond)
+drainLoop:
+	for {
+		select {
+		case msg, ok := <-msgChan:
+			if !ok {
+				break drainLoop
+			}
+			receivedMsgs = append(receivedMsgs, msg)
+		case <-drainTimer:
+			break drainLoop
+		}
+	}
 
 	foundAfterReset := false
 	for _, m := range receivedMsgs {

@@ -310,7 +310,7 @@ func parseFloatColumn(row []string, idx int, fallback float64) float64 {
 }
 
 // parseIntColumn safely extracts an int from a CSV row at the given index.
-func parseIntColumn(row []string, idx int, fallback int) int {
+func parseIntColumn(row []string, idx int, fallback int) int { //nolint:unparam
 	if idx >= len(row) {
 		return fallback
 	}

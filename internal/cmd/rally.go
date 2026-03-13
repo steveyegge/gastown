@@ -235,7 +235,7 @@ func printRallyJSON(cmd *cobra.Command, results []rally.KnowledgeEntry) error {
 			strings.TrimSpace(r.Summary+r.Lesson+r.Solution),
 		)
 		if i < len(results)-1 {
-			fmt.Fprint(out, ",")
+			_, _ = fmt.Fprint(out, ",")
 		}
 		fmt.Fprintln(out)
 	}

@@ -8,7 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ReportKind classifies what an agent is signalling about an entry.
+// ReportKind classifies what an agent is signaling about an entry.
 type ReportKind string
 
 const (

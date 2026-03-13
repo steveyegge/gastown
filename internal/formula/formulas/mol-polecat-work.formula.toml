@@ -665,7 +665,7 @@ future agent working on similar problems.
 
 ```bash
 gt rally nominate \
-  --category practice \        # or: solution, learned
+  --category practice \
   --title "Short descriptive title" \
   --summary "One sentence: what it is and why it matters" \
   --tags relevant,tags,here \

@@ -181,7 +181,7 @@ func (p *Propeller) eventLoop() {
 		logEvent(p.townRoot, "acp_error", fmt.Sprintf("failed to create nudge watcher: %v", err))
 		return
 	}
-	defer watcher.Close()
+	defer func() { _ = watcher.Close() }()
 
 	for {
 		select {

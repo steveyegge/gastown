@@ -201,11 +201,11 @@ func (p *Proxy) Start(ctx context.Context, agentPath string, agentArgs []string,
 		cancel()
 		p.stdinMux.Lock()
 		if p.agentStdin != nil {
-			p.agentStdin.Close()
+			_ = p.agentStdin.Close()
 			p.agentStdin = nil
 		}
 		p.stdinMux.Unlock()
-		p.cmd.Wait()
+		_ = p.cmd.Wait()
 		return fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
@@ -215,11 +215,11 @@ func (p *Proxy) Start(ctx context.Context, agentPath string, agentArgs []string,
 		cancel()
 		p.stdinMux.Lock()
 		if p.agentStdin != nil {
-			p.agentStdin.Close()
+			_ = p.agentStdin.Close()
 			p.agentStdin = nil
 		}
 		p.stdinMux.Unlock()
-		p.agentStdout.Close()
+		_ = p.agentStdout.Close()
 		return fmt.Errorf("creating stderr pipe: %w", err)
 	}
 
@@ -227,7 +227,7 @@ func (p *Proxy) Start(ctx context.Context, agentPath string, agentArgs []string,
 		cancel()
 		p.stdinMux.Lock()
 		if p.agentStdin != nil {
-			p.agentStdin.Close()
+			_ = p.agentStdin.Close()
 			p.agentStdin = nil
 		}
 		p.stdinMux.Unlock()
@@ -1075,7 +1075,7 @@ func (p *Proxy) Shutdown() {
 		p.stdinMux.Unlock()
 
 		if p.agentStdout != nil {
-			p.agentStdout.Close()
+			_ = p.agentStdout.Close()
 		}
 
 		// Platform-specific process termination
