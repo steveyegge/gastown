@@ -677,9 +677,9 @@ Ask yourself:
 - Did I find a footgun that isn't documented anywhere?
 - Did I discover a pattern that works well for this tech stack?
 
-If yes to any of these — nominate. franklin (rally_tavern's knowledge curator)
-evaluates quality, so err on the side of nominating. Non-blocking: degrades
-gracefully if rally_tavern is absent.
+If yes to any of these — nominate. The Barkeep (rally_tavern's Mayor) evaluates
+quality, so err on the side of nominating. Non-blocking: degrades gracefully if
+rally_tavern is absent.
 
 **You are GONE after this.** The refinery has already merged your work.
 `gt done` at this point is just cleanup (nuke sandbox, close session).

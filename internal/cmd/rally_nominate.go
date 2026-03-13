@@ -33,8 +33,8 @@ var (
 	rallyNominateDryRun      bool
 )
 
-// rallyNominationTarget is the address of the rally_tavern knowledge curator.
-const rallyNominationTarget = "rally_tavern/franklin"
+// rallyNominationTarget is the address of the rally_tavern Barkeep (Mayor).
+const rallyNominationTarget = "rally_tavern/mayor"
 
 func init() {
 	rallyCmd.AddCommand(rallyNominateCmd)
