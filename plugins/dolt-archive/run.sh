@@ -191,7 +191,7 @@ if ! $SKIP_DOLT_PUSH; then
       continue
     fi
 
-    REMOTES=$(cd "$DB_DIR" && dolt remote -v 2>/dev/null | grep -v "^$" | head -5)
+    REMOTES=$(cd "$DB_DIR" && dolt remote -v 2>/dev/null | grep -v "^$" | head -5 || true)
     if [[ -z "$REMOTES" ]]; then
       log "  $DB: no remotes configured, skipping"
       continue
