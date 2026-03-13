@@ -287,6 +287,13 @@ func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error)
 		style.PrintWarning("could not copy overlay files: %v", err)
 	}
 
+	// Run setup hooks from .runtime/setup-hooks/.
+	// These hooks can inject local config, copy secrets, or perform other setup tasks.
+	if err := rig.RunSetupHooks(m.rig.Path, crewPath); err != nil {
+		// Non-fatal - log warning but continue
+		style.PrintWarning("could not run setup hooks: %v", err)
+	}
+
 	// Ensure .gitignore has required Gas Town patterns
 	if err := rig.EnsureGitignorePatterns(crewPath); err != nil {
 		// Non-fatal - log warning but continue
