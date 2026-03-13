@@ -42,7 +42,9 @@ If rally_tavern is not present, commands degrade gracefully.
 Commands:
   search    Search knowledge by query, tags, or codebase type
   lookup    Look up knowledge by exact tag (agent self-serve)
-  nominate  Nominate a knowledge contribution for review by franklin`,
+  nominate  Nominate a knowledge contribution for review by the Barkeep
+  report    Report an entry as stale, wrong, or improvable
+  verify    Confirm an entry is still accurate (updates last_verified)`,
 }
 
 var rallySearchCmd = &cobra.Command{

@@ -33,6 +33,11 @@ type KnowledgeEntry struct {
 	Context string `yaml:"context"`
 	Lesson  string `yaml:"lesson"`
 
+	// Lifecycle metadata
+	LastVerified string `yaml:"last_verified,omitempty"` // RFC3339 date last confirmed still valid
+	Deprecated   bool   `yaml:"deprecated,omitempty"`    // true if entry is outdated
+	SupersededBy string `yaml:"superseded_by,omitempty"` // ID of replacement entry
+
 	// Internal metadata
 	Kind string `yaml:"-"` // "practice", "solution", "learned"
 }
@@ -130,6 +135,9 @@ func (idx *KnowledgeIndex) Search(q SearchQuery) []KnowledgeEntry {
 
 	var results []scored
 	for _, e := range idx.entries {
+		if e.Deprecated {
+			continue // never surface deprecated entries in search
+		}
 		s := score(e, q)
 		if s > 0 {
 			results = append(results, scored{e, s})
