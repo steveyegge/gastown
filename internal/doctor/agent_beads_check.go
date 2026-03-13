@@ -209,6 +209,13 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 
 // Fix creates missing agent beads and adds gt:agent labels to beads missing them.
 func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
+	// Invalidate sentinel files and re-seed custom types before creating agent beads.
+	// After a Dolt restart, types.custom may be cleared from the config table while
+	// sentinel files persist on disk. Without this, CreateAgentBead → EnsureCustomTypes
+	// sees the stale sentinel, skips bd config set, and bd create --type=agent fails
+	// with "invalid issue type: agent". (st-60o)
+	invalidateAndReseedTypes(ctx.TownRoot)
+
 	// Pre-load all known agent bead IDs (from both issues and wisps tables)
 	// so we can check existence without per-bead Show() calls that miss ephemeral wisps.
 	allAgentBeads := make(map[string]*beads.Issue) // from issues table
@@ -469,4 +476,50 @@ func listPolecats(townRoot, rigName string) []string {
 		}
 	}
 	return polecats
+}
+
+// invalidateAndReseedTypes removes sentinel files and re-seeds custom types
+// and statuses in all beads databases. This ensures that CreateAgentBead →
+// EnsureCustomTypes actually calls bd config set instead of trusting a stale
+// sentinel file left over from before a Dolt restart. (st-60o)
+func invalidateAndReseedTypes(townRoot string) {
+	seen := make(map[string]bool)
+	var beadsDirs []string
+
+	addDir := func(dir string) {
+		if dir != "" && !seen[dir] {
+			seen[dir] = true
+			beadsDirs = append(beadsDirs, dir)
+		}
+	}
+
+	// Town-level beads
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if _, err := os.Stat(townBeadsDir); err == nil {
+		addDir(townBeadsDir)
+	}
+
+	// Rig-level beads (from routes.jsonl)
+	routes, err := beads.LoadRoutes(townBeadsDir)
+	if err == nil {
+		for _, r := range routes {
+			// Route paths are relative to town root (e.g., "ScaledTest/mayor/rig")
+			rigWorkDir := filepath.Join(townRoot, r.Path)
+			resolved := beads.ResolveBeadsDir(rigWorkDir)
+			addDir(resolved)
+		}
+	}
+
+	if len(beadsDirs) == 0 {
+		return
+	}
+
+	// Invalidate sentinels so EnsureCustomTypes bypasses the cache
+	beads.InvalidateSentinels(beadsDirs...)
+
+	// Re-seed types in each database (best-effort)
+	for _, dir := range beadsDirs {
+		_ = beads.EnsureCustomTypes(dir)
+		_ = beads.EnsureCustomStatuses(dir)
+	}
 }

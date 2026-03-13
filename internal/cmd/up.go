@@ -318,6 +318,13 @@ func runUp(cmd *cobra.Command, args []string) error {
 		portStr := fmt.Sprintf("%d", doltCfg.Port)
 		os.Setenv("GT_DOLT_PORT", portStr)
 		os.Setenv("BEADS_DOLT_PORT", portStr)
+
+		// Seed custom types and statuses in all beads databases after Dolt restart.
+		// The Dolt config table may lose types.custom when the server restarts,
+		// while sentinel files persist on disk — causing EnsureCustomTypes() to
+		// skip re-configuration and bd create --type=agent to fail. Invalidate
+		// sentinels and re-seed to prevent this. (st-60o)
+		seedBeadsCustomConfig(townRoot, rigs)
 	}
 
 	// 5 & 6. Witnesses and Refineries (using prefetched rigs)
@@ -962,6 +969,52 @@ const doltReadyTimeout = 10 * time.Second
 func waitForDoltReady(townRoot string) {
 	if err := doltserver.WaitForReady(townRoot, doltReadyTimeout); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: %v (agents may see connection errors)\n", err)
+	}
+}
+
+// seedBeadsCustomConfig invalidates sentinel files and re-seeds custom types and
+// statuses in all beads databases after a Dolt server start. This prevents the
+// scenario where the Dolt config table loses types.custom on restart but sentinel
+// files persist, causing EnsureCustomTypes to skip re-configuration and agent
+// bead creation to fail with "invalid issue type: agent". (st-60o)
+func seedBeadsCustomConfig(townRoot string, rigNames []string) {
+	// Collect all beads directories: town-level + each rig
+	var beadsDirs []string
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if _, err := os.Stat(townBeadsDir); err == nil {
+		beadsDirs = append(beadsDirs, townBeadsDir)
+	}
+
+	for _, rigName := range rigNames {
+		// Check for rig-level beads (may be in mayor/rig/.beads via redirect)
+		rigDir := filepath.Join(townRoot, rigName)
+		rigBeadsDir := filepath.Join(rigDir, ".beads")
+		if _, err := os.Stat(rigBeadsDir); err == nil {
+			// ResolveBeadsDir follows redirects (e.g., .beads/redirect → mayor/rig/.beads)
+			resolved := beads.ResolveBeadsDir(rigDir)
+			if resolved != "" {
+				beadsDirs = append(beadsDirs, resolved)
+			} else {
+				beadsDirs = append(beadsDirs, rigBeadsDir)
+			}
+		}
+	}
+
+	if len(beadsDirs) == 0 {
+		return
+	}
+
+	// Invalidate sentinel files so EnsureCustomTypes actually runs bd config set
+	beads.InvalidateSentinels(beadsDirs...)
+
+	// Re-seed types and statuses in each database (errors are non-fatal)
+	for _, dir := range beadsDirs {
+		if err := beads.EnsureCustomTypes(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not seed custom types in %s: %v\n", dir, err)
+		}
+		if err := beads.EnsureCustomStatuses(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not seed custom statuses in %s: %v\n", dir, err)
+		}
 	}
 }
 

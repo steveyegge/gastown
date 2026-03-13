@@ -422,6 +422,26 @@ func stripYAMLQuotes(s string) string {
 	return s
 }
 
+// InvalidateSentinels removes sentinel files from the given beads directories
+// and clears the in-memory cache, forcing the next EnsureCustomTypes/EnsureCustomStatuses
+// call to re-configure types in the database.
+//
+// This should be called after a Dolt server restart, because the config table
+// may have been reset while sentinel files persisted on disk (st-60o).
+func InvalidateSentinels(beadsDirs ...string) {
+	ensuredMu.Lock()
+	defer ensuredMu.Unlock()
+
+	for _, dir := range beadsDirs {
+		// Remove sentinel files so next EnsureCustomTypes/Statuses re-configures
+		_ = os.Remove(filepath.Join(dir, typesSentinel))
+		_ = os.Remove(filepath.Join(dir, statusesSentinel))
+		// Clear in-memory cache entries
+		delete(ensuredDirs, dir)
+		delete(ensuredDirs, dir+":statuses")
+	}
+}
+
 // ResetEnsuredDirs clears the in-memory cache of ensured directories.
 // This is primarily useful for testing.
 func ResetEnsuredDirs() {

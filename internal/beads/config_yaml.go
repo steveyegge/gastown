@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // EnsureConfigYAML ensures config.yaml has both prefix keys set for the given
@@ -88,11 +90,13 @@ func ensureConfigYAML(beadsDir, prefix string, onlyIfMissing bool) error {
 	wantIssuePrefix := "issue-prefix: " + prefix
 	// Gas Town rigs should disable idle-monitor to use centralized Dolt server
 	wantIdleTimeout := "dolt.idle-timeout: \"0\""
+	// Persistent fallback for custom types — survives Dolt config table resets. (st-60o)
+	wantTypesCustom := "types.custom: \"" + constants.BeadsCustomTypes + "\""
 
 	data, err := os.ReadFile(configPath)
 	if os.IsNotExist(err) {
 		// New config: include all Gas Town defaults
-		content := wantPrefix + "\n" + wantIssuePrefix + "\n" + wantIdleTimeout + "\n"
+		content := wantPrefix + "\n" + wantIssuePrefix + "\n" + wantIdleTimeout + "\n" + wantTypesCustom + "\n"
 		return os.WriteFile(configPath, []byte(content), 0644)
 	}
 	if err != nil {
@@ -107,6 +111,7 @@ func ensureConfigYAML(beadsDir, prefix string, onlyIfMissing bool) error {
 	foundPrefix := false
 	foundIssuePrefix := false
 	foundIdleTimeout := false
+	foundTypesCustom := false
 
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -125,6 +130,11 @@ func ensureConfigYAML(beadsDir, prefix string, onlyIfMissing bool) error {
 			foundIdleTimeout = true
 			continue
 		}
+		if strings.HasPrefix(trimmed, "types.custom:") {
+			lines[i] = wantTypesCustom
+			foundTypesCustom = true
+			continue
+		}
 	}
 
 	if !foundPrefix {
@@ -135,6 +145,9 @@ func ensureConfigYAML(beadsDir, prefix string, onlyIfMissing bool) error {
 	}
 	if !foundIdleTimeout {
 		lines = append(lines, wantIdleTimeout)
+	}
+	if !foundTypesCustom {
+		lines = append(lines, wantTypesCustom)
 	}
 
 	newContent := strings.Join(lines, "\n")
