@@ -236,7 +236,7 @@ for entry in "${CANDIDATES[@]}"; do
   # Step 3a: Record pre-flight row counts for integrity verification.
   log "  Recording pre-flight row counts..."
   PRE_TABLES=$(dolt_query "$DB" \
-    "SELECT table_name FROM information_schema.tables WHERE table_schema = '$DB' AND table_name NOT LIKE 'dolt_%'")
+    "SELECT table_name FROM information_schema.tables WHERE table_schema = '$DB' AND table_name NOT LIKE 'dolt_%' AND table_type = 'BASE TABLE'")
 
   # Clear pre-counts file for this database.
   : > "$PRE_COUNTS_FILE"
@@ -357,7 +357,7 @@ for entry in "${CANDIDATES[@]}"; do
 
   # Check for missing tables (tables present before but gone after).
   POST_TABLES=$(dolt_query "$DB" \
-    "SELECT table_name FROM information_schema.tables WHERE table_schema = '$DB' AND table_name NOT LIKE 'dolt_%'")
+    "SELECT table_name FROM information_schema.tables WHERE table_schema = '$DB' AND table_name NOT LIKE 'dolt_%' AND table_type = 'BASE TABLE'")
   while IFS=$'\t' read -r TABLE _; do
     [[ -z "$TABLE" ]] && continue
     if ! printf '%s' "$POST_TABLES" | grep -qx "$TABLE"; then
