@@ -5274,7 +5274,7 @@ func TestResolveExecWrapper_StaticWrapperZeroContext(t *testing.T) {
 	}
 
 	// Zero-value context: no expansion, wrapper returned as-is
-	result := resolveExecWrapper(rigPath, WrapperContext{})
+	result, _ := resolveExecWrapperConfig(rigPath, WrapperContext{})
 	expected := []string{"exitbox", "run", "--profile=test", "--"}
 	if len(result) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(result), result)
@@ -5305,7 +5305,7 @@ func TestResolveExecWrapper_DaytonaTemplateExpansion(t *testing.T) {
 		WorkDir:       "/home/user/project",
 		WorkspaceName: "gt-abc123-furiosa--obsidian",
 	}
-	result := resolveExecWrapper(rigPath, ctx)
+	result, _ := resolveExecWrapperConfig(rigPath, ctx)
 	if len(result) != 5 {
 		t.Fatalf("expected 5 args, got %d: %v", len(result), result)
 	}
@@ -5343,7 +5343,7 @@ func TestResolveExecWrapper_AllTemplateVariables(t *testing.T) {
 		WorkDir:       "/work/dir",
 		WorkspaceName: "gt-xyz-myrig--mypolecat",
 	}
-	result := resolveExecWrapper(rigPath, ctx)
+	result, _ := resolveExecWrapperConfig(rigPath, ctx)
 	expected := []string{
 		"wrapper",
 		"--rig=myrig",
@@ -5372,14 +5372,14 @@ func TestResolveExecWrapper_NoExecWrapperConfigured(t *testing.T) {
 		t.Fatalf("SaveRigSettings: %v", err)
 	}
 
-	result := resolveExecWrapper(rigPath, WrapperContext{})
+	result, _ := resolveExecWrapperConfig(rigPath, WrapperContext{})
 	if result != nil {
 		t.Errorf("expected nil for no exec_wrapper, got: %v", result)
 	}
 
 	// Also test with a non-zero context — still nil
 	ctx := WrapperContext{Rig: "test", WorkspaceName: "ws"}
-	result = resolveExecWrapper(rigPath, ctx)
+	result, _ = resolveExecWrapperConfig(rigPath, ctx)
 	if result != nil {
 		t.Errorf("expected nil for no exec_wrapper with context, got: %v", result)
 	}
@@ -6046,7 +6046,7 @@ func TestResolveExecWrapperInnerEnv_WithConfiguredEnv(t *testing.T) {
 		t.Fatalf("SaveRigSettings: %v", err)
 	}
 
-	result := resolveExecWrapperInnerEnv(rigPath)
+	_, result := resolveExecWrapperConfig(rigPath, WrapperContext{})
 	if result == nil {
 		t.Fatal("expected non-nil map, got nil")
 	}
@@ -6074,7 +6074,7 @@ func TestResolveExecWrapperInnerEnv_NotConfigured(t *testing.T) {
 		t.Fatalf("SaveRigSettings: %v", err)
 	}
 
-	result := resolveExecWrapperInnerEnv(rigPath)
+	_, result := resolveExecWrapperConfig(rigPath, WrapperContext{})
 	if result != nil {
 		t.Errorf("expected nil for no exec_wrapper_inner_env, got: %v", result)
 	}
@@ -6092,7 +6092,7 @@ func TestResolveExecWrapperInnerEnv_EmptyMap(t *testing.T) {
 		t.Fatalf("SaveRigSettings: %v", err)
 	}
 
-	result := resolveExecWrapperInnerEnv(rigPath)
+	_, result := resolveExecWrapperConfig(rigPath, WrapperContext{})
 	if result != nil {
 		t.Errorf("expected nil for empty exec_wrapper_inner_env map, got: %v", result)
 	}
@@ -6101,7 +6101,7 @@ func TestResolveExecWrapperInnerEnv_EmptyMap(t *testing.T) {
 func TestResolveExecWrapperInnerEnv_EmptyRigPath(t *testing.T) {
 	t.Parallel()
 
-	result := resolveExecWrapperInnerEnv("")
+	_, result := resolveExecWrapperConfig("", WrapperContext{})
 	if result != nil {
 		t.Errorf("expected nil for empty rigPath, got: %v", result)
 	}
@@ -6112,7 +6112,7 @@ func TestResolveExecWrapperInnerEnv_InvalidSettingsFile(t *testing.T) {
 	rigPath := t.TempDir()
 
 	// No rig settings file exists at this path — LoadRigSettings should fail gracefully
-	result := resolveExecWrapperInnerEnv(rigPath)
+	_, result := resolveExecWrapperConfig(rigPath, WrapperContext{})
 	if result != nil {
 		t.Errorf("expected nil for missing rig settings file, got: %v", result)
 	}

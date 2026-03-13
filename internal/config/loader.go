@@ -2003,16 +2003,21 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string, inne
 
 	// Apply exec wrapper and inner env from rig/town settings if not already set.
 	// Uses a single LoadRigSettings call to avoid redundant file reads.
-	if len(rc.ExecWrapper) == 0 || len(rc.ExecWrapperInnerEnv) == 0 {
+	needWrapper := len(rc.ExecWrapper) == 0
+	needInnerEnv := len(rc.ExecWrapperInnerEnv) == 0
+	if needWrapper || needInnerEnv {
 		wrapper, innerEnv := resolveExecWrapperConfig(rigPath, wrapperCtx)
-		if len(rc.ExecWrapper) == 0 {
+		if needWrapper {
 			rc.ExecWrapper = wrapper
-		} else if wrapperCtx != (WrapperContext{}) {
-			rc.ExecWrapper = ExpandWrapper(rc.ExecWrapper, wrapperCtx)
 		}
-		if len(rc.ExecWrapperInnerEnv) == 0 {
+		if needInnerEnv {
 			rc.ExecWrapperInnerEnv = innerEnv
 		}
+	}
+	// ExecWrapper may already be set (e.g., from agent config resolution) but contain
+	// unexpanded templates. Expand them with the env-derived context.
+	if !needWrapper && wrapperCtx != (WrapperContext{}) {
+		rc.ExecWrapper = ExpandWrapper(rc.ExecWrapper, wrapperCtx)
 	}
 
 	// Copy env vars to avoid mutating caller map
@@ -2388,16 +2393,21 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 
 	// Apply exec wrapper and inner env from rig/town settings if not already set.
 	// Uses a single LoadRigSettings call to avoid redundant file reads.
-	if len(rc.ExecWrapper) == 0 || len(rc.ExecWrapperInnerEnv) == 0 {
+	needWrapper := len(rc.ExecWrapper) == 0
+	needInnerEnv := len(rc.ExecWrapperInnerEnv) == 0
+	if needWrapper || needInnerEnv {
 		wrapper, innerEnv := resolveExecWrapperConfig(rigPath, wrapperCtx)
-		if len(rc.ExecWrapper) == 0 {
+		if needWrapper {
 			rc.ExecWrapper = wrapper
-		} else if wrapperCtx != (WrapperContext{}) {
-			rc.ExecWrapper = ExpandWrapper(rc.ExecWrapper, wrapperCtx)
 		}
-		if len(rc.ExecWrapperInnerEnv) == 0 {
+		if needInnerEnv {
 			rc.ExecWrapperInnerEnv = innerEnv
 		}
+	}
+	// ExecWrapper may already be set (e.g., from agent config resolution) but contain
+	// unexpanded templates. Expand them with the env-derived context.
+	if !needWrapper && wrapperCtx != (WrapperContext{}) {
+		rc.ExecWrapper = ExpandWrapper(rc.ExecWrapper, wrapperCtx)
 	}
 
 	// Copy env vars to avoid mutating caller map
@@ -2587,18 +2597,6 @@ func resolveExecWrapperConfig(rigPath string, ctx WrapperContext) (wrapper []str
 	return wrapper, innerEnv
 }
 
-// resolveExecWrapperInnerEnv loads exec_wrapper_inner_env from rig settings.
-// Returns nil if no inner env is configured.
-func resolveExecWrapperInnerEnv(rigPath string) map[string]string {
-	_, innerEnv := resolveExecWrapperConfig(rigPath, WrapperContext{})
-	return innerEnv
-}
-
-// resolveExecWrapper loads the exec_wrapper from rig settings and optionally
-// expands template variables via ExpandWrapper(). If ctx is zero-value,
-// template expansion is skipped (backwards-compatible).
-// ExecWrapper is a deployment-level setting (sandbox/container) that wraps the agent binary.
-// It is independent of agent choice — exitbox wraps Claude, Codex, or any other runtime.
 // wrapperContextFromEnv constructs a WrapperContext from envVars for template
 // expansion in exec wrapper args. This mirrors the context construction used for
 // inner env expansion (see InjectInnerEnv call sites) so that exec_wrapper
@@ -2627,12 +2625,6 @@ func wrapperContextFromEnv(envVars map[string]string) WrapperContext {
 		}
 	}
 	return ctx
-}
-
-
-func resolveExecWrapper(rigPath string, ctx WrapperContext) []string {
-	wrapper, _ := resolveExecWrapperConfig(rigPath, ctx)
-	return wrapper
 }
 
 // ExpectedPaneCommands returns tmux pane command names that indicate the runtime is running.
