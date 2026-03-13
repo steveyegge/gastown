@@ -23,8 +23,9 @@ DOLT_HOST="${DOLT_HOST:-127.0.0.1}"
 DOLT_PORT="${DOLT_PORT:-3307}"
 DOLT_USER="${DOLT_USER:-root}"
 COMMIT_THRESHOLD="${COMMIT_THRESHOLD:-500}"
-# Default production databases (matches reaper.DefaultDatabases)
-DEFAULT_DBS="hq,bd,gt"
+# Default production databases — "auto" queries SHOW DATABASES and filters system DBs.
+# This avoids hardcoded names that drift out of sync with actual Dolt databases.
+DEFAULT_DBS="auto"
 DRY_RUN=false
 CHECK_ONLY=false
 LOGFILE=""
@@ -76,11 +77,13 @@ validate_name() {
   return 0
 }
 
-# Validate that a value looks like a Dolt commit hash (hex string).
+# Validate that a value looks like a Dolt commit hash.
+# Dolt uses a base32-style content hash (lowercase alphanumeric), NOT hex.
+# Example: j5658jmafu1uhdu9p1k5i0u88k6vl7b0
 validate_hash() {
   local hash="$1"
   local context="$2"
-  if [[ ! "$hash" =~ ^[a-fA-F0-9]+$ ]]; then
+  if [[ ! "$hash" =~ ^[a-z0-9]+$ ]]; then
     log "ERROR: Unsafe $context hash rejected: '$hash'"
     return 1
   fi
