@@ -1687,6 +1687,18 @@ func runPolecatPoolInit(cmd *cobra.Command, args []string) error {
 		poolSize = polecatPoolInitSize
 	}
 
+	// Warn if pool size exceeds rig-level max_polecats cap.
+	// Only max_polecats of these can be working simultaneously; the rest will idle.
+	maxPolecats := r.GetIntConfig("max_polecats")
+	if maxPolecats > 0 && poolSize > maxPolecats {
+		fmt.Fprintf(os.Stderr, "%s pool-init --size %d exceeds max_polecats=%d for rig %s. "+
+			"Only %d polecats can work simultaneously.\n"+
+			"  Raise the cap:    gt rig config set %s max_polecats %d\n"+
+			"  Or reduce --size: gt polecat pool-init %s --size %d\n",
+			style.Warning.Render("⚠"), poolSize, maxPolecats, rigName,
+			maxPolecats, rigName, poolSize, rigName, maxPolecats)
+	}
+
 	// Determine names: rig config > name pool theme
 	var fixedNames []string
 	if cfgErr == nil && len(rigCfg.PolecatNames) > 0 {

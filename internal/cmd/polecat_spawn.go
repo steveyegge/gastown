@@ -509,3 +509,5 @@ func verifyWorktreeExists(clonePath string) error {
 
 	return nil
 }
+
+
