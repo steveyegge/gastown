@@ -292,6 +292,55 @@ func TestListWithPolecats(t *testing.T) {
 	}
 }
 
+func TestCountWorkingPolecatsEmpty(t *testing.T) {
+	root := t.TempDir()
+	r := &rig.Rig{Name: "test-rig", Path: root}
+	m := NewManager(r, git.NewGit(root), nil)
+
+	count, err := m.CountWorkingPolecats()
+	if err != nil {
+		t.Fatalf("CountWorkingPolecats: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("count = %d, want 0", count)
+	}
+}
+
+func TestCountWorkingPolecatsWithMixedStates(t *testing.T) {
+	// When beads is not available and tmux is nil, Get returns StateIdle
+	// (no tmux session, no beads assignment). To get StateWorking we need
+	// either a tmux session or beads — skip if bd is installed since it
+	// changes state derivation.
+	if _, err := exec.LookPath("bd"); err == nil {
+		t.Skip("skipping: bd is installed, test requires bd to be unavailable")
+	}
+
+	root := t.TempDir()
+	// Create polecat directories
+	for _, name := range []string{"Working1", "Working2", "Idle1"} {
+		if err := os.MkdirAll(filepath.Join(root, "polecats", name), 0755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	// Create mayor/rig for beads path
+	if err := os.MkdirAll(filepath.Join(root, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	r := &rig.Rig{Name: "test-rig", Path: root}
+	// Without beads or tmux, all polecats will be StateIdle
+	m := NewManager(r, git.NewGit(root), nil)
+
+	count, err := m.CountWorkingPolecats()
+	if err != nil {
+		t.Fatalf("CountWorkingPolecats: %v", err)
+	}
+	// Without beads or tmux sessions, all polecats are idle
+	if count != 0 {
+		t.Errorf("count = %d, want 0 (no beads/tmux means all idle)", count)
+	}
+}
+
 // Note: TestSetState, TestAssignIssue, and TestClearIssue were removed.
 // These operations now require a running beads instance and are tested
 // via integration tests. The unit tests here focus on testing the basic

@@ -1846,6 +1846,22 @@ func (m *Manager) List() ([]*Polecat, error) {
 	return polecats, nil
 }
 
+// CountWorkingPolecats returns the number of polecats currently in StateWorking.
+// Idle, done, stuck, and zombie polecats are not counted.
+func (m *Manager) CountWorkingPolecats() (int, error) {
+	polecats, err := m.List()
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, p := range polecats {
+		if p.State == StateWorking {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // FindIdlePolecat returns the first idle polecat in the rig, or nil if none.
 // Idle polecats have completed their work and have a preserved sandbox (worktree)
 // that can be reused by gt sling without creating a new worktree.
