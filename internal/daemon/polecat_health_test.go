@@ -270,6 +270,12 @@ func TestCheckPolecatHealth_SkipsNukedPolecat(t *testing.T) {
 	d.checkPolecatHealth("myr", "mycat")
 
 	got := logBuf.String()
+	if !strings.Contains(got, "Skipping crash detection") {
+		t.Errorf("expected skip log message, got: %q", got)
+	}
+	if !strings.Contains(got, "agent_state=nuked") {
+		t.Errorf("expected agent_state=nuked in skip log, got: %q", got)
+	}
 	if strings.Contains(got, "CRASH DETECTED") {
 		t.Errorf("nuked polecat must not trigger CRASH DETECTED, got: %q", got)
 	}
@@ -303,6 +309,12 @@ func TestCheckPolecatHealth_SkipsDonePolecat(t *testing.T) {
 	d.checkPolecatHealth("myr", "mycat")
 
 	got := logBuf.String()
+	if !strings.Contains(got, "Skipping crash detection") {
+		t.Errorf("expected skip log message, got: %q", got)
+	}
+	if !strings.Contains(got, "agent_state=done") {
+		t.Errorf("expected agent_state=done in skip log, got: %q", got)
+	}
 	if strings.Contains(got, "CRASH DETECTED") {
 		t.Errorf("done polecat with open hook_bead must not trigger CRASH DETECTED, got: %q", got)
 	}
