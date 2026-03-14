@@ -28,7 +28,7 @@ Gas Town already has significant agent-routing infrastructure:
 
 **What's missing** (what the RFC adds):
 1. **Agent tiers with selection strategies** — abstract `small`/`medium`/`large`/`reasoning` tiers that map to ordered lists of agent presets, with per-tier selection strategies
-2. **LLM-driven task-complexity routing** — dynamic tier selection based on task analysis; Go code handles agent selection within tiers
+2. **Agent-driven task-complexity routing** — dynamic tier selection based on task analysis; Go code handles agent selection within tiers
 3. **Witness→Router feedback via mail** — witness sends AGENT_FAILURE mail to the router when it detects agent-level failures
 4. **Router→Mayor escalation via mail** — router sends ROUTING_FAILED mail to the mayor when no routable agents remain
 
@@ -39,7 +39,7 @@ Gas Town already has significant agent-routing infrastructure:
 ### Q1: Router opt-in or opt-out?
 **Decision: Opt-in (off by default)**
 
-The LLM router adds latency to every dispatch and requires a running local model. Phase 1 (tier config + role defaults) delivers most of the value without it. Enable via config:
+The router agent adds latency to every dispatch. Phase 1 (tier config + role defaults) delivers most of the value without it. Enable via config:
 ```json
 { "router": { "enabled": true } }
 ```
@@ -49,14 +49,14 @@ The LLM router adds latency to every dispatch and requires a running local model
 
 The router performs a classification task, not planning. Bead title + body is sufficient signal for tier selection. We explicitly do NOT try to judge "how well" a task was completed — there is no judge for that.
 
-The LLM router sees only tier names and descriptions. It does NOT see agent lists, exclusion state, or AGENT_FAILURE mail. Those are handled by Go code after the LLM returns a tier (see §3.3 for the full separation of concerns).
+The router agent sees only tier names and descriptions. It does NOT see agent lists, exclusion state, or AGENT_FAILURE mail. Those are handled by Go code after the router returns a tier (see §3.3 for the full separation of concerns).
 
-**v1 LLM router input:**
+**v1 router agent input:**
 - Bead title + description (from `bd show`)
 - Current role (`polecat`, `crew`, etc.)
 - Available tier names and their descriptions
 
-**Handled by Go code (not the LLM):**
+**Handled by Go code (not the router agent):**
 - AGENT_FAILURE exclusions (from `ExclusionCache`)
 - Agent selection within the chosen tier (priority/round-robin)
 - Tier fallback when all agents in a tier are excluded
@@ -77,7 +77,7 @@ The witness is the judge, not the router. The router's structured response is si
 { "tier": "large", "rationale": "cross-cutting refactor touching auth + DB layers" }
 ```
 
-No `confidence` field. The router always returns a tier. If the router LLM itself fails (timeout, crash), use `fallback_tier` from config.
+No `confidence` field. The router always returns a tier. If the router agent fails (timeout, crash), use `fallback_tier` from config.
 
 ### Q4: Agent fallback on failure — witness-informed via mail
 **Decision: Witness sends AGENT_FAILURE mail → router excludes those agents**
@@ -95,7 +95,7 @@ gt mail send router/ -s "AGENT_FAILURE: claude-sonnet" -m "agent: claude-sonnet\
 4. If all agents in a tier are excluded, moves **up one tier** (e.g., `medium` → `large`)
 5. If no routable agents remain at any tier, sends `ROUTING_FAILED` mail to `mayor/` and uses `fallback_tier`
 
-**Note:** This is Go code in the dispatch path, not the LLM router. The LLM (Phase 3) only picks a tier — all agent selection, exclusion, and fallback logic is deterministic Go code.
+**Note:** This is Go code in the dispatch path, not the router agent. The router (Phase 3) only picks a tier — all agent selection, exclusion, and fallback logic is deterministic Go code.
 
 **Why mail instead of a custom store:**
 - Uses Gas Town's existing communication infrastructure — no new persistence layer
@@ -109,7 +109,7 @@ gt mail send router/ -s "AGENT_FAILURE: claude-sonnet" -m "agent: claude-sonnet\
 ### Q5: Cost attribution for router calls?
 **Decision: Infrastructure overhead — attributed to the same cost bucket as the Mayor**
 
-Router calls are tiny (local model, small context, structured output). Track as a separate OTEL metric (`gt.router.calls`, `gt.router.latency_ms`) but attribute costs to infrastructure, not individual beads.
+Router calls are tiny (small context, structured output). Track as a separate OTEL metric (`gt.router.calls`, `gt.router.latency_ms`) but attribute costs to infrastructure, not individual beads.
 
 ### Q6: Multi-agent tier resolution — per-tier selection strategy
 **Decision: Configurable per-tier — `priority` (default) or `round-robin`**
@@ -170,9 +170,9 @@ gt config
 │       ├── remove-agent <tier> <agent> ← remove agent from tier
 │       ├── set-order <tier...>     ← set tier ordering
 │       └── init                    ← initialize default tier config
-├── router                          ← NEW: LLM router management (Phase 3)
+├── router                          ← NEW: router agent management (Phase 3)
 │   ├── show                        ← display router config + recent AGENT_FAILURE mail
-│   ├── enable [flags]              ← enable with provider/model
+│   ├── set <agent>                 ← set router agent and enable routing
 │   ├── disable                     ← disable router
 │   └── test <bead-id>              ← dry-run routing decision
 ├── cost-tier [standard|economy|budget]  ← quick presets (unchanged)
@@ -194,7 +194,7 @@ gt agent                            ← NEW: runtime tier operations
 2. `--tier` flag on `gt sling` (explicit tier override — picks agent from tier's list)
 3. Rig-level `role_agents` / `worker_agents` (rig settings)
 4. Town-level `role_agents` / `crew_agents` (town settings, written by `gt config agent`)
-5. LLM router decision (if enabled, Phase 3)
+5. Router agent decision (if enabled, Phase 3)
 6. Agent tier `role_defaults` (Phase 1)
 7. Cost tier preset (standard/economy/budget) — writes to `role_agents`, so effectively layer 4
 8. Town `default_agent` (final fallback)
@@ -365,7 +365,7 @@ The router's state is visible in `gt status` output, giving operators a single-p
   ...existing sections...
 
 📡 Agent Router
-  Status:     enabled (ollama/qwen2.5-coder:14b)
+  Status:     enabled (agent: qwen-local)
   Fallback:   medium
   Failure TTL: 30m
 
@@ -428,7 +428,7 @@ This gives operators immediate visibility into:
 ```go
 // AgentTier defines a capability tier with an ordered list of agent preset names.
 type AgentTier struct {
-    Description string   `json:"description"` // human-readable purpose — fed to the LLM router for tier selection
+    Description string   `json:"description"` // human-readable purpose — fed to the router agent for tier selection
     Agents      []string `json:"agents"`      // ordered list of agent preset names
     Selection   string   `json:"selection"`   // "priority" (default) or "round-robin"
     Fallback    bool     `json:"fallback"`    // default: true — fall back to higher tier on failure
@@ -445,7 +445,7 @@ type AgentTierConfig struct {
 **Key design decisions:**
 - **JSON, not YAML** — the entire config system uses JSON; no new dependencies
 - **Agents are just names** — each entry in `Agents` references an agent preset (built-in or custom from `settings/agents.json`). The preset already encapsulates command, args, model, env — no need to re-specify provider/model at the tier level
-- **`Description` is for the LLM router** — the router sees tier names + descriptions when classifying tasks. This lets users define intent-based tiers (e.g., `"complex-work": { "description": "Pick this for tasks with significant design work still to do" }`) beyond generic size labels. The description is NOT used for mechanical tier resolution — only for the Phase 3 LLM prompt
+- **`Description` is for the router agent** — the router sees tier names + descriptions when classifying tasks. This lets users define intent-based tiers (e.g., `"complex-work": { "description": "Pick this for tasks with significant design work still to do" }`) beyond generic size labels. The description is NOT used for mechanical tier resolution — only for the Phase 3 router prompt
 - **Tiers are string-keyed, not an enum** — users can define custom tiers beyond small/medium/large/reasoning (e.g., "complex-work", "local", "vision", "code-review")
 - **`TierOrder` is explicit** — defines the capability ordering. "Up one tier" means moving toward the end of this list. Required for the router's fallback behavior
 - **`Selection` per tier** — `priority` or `round-robin`, not global. A `reasoning` tier with one agent uses `priority`; a `medium` tier with multiple agents might use `round-robin`
@@ -576,7 +576,7 @@ gt config agent tiers init
 # Show current tier configuration (tiers, agents, role defaults, selection strategies)
 gt config agent tiers show
 
-# Create/update a tier (with description for the LLM router)
+# Create/update a tier (with description for the router agent)
 gt config agent tiers set large --agent claude-opus --description "Cross-cutting refactors, new subsystem integration"
 gt config agent tiers set medium --agent claude-sonnet --selection round-robin --description "Standard feature work, multi-file changes"
 gt config agent tiers set reasoning --agent claude-reasoning --description "Deep debugging, architecture decisions, tricky algorithms"
@@ -896,9 +896,9 @@ gt.routing.fallback_triggered{from_tier, to_tier}
 
 ---
 
-### Phase 3: LLM Router (Opt-in)
+### Phase 3: Router Agent (Opt-in)
 
-**Goal:** An optional, dedicated LLM evaluates task complexity at dispatch time and selects the appropriate tier. The LLM sees only tier names and descriptions — it classifies the task, not the agents. Go code then handles agent selection (round-robin/priority), exclusion filtering (from AGENT_FAILURE mail), and tier fallback. The router always commits to a decision (no confidence threshold).
+**Goal:** An optional, dedicated router agent evaluates task complexity at dispatch time and selects the appropriate tier. The router agent is any configured agent preset — it sees only tier names and descriptions, classifying the task, not the agents. Go code then handles agent selection (round-robin/priority), exclusion filtering (from AGENT_FAILURE mail), and tier fallback. The router always commits to a decision (no confidence threshold).
 
 #### 3.1 Router Configuration
 
@@ -907,9 +907,8 @@ gt.routing.fallback_triggered{from_tier, to_tier}
 ```go
 type RouterConfig struct {
     Enabled          bool   `json:"enabled"`             // default: false
-    Provider         string `json:"provider"`            // "ollama", "anthropic", etc.
-    Model            string `json:"model"`               // e.g., "qwen2.5-coder:14b"
-    FallbackTier     string `json:"fallback_tier"`       // tier if router LLM fails (default: "medium")
+    Agent            string `json:"agent"`               // agent preset name (e.g., "qwen-local", "claude-haiku")
+    FallbackTier     string `json:"fallback_tier"`       // tier if router agent fails (default: "medium")
     TimeoutMs        int    `json:"timeout_ms"`          // default: 5000
     FailureTTLMinutes int   `json:"failure_ttl_minutes"` // how long AGENT_FAILURE mail stays relevant (default: 30)
 }
@@ -927,7 +926,7 @@ Router *RouterConfig `json:"router,omitempty"`
 ```go
 package routing
 
-// RoutingRequest is the input to the LLM router.
+// RoutingRequest is the input to the router agent.
 // Contains only tier names + descriptions — no agent lists or exclusion info.
 // Agent selection and exclusion are handled by Go code after the router returns.
 type RoutingRequest struct {
@@ -938,7 +937,7 @@ type RoutingRequest struct {
 }
 
 // TierSummary describes a tier for the router's context.
-// Only includes the name and description — the LLM doesn't need to know
+// Only includes the name and description — the router doesn't need to know
 // which agents are in each tier or which are excluded.
 type TierSummary struct {
     Name        string `json:"name"`
@@ -960,21 +959,22 @@ type Router interface {
 }
 ```
 
-#### 3.3 LLM Router Implementation
+#### 3.3 Router Agent Implementation
 
-**File:** `internal/routing/llm_router.go` (new)
+**File:** `internal/routing/agent_router.go` (new)
 
 ```go
-// LLMRouter calls a local or remote LLM to evaluate task complexity.
-type LLMRouter struct {
+// AgentRouter uses a configured agent to evaluate task complexity.
+// The router agent is any agent preset — local (Ollama), remote (Anthropic), or custom.
+type AgentRouter struct {
     config     *config.RouterConfig
-    client     LLMClient
+    agentCfg   *config.RuntimeConfig // resolved from RouterConfig.Agent
     tierConfig *config.AgentTierConfig
 }
 
-func (r *LLMRouter) Route(ctx context.Context, req RoutingRequest) (*RoutingDecision, error) {
+func (r *AgentRouter) Route(ctx context.Context, req RoutingRequest) (*RoutingDecision, error) {
     // 1. Build prompt from template + request (tier names + descriptions only, NO agent lists)
-    // 2. Call LLM with JSON mode / structured output
+    // 2. Invoke the router agent with JSON mode / structured output
     // 3. Parse response into RoutingDecision
     // 4. Validate tier name exists in config
     // 5. Record OTEL metrics (latency, tier chosen)
@@ -982,18 +982,18 @@ func (r *LLMRouter) Route(ctx context.Context, req RoutingRequest) (*RoutingDeci
 }
 ```
 
-**Separation of concerns — LLM vs Go code:**
+**Separation of concerns — router agent vs Go code:**
 
-The LLM router and the Go tier resolution engine have strictly separated responsibilities:
+The router agent and the Go tier resolution engine have strictly separated responsibilities:
 
 | Concern | Who handles it | Why |
 |---------|---------------|-----|
-| Task → tier classification | **LLM router** | Requires understanding task semantics |
+| Task → tier classification | **Router agent** | Requires understanding task semantics |
 | Agent selection within a tier | **Go code** (`ResolveTierToRuntimeConfig`) | Mechanical — priority or round-robin |
-| Agent exclusion (from AGENT_FAILURE mail) | **Go code** (`ExclusionCache`) | Deterministic — no LLM judgment needed |
+| Agent exclusion (from AGENT_FAILURE mail) | **Go code** (`ExclusionCache`) | Deterministic — no router judgment needed |
 | Tier fallback on exhaustion | **Go code** (`UpOneTier`) | Mechanical — follow `TierOrder` |
 
-The LLM sees **tier names and descriptions only** — never individual agent names, never exclusion state. This keeps the LLM prompt simple and focused on the one thing it's good at: understanding what kind of work a task involves.
+The router agent sees **tier names and descriptions only** — never individual agent names, never exclusion state. This keeps the router prompt simple and focused on the one thing it's good at: understanding what kind of work a task involves.
 
 **Router prompt template** (embedded):
 ```
@@ -1019,32 +1019,136 @@ Role: {{.Role}}
 Respond with JSON only: {"tier": "...", "rationale": "one sentence"}
 ```
 
-**Note:** The prompt does NOT include agent lists, exclusion info, or availability status. After the LLM returns a tier name, Go code handles agent selection (round-robin/priority), exclusion filtering, and tier fallback. If the selected tier has no available agents, Go code moves up one tier automatically — the LLM is not consulted again.
+**Note:** The prompt does NOT include agent lists, exclusion info, or availability status. After the router agent returns a tier name, Go code handles agent selection (round-robin/priority), exclusion filtering, and tier fallback. If the selected tier has no available agents, Go code moves up one tier automatically — the router agent is not consulted again.
 
-#### 3.4 LLM Client Abstraction
+#### 3.4 Router Agent Invocation
 
-**File:** `internal/routing/llm_client.go` (new)
+The router does NOT spawn a tmux session or start an interactive agent. It invokes the configured agent in **non-interactive mode** — a single prompt in, structured JSON out, process exits. This is a subprocess call, not a session.
+
+**How agents support non-interactive mode:**
+
+Every agent preset already has a `NonInteractiveConfig` in `internal/config/agents.go` that describes how to invoke it for one-shot execution:
+
+| Agent | Non-interactive invocation | Config |
+|-------|---------------------------|--------|
+| Claude | `claude -p "prompt"` | Native (nil config — `-p` is built-in) |
+| Gemini | `gemini -p "prompt" --output-format json` | `PromptFlag: "-p"`, `OutputFlag: "--output-format json"` |
+| Codex | `codex exec "prompt" --json` | `Subcommand: "exec"`, `OutputFlag: "--json"` |
+| Cursor | `cursor-agent -p "prompt" --output-format json` | `PromptFlag: "-p"`, `OutputFlag: "--output-format json"` |
+| Custom | User-defined command + args | Via `settings/agents.json` |
+
+**The router builds and executes a non-interactive command from the agent preset:**
 
 ```go
-// LLMClient abstracts the LLM provider for the router.
-type LLMClient interface {
-    Complete(ctx context.Context, prompt string) (string, error)
-}
+// BuildRouterCommand constructs the non-interactive command for the router agent.
+// Uses the agent preset's NonInteractiveConfig to determine flags and structure.
+//
+// For Claude (native non-interactive):
+//   claude -p "<routing prompt>" --output-format json
+//
+// For agents with NonInteractiveConfig.Subcommand (e.g., Codex):
+//   codex exec "<routing prompt>" --json
+//
+// For agents with NonInteractiveConfig.PromptFlag (e.g., Gemini):
+//   gemini -p "<routing prompt>" --output-format json
+func BuildRouterCommand(preset *config.AgentPresetInfo, prompt string) *exec.Cmd
+```
 
-// OllamaClient calls a local Ollama instance.
-type OllamaClient struct {
-    baseURL string // default: http://localhost:11434
-    model   string
-}
+**Execution flow:**
 
-// AnthropicClient calls the Anthropic Messages API.
-type AnthropicClient struct {
-    apiKey string
-    model  string
-}
+```go
+func (r *AgentRouter) Route(ctx context.Context, req RoutingRequest) (*RoutingDecision, error) {
+    // 1. Render the routing prompt from template + request
+    prompt := renderPrompt(req)
 
-// NewLLMClient creates the appropriate client based on provider name.
-func NewLLMClient(provider, model string) (LLMClient, error)
+    // 2. Build non-interactive command from agent preset
+    cmd := BuildRouterCommand(r.preset, prompt)
+
+    // 3. Execute with timeout (from RouterConfig.TimeoutMs)
+    ctx, cancel := context.WithTimeout(ctx, r.config.Timeout())
+    defer cancel()
+    cmd = exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
+
+    // 4. Capture stdout, parse JSON response
+    output, err := cmd.Output()
+    if err != nil {
+        return nil, fmt.Errorf("router agent failed: %w", err)
+    }
+
+    // 5. Parse into RoutingDecision, validate tier name
+    var decision RoutingDecision
+    if err := json.Unmarshal(output, &decision); err != nil {
+        return nil, fmt.Errorf("router agent returned invalid JSON: %w", err)
+    }
+    if !r.tierConfig.HasTier(decision.Tier) {
+        return nil, fmt.Errorf("router agent returned unknown tier: %q", decision.Tier)
+    }
+
+    return &decision, nil
+}
+```
+
+**No special agent configuration is needed.** The router uses the same agent preset the user already has configured — it just invokes it differently (non-interactive subprocess instead of interactive tmux session). Any agent that supports non-interactive mode can serve as the router agent.
+
+**Key properties of this approach:**
+- **No persistent process** — the router agent starts, classifies, and exits. No session management, no tmux, no zombie detection needed
+- **Reuses existing infrastructure** — `NonInteractiveConfig` already describes how each agent handles one-shot invocation
+- **Works with any agent** — local Ollama, Claude, Gemini, or a custom script. If it can take a prompt and return JSON, it can route
+- **Subprocess isolation** — the router agent runs in its own process with its own timeout. A hung router doesn't affect the dispatch path beyond the configured timeout
+
+**Using local models for routing via OpenCode:**
+
+The natural choice for a cost-free, low-latency router is a local model. OpenCode is Gas Town's multi-model agent — it supports any provider (including local Ollama) and already has non-interactive mode (`opencode run "prompt" --format json`). The `-m` flag selects the provider/model.
+
+To set up a local-model router agent:
+
+```bash
+# 1. Register a custom agent preset targeting a local model
+gt config agent set router-local \
+  --command opencode \
+  --args '-m ollama/qwen2.5-coder:14b' \
+  --non-interactive-subcommand run \
+  --non-interactive-output-flag '--format json'
+
+# 2. Set it as the router agent
+gt config router set router-local
+```
+
+**Note:** `gt config agent set` does not currently support `--non-interactive-*` flags. These must be added as part of this work (see §3.9 below), or the user can edit `settings/agents.json` directly.
+
+This creates an agent preset that invokes `opencode -m ollama/qwen2.5-coder:14b run "<prompt>" --format json` — a local model classification with no API costs and sub-second latency.
+
+The existing OpenCode agent template (`templates/agents/opencode.json.tmpl`) already captures this pattern:
+
+```json
+{
+  "name": "opencode-{{.Model}}",
+  "command": "opencode",
+  "args": ["-m", "{{.Provider}}/{{.Model}}"],
+  "non_interactive": {
+    "subcommand": "run",
+    "output_flag": "--format json"
+  }
+}
+```
+
+**Any multi-model agent that supports non-interactive mode works the same way.** The router doesn't care what's behind the agent — Ollama, vLLM, a remote API, a shell script that calls `curl`. It invokes the agent's non-interactive command, reads JSON from stdout, and moves on.
+
+**What about agents without `NonInteractiveConfig`?**
+
+Agents that lack non-interactive support (e.g., Pi, Amp) cannot be used as router agents. `gt config router set` validates this at configuration time:
+
+```go
+func validateRouterAgent(agentName string) error {
+    preset := config.GetAgentPresetByName(agentName)
+    if preset == nil {
+        return fmt.Errorf("unknown agent: %q", agentName)
+    }
+    if !preset.SupportsNonInteractive() {
+        return fmt.Errorf("agent %q does not support non-interactive mode (required for routing)", agentName)
+    }
+    return nil
+}
 ```
 
 #### 3.5 Integration with Dispatch
@@ -1059,7 +1163,7 @@ if routerConfig := loadRouterConfig(townRoot); routerConfig != nil && routerConf
     if opts.Agent == "" && opts.AgentTier == "" { // don't route if explicit override
         tierConfig := config.LoadAgentTierConfig(townRoot)
 
-        // Step 1: LLM picks a TIER (sees only tier names + descriptions)
+        // Step 1: Router agent picks a TIER (sees only tier names + descriptions)
         decision, err := router.Route(ctx, routing.RoutingRequest{
             TaskTitle:       bead.Title,
             TaskDescription: bead.Body,
@@ -1096,14 +1200,15 @@ if routerConfig := loadRouterConfig(townRoot); routerConfig != nil && routerConf
 **Critical:** Router is bypassed when `--agent` or `--tier` is specified. Explicit overrides always win.
 
 **The two-step flow:**
-1. **LLM router** → "this task needs the `large` tier" (semantic understanding)
+1. **Router agent** → "this task needs the `large` tier" (semantic understanding)
 2. **Go code** → "the `large` tier has `[claude-opus, gemini-pro]`, `claude-opus` is excluded, using `gemini-pro`" (mechanical selection)
 
 #### 3.6 CLI Commands
 
 ```bash
-# Enable the router
-gt config router enable --provider ollama --model qwen2.5-coder:14b
+# Set the router agent and enable routing
+gt config router set claude-haiku
+gt config router set qwen-local
 
 # Disable the router
 gt config router disable
@@ -1114,11 +1219,12 @@ gt config router show
 # Test the router against a bead without dispatching (dry-run)
 gt config router test <bead-id>
 # Output:
+#   Router agent: qwen-local (non-interactive: qwen-local -p "<prompt>" --output-format json)
 #   Router decision: tier=large, rationale='Cross-cutting refactor across 3 packages'
 #   Agent resolution: claude-opus (✓ available, priority selection)
 #   Excluded agents: gemini-pro (credit_exhaustion, 12min ago)
 
-# Set fallback tier (used when router LLM itself fails)
+# Set fallback tier (used when router agent fails)
 gt config router set-fallback medium
 
 # Set timeout
@@ -1134,26 +1240,43 @@ gt config router set-failure-ttl 45
 
 | Metric | Type | Labels |
 |--------|------|--------|
-| `gt.router.calls` | Counter | `provider`, `model`, `outcome` (success/fallback/error) |
-| `gt.router.latency_ms` | Histogram | `provider`, `model` |
+| `gt.router.calls` | Counter | `agent`, `outcome` (success/fallback/error) |
+| `gt.router.latency_ms` | Histogram | `agent` |
 | `gt.router.tier_selected` | Counter | `tier`, `role` |
 | `gt.routing.agent_failure_reported` | Counter | `agent`, `reason` |
 | `gt.routing.routing_failed` | Counter | `tier`, `excluded_count` |
 | `gt.routing.fallback_triggered` | Counter | `from_tier`, `to_tier` |
 
-#### 3.8 Files Changed (Phase 3)
+#### 3.8 `gt config agent set` — Non-Interactive Flags
+
+`gt config agent set` currently supports `--command`, `--args`, and `--env` but has no flags for `NonInteractiveConfig`. To support router agent registration from the CLI (without editing `settings/agents.json` by hand), add:
+
+```bash
+gt config agent set <name> \
+  --command <cmd> \
+  --args '<args>' \
+  --non-interactive-subcommand <sub>  # e.g., "run" for opencode, "exec" for codex
+  --non-interactive-prompt-flag <flag> # e.g., "-p" for gemini/claude
+  --non-interactive-output-flag <flag> # e.g., "--format json", "--output-format json"
+```
+
+**File:** `internal/cmd/config.go` — add three new `StringVar` flags to the `agent set` subcommand, write them into `NonInteractiveConfig` in `settings/agents.json`.
+
+At least one of `--non-interactive-subcommand` or `--non-interactive-prompt-flag` is required for the agent to support non-interactive mode. If neither is set and the agent is not a built-in preset with native non-interactive support (like Claude), the agent cannot be used as a router.
+
+#### 3.9 Files Changed (Phase 3)
 
 | File | Change |
 |------|--------|
 | `internal/routing/router.go` | **New** — `Router` interface, request/response types, `TierSummary` |
-| `internal/routing/llm_router.go` | **New** — LLM-based router implementation |
-| `internal/routing/llm_client.go` | **New** — `LLMClient` interface, Ollama + Anthropic implementations |
+| `internal/routing/agent_router.go` | **New** — `AgentRouter` implementation, `BuildRouterCommand()`, non-interactive invocation |
 | `internal/routing/prompt.go` | **New** — router prompt template |
-| `internal/routing/router_test.go` | **New** — unit tests with mock LLM client |
+| `internal/routing/router_test.go` | **New** — unit tests with mock router agent |
 | `internal/config/types.go` | **Modified** — add `RouterConfig` to `TownSettings` |
+| `internal/config/agents.go` | **Modified** — add `SupportsNonInteractive()` method to `AgentPresetInfo` |
+| `internal/cmd/config.go` | **Modified** — add `--non-interactive-*` flags to `agent set`, register `router` subcommand |
 | `internal/cmd/polecat_spawn.go` | **Modified** — integrate router into dispatch flow |
-| `internal/cmd/config_router.go` | **New** — `gt config router` CLI commands |
-| `internal/cmd/config.go` | **Modified** — register `router` subcommand |
+| `internal/cmd/config_router.go` | **New** — `gt config router` CLI commands (including `set` validation) |
 
 ---
 
@@ -1168,7 +1291,7 @@ gt config router set-failure-ttl 45
     │  4. Town settings: role_agents / crew_agents │  Town-wide config
     │     (also written by gt config cost-tier)    │
     ├─────────────────────────────────────────────┤
-    │  5. LLM Router decision (if enabled)        │  Dynamic (Phase 3)
+    │  5. Router agent decision (if enabled)       │  Dynamic (Phase 3)
     ├─────────────────────────────────────────────┤
     │  6. agent_tiers.role_defaults               │  Tier-based default (Phase 1)
     ├─────────────────────────────────────────────┤
@@ -1199,7 +1322,7 @@ gt config router set-failure-ttl 45
                     └───────────┬─────────────┘
                                 │
               ┌─────────────────▼──────────────────┐
-              │  LLM Router (opt-in, Phase 3)       │
+              │  Router Agent (opt-in, Phase 3)      │
               │  Input: bead, role, tier desc.       │
               │  Output: tier name                   │
               │  (does NOT see agents or exclusions) │
@@ -1267,7 +1390,7 @@ gt config router set-failure-ttl 45
 - **Agent failure classification:** heuristic matching for credit/rate-limit/network/crash patterns
 - **Precedence:** verify each layer overrides the one below it
 - **Config loading:** valid/invalid JSON, missing fields, defaults applied
-- **Router:** mock LLM responses, fallback on timeout, invalid tier name handling
+- **Router:** mock agent responses, fallback on timeout, invalid tier name handling
 
 ### Integration Tests
 - `gt sling --tier large` spawns polecat with correct agent
