@@ -107,6 +107,37 @@ func runPatrolReport(cmd *cobra.Command, args []string) error {
 	// Print the step audit for visibility
 	fmt.Println(stepAudit)
 
+	// ENFORCEMENT: Audit step execution before closing patrol.
+	// Count how many step beads were properly closed (by the agent) vs still open
+	// (will be force-closed below). This makes step-skipping visible.
+	children, listErr := b.List(beads.ListOptions{
+		Parent: patrolID,
+		Status: "all",
+	})
+	if listErr == nil && len(children) > 0 {
+		closedByAgent := 0
+		var skippedSteps []string
+		for _, child := range children {
+			if child.Status == "closed" {
+				closedByAgent++
+			} else {
+				skippedSteps = append(skippedSteps, fmt.Sprintf("  %s [%s]: %s", child.ID, child.Status, child.Title))
+			}
+		}
+		total := len(children)
+		if len(skippedSteps) > 0 {
+			fmt.Printf("%s Step coverage: %d/%d (%d skipped)\n",
+				style.Warning.Render("⚠"), closedByAgent, total, len(skippedSteps))
+			for _, s := range skippedSteps {
+				fmt.Printf("  %s\n", s)
+			}
+			fmt.Println()
+		} else {
+			fmt.Printf("%s Step coverage: %d/%d (all executed)\n",
+				style.Success.Render("✓"), closedByAgent, total)
+		}
+	}
+
 	// Close all descendant wisps first (recursive), then the patrol root.
 	// Without this, every patrol cycle leaks ~10 orphan wisps into the DB.
 	// If descendants can't be closed, abort so patrol retries next cycle (gt-7lx3).
