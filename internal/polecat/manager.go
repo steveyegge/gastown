@@ -769,6 +769,12 @@ func (m *Manager) addWithOptionsLocked(name string, opts AddOptions, polecatDir 
 		style.PrintWarning("could not update local git excludes: %v", err)
 	}
 
+	// Install pre-push hook to block pushes to main when rig has a different default_branch.
+	// Polecats should push to the configured default branch (e.g., release), never main.
+	if rigCfg, cfgErr := rig.LoadRigConfig(m.rig.Path); cfgErr == nil && rigCfg.DefaultBranch != "" && rigCfg.DefaultBranch != "main" {
+		installMainBlockHook(clonePath, rigCfg.DefaultBranch)
+	}
+
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
 	polecatSettingsDir := config.RoleSettingsDir("polecat", m.rig.Path)
@@ -2368,4 +2374,41 @@ func assessStaleness(info *StalenessInfo, threshold int) (bool, string) {
 	// No session but has agent bead without special state = clean up
 	// (The session is the source of truth for liveness)
 	return true, "no active session"
+}
+
+// installMainBlockHook installs a pre-push git hook in a polecat worktree
+// that blocks pushes to refs/heads/main. This prevents polecats from
+// accidentally pushing to main when the rig's default_branch is different.
+func installMainBlockHook(clonePath, defaultBranch string) {
+	// For worktrees, .git is a file containing "gitdir: <path>".
+	// For regular clones, .git is a directory. Resolve to actual git dir.
+	dotGit := filepath.Join(clonePath, ".git")
+	gitDir := dotGit
+	if info, err := os.Stat(dotGit); err == nil && !info.IsDir() {
+		// Worktree: read the gitdir pointer
+		content, readErr := os.ReadFile(dotGit)
+		if readErr != nil {
+			return
+		}
+		ref := strings.TrimSpace(strings.TrimPrefix(string(content), "gitdir: "))
+		if !filepath.IsAbs(ref) {
+			ref = filepath.Join(clonePath, ref)
+		}
+		gitDir = ref
+	}
+
+	hooksDir := filepath.Join(gitDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		return
+	}
+	hookPath := filepath.Join(hooksDir, "pre-push")
+	hook := fmt.Sprintf(`#!/bin/bash
+while read local_ref local_sha remote_ref remote_sha; do
+  if [[ "$remote_ref" == *refs/heads/main* ]]; then
+    echo "BLOCKED: agents cannot push to main. Push to %s instead."
+    exit 1
+  fi
+done
+`, defaultBranch)
+	_ = os.WriteFile(hookPath, []byte(hook), 0755)
 }
