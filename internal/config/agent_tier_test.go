@@ -308,6 +308,47 @@ func TestAgentTierConfigValidate(t *testing.T) {
 			t.Error("Validate() should fail on duplicate tier names in TierOrder")
 		}
 	})
+
+	t.Run("highest tier with Fallback=true fails", func(t *testing.T) {
+		t.Parallel()
+		cfg := &AgentTierConfig{
+			Tiers: map[string]*AgentTier{
+				"low":  {Description: "Low", Agents: []string{"x"}, Fallback: true},
+				"high": {Description: "High", Agents: []string{"y"}, Fallback: true}, // wrong: highest must be false
+			},
+			TierOrder: []string{"low", "high"},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("Validate() should fail when highest tier has Fallback=true")
+		}
+	})
+
+	t.Run("highest tier with Fallback=false passes", func(t *testing.T) {
+		t.Parallel()
+		cfg := &AgentTierConfig{
+			Tiers: map[string]*AgentTier{
+				"low":  {Description: "Low", Agents: []string{"x"}, Fallback: true},
+				"high": {Description: "High", Agents: []string{"y"}, Fallback: false},
+			},
+			TierOrder: []string{"low", "high"},
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Validate() should pass when highest tier has Fallback=false: %v", err)
+		}
+	})
+
+	t.Run("single tier with Fallback=true fails", func(t *testing.T) {
+		t.Parallel()
+		cfg := &AgentTierConfig{
+			Tiers: map[string]*AgentTier{
+				"only": {Description: "Only", Agents: []string{"x"}, Fallback: true},
+			},
+			TierOrder: []string{"only"},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("Validate() should fail when single (highest) tier has Fallback=true")
+		}
+	})
 }
 
 // --- ResolveTierToRuntimeConfig tests ---

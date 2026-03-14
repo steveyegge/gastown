@@ -122,6 +122,7 @@ func (c *AgentTierConfig) BuildTierSummaries() []TierSummary {
 // It verifies:
 //   - Every name in TierOrder references a key in Tiers
 //   - No duplicate names in TierOrder
+//   - The highest tier (last in TierOrder) has Fallback=false
 //   - Every role in RoleDefaults references a tier in Tiers
 //   - Each tier's Selection value is "priority" or "round-robin" (or empty, meaning priority)
 //
@@ -155,6 +156,16 @@ func (c *AgentTierConfig) Validate() error {
 		sel := tier.Selection
 		if sel != "" && sel != "priority" && sel != "round-robin" {
 			return fmt.Errorf("tier %q: invalid selection %q (must be \"priority\" or \"round-robin\")", name, sel)
+		}
+	}
+
+	// Validate that the highest tier (last in TierOrder) has Fallback=false.
+	// A highest tier with Fallback=true is a misconfiguration: UpOneTier returns ""
+	// for the highest tier, so the Fallback=true promise of escalation can never be fulfilled.
+	if len(c.TierOrder) > 0 {
+		highestName := c.TierOrder[len(c.TierOrder)-1]
+		if highest, ok := c.Tiers[highestName]; ok && highest.Fallback {
+			return fmt.Errorf("tier %q is the highest tier in tier_order but has Fallback=true; the highest tier must have Fallback=false", highestName)
 		}
 	}
 
