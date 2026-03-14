@@ -46,6 +46,28 @@ func writeFakeTestBD(t *testing.T, dir, descState, dbState, hookBead, updatedAt 
 	return path
 }
 
+// writeFakeBDWithHookBead creates a shell script in dir named "bd" that returns
+// different JSON based on the bead ID: the agent bead in one state, and the hook
+// bead (work bead) in a separate state. Used to test cases where the agent and hook
+// beads have independent lifecycles (e.g., agent done/nuked while hook_bead open).
+func writeFakeBDWithHookBead(t *testing.T, dir, agentState, hookBeadID, hookBeadStatus, updatedAt string) string {
+	t.Helper()
+	agentJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent"],"description":"agent_state: %s","hook_bead":"%s","agent_state":"%s","updated_at":"%s"}]`,
+		agentState, hookBeadID, agentState, updatedAt)
+	hookJSON := fmt.Sprintf(`[{"id":"%s","status":"%s"}]`, hookBeadID, hookBeadStatus)
+	script := fmt.Sprintf("#!/bin/sh\n"+
+		"case \"$2\" in\n"+
+		"  gt-myr-polecat-mycat) echo '%s';;\n"+
+		"  %s) echo '%s';;\n"+
+		"  *) echo '[]'; exit 1;;\n"+
+		"esac\n", agentJSON, hookBeadID, hookJSON)
+	bdPath := filepath.Join(dir, "bd")
+	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
+		t.Fatalf("writing fake bd: %v", err)
+	}
+	return bdPath
+}
+
 // TestCheckPolecatHealth_SkipsSpawning verifies that checkPolecatHealth does NOT
 // attempt to restart a polecat in agent_state=spawning when recently updated.
 // This is the regression test for the double-spawn bug (issue #1752): the daemon
@@ -197,22 +219,7 @@ func TestCheckPolecatHealth_SkipsClosedHookBead(t *testing.T) {
 	binDir := t.TempDir()
 	writeFakeTestTmux(t, binDir)
 	recentTime := time.Now().UTC().Format(time.RFC3339)
-
-	// Create a bd script that returns different JSON based on the bead ID:
-	// - Agent bead: working state with hook_bead set
-	// - Hook bead: status=closed (work completed normally)
-	agentJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent"],"description":"agent_state: working","hook_bead":"fe-xyz","agent_state":"working","updated_at":"%s"}]`, recentTime)
-	hookJSON := `[{"id":"fe-xyz","status":"closed"}]`
-	script := fmt.Sprintf("#!/bin/sh\n"+
-		"case \"$2\" in\n"+
-		"  gt-myr-polecat-mycat) echo '%s';;\n"+
-		"  fe-xyz) echo '%s';;\n"+
-		"  *) echo '[]'; exit 1;;\n"+
-		"esac\n", agentJSON, hookJSON)
-	bdPath := filepath.Join(binDir, "bd")
-	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
-		t.Fatalf("writing fake bd: %v", err)
-	}
+	bdPath := writeFakeBDWithHookBead(t, binDir, "working", "fe-xyz", "closed", recentTime)
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
@@ -248,22 +255,7 @@ func TestCheckPolecatHealth_SkipsNukedPolecat(t *testing.T) {
 	binDir := t.TempDir()
 	writeFakeTestTmux(t, binDir)
 	recentTime := time.Now().UTC().Format(time.RFC3339)
-
-	// Create a bd script that returns different JSON based on the bead ID:
-	// - Agent bead: nuked state with hook_bead still set
-	// - Hook bead: status=open (NOT closed — nuke doesn't close work beads)
-	agentJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent"],"description":"agent_state: nuked","hook_bead":"gt-xyz","agent_state":"nuked","updated_at":"%s"}]`, recentTime)
-	hookJSON := `[{"id":"gt-xyz","status":"open"}]`
-	script := fmt.Sprintf("#!/bin/sh\n"+
-		"case \"$2\" in\n"+
-		"  gt-myr-polecat-mycat) echo '%s';;\n"+
-		"  gt-xyz) echo '%s';;\n"+
-		"  *) echo '[]'; exit 1;;\n"+
-		"esac\n", agentJSON, hookJSON)
-	bdPath := filepath.Join(binDir, "bd")
-	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
-		t.Fatalf("writing fake bd: %v", err)
-	}
+	bdPath := writeFakeBDWithHookBead(t, binDir, "nuked", "gt-xyz", "open", recentTime)
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
@@ -296,22 +288,7 @@ func TestCheckPolecatHealth_SkipsDonePolecat(t *testing.T) {
 	binDir := t.TempDir()
 	writeFakeTestTmux(t, binDir)
 	recentTime := time.Now().UTC().Format(time.RFC3339)
-
-	// Create a bd script that returns different JSON based on the bead ID:
-	// - Agent bead: done state with hook_bead still set (race window)
-	// - Hook bead: status=open (NOT closed — work bead not yet closed)
-	agentJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent"],"description":"agent_state: done","hook_bead":"gt-xyz","agent_state":"done","updated_at":"%s"}]`, recentTime)
-	hookJSON := `[{"id":"gt-xyz","status":"open"}]`
-	script := fmt.Sprintf("#!/bin/sh\n"+
-		"case \"$2\" in\n"+
-		"  gt-myr-polecat-mycat) echo '%s';;\n"+
-		"  gt-xyz) echo '%s';;\n"+
-		"  *) echo '[]'; exit 1;;\n"+
-		"esac\n", agentJSON, hookJSON)
-	bdPath := filepath.Join(binDir, "bd")
-	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
-		t.Fatalf("writing fake bd: %v", err)
-	}
+	bdPath := writeFakeBDWithHookBead(t, binDir, "done", "gt-xyz", "open", recentTime)
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
