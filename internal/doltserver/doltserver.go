@@ -1899,7 +1899,9 @@ func verifyDatabasesWithRetry(townRoot string, maxAttempts int) (served, missing
 		}
 
 		// Compare against filesystem databases.
-		fsDatabases, fsErr := ListDatabases(townRoot)
+		// Use listDatabasesLocal (direct filesystem scan) instead of ListDatabases
+		// which returns cached/empty results and causes false CRITICAL escalations.
+		fsDatabases, fsErr := listDatabasesLocal(config)
 		if fsErr != nil {
 			return served, nil, fmt.Errorf("listing filesystem databases: %w", fsErr)
 		}
