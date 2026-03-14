@@ -255,5 +255,7 @@ func (c *AgentTierConfig) ResolveTierToRuntimeConfig(tierName string, excludedAg
 		return nil, fmt.Errorf("agent preset %q not found", selected)
 	}
 
-	return RuntimeConfigFromPreset(preset.Name), nil
+	rc := RuntimeConfigFromPreset(preset.Name)
+	rc.ResolvedAgent = selected
+	return rc, nil
 }

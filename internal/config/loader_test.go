@@ -5137,3 +5137,370 @@ func TestBuildStartupCommandWithAgentOverride_ExecWrapper(t *testing.T) {
 		t.Errorf("expected wrapper immediately before claude command, got: %q", cmd)
 	}
 }
+
+// --- AgentTiers integration tests: tier resolution in config loader ---
+
+// buildLoaderTestTierConfig builds an AgentTierConfig using test agents registered
+// via registerTestAgents. Maps "witness" → "low" (test-agent-a), "polecat" → "mid"
+// (test-agent-c).
+func buildLoaderTestTierConfig() *AgentTierConfig {
+	return &AgentTierConfig{
+		Tiers: map[string]*AgentTier{
+			"low": {
+				Description: "Low capability",
+				Agents:      []string{"test-agent-a"},
+				Selection:   "priority",
+				Fallback:    true,
+			},
+			"mid": {
+				Description: "Mid capability",
+				Agents:      []string{"test-agent-c"},
+				Selection:   "priority",
+				Fallback:    true,
+			},
+		},
+		TierOrder: []string{"low", "mid"},
+		RoleDefaults: map[string]string{
+			"witness": "low",
+			"polecat": "mid",
+		},
+	}
+}
+
+// saveTownSettingsWithTiers creates a town settings file with the given AgentTierConfig.
+func saveTownSettingsWithTiers(t *testing.T, townRoot string, tierCfg *AgentTierConfig) {
+	t.Helper()
+	settings := NewTownSettings()
+	settings.AgentTiers = tierCfg
+	if err := SaveTownSettings(TownSettingsPath(townRoot), settings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+}
+
+// --- Precedence tests ---
+
+// TestTierResolution_RigRoleAgentsWinsOverTier verifies that rig role_agents takes
+// priority over agent_tiers.role_defaults.
+func TestTierResolution_RigRoleAgentsWinsOverTier(t *testing.T) {
+	registerTestAgents(t)
+	townRoot := t.TempDir()
+	rigPath := t.TempDir()
+
+	// Tier maps "witness" → "low" (test-agent-a)
+	saveTownSettingsWithTiers(t, townRoot, buildLoaderTestTierConfig())
+
+	// Rig role_agents maps "witness" → "test-agent-b" (overrides tier)
+	rigSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: 1,
+		RoleAgents: map[string]string{
+			"witness": "test-agent-b",
+		},
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	rc := ResolveRoleAgentConfig("witness", townRoot, rigPath)
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for witness")
+	}
+	// Rig role_agents wins — should get test-agent-b (claude with --dangerously-skip-permissions),
+	// NOT test-agent-a from tier.
+	if rc.Command != "claude" {
+		t.Errorf("expected claude command from test-agent-b, got %q", rc.Command)
+	}
+	// The resolved agent should be test-agent-b, not test-agent-a.
+	if rc.ResolvedAgent == "test-agent-a" {
+		t.Error("rig role_agents should override tier: got tier agent test-agent-a instead of rig agent test-agent-b")
+	}
+}
+
+// TestTierResolution_TownRoleAgentsWinsOverTier verifies that town role_agents takes
+// priority over agent_tiers.role_defaults.
+func TestTierResolution_TownRoleAgentsWinsOverTier(t *testing.T) {
+	registerTestAgents(t)
+	townRoot := t.TempDir()
+
+	// Set up tier that maps "witness" → "low" (test-agent-a)
+	tierCfg := buildLoaderTestTierConfig()
+
+	// Town role_agents maps "witness" → "test-agent-b" (overrides tier)
+	settings := NewTownSettings()
+	settings.AgentTiers = tierCfg
+	settings.RoleAgents = map[string]string{
+		"witness": "test-agent-b",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), settings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rc := ResolveRoleAgentConfig("witness", townRoot, "")
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for witness")
+	}
+	// Town role_agents wins — resolved agent should be test-agent-b, not test-agent-a from tier.
+	if rc.ResolvedAgent == "test-agent-a" {
+		t.Error("town role_agents should override tier: got tier agent test-agent-a instead of town agent test-agent-b")
+	}
+}
+
+// TestTierResolution_TierWinsOverDefaultAgent verifies that agent_tiers.role_defaults
+// wins over the final default_agent fallback when rig/town role_agents has no entry.
+func TestTierResolution_TierWinsOverDefaultAgent(t *testing.T) {
+	registerTestAgents(t)
+	townRoot := t.TempDir()
+
+	// Tier maps "witness" → "low" (test-agent-a). No rig/town role_agents.
+	saveTownSettingsWithTiers(t, townRoot, buildLoaderTestTierConfig())
+
+	rc := ResolveRoleAgentConfig("witness", townRoot, "")
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for witness")
+	}
+	// Tier should apply — test-agent-a uses "claude" command with --dangerously-skip-permissions.
+	// The default agent would be plain claude without that arg.
+	// We verify the ResolvedAgent was set to the tier's preset name.
+	if rc.ResolvedAgent != "test-agent-a" {
+		t.Errorf("expected tier to apply (ResolvedAgent=test-agent-a), got ResolvedAgent=%q Command=%q", rc.ResolvedAgent, rc.Command)
+	}
+}
+
+// TestTierResolution_DefaultAgentFallbackWhenNoTier verifies that when no
+// agent_tiers are configured, the resolution falls back to the default claude agent.
+func TestTierResolution_DefaultAgentFallbackWhenNoTier(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	// No agent_tiers, no role_agents configured.
+	settings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), settings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rc := ResolveRoleAgentConfig("witness", townRoot, "")
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for witness")
+	}
+	// Should get default claude.
+	if !isClaudeCommand(rc.Command) {
+		t.Errorf("expected claude as default fallback, got %q", rc.Command)
+	}
+}
+
+// --- Coexistence tests ---
+
+// TestTierResolution_CostTierWinsForManagedRoles verifies that when a cost tier is
+// applied (via RoleAgents in TownSettings) AND agent_tiers is configured,
+// the cost tier's RoleAgents entry wins for managed roles.
+func TestTierResolution_CostTierWinsForManagedRoles(t *testing.T) {
+	registerTestAgents(t)
+	townRoot := t.TempDir()
+
+	// Apply economy cost tier — sets town.RoleAgents["witness"] = "claude-sonnet"
+	settings := NewTownSettings()
+	if err := ApplyCostTier(settings, TierEconomy); err != nil {
+		t.Fatalf("ApplyCostTier: %v", err)
+	}
+	// Also configure agent_tiers mapping witness → "low" (test-agent-a)
+	settings.AgentTiers = buildLoaderTestTierConfig()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), settings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rc := ResolveRoleAgentConfig("witness", townRoot, "")
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for witness")
+	}
+	// Cost tier's RoleAgents entry wins over agent_tiers for "witness".
+	// Economy maps witness → "claude-sonnet" (claude with --model sonnet).
+	foundSonnet := false
+	for i, arg := range rc.Args {
+		if arg == "--model" && i+1 < len(rc.Args) && rc.Args[i+1] == "sonnet" {
+			foundSonnet = true
+			break
+		}
+	}
+	if !foundSonnet {
+		t.Errorf("cost tier should win for managed role witness; Args=%v missing --model sonnet", rc.Args)
+	}
+}
+
+// TestTierResolution_TierAppliesForRolesNotInCostTier verifies that agent_tiers
+// applies for roles that are NOT covered by the active cost tier's RoleAgents.
+func TestTierResolution_TierAppliesForRolesNotInCostTier(t *testing.T) {
+	registerTestAgents(t)
+	townRoot := t.TempDir()
+
+	// Economy cost tier does NOT set role_agents for "polecat".
+	settings := NewTownSettings()
+	if err := ApplyCostTier(settings, TierEconomy); err != nil {
+		t.Fatalf("ApplyCostTier: %v", err)
+	}
+	// Agent tiers map "polecat" → "mid" (test-agent-c).
+	settings.AgentTiers = buildLoaderTestTierConfig()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), settings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rc := ResolveRoleAgentConfig("polecat", townRoot, "")
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for polecat")
+	}
+	// Polecat is not in economy's RoleAgents, so tier should apply.
+	if rc.ResolvedAgent != "test-agent-c" {
+		t.Errorf("tier should apply for polecat (not in economy cost tier); ResolvedAgent=%q", rc.ResolvedAgent)
+	}
+}
+
+// TestTierResolution_NoCostTierTierAppliesToAllMappedRoles verifies that when no
+// cost tier is active and agent_tiers is configured, tier defaults apply for all
+// roles with RoleDefaults mappings.
+func TestTierResolution_NoCostTierTierAppliesToAllMappedRoles(t *testing.T) {
+	registerTestAgents(t)
+	townRoot := t.TempDir()
+
+	// Only agent_tiers configured, no cost tier, no role_agents.
+	saveTownSettingsWithTiers(t, townRoot, buildLoaderTestTierConfig())
+
+	for role, wantAgent := range map[string]string{
+		"witness": "test-agent-a",
+		"polecat": "test-agent-c",
+	} {
+		role, wantAgent := role, wantAgent
+		t.Run(role, func(t *testing.T) {
+			rc := ResolveRoleAgentConfig(role, townRoot, "")
+			if rc == nil {
+				t.Fatalf("expected RuntimeConfig for %s", role)
+			}
+			if rc.ResolvedAgent != wantAgent {
+				t.Errorf("role %s: expected tier agent %s, got ResolvedAgent=%q", role, wantAgent, rc.ResolvedAgent)
+			}
+		})
+	}
+}
+
+// TestTierResolution_NoCostTierNoTierDefaultFallback verifies that without a cost
+// tier and without agent_tiers, resolution falls back to the default agent.
+func TestTierResolution_NoCostTierNoTierDefaultFallback(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	// No cost tier, no agent_tiers — minimal settings.
+	settings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), settings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rc := ResolveRoleAgentConfig("polecat", townRoot, "")
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for polecat")
+	}
+	if !isClaudeCommand(rc.Command) {
+		t.Errorf("expected claude as final fallback, got %q", rc.Command)
+	}
+}
+
+// --- Edge case tests ---
+
+// TestTierResolution_NilAgentTiersSkipsResolution verifies that when AgentTiers is
+// nil in TownSettings, tier resolution is skipped entirely and falls through to
+// the default agent.
+func TestTierResolution_NilAgentTiersSkipsResolution(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	settings := NewTownSettings()
+	settings.AgentTiers = nil
+	if err := SaveTownSettings(TownSettingsPath(townRoot), settings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rc := ResolveRoleAgentConfig("witness", townRoot, "")
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for witness")
+	}
+	// With nil AgentTiers, falls through to default claude.
+	if !isClaudeCommand(rc.Command) {
+		t.Errorf("nil AgentTiers should skip tier resolution, expected claude, got %q", rc.Command)
+	}
+}
+
+// TestTierResolution_RoleNotInRoleDefaultsFallsThrough verifies that when AgentTiers
+// is present but the role has no RoleDefaults entry, tier resolution is skipped
+// and falls through to the default agent.
+func TestTierResolution_RoleNotInRoleDefaultsFallsThrough(t *testing.T) {
+	registerTestAgents(t)
+	townRoot := t.TempDir()
+
+	// Tier config only maps "witness" and "polecat". "mayor" is not mapped.
+	saveTownSettingsWithTiers(t, townRoot, buildLoaderTestTierConfig())
+
+	rc := ResolveRoleAgentConfig("mayor", townRoot, "")
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for mayor")
+	}
+	// "mayor" has no tier mapping → falls through to default claude.
+	if !isClaudeCommand(rc.Command) {
+		t.Errorf("role not in RoleDefaults should fall through to default, got %q", rc.Command)
+	}
+}
+
+// TestTierResolution_UnknownPresetFallsThrough verifies that when the tier's agent
+// preset name is not registered, ResolveTierToRuntimeConfig returns an error and
+// the loader falls through to the default agent.
+func TestTierResolution_UnknownPresetFallsThrough(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	// Tier references an unregistered preset name.
+	tierCfg := &AgentTierConfig{
+		Tiers: map[string]*AgentTier{
+			"low": {
+				Description: "Low tier",
+				Agents:      []string{"nonexistent-preset-xyz"},
+				Selection:   "priority",
+				Fallback:    false,
+			},
+		},
+		TierOrder: []string{"low"},
+		RoleDefaults: map[string]string{
+			"witness": "low",
+		},
+	}
+	saveTownSettingsWithTiers(t, townRoot, tierCfg)
+
+	rc := ResolveRoleAgentConfig("witness", townRoot, "")
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for witness (fallthrough to default)")
+	}
+	// Unknown preset causes ResolveTierToRuntimeConfig to fail →
+	// falls through to resolveAgentConfigInternal → default claude.
+	if !isClaudeCommand(rc.Command) {
+		t.Errorf("unknown preset should fall through to default claude, got %q", rc.Command)
+	}
+}
+
+// TestTierResolution_EmptyAgentTiersSkipsResolution verifies that an AgentTierConfig
+// with no tiers defined causes tier resolution to be skipped (no tier to resolve to).
+func TestTierResolution_EmptyAgentTiersSkipsResolution(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	// AgentTiers is present but has empty Tiers map and no RoleDefaults.
+	tierCfg := &AgentTierConfig{
+		Tiers:        map[string]*AgentTier{},
+		TierOrder:    []string{},
+		RoleDefaults: map[string]string{},
+	}
+	saveTownSettingsWithTiers(t, townRoot, tierCfg)
+
+	rc := ResolveRoleAgentConfig("witness", townRoot, "")
+	if rc == nil {
+		t.Fatal("expected RuntimeConfig for witness")
+	}
+	// Empty tiers → no role mapping → falls through to default claude.
+	if !isClaudeCommand(rc.Command) {
+		t.Errorf("empty AgentTiers should fall through to default claude, got %q", rc.Command)
+	}
+}
