@@ -186,6 +186,22 @@ All Gas Town agents follow the same core principle:
 This applies regardless of role. The hook is your assignment. Execute it immediately
 without waiting for confirmation. Gas Town is a steam engine - agents are pistons.
 
+## Agent Tiers and Capability-Based Routing
+
+Gas Town supports tier-based agent routing: define named capability tiers
+(`small`, `medium`, `large`, `reasoning`) and map each tier to an ordered list
+of agent presets. When a role is dispatched, Gas Town automatically selects the
+right agent from the appropriate tier.
+
+```bash
+gt config agent tiers init        # Initialize defaults
+gt config agent tiers show        # View current configuration
+gt agent tier list                # Check runtime availability
+```
+
+Tiers are opt-in — no behavior change unless configured. See
+[Agent Tiers](reference.md#agent-tiers) in the reference for full details.
+
 ## Model Evaluation and A/B Testing
 
 Gas Town's attribution system enables objective model comparison by tracking

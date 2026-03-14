@@ -481,6 +481,77 @@ For OpenCode autonomous mode, set env var in your shell profile:
 export OPENCODE_PERMISSION='{"*":"allow"}'
 ```
 
+#### Agent Tiers
+
+Agent tiers group agents by capability level and route work to the right agent
+automatically. Tiers are opt-in — no behavior change unless configured.
+
+```bash
+# Tier configuration
+gt config agent tiers init                           # Initialize default tier config
+gt config agent tiers show                           # Display current tier configuration
+gt config agent tiers set <tier> [flags]             # Create or update a tier
+gt config agent tiers remove <tier>                  # Remove a tier
+gt config agent tiers set-role <role> <tier>         # Map a role to a tier
+gt config agent tiers add-agent <tier> <agent>       # Add agent to a tier
+gt config agent tiers remove-agent <tier> <agent>    # Remove agent from a tier
+gt config agent tiers set-order <tier...>            # Set tier capability ordering
+
+# Runtime view
+gt agent tier list               # Show tiers with real-time availability
+gt agent tier list --available   # Only tiers that have live agents
+```
+
+**What tiers are:** Each tier is a named capability level (e.g., `small`, `medium`,
+`large`, `reasoning`) that maps to an ordered list of agent presets. When a role
+is assigned to a tier, Gas Town picks the best available agent from that tier's
+list based on the tier's selection strategy.
+
+**Selection strategies** (per-tier):
+- `priority` (default): First available agent in list order wins
+- `round-robin`: Cycle through agents in order, skipping unavailable ones
+
+**Tier ordering**: Tiers are ordered from lowest to highest capability. If all
+agents in a tier are excluded (via AGENT_FAILURE mail), Gas Town automatically
+falls back to the next higher tier.
+
+**Relationship to cost tiers**: Cost tiers (`gt config cost-tier`) write directly
+to `role_agents` and take precedence over tier `role_defaults`. Both systems
+coexist — tier config is more flexible for fine-grained control.
+
+**Precedence (highest → lowest):**
+1. `--agent` flag on `gt sling` (explicit agent override)
+2. `--tier` flag on `gt sling` (explicit tier override)
+3. Rig-level `role_agents` / `worker_agents`
+4. Town-level `role_agents` (written by `gt config agent` or `gt config cost-tier`)
+5. Agent tier `role_defaults`
+6. Town `default_agent`
+
+**Example workflow:**
+```bash
+# 1. Initialize sensible defaults
+gt config agent tiers init
+
+# 2. Inspect what was created
+gt config agent tiers show
+
+# 3. Customize: add a fast agent to the small tier
+gt config agent tiers add-agent small claude-haiku
+
+# 4. Set custom tier ordering (low → high capability)
+gt config agent tiers set-order small medium large reasoning
+
+# 5. Map the polecat role to the medium tier
+gt config agent tiers set-role polecat medium
+
+# 6. Check runtime availability
+gt agent tier list
+```
+
+Custom tier names are supported — `small`/`medium`/`large`/`reasoning` are
+conventions, not requirements. See [design/intelligent-model-routing.md](design/intelligent-model-routing.md) §1.6
+for the full design.
+
 ### Rig Management
 
 ```bash

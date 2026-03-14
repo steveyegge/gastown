@@ -727,6 +727,35 @@ the file into their town settings and it works.
 But users can also install hooks manually or via a wrapper script without
 any PR.
 
+### How does my agent get selected via agent tiers?
+
+Gas Town's tier system routes work to agents based on capability level. Tiers
+map role names (e.g., `polecat`, `crew`) to ordered lists of agent presets.
+When a role is assigned to a tier, Gas Town picks from that tier's agent list
+using the tier's selection strategy (`priority` or `round-robin`).
+
+**How your agent gets into a tier:**
+
+1. Register your agent as a preset (Tier 1 above)
+2. A user adds it to a tier:
+   ```bash
+   gt config agent tiers add-agent medium my-agent
+   ```
+3. Gas Town will now select your agent when dispatching work to the `medium` tier
+
+**The `GT_AGENT` environment variable** tells your agent which preset name is
+active. You can use this to adjust behavior (e.g., load a specific model).
+
+**Exclusion and fallback:** If your agent fails (the witness sends `AGENT_FAILURE`
+mail), Gas Town excludes it temporarily and selects the next agent in the tier.
+If all agents in a tier are excluded, Gas Town falls back to the next higher tier.
+Your agent is re-included after the exclusion TTL expires.
+
+**What your agent sees:** Nothing special. Gas Town selects the agent before
+spawning — your agent just receives its normal startup prompt via `gt prime`.
+
+See [gt config agent tiers](reference.md#agent-tiers) for configuration commands.
+
 ### What if my agent doesn't support autonomous mode?
 
 Gas Town requires autonomous mode (no confirmation prompts) for unattended
