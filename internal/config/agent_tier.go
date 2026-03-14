@@ -107,7 +107,7 @@ func (c *AgentTierConfig) BuildTierSummaries() []TierSummary {
 	summaries := make([]TierSummary, 0, len(names))
 	for _, name := range names {
 		tier, ok := c.Tiers[name]
-		if !ok {
+		if !ok || tier == nil {
 			continue
 		}
 		summaries = append(summaries, TierSummary{
@@ -218,6 +218,9 @@ func (c *AgentTierConfig) ResolveTierToRuntimeConfig(tierName string, excludedAg
 	tier, ok := c.Tiers[tierName]
 	if !ok {
 		return nil, fmt.Errorf("tier %q not found", tierName)
+	}
+	if tier == nil {
+		return nil, fmt.Errorf("tier %q has nil config", tierName)
 	}
 
 	// Filter to available (non-excluded) agents.

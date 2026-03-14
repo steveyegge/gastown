@@ -256,6 +256,19 @@ func TestAgentTierConfigValidate(t *testing.T) {
 		}
 	})
 
+	t.Run("nil tier value in Tiers map fails", func(t *testing.T) {
+		t.Parallel()
+		cfg := &AgentTierConfig{
+			Tiers: map[string]*AgentTier{
+				"a": nil,
+			},
+			TierOrder: []string{"a"},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("Validate() should fail when Tiers map contains a nil value")
+		}
+	})
+
 	t.Run("duplicate tier in TierOrder fails", func(t *testing.T) {
 		t.Parallel()
 		cfg := &AgentTierConfig{
@@ -382,6 +395,20 @@ func TestResolveTierToRuntimeConfig(t *testing.T) {
 		_, err := nilCfg.ResolveTierToRuntimeConfig("low", nil)
 		if err == nil {
 			t.Error("nil config should return error")
+		}
+	})
+
+	t.Run("nil tier in map returns error not panic", func(t *testing.T) {
+		t.Parallel()
+		cfg := &AgentTierConfig{
+			Tiers: map[string]*AgentTier{
+				"nilTier": nil,
+			},
+			TierOrder: []string{"nilTier"},
+		}
+		_, err := cfg.ResolveTierToRuntimeConfig("nilTier", nil)
+		if err == nil {
+			t.Error("nil tier value should return error, not panic")
 		}
 	})
 }
@@ -649,6 +676,24 @@ func TestBuildTierSummaries(t *testing.T) {
 		cfg := &AgentTierConfig{Tiers: map[string]*AgentTier{}}
 		if s := cfg.BuildTierSummaries(); s != nil {
 			t.Errorf("empty tiers BuildTierSummaries() = %v, want nil", s)
+		}
+	})
+
+	t.Run("nil tier value in map is skipped not panicked", func(t *testing.T) {
+		t.Parallel()
+		cfg := &AgentTierConfig{
+			Tiers: map[string]*AgentTier{
+				"a": {Description: "A", Agents: []string{"x"}},
+				"b": nil,
+			},
+			TierOrder: []string{"a", "b"},
+		}
+		summaries := cfg.BuildTierSummaries()
+		if len(summaries) != 1 {
+			t.Fatalf("BuildTierSummaries() = %d entries, want 1 (nil tier skipped)", len(summaries))
+		}
+		if summaries[0].Name != "a" {
+			t.Errorf("BuildTierSummaries()[0].Name = %q, want %q", summaries[0].Name, "a")
 		}
 	})
 
