@@ -1,6 +1,7 @@
 package config
 
 import (
+	"sync"
 	"testing"
 )
 
@@ -298,6 +299,9 @@ func TestResolveTierToRuntimeConfig(t *testing.T) {
 		if rc == nil {
 			t.Fatal("returned nil RuntimeConfig")
 		}
+		if rc.ResolvedAgent != "test-agent-a" {
+			t.Errorf("ResolvedAgent = %q, want %q", rc.ResolvedAgent, "test-agent-a")
+		}
 	})
 
 	t.Run("priority with exclusions skips excluded returns next", func(t *testing.T) {
@@ -309,6 +313,9 @@ func TestResolveTierToRuntimeConfig(t *testing.T) {
 		}
 		if rc == nil {
 			t.Fatal("returned nil RuntimeConfig")
+		}
+		if rc.ResolvedAgent != "test-agent-b" {
+			t.Errorf("ResolvedAgent = %q, want %q", rc.ResolvedAgent, "test-agent-b")
 		}
 	})
 
@@ -329,6 +336,9 @@ func TestResolveTierToRuntimeConfig(t *testing.T) {
 		if rc == nil {
 			t.Fatal("returned nil RuntimeConfig")
 		}
+		if rc.ResolvedAgent != "test-agent-a" {
+			t.Errorf("ResolvedAgent = %q, want %q", rc.ResolvedAgent, "test-agent-a")
+		}
 	})
 
 	t.Run("all agents excluded with Fallback=true falls back", func(t *testing.T) {
@@ -344,6 +354,10 @@ func TestResolveTierToRuntimeConfig(t *testing.T) {
 		}
 		if rc == nil {
 			t.Fatal("returned nil RuntimeConfig")
+		}
+		// "mid" tier has only "test-agent-c" with priority selection
+		if rc.ResolvedAgent != "test-agent-c" {
+			t.Errorf("ResolvedAgent = %q, want %q (first agent in mid tier)", rc.ResolvedAgent, "test-agent-c")
 		}
 	})
 
@@ -371,6 +385,10 @@ func TestResolveTierToRuntimeConfig(t *testing.T) {
 		}
 		if rc == nil {
 			t.Fatal("returned nil RuntimeConfig")
+		}
+		// "high" tier has only "test-agent-d" with priority selection
+		if rc.ResolvedAgent != "test-agent-d" {
+			t.Errorf("ResolvedAgent = %q, want %q (only agent in high tier)", rc.ResolvedAgent, "test-agent-d")
 		}
 	})
 
@@ -411,6 +429,53 @@ func TestResolveTierToRuntimeConfig(t *testing.T) {
 			t.Error("nil tier value should return error, not panic")
 		}
 	})
+
+	t.Run("empty Agents list with Fallback=false returns error", func(t *testing.T) {
+		t.Parallel()
+		cfg := &AgentTierConfig{
+			Tiers: map[string]*AgentTier{
+				"empty": {
+					Description: "Tier with no agents",
+					Agents:      []string{},
+					Selection:   "priority",
+					Fallback:    false,
+				},
+			},
+			TierOrder: []string{"empty"},
+		}
+		_, err := cfg.ResolveTierToRuntimeConfig("empty", nil)
+		if err == nil {
+			t.Error("expected error for tier with empty Agents list and Fallback=false")
+		}
+	})
+
+	t.Run("empty Agents list with Fallback=true falls back to higher tier", func(t *testing.T) {
+		t.Parallel()
+		cfg := &AgentTierConfig{
+			Tiers: map[string]*AgentTier{
+				"empty": {
+					Description: "Tier with no agents",
+					Agents:      []string{},
+					Selection:   "priority",
+					Fallback:    true,
+				},
+				"fallback": {
+					Description: "Fallback tier",
+					Agents:      []string{"test-agent-a"},
+					Selection:   "priority",
+					Fallback:    false,
+				},
+			},
+			TierOrder: []string{"empty", "fallback"},
+		}
+		rc, err := cfg.ResolveTierToRuntimeConfig("empty", nil)
+		if err != nil {
+			t.Fatalf("should fall back when Agents list is empty: %v", err)
+		}
+		if rc.ResolvedAgent != "test-agent-a" {
+			t.Errorf("ResolvedAgent = %q, want %q", rc.ResolvedAgent, "test-agent-a")
+		}
+	})
 }
 
 func TestResolveTierToRuntimeConfig_RoundRobin(t *testing.T) {
@@ -431,19 +496,31 @@ func TestResolveTierToRuntimeConfig_RoundRobin(t *testing.T) {
 			TierOrder: []string{"rr"},
 		}
 
-		// Call twice: counter starts at 0 so first picks index 0, second picks index 1.
-		_, err := cfg.ResolveTierToRuntimeConfig("rr", nil)
+		// counter starts at 0: Add(1)=1, idx=(1-1)%2=0 → test-agent-a
+		rc1, err := cfg.ResolveTierToRuntimeConfig("rr", nil)
 		if err != nil {
 			t.Fatalf("first call: %v", err)
 		}
-		_, err = cfg.ResolveTierToRuntimeConfig("rr", nil)
+		if rc1.ResolvedAgent != "test-agent-a" {
+			t.Errorf("first call ResolvedAgent = %q, want %q", rc1.ResolvedAgent, "test-agent-a")
+		}
+
+		// counter=1: Add(1)=2, idx=(2-1)%2=1 → test-agent-b
+		rc2, err := cfg.ResolveTierToRuntimeConfig("rr", nil)
 		if err != nil {
 			t.Fatalf("second call: %v", err)
 		}
-		// Call a third time to wrap around: should succeed (index 0 again).
-		_, err = cfg.ResolveTierToRuntimeConfig("rr", nil)
+		if rc2.ResolvedAgent != "test-agent-b" {
+			t.Errorf("second call ResolvedAgent = %q, want %q", rc2.ResolvedAgent, "test-agent-b")
+		}
+
+		// counter=2: Add(1)=3, idx=(3-1)%2=0 → test-agent-a (wraps around)
+		rc3, err := cfg.ResolveTierToRuntimeConfig("rr", nil)
 		if err != nil {
 			t.Fatalf("third call (wrap): %v", err)
+		}
+		if rc3.ResolvedAgent != "test-agent-a" {
+			t.Errorf("third call (wrap) ResolvedAgent = %q, want %q", rc3.ResolvedAgent, "test-agent-a")
 		}
 	})
 
@@ -471,6 +548,57 @@ func TestResolveTierToRuntimeConfig_RoundRobin(t *testing.T) {
 		}
 		if rc == nil {
 			t.Fatal("returned nil RuntimeConfig")
+		}
+		// Only "test-agent-c" is available after exclusions
+		if rc.ResolvedAgent != "test-agent-c" {
+			t.Errorf("ResolvedAgent = %q, want %q", rc.ResolvedAgent, "test-agent-c")
+		}
+	})
+
+	t.Run("concurrent round-robin is safe and covers all agents", func(t *testing.T) {
+		// Use a fresh config to get a clean counter.
+		cfg := &AgentTierConfig{
+			Tiers: map[string]*AgentTier{
+				"rr": {
+					Description: "Round-robin tier",
+					Agents:      []string{"test-agent-a", "test-agent-b"},
+					Selection:   "round-robin",
+					Fallback:    false,
+				},
+			},
+			TierOrder: []string{"rr"},
+		}
+
+		const goroutines = 20
+		results := make([]string, goroutines)
+		var wg sync.WaitGroup
+		wg.Add(goroutines)
+		for i := range goroutines {
+			go func(i int) {
+				defer wg.Done()
+				rc, err := cfg.ResolveTierToRuntimeConfig("rr", nil)
+				if err != nil {
+					t.Errorf("goroutine %d: %v", i, err)
+					return
+				}
+				results[i] = rc.ResolvedAgent
+			}(i)
+		}
+		wg.Wait()
+
+		// Verify all results are valid agent names and both agents appear.
+		seen := make(map[string]int)
+		for i, agent := range results {
+			if agent != "test-agent-a" && agent != "test-agent-b" {
+				t.Errorf("results[%d] = %q, want test-agent-a or test-agent-b", i, agent)
+			}
+			seen[agent]++
+		}
+		if seen["test-agent-a"] == 0 {
+			t.Error("test-agent-a never selected in 20 concurrent round-robin calls")
+		}
+		if seen["test-agent-b"] == 0 {
+			t.Error("test-agent-b never selected in 20 concurrent round-robin calls")
 		}
 	})
 }
