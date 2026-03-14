@@ -1123,9 +1123,41 @@ func runDogDispatch(cmd *cobra.Command, args []string) error {
 		WorkDesc: workDesc,
 	}
 	if _, sessErr := sessMgr.EnsureRunning(targetDog.Name, sessOpts); sessErr != nil {
-		// Non-fatal: work is assigned and mail is sent, session may start later
+		// Session start failed — escalate rather than silently continuing.
+		// Work is assigned and mail is sent, but the dog cannot read the mail
+		// without a running session. Dog will be stuck idle until manually
+		// re-dispatched (see: github.com/steveyegge/gastown/issues/2748).
+		escalateCmd := exec.Command("gt", "escalate",
+			fmt.Sprintf("dog dispatch: session start failed for %s: %v", targetDog.Name, sessErr),
+			"-s", "MEDIUM")
+		_ = escalateCmd.Run() // best-effort
 		if !dogDispatchJSON {
-			style.PrintWarning("could not start dog session: %v", sessErr)
+			style.PrintWarning("could not start dog session (escalated): %v", sessErr)
+		}
+	}
+
+	// Verify the dog's work assignment is readable before declaring success.
+	// Hook state writes and mail routing are async — poll briefly to confirm.
+	// If unconfirmed, warn so the operator can re-dispatch manually.
+	// See: github.com/steveyegge/gastown/issues/2748
+	const verifyTimeout = 8 * time.Second
+	const verifyPoll = 500 * time.Millisecond
+	deadline := time.Now().Add(verifyTimeout)
+	confirmed := false
+	for !confirmed && time.Now().Before(deadline) {
+		if d, err := mgr.Get(targetDog.Name); err == nil && d.Work != "" {
+			confirmed = true
+		} else {
+			time.Sleep(verifyPoll)
+		}
+	}
+	if !confirmed {
+		escalateCmd := exec.Command("gt", "escalate",
+			fmt.Sprintf("dog dispatch: assignment unconfirmed for %s after %s — may need re-dispatch", targetDog.Name, verifyTimeout),
+			"-s", "MEDIUM")
+		_ = escalateCmd.Run()
+		if !dogDispatchJSON {
+			style.PrintWarning("work assignment unconfirmed for dog %s after %s", targetDog.Name, verifyTimeout)
 		}
 	}
 
