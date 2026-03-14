@@ -195,6 +195,10 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			Topic:            "start",
 			SessionName:      sessionID,
 		})
+		// Merge liveness-critical env vars (GT_AGENT, GT_PROCESS_NAMES) so that
+		// IsAgentAlive can detect non-Claude runtimes. Without this, attach
+		// misclassifies live sessions as dead and recreates them.
+		envVars = session.MergeRuntimeLivenessEnv(envVars, runtimeConfig)
 		for k, v := range envVars {
 			_ = t.SetEnvironment(sessionID, k, v)
 		}
@@ -262,6 +266,23 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		if !t.IsAgentAlive(sessionID) {
 			// Runtime has exited, restart it using respawn-pane
 			fmt.Printf("Runtime exited, restarting...\n")
+
+			// Refresh liveness env vars before restart so the next IsAgentAlive
+			// check can detect non-Claude runtimes.
+			restartEnv := config.AgentEnv(config.AgentEnvConfig{
+				Role:             "crew",
+				Rig:              r.Name,
+				AgentName:        name,
+				TownRoot:         townRoot,
+				RuntimeConfigDir: claudeConfigDir,
+				Agent:            crewAgentOverride,
+				Topic:            "restart",
+				SessionName:      sessionID,
+			})
+			restartEnv = session.MergeRuntimeLivenessEnv(restartEnv, runtimeConfig)
+			for k, v := range restartEnv {
+				_ = t.SetEnvironment(sessionID, k, v)
+			}
 
 			// Get pane ID for respawn
 			paneID, err := t.GetPaneID(sessionID)

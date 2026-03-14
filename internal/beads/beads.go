@@ -297,14 +297,6 @@ type UpdateOptions struct {
 	SetLabels    []string // Labels to set (replaces all existing)
 }
 
-// SyncStatus represents the sync status of the beads repository.
-type SyncStatus struct {
-	Branch    string
-	Ahead     int
-	Behind    int
-	Conflicts []string
-}
-
 // Beads wraps bd CLI operations for a working directory.
 type Beads struct {
 	workDir    string
@@ -1423,37 +1415,6 @@ func (b *Beads) AddDependency(issue, dependsOn string) error {
 func (b *Beads) RemoveDependency(issue, dependsOn string) error {
 	_, err := b.run("dep", "remove", issue, dependsOn)
 	return err
-}
-
-// Sync syncs beads with remote.
-func (b *Beads) Sync() error {
-	_, err := b.run("sync")
-	return err
-}
-
-// SyncFromMain syncs beads updates from main branch.
-func (b *Beads) SyncFromMain() error {
-	_, err := b.run("sync", "--from-main")
-	return err
-}
-
-// GetSyncStatus returns the sync status without performing a sync.
-func (b *Beads) GetSyncStatus() (*SyncStatus, error) {
-	out, err := b.run("sync", "--status", "--json")
-	if err != nil {
-		// If sync branch doesn't exist, return empty status
-		if strings.Contains(err.Error(), "does not exist") {
-			return &SyncStatus{}, nil
-		}
-		return nil, err
-	}
-
-	var status SyncStatus
-	if err := json.Unmarshal(out, &status); err != nil {
-		return nil, fmt.Errorf("parsing bd sync status output: %w", err)
-	}
-
-	return &status, nil
 }
 
 // Stats returns repository statistics.

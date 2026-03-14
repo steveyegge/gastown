@@ -22,6 +22,8 @@ const (
 	compactorQueryTimeout = 30 * time.Second
 	// compactorGCTimeout is the timeout for CALL dolt_gc() after compaction.
 	compactorGCTimeout = 5 * time.Minute
+	// compactorPushTimeout is the timeout for DOLT_PUSH after compaction.
+	compactorPushTimeout = 2 * time.Minute
 	// compactorBranchName is the temporary branch used during compaction.
 	compactorBranchName = "gt-compaction"
 	// surgicalMaxRetries is the number of times to retry surgical rebase after
@@ -157,6 +159,22 @@ func (d *Daemon) runCompactorDog() {
 		d.logger.Printf("compactor_dog: %s: %d commits (threshold %d) — compacting (mode=%s)",
 			dbName, commitCount, threshold, mode)
 
+		// Pre-flight: fetch from remote and verify local ≥ remote before
+		// compacting. Flatten rewrites the commit graph, so force-push after
+		// compaction would overwrite any remote-only commits. Skip compaction
+		// if the remote has diverged.
+		diverged, fetchErr := d.compactorFetchAndVerify(dbName)
+		if fetchErr != nil {
+			d.logger.Printf("compactor_dog: %s: pre-flight fetch failed: %v (skipping)", dbName, fetchErr)
+			skipped++
+			continue
+		}
+		if diverged {
+			d.logger.Printf("compactor_dog: %s: remote has diverged — skipping compaction to avoid data loss", dbName)
+			skipped++
+			continue
+		}
+
 		var compactErr error
 		if mode == "surgical" {
 			keepRecent := compactorDogKeepRecent(d.patrolConfig)
@@ -174,6 +192,13 @@ func (d *Daemon) runCompactorDog() {
 			// Order matters: rebase first (compactDatabase), gc second.
 			if err := d.compactorRunGC(dbName); err != nil {
 				d.logger.Printf("compactor_dog: %s: gc after compaction failed: %v", dbName, err)
+			}
+			// Force-push to DoltHub remote after compaction. Flatten rewrites
+			// the commit graph, so standard push always fails with non-fast-forward.
+			// Safe because compactorFetchAndVerify confirmed local ≥ remote
+			// before compaction, and compactDatabase verified integrity.
+			if err := d.compactorForcePush(dbName); err != nil {
+				d.logger.Printf("compactor_dog: %s: force-push failed: %v", dbName, err)
 			}
 		}
 	}
@@ -628,5 +653,97 @@ func (d *Daemon) compactorRunGC(dbName string) error {
 	}
 
 	d.logger.Printf("compactor_dog: gc: %s: completed in %v", dbName, time.Since(start))
+	return nil
+}
+
+// compactorFetchAndVerify fetches from the remote and checks that the local
+// history contains the remote HEAD. Returns (diverged=true, nil) if the remote
+// has commits not in local history — compaction must be skipped to avoid data
+// loss on force-push. Returns (false, nil) if local ≥ remote or no remote.
+// Mirrors the shell script's pre-flight check (run.sh lines 263-300).
+func (d *Daemon) compactorFetchAndVerify(dbName string) (diverged bool, err error) {
+	db, err := d.compactorOpenDB(dbName)
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), compactorQueryTimeout)
+	defer cancel()
+
+	// Discover remote.
+	var remoteName string
+	if err := db.QueryRowContext(ctx, "SELECT name FROM dolt_remotes LIMIT 1").Scan(&remoteName); err != nil {
+		return false, nil // No remote — nothing to verify
+	}
+
+	// Fetch from remote.
+	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), compactorPushTimeout)
+	defer fetchCancel()
+	if _, err := db.ExecContext(fetchCtx, "CALL DOLT_FETCH(?)", remoteName); err != nil {
+		return false, fmt.Errorf("DOLT_FETCH %s: %w", remoteName, err)
+	}
+
+	// Get remote HEAD.
+	var remoteHead string
+	remoteRef := remoteName + "/main"
+	err = db.QueryRowContext(ctx,
+		"SELECT commit_hash FROM dolt_remote_branches WHERE name = ?", remoteRef,
+	).Scan(&remoteHead)
+	if err != nil {
+		return false, nil // Remote ref not found — skip check
+	}
+
+	// Check if remote HEAD is an ancestor of local history.
+	var isAncestor int
+	err = db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM dolt_log WHERE commit_hash = ?", remoteHead,
+	).Scan(&isAncestor)
+	if err != nil {
+		return false, fmt.Errorf("ancestor check: %w", err)
+	}
+
+	if isAncestor == 0 {
+		return true, nil // Diverged — remote has commits we don't have
+	}
+
+	d.logger.Printf("compactor_dog: fetch: %s: local ≥ %s (verified)", dbName, remoteName)
+	return false, nil
+}
+
+// compactorForcePush pushes the compacted database to its DoltHub remote.
+// Flatten rewrites the commit graph, so a force-push is required — standard
+// push always fails with non-fast-forward. This mirrors the shell script's
+// DOLT_PUSH('--force', remote) at line 397 of plugins/compactor-dog/run.sh.
+// Non-fatal: remote may not be configured, and push failures don't affect
+// local data integrity.
+func (d *Daemon) compactorForcePush(dbName string) error {
+	db, err := d.compactorOpenDB(dbName)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	// Discover the remote name (if any).
+	ctx, cancel := context.WithTimeout(context.Background(), compactorQueryTimeout)
+	defer cancel()
+
+	var remoteName string
+	err = db.QueryRowContext(ctx, "SELECT name FROM dolt_remotes LIMIT 1").Scan(&remoteName)
+	if err != nil || remoteName == "" {
+		return nil // No remote configured — skip silently
+	}
+
+	// Force-push to remote.
+	pushCtx, pushCancel := context.WithTimeout(context.Background(), compactorPushTimeout)
+	defer pushCancel()
+
+	start := time.Now()
+	_, err = db.ExecContext(pushCtx, "CALL DOLT_PUSH('--force', ?)", remoteName)
+	if err != nil {
+		return fmt.Errorf("DOLT_PUSH --force to %s: %w", remoteName, err)
+	}
+
+	d.logger.Printf("compactor_dog: push: %s → %s: force-pushed in %v", dbName, remoteName, time.Since(start))
 	return nil
 }

@@ -1080,6 +1080,11 @@ func isSlingConfigError(err error) bool {
 // loadRigCommandVars reads rig settings and returns --var key=value strings
 // for all configured build pipeline commands (setup, typecheck, lint, test, build)
 // and the default branch (base_branch). Only non-empty values are included.
+//
+// Settings are resolved in priority order:
+//  1. Repository defaults: <rig>/mayor/rig/.gastown/settings.json (committed to git)
+//  2. Rig-local overrides: <rig>/settings/config.json (operator tuning)
+//  3. User --var flags (handled by caller, not here)
 func loadRigCommandVars(townRoot, rig string) []string {
 	if townRoot == "" || rig == "" {
 		return nil
@@ -1093,12 +1098,28 @@ func loadRigCommandVars(townRoot, rig string) []string {
 		vars = append(vars, fmt.Sprintf("base_branch=%s", rigCfg.DefaultBranch))
 	}
 
+	// Load repo-sourced settings (floor — committed to git, always present after clone)
+	var repoMQ *config.MergeQueueConfig
+	repoRoot := filepath.Join(townRoot, rig, "mayor", "rig")
+	repoSettings, _ := config.LoadRepoSettings(repoRoot)
+	if repoSettings != nil {
+		repoMQ = repoSettings.MergeQueue
+	}
+
+	// Load rig-local settings (override — operator tuning)
+	var localMQ *config.MergeQueueConfig
 	settingsPath := filepath.Join(townRoot, rig, "settings", "config.json")
-	settings, err := config.LoadRigSettings(settingsPath)
-	if err != nil || settings == nil || settings.MergeQueue == nil {
+	localSettings, err := config.LoadRigSettings(settingsPath)
+	if err == nil && localSettings != nil {
+		localMQ = localSettings.MergeQueue
+	}
+
+	// Merge: repo defaults + local overrides
+	mq := config.MergeSettingsCommand(repoMQ, localMQ)
+	if mq == nil {
 		return vars
 	}
-	mq := settings.MergeQueue
+
 	if mq.SetupCommand != "" {
 		vars = append(vars, fmt.Sprintf("setup_command=%s", mq.SetupCommand))
 	}

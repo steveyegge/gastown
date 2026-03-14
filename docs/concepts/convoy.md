@@ -178,6 +178,31 @@ Issues (3):
 Duration: 2h 15m
 ```
 
+## Create from Epic
+
+Auto-discover tracked issues from an existing epic's children. Useful when
+a planning/decomposition tool has already structured work as an epic with
+child implementation beads.
+
+```bash
+# Auto-discover children from epic
+gt convoy create --from-epic gt-epic-abc
+
+# Override the convoy name (defaults to epic title)
+gt convoy create --from-epic gt-epic-abc "Custom convoy name"
+
+# Combine with other flags
+gt convoy create --from-epic gt-epic-abc --owned --merge=direct
+```
+
+**How it works:**
+1. Verifies the given bead is an epic
+2. BFS-walks the parent-child hierarchy to find slingable descendants
+3. Creates a standard convoy (`hq-cv-*`) tracking all slingable children (task, bug, feature, chore)
+
+Non-slingable types (sub-epics, decisions) are recursed into but never
+tracked directly. Only leaf work items appear in the convoy.
+
 ## Auto-Convoy on Sling
 
 When you sling a single issue without an existing convoy:

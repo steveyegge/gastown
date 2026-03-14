@@ -176,7 +176,17 @@ func runPrime(cmd *cobra.Command, args []string) (retErr error) {
 	// injectWorkContext sets GT_WORK_RIG/BEAD/MOL in the current process env and
 	// in the tmux session env so all subsequent subprocesses (bd, mail, …) carry
 	// the correct work attribution until the next gt prime overwrites it.
-	hookedBead := findAgentWork(ctx)
+	hookedBead, hookErr := findAgentWork(ctx)
+	if hookErr != nil {
+		// Database error during hook query — NOT the same as "no work assigned".
+		// Emit a loud warning so the agent does NOT run gt done / close the bead.
+		// This prevents the destructive cycle: DB error → "no work" → gt done → bead lost. (GH#2638)
+		fmt.Fprintf(os.Stderr, "\n%s\n", style.Bold.Render("## ⚠️  DATABASE ERROR — DO NOT RUN gt done ⚠️"))
+		fmt.Fprintf(os.Stderr, "Hook query failed: %v\n", hookErr)
+		fmt.Fprintf(os.Stderr, "This is a database connectivity error, NOT an empty hook.\n")
+		fmt.Fprintf(os.Stderr, "Your work may still be assigned. Do NOT close any beads.\n")
+		fmt.Fprintf(os.Stderr, "Escalate to witness/mayor and wait for resolution.\n\n")
+	}
 	injectWorkContext(ctx, hookedBead)
 
 	formula, err := outputRoleContext(ctx)
@@ -530,11 +540,14 @@ func hasWorkflowAttachment(attachment *beads.AttachmentFields) bool {
 // For polecats and crew, retries up to 3 times with 2-second delays to handle
 // the timing race where hook state hasn't propagated by the time gt prime runs.
 // See: https://github.com/steveyegge/gastown/issues/1438
-// Returns nil if no work is found.
-func findAgentWork(ctx RoleContext) *beads.Issue {
+//
+// Returns (nil, nil) if no work is found.
+// Returns (nil, err) if all attempts failed due to database errors — the caller
+// MUST distinguish this from "no work" to avoid silently closing beads. (GH#2638)
+func findAgentWork(ctx RoleContext) (*beads.Issue, error) {
 	agentID := getAgentIdentity(ctx)
 	if agentID == "" {
-		return nil
+		return nil, nil
 	}
 
 	// Polecats and crew use a retry loop to handle the timing race where
@@ -551,6 +564,7 @@ func findAgentWork(ctx RoleContext) *beads.Issue {
 		maxAttempts = 5
 	}
 
+	var lastErr error
 	backoff := 500 * time.Millisecond
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
@@ -558,16 +572,26 @@ func findAgentWork(ctx RoleContext) *beads.Issue {
 			backoff *= 2
 		}
 
-		if result := findAgentWorkOnce(ctx, agentID); result != nil {
-			return result
+		result, err := findAgentWorkOnce(ctx, agentID)
+		if result != nil {
+			return result, nil
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			// Successful query returned no work — not a DB error
+			lastErr = nil
 		}
 	}
 
-	return nil
+	return nil, lastErr
 }
 
 // findAgentWorkOnce performs a single attempt to find hooked work for an agent.
-func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
+// Returns (nil, nil) when no work is found.
+// Returns (nil, err) when the database query itself failed — the caller must
+// not treat this as "no work assigned". (GH#2638)
+func findAgentWorkOnce(ctx RoleContext, agentID string) (*beads.Issue, error) {
 	// Use rig root for beads queries instead of ctx.WorkDir. Polecat worktrees
 	// rely on .beads/redirect which can fail to resolve in edge cases, causing
 	// polecats to miss hooked work and exit immediately. The rig root directory
@@ -586,7 +610,7 @@ func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
 			hb := beads.New(hookBeadDir)
 			if hookBead, err := hb.Show(agentBead.HookBead); err == nil && hookBead != nil &&
 				(hookBead.Status == beads.StatusHooked || hookBead.Status == "in_progress") {
-				return hookBead
+				return hookBead, nil
 			}
 		}
 	}
@@ -598,7 +622,7 @@ func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
 		Priority: -1,
 	})
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("querying hooked beads: %w", err)
 	}
 
 	// Fall back to in_progress beads (session interrupted before completion)
@@ -608,7 +632,10 @@ func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
 			Assignee: agentID,
 			Priority: -1,
 		})
-		if err == nil && len(inProgressBeads) > 0 {
+		if err != nil {
+			return nil, fmt.Errorf("querying in-progress beads: %w", err)
+		}
+		if len(inProgressBeads) > 0 {
 			hookedBeads = inProgressBeads
 		}
 	}
@@ -631,12 +658,13 @@ func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
 		}); err == nil && len(townIP) > 0 {
 			hookedBeads = townIP
 		}
+		// Town-level fallback errors are non-fatal — rig-level query succeeded
 	}
 
 	if len(hookedBeads) == 0 {
-		return nil
+		return nil, nil
 	}
-	return hookedBeads[0]
+	return hookedBeads[0], nil
 }
 
 // rigBeadsRoot returns the directory to use for beads queries.

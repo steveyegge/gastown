@@ -347,7 +347,9 @@ If typecheck_command is set:
 {{typecheck_command}}
 ```
 
-Empty commands mean "not configured" — skip silently.
+If any command is empty (not configured), check CLAUDE.md and AGENTS.md in the
+repo root for project-specific build/test/lint instructions. **Do NOT silently
+skip** — the project may have critical quality gates documented there.
 
 **2. If build fails:**
 - Fix it. Return to implement step if needed.
@@ -359,13 +361,14 @@ If you modified or added test files, run those specific tests to catch
 obvious regressions. Do NOT run the full test suite — that's the
 Refinery's job.
 
+If test_command is set:
 ```bash
-# Example: run only tests in packages you changed
-go test ./internal/pkg/you/changed/...
-# Or for JS: npx jest --testPathPattern="changed-file"
+{{test_command}} --filter "RelevantTests"
 ```
 
-If you're unsure which tests are relevant, skip this — the MQ will catch it.
+If test_command is NOT set, check CLAUDE.md and AGENTS.md for the project's
+test command. Many projects have a "Definition of Done" section with the
+exact command to run.
 
 **4. Lint (OPTIONAL — run if configured and fast):**
 
@@ -471,7 +474,9 @@ If test_command is set:
 {{test_command}}
 ```
 
-Empty commands mean "not configured" — skip silently.
+If any command is empty (not configured), check CLAUDE.md and AGENTS.md in the
+repo root for project-specific instructions. **Do NOT silently skip gates** —
+the project's definition of done may require specific commands.
 
 **3. If any gate fails after rebase:**
 - Fix the issue, commit, and re-run from step 1

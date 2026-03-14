@@ -152,9 +152,18 @@ func HandlePolecatDone(bd *BdCli, workDir, rigName string, msg *mail.Message, ro
 	}
 
 	if hasPendingMR {
-		return handlePolecatDonePendingMR(bd, workDir, rigName, payload, result)
+		result = handlePolecatDonePendingMR(bd, workDir, rigName, payload, result)
+	} else {
+		result = handlePolecatDoneNoMR(workDir, rigName, payload, result)
 	}
-	return handlePolecatDoneNoMR(workDir, rigName, payload, result)
+
+	// Notify Mayor that a slot is open regardless of MR status.
+	// The polecat is idle either way — Mayor should consider slinging next bead. (GH#2727)
+	if result.Handled {
+		notifyMayorSlotOpen(workDir, rigName, payload.PolecatName, payload.Exit)
+	}
+
+	return result
 }
 
 // HandlePolecatDoneFromBead processes polecat completion detected from agent bead
@@ -657,6 +666,35 @@ func nudgeRefinery(townRoot, rigName string) error {
 	// nudges would be stuck forever. Direct delivery is safe: if the
 	// agent is busy, text buffers in tmux and is processed at next prompt.
 	return t.NudgeSession(sessionName, "New MR available - check merge queue for pending work")
+}
+
+// notifyMayorSlotOpen nudges the Mayor that a polecat slot is now open.
+// This is critical for pipeline throughput: without it, the Mayor sits idle
+// even when open beads exist, because it never learns about the completion.
+// Uses nudge (not mail) per communication hygiene. (GH#2727)
+func notifyMayorSlotOpen(workDir, rigName, polecatName, exitType string) {
+	townRoot, _ := workspace.Find(workDir)
+	if townRoot == "" {
+		return
+	}
+
+	// Emit SLOT_OPEN channel event so Mayor's await-event unblocks instantly.
+	_, _ = channelevents.EmitToTown(townRoot, "mayor", "SLOT_OPEN", []string{
+		"source=witness",
+		"rig=" + rigName,
+		"polecat=" + polecatName,
+		"exit=" + exitType,
+	})
+
+	// Belt-and-suspenders: also nudge the Mayor's tmux session directly.
+	// This handles cases where the Mayor is at the Claude prompt rather
+	// than in an await-event loop.
+	mayorSession := session.MayorSessionName()
+	t := tmux.NewTmux()
+	if running, err := t.HasSession(mayorSession); err == nil && running {
+		msg := fmt.Sprintf("SLOT_OPEN: %s/%s completed (exit=%s) — slot available. Run `gt polecat list` to verify and sling next bead.", rigName, polecatName, exitType)
+		_ = t.NudgeSession(mayorSession, msg)
+	}
 }
 
 // RecoveryPayload contains data for RECOVERY_NEEDED escalation.
@@ -1708,11 +1746,17 @@ func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *Po
 		}
 
 		discovery.Action = fmt.Sprintf("merge-ready-nudged (MR=%s, wisp=%s)", payload.MRID, wispID)
+
+		// Notify Mayor that a slot is open even with pending MR — polecat is idle. (GH#2727)
+		notifyMayorSlotOpen(workDir, rigName, payload.PolecatName, payload.Exit)
 		return
 	}
 
 	// No MR — polecat is idle (persistent polecat model, gt-4ac)
 	discovery.Action = fmt.Sprintf("acknowledged-idle (exit=%s)", payload.Exit)
+
+	// Notify Mayor that a slot is open (bead-based discovery path). (GH#2727)
+	notifyMayorSlotOpen(workDir, rigName, payload.PolecatName, payload.Exit)
 }
 
 // agentBeadSnapshot holds all fields from a single bd show --json call for an agent bead.

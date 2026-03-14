@@ -780,6 +780,12 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 		return nil, fmt.Errorf("creating settings dir: %w", err)
 	}
 
+	// Note: we intentionally do NOT seed local rig settings from
+	// .gastown/settings.json here. Repo settings are merged at runtime
+	// by loadRigCommandVars (repo defaults → local overrides → --var flags).
+	// Seeding at rig-add time would fork the config, silently shadowing
+	// any future repo-side updates.
+
 	// Create rig-level agent beads (witness, refinery) in rig beads.
 	// Town-level agents (mayor, deacon) are created by gt install in town beads.
 	if err := m.initAgentBeads(rigPath, opts.Name, opts.BeadsPrefix); err != nil {

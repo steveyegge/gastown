@@ -703,7 +703,7 @@ func runMountainCancel(cmd *cobra.Command, args []string) error {
 	// Best-effort remove paused label too.
 	_ = bdRemoveLabelTown(convoyID, "mountain:paused")
 
-	fmt.Printf("Mountain cancelled on %s.\n", convoyID)
+	fmt.Printf("Mountain canceled on %s.\n", convoyID)
 	fmt.Printf("Convoy remains open for manual management.\n")
 	fmt.Printf("Check convoy status: gt convoy status %s\n", convoyID)
 	return nil

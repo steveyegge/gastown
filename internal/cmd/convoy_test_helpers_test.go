@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // ---------------------------------------------------------------------------
@@ -374,6 +376,16 @@ func (d *testDAG) Setup(t *testing.T) (townRoot, logPath string) {
 	}
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	// Write sentinel files so beads.EnsureCustomTypes/Statuses skip bd calls.
+	typesList := strings.Join(constants.BeadsCustomTypesList(), ",")
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", ".gt-types-configured"), []byte(typesList+"\n"), 0644); err != nil {
+		t.Fatalf("write types sentinel: %v", err)
+	}
+	statusesList := strings.Join(constants.BeadsCustomStatusesList(), ",")
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", ".gt-statuses-configured"), []byte(statusesList+"\n"), 0644); err != nil {
+		t.Fatalf("write statuses sentinel: %v", err)
 	}
 
 	// Install bd stub script.

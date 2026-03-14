@@ -456,6 +456,104 @@ func TestLoadRigSettingsNotFound(t *testing.T) {
 	}
 }
 
+func TestLoadRepoSettings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns nil when file missing", func(t *testing.T) {
+		t.Parallel()
+		settings, err := LoadRepoSettings("/nonexistent/repo")
+		if err != nil {
+			t.Fatalf("expected nil error, got: %v", err)
+		}
+		if settings != nil {
+			t.Fatal("expected nil settings for missing file")
+		}
+	})
+
+	t.Run("loads valid repo settings", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		gsDir := filepath.Join(dir, ".gastown")
+		if err := os.MkdirAll(gsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		data := []byte(`{
+			"type": "rig-settings",
+			"version": 1,
+			"merge_queue": {
+				"test_command": "./scripts/ci/api.sh",
+				"build_command": "dotnet build"
+			}
+		}`)
+		if err := os.WriteFile(filepath.Join(gsDir, "settings.json"), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		settings, err := LoadRepoSettings(dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings == nil {
+			t.Fatal("expected non-nil settings")
+		}
+		if settings.MergeQueue == nil {
+			t.Fatal("expected non-nil MergeQueue")
+		}
+		if settings.MergeQueue.TestCommand != "./scripts/ci/api.sh" {
+			t.Errorf("expected test_command='./scripts/ci/api.sh', got %q", settings.MergeQueue.TestCommand)
+		}
+		if settings.MergeQueue.BuildCommand != "dotnet build" {
+			t.Errorf("expected build_command='dotnet build', got %q", settings.MergeQueue.BuildCommand)
+		}
+	})
+}
+
+func TestMergeSettingsCommand(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil inputs returns nil", func(t *testing.T) {
+		t.Parallel()
+		result := MergeSettingsCommand(nil, nil)
+		if result != nil {
+			t.Fatal("expected nil")
+		}
+	})
+
+	t.Run("repo only", func(t *testing.T) {
+		t.Parallel()
+		repo := &MergeQueueConfig{TestCommand: "repo-test", BuildCommand: "repo-build"}
+		result := MergeSettingsCommand(repo, nil)
+		if result.TestCommand != "repo-test" {
+			t.Errorf("expected 'repo-test', got %q", result.TestCommand)
+		}
+	})
+
+	t.Run("local overrides repo", func(t *testing.T) {
+		t.Parallel()
+		repo := &MergeQueueConfig{TestCommand: "repo-test", BuildCommand: "repo-build", LintCommand: "repo-lint"}
+		local := &MergeQueueConfig{TestCommand: "local-test"}
+		result := MergeSettingsCommand(repo, local)
+		if result.TestCommand != "local-test" {
+			t.Errorf("expected 'local-test', got %q", result.TestCommand)
+		}
+		if result.BuildCommand != "repo-build" {
+			t.Errorf("expected 'repo-build' (not overridden), got %q", result.BuildCommand)
+		}
+		if result.LintCommand != "repo-lint" {
+			t.Errorf("expected 'repo-lint' (not overridden), got %q", result.LintCommand)
+		}
+	})
+
+	t.Run("local only", func(t *testing.T) {
+		t.Parallel()
+		local := &MergeQueueConfig{TestCommand: "local-test"}
+		result := MergeSettingsCommand(nil, local)
+		if result.TestCommand != "local-test" {
+			t.Errorf("expected 'local-test', got %q", result.TestCommand)
+		}
+	})
+}
+
 func TestMayorConfigRoundTrip(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

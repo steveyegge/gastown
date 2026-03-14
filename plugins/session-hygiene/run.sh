@@ -106,10 +106,29 @@ while IFS= read -r SESSION; do
   fi
 done <<< "$SESSIONS"
 
+# --- Step 3.5: Kill threshold safeguard ---------------------------------------
+
+# If >50% of sessions would be killed, abort and escalate. A plugin that
+# kills the entire town is never correct — this indicates a data source bug.
+
+ZOMBIE_COUNT=${#ZOMBIES[@]}
+if [ "$ZOMBIE_COUNT" -gt 0 ] && [ "$SESSION_COUNT" -gt 0 ]; then
+  KILL_PERCENT=$(( ZOMBIE_COUNT * 100 / SESSION_COUNT ))
+  if [ "$KILL_PERCENT" -gt 50 ]; then
+    ZOMBIE_LIST=$(printf '%s, ' "${ZOMBIES[@]}")
+    log "ABORT: $ZOMBIE_COUNT of $SESSION_COUNT sessions (${KILL_PERCENT}%) would be killed — exceeds 50% threshold"
+    log "Would-be zombies: $ZOMBIE_LIST"
+    log "This likely indicates a data source bug (stale rigs.json, missing prefixes). Escalating."
+    gt escalate "session-hygiene: ABORT — ${KILL_PERCENT}% of sessions classified as zombies" \
+      -s HIGH \
+      --reason "session-hygiene would kill $ZOMBIE_COUNT of $SESSION_COUNT sessions (${KILL_PERCENT}%). Aborting. Would-be zombies: ${ZOMBIE_LIST}" 2>/dev/null || true
+    exit 1
+  fi
+fi
+
 # --- Step 4: Kill zombie sessions ---------------------------------------------
 
 KILLED=0
-ZOMBIE_COUNT=${#ZOMBIES[@]}
 for ZOMBIE in "${ZOMBIES[@]+"${ZOMBIES[@]}"}"; do
   [ -z "$ZOMBIE" ] && continue
   if $DRY_RUN; then

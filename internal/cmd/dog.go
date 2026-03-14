@@ -1122,11 +1122,52 @@ func runDogDispatch(cmd *cobra.Command, args []string) error {
 	sessOpts := dog.SessionStartOptions{
 		WorkDesc: workDesc,
 	}
+	result.SessionStarted = true
 	if _, sessErr := sessMgr.EnsureRunning(targetDog.Name, sessOpts); sessErr != nil {
-		// Non-fatal: work is assigned and mail is sent, session may start later
-		if !dogDispatchJSON {
-			style.PrintWarning("could not start dog session: %v", sessErr)
+		result.SessionStarted = false
+		// Roll back the work assignment: without a running session the dog
+		// cannot read its mail, leaving it stuck in StateWorking (zombie).
+		// Clearing work returns it to idle so it can be re-dispatched.
+		// See: github.com/steveyegge/gastown/issues/2748
+		if clearErr := mgr.ClearWork(targetDog.Name); clearErr != nil {
+			warn := fmt.Sprintf("session start failed AND rollback failed for dog %s — dog stuck in StateWorking, run: gt dog health-check --auto-clear: %v", targetDog.Name, clearErr)
+			result.Warnings = append(result.Warnings, warn)
+			if !dogDispatchJSON {
+				style.PrintWarning("%s", warn)
+			}
 		}
+		warn := fmt.Sprintf("dog dispatch: session start failed for %s (work rolled back, re-dispatch with: gt dog dispatch --plugin %s): %v", targetDog.Name, p.Name, sessErr)
+		result.Warnings = append(result.Warnings, warn)
+		if !dogDispatchJSON {
+			style.PrintWarning("%s", warn)
+		}
+		if escErr := dogEscalateBestEffort(warn); escErr != nil {
+			if !dogDispatchJSON {
+				style.PrintWarning("escalation also failed (%v) — escalate manually: gt escalate --severity medium %q", escErr, warn)
+			}
+		}
+	}
+
+	// Verify the work state write is readable. A read-back failure here
+	// indicates state corruption, not a timing race.
+	// See: github.com/steveyegge/gastown/issues/2748
+	result.WorkConfirmed = false
+	if d, getErr := mgr.Get(targetDog.Name); getErr != nil {
+		warn := fmt.Sprintf("dog dispatch: could not verify work assignment for %s: %v", targetDog.Name, getErr)
+		result.Warnings = append(result.Warnings, warn)
+		if !dogDispatchJSON {
+			style.PrintWarning("%s", warn)
+		}
+		_ = dogEscalateBestEffort(warn)
+	} else if d.Work != "" {
+		result.WorkConfirmed = true
+	} else {
+		warn := fmt.Sprintf("dog dispatch: work assignment cleared for %s between dispatch and verify — re-dispatch required", targetDog.Name)
+		result.Warnings = append(result.Warnings, warn)
+		if !dogDispatchJSON {
+			style.PrintWarning("%s", warn)
+		}
+		_ = dogEscalateBestEffort(warn)
 	}
 
 	// Success - output result
@@ -1153,13 +1194,22 @@ func runDogDispatch(cmd *cobra.Command, args []string) error {
 
 // dogDispatchResult is the JSON output for gt dog dispatch.
 type dogDispatchResult struct {
-	Plugin     string `json:"plugin"`
-	PluginRig  string `json:"plugin_rig,omitempty"`
-	PluginPath string `json:"plugin_path"`
-	Dog        string `json:"dog"`
-	DogCreated bool   `json:"dog_created,omitempty"`
-	Work       string `json:"work"`
-	DryRun     bool   `json:"dry_run,omitempty"`
+	Plugin         string   `json:"plugin"`
+	PluginRig      string   `json:"plugin_rig,omitempty"`
+	PluginPath     string   `json:"plugin_path"`
+	Dog            string   `json:"dog"`
+	DogCreated     bool     `json:"dog_created,omitempty"`
+	Work           string   `json:"work"`
+	DryRun         bool     `json:"dry_run,omitempty"`
+	SessionStarted bool     `json:"session_started"`
+	WorkConfirmed  bool     `json:"work_confirmed"`
+	Warnings       []string `json:"warnings,omitempty"`
+}
+
+// dogEscalateBestEffort fires a MEDIUM escalation via gt escalate.
+func dogEscalateBestEffort(msg string) error {
+	cmd := exec.Command("gt", "escalate", "--severity", "medium", msg)
+	return cmd.Run()
 }
 
 // ifStr returns ifTrue if cond is true, otherwise ifFalse.

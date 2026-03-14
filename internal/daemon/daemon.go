@@ -1936,6 +1936,17 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 		return
 	}
 
+	// Stale hook guard: skip polecats whose hook_bead is already closed.
+	// When a polecat completes work normally (gt done), the hook_bead gets closed
+	// but may not be cleared from the agent bead before the session stops.
+	// Without this check, every heartbeat cycle fires a false CRASHED_POLECAT alert
+	// for the dead session + non-empty hook_bead combination.
+	if d.isBeadClosed(info.HookBead) {
+		d.logger.Printf("Skipping crash detection for %s/%s: hook_bead %s is already closed (work completed normally)",
+			rigName, polecatName, info.HookBead)
+		return
+	}
+
 	// Spawning guard: skip polecats being actively started by gt sling.
 	// agent_state='spawning' means the polecat bead was created (with hook_bead
 	// set atomically) but the tmux session hasn't been launched yet. Restarting
@@ -2034,6 +2045,30 @@ func (d *Daemon) emitMassDeathEvent() {
 
 	// Clear the deaths to avoid repeated alerts
 	d.recentDeaths = nil
+}
+
+// isBeadClosed checks if a bead's status is "closed" by querying bd show --json.
+// Returns true if the bead exists and has status "closed", false otherwise.
+// On any error (bead not found, bd failure), returns false to err on the side
+// of crash detection rather than silently suppressing alerts.
+func (d *Daemon) isBeadClosed(beadID string) bool {
+	cmd := exec.Command(d.bdPath, "show", beadID, "--json") //nolint:gosec // G204: args are constructed internally
+	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ()
+
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	var issues []struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(output, &issues); err != nil || len(issues) == 0 {
+		return false
+	}
+
+	return issues[0].Status == "closed"
 }
 
 // notifyWitnessOfCrashedPolecat notifies the witness when a polecat crash is detected.
@@ -2136,9 +2171,11 @@ func (d *Daemon) reapIdlePolecat(rigName, polecatName string, timeout time.Durat
 			return
 		}
 
-		// If polecat has hooked work, it might just be stuck (not idle).
+		// If polecat has hooked work that is still open, it might be stuck (not idle).
 		// Don't reap — let checkPolecatSessionHealth handle stuck polecats.
-		if info.HookBead != "" {
+		// But if the hook_bead is closed, the work is done and this is just an idle
+		// polecat with a stale hook reference — safe to reap.
+		if info.HookBead != "" && !d.isBeadClosed(info.HookBead) {
 			return
 		}
 

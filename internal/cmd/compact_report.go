@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -129,7 +130,7 @@ func runDailyDigest() error {
 	}
 
 	var result compactResult
-	if err := json.Unmarshal(compactOut, &result); err != nil {
+	if err := json.Unmarshal(extractJSONObject(compactOut), &result); err != nil {
 		return fmt.Errorf("parsing compaction output: %w", err)
 	}
 
@@ -465,7 +466,7 @@ func queryCompactionReports(startDate, endDate string) ([]*compactReport, error)
 		Title        string `json:"title"`
 		EventPayload string `json:"event_payload"`
 	}
-	if err := json.Unmarshal(listOutput, &events); err != nil {
+	if err := json.Unmarshal(extractJSONArray(listOutput), &events); err != nil {
 		return nil, fmt.Errorf("parsing event list: %w", err)
 	}
 
@@ -572,7 +573,7 @@ func findExistingCompactReport(dateStr string) (string, error) {
 		ID    string `json:"id"`
 		Title string `json:"title"`
 	}
-	if err := json.Unmarshal(listOutput, &events); err != nil {
+	if err := json.Unmarshal(extractJSONArray(listOutput), &events); err != nil {
 		return "", err
 	}
 
@@ -603,7 +604,7 @@ func findExistingWeeklyRollup(weekStart, weekEnd string) (string, error) {
 		ID    string `json:"id"`
 		Title string `json:"title"`
 	}
-	if err := json.Unmarshal(listOutput, &events); err != nil {
+	if err := json.Unmarshal(extractJSONArray(listOutput), &events); err != nil {
 		return "", err
 	}
 
@@ -613,6 +614,16 @@ func findExistingWeeklyRollup(weekStart, weekEnd string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// extractJSONObject finds the first '{' byte in data and returns from that
+// point onward. Strips non-JSON prefix from subprocess output.
+func extractJSONObject(data []byte) []byte {
+	idx := bytes.IndexByte(data, '{')
+	if idx < 0 {
+		return data
+	}
+	return data[idx:]
 }
 
 // createWeeklyRollupBead creates a permanent audit bead for the weekly rollup.

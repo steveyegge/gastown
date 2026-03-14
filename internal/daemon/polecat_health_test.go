@@ -185,6 +185,56 @@ func TestCheckPolecatHealth_DBStateOverridesDescription(t *testing.T) {
 	}
 }
 
+// TestCheckPolecatHealth_SkipsClosedHookBead verifies that checkPolecatHealth
+// does NOT fire CRASHED_POLECAT when the hook_bead is already closed.
+// This is the regression test for the false-positive spam bug (issue hq-1o7):
+// when a polecat completes work normally, the hook_bead gets closed but the
+// stale reference remains on the agent bead, causing repeated false alerts.
+func TestCheckPolecatHealth_SkipsClosedHookBead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+	binDir := t.TempDir()
+	writeFakeTestTmux(t, binDir)
+	recentTime := time.Now().UTC().Format(time.RFC3339)
+
+	// Create a bd script that returns different JSON based on the bead ID:
+	// - Agent bead: working state with hook_bead set
+	// - Hook bead: status=closed (work completed normally)
+	agentJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent"],"description":"agent_state: working","hook_bead":"fe-xyz","agent_state":"working","updated_at":"%s"}]`, recentTime)
+	hookJSON := `[{"id":"fe-xyz","status":"closed"}]`
+	script := fmt.Sprintf("#!/bin/sh\n"+
+		"case \"$2\" in\n"+
+		"  gt-myr-polecat-mycat) echo '%s';;\n"+
+		"  fe-xyz) echo '%s';;\n"+
+		"  *) echo '[]'; exit 1;;\n"+
+		"esac\n", agentJSON, hookJSON)
+	bdPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
+		t.Fatalf("writing fake bd: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	var logBuf strings.Builder
+	d := &Daemon{
+		config: &Config{TownRoot: t.TempDir()},
+		logger: log.New(&logBuf, "", 0),
+		tmux:   tmux.NewTmux(),
+		bdPath: bdPath,
+	}
+
+	d.checkPolecatHealth("myr", "mycat")
+
+	got := logBuf.String()
+	if !strings.Contains(got, "hook_bead fe-xyz is already closed") {
+		t.Errorf("expected log about closed hook_bead, got: %q", got)
+	}
+	if strings.Contains(got, "CRASH DETECTED") {
+		t.Errorf("closed hook_bead must not trigger CRASH DETECTED, got: %q", got)
+	}
+}
+
 // TestCheckPolecatHealth_NotifiesWitnessOnCrash verifies that when a polecat
 // crash is detected, the daemon sends a notification to the witness via
 // `gt mail send` with a CRASHED_POLECAT subject. Restart is deferred to the

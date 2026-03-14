@@ -308,17 +308,6 @@ func TestIntegration(t *testing.T) {
 
 	b := New(dir)
 
-	// Sync database before testing to ensure consistent data and prevent
-	// flaky test failures from stale state.
-	// We use --allow-stale to handle cases where the daemon is actively writing and
-	// the staleness check would otherwise fail spuriously.
-	syncCmd := exec.Command("bd", "--allow-stale", "sync", "--import-only")
-	syncCmd.Dir = dir
-	if err := syncCmd.Run(); err != nil {
-		// If sync fails (e.g., no database exists), just log and continue
-		t.Logf("bd sync --import-only failed (may not have db): %v", err)
-	}
-
 	// Test List
 	t.Run("List", func(t *testing.T) {
 		issues, err := b.List(ListOptions{Status: "open"})

@@ -282,6 +282,89 @@ func NewRigSettings() *RigSettings {
 	}
 }
 
+// RepoSettingsPath is the conventional path within a repository where
+// gastown rig settings can be stored. This file is committed to git and
+// provides durable defaults that survive rig re-scaffolding.
+const RepoSettingsPath = ".gastown/settings.json"
+
+// LoadRepoSettings loads rig settings from a repository's .gastown/settings.json.
+// Returns nil, nil if the file does not exist (repo has no gastown settings).
+func LoadRepoSettings(repoRoot string) (*RigSettings, error) {
+	path := filepath.Join(repoRoot, RepoSettingsPath)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading repo settings: %w", err)
+	}
+
+	var settings RigSettings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, fmt.Errorf("parsing repo settings %s: %w", path, err)
+	}
+
+	return &settings, nil
+}
+
+// MergeSettingsCommand merges a repo-sourced MergeQueueConfig (floor) with
+// a local override. Non-empty fields in the override take precedence.
+// Returns a new config without mutating either input.
+func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
+	if repo == nil && local == nil {
+		return nil
+	}
+	result := &MergeQueueConfig{}
+	// Start from repo defaults
+	if repo != nil {
+		*result = *repo
+	}
+	// Overlay local overrides (non-empty fields win)
+	if local != nil {
+		if local.SetupCommand != "" {
+			result.SetupCommand = local.SetupCommand
+		}
+		if local.TypecheckCommand != "" {
+			result.TypecheckCommand = local.TypecheckCommand
+		}
+		if local.LintCommand != "" {
+			result.LintCommand = local.LintCommand
+		}
+		if local.TestCommand != "" {
+			result.TestCommand = local.TestCommand
+		}
+		if local.BuildCommand != "" {
+			result.BuildCommand = local.BuildCommand
+		}
+		// Merge non-command fields from local if explicitly set
+		if local.Enabled {
+			result.Enabled = local.Enabled
+		}
+		if local.OnConflict != "" {
+			result.OnConflict = local.OnConflict
+		}
+		if local.RunTests != nil {
+			result.RunTests = local.RunTests
+		}
+		if local.DeleteMergedBranches != nil {
+			result.DeleteMergedBranches = local.DeleteMergedBranches
+		}
+		if local.RetryFlakyTests > 0 {
+			result.RetryFlakyTests = local.RetryFlakyTests
+		}
+		if local.PollInterval != "" {
+			result.PollInterval = local.PollInterval
+		}
+		if local.MaxConcurrent > 0 {
+			result.MaxConcurrent = local.MaxConcurrent
+		}
+		if local.StaleClaimTimeout != "" {
+			result.StaleClaimTimeout = local.StaleClaimTimeout
+		}
+	}
+	return result
+}
+
 // LoadRigSettings loads and validates a rig settings file.
 func LoadRigSettings(path string) (*RigSettings, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally, not from user input

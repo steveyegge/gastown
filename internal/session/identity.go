@@ -108,7 +108,11 @@ func ParseSessionNameWithRegistry(session string, registry *PrefixRegistry) (*Ag
 		registry = NewPrefixRegistry()
 	}
 
-	// Check for town-level roles (hq- prefix)
+	// Check for town-level roles (hq- prefix).
+	// Note: "hq" may also be a registered rig prefix (e.g., knjn uses "hq").
+	// Known town-level roles are matched first; unknown suffixes fall through
+	// to rig-level parsing so that hq-witness, hq-refinery, hq-<polecat> etc.
+	// resolve correctly when "hq" is a rig prefix.
 	if strings.HasPrefix(session, HQPrefix) {
 		suffix := strings.TrimPrefix(session, HQPrefix)
 		switch suffix {
@@ -129,7 +133,7 @@ func ParseSessionNameWithRegistry(session string, registry *PrefixRegistry) (*Ag
 				}
 				return &AgentIdentity{Role: RoleDog, Name: name}, nil
 			}
-			return nil, fmt.Errorf("invalid session name %q: unknown hq- role", session)
+			// Fall through to rig-level parsing — "hq" may be a rig prefix.
 		}
 	}
 

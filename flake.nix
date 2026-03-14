@@ -4,10 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    beads = {
-      url = "github:steveyegge/beads/v0.55.4";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    beads.url = "github:steveyegge/beads";
   };
 
   outputs =
@@ -20,8 +17,23 @@
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
-        beads = self.inputs.beads.packages.${system};
+        # Go 1.25.8: beads v0.60.0 deps (charm.land/huh/v2) require it, nixpkgs has 1.25.7
+        # Remove when nixpkgs ships Go >= 1.25.8
+        goOverlay = final: prev: {
+          go_1_25 = prev.go_1_25.overrideAttrs {
+            version = "1.25.8";
+            src = prev.fetchurl {
+              url = "https://go.dev/dl/go1.25.8.src.tar.gz";
+              hash = "sha256-6YjUokRqx/4/baoImljpk2pSo4E1Wt7ByJgyMKjWxZ4=";
+            };
+          };
+        };
+
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ goOverlay ];
+        };
+        beadsPkg = beads.packages.${system}.default;
       in
       {
         packages = {
@@ -56,12 +68,12 @@
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            beads
-            go
-            gopls
-            gotools
-            go-tools
+          buildInputs = [
+            beadsPkg
+            pkgs.go_1_25
+            pkgs.gopls
+            pkgs.gotools
+            pkgs.go-tools
           ];
         };
       }

@@ -18,7 +18,8 @@ import (
 
 const (
 	defaultStrandedScanInterval = 30 * time.Second
-	eventPollInterval           = 5 * time.Second
+	eventPollInterval    = 5 * time.Second
+	eventPollMaxBackoff = 60 * time.Second
 
 	// convoyGracePeriod is how long after creation a convoy is immune from
 	// auto-close. This prevents a race where the daemon's stranded scan
@@ -183,7 +184,8 @@ func (m *ConvoyManager) runEventPoll() {
 		return
 	}
 
-	ticker := time.NewTicker(eventPollInterval)
+	currentInterval := eventPollInterval
+	ticker := time.NewTicker(currentInterval)
 	defer ticker.Stop()
 
 	for {
@@ -209,7 +211,25 @@ func (m *ConvoyManager) runEventPoll() {
 				snapshot[k] = v
 			}
 			m.storesMu.Unlock()
-			m.pollStoresSnapshot(snapshot)
+
+			hadError := m.pollStoresSnapshot(snapshot)
+			// Exponential backoff on consecutive errors to avoid hammering
+			// a recovering Dolt server. Reset on success. (GH#2686)
+			if hadError {
+				newInterval := currentInterval * 2
+				if newInterval > eventPollMaxBackoff {
+					newInterval = eventPollMaxBackoff
+				}
+				if newInterval != currentInterval {
+					currentInterval = newInterval
+					ticker.Reset(currentInterval)
+					m.logger("Convoy: poll backoff → %s", currentInterval)
+				}
+			} else if currentInterval != eventPollInterval {
+				currentInterval = eventPollInterval
+				ticker.Reset(currentInterval)
+				m.logger("Convoy: poll recovered, interval reset to %s", currentInterval)
+			}
 		}
 	}
 }
@@ -219,22 +239,28 @@ func (m *ConvoyManager) runEventPoll() {
 // processing events, preventing a burst of historical replay on restart.
 // A per-cycle seen set deduplicates close events across stores so each
 // issueID is processed at most once per poll cycle.
-func (m *ConvoyManager) pollStoresSnapshot(stores map[string]beadsdk.Storage) {
+// Returns true if any store poll encountered an error.
+func (m *ConvoyManager) pollStoresSnapshot(stores map[string]beadsdk.Storage) bool {
 	seen := make(map[string]bool)
+	hadError := false
 	for name, store := range stores {
 		if name != "hq" && m.isRigParked(name) {
 			continue
 		}
-		m.pollStore(name, store, stores, seen)
+		if err := m.pollStore(name, store, stores, seen); err != nil {
+			hadError = true
+		}
 	}
 	m.seeded.CompareAndSwap(false, true)
+	return hadError
 }
 
 // pollStore fetches new events from a single store and processes close events.
 // Convoy lookups always use the hq store since convoys are hq-* prefixed.
 // The stores snapshot is passed to avoid accessing m.stores without the lock.
 // The seen set deduplicates issueIDs across stores within a poll cycle.
-func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map[string]beadsdk.Storage, seen map[string]bool) {
+// Returns an error if the poll failed (used by caller for backoff decisions).
+func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map[string]beadsdk.Storage, seen map[string]bool) error {
 	// Load per-store high-water mark
 	var highWater int64
 	if v, ok := m.lastEventIDs.Load(name); ok {
@@ -247,7 +273,7 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map
 		// Signal recovery mode so the stranded scan shortens its interval and
 		// retries quickly once Dolt comes back.
 		m.recoveryMode.Store(true)
-		return
+		return err
 	}
 
 	// Advance high-water mark from all events
@@ -261,14 +287,14 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map
 	// First poll cycle is warm-up only: advance marks, skip processing.
 	// This prevents replaying the entire event history on daemon restart.
 	if !m.seeded.Load() {
-		return
+		return nil
 	}
 
 	// Use hq store for convoy lookups (convoys are hq-* prefixed)
 	hqStore := stores["hq"]
 	if hqStore == nil {
 		m.logger("Convoy: hq store unavailable, skipping convoy lookups for %s events", name)
-		return
+		return nil
 	}
 
 	for _, e := range events {
@@ -306,6 +332,7 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map
 		resolver := convoy.NewStoreResolver(m.townRoot, stores)
 		convoy.CheckConvoysForIssue(m.ctx, hqStore, m.townRoot, issueID, "Convoy", m.logger, m.gtPath, m.isRigParked, resolver)
 	}
+	return nil
 }
 
 // runStrandedScan is the periodic stranded convoy scan loop.

@@ -88,6 +88,9 @@ func TestEnsureLifecycleDefaults_EmptyConfig(t *testing.T) {
 	if config.Patrols.CompactorDog == nil || !config.Patrols.CompactorDog.Enabled {
 		t.Error("expected compactor_dog to be set")
 	}
+	if config.Patrols.Handler == nil || !config.Patrols.Handler.Enabled {
+		t.Error("expected handler to be set")
+	}
 }
 
 func TestEnsureLifecycleDefaults_PreservesExisting(t *testing.T) {

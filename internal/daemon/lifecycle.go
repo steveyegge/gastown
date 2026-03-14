@@ -450,6 +450,14 @@ func (d *Daemon) getNeedsPreSync(config *beads.RoleConfig, parsed *ParsedIdentit
 	}
 }
 
+// isBuiltinClaudeStartCommand returns true if the start_command is the
+// built-in default from role TOMLs ("exec claude --dangerously-skip-permissions").
+// Custom start_commands (e.g., "exec run --town {town}") return false.
+func isBuiltinClaudeStartCommand(cmd string) bool {
+	trimmed := strings.TrimPrefix(cmd, "exec ")
+	return trimmed == "claude --dangerously-skip-permissions"
+}
+
 // getStartCommand determines the startup command for an agent.
 // Uses role config if available, then role-based agent selection, then hardcoded defaults.
 // Includes beacon + role-specific instructions in the CLI prompt.
@@ -464,18 +472,10 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
 		}
 		rc := config.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
-		if config.IsResolvedAgentClaude(rc) {
+		if !config.IsResolvedAgentClaude(rc) || !isBuiltinClaudeStartCommand(roleConfig.StartCommand) {
+			// Non-Claude agent OR custom start_command: use TOML pattern
+			// with template expansion.
 			cmd := beads.ExpandRolePattern(roleConfig.StartCommand, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType, session.PrefixFor(parsed.RigName))
-			// Prepend env sanitization: CLAUDECODE causes Claude Code to
-			// reject startup (nested session detection) when inherited from
-			// tmux server environment. NODE_OPTIONS can contain debugger flags
-			// that crash Claude's Node.js runtime.
-			//
-			// The start_command may begin with "exec " (a shell builtin). Since
-			// env(1) treats its first non-option argument as the binary to run,
-			// "env ... exec claude" fails (exec is not a binary). We strip the
-			// "exec " prefix and re-add it before env so the shell processes it:
-			//   exec env -u CLAUDECODE NODE_OPTIONS='' claude ...
 			if strings.HasPrefix(cmd, "exec ") {
 				cmd = "exec env -u CLAUDECODE NODE_OPTIONS='' " + cmd[len("exec "):]
 			} else {
@@ -483,6 +483,8 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			}
 			return cmd
 		}
+		// Claude agent with built-in start_command: fall through to
+		// BuildStartupCommandFromConfig for proper model flag resolution.
 	}
 
 	rigPath := ""

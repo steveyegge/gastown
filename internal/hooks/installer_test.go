@@ -188,7 +188,11 @@ func TestInstallForRole_GeminiRoleAware(t *testing.T) {
 
 	got, _ := os.ReadFile(filepath.Join(dir, ".gemini", "settings.json"))
 	want, _ := templateFS.ReadFile("templates/gemini/settings-autonomous.json")
-	if string(got) != string(want) {
+	// Gemini templates contain {{GT_BIN}} which gets resolved at install time.
+	// Apply the same substitution to the expected content for comparison.
+	gtBin := resolveGTBinary()
+	wantResolved := strings.ReplaceAll(string(want), "{{GT_BIN}}", gtBin)
+	if string(got) != wantResolved {
 		t.Error("gemini autonomous: content mismatch")
 	}
 }

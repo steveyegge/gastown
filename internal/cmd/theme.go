@@ -195,9 +195,13 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 			theme = getThemeForRole(rig, role)
 		}
 
-		// Apply theme and status format
+		// Apply theme, window style, and status format
 		if err := t.ApplyTheme(sess, theme); err != nil {
 			fmt.Printf("  %s: failed (%v)\n", sess, err)
+			continue
+		}
+		if err := t.ApplyWindowStyle(sess, theme); err != nil {
+			fmt.Printf("  %s: failed to set window style (%v)\n", sess, err)
 			continue
 		}
 		if err := t.SetStatusFormat(sess, rig, worker, role); err != nil {

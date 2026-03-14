@@ -101,6 +101,14 @@ func CheckStaleBinary(repoDir string) *StaleBinaryInfo {
 	// Compare commits using prefix matching (handles short vs full hash)
 	// Use the shorter of the two commit lengths for comparison
 	if !commitsMatch(info.BinaryCommit, info.RepoCommit) {
+		// Check if all commits between binary and HEAD only touch .beads/ files
+		// (e.g., bd backup commits). These don't affect the binary and should not
+		// trigger a stale warning. (GH#2596)
+		if onlyBeadsChanges(repoDir, info.BinaryCommit) {
+			// HEAD advanced but only via beads-only commits — not stale
+			return info
+		}
+
 		info.IsStale = true
 
 		// Check if this is a forward-only update (binary commit is ancestor of HEAD).
@@ -183,6 +191,23 @@ func isGitRepo(dir string) bool {
 func hasGtSource(dir string) bool {
 	_, err := os.Stat(dir + "/cmd/gt/main.go")
 	return err == nil
+}
+
+// onlyBeadsChanges checks whether all commits between binaryCommit and HEAD
+// exclusively modify files under .beads/. Returns true if the diff contains
+// no changes outside .beads/, meaning the binary is functionally up-to-date.
+// Used to suppress false-positive stale warnings from bd backup commits. (GH#2596)
+func onlyBeadsChanges(repoDir, binaryCommit string) bool {
+	// Get files changed between binary commit and HEAD, excluding .beads/
+	// If this produces no output, all changes are within .beads/
+	cmd := exec.Command("git", "diff", "--name-only", binaryCommit+"..HEAD", "--", ".", ":!.beads")
+	cmd.Dir = repoDir
+	output, err := cmd.Output()
+	if err != nil {
+		// Can't determine — be conservative, assume stale
+		return false
+	}
+	return strings.TrimSpace(string(output)) == ""
 }
 
 // SetCommit allows the cmd package to pass in the build-time commit.

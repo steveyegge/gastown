@@ -12,6 +12,7 @@ func testRegistry() *PrefixRegistry {
 	r.Register("hop", "hop")
 	r.Register("sky", "sky")
 	r.Register("mp", "my-project")
+	r.Register("hq", "knjn")
 	return r
 }
 
@@ -61,6 +62,39 @@ func TestParseSessionName(t *testing.T) {
 			session:  "hq-dog-my-dog",
 			wantRole: RoleDog,
 			wantName: "my-dog",
+		},
+
+		// Rig prefix "hq" collision: hq-refinery/hq-witness/hq-<polecat>
+		// should resolve as rig-level roles when "hq" is a registered prefix.
+		{
+			name:       "hq prefix witness",
+			session:    "hq-witness",
+			wantRole:   RoleWitness,
+			wantRig:    "knjn",
+			wantPrefix: "hq",
+		},
+		{
+			name:       "hq prefix refinery",
+			session:    "hq-refinery",
+			wantRole:   RoleRefinery,
+			wantRig:    "knjn",
+			wantPrefix: "hq",
+		},
+		{
+			name:       "hq prefix polecat",
+			session:    "hq-jasper",
+			wantRole:   RolePolecat,
+			wantRig:    "knjn",
+			wantName:   "jasper",
+			wantPrefix: "hq",
+		},
+		{
+			name:       "hq prefix crew",
+			session:    "hq-crew-rushd",
+			wantRole:   RoleCrew,
+			wantRig:    "knjn",
+			wantName:   "rushd",
+			wantPrefix: "hq",
 		},
 
 		// Witness (new format: <prefix>-witness)
@@ -342,6 +376,10 @@ func TestParseSessionName_RoundTrip(t *testing.T) {
 		"gt-morsov",
 		"hop-ostrom",
 		"sky-furiosa",
+		"hq-witness",
+		"hq-refinery",
+		"hq-jasper",
+		"hq-crew-rushd",
 	}
 
 	for _, sess := range sessions {
