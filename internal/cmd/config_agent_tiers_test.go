@@ -912,3 +912,29 @@ func TestConfigAgentTiersAddAgent_RejectsInvalidNames(t *testing.T) {
 		t.Error("expected error for agent name with space")
 	}
 }
+
+func TestConfigAgentTiersSetOrder_ErrorOnDuplicateTierName(t *testing.T) {
+	townRoot, settingsPath := setupTierTestTown(t)
+	chdirTo(t, townRoot)
+
+	s := &config.TownSettings{
+		Type:    "town-settings",
+		Version: config.CurrentTownSettingsVersion,
+		AgentTiers: &config.AgentTierConfig{
+			Tiers: map[string]*config.AgentTier{
+				"small":  {Agents: []string{"claude-haiku"}, Selection: "priority", Fallback: true},
+				"medium": {Agents: []string{"claude-sonnet"}, Selection: "priority", Fallback: true},
+			},
+			TierOrder: []string{"small", "medium"},
+		},
+	}
+	saveSettings(t, settingsPath, s)
+
+	err := runConfigAgentTiersSetOrder(&cobra.Command{}, []string{"small", "small", "medium"})
+	if err == nil {
+		t.Fatal("expected error for duplicate tier name in order args")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("error = %v, want 'duplicate'", err)
+	}
+}
