@@ -299,6 +299,31 @@ func TestConfigAgentTiersSet_CreatesNewTier(t *testing.T) {
 	}
 }
 
+func TestConfigAgentTiersSet_NoAgentsFlagInitializesEmptySlice(t *testing.T) {
+	townRoot, settingsPath := setupTierTestTown(t)
+	chdirTo(t, townRoot)
+
+	tiersSetAgent = ""
+	tiersSetDescription = "A tier with no agents yet"
+	tiersSetSelection = ""
+	tiersSetFallback = ""
+	defer func() { tiersSetDescription = "" }()
+
+	err := runConfigAgentTiersSet(configAgentTiersSetCmd, []string{"empty-tier"})
+	if err != nil {
+		t.Fatalf("runConfigAgentTiersSet: %v", err)
+	}
+
+	s := loadSettings(t, settingsPath)
+	tier, ok := s.AgentTiers.Tiers["empty-tier"]
+	if !ok {
+		t.Fatal("empty-tier not created")
+	}
+	if tier.Agents == nil {
+		t.Error("Agents should be empty slice, not nil")
+	}
+}
+
 func TestConfigAgentTiersSet_UpdatesExistingTier(t *testing.T) {
 	townRoot, settingsPath := setupTierTestTown(t)
 	chdirTo(t, townRoot)

@@ -298,6 +298,7 @@ func runConfigAgentTiersSet(cmd *cobra.Command, args []string) error {
 	tier, exists := townSettings.AgentTiers.Tiers[tierName]
 	if !exists {
 		tier = &config.AgentTier{
+			Agents:    []string{},
 			Selection: "priority",
 			Fallback:  true,
 		}
