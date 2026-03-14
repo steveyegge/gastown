@@ -540,25 +540,50 @@ func TestUpOneTier(t *testing.T) {
 
 	t.Run("returns next tier in TierOrder", func(t *testing.T) {
 		t.Parallel()
-		if got := cfg.UpOneTier("low"); got != "mid" {
+		got, err := cfg.UpOneTier("low")
+		if err != nil {
+			t.Fatalf("UpOneTier(low) unexpected error: %v", err)
+		}
+		if got != "mid" {
 			t.Errorf("UpOneTier(low) = %q, want %q", got, "mid")
 		}
-		if got := cfg.UpOneTier("mid"); got != "high" {
+		got, err = cfg.UpOneTier("mid")
+		if err != nil {
+			t.Fatalf("UpOneTier(mid) unexpected error: %v", err)
+		}
+		if got != "high" {
 			t.Errorf("UpOneTier(mid) = %q, want %q", got, "high")
 		}
 	})
 
 	t.Run("last tier returns empty string", func(t *testing.T) {
 		t.Parallel()
-		if got := cfg.UpOneTier("high"); got != "" {
+		got, err := cfg.UpOneTier("high")
+		if err != nil {
+			t.Fatalf("UpOneTier(high) unexpected error: %v", err)
+		}
+		if got != "" {
 			t.Errorf("UpOneTier(high) = %q, want empty string", got)
 		}
 	})
 
 	t.Run("unknown tier returns empty string", func(t *testing.T) {
 		t.Parallel()
-		if got := cfg.UpOneTier("nonexistent"); got != "" {
+		got, err := cfg.UpOneTier("nonexistent")
+		if err != nil {
+			t.Fatalf("UpOneTier(nonexistent) unexpected error: %v", err)
+		}
+		if got != "" {
 			t.Errorf("UpOneTier(nonexistent) = %q, want empty string", got)
+		}
+	})
+
+	t.Run("empty TierOrder returns error", func(t *testing.T) {
+		t.Parallel()
+		emptyCfg := &AgentTierConfig{}
+		_, err := emptyCfg.UpOneTier("low")
+		if err == nil {
+			t.Error("UpOneTier with empty TierOrder should return error, got nil")
 		}
 	})
 }

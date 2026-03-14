@@ -179,17 +179,21 @@ func (c *AgentTierConfig) ResolveTierForRole(role string) string {
 }
 
 // UpOneTier returns the next tier above tierName in TierOrder.
-// Returns "" if tierName is not in TierOrder or is already the highest tier.
-func (c *AgentTierConfig) UpOneTier(tierName string) string {
+// Returns ("", nil) if tierName is not in TierOrder or is already the highest tier.
+// Returns an error if TierOrder is empty (no tiers configured).
+func (c *AgentTierConfig) UpOneTier(tierName string) (string, error) {
+	if len(c.TierOrder) == 0 {
+		return "", fmt.Errorf("TierOrder is empty: no tiers configured")
+	}
 	for i, name := range c.TierOrder {
 		if name == tierName {
 			if i+1 < len(c.TierOrder) {
-				return c.TierOrder[i+1]
+				return c.TierOrder[i+1], nil
 			}
-			return ""
+			return "", nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // rrCounter returns the atomic round-robin counter for the given tier,
@@ -235,7 +239,10 @@ func (c *AgentTierConfig) ResolveTierToRuntimeConfig(tierName string, excludedAg
 		if !tier.Fallback {
 			return nil, fmt.Errorf("no agents available in tier %q and fallback is disabled", tierName)
 		}
-		next := c.UpOneTier(tierName)
+		next, err := c.UpOneTier(tierName)
+		if err != nil {
+			return nil, fmt.Errorf("no agents available in tier %q: %w", tierName, err)
+		}
 		if next == "" {
 			return nil, fmt.Errorf("no agents available in tier %q and no higher tier exists", tierName)
 		}
