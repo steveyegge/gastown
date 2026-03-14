@@ -102,6 +102,12 @@ type TownSettings struct {
 	// These were previously hardcoded as Go constants throughout the codebase.
 	// All values are optional — omitted values use compiled-in defaults.
 	Operational *OperationalConfig `json:"operational,omitempty"`
+
+	// AgentTiers configures the multi-tier agent routing system.
+	// When set, tier role_defaults are consulted after rig/town role_agents but
+	// before the default_agent fallback, enabling intelligent agent selection.
+	// If nil, the tier system is not configured and this path is skipped entirely.
+	AgentTiers *AgentTierConfig `json:"agent_tiers,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.

@@ -1540,6 +1540,16 @@ func resolveRoleAgentConfigCore(role, townRoot, rigPath string) *RuntimeConfig {
 		}
 	}
 
+	// Check agent tier role_defaults — applies when rig/town role_agents has no entry.
+	// Phase 1: no exclusions (nil excludedAgents); Phase 2 adds AGENT_FAILURE-based exclusions.
+	if townSettings.AgentTiers != nil {
+		if tierName := townSettings.AgentTiers.ResolveTierForRole(role); tierName != "" {
+			if rc, err := townSettings.AgentTiers.ResolveTierToRuntimeConfig(tierName, nil); err == nil {
+				return rc
+			}
+		}
+	}
+
 	// Fall back to existing resolution (rig's Agent → town's DefaultAgent → "claude")
 	// Use internal version — caller already holds resolveConfigMu.
 	return resolveAgentConfigInternal(townRoot, rigPath)
