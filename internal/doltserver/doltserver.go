@@ -518,7 +518,11 @@ func IsRunning(townRoot string) (bool, int, error) {
 		serverDataDir := getServerDataDir(townRoot, pid)
 		if serverDataDir == "" || serverDataDir == config.DataDir {
 			// Cross-check process args to guard against PID reuse.
+			// Also check cwd as fallback for bare-started servers (no --data-dir flag).
 			actualDir := getDoltDataDirFromProcess(pid)
+			if actualDir == "" {
+				actualDir = getDoltCwdFromProcess(pid)
+			}
 			if actualDir == "" {
 				return true, pid, nil
 			}
@@ -685,8 +689,20 @@ func CheckPortConflict(townRoot string) (int, string) {
 		return 0, ""
 	}
 	dataDir := getServerDataDir(townRoot, pid)
-	if dataDir == "" || dataDir == cfg.DataDir {
-		return 0, "" // It's ours or unknown
+	if dataDir == cfg.DataDir {
+		return 0, "" // It's ours
+	}
+	if dataDir == "" {
+		// State file unknown — fall back to process args, then cwd.
+		// Processes started bare (no --data-dir flag) use their cwd as data dir.
+		if argDir := getDoltDataDirFromProcess(pid); argDir != "" {
+			dataDir = argDir
+		} else if cwd := getDoltCwdFromProcess(pid); cwd != "" {
+			dataDir = cwd
+		}
+		if dataDir == "" || dataDir == cfg.DataDir {
+			return 0, "" // Still unknown or confirmed ours
+		}
 	}
 	return pid, dataDir
 }
@@ -833,6 +849,26 @@ func getDoltDataDirFromProcess(pid int) string {
 		// Handle --data-dir=value form
 		if strings.HasPrefix(arg, "--data-dir=") {
 			return strings.TrimPrefix(arg, "--data-dir=")
+		}
+	}
+	return ""
+}
+
+// getDoltCwdFromProcess returns the working directory of the given process.
+// Used as a fallback when the process has no --data-dir flag (started bare from a rig dir).
+// Returns empty string on error or Windows.
+func getDoltCwdFromProcess(pid int) string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+	cmd := exec.Command("lsof", "-p", strconv.Itoa(pid), "-a", "-d", "cwd", "-Fn")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.HasPrefix(line, "n") {
+			return strings.TrimPrefix(line, "n")
 		}
 	}
 	return ""
