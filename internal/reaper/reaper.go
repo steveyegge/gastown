@@ -22,7 +22,7 @@ import (
 var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 // DefaultDatabases is the static fallback list of known production databases.
-var DefaultDatabases = []string{"hq", "bd", "gt"}
+var DefaultDatabases = []string{"hq", "bd", "gastown"}
 
 // testPollutionPrefixes are database name prefixes created by tests.
 var testPollutionPrefixes = []string{"testdb_", "beads_t", "beads_pt", "doctest_"}
