@@ -57,11 +57,11 @@ func buildTestTierConfig() *AgentTierConfig {
 func TestDefaultAgentTierConfig(t *testing.T) {
 	t.Parallel()
 
-	t.Run("returns 4 tiers", func(t *testing.T) {
+	t.Run("returns 3 tiers", func(t *testing.T) {
 		t.Parallel()
 		cfg := DefaultAgentTierConfig()
-		if len(cfg.Tiers) != 4 {
-			t.Fatalf("DefaultAgentTierConfig() has %d tiers, want 4", len(cfg.Tiers))
+		if len(cfg.Tiers) != 3 {
+			t.Fatalf("DefaultAgentTierConfig() has %d tiers, want 3", len(cfg.Tiers))
 		}
 	})
 
@@ -112,10 +112,10 @@ func TestDefaultAgentTierConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("TierOrder is small medium large reasoning", func(t *testing.T) {
+	t.Run("TierOrder is small medium large", func(t *testing.T) {
 		t.Parallel()
 		cfg := DefaultAgentTierConfig()
-		want := []string{"small", "medium", "large", "reasoning"}
+		want := []string{"small", "medium", "large"}
 		if len(cfg.TierOrder) != len(want) {
 			t.Fatalf("TierOrder = %v, want %v", cfg.TierOrder, want)
 		}
@@ -137,28 +137,38 @@ func TestDefaultAgentTierConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("reasoning tier has Fallback=false", func(t *testing.T) {
+	t.Run("large tier has Fallback=false", func(t *testing.T) {
 		t.Parallel()
 		cfg := DefaultAgentTierConfig()
-		reasoning := cfg.Tiers["reasoning"]
-		if reasoning == nil {
-			t.Fatal("reasoning tier not found")
+		large := cfg.Tiers["large"]
+		if large == nil {
+			t.Fatal("large tier not found")
 		}
-		if reasoning.Fallback {
-			t.Error("reasoning tier Fallback should be false (highest tier)")
+		if large.Fallback {
+			t.Error("large tier Fallback should be false (highest tier)")
 		}
 	})
 
 	t.Run("lower tiers have Fallback=true", func(t *testing.T) {
 		t.Parallel()
 		cfg := DefaultAgentTierConfig()
-		for _, name := range []string{"small", "medium", "large"} {
+		for _, name := range []string{"small", "medium"} {
 			tier := cfg.Tiers[name]
 			if tier == nil {
 				t.Fatalf("tier %q not found", name)
 			}
 			if !tier.Fallback {
 				t.Errorf("tier %q Fallback should be true", name)
+			}
+		}
+	})
+
+	t.Run("all default tiers use built-in claude preset", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultAgentTierConfig()
+		for name, tier := range cfg.Tiers {
+			if len(tier.Agents) != 1 || tier.Agents[0] != "claude" {
+				t.Errorf("tier %q Agents = %v, want [\"claude\"]", name, tier.Agents)
 			}
 		}
 	})
@@ -921,8 +931,8 @@ func TestBuildTierSummaries(t *testing.T) {
 		t.Parallel()
 		cfg := DefaultAgentTierConfig()
 		summaries := cfg.BuildTierSummaries()
-		if len(summaries) != 4 {
-			t.Fatalf("BuildTierSummaries() = %d entries, want 4", len(summaries))
+		if len(summaries) != 3 {
+			t.Fatalf("BuildTierSummaries() = %d entries, want 3", len(summaries))
 		}
 		for _, s := range summaries {
 			if s.Name == "" {

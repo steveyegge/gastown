@@ -30,15 +30,13 @@ func TestAgentTierList_ShowsAllTiersWhenConfigured(t *testing.T) {
 		}
 	})
 
-	for _, tier := range []string{"small", "medium", "large", "reasoning"} {
+	for _, tier := range []string{"small", "medium", "large"} {
 		if !strings.Contains(out, tier) {
 			t.Errorf("output missing tier %q", tier)
 		}
 	}
-	for _, agent := range []string{"claude-haiku", "claude-sonnet", "claude-opus", "claude-reasoning"} {
-		if !strings.Contains(out, agent) {
-			t.Errorf("output missing agent %q", agent)
-		}
+	if !strings.Contains(out, "claude") {
+		t.Errorf("output missing agent %q", "claude")
 	}
 }
 
@@ -87,7 +85,7 @@ func TestAgentTierList_AvailableFlagFiltersTiers(t *testing.T) {
 	})
 
 	// In Phase 1, all tiers have agents so all should still appear
-	for _, tier := range []string{"small", "medium", "large", "reasoning"} {
+	for _, tier := range []string{"small", "medium", "large"} {
 		if !strings.Contains(out, tier) {
 			t.Errorf("output with --available missing tier %q", tier)
 		}

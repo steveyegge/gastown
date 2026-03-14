@@ -503,7 +503,7 @@ gt agent tier list --available   # Only tiers that have live agents
 ```
 
 **What tiers are:** Each tier is a named capability level (e.g., `small`, `medium`,
-`large`, `reasoning`) that maps to an ordered list of agent presets. When a role
+`large`) that maps to an ordered list of agent presets. When a role
 is assigned to a tier, Gas Town picks the best available agent from that tier's
 list based on the tier's selection strategy.
 
@@ -535,11 +535,11 @@ gt config agent tiers init
 # 2. Inspect what was created
 gt config agent tiers show
 
-# 3. Customize: add a fast agent to the small tier
-gt config agent tiers add-agent small claude-haiku
+# 3. Customize: add a secondary agent to the small tier
+gt config agent tiers add-agent small gemini
 
 # 4. Set custom tier ordering (low → high capability)
-gt config agent tiers set-order small medium large reasoning
+gt config agent tiers set-order small medium large
 
 # 5. Map the polecat role to the medium tier
 gt config agent tiers set-role polecat medium
@@ -548,7 +548,7 @@ gt config agent tiers set-role polecat medium
 gt agent tier list
 ```
 
-Custom tier names are supported — `small`/`medium`/`large`/`reasoning` are
+Custom tier names are supported — `small`/`medium`/`large` are
 conventions, not requirements. See [design/intelligent-model-routing.md](design/intelligent-model-routing.md) §1.6
 for the full design.
 

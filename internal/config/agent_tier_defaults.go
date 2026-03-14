@@ -1,15 +1,19 @@
 package config
 
-// DefaultAgentTierConfig returns a default 4-tier agent configuration.
+// DefaultAgentTierConfig returns a default 3-tier agent configuration.
 //
 // Tiers (lowest to highest capability):
-//   - small:     Lightweight tasks — haiku-class agents
-//   - medium:    Standard feature work — sonnet-class agents
-//   - large:     Cross-cutting work — opus-class agents
-//   - reasoning: Deep analysis and hard algorithms — reasoning-class agents
+//   - small:  Lightweight tasks — monitoring, health checks, routine dispatch
+//   - medium: Standard feature work — bug fixes, multi-file changes, merge processing
+//   - large:  Cross-cutting work — refactors, new subsystems, strategic coordination
+//
+// All tiers default to the built-in "claude" preset, which resolves to the
+// platform's current flagship model. Operators can customize tiers to use
+// different agents or model-specific presets (e.g., custom "claude-haiku"
+// entries in settings/agents.json).
 //
 // All tiers use "priority" selection by default.
-// The "reasoning" tier has Fallback=false — it is the highest tier and cannot
+// The "large" tier has Fallback=false — it is the highest tier and cannot
 // be escalated further.
 //
 // Default role mappings:
@@ -21,30 +25,24 @@ func DefaultAgentTierConfig() *AgentTierConfig {
 		Tiers: map[string]*AgentTier{
 			"small": {
 				Description: "Lightweight monitoring and patrol tasks: zombie detection, health checks, routine dispatch",
-				Agents:      []string{"claude-haiku"},
+				Agents:      []string{"claude"},
 				Selection:   "priority",
 				Fallback:    true,
 			},
 			"medium": {
 				Description: "Standard feature work, multi-file changes, bug fixes, merge queue processing",
-				Agents:      []string{"claude-sonnet"},
+				Agents:      []string{"claude"},
 				Selection:   "priority",
 				Fallback:    true,
 			},
 			"large": {
 				Description: "Cross-cutting refactors, new subsystem integration, strategic coordination",
-				Agents:      []string{"claude-opus"},
-				Selection:   "priority",
-				Fallback:    true,
-			},
-			"reasoning": {
-				Description: "Deep debugging, architecture decisions, tricky algorithms, security analysis",
-				Agents:      []string{"claude-reasoning"},
+				Agents:      []string{"claude"},
 				Selection:   "priority",
 				Fallback:    false,
 			},
 		},
-		TierOrder: []string{"small", "medium", "large", "reasoning"},
+		TierOrder: []string{"small", "medium", "large"},
 		RoleDefaults: map[string]string{
 			"mayor":    "large",
 			"crew":     "large",

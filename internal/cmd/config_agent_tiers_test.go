@@ -231,16 +231,14 @@ func TestConfigAgentTiersShow_OutputIncludesAllTiers(t *testing.T) {
 		_ = runConfigAgentTiersShow(&cobra.Command{}, nil)
 	})
 
-	for _, tier := range []string{"small", "medium", "large", "reasoning"} {
+	for _, tier := range []string{"small", "medium", "large"} {
 		if !strings.Contains(out, tier) {
 			t.Errorf("output missing tier %q", tier)
 		}
 	}
-	// Agents
-	for _, agent := range []string{"claude-haiku", "claude-sonnet", "claude-opus", "claude-reasoning"} {
-		if !strings.Contains(out, agent) {
-			t.Errorf("output missing agent %q", agent)
-		}
+	// Agents — all default tiers use built-in "claude"
+	if !strings.Contains(out, "claude") {
+		t.Errorf("output missing agent %q", "claude")
 	}
 	// Role defaults
 	for _, role := range []string{"mayor", "polecat", "witness"} {

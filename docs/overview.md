@@ -189,7 +189,7 @@ without waiting for confirmation. Gas Town is a steam engine - agents are piston
 ## Agent Tiers and Capability-Based Routing
 
 Gas Town supports tier-based agent routing: define named capability tiers
-(`small`, `medium`, `large`, `reasoning`) and map each tier to an ordered list
+(`small`, `medium`, `large`) and map each tier to an ordered list
 of agent presets. When a role is dispatched, Gas Town automatically selects the
 right agent from the appropriate tier.
 
