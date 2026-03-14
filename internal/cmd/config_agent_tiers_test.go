@@ -804,3 +804,111 @@ func TestConfigAgentTiersSetOrder_ErrorIfTiersMismatch(t *testing.T) {
 		t.Errorf("error = %v, want 'not found'", err)
 	}
 }
+
+// ---- validateIdentifier ----
+
+func TestValidateIdentifier_Valid(t *testing.T) {
+	cases := []struct {
+		kind        string
+		name        string
+		extraAllowed string
+	}{
+		{"tier name", "small", ""},
+		{"tier name", "my-tier", ""},
+		{"tier name", "tier_1", ""},
+		{"tier name", "CamelCase", ""},
+		{"agent name", "claude-sonnet", "."},
+		{"agent name", "claude-haiku-4-5-20251001", "."},
+		{"agent name", "my.agent.v2", "."},
+		{"role name", "polecat", "/"},
+		{"role name", "gastown/polecats/nux", "/"},
+		{"role name", "mayor", "/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateIdentifier(tc.kind, tc.name, tc.extraAllowed); err != nil {
+				t.Errorf("validateIdentifier(%q, %q, %q) = %v, want nil", tc.kind, tc.name, tc.extraAllowed, err)
+			}
+		})
+	}
+}
+
+func TestValidateIdentifier_Invalid(t *testing.T) {
+	cases := []struct {
+		kind        string
+		name        string
+		extraAllowed string
+		wantErr     string
+	}{
+		{"tier name", "", "", "must not be empty"},
+		{"tier name", "has space", "", "whitespace"},
+		{"tier name", "has\ttab", "", "whitespace"},
+		{"tier name", "has\nnewline", "", "whitespace"},
+		{"tier name", "has@special", "", "invalid character"},
+		{"tier name", "has!bang", "", "invalid character"},
+		{"tier name", "tier/slash", "", "invalid character"},
+		{"agent name", "", ".", "must not be empty"},
+		{"agent name", "agent name", ".", "whitespace"},
+		{"agent name", "agent@bad", ".", "invalid character"},
+		{"role name", "", "/", "must not be empty"},
+		{"role name", "role name", "/", "whitespace"},
+		{"role name", "role@bad", "/", "invalid character"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.kind+"/"+tc.name, func(t *testing.T) {
+			err := validateIdentifier(tc.kind, tc.name, tc.extraAllowed)
+			if err == nil {
+				t.Fatalf("validateIdentifier(%q, %q, %q) = nil, want error containing %q", tc.kind, tc.name, tc.extraAllowed, tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error = %q, want to contain %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestConfigAgentTiersSet_RejectsInvalidTierName(t *testing.T) {
+	townRoot, _ := setupTierTestTown(t)
+	chdirTo(t, townRoot)
+
+	for _, badName := range []string{"has space", "has@special", ""} {
+		err := runConfigAgentTiersSet(configAgentTiersSetCmd, []string{badName})
+		if err == nil {
+			t.Errorf("runConfigAgentTiersSet(%q): expected error, got nil", badName)
+		}
+	}
+}
+
+func TestConfigAgentTiersSetRole_RejectsInvalidNames(t *testing.T) {
+	townRoot, _ := setupTierTestTown(t)
+	chdirTo(t, townRoot)
+
+	// Invalid role name
+	err := runConfigAgentTiersSetRole(&cobra.Command{}, []string{"bad role", "medium"})
+	if err == nil {
+		t.Error("expected error for role name with space")
+	}
+
+	// Invalid tier name
+	err = runConfigAgentTiersSetRole(&cobra.Command{}, []string{"polecat", "bad tier"})
+	if err == nil {
+		t.Error("expected error for tier name with space")
+	}
+}
+
+func TestConfigAgentTiersAddAgent_RejectsInvalidNames(t *testing.T) {
+	townRoot, _ := setupTierTestTown(t)
+	chdirTo(t, townRoot)
+
+	// Invalid tier name
+	err := runConfigAgentTiersAddAgent(&cobra.Command{}, []string{"bad tier", "claude-sonnet"})
+	if err == nil {
+		t.Error("expected error for tier name with space")
+	}
+
+	// Invalid agent name
+	err = runConfigAgentTiersAddAgent(&cobra.Command{}, []string{"medium", "bad agent"})
+	if err == nil {
+		t.Error("expected error for agent name with space")
+	}
+}

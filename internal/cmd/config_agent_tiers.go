@@ -269,6 +269,9 @@ func printTiersSummary(tc *config.AgentTierConfig) {
 
 func runConfigAgentTiersSet(cmd *cobra.Command, args []string) error {
 	tierName := args[0]
+	if err := validateIdentifier("tier name", tierName, ""); err != nil {
+		return err
+	}
 
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
@@ -302,6 +305,9 @@ func runConfigAgentTiersSet(cmd *cobra.Command, args []string) error {
 
 	// Apply flags
 	if tiersSetAgent != "" {
+		if err := validateIdentifier("agent name", tiersSetAgent, "."); err != nil {
+			return err
+		}
 		// Warn if not a known preset
 		if !isKnownAgentPreset(tiersSetAgent) {
 			fmt.Printf("Warning: agent %q is not a known preset (may be a custom agent)\n", tiersSetAgent)
@@ -355,6 +361,9 @@ func runConfigAgentTiersSet(cmd *cobra.Command, args []string) error {
 
 func runConfigAgentTiersRemove(cmd *cobra.Command, args []string) error {
 	tierName := args[0]
+	if err := validateIdentifier("tier name", tierName, ""); err != nil {
+		return err
+	}
 
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
@@ -403,6 +412,12 @@ func runConfigAgentTiersRemove(cmd *cobra.Command, args []string) error {
 func runConfigAgentTiersSetRole(cmd *cobra.Command, args []string) error {
 	role := args[0]
 	tierName := args[1]
+	if err := validateIdentifier("role name", role, "/"); err != nil {
+		return err
+	}
+	if err := validateIdentifier("tier name", tierName, ""); err != nil {
+		return err
+	}
 
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
@@ -435,6 +450,12 @@ func runConfigAgentTiersSetRole(cmd *cobra.Command, args []string) error {
 func runConfigAgentTiersAddAgent(cmd *cobra.Command, args []string) error {
 	tierName := args[0]
 	agentName := args[1]
+	if err := validateIdentifier("tier name", tierName, ""); err != nil {
+		return err
+	}
+	if err := validateIdentifier("agent name", agentName, "."); err != nil {
+		return err
+	}
 
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
@@ -475,6 +496,12 @@ func runConfigAgentTiersAddAgent(cmd *cobra.Command, args []string) error {
 func runConfigAgentTiersRemoveAgent(cmd *cobra.Command, args []string) error {
 	tierName := args[0]
 	agentName := args[1]
+	if err := validateIdentifier("tier name", tierName, ""); err != nil {
+		return err
+	}
+	if err := validateIdentifier("agent name", agentName, "."); err != nil {
+		return err
+	}
 
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
@@ -532,6 +559,13 @@ func runConfigAgentTiersSetOrder(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no agent tiers configured; run 'gt config agent tiers init' first")
 	}
 
+	// Validate tier name format before existence checks
+	for _, name := range args {
+		if err := validateIdentifier("tier name", name, ""); err != nil {
+			return err
+		}
+	}
+
 	// Validate: all args must exist in Tiers
 	for _, name := range args {
 		if !townSettings.AgentTiers.HasTier(name) {
@@ -571,6 +605,46 @@ func isKnownAgentPreset(name string) bool {
 		}
 	}
 	return false
+}
+
+// validateIdentifier checks that a name is non-empty and contains only
+// alphanumeric characters, hyphens, and underscores (plus any extra allowed chars).
+func validateIdentifier(kind, name string, extraAllowed string) error {
+	if name == "" {
+		return fmt.Errorf("%s must not be empty", kind)
+	}
+	for _, c := range name {
+		valid := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_'
+		if !valid && extraAllowed != "" {
+			valid = strings.ContainsRune(extraAllowed, c)
+		}
+		if !valid {
+			if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+				return fmt.Errorf("%s %q must not contain whitespace", kind, name)
+			}
+			return fmt.Errorf("%s %q contains invalid character %q (use letters, digits, hyphens, underscores%s)", kind, name, string(c), extraAllowedHint(extraAllowed))
+		}
+	}
+	return nil
+}
+
+// extraAllowedHint returns a human-readable hint for extra allowed characters.
+func extraAllowedHint(extra string) string {
+	if extra == "" {
+		return ""
+	}
+	hints := make([]string, 0, len(extra))
+	for _, c := range extra {
+		switch c {
+		case '.':
+			hints = append(hints, "dots")
+		case '/':
+			hints = append(hints, "slashes")
+		default:
+			hints = append(hints, string(c))
+		}
+	}
+	return ", " + strings.Join(hints, ", ")
 }
 
 func init() {
