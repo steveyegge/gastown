@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 )
 
 // AgentTier defines a capability tier that maps to an ordered list of agent presets.
@@ -52,6 +54,11 @@ type AgentTierConfig struct {
 	// Keys are role names (e.g., "mayor", "polecat", "witness").
 	// Values are tier names (must be keys in Tiers).
 	RoleDefaults map[string]string `json:"role_defaults,omitempty"`
+
+	// rrCounters holds per-tier round-robin counters (not persisted).
+	// Keys are tier names (string), values are *atomic.Uint64.
+	// Resets on process restart, which is intentional.
+	rrCounters sync.Map
 }
 
 // TierSummary is a compact tier descriptor for the Phase 3 router agent.
@@ -160,4 +167,93 @@ func (c *AgentTierConfig) Validate() error {
 	}
 
 	return nil
+}
+
+// ResolveTierForRole returns the default tier name for the given role.
+// Returns "" if no mapping exists.
+func (c *AgentTierConfig) ResolveTierForRole(role string) string {
+	if c == nil || c.RoleDefaults == nil {
+		return ""
+	}
+	return c.RoleDefaults[role]
+}
+
+// UpOneTier returns the next tier above tierName in TierOrder.
+// Returns "" if tierName is not in TierOrder or is already the highest tier.
+func (c *AgentTierConfig) UpOneTier(tierName string) string {
+	for i, name := range c.TierOrder {
+		if name == tierName {
+			if i+1 < len(c.TierOrder) {
+				return c.TierOrder[i+1]
+			}
+			return ""
+		}
+	}
+	return ""
+}
+
+// rrCounter returns the atomic round-robin counter for the given tier,
+// creating it on first access.
+func (c *AgentTierConfig) rrCounter(tierName string) *atomic.Uint64 {
+	v, _ := c.rrCounters.LoadOrStore(tierName, new(atomic.Uint64))
+	return v.(*atomic.Uint64)
+}
+
+// ResolveTierToRuntimeConfig resolves a tier name to a RuntimeConfig.
+//
+// Resolution steps:
+//  1. Look up tier by name — returns error if not found.
+//  2. Filter agents: skip any in excludedAgents.
+//  3. Select agent based on tier's Selection strategy:
+//     - "priority" (default): first available agent in list order.
+//     - "round-robin": next agent in cycle via per-tier atomic counter.
+//  4. Resolve selected agent name to RuntimeConfig via GetAgentPresetByName + RuntimeConfigFromPreset.
+//  5. If no agents remain and Fallback is true: recurse via UpOneTier.
+//  6. If no agents remain and Fallback is false (or no higher tier): return error.
+func (c *AgentTierConfig) ResolveTierToRuntimeConfig(tierName string, excludedAgents map[string]bool) (*RuntimeConfig, error) {
+	if c == nil || c.Tiers == nil {
+		return nil, fmt.Errorf("agent tier config is nil")
+	}
+
+	tier, ok := c.Tiers[tierName]
+	if !ok {
+		return nil, fmt.Errorf("tier %q not found", tierName)
+	}
+
+	// Filter to available (non-excluded) agents.
+	available := make([]string, 0, len(tier.Agents))
+	for _, agent := range tier.Agents {
+		if !excludedAgents[agent] {
+			available = append(available, agent)
+		}
+	}
+
+	if len(available) == 0 {
+		if !tier.Fallback {
+			return nil, fmt.Errorf("no agents available in tier %q and fallback is disabled", tierName)
+		}
+		next := c.UpOneTier(tierName)
+		if next == "" {
+			return nil, fmt.Errorf("no agents available in tier %q and no higher tier exists", tierName)
+		}
+		return c.ResolveTierToRuntimeConfig(next, excludedAgents)
+	}
+
+	// Select agent.
+	var selected string
+	switch tier.Selection {
+	case "round-robin":
+		counter := c.rrCounter(tierName)
+		idx := int(counter.Add(1)-1) % len(available)
+		selected = available[idx]
+	default: // "priority" or ""
+		selected = available[0]
+	}
+
+	preset := GetAgentPresetByName(selected)
+	if preset == nil {
+		return nil, fmt.Errorf("agent preset %q not found", selected)
+	}
+
+	return RuntimeConfigFromPreset(preset.Name), nil
 }
