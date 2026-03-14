@@ -270,6 +270,32 @@ func TestAgentTierConfigValidate(t *testing.T) {
 		}
 	})
 
+	t.Run("nil agents list fails", func(t *testing.T) {
+		t.Parallel()
+		cfg := &AgentTierConfig{
+			Tiers: map[string]*AgentTier{
+				"a": {Description: "A", Agents: nil, Selection: "priority"},
+			},
+			TierOrder: []string{"a"},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("Validate() should fail when Agents is nil")
+		}
+	})
+
+	t.Run("empty agents list fails", func(t *testing.T) {
+		t.Parallel()
+		cfg := &AgentTierConfig{
+			Tiers: map[string]*AgentTier{
+				"a": {Description: "A", Agents: []string{}, Selection: "priority"},
+			},
+			TierOrder: []string{"a"},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("Validate() should fail when Agents is empty")
+		}
+	})
+
 	t.Run("duplicate tier in TierOrder fails", func(t *testing.T) {
 		t.Parallel()
 		cfg := &AgentTierConfig{

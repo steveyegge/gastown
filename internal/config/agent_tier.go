@@ -149,6 +149,9 @@ func (c *AgentTierConfig) Validate() error {
 		if tier == nil {
 			return fmt.Errorf("tier %q: nil tier config", name)
 		}
+		if len(tier.Agents) == 0 {
+			return fmt.Errorf("tier %q: agents list must not be nil or empty", name)
+		}
 		sel := tier.Selection
 		if sel != "" && sel != "priority" && sel != "round-robin" {
 			return fmt.Errorf("tier %q: invalid selection %q (must be \"priority\" or \"round-robin\")", name, sel)
