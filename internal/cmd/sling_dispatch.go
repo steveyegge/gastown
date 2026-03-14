@@ -289,6 +289,15 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		if spawnInfo.BaseBranch != "" && spawnInfo.BaseBranch != "main" {
 			allVars = append(allVars, fmt.Sprintf("base_branch=%s", spawnInfo.BaseBranch))
 		}
+
+		// GH#gt-zqvj: Inject prior attempt context when re-dispatching an issue
+		// that already has an open MR from a previous polecat. The new polecat
+		// gets the old branch name so it can cherry-pick prior work instead of
+		// starting from scratch.
+		if priorVars := lookupPriorAttempt(beadsDir, params.BeadID); len(priorVars) > 0 {
+			allVars = append(allVars, priorVars...)
+			fmt.Printf("  %s Prior attempt found — context injected for polecat\n", style.Dim.Render("↻"))
+		}
 		formulaResult, err := InstantiateFormulaOnBead(context.Background(), params.FormulaName, params.BeadID, info.Title, hookWorkDir, townRoot, true, allVars)
 		if err != nil {
 			if params.FormulaFailFatal {

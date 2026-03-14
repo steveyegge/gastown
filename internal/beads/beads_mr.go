@@ -47,8 +47,8 @@ func (b *Beads) findMRForBranch(branch string, skipClosed bool) (*Issue, error) 
 }
 
 // FindOpenMRsForIssue returns all open merge-request beads whose source_issue
-// matches the given issue ID. Used to find superseded MRs when a new MR is
-// created for the same source issue.
+// matches the given issue ID. Used to find prior attempts when re-dispatching
+// an issue and to supersede old MRs when a new one is created.
 func (b *Beads) FindOpenMRsForIssue(issueID string) ([]*Issue, error) {
 	needle := "source_issue: " + issueID + "\n"
 
