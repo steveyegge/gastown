@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,17 +30,30 @@ var (
 // same precedence as other gt commands: config.yaml > GT_DOLT_PORT env > default.
 // This replaces hardcoded 127.0.0.1:3307 which broke when the server ran on
 // a different port (GH#2470).
+//
+// When workspace.FindFromCwd() fails (e.g., running from outside a town dir),
+// env vars GT_DOLT_HOST/GT_DOLT_PORT are still respected as fallback. See #2601.
 func resolveReaperDoltConfig() (host string, port int) {
 	host = "127.0.0.1"
 	port = doltserver.DefaultPort
 	townRoot, err := workspace.FindFromCwd()
-	if err != nil {
+	if err == nil {
+		cfg := doltserver.DefaultConfig(townRoot)
+		port = cfg.Port
+		if cfg.Host != "" {
+			host = cfg.Host
+		}
 		return
 	}
-	cfg := doltserver.DefaultConfig(townRoot)
-	port = cfg.Port
-	if cfg.Host != "" {
-		host = cfg.Host
+	// Workspace not found — still check env vars directly so reaper works
+	// in environments where the workspace can't be detected (Docker, WSL2).
+	if h := os.Getenv("GT_DOLT_HOST"); h != "" {
+		host = h
+	}
+	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
+		if portVal, err := strconv.Atoi(p); err == nil {
+			port = portVal
+		}
 	}
 	return
 }
