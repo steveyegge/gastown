@@ -84,6 +84,8 @@ var (
 	convoyLandForce    bool
 	convoyLandKeep     bool
 	convoyLandDryRun   bool
+	convoyAdoptOwned   bool
+	convoyAdoptMerge   string
 )
 
 const (
@@ -358,6 +360,37 @@ Examples:
 	RunE:         runConvoyLand,
 }
 
+var convoyAdoptCmd = &cobra.Command{
+	Use:   "adopt <epic-id>",
+	Short: "Create a convoy from an epic's children",
+	Long: `Create a convoy that tracks all slingable children of an existing epic.
+
+The epic bead is NOT the convoy itself. Instead, a new convoy bead (hq-cv-*)
+is created that tracks the epic's leaf work items (tasks, bugs, features,
+chores). Non-slingable types (epics, decisions) are excluded.
+
+This is similar to 'convoy create' but auto-discovers tracked issues from
+the epic's parent-child hierarchy instead of requiring them to be listed
+explicitly.
+
+The --owned flag marks the convoy as caller-managed (no automatic
+witness/refinery registration).
+
+The --merge flag sets the merge strategy for all work in the convoy:
+  direct  Push branch directly to main (no MR, no refinery)
+  mr      Create merge-request bead, refinery processes (default)
+  local   Keep on feature branch (for upstream PRs, human review)
+
+Examples:
+  gt convoy adopt gt-epic-abc
+  gt convoy adopt gt-epic-abc --owned
+  gt convoy adopt gt-epic-abc --merge=direct
+  gt convoy adopt gt-epic-abc --owned --merge=direct`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE:         runConvoyAdopt,
+}
+
 func init() {
 	// Create flags
 	convoyCreateCmd.Flags().StringVar(&convoyMolecule, "molecule", "", "Associated molecule ID")
@@ -395,6 +428,10 @@ func init() {
 	convoyLandCmd.Flags().BoolVar(&convoyLandKeep, "keep-worktrees", false, "Skip worktree cleanup")
 	convoyLandCmd.Flags().BoolVar(&convoyLandDryRun, "dry-run", false, "Show what would happen without acting")
 
+	// Adopt flags
+	convoyAdoptCmd.Flags().BoolVar(&convoyAdoptOwned, "owned", false, "Mark convoy as caller-managed lifecycle (no automatic witness/refinery registration)")
+	convoyAdoptCmd.Flags().StringVar(&convoyAdoptMerge, "merge", "", "Merge strategy: direct (push to main), mr (merge queue, default), local (keep on branch)")
+
 	// Add subcommands
 	convoyCmd.AddCommand(convoyCreateCmd)
 	convoyCmd.AddCommand(convoyStatusCmd)
@@ -406,6 +443,7 @@ func init() {
 	convoyCmd.AddCommand(convoyLandCmd)
 	convoyCmd.AddCommand(convoyStageCmd)
 	convoyCmd.AddCommand(convoyLaunchCmd)
+	convoyCmd.AddCommand(convoyAdoptCmd)
 
 	rootCmd.AddCommand(convoyCmd)
 }
@@ -579,6 +617,189 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	if convoyOwned {
+		fmt.Printf("\n  %s\n", style.Dim.Render("Owned convoy: caller manages lifecycle via gt convoy land"))
+	} else {
+		fmt.Printf("\n  %s\n", style.Dim.Render("Convoy auto-closes when all tracked issues complete"))
+	}
+
+	return nil
+}
+
+func runConvoyAdopt(cmd *cobra.Command, args []string) error {
+	epicID := args[0]
+
+	// Validate --merge flag if provided
+	if convoyAdoptMerge != "" {
+		switch convoyAdoptMerge {
+		case "direct", "mr", "local":
+			// Valid
+		default:
+			return fmt.Errorf("invalid --merge value %q: must be direct, mr, or local", convoyAdoptMerge)
+		}
+	}
+
+	// Verify the epic bead exists via bd show (uses bdShow from convoy_stage.go,
+	// which is in the same package and handles cross-rig resolution).
+	epic, err := bdShow(epicID)
+	if err != nil {
+		return fmt.Errorf("epic '%s' not found: %w", epicID, err)
+	}
+
+	// Verify it's an epic type
+	if epic.IssueType != "epic" {
+		return fmt.Errorf("'%s' is not an epic (type: %s)\n  convoy adopt only works with epic beads", epicID, epic.IssueType)
+	}
+
+	// Find all children via bd list --parent (uses bdListChildren from convoy_stage.go).
+	// This walks one level of the parent-child hierarchy.
+	// For deep hierarchies, we do BFS like collectEpicBeads.
+	var slingableChildren []bdShowResult
+	visited := make(map[string]bool)
+	queue := []string{epicID}
+	visited[epicID] = true // don't include the epic itself
+
+	for len(queue) > 0 {
+		parentID := queue[0]
+		queue = queue[1:]
+
+		children, err := bdListChildren(parentID)
+		if err != nil {
+			style.PrintWarning("couldn't list children of %s: %v", parentID, err)
+			continue
+		}
+
+		for _, child := range children {
+			if visited[child.ID] {
+				continue
+			}
+			visited[child.ID] = true
+
+			if convoyops.IsSlingableType(child.IssueType) {
+				slingableChildren = append(slingableChildren, child)
+			} else {
+				// Non-slingable types (e.g., sub-epics, decisions) — recurse into them
+				// to find their slingable descendants.
+				queue = append(queue, child.ID)
+			}
+		}
+	}
+
+	if len(slingableChildren) == 0 {
+		return fmt.Errorf("epic '%s' has no slingable children (task, bug, feature, chore)", epicID)
+	}
+
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return err
+	}
+
+	// Ensure custom types (including 'convoy') are registered in town beads.
+	if err := beads.EnsureCustomTypes(townBeads); err != nil {
+		return fmt.Errorf("ensuring custom types: %w", err)
+	}
+
+	// Ensure custom statuses (staged_ready, staged_warnings) are registered.
+	if err := beads.EnsureCustomStatuses(townBeads); err != nil {
+		return fmt.Errorf("ensuring custom statuses: %w", err)
+	}
+
+	// Build convoy description and fields
+	convoyTitle := fmt.Sprintf("Adopt: %s", epic.Title)
+	description := fmt.Sprintf("Convoy adopted from epic %s, tracking %d children", epicID, len(slingableChildren))
+
+	owner := detectSender()
+	convoyFieldValues := &beads.ConvoyFields{
+		Owner: owner,
+		Merge: convoyAdoptMerge,
+	}
+	description = beads.SetConvoyFields(&beads.Issue{Description: description}, convoyFieldValues)
+
+	// Guard against flag-like titles (gt-e0kx5)
+	if beads.IsFlagLikeTitle(epic.Title) {
+		return fmt.Errorf("refusing to create convoy: epic title %q looks like a CLI flag", epic.Title)
+	}
+
+	// Generate convoy ID
+	convoyID := fmt.Sprintf("hq-cv-%s", generateShortID())
+
+	createArgs := []string{
+		"create",
+		"--type=convoy",
+		"--id=" + convoyID,
+		"--title=" + convoyTitle,
+		"--description=" + description,
+		"--json",
+	}
+	if convoyAdoptOwned {
+		createArgs = append(createArgs, "--labels=gt:owned")
+	}
+	if beads.NeedsForceForID(convoyID) {
+		createArgs = append(createArgs, "--force")
+	}
+
+	var createStderr bytes.Buffer
+	if err := BdCmd(createArgs...).
+		WithAutoCommit().
+		Dir(townBeads).
+		Stderr(&createStderr).
+		Run(); err != nil {
+		return fmt.Errorf("creating convoy: %w (%s)", err, strings.TrimSpace(createStderr.String()))
+	}
+
+	// Add 'tracks' relations for each slingable child
+	trackedCount := 0
+	for _, child := range slingableChildren {
+		var depStderr bytes.Buffer
+		if err := BdCmd("dep", "add", convoyID, child.ID, "--type=tracks").
+			WithAutoCommit().
+			Dir(townBeads).
+			Stderr(&depStderr).
+			Run(); err != nil {
+			errMsg := strings.TrimSpace(depStderr.String())
+			if errMsg == "" {
+				errMsg = err.Error()
+			}
+			style.PrintWarning("couldn't track %s: %s", child.ID, errMsg)
+		} else {
+			trackedCount++
+		}
+	}
+
+	// Output summary
+	fmt.Printf("%s Created convoy 🚚 %s from epic %s\n\n", style.Bold.Render("✓"), convoyID, epicID)
+	fmt.Printf("  Name:     %s\n", convoyTitle)
+	fmt.Printf("  Epic:     %s (%s)\n", epicID, epic.Title)
+	fmt.Printf("  Tracking: %d slingable children\n", trackedCount)
+	if owner != "" {
+		fmt.Printf("  Owner:    %s\n", owner)
+	}
+	if convoyAdoptMerge != "" {
+		fmt.Printf("  Merge:    %s\n", convoyAdoptMerge)
+	}
+	if convoyAdoptOwned {
+		fmt.Printf("  Owned:    %s\n", style.Warning.Render("caller-managed lifecycle"))
+	}
+
+	// Print tracked beads with statuses
+	fmt.Printf("\n  Tracked beads:\n")
+	for _, child := range slingableChildren {
+		statusIcon := "○"
+		switch child.Status {
+		case "open":
+			statusIcon = "●"
+		case "closed":
+			statusIcon = "✓"
+		case "in_progress", "hooked", "pinned":
+			statusIcon = "◆"
+		}
+		issueType := child.IssueType
+		if issueType == "" {
+			issueType = "task"
+		}
+		fmt.Printf("    %s %s  %s [%s] (%s)\n", statusIcon, child.ID, child.Title, child.Status, issueType)
+	}
+
+	if convoyAdoptOwned {
 		fmt.Printf("\n  %s\n", style.Dim.Render("Owned convoy: caller manages lifecycle via gt convoy land"))
 	} else {
 		fmt.Printf("\n  %s\n", style.Dim.Render("Convoy auto-closes when all tracked issues complete"))
