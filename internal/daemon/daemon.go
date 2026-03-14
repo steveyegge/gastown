@@ -1947,6 +1947,18 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 		return
 	}
 
+	// Terminal state guard: skip polecats in intentional shutdown states.
+	// agent_state='done' means normal completion; agent_state='nuked' means forced shutdown.
+	// Their sessions being dead is expected, not a crash. Without this check,
+	// the dead session + open hook_bead combination can fire false CRASHED_POLECAT
+	// alerts during the race window before the hook_bead is closed.
+	agentState := beads.AgentState(info.State)
+	if agentState == beads.AgentStateDone || agentState == beads.AgentStateNuked {
+		d.logger.Printf("Skipping crash detection for %s/%s: agent_state=%s (intentional shutdown, not a crash)",
+			rigName, polecatName, info.State)
+		return
+	}
+
 	// Spawning guard: skip polecats being actively started by gt sling.
 	// agent_state='spawning' means the polecat bead was created (with hook_bead
 	// set atomically) but the tmux session hasn't been launched yet. Restarting
