@@ -146,6 +146,29 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		}
 	}
 
+	// ENFORCEMENT: If rig config has default_branch set, polecats MUST use it
+	// as their base branch. This applies to both new worktrees and reused ones.
+	// Prevents polecats from branching off the wrong base when config changes
+	// (e.g., main → release) after worktrees were originally created.
+	rigConfigBranch := ""
+	if rigCfg, cfgErr := rig.LoadRigConfig(r.Path); cfgErr == nil && rigCfg.DefaultBranch != "" {
+		rigConfigBranch = rigCfg.DefaultBranch
+	}
+	if rigConfigBranch != "" && opts.BaseBranch == "" {
+		opts.BaseBranch = rigConfigBranch
+		fmt.Printf("  Using rig default_branch: %s\n", rigConfigBranch)
+	}
+	if rigConfigBranch != "" && opts.BaseBranch != "" {
+		// Strip origin/ prefix for comparison
+		effectiveBase := strings.TrimPrefix(opts.BaseBranch, "origin/")
+		if effectiveBase != rigConfigBranch {
+			return nil, fmt.Errorf("base branch mismatch: opts.BaseBranch=%q but rig config default_branch=%q\n"+
+				"Rig config is authoritative. Fix with: gt config set default_branch %s (in rig config.json)\n"+
+				"Or pass --base-branch %s to override.",
+				effectiveBase, rigConfigBranch, effectiveBase, effectiveBase)
+		}
+	}
+
 	// Persistent polecat model (gt-4ac): try to reuse an idle polecat first.
 	// Idle polecats have completed their work but kept their sandbox (worktree).
 	// Reusing avoids the overhead of creating a new worktree.
