@@ -6,9 +6,11 @@
 package hooks
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/steveyegge/gastown/internal/hookutil"
@@ -58,6 +60,16 @@ func InstallForRole(provider, settingsDir, workDir, role, hooksDir, hooksFile st
 	content, err := resolveTemplate(provider, hooksFile, role)
 	if err != nil {
 		return fmt.Errorf("resolving template for %s: %w", provider, err)
+	}
+
+	// Substitute {{GT_BIN}} with the resolved gt binary path.
+	// Templates use this placeholder so hooks call gt directly instead of
+	// relying on PATH exports, which fail on Gemini CLI (the hook runner
+	// expands $PATH into an enormous string that breaks command parsing).
+	// GH#gt-6y2s
+	if bytes.Contains(content, []byte("{{GT_BIN}}")) {
+		gtBin := resolveGTBinary()
+		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBin))
 	}
 
 	// Use restrictive permissions for settings that may contain role instructions
@@ -122,4 +134,18 @@ func roleAwarePatterns(roleType, hooksFile string) []string {
 // isSettingsFile returns true for files that may contain sensitive role config.
 func isSettingsFile(name string) bool {
 	return filepath.Ext(name) == ".json"
+}
+
+// resolveGTBinary returns the absolute path to the gt binary.
+// Tries os.Executable() first (most reliable when running as gt), then
+// falls back to exec.LookPath for PATH-based discovery. If both fail,
+// returns "gt" and hopes the runtime PATH has it.
+func resolveGTBinary() string {
+	if exe, err := os.Executable(); err == nil {
+		return exe
+	}
+	if path, err := exec.LookPath("gt"); err == nil {
+		return path
+	}
+	return "gt"
 }
