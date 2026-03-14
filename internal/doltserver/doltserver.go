@@ -1205,6 +1205,11 @@ func Start(townRoot string) error {
 		}
 	}
 
+	// Clean up stale Unix socket file left by a previous Dolt crash.
+	// Dolt defaults to /tmp/mysql.sock; if stale, it falls back to TCP-only
+	// and subsequent restarts also fail to bind the socket.
+	cleanupStaleSocket("/tmp/mysql.sock")
+
 	// Open log file
 	logFile, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
@@ -1327,6 +1332,28 @@ func cleanupStaleDoltLock(databaseDir string) error {
 	// lsof found processes - lock is legitimately held (likely by bd)
 	// This is not an error condition; dolt server will handle the conflict
 	return nil
+}
+
+// cleanupStaleSocket removes a stale Unix socket file if no process holds it.
+// After a Dolt crash, /tmp/mysql.sock can remain and prevent clean restarts.
+func cleanupStaleSocket(socketPath string) {
+	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+		return // No socket file, nothing to clean
+	}
+
+	// Check if any process holds this socket open
+	cmd := exec.Command("lsof", socketPath)
+	if _, err := cmd.Output(); err != nil {
+		// lsof exit code 1 = no process has the file open → stale socket
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			if rmErr := os.Remove(socketPath); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to remove stale socket %s: %v\n", socketPath, rmErr)
+			} else {
+				fmt.Fprintf(os.Stderr, "Cleaned up stale socket: %s\n", socketPath)
+			}
+		}
+	}
+	// If lsof found processes, socket is in use — leave it alone
 }
 
 // Stop stops the Dolt SQL server.
