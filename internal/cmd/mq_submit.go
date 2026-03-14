@@ -244,6 +244,25 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 				style.PrintWarning("could not back-link source issue %s to MR %s: %v", issueID, mrIssue.ID, err)
 			}
 		}
+
+		// GH#gt-tt37: Supersede older open MRs for the same source issue.
+		// When a new polecat reattempts an issue, the old MR (different branch)
+		// is orphaned. Close it so the queue and GitHub PRs stay clean.
+		if issueID != "" {
+			if oldMRs, err := bd.FindOpenMRsForIssue(issueID); err == nil {
+				for _, old := range oldMRs {
+					if old.ID == mrIssue.ID {
+						continue // skip the one we just created
+					}
+					reason := fmt.Sprintf("superseded by %s", mrIssue.ID)
+					if err := bd.CloseWithReason(reason, old.ID); err != nil {
+						style.PrintWarning("could not supersede old MR %s: %v", old.ID, err)
+					} else {
+						fmt.Printf("  %s Superseded old MR: %s\n", style.Dim.Render("○"), old.ID)
+					}
+				}
+			}
+		}
 	}
 
 	// Success output
