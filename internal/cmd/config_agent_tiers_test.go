@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,20 +70,6 @@ func saveSettings(t *testing.T, settingsPath string, s *config.TownSettings) {
 	if err := config.SaveTownSettings(settingsPath, s); err != nil {
 		t.Fatalf("save settings: %v", err)
 	}
-}
-
-// settingsJSON returns the raw JSON of the settings file for deep inspection.
-func settingsJSON(t *testing.T, settingsPath string) map[string]interface{} {
-	t.Helper()
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		t.Fatalf("read settings file: %v", err)
-	}
-	var out map[string]interface{}
-	if err := json.Unmarshal(data, &out); err != nil {
-		t.Fatalf("unmarshal settings: %v", err)
-	}
-	return out
 }
 
 // ---- gt config agent tiers init ----
@@ -173,6 +158,9 @@ func TestConfigAgentTiersInit_WrittenConfigMatchesDefault(t *testing.T) {
 		}
 		if len(gotTier.Agents) != len(wantTier.Agents) {
 			t.Errorf("tier %q agents count = %d, want %d", name, len(gotTier.Agents), len(wantTier.Agents))
+		}
+		if gotTier.Selection != wantTier.Selection {
+			t.Errorf("tier %q selection = %q, want %q", name, gotTier.Selection, wantTier.Selection)
 		}
 		if gotTier.Fallback != wantTier.Fallback {
 			t.Errorf("tier %q fallback = %v, want %v", name, gotTier.Fallback, wantTier.Fallback)
@@ -297,6 +285,12 @@ func TestConfigAgentTiersSet_CreatesNewTier(t *testing.T) {
 	if len(tier.Agents) != 1 || tier.Agents[0] != "claude-sonnet" {
 		t.Errorf("Agents = %v, want [claude-sonnet]", tier.Agents)
 	}
+	if tier.Selection != "priority" {
+		t.Errorf("Selection = %q, want 'priority'", tier.Selection)
+	}
+	if !tier.Fallback {
+		t.Error("Fallback should be true for new tier")
+	}
 }
 
 func TestConfigAgentTiersSet_NoAgentsFlagInitializesEmptySlice(t *testing.T) {
@@ -321,6 +315,12 @@ func TestConfigAgentTiersSet_NoAgentsFlagInitializesEmptySlice(t *testing.T) {
 	}
 	if tier.Agents == nil {
 		t.Error("Agents should be empty slice, not nil")
+	}
+	if tier.Selection != "priority" {
+		t.Errorf("Selection = %q, want 'priority'", tier.Selection)
+	}
+	if !tier.Fallback {
+		t.Error("Fallback should be true for new tier")
 	}
 }
 
@@ -366,6 +366,13 @@ func TestConfigAgentTiersSet_UpdatesExistingTier(t *testing.T) {
 	if len(tier.Agents) != 1 || tier.Agents[0] != "claude-haiku" {
 		t.Errorf("Agents should be unchanged, got %v", tier.Agents)
 	}
+	// Selection and Fallback should be preserved from the existing tier
+	if tier.Selection != "priority" {
+		t.Errorf("Selection = %q, want 'priority' (should be preserved)", tier.Selection)
+	}
+	if !tier.Fallback {
+		t.Error("Fallback should be true (should be preserved from existing tier)")
+	}
 }
 
 func TestConfigAgentTiersSet_NewTierAppendedToTierOrder(t *testing.T) {
@@ -403,6 +410,14 @@ func TestConfigAgentTiersSet_NewTierAppendedToTierOrder(t *testing.T) {
 	}
 	if order[0] != "small" || order[1] != "medium" {
 		t.Errorf("TierOrder = %v, want [small medium]", order)
+	}
+	// New tier should have default Selection and Fallback
+	newTier := after.AgentTiers.Tiers["medium"]
+	if newTier.Selection != "priority" {
+		t.Errorf("new tier Selection = %q, want 'priority'", newTier.Selection)
+	}
+	if !newTier.Fallback {
+		t.Error("new tier Fallback should be true")
 	}
 }
 
@@ -454,6 +469,9 @@ func TestConfigAgentTiersSet_FallbackFalse(t *testing.T) {
 	tier := after.AgentTiers.Tiers["reasoning"]
 	if tier.Fallback {
 		t.Error("Fallback should be false")
+	}
+	if tier.Selection != "priority" {
+		t.Errorf("Selection = %q, want 'priority'", tier.Selection)
 	}
 }
 
