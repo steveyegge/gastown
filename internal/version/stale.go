@@ -91,19 +91,53 @@ func CheckStaleBinary(repoDir string) *StaleBinaryInfo {
 	// Compare commits using prefix matching (handles short vs full hash)
 	// Use the shorter of the two commit lengths for comparison
 	if !commitsMatch(info.BinaryCommit, info.RepoCommit) {
-		info.IsStale = true
+		// Check if the only changes since the binary commit are backup-only
+		// (.beads/backup/*). These commits don't affect the gt binary and
+		// should not trigger stale warnings. See #2596.
+		if !onlyBackupCommits(repoDir, info.BinaryCommit) {
+			info.IsStale = true
 
-		// Try to count commits between binary and HEAD
-		countCmd := exec.Command("git", "rev-list", "--count", info.BinaryCommit+"..HEAD")
-		countCmd.Dir = repoDir
-		if countOutput, err := countCmd.Output(); err == nil {
-			if count, parseErr := fmt.Sscanf(strings.TrimSpace(string(countOutput)), "%d", &info.CommitsBehind); parseErr != nil || count != 1 {
-				info.CommitsBehind = 0
+			// Try to count commits between binary and HEAD
+			countCmd := exec.Command("git", "rev-list", "--count", info.BinaryCommit+"..HEAD")
+			countCmd.Dir = repoDir
+			if countOutput, err := countCmd.Output(); err == nil {
+				if count, parseErr := fmt.Sscanf(strings.TrimSpace(string(countOutput)), "%d", &info.CommitsBehind); parseErr != nil || count != 1 {
+					info.CommitsBehind = 0
+				}
 			}
 		}
 	}
 
 	return info
+}
+
+// onlyBackupCommits returns true if all commits between binaryCommit and HEAD
+// only touch .beads/backup/* files. These backup-only commits don't affect the
+// gt binary and should not trigger stale-binary warnings.
+func onlyBackupCommits(repoDir, binaryCommit string) bool {
+	// Get list of files changed between binary commit and HEAD
+	cmd := exec.Command("git", "diff", "--name-only", binaryCommit+"..HEAD")
+	cmd.Dir = repoDir
+	output, err := cmd.Output()
+	if err != nil {
+		return false // Can't determine, assume not backup-only
+	}
+
+	files := strings.TrimSpace(string(output))
+	if files == "" {
+		return false // No files changed is unexpected here
+	}
+
+	for _, f := range strings.Split(files, "\n") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if !strings.HasPrefix(f, ".beads/backup/") {
+			return false // Non-backup file changed
+		}
+	}
+	return true
 }
 
 // GetRepoRoot returns the git repository root for the gt source code.
