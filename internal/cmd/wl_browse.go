@@ -74,14 +74,20 @@ func runWLBrowse(cmd *cobra.Command, args []string) error {
 	cloneDir := filepath.Join(tmpDir, commonsDB)
 
 	remote := fmt.Sprintf("%s/%s", commonsOrg, commonsDB)
-	fmt.Printf("Cloning %s...\n", style.Bold.Render(remote))
+	if !wlBrowseJSON {
+		fmt.Printf("Cloning %s...\n", style.Bold.Render(remote))
+	}
 
 	cloneCmd := exec.Command(doltPath, "clone", remote, cloneDir)
-	cloneCmd.Stderr = os.Stderr
+	if !wlBrowseJSON {
+		cloneCmd.Stderr = os.Stderr
+	}
 	if err := cloneCmd.Run(); err != nil {
 		return fmt.Errorf("cloning %s: %w\nEnsure the database exists on DoltHub: https://www.dolthub.com/%s", remote, err, remote)
 	}
-	fmt.Printf("%s Cloned successfully\n\n", style.Bold.Render("✓"))
+	if !wlBrowseJSON {
+		fmt.Printf("%s Cloned successfully\n\n", style.Bold.Render("✓"))
+	}
 
 	query := buildBrowseQuery(BrowseFilter{
 		Status:   wlBrowseStatus,
