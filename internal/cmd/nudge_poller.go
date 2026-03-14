@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -69,6 +70,16 @@ func runNudgePoller(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("session %q not found", sessionName)
 	}
 
+	// Resolve nudge options once at startup: if the target agent uses Escape
+	// as cancel (e.g., Gemini CLI), skip the Escape keystroke during delivery
+	// to avoid canceling in-flight generation. (GH#gt-wasn)
+	nudgeOpts := tmux.NudgeOpts{}
+	if agentName, err := t.GetEnvironment(sessionName, "GT_AGENT"); err == nil && agentName != "" {
+		if preset := config.GetAgentPresetByName(agentName); preset != nil && preset.EscapeCancelsRequest {
+			nudgeOpts.SkipEscape = true
+		}
+	}
+
 	// Set up signal handling for graceful shutdown.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -111,7 +122,7 @@ func runNudgePoller(cmd *cobra.Command, args []string) error {
 			}
 
 			formatted := nudge.FormatForInjection(drained)
-			if err := t.NudgeSession(sessionName, formatted); err != nil {
+			if err := t.NudgeSessionWithOpts(sessionName, formatted, nudgeOpts); err != nil {
 				fmt.Fprintf(os.Stderr, "nudge-poller: injection error for %s: %v\n", sessionName, err)
 			}
 		}

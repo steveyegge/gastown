@@ -1404,6 +1404,21 @@ func (t *Tmux) sendKeysLiteralWithRetry(target, text string, timeout time.Durati
 // queue up and execute one at a time. This prevents garbled input when
 // SessionStart hooks and nudges arrive simultaneously.
 func (t *Tmux) NudgeSession(session, message string) error {
+	return t.NudgeSessionWithOpts(session, message, NudgeOpts{})
+}
+
+// NudgeOpts controls optional behavior for nudge delivery.
+type NudgeOpts struct {
+	// SkipEscape omits the Escape keystroke (step 5) and the 600ms readline
+	// timeout (step 6) from the delivery protocol. Set this for agents where
+	// Escape cancels in-flight generation (e.g., Gemini CLI) rather than
+	// harmlessly exiting vim INSERT mode.
+	SkipEscape bool
+}
+
+// NudgeSessionWithOpts is like NudgeSession but accepts delivery options.
+// See NudgeOpts for available options.
+func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) error {
 	// Serialize nudges to this session to prevent interleaving.
 	// Use a timed lock to avoid permanent blocking if a previous nudge hung.
 	if !acquireNudgeLock(session, nudgeLockTimeout) {
@@ -1437,15 +1452,17 @@ func (t *Tmux) NudgeSession(session, message string) error {
 	// 4. Wait 500ms for text delivery to complete (tested, required)
 	time.Sleep(500 * time.Millisecond)
 
-	// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
-	// See: https://github.com/anthropics/gastown/issues/307
-	_, _ = t.run("send-keys", "-t", target, "Escape")
+	if !opts.SkipEscape {
+		// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
+		// See: https://github.com/anthropics/gastown/issues/307
+		_, _ = t.run("send-keys", "-t", target, "Escape")
 
-	// 6. Wait 600ms — must exceed bash readline's keyseq-timeout (500ms default)
-	// so ESC is processed alone, not as a meta prefix for the subsequent Enter.
-	// Without this, ESC+Enter within 500ms becomes M-Enter (meta-return) which
-	// does NOT submit the line.
-	time.Sleep(600 * time.Millisecond)
+		// 6. Wait 600ms — must exceed bash readline's keyseq-timeout (500ms default)
+		// so ESC is processed alone, not as a meta prefix for the subsequent Enter.
+		// Without this, ESC+Enter within 500ms becomes M-Enter (meta-return) which
+		// does NOT submit the line.
+		time.Sleep(600 * time.Millisecond)
+	}
 
 	// 7. Send Enter with retry (critical for message submission)
 	var lastErr error

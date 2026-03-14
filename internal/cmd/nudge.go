@@ -265,7 +265,16 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 		return nil
 
 	default: // NudgeModeImmediate
-		return t.NudgeSession(sessionName, prefixedMessage)
+		opts := tmux.NudgeOpts{}
+		// Check if the target agent uses Escape as cancel (e.g., Gemini CLI).
+		// For these agents, skip the Escape keystroke to avoid canceling
+		// in-flight generation. (GH#gt-wasn)
+		if agentName, err := t.GetEnvironment(sessionName, "GT_AGENT"); err == nil && agentName != "" {
+			if preset := config.GetAgentPresetByName(agentName); preset != nil && preset.EscapeCancelsRequest {
+				opts.SkipEscape = true
+			}
+		}
+		return t.NudgeSessionWithOpts(sessionName, prefixedMessage, opts)
 	}
 }
 
