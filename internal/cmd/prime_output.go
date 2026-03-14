@@ -467,7 +467,9 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("4. If there's a 🤝 HANDOFF message, read it and continue the work")
 		fmt.Println("5. Check for attached work: `" + cli.Name() + " hook`")
 		fmt.Println("   - If attachment found → **RUN IT** (no human input needed)")
-		fmt.Println("   - If no attachment → await user instruction")
+		fmt.Println("   - If no attachment → **STOP and wait for input**. Do NOT run")
+		fmt.Println("     any more commands. Do NOT poll mail. Do NOT check status.")
+		fmt.Println("     Sit idle at your prompt — a nudge or user message will arrive.")
 	case RoleDeacon:
 		// Skip startup protocol if paused - the pause message was already shown
 		paused, _, _ := deacon.IsPaused(ctx.TownRoot)
