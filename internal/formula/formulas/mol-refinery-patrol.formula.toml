@@ -322,7 +322,18 @@ id = "run-tests"
 title = "Run quality checks and tests"
 needs = ["process-branch"]
 description = """
+**FIRST: Check run_tests config before doing ANYTHING.**
+
+**If run_tests = "false": SKIP THIS ENTIRE STEP. Do not run any quality checks
+or tests. Proceed directly to the next step. Do NOT display or execute any
+commands below.**
+
 **Config: run_tests = {{run_tests}}**
+
+---
+
+If run_tests = "true", proceed with quality checks and tests below:
+
 **Config: test_command = {{test_command}}**
 **Config: setup_command = {{setup_command}}**
 **Config: typecheck_command = {{typecheck_command}}**
@@ -351,10 +362,6 @@ Proceed to handle-failures step. Track which specific check failed
 (setup/typecheck/lint/build) for the failure diagnosis.
 
 **3. Run the test suite:**
-
-If run_tests = "false": Skip this step entirely. Proceed to handle-failures.
-
-If run_tests = "true":
 
 ```bash
 {{test_command}}            # Run tests (configured per-rig)
