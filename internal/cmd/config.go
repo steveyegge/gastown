@@ -1229,6 +1229,7 @@ config values such as the default AI model or provider.`,
 	configAgentCmd.AddCommand(configAgentGetCmd)
 	configAgentCmd.AddCommand(configAgentSetCmd)
 	configAgentCmd.AddCommand(configAgentRemoveCmd)
+	configAgentCmd.AddCommand(configAgentTiersCmd)
 
 	// Add subcommands to config
 	configCmd.AddCommand(configAgentCmd)
