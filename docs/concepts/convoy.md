@@ -178,6 +178,44 @@ Issues (3):
 Duration: 2h 15m
 ```
 
+### Adopt from Epic
+
+Create a convoy that automatically discovers and tracks all slingable children
+of an existing epic. This walks the epic's parent-child hierarchy (including
+nested sub-epics) and tracks leaf work items (tasks, bugs, features, chores).
+
+```bash
+# Basic: adopt all children of an epic
+gt convoy adopt gt-epic-abc
+
+# Mark as caller-managed (no automatic witness/refinery registration)
+gt convoy adopt gt-epic-abc --owned
+
+# Set merge strategy for all work in the convoy
+gt convoy adopt gt-epic-abc --merge=direct
+gt convoy adopt gt-epic-abc --merge=mr       # default
+gt convoy adopt gt-epic-abc --merge=local
+
+# Combine flags
+gt convoy adopt gt-epic-abc --owned --merge=direct
+```
+
+**How it works:**
+1. Verifies the given bead is an epic
+2. BFS-walks the parent-child hierarchy to find slingable descendants
+3. Creates a new convoy bead (`hq-cv-*`) with title "Adopt: \<epic title\>"
+4. Adds `tracks` relations for each slingable child
+
+**Merge strategies:**
+| Strategy | Description |
+|----------|-------------|
+| `direct` | Push branch directly to main (no MR, no refinery) |
+| `mr` | Create merge-request bead, refinery processes (default) |
+| `local` | Keep on feature branch (for upstream PRs, human review) |
+
+**Non-slingable types** (epics, decisions) are recursed into but never tracked
+directly. Only leaf work items appear in the convoy.
+
 ## Auto-Convoy on Sling
 
 When you sling a single issue without an existing convoy:
