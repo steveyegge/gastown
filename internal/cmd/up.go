@@ -856,7 +856,7 @@ func startCrewFromSettings(townRoot, rigName string) ([]string, map[string]error
 	}
 
 	// Parse startup preference and determine which crew to start
-	toStart := parseCrewStartupPreference(settings.Crew.Startup, crewNames)
+	toStart := crew.ParseStartupPreference(settings.Crew.Startup, crewNames)
 
 	// Start each crew member using Manager
 	for _, crewName := range toStart {
@@ -874,67 +874,10 @@ func startCrewFromSettings(townRoot, rigName string) ([]string, map[string]error
 	return started, errors
 }
 
-// parseCrewStartupPreference parses the natural language crew startup preference.
-// Examples: "max", "joe and max", "all", "none", "pick one"
+// parseCrewStartupPreference delegates to crew.ParseStartupPreference.
+// Kept for backward compatibility with tests.
 func parseCrewStartupPreference(pref string, available []string) []string {
-	pref = strings.ToLower(strings.TrimSpace(pref))
-
-	// Special keywords
-	switch pref {
-	case "none", "":
-		return []string{}
-	case "all":
-		return available
-	case "pick one", "any", "any one":
-		if len(available) > 0 {
-			return []string{available[0]}
-		}
-		return []string{}
-	}
-
-	// Parse comma/and-separated list
-	// "joe and max" -> ["joe", "max"]
-	// "joe, max" -> ["joe", "max"]
-	// "max" -> ["max"]
-	pref = strings.ReplaceAll(pref, " and ", ",")
-	pref = strings.ReplaceAll(pref, ", but not ", ",-")
-	pref = strings.ReplaceAll(pref, " but not ", ",-")
-
-	parts := strings.Split(pref, ",")
-
-	include := []string{}
-	exclude := map[string]bool{}
-
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-
-		if strings.HasPrefix(part, "-") {
-			// Exclusion
-			exclude[strings.TrimPrefix(part, "-")] = true
-		} else {
-			include = append(include, part)
-		}
-	}
-
-	// Filter to only available crew members
-	result := []string{}
-	for _, name := range include {
-		if exclude[name] {
-			continue
-		}
-		// Check if this crew exists
-		for _, avail := range available {
-			if avail == name {
-				result = append(result, name)
-				break
-			}
-		}
-	}
-
-	return result
+	return crew.ParseStartupPreference(pref, available)
 }
 
 // startPolecatsWithWork starts polecats that have pinned beads (work attached).

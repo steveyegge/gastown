@@ -946,3 +946,59 @@ func (m *Manager) IsRunning(name string) (bool, error) {
 	sessionID := m.SessionName(name)
 	return t.HasSession(sessionID)
 }
+
+// ParseStartupPreference parses a natural language crew startup preference
+// against a list of available crew member names.
+// Examples: "max", "joe and max", "all", "none", "pick one", "all but not emma"
+func ParseStartupPreference(pref string, available []string) []string {
+	pref = strings.ToLower(strings.TrimSpace(pref))
+
+	switch pref {
+	case "none", "":
+		return nil
+	case "all":
+		return available
+	case "pick one", "any", "any one":
+		if len(available) > 0 {
+			return []string{available[0]}
+		}
+		return nil
+	}
+
+	// Parse comma/and-separated list with optional exclusions
+	pref = strings.ReplaceAll(pref, " and ", ",")
+	pref = strings.ReplaceAll(pref, ", but not ", ",-")
+	pref = strings.ReplaceAll(pref, " but not ", ",-")
+
+	parts := strings.Split(pref, ",")
+	var include []string
+	exclude := map[string]bool{}
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if strings.HasPrefix(part, "-") {
+			exclude[strings.TrimPrefix(part, "-")] = true
+		} else {
+			include = append(include, part)
+		}
+	}
+
+	// Filter to only available crew members
+	var result []string
+	for _, name := range include {
+		if exclude[name] {
+			continue
+		}
+		for _, avail := range available {
+			if avail == name {
+				result = append(result, name)
+				break
+			}
+		}
+	}
+
+	return result
+}
