@@ -161,7 +161,7 @@ func TestLoadMachinesConfig_InvalidJSON(t *testing.T) {
 // --- Bootstrap script generation tests (uses production buildBootstrapScript) ---
 
 func TestBootstrapScript_ContainsRequiredElements(t *testing.T) {
-	script := buildBootstrapScript("/Users/test/gt", "gastown", "Toast", "10.0.0.1", 3307, "https://10.0.0.1:9876")
+	script := buildBootstrapScript("/Users/test/gt", "gastown", "Toast", "10.0.0.1", 3307, "https://10.0.0.1:9876", "")
 
 	checks := []struct {
 		name   string
@@ -176,7 +176,7 @@ func TestBootstrapScript_ContainsRequiredElements(t *testing.T) {
 		{"ca.pem write", `jq -r .ca   > "$CERT_DIR/ca.pem"`},
 		{"key perms", `chmod 600 "$CERT_DIR/key.pem"`},
 		{"cd to town root", "cd /Users/test/gt"},
-		{"polecat spawn", "gt polecat spawn gastown --name Toast"},
+		{"polecat spawn", "gt.real polecat spawn gastown --name Toast"},
 		{"dolt host", "--dolt-host 10.0.0.1"},
 		{"dolt port", "--dolt-port 3307"},
 		{"json flag", "--json"},
@@ -205,7 +205,7 @@ func TestBootstrapScript_ContainsRequiredElements(t *testing.T) {
 }
 
 func TestBootstrapScript_SessionBeforeEnv(t *testing.T) {
-	script := buildBootstrapScript("/gt", "rig", "Name", "10.0.0.1", 3307, "https://10.0.0.1:9876")
+	script := buildBootstrapScript("/gt", "rig", "Name", "10.0.0.1", 3307, "https://10.0.0.1:9876", "")
 
 	sessionIdx := strings.Index(script, "tmux new-session")
 	setenvIdx := strings.Index(script, "tmux setenv")
@@ -222,7 +222,7 @@ func TestBootstrapScript_SessionBeforeEnv(t *testing.T) {
 }
 
 func TestBootstrapScript_NoEchoForCert(t *testing.T) {
-	script := buildBootstrapScript("/gt", "rig", "Name", "10.0.0.1", 3307, "https://10.0.0.1:9876")
+	script := buildBootstrapScript("/gt", "rig", "Name", "10.0.0.1", 3307, "https://10.0.0.1:9876", "")
 
 	// echo "$CERT_JSON" on macOS expands \n — we must use printf '%s'
 	if strings.Contains(script, `echo "$CERT_JSON"`) {
@@ -233,9 +233,26 @@ func TestBootstrapScript_NoEchoForCert(t *testing.T) {
 func TestBootstrapScript_DoltPortPassthrough(t *testing.T) {
 	// buildBootstrapScript passes through whatever port the caller provides.
 	// Default (3307) is applied by spawnRemoteSatellite before calling this.
-	script := buildBootstrapScript("/gt", "rig", "Name", "10.0.0.1", 0, "https://10.0.0.1:9876")
+	script := buildBootstrapScript("/gt", "rig", "Name", "10.0.0.1", 0, "https://10.0.0.1:9876", "")
 	if !strings.Contains(script, "--dolt-port 0") {
 		t.Error("expected --dolt-port 0 in script (builder passes through caller value)")
+	}
+}
+
+func TestBootstrapScript_CustomGtBinary(t *testing.T) {
+	script := buildBootstrapScript("/gt", "rig", "Name", "10.0.0.1", 3307, "https://10.0.0.1:9876", "/usr/local/bin/gt-custom")
+	if !strings.Contains(script, "/usr/local/bin/gt-custom polecat spawn") {
+		t.Error("expected custom gt binary path in spawn command")
+	}
+	if strings.Contains(script, "gt.real polecat spawn") {
+		t.Error("should not use gt.real when custom binary is specified")
+	}
+}
+
+func TestBootstrapScript_DefaultGtReal(t *testing.T) {
+	script := buildBootstrapScript("/gt", "rig", "Name", "10.0.0.1", 3307, "https://10.0.0.1:9876", "")
+	if !strings.Contains(script, "gt.real polecat spawn") {
+		t.Error("expected gt.real as default binary for satellite bootstrap")
 	}
 }
 

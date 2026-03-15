@@ -325,6 +325,7 @@ func spawnRemoteSatellite(
 		proxyURL,
 		certResp,
 		opts,
+		machine.GtBinary,
 	)
 	if err != nil {
 		// Clean up: deny the orphaned cert
@@ -403,7 +404,10 @@ func denyCertViaSSH(hubHost, serial string) error {
 // buildBootstrapScript generates the shell script that runs on the target
 // machine during satellite bootstrap. Cert material is piped via stdin,
 // never embedded in the script.
-func buildBootstrapScript(townRoot, rigName, polecatName, doltHost string, doltPort int, proxyURL string) string {
+func buildBootstrapScript(townRoot, rigName, polecatName, doltHost string, doltPort int, proxyURL, gtBinary string) string {
+	if gtBinary == "" {
+		gtBinary = "gt.real" // satellites use gt.real to bypass proxy-client shim
+	}
 	return fmt.Sprintf(`
 set -e
 CERT_DIR=$(mktemp -d)
@@ -421,7 +425,7 @@ cd %s
 # Spawn polecat (creates worktree, does NOT start tmux session)
 # Temporarily disable set -e to capture the error message
 set +e
-SPAWN_OUTPUT=$(gt polecat spawn %s --name %s --dolt-host %s --dolt-port %d --json 2>&1)
+SPAWN_OUTPUT=$(%s polecat spawn %s --name %s --dolt-host %s --dolt-port %d --json 2>&1)
 SPAWN_EXIT=$?
 set -e
 if [ $SPAWN_EXIT -ne 0 ]; then
@@ -448,7 +452,7 @@ tmux setenv -t "$SESS" GT_REAL_BIN "$HOME/.local/bin/gt.real"
 printf '%%s' "$SPAWN_JSON" | jq -c --arg sess "$SESS" --arg cert_dir "$CERT_DIR" '. + {session_name: $sess, cert_dir: $cert_dir}'
 `,
 		townRoot,
-		rigName, polecatName, doltHost, doltPort,
+		gtBinary, rigName, polecatName, doltHost, doltPort,
 		rigName, polecatName,
 		proxyURL,
 	)
@@ -487,8 +491,9 @@ func spawnOnTarget(
 	proxyURL string,
 	cert *issueCertResponse,
 	opts SlingSpawnOptions,
+	gtBinary string,
 ) (*SatelliteSpawnResult, error) {
-	script := buildBootstrapScript(townRoot, rigName, polecatName, doltHost, doltPort, proxyURL)
+	script := buildBootstrapScript(townRoot, rigName, polecatName, doltHost, doltPort, proxyURL, gtBinary)
 
 	// Pipe cert material via stdin
 	certJSON, err := json.Marshal(cert)
