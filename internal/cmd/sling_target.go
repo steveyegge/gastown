@@ -181,14 +181,20 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 
 	// Rig target (auto-spawn polecat)
 	if rigName, isRig := IsRigName(target); isRig {
-		// Check if rig is parked or docked before dispatching (gt-4owfd.1, gt-11y)
-		// Skip docked check when --machine is set: the work runs on a remote
-		// satellite, so the local rig's docked state is irrelevant.
+		// Resolve dispatch target: explicit --machine wins, otherwise policy decides.
 		townRoot := opts.TownRoot
 		if townRoot == "" {
 			townRoot, _ = workspace.FindFromCwd()
 		}
-		if townRoot != "" && opts.Machine == "" {
+		dispatchMachine, dispatchEntry, err := resolveDispatchMachineFn(townRoot, rigName, opts.Machine)
+		if err != nil {
+			return nil, fmt.Errorf("resolving dispatch machine: %w", err)
+		}
+
+		// Check if rig is parked or docked before dispatching (gt-4owfd.1, gt-11y)
+		// Skip docked check when dispatching to a satellite: the work runs on a
+		// remote machine, so the local rig's docked state is irrelevant.
+		if townRoot != "" && dispatchMachine == "" {
 			if blocked, reason := IsRigParkedOrDocked(townRoot, rigName); blocked {
 				undoCmd := "gt rig unpark"
 				if reason == "docked" {
@@ -204,8 +210,8 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 			}
 		}
 		if opts.DryRun {
-			if opts.Machine != "" {
-				fmt.Printf("Would spawn satellite polecat in rig '%s' on machine '%s'\n", rigName, opts.Machine)
+			if dispatchMachine != "" {
+				fmt.Printf("Would spawn satellite polecat in rig '%s' on machine '%s'\n", rigName, dispatchMachine)
 			} else {
 				fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
 			}
@@ -223,24 +229,13 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 		}
 
 		// Satellite dispatch: spawn on remote machine via proxy
-		if opts.Machine != "" {
-			fmt.Printf("Target is rig '%s', dispatching to satellite '%s'...\n", rigName, opts.Machine)
-			townRoot := opts.TownRoot
-			if townRoot == "" {
-				townRoot, _ = workspace.FindFromCwd()
-			}
+		if dispatchMachine != "" {
+			fmt.Printf("Target is rig '%s', dispatching to satellite '%s'...\n", rigName, dispatchMachine)
 			machines, err := loadMachinesConfig(townRoot)
 			if err != nil {
 				return nil, fmt.Errorf("loading machines config: %w", err)
 			}
-			if machines == nil {
-				return nil, fmt.Errorf("--machine requires machines.json in mayor/")
-			}
-			machineName, machine, err := selectMachine(machines, opts.Machine)
-			if err != nil {
-				return nil, fmt.Errorf("selecting machine: %w", err)
-			}
-			satResult, err := spawnRemoteSatellite(machines, machineName, machine, rigName, spawnOpts)
+			satResult, err := spawnRemoteSatellite(machines, dispatchMachine, dispatchEntry, rigName, spawnOpts)
 			if err != nil {
 				return nil, fmt.Errorf("satellite spawn: %w", err)
 			}

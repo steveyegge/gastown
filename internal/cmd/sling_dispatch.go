@@ -112,10 +112,18 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		BeadID: params.BeadID,
 	}
 
+	// Resolve dispatch machine early: needed for the docked-rig guard (step 0)
+	// and the spawn step (step 3). Explicit --machine wins; otherwise policy decides.
+	dispatchMachine, dispatchEntry, err := resolveDispatchMachineFn(townRoot, params.RigName, params.Machine)
+	if err != nil {
+		result.ErrMsg = err.Error()
+		return result, fmt.Errorf("resolving dispatch machine: %w", err)
+	}
+
 	// 0. Check if rig is parked or docked before dispatching (gt-4owfd.1, gt-11y)
-	// Skip docked check when --machine is set: the work runs on a remote
-	// satellite, so the local rig's docked state is irrelevant.
-	if params.RigName != "" && params.Machine == "" {
+	// Skip docked check when dispatching to a satellite: the work runs on a
+	// remote machine, so the local rig's docked state is irrelevant.
+	if params.RigName != "" && dispatchMachine == "" {
 		if blocked, reason := IsRigParkedOrDocked(townRoot, params.RigName); blocked {
 			result.ErrMsg = "rig " + reason
 			undoCmd := "gt rig unpark"
@@ -236,25 +244,16 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		Create: true,
 	}
 
-	// Check for satellite dispatch: if --machine is set or machines.json
-	// exists, route to a remote machine instead of local spawn.
+	// Check for satellite dispatch: if --machine is set or dispatch policy
+	// selects a satellite, route to a remote machine instead of local spawn.
 	var spawnInfo *SpawnedPolecatInfo
-	if params.Machine != "" {
+	if dispatchMachine != "" {
 		machines, err := loadMachinesConfig(townRoot)
 		if err != nil {
 			result.ErrMsg = err.Error()
 			return result, fmt.Errorf("loading machines config: %w", err)
 		}
-		if machines == nil {
-			result.ErrMsg = "no machines.json found"
-			return result, fmt.Errorf("--machine requires machines.json in mayor/")
-		}
-		machineName, machine, err := selectMachine(machines, params.Machine)
-		if err != nil {
-			result.ErrMsg = err.Error()
-			return result, fmt.Errorf("selecting machine: %w", err)
-		}
-		satResult, err := spawnRemoteSatellite(machines, machineName, machine, params.RigName, spawnOpts)
+		satResult, err := spawnRemoteSatellite(machines, dispatchMachine, dispatchEntry, params.RigName, spawnOpts)
 		if err != nil {
 			result.ErrMsg = err.Error()
 			return result, fmt.Errorf("satellite spawn: %w", err)

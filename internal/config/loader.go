@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/dispatch"
 )
 
 // resolveConfigMu serializes agent config resolution across all callers.
@@ -2664,6 +2665,11 @@ func LoadMachinesConfig(path string) (*MachinesConfig, error) {
 	}
 	if cfg.Machines == nil {
 		cfg.Machines = make(map[string]*MachineEntry)
+	}
+	if cfg.DispatchPolicy != "" {
+		if !dispatch.IsValidPolicy(cfg.DispatchPolicy) {
+			return nil, fmt.Errorf("invalid dispatch_policy %q in machines config", cfg.DispatchPolicy)
+		}
 	}
 	return &cfg, nil
 }

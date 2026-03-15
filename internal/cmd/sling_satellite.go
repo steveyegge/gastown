@@ -15,9 +15,11 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/dispatch"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -94,6 +96,150 @@ func loadMachinesConfig(townRoot string) (*config.MachinesConfig, error) {
 		return nil, fmt.Errorf("loading machines config: %w", err)
 	}
 	return cfg, nil
+}
+
+// resolveDispatchMachine determines which machine should handle dispatch.
+// If explicitMachine is non-empty, it's looked up directly (--machine override).
+// Otherwise, machines.json is loaded and the configured DispatchPolicy decides.
+// Returns ("", nil, nil) for local dispatch.
+func resolveDispatchMachine(townRoot, rigName, explicitMachine string) (string, *config.MachineEntry, error) {
+	// 1. Explicit --machine always wins
+	if explicitMachine != "" {
+		machines, err := loadMachinesConfig(townRoot)
+		if err != nil {
+			return "", nil, fmt.Errorf("loading machines config: %w", err)
+		}
+		if machines == nil {
+			return "", nil, fmt.Errorf("--machine requires machines.json in mayor/")
+		}
+		return selectMachine(machines, explicitMachine)
+	}
+
+	// 2. No machines.json → local
+	machines, err := loadMachinesConfig(townRoot)
+	if err != nil {
+		return "", nil, fmt.Errorf("loading machines config: %w", err)
+	}
+	if machines == nil {
+		return "", nil, nil
+	}
+
+	// 3. Empty or local-only policy → local
+	policyName := machines.DispatchPolicy
+	if policyName == "" {
+		policyName = string(dispatch.PolicySatelliteFirst) // default
+	}
+	if policyName == string(dispatch.PolicyLocalOnly) {
+		return "", nil, nil
+	}
+
+	// 4. Resolve policy, build context, route
+	policy, err := dispatch.Resolve(policyName)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolving dispatch policy: %w", err)
+	}
+
+	ctx := buildRoutingContextFn(machines)
+	result, err := policy.Route(ctx)
+	if err != nil {
+		return "", nil, fmt.Errorf("dispatch policy %q: %w", policyName, err)
+	}
+
+	// "" = local dispatch
+	if result.Machine == "" {
+		return "", nil, nil
+	}
+
+	// Look up the selected machine entry
+	entry, ok := machines.Machines[result.Machine]
+	if !ok {
+		return "", nil, fmt.Errorf("policy selected unknown machine %q", result.Machine)
+	}
+	return result.Machine, entry, nil
+}
+
+// resolveDispatchMachineFn is a seam for tests.
+var resolveDispatchMachineFn = resolveDispatchMachine
+
+// buildRoutingContextFn is a seam for tests (avoids SSH/tmux in unit tests).
+var buildRoutingContextFn = buildRoutingContext
+
+// buildRoutingContext constructs a dispatch.RoutingContext from machines.json
+// and current load data.
+func buildRoutingContext(machines *config.MachinesConfig) dispatch.RoutingContext {
+	workers := machines.WorkerMachines()
+	ctx := dispatch.RoutingContext{}
+
+	// Local load
+	localActive := countActivePolecats()
+	ctx.LocalLoad = &dispatch.MachineLoad{
+		Name:           "local",
+		MaxPolecats:    0, // unlimited locally (operator's machine)
+		ActivePolecats: localActive,
+	}
+
+	// Remote loads (sorted by name for determinism)
+	names := make([]string, 0, len(workers))
+	for name := range workers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	remoteCounts := countRemotePolecats(machines, names)
+	for _, name := range names {
+		entry := workers[name]
+		ctx.Machines = append(ctx.Machines, dispatch.MachineLoad{
+			Name:           name,
+			MaxPolecats:    entry.MaxPolecats,
+			ActivePolecats: remoteCounts[name],
+		})
+	}
+
+	return ctx
+}
+
+// countRemotePolecats SSHes to each worker and counts active polecat tmux sessions.
+// Returns a map of machine name → active polecat count.
+func countRemotePolecats(machines *config.MachinesConfig, workerNames []string) map[string]int {
+	counts := make(map[string]int, len(workerNames))
+	for _, name := range workerNames {
+		entry, ok := machines.Machines[name]
+		if !ok {
+			continue
+		}
+		count, err := countRemotePolecatsOnMachine(entry)
+		if err != nil {
+			// SSH failure → assume machine is busy (conservative: don't overload)
+			counts[name] = entry.MaxPolecats
+			continue
+		}
+		counts[name] = count
+	}
+	return counts
+}
+
+// countRemotePolecatsOnMachine SSHes to a single machine and counts polecat sessions.
+func countRemotePolecatsOnMachine(entry *config.MachineEntry) (int, error) {
+	target := entry.SSHTarget()
+	out, err := runSSH(target, "tmux list-sessions -F '#{session_name}' 2>/dev/null || true", 10*time.Second)
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		identity, err := session.ParseSessionName(line)
+		if err != nil {
+			continue
+		}
+		if identity.Role == session.RolePolecat {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // SatelliteSpawnResult holds the outcome of a satellite bootstrap.
