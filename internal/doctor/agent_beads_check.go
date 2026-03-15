@@ -411,7 +411,11 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	return errors.Join(errs...)
 }
 
-// listCrewWorkers returns the names of all crew workers in a rig.
+// listCrewWorkers returns the names of canonical crew workers in a rig.
+// Filters out git worktrees and other non-identity directories that may
+// exist under <rig>/crew/ (e.g., cross-rig worktrees, fix branches).
+// A canonical crew workspace is a full git clone (.git is a directory),
+// while worktrees have a .git file pointing to the parent repo.
 func listCrewWorkers(townRoot, rigName string) []string {
 	crewDir := filepath.Join(townRoot, rigName, "crew")
 	entries, err := os.ReadDir(crewDir)
@@ -421,9 +425,21 @@ func listCrewWorkers(townRoot, rigName string) []string {
 
 	var workers []string
 	for _, entry := range entries {
-		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
-			workers = append(workers, entry.Name())
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
 		}
+		// A canonical crew workspace is a full git clone with a .git directory.
+		// Git worktrees (created by gt worktree) have a .git *file* instead.
+		// Skip worktrees to avoid overcounting agent identities (GH#2767).
+		gitPath := filepath.Join(crewDir, entry.Name(), ".git")
+		info, err := os.Lstat(gitPath)
+		if err != nil {
+			continue // No .git at all — not a crew workspace
+		}
+		if !info.IsDir() {
+			continue // .git is a file — this is a worktree, skip
+		}
+		workers = append(workers, entry.Name())
 	}
 	return workers
 }
