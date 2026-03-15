@@ -76,8 +76,8 @@ Use --adopt to register an existing directory instead of creating new:
 
 Example:
   gt rig add gastown https://github.com/steveyegge/gastown
-  gt rig add my-project git@github.com:user/repo.git --prefix mp
-  gt rig add existing-rig --adopt`,
+  gt rig add my_project git@github.com:user/repo.git --prefix mp
+  gt rig add existing_rig --adopt`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runRigAdd,
 }
