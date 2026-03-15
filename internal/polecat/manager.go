@@ -1562,7 +1562,10 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 	// Clean worktree state before branch switch — the worktree may have stale
 	// state from a previous dog/pool dispatch (uncommitted changes, detached HEAD,
 	// or checked out on an old dog/alpha-* branch).
-	_ = polecatGit.ResetHard("HEAD")
+	// Reset to startPoint instead of HEAD so the tree matches the target commit.
+	// This prevents "local changes would be overwritten by checkout" when HEAD
+	// and startPoint have different file content (GH#2536).
+	_ = polecatGit.ResetHard(startPoint)
 
 	// Create fresh branch from start point (branch-only, no worktree add/remove)
 	branchName := m.buildBranchName(name, opts.HookBead)
