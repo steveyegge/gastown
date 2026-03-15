@@ -10,21 +10,23 @@ func TestGetRigLED(t *testing.T) {
 		opState     string
 		want        string
 	}{
+		// Operational state overrides session state (GH#2555)
+		{"parked no sessions", false, false, "PARKED", "🅿️"},
+		{"parked with sessions", true, true, "PARKED", "🅿️"},
+		{"parked partial", true, false, "PARKED", "🅿️"},
+		{"docked no sessions", false, false, "DOCKED", "🛑"},
+		{"docked with sessions", true, true, "DOCKED", "🛑"},
+
 		// Both running - fully active
 		{"both running", true, true, "OPERATIONAL", "🟢"},
-		{"both running parked config", true, true, "PARKED", "🟢"},
-		{"both running docked config", true, true, "DOCKED", "🟢"},
 
 		// One running - partially active
 		{"witness only", true, false, "OPERATIONAL", "🟡"},
 		{"refinery only", false, true, "OPERATIONAL", "🟡"},
-		{"witness only parked", true, false, "PARKED", "🟡"},
 
-		// Nothing running - check config state
+		// Nothing running
 		{"stopped operational", false, false, "OPERATIONAL", "⚫"},
 		{"stopped empty state", false, false, "", "⚫"},
-		{"parked", false, false, "PARKED", "🅿️"},
-		{"docked", false, false, "DOCKED", "🛑"},
 	}
 
 	for _, tt := range tests {
