@@ -1406,14 +1406,17 @@ func (b *Beads) ReleaseWithReason(id, reason string) error {
 }
 
 // AddDependency adds a dependency: issue depends on dependsOn.
+// Uses runWithRouting so bd can resolve cross-prefix dependencies
+// (e.g., adding a dep from rig A's bead to rig B's bead) via routes.jsonl.
 func (b *Beads) AddDependency(issue, dependsOn string) error {
-	_, err := b.run("dep", "add", issue, dependsOn)
+	_, err := b.runWithRouting("dep", "add", issue, dependsOn)
 	return err
 }
 
 // RemoveDependency removes a dependency.
+// Uses runWithRouting so bd can resolve cross-prefix dependencies via routes.jsonl.
 func (b *Beads) RemoveDependency(issue, dependsOn string) error {
-	_, err := b.run("dep", "remove", issue, dependsOn)
+	_, err := b.runWithRouting("dep", "remove", issue, dependsOn)
 	return err
 }
 

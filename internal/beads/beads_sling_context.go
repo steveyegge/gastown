@@ -62,7 +62,8 @@ func (b *Beads) CreateSlingContext(workBeadTitle, workBeadID string, fields *cap
 	}
 
 	// Add tracks dependency: context bead → work bead
-	_, depErr := b.run("dep", "add", issue.ID, workBeadID, "--type=tracks")
+	// Use runWithRouting so bd can resolve cross-prefix beads via routes.jsonl.
+	_, depErr := b.runWithRouting("dep", "add", issue.ID, workBeadID, "--type=tracks")
 	if depErr != nil {
 		// Non-fatal: the context bead was created, just missing the dep link.
 		// This can happen if the work bead is in a different DB and external refs aren't set up.
