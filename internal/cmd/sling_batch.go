@@ -145,6 +145,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			BeadID:           beadID,
 			FormulaName:      formulaName,
 			RigName:          rigName,
+			Machine:          slingMachine,
 			Args:             slingArgs,
 			Vars:             slingVars,
 			Merge:            slingMerge,

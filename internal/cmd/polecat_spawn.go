@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -56,6 +58,7 @@ type SlingSpawnOptions struct {
 	HookBead   string // Bead ID to set as hook_bead at spawn time (atomic assignment)
 	Agent      string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
 	BaseBranch string // Override base branch for polecat worktree (e.g., "develop", "release/v2")
+	Name       string // Pre-allocated polecat name (if empty, auto-allocate from pool)
 }
 
 // SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
@@ -149,7 +152,14 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// Persistent polecat model (gt-4ac): try to reuse an idle polecat first.
 	// Idle polecats have completed their work but kept their sandbox (worktree).
 	// Reusing avoids the overhead of creating a new worktree.
+	// Skip idle reuse when a specific name is requested (satellite bootstrap
+	// pre-allocates names for cert CN matching — reusing a different polecat
+	// would break the identity flow).
 	idlePolecat, findErr := polecatMgr.FindIdlePolecat()
+	if opts.Name != "" {
+		idlePolecat = nil
+		findErr = fmt.Errorf("skipping idle reuse: specific name %q requested", opts.Name)
+	}
 	if findErr == nil && idlePolecat != nil {
 		polecatName := idlePolecat.Name
 		fmt.Printf("Reusing idle polecat: %s\n", polecatName)
@@ -265,6 +275,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	addOpts := polecat.AddOptions{
 		HookBead:   opts.HookBead,
 		BaseBranch: baseBranch,
+		Name:       opts.Name,
 	}
 
 	// No idle polecat available — allocate and create atomically (GH#2215).
@@ -462,6 +473,54 @@ func IsRigName(target string) (string, bool) {
 	}
 
 	return target, true
+}
+
+// polecatSpawnCmd is the CLI wrapper for SpawnPolecatForSling.
+// Used by satellite bootstrap to spawn a polecat on a remote machine.
+var (
+	polecatSpawnName     string
+	polecatSpawnBead     string
+	polecatSpawnDoltHost string
+	polecatSpawnDoltPort int
+	polecatSpawnJSON     bool
+)
+
+var polecatSpawnCmd = &cobra.Command{
+	Use:   "spawn <rig>",
+	Short: "Spawn a new polecat in a rig (used by satellite bootstrap)",
+	Long: `Spawn a new polecat in a rig. Creates the worktree and allocates
+a name (or uses --name if provided). Does NOT start the Claude session —
+the caller handles session start after env var wiring.
+
+This command is primarily used by the satellite bootstrap sequence
+(gt sling --machine) to create polecats on remote machines.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rigName := args[0]
+		opts := SlingSpawnOptions{
+			Name:     polecatSpawnName,
+			HookBead: polecatSpawnBead,
+		}
+		info, err := SpawnPolecatForSling(rigName, opts)
+		if err != nil {
+			return err
+		}
+		if polecatSpawnJSON {
+			out := map[string]string{
+				"rig":          info.RigName,
+				"polecat":      info.PolecatName,
+				"session_name": info.SessionName,
+				"clone_path":   info.ClonePath,
+				"base_branch":  info.BaseBranch,
+				"branch":       info.Branch,
+			}
+			enc := json.NewEncoder(os.Stdout)
+			return enc.Encode(out)
+		}
+		fmt.Printf("Spawned %s/%s (session: %s, path: %s)\n",
+			info.RigName, info.PolecatName, info.SessionName, info.ClonePath)
+		return nil
+	},
 }
 
 // verifyWorktreeExists checks that a git worktree was actually created at the given path

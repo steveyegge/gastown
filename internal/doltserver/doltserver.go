@@ -269,6 +269,27 @@ func DefaultConfig(townRoot string) *Config {
 		config.Host = h
 	}
 
+	// Failover override: if the daemon has failed over to a different host,
+	// dolt-failover-state.json contains the active host:port. This takes
+	// precedence over GT_DOLT_HOST so child processes (bd, gt subcommands)
+	// connect to the correct server without anyone mutating ~/.zshenv.
+	if townRoot != "" {
+		foStateFile := filepath.Join(townRoot, "daemon", "dolt-failover-state.json")
+		if data, err := os.ReadFile(foStateFile); err == nil {
+			var foState struct {
+				ActiveHost string `json:"active_host"`
+				ActivePort int    `json:"active_port"`
+				InFailover bool   `json:"in_failover"`
+			}
+			if err := json.Unmarshal(data, &foState); err == nil && foState.InFailover {
+				config.Host = foState.ActiveHost
+				if foState.ActivePort > 0 {
+					config.Port = foState.ActivePort
+				}
+			}
+		}
+	}
+
 	// Port precedence: config.yaml > env var > default
 	// config.yaml takes precedence to prevent stale env var pollution
 	if port := readPortFromConfigYAML(townRoot); port > 0 {
