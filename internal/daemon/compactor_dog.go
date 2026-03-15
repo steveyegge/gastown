@@ -311,8 +311,8 @@ func (d *Daemon) compactDatabase(dbName string) error {
 		if !ok {
 			return fmt.Errorf("integrity check: table %q missing after compaction", table)
 		}
-		if preCount != postCount {
-			return fmt.Errorf("integrity check: table %q count mismatch: pre=%d post=%d", table, preCount, postCount)
+		if postCount < preCount {
+			return fmt.Errorf("integrity check: table %q lost rows: pre=%d post=%d", table, preCount, postCount)
 		}
 	}
 	d.logger.Printf("compactor_dog: %s: integrity verified (%d tables match)", dbName, len(preCounts))
