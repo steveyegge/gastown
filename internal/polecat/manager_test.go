@@ -1692,3 +1692,128 @@ func TestAllocateAndAdd_NoDuplicateNames(t *testing.T) {
 		}
 	}
 }
+
+// TestInstallMainBlockHookPrefersSharedHook verifies that installMainBlockHook
+// copies the shared .repo.git/hooks/pre-push hook when it exists, instead of
+// writing the simple main-only block. This prevents local hooks from shadowing
+// the shared hook with a weaker version.
+func TestInstallMainBlockHookPrefersSharedHook(t *testing.T) {
+	// Create a fake rig structure:
+	// <rig>/.repo.git/hooks/pre-push  (shared hook blocking main+release)
+	// <rig>/polecats/alpha/.git/hooks/ (empty, will be written to)
+	rigDir := t.TempDir()
+
+	// Create shared hook
+	sharedHooksDir := filepath.Join(rigDir, ".repo.git", "hooks")
+	if err := os.MkdirAll(sharedHooksDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	sharedHook := `#!/bin/sh
+# Shared hook: blocks both main and release
+case "$branch" in main|release) exit 1 ;; esac
+`
+	if err := os.WriteFile(filepath.Join(sharedHooksDir, "pre-push"), []byte(sharedHook), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create polecat worktree (regular clone style — .git is a directory)
+	clonePath := filepath.Join(rigDir, "polecats", "alpha")
+	cloneGitDir := filepath.Join(clonePath, ".git")
+	if err := os.MkdirAll(cloneGitDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Install hook — should copy the shared hook, not write the simple one
+	installMainBlockHook(clonePath, "release")
+
+	hookPath := filepath.Join(cloneGitDir, "hooks", "pre-push")
+	content, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatalf("hook not installed: %v", err)
+	}
+
+	// Should contain the shared hook content (which blocks release), not the simple one
+	if !strings.Contains(string(content), "release") {
+		t.Errorf("expected shared hook content blocking release, got:\n%s", content)
+	}
+	if strings.Contains(string(content), "BLOCKED: agents cannot push to main") {
+		t.Error("got the simple main-only hook instead of the shared hook")
+	}
+}
+
+// TestInstallMainBlockHookFallsBackWithoutSharedHook verifies that
+// installMainBlockHook falls back to the simple main-only block when
+// no shared .repo.git/hooks/pre-push exists.
+func TestInstallMainBlockHookFallsBackWithoutSharedHook(t *testing.T) {
+	// No .repo.git — just a bare clone
+	clonePath := t.TempDir()
+	cloneGitDir := filepath.Join(clonePath, ".git")
+	if err := os.MkdirAll(cloneGitDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	installMainBlockHook(clonePath, "release")
+
+	hookPath := filepath.Join(cloneGitDir, "hooks", "pre-push")
+	content, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatalf("hook not installed: %v", err)
+	}
+
+	if !strings.Contains(string(content), "BLOCKED: agents cannot push to main") {
+		t.Errorf("expected simple main-only hook, got:\n%s", content)
+	}
+}
+
+// TestSyncSharedHookToWorktrees verifies that SyncSharedHookToWorktrees
+// propagates a shared hook to all worktree .git/hooks/ directories that
+// already have a local hook file (doesn't create new ones).
+func TestSyncSharedHookToWorktrees(t *testing.T) {
+	rigDir := t.TempDir()
+
+	// Create shared hook in .repo.git
+	sharedHooksDir := filepath.Join(rigDir, ".repo.git", "hooks")
+	if err := os.MkdirAll(sharedHooksDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	newHook := "#!/bin/sh\n# new shared hook\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(sharedHooksDir, "pre-push"), []byte(newHook), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create crew worktree with an OLD local hook (should be updated)
+	crewDir := filepath.Join(rigDir, "crew", "emmett", ".git", "hooks")
+	if err := os.MkdirAll(crewDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	oldHook := "#!/bin/bash\n# old hook — only blocks main\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(crewDir, "pre-push"), []byte(oldHook), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create polecat worktree WITHOUT a local hook (should NOT get one)
+	polecatDir := filepath.Join(rigDir, "polecats", "alpha", ".git", "hooks")
+	if err := os.MkdirAll(polecatDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// No pre-push file here
+
+	// Sync
+	if err := SyncSharedHookToWorktrees(rigDir, "pre-push"); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	// Crew hook should be updated
+	crewContent, err := os.ReadFile(filepath.Join(crewDir, "pre-push"))
+	if err != nil {
+		t.Fatalf("crew hook missing after sync: %v", err)
+	}
+	if string(crewContent) != newHook {
+		t.Errorf("crew hook not updated.\nwant: %s\ngot:  %s", newHook, crewContent)
+	}
+
+	// Polecat should NOT have a hook (didn't have one before)
+	if _, err := os.Stat(filepath.Join(polecatDir, "pre-push")); err == nil {
+		t.Error("polecat hook was created, but should only update existing hooks")
+	}
+}

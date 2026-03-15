@@ -2389,6 +2389,11 @@ func assessStaleness(info *StalenessInfo, threshold int) (bool, string) {
 // installMainBlockHook installs a pre-push git hook in a polecat worktree
 // that blocks pushes to refs/heads/main. This prevents polecats from
 // accidentally pushing to main when the rig's default_branch is different.
+//
+// If a shared hook exists at .repo.git/hooks/pre-push (which typically blocks
+// both main and release), that hook is copied instead of writing the simple
+// main-only block. This prevents local hooks from shadowing the shared hook
+// with a weaker version.
 func installMainBlockHook(clonePath, defaultBranch string) {
 	// For worktrees, .git is a file containing "gitdir: <path>".
 	// For regular clones, .git is a directory. Resolve to actual git dir.
@@ -2412,6 +2417,21 @@ func installMainBlockHook(clonePath, defaultBranch string) {
 		return
 	}
 	hookPath := filepath.Join(hooksDir, "pre-push")
+
+	// Check if a shared hook exists in .repo.git/hooks/pre-push.
+	// If it does, copy it instead of writing the simple main-only block.
+	// The shared hook typically protects both main and release, and a local
+	// main-only hook would shadow it with weaker protection.
+	sharedHook := findSharedPrePushHook(clonePath)
+	if sharedHook != "" {
+		content, err := os.ReadFile(sharedHook)
+		if err == nil {
+			_ = os.WriteFile(hookPath, content, 0755)
+			return
+		}
+	}
+
+	// Fallback: write the simple main-only block hook
 	hook := fmt.Sprintf(`#!/bin/bash
 while read local_ref local_sha remote_ref remote_sha; do
   if [[ "$remote_ref" == *refs/heads/main* ]]; then
@@ -2421,4 +2441,94 @@ while read local_ref local_sha remote_ref remote_sha; do
 done
 `, defaultBranch)
 	_ = os.WriteFile(hookPath, []byte(hook), 0755)
+}
+
+// findSharedPrePushHook searches up from clonePath to find .repo.git/hooks/pre-push.
+// Returns the path if found, empty string otherwise.
+func findSharedPrePushHook(clonePath string) string {
+	// Walk up looking for .repo.git in the rig directory.
+	// clonePath is typically <rig>/polecats/<name> or <rig>/crew/<name>.
+	dir := clonePath
+	for i := 0; i < 5; i++ {
+		candidate := filepath.Join(dir, ".repo.git", "hooks", "pre-push")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+// SyncSharedHookToWorktrees copies a hook from .repo.git/hooks/ to all
+// worktree .git/hooks/ directories in the rig. This prevents local hooks
+// from shadowing the shared hook with an older/weaker version.
+//
+// Call this after installing or updating a hook in .repo.git/hooks/.
+func SyncSharedHookToWorktrees(rigPath, hookName string) error {
+	sharedHookPath := filepath.Join(rigPath, ".repo.git", "hooks", hookName)
+	content, err := os.ReadFile(sharedHookPath)
+	if err != nil {
+		return fmt.Errorf("reading shared hook %s: %w", sharedHookPath, err)
+	}
+
+	// Scan all subdirectories that might be worktrees (crew/*, polecats/*, witness/*, refinery/*)
+	roleDirs := []string{"crew", "polecats", "witness", "refinery"}
+	var updated int
+	for _, roleDir := range roleDirs {
+		roleBase := filepath.Join(rigPath, roleDir)
+		entries, err := os.ReadDir(roleBase)
+		if err != nil {
+			continue // Role dir doesn't exist
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			worktreePath := filepath.Join(roleBase, entry.Name())
+			hookPath := resolveWorktreeHookPath(worktreePath, hookName)
+			if hookPath == "" {
+				continue
+			}
+			// Only update if a local hook already exists (don't create new ones
+			// in worktrees that intentionally don't have local hooks)
+			if _, err := os.Stat(hookPath); err != nil {
+				continue
+			}
+			if writeErr := os.WriteFile(hookPath, content, 0755); writeErr == nil {
+				updated++
+			}
+		}
+	}
+	if updated > 0 {
+		fmt.Printf("  Synced %s to %d worktree(s)\n", hookName, updated)
+	}
+	return nil
+}
+
+// resolveWorktreeHookPath resolves the git hooks directory for a worktree or clone.
+// Returns the full path to the hook file, or empty string if resolution fails.
+func resolveWorktreeHookPath(worktreePath, hookName string) string {
+	dotGit := filepath.Join(worktreePath, ".git")
+	gitDir := dotGit
+	info, err := os.Stat(dotGit)
+	if err != nil {
+		return ""
+	}
+	if !info.IsDir() {
+		// Worktree: .git is a file with "gitdir: <path>"
+		content, readErr := os.ReadFile(dotGit)
+		if readErr != nil {
+			return ""
+		}
+		ref := strings.TrimSpace(strings.TrimPrefix(string(content), "gitdir: "))
+		if !filepath.IsAbs(ref) {
+			ref = filepath.Join(worktreePath, ref)
+		}
+		gitDir = ref
+	}
+	return filepath.Join(gitDir, "hooks", hookName)
 }
