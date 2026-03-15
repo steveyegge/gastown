@@ -16,7 +16,7 @@ DOLT_USER="${DOLT_USER:-root}"
 DOLT_DATA_DIR="${DOLT_DATA_DIR:-$HOME/gt/.dolt-data}"
 JSONL_EXPORT_DIR="$HOME/gt/.dolt-archive/jsonl"
 BACKUP_REPO="$HOME/gt/.dolt-archive/git"
-DEFAULT_DBS="beads_hq,beads,beads_gt,beads_mm,gt,lc,lilypad_chat,myndy_api,myndy_ios,rally_tavern,theoutlived,tr,vitalitek,wandering_river,wr"
+DEFAULT_DBS="beads_hq,gt,lc,ma,mm,myndy_ios,rt,th,vitalitek,wr"
 SKIP_GIT=false
 SKIP_DOLT_PUSH=false
 
