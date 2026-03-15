@@ -670,6 +670,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		BeadID:     beadID,
 		TownRoot:   townRoot,
 		BaseBranch: slingBaseBranch,
+		Machine:    slingMachine,
 	})
 	if err != nil {
 		return err

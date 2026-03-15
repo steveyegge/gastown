@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -464,6 +466,54 @@ func IsRigName(target string) (string, bool) {
 	}
 
 	return target, true
+}
+
+// polecatSpawnCmd is the CLI wrapper for SpawnPolecatForSling.
+// Used by satellite bootstrap to spawn a polecat on a remote machine.
+var (
+	polecatSpawnName     string
+	polecatSpawnBead     string
+	polecatSpawnDoltHost string
+	polecatSpawnDoltPort int
+	polecatSpawnJSON     bool
+)
+
+var polecatSpawnCmd = &cobra.Command{
+	Use:   "spawn <rig>",
+	Short: "Spawn a new polecat in a rig (used by satellite bootstrap)",
+	Long: `Spawn a new polecat in a rig. Creates the worktree and allocates
+a name (or uses --name if provided). Does NOT start the Claude session —
+the caller handles session start after env var wiring.
+
+This command is primarily used by the satellite bootstrap sequence
+(gt sling --machine) to create polecats on remote machines.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rigName := args[0]
+		opts := SlingSpawnOptions{
+			Name:     polecatSpawnName,
+			HookBead: polecatSpawnBead,
+		}
+		info, err := SpawnPolecatForSling(rigName, opts)
+		if err != nil {
+			return err
+		}
+		if polecatSpawnJSON {
+			out := map[string]string{
+				"rig":          info.RigName,
+				"polecat":      info.PolecatName,
+				"session_name": info.SessionName,
+				"clone_path":   info.ClonePath,
+				"base_branch":  info.BaseBranch,
+				"branch":       info.Branch,
+			}
+			enc := json.NewEncoder(os.Stdout)
+			return enc.Encode(out)
+		}
+		fmt.Printf("Spawned %s/%s (session: %s, path: %s)\n",
+			info.RigName, info.PolecatName, info.SessionName, info.ClonePath)
+		return nil
+	},
 }
 
 // verifyWorktreeExists checks that a git worktree was actually created at the given path

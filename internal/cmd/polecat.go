@@ -362,7 +362,15 @@ func init() {
 	polecatPoolInitCmd.Flags().BoolVar(&polecatPoolInitDryRun, "dry-run", false, "Show what would be created without doing it")
 	polecatPoolInitCmd.Flags().IntVar(&polecatPoolInitSize, "size", 0, "Pool size (overrides rig config)")
 
+	// Spawn flags
+	polecatSpawnCmd.Flags().StringVar(&polecatSpawnName, "name", "", "Pre-allocated polecat name (auto-allocate if empty)")
+	polecatSpawnCmd.Flags().StringVar(&polecatSpawnBead, "bead", "", "Bead ID to hook at spawn time")
+	polecatSpawnCmd.Flags().StringVar(&polecatSpawnDoltHost, "dolt-host", "", "Dolt server host (for satellite bootstrap)")
+	polecatSpawnCmd.Flags().IntVar(&polecatSpawnDoltPort, "dolt-port", 3307, "Dolt server port")
+	polecatSpawnCmd.Flags().BoolVar(&polecatSpawnJSON, "json", false, "Output spawn info as JSON")
+
 	// Add subcommands
+	polecatCmd.AddCommand(polecatSpawnCmd)
 	polecatCmd.AddCommand(polecatListCmd)
 	polecatCmd.AddCommand(polecatAddCmd)
 	polecatCmd.AddCommand(polecatRemoveCmd)

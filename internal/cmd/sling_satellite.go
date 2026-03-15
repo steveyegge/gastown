@@ -143,7 +143,7 @@ func spawnRemoteSatellite(
 	}
 
 	proxyURL := machines.ProxyURL(machine.Host)
-	hubTarget := machines.DoltHost
+	hubTarget := machines.HubSSHTarget()
 	targetTownRoot := machine.TownRoot
 	if targetTownRoot == "" {
 		targetTownRoot = "~/gt"
@@ -272,28 +272,44 @@ chmod 700 "$CERT_DIR"
 
 # Read cert material from stdin (JSON)
 CERT_JSON=$(cat)
-echo "$CERT_JSON" | jq -r .cert > "$CERT_DIR/cert.pem"
-echo "$CERT_JSON" | jq -r .key  > "$CERT_DIR/key.pem"
-echo "$CERT_JSON" | jq -r .ca   > "$CERT_DIR/ca.pem"
+printf '%%s' "$CERT_JSON" | jq -r .cert > "$CERT_DIR/cert.pem"
+printf '%%s' "$CERT_JSON" | jq -r .key  > "$CERT_DIR/key.pem"
+printf '%%s' "$CERT_JSON" | jq -r .ca   > "$CERT_DIR/ca.pem"
 chmod 600 "$CERT_DIR/key.pem"
 
 cd %s
 
-# Spawn polecat with pre-allocated name
-gt polecat spawn %s --name %s --bead %s --dolt-host %s --dolt-port %d --json 2>/dev/null
+# Spawn polecat (creates worktree, does NOT start tmux session)
+# Temporarily disable set -e to capture the error message
+set +e
+SPAWN_OUTPUT=$(gt polecat spawn %s --name %s --dolt-host %s --dolt-port %d --json 2>&1)
+SPAWN_EXIT=$?
+set -e
+if [ $SPAWN_EXIT -ne 0 ]; then
+  echo "SPAWN FAILED (exit $SPAWN_EXIT): $SPAWN_OUTPUT" >&2
+  exit 1
+fi
+SPAWN_JSON=$(printf '%%s\n' "$SPAWN_OUTPUT" | grep '^{' | tail -1)
+CLONE_PATH=$(printf '%%s' "$SPAWN_JSON" | jq -r .clone_path)
 
-# Set proxy env vars in tmux session
+# Session name follows gt convention
 SESS="gt-%s-p-%s"
+
+# Create a detached tmux session in the polecat's worktree
+tmux new-session -d -s "$SESS" -c "$CLONE_PATH" 2>/dev/null || true
+
+# Set proxy env vars in tmux session (must happen after session creation)
 tmux setenv -t "$SESS" GT_PROXY_URL "%s"
 tmux setenv -t "$SESS" GT_PROXY_CERT "$CERT_DIR/cert.pem"
 tmux setenv -t "$SESS" GT_PROXY_KEY "$CERT_DIR/key.pem"
 tmux setenv -t "$SESS" GT_PROXY_CA "$CERT_DIR/ca.pem"
+tmux setenv -t "$SESS" GT_REAL_BIN "$HOME/.local/bin/gt.real"
 
-# Output session info as JSON
-echo '{"session_name":"'"$SESS"'","cert_dir":"'"$CERT_DIR"'"}'
+# Output merged session info as JSON
+printf '%%s' "$SPAWN_JSON" | jq -c --arg sess "$SESS" --arg cert_dir "$CERT_DIR" '. + {session_name: $sess, cert_dir: $cert_dir}'
 `,
 		townRoot,
-		rigName, polecatName, opts.HookBead, doltHost, doltPort,
+		rigName, polecatName, doltHost, doltPort,
 		rigName, polecatName,
 		proxyURL,
 	)
@@ -316,6 +332,9 @@ echo '{"session_name":"'"$SESS"'","cert_dir":"'"$CERT_DIR"'"}'
 	var info struct {
 		SessionName string `json:"session_name"`
 		CertDir     string `json:"cert_dir"`
+		ClonePath   string `json:"clone_path"`
+		BaseBranch  string `json:"base_branch"`
+		Branch      string `json:"branch"`
 	}
 	if err := json.Unmarshal([]byte(lastLine), &info); err != nil {
 		return nil, fmt.Errorf("parsing spawn output: %w\noutput: %s", err, stdout)
@@ -325,6 +344,9 @@ echo '{"session_name":"'"$SESS"'","cert_dir":"'"$CERT_DIR"'"}'
 		RigName:     rigName,
 		PolecatName: polecatName,
 		SessionName: info.SessionName,
+		ClonePath:   info.ClonePath,
+		BaseBranch:  info.BaseBranch,
+		Branch:      info.Branch,
 	}, nil
 }
 

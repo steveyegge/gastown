@@ -1590,6 +1590,18 @@ func (mc *MachinesConfig) WorkerMachines() map[string]*MachineEntry {
 // ProxyURL returns the GT_PROXY_URL for a polecat on the given machine.
 // If the machine host matches DoltHost, returns loopback (polecat is on the hub).
 // Otherwise returns the DoltHost Tailscale IP.
+// HubSSHTarget returns the SSH target for the hub machine (DoltHost).
+// Looks up the machine whose Host matches DoltHost and returns its SSHTarget().
+// Falls back to DoltHost if no matching machine is found.
+func (mc *MachinesConfig) HubSSHTarget() string {
+	for _, m := range mc.Machines {
+		if m.Host == mc.DoltHost {
+			return m.SSHTarget()
+		}
+	}
+	return mc.DoltHost
+}
+
 func (mc *MachinesConfig) ProxyURL(machineHost string) string {
 	port := 9876
 	if machineHost == mc.DoltHost {

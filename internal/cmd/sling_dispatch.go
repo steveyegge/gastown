@@ -113,7 +113,9 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	}
 
 	// 0. Check if rig is parked or docked before dispatching (gt-4owfd.1, gt-11y)
-	if params.RigName != "" {
+	// Skip docked check when --machine is set: the work runs on a remote
+	// satellite, so the local rig's docked state is irrelevant.
+	if params.RigName != "" && params.Machine == "" {
 		if blocked, reason := IsRigParkedOrDocked(townRoot, params.RigName); blocked {
 			result.ErrMsg = "rig " + reason
 			undoCmd := "gt rig unpark"
@@ -265,6 +267,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 			ClonePath:   satResult.ClonePath,
 			BaseBranch:  satResult.BaseBranch,
 			Branch:      satResult.Branch,
+			Pane:        "satellite", // Mark session as already started (remote tmux)
 			account:     params.Account,
 			agent:       params.Agent,
 		}
