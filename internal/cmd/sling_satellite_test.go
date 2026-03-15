@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,7 +93,6 @@ func TestSSHTarget_HostOnly(t *testing.T) {
 
 func TestLoadMachinesConfig_FileNotExist(t *testing.T) {
 	dir := t.TempDir()
-	// Create the mayor directory but no machines.json
 	if err := os.MkdirAll(filepath.Join(dir, "mayor"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -160,23 +158,14 @@ func TestLoadMachinesConfig_InvalidJSON(t *testing.T) {
 	}
 }
 
-// --- Bootstrap script generation tests ---
+// --- Bootstrap script generation tests (uses production buildBootstrapScript) ---
 
-func TestSpawnOnTarget_ScriptContainsRequiredElements(t *testing.T) {
-	// We can't call spawnOnTarget directly (it SSHes), but we can verify
-	// the script template by reproducing the fmt.Sprintf and checking output.
-	townRoot := "/Users/test/gt"
-	rigName := "gastown"
-	polecatName := "Toast"
-	doltHost := "10.0.0.1"
-	doltPort := 3307
-	proxyURL := "https://10.0.0.1:9876"
-
-	script := buildBootstrapScript(townRoot, rigName, polecatName, doltHost, doltPort, proxyURL)
+func TestBootstrapScript_ContainsRequiredElements(t *testing.T) {
+	script := buildBootstrapScript("/Users/test/gt", "gastown", "Toast", "10.0.0.1", 3307, "https://10.0.0.1:9876")
 
 	checks := []struct {
-		name    string
-		substr  string
+		name   string
+		substr string
 	}{
 		{"set -e", "set -e"},
 		{"cert dir creation", "mktemp -d"},
@@ -215,7 +204,7 @@ func TestSpawnOnTarget_ScriptContainsRequiredElements(t *testing.T) {
 	}
 }
 
-func TestSpawnOnTarget_ScriptSessionBeforeEnv(t *testing.T) {
+func TestBootstrapScript_SessionBeforeEnv(t *testing.T) {
 	script := buildBootstrapScript("/gt", "rig", "Name", "10.0.0.1", 3307, "https://10.0.0.1:9876")
 
 	sessionIdx := strings.Index(script, "tmux new-session")
@@ -232,7 +221,7 @@ func TestSpawnOnTarget_ScriptSessionBeforeEnv(t *testing.T) {
 	}
 }
 
-func TestSpawnOnTarget_ScriptNoEchoForCert(t *testing.T) {
+func TestBootstrapScript_NoEchoForCert(t *testing.T) {
 	script := buildBootstrapScript("/gt", "rig", "Name", "10.0.0.1", 3307, "https://10.0.0.1:9876")
 
 	// echo "$CERT_JSON" on macOS expands \n — we must use printf '%s'
@@ -241,22 +230,18 @@ func TestSpawnOnTarget_ScriptNoEchoForCert(t *testing.T) {
 	}
 }
 
-func TestSpawnOnTarget_DoltPortDefault(t *testing.T) {
+func TestBootstrapScript_DoltPortPassthrough(t *testing.T) {
+	// buildBootstrapScript passes through whatever port the caller provides.
+	// Default (3307) is applied by spawnRemoteSatellite before calling this.
 	script := buildBootstrapScript("/gt", "rig", "Name", "10.0.0.1", 0, "https://10.0.0.1:9876")
-
-	// Port 0 means the caller didn't set it — script should still contain --dolt-port
 	if !strings.Contains(script, "--dolt-port 0") {
-		// This is actually fine — the default happens in spawnRemoteSatellite,
-		// not in the script builder. Port 0 would be a caller bug.
-		// Just verify the script embeds whatever port it's given.
-		t.Log("port 0 passed through to script — caller should default to 3307")
+		t.Error("expected --dolt-port 0 in script (builder passes through caller value)")
 	}
 }
 
 // --- Cert API payload tests ---
 
 func TestIssueCertPayload_JSONSafe(t *testing.T) {
-	// Verify json.Marshal produces safe payloads even with special chars
 	cases := []struct {
 		name string
 		rig  string
@@ -276,7 +261,6 @@ func TestIssueCertPayload_JSONSafe(t *testing.T) {
 			if err != nil {
 				t.Fatalf("json.Marshal failed: %v", err)
 			}
-			// Must be valid JSON
 			var parsed map[string]string
 			if err := json.Unmarshal(payload, &parsed); err != nil {
 				t.Fatalf("payload is not valid JSON: %v\npayload: %s", err, payload)
@@ -306,52 +290,13 @@ func TestDenyCertPayload_JSONSafe(t *testing.T) {
 	}
 }
 
-// --- verifyBootstrap parsing tests ---
-
-func TestVerifyBootstrapParsing_Match(t *testing.T) {
-	// Simulate what verifyBootstrap checks internally
-	stdout := "GT_PROXY_URL=https://127.0.0.1:9876\n"
-	expected := "https://127.0.0.1:9876"
-
-	if !strings.Contains(stdout, expected) {
-		t.Errorf("expected stdout to contain %q", expected)
-	}
-}
-
-func TestVerifyBootstrapParsing_Mismatch(t *testing.T) {
-	stdout := "GT_PROXY_URL=https://10.0.0.1:9876\n"
-	expected := "https://127.0.0.1:9876"
-
-	if strings.Contains(stdout, expected) {
-		t.Error("expected mismatch but got match")
-	}
-}
-
-func TestVerifyBootstrapParsing_Empty(t *testing.T) {
-	stdout := ""
-	expected := "https://127.0.0.1:9876"
-
-	if strings.Contains(stdout, expected) {
-		t.Error("empty stdout should not match")
-	}
-}
-
-// --- Spawn output parsing tests ---
+// --- parseSpawnOutput tests (uses production parseSpawnOutput) ---
 
 func TestParseSpawnOutput_CleanJSON(t *testing.T) {
 	output := `{"session_name":"gt-gastown-p-Toast","cert_dir":"/tmp/abc","clone_path":"/gt/gastown/polecats/Toast","base_branch":"main","branch":"polecat/Toast"}`
 
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	lastLine := lines[len(lines)-1]
-
-	var info struct {
-		SessionName string `json:"session_name"`
-		CertDir     string `json:"cert_dir"`
-		ClonePath   string `json:"clone_path"`
-		BaseBranch  string `json:"base_branch"`
-		Branch      string `json:"branch"`
-	}
-	if err := json.Unmarshal([]byte(lastLine), &info); err != nil {
+	info, err := parseSpawnOutput(output)
+	if err != nil {
 		t.Fatalf("failed to parse clean JSON output: %v", err)
 	}
 	if info.SessionName != "gt-gastown-p-Toast" {
@@ -360,23 +305,22 @@ func TestParseSpawnOutput_CleanJSON(t *testing.T) {
 	if info.ClonePath != "/gt/gastown/polecats/Toast" {
 		t.Errorf("ClonePath = %q, want %q", info.ClonePath, "/gt/gastown/polecats/Toast")
 	}
+	if info.BaseBranch != "main" {
+		t.Errorf("BaseBranch = %q, want %q", info.BaseBranch, "main")
+	}
+	if info.Branch != "polecat/Toast" {
+		t.Errorf("Branch = %q, want %q", info.Branch, "polecat/Toast")
+	}
 }
 
 func TestParseSpawnOutput_MixedWithProgress(t *testing.T) {
 	// gt polecat spawn prints progress text before JSON
-	output := `Checking Dolt health...
-Created polecat: Toast
-✓ Polecat Toast spawned (session start deferred)
-{"rig":"gastown","polecat":"Toast","session_name":"gt-gastown-p-Toast","clone_path":"/gt/gastown/polecats/Toast","base_branch":"main","branch":"polecat/Toast"}`
+	output := "Checking Dolt health...\nCreated polecat: Toast\n" +
+		"\u2713 Polecat Toast spawned (session start deferred)\n" +
+		`{"rig":"gastown","polecat":"Toast","session_name":"gt-gastown-p-Toast","clone_path":"/gt/gastown/polecats/Toast","base_branch":"main","branch":"polecat/Toast"}`
 
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	lastLine := lines[len(lines)-1]
-
-	var info struct {
-		SessionName string `json:"session_name"`
-		ClonePath   string `json:"clone_path"`
-	}
-	if err := json.Unmarshal([]byte(lastLine), &info); err != nil {
+	info, err := parseSpawnOutput(output)
+	if err != nil {
 		t.Fatalf("failed to parse JSON from mixed output: %v", err)
 	}
 	if info.SessionName != "gt-gastown-p-Toast" {
@@ -385,17 +329,57 @@ Created polecat: Toast
 }
 
 func TestParseSpawnOutput_NoJSON(t *testing.T) {
-	output := "Some error occurred\nNo JSON here"
-
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	lastLine := lines[len(lines)-1]
-
-	var info struct {
-		SessionName string `json:"session_name"`
-	}
-	err := json.Unmarshal([]byte(lastLine), &info)
+	_, err := parseSpawnOutput("Some error occurred\nNo JSON here")
 	if err == nil {
 		t.Error("expected parse error for non-JSON output")
+	}
+}
+
+func TestParseSpawnOutput_EmptyString(t *testing.T) {
+	_, err := parseSpawnOutput("")
+	if err == nil {
+		t.Error("expected parse error for empty output")
+	}
+}
+
+func TestParseSpawnOutput_MultipleJSONLines(t *testing.T) {
+	// Only the last line should be parsed (bootstrap script uses jq -c at the end)
+	output := `{"session_name":"wrong","clone_path":"/wrong"}
+{"session_name":"gt-gastown-p-Toast","clone_path":"/gt/gastown/polecats/Toast","base_branch":"main","branch":"polecat/Toast"}`
+
+	info, err := parseSpawnOutput(output)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info.SessionName != "gt-gastown-p-Toast" {
+		t.Errorf("should parse last JSON line, got SessionName = %q", info.SessionName)
+	}
+}
+
+// --- verifyBootstrap parsing tests ---
+
+func TestVerifyBootstrapParsing_Match(t *testing.T) {
+	// verifyBootstrap uses strings.Contains(stdout, expectedURL)
+	stdout := "GT_PROXY_URL=https://127.0.0.1:9876\n"
+	expected := "https://127.0.0.1:9876"
+	if !strings.Contains(stdout, expected) {
+		t.Errorf("expected stdout to contain %q", expected)
+	}
+}
+
+func TestVerifyBootstrapParsing_Mismatch(t *testing.T) {
+	stdout := "GT_PROXY_URL=https://10.0.0.1:9876\n"
+	expected := "https://127.0.0.1:9876"
+	if strings.Contains(stdout, expected) {
+		t.Error("expected mismatch but got match")
+	}
+}
+
+func TestVerifyBootstrapParsing_Empty(t *testing.T) {
+	stdout := ""
+	expected := "https://127.0.0.1:9876"
+	if strings.Contains(stdout, expected) {
+		t.Error("empty stdout should not match")
 	}
 }
 
@@ -465,12 +449,8 @@ func TestIsWorker_EmptyRoles(t *testing.T) {
 
 func TestTownRoot_DefaultsToHome(t *testing.T) {
 	m := &config.MachineEntry{TownRoot: ""}
-	got := m.TownRoot
-	if got != "" {
-		t.Errorf("expected empty TownRoot, got %q", got)
-	}
-	// spawnRemoteSatellite defaults "" to "~/gt"
-	defaulted := got
+	// spawnRemoteSatellite defaults empty TownRoot to "~/gt"
+	defaulted := m.TownRoot
 	if defaulted == "" {
 		defaulted = "~/gt"
 	}
@@ -513,59 +493,6 @@ func TestIssueCertResponse_Roundtrip(t *testing.T) {
 }
 
 // --- helpers ---
-
-// buildBootstrapScript extracts the script template from spawnOnTarget for testing.
-// This is the same fmt.Sprintf used in the production code.
-func buildBootstrapScript(townRoot, rigName, polecatName, doltHost string, doltPort int, proxyURL string) string {
-	return fmt.Sprintf(`
-set -e
-CERT_DIR=$(mktemp -d)
-chmod 700 "$CERT_DIR"
-
-# Read cert material from stdin (JSON)
-CERT_JSON=$(cat)
-printf '%%s' "$CERT_JSON" | jq -r .cert > "$CERT_DIR/cert.pem"
-printf '%%s' "$CERT_JSON" | jq -r .key  > "$CERT_DIR/key.pem"
-printf '%%s' "$CERT_JSON" | jq -r .ca   > "$CERT_DIR/ca.pem"
-chmod 600 "$CERT_DIR/key.pem"
-
-cd %s
-
-# Spawn polecat (creates worktree, does NOT start tmux session)
-# Temporarily disable set -e to capture the error message
-set +e
-SPAWN_OUTPUT=$(gt polecat spawn %s --name %s --dolt-host %s --dolt-port %d --json 2>&1)
-SPAWN_EXIT=$?
-set -e
-if [ $SPAWN_EXIT -ne 0 ]; then
-  echo "SPAWN FAILED (exit $SPAWN_EXIT): $SPAWN_OUTPUT" >&2
-  exit 1
-fi
-SPAWN_JSON=$(printf '%%s\n' "$SPAWN_OUTPUT" | grep '^{' | tail -1)
-CLONE_PATH=$(printf '%%s' "$SPAWN_JSON" | jq -r .clone_path)
-
-# Session name follows gt convention
-SESS="gt-%s-p-%s"
-
-# Create a detached tmux session in the polecat's worktree
-tmux new-session -d -s "$SESS" -c "$CLONE_PATH" 2>/dev/null || true
-
-# Set proxy env vars in tmux session (must happen after session creation)
-tmux setenv -t "$SESS" GT_PROXY_URL "%s"
-tmux setenv -t "$SESS" GT_PROXY_CERT "$CERT_DIR/cert.pem"
-tmux setenv -t "$SESS" GT_PROXY_KEY "$CERT_DIR/key.pem"
-tmux setenv -t "$SESS" GT_PROXY_CA "$CERT_DIR/ca.pem"
-tmux setenv -t "$SESS" GT_REAL_BIN "$HOME/.local/bin/gt.real"
-
-# Output merged session info as JSON
-printf '%%s' "$SPAWN_JSON" | jq -c --arg sess "$SESS" --arg cert_dir "$CERT_DIR" '. + {session_name: $sess, cert_dir: $cert_dir}'
-`,
-		townRoot,
-		rigName, polecatName, doltHost, doltPort,
-		rigName, polecatName,
-		proxyURL,
-	)
-}
 
 func keys(m map[string]*config.MachineEntry) []string {
 	out := make([]string, 0, len(m))

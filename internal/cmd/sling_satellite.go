@@ -254,21 +254,11 @@ func denyCertViaSSH(hubHost, serial string) error {
 	return err
 }
 
-// spawnOnTarget SSHes to the target machine and:
-//  1. Writes cert files (piped via stdin, chmod 600 on key)
-//  2. Spawns polecat with --name
-//  3. Sets tmux env vars for proxy routing
-//  4. Starts polecat session
-func spawnOnTarget(
-	sshTarget, townRoot, rigName, polecatName string,
-	doltHost string, doltPort int,
-	proxyURL string,
-	cert *issueCertResponse,
-	opts SlingSpawnOptions,
-) (*SatelliteSpawnResult, error) {
-	// Build the bootstrap script to run on the target.
-	// Cert material is piped via stdin (never in process args).
-	script := fmt.Sprintf(`
+// buildBootstrapScript generates the shell script that runs on the target
+// machine during satellite bootstrap. Cert material is piped via stdin,
+// never embedded in the script.
+func buildBootstrapScript(townRoot, rigName, polecatName, doltHost string, doltPort int, proxyURL string) string {
+	return fmt.Sprintf(`
 set -e
 CERT_DIR=$(mktemp -d)
 chmod 700 "$CERT_DIR"
@@ -316,6 +306,43 @@ printf '%%s' "$SPAWN_JSON" | jq -c --arg sess "$SESS" --arg cert_dir "$CERT_DIR"
 		rigName, polecatName,
 		proxyURL,
 	)
+}
+
+// spawnOutputInfo holds the parsed JSON from a satellite spawn command.
+type spawnOutputInfo struct {
+	SessionName string `json:"session_name"`
+	CertDir     string `json:"cert_dir"`
+	ClonePath   string `json:"clone_path"`
+	BaseBranch  string `json:"base_branch"`
+	Branch      string `json:"branch"`
+}
+
+// parseSpawnOutput extracts the spawn result from mixed stdout that may
+// contain progress text before the final JSON line.
+func parseSpawnOutput(stdout string) (*spawnOutputInfo, error) {
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	lastLine := lines[len(lines)-1]
+
+	var info spawnOutputInfo
+	if err := json.Unmarshal([]byte(lastLine), &info); err != nil {
+		return nil, fmt.Errorf("parsing spawn output: %w\noutput: %s", err, stdout)
+	}
+	return &info, nil
+}
+
+// spawnOnTarget SSHes to the target machine and:
+//  1. Writes cert files (piped via stdin, chmod 600 on key)
+//  2. Spawns polecat with --name
+//  3. Sets tmux env vars for proxy routing
+//  4. Starts polecat session
+func spawnOnTarget(
+	sshTarget, townRoot, rigName, polecatName string,
+	doltHost string, doltPort int,
+	proxyURL string,
+	cert *issueCertResponse,
+	opts SlingSpawnOptions,
+) (*SatelliteSpawnResult, error) {
+	script := buildBootstrapScript(townRoot, rigName, polecatName, doltHost, doltPort, proxyURL)
 
 	// Pipe cert material via stdin
 	certJSON, err := json.Marshal(cert)
@@ -328,19 +355,9 @@ printf '%%s' "$SPAWN_JSON" | jq -c --arg sess "$SESS" --arg cert_dir "$CERT_DIR"
 		return nil, err
 	}
 
-	// Parse the last JSON line from output
-	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	lastLine := lines[len(lines)-1]
-
-	var info struct {
-		SessionName string `json:"session_name"`
-		CertDir     string `json:"cert_dir"`
-		ClonePath   string `json:"clone_path"`
-		BaseBranch  string `json:"base_branch"`
-		Branch      string `json:"branch"`
-	}
-	if err := json.Unmarshal([]byte(lastLine), &info); err != nil {
-		return nil, fmt.Errorf("parsing spawn output: %w\noutput: %s", err, stdout)
+	info, err := parseSpawnOutput(stdout)
+	if err != nil {
+		return nil, err
 	}
 
 	return &SatelliteSpawnResult{
