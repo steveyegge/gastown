@@ -186,45 +186,65 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 			// rather than silently degrading to immediate (destructive) delivery.
 			return fmt.Errorf("--mode=wait-idle requires a Gas Town workspace")
 		}
-		// Check if the target agent supports prompt-based idle detection.
-		// WaitForIdle uses Claude Code's prompt pattern (❯) and status bar (⏵⏵).
-		// Non-Claude agents (Gemini, Codex, etc.) have no ReadyPromptPrefix,
-		// so WaitForIdle produces false positives — it sees no busy indicator
-		// and matches stale prompt characters in the pane buffer. (GH#gt-5ey3)
-		// Degrade to queue mode for agents without prompt-based detection.
+		// Resolve agent preset for delivery strategy decisions.
+		var preset *config.AgentPresetInfo
 		if agentName, err := t.GetEnvironment(sessionName, "GT_AGENT"); err == nil && agentName != "" {
-			preset := config.GetAgentPresetByName(agentName)
-			if preset != nil && preset.ReadyPromptPrefix == "" {
-				fmt.Fprintf(os.Stderr, "wait-idle: %s agent %q has no prompt detection, using queue mode\n", sessionName, agentName)
-				if qErr := nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
+			preset = config.GetAgentPresetByName(agentName)
+		}
+
+		// Non-Claude agents (Gemini, Codex, etc.) have no ReadyPromptPrefix,
+		// so WaitForIdle produces false positives — degrade to queue mode.
+		if preset != nil && preset.ReadyPromptPrefix == "" {
+			fmt.Fprintf(os.Stderr, "wait-idle: %s agent %q has no prompt detection, using queue mode\n", sessionName, preset.Name)
+			if qErr := nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
+				Sender:   sender,
+				Message:  message,
+				Priority: nudgePriorityFlag,
+			}); qErr != nil {
+				formatted := nudge.FormatForInjection([]nudge.QueuedNudge{{
 					Sender:   sender,
 					Message:  message,
 					Priority: nudgePriorityFlag,
-				}); qErr != nil {
-					formatted := nudge.FormatForInjection([]nudge.QueuedNudge{{
-						Sender:   sender,
-						Message:  message,
-						Priority: nudgePriorityFlag,
-					}})
-					return t.NudgeSession(sessionName, formatted)
-				}
-				// Ensure a nudge-poller is running so the queue actually drains.
-				// The poller is normally started by gt crew start, but if the
-				// session was started manually (or the poller crashed), queued
-				// nudges sit undelivered forever. StartPoller is idempotent —
-				// it no-ops if a poller is already alive for this session.
-				if _, pollerErr := nudge.StartPoller(townRoot, sessionName); pollerErr != nil {
-					fmt.Fprintf(os.Stderr, "wait-idle: could not start nudge poller for %s: %v\n", sessionName, pollerErr)
-				}
-				return nil
+				}})
+				return t.NudgeSession(sessionName, formatted)
 			}
+			// Ensure a nudge-poller is running so the queue actually drains.
+			if _, pollerErr := nudge.StartPoller(townRoot, sessionName); pollerErr != nil {
+				fmt.Fprintf(os.Stderr, "wait-idle: could not start nudge poller for %s: %v\n", sessionName, pollerErr)
+			}
+			return nil
 		}
-		// Try to wait for idle
+
+		// For agents with turn-boundary drain (Claude Code), prefer queue
+		// delivery — the UserPromptSubmit hook drains reliably on the next
+		// turn boundary. But if the agent is idle (no turns coming), the
+		// queue would sit forever. So we queue first, then run watchAndDeliver
+		// which polls for idle and falls back to NudgeSession if needed.
+		if preset != nil && preset.HasTurnBoundaryDrain {
+			fmt.Fprintf(os.Stderr, "wait-idle: %s has turn-boundary drain, queuing with watcher\n", sessionName)
+			if qErr := nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
+				Sender:   sender,
+				Message:  message,
+				Priority: nudgePriorityFlag,
+			}); qErr != nil {
+				// Queue failed — fall back to direct delivery as last resort
+				formatted := nudge.FormatForInjection([]nudge.QueuedNudge{{
+					Sender:   sender,
+					Message:  message,
+					Priority: nudgePriorityFlag,
+				}})
+				return t.NudgeSession(sessionName, formatted)
+			}
+			// Watch for idle and deliver via NudgeSession if the hook doesn't
+			// drain the queue first (covers idle agents with no incoming turns).
+			watchAndDeliver(t, townRoot, sessionName)
+			return nil
+		}
+
+		// Try to wait for idle (agents without turn-boundary drain)
 		err := t.WaitForIdle(sessionName, waitIdleTimeout)
 		if err == nil {
-			// Agent is idle — deliver directly. Format as system-reminder
-			// so the agent processes it as a background notification rather
-			// than a user interruption/correction.
+			// Agent is idle — deliver directly.
 			formatted := nudge.FormatForInjection([]nudge.QueuedNudge{{
 				Sender:   sender,
 				Message:  message,
