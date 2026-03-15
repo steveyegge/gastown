@@ -42,6 +42,7 @@ var (
 	installShell      bool
 	installWrappers   bool
 	installSupervisor bool
+	installDashboard  bool
 	installDoltPort   int
 )
 
@@ -70,7 +71,8 @@ Examples:
   gt install ~/gt --github=user/repo           # Create private GitHub repo (default)
   gt install ~/gt --github=user/repo --public  # Create public GitHub repo
   gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)
-  gt install ~/gt --supervisor                 # Configure launchd/systemd for daemon auto-restart`,
+  gt install ~/gt --supervisor                 # Configure launchd/systemd for daemon auto-restart
+  gt install ~/gt --dashboard                  # Configure launchd/systemd for dashboard auto-restart`,
 	Args:         cobra.MaximumNArgs(1),
 	RunE:         runInstall,
 	SilenceUsage: true,
@@ -88,6 +90,7 @@ func init() {
 	installCmd.Flags().BoolVar(&installShell, "shell", false, "Install shell integration (sets GT_TOWN_ROOT/GT_RIG env vars)")
 	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-gemini/gt-opencode wrapper scripts to ~/bin/")
 	installCmd.Flags().BoolVar(&installSupervisor, "supervisor", false, "Configure launchd/systemd for daemon auto-restart")
+	installCmd.Flags().BoolVar(&installDashboard, "dashboard", false, "Configure launchd/systemd for dashboard auto-restart")
 	installCmd.Flags().IntVar(&installDoltPort, "dolt-port", 0, "Dolt SQL server port (default 3307; set when another instance owns the default port)")
 	rootCmd.AddCommand(installCmd)
 }
@@ -476,6 +479,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		if msg, err := templates.ProvisionSupervisor(absPath); err != nil {
 			fmt.Printf("   %s Could not configure supervisor: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ %s\n", msg)
+		}
+	}
+
+	// Configure dashboard supervisor (launchd/systemd) for dashboard auto-restart
+	if installDashboard {
+		fmt.Println()
+		if msg, err := templates.ProvisionDashboardSupervisor(absPath); err != nil {
+			fmt.Printf("   %s Could not configure dashboard supervisor: %v\n", style.Dim.Render("⚠"), err)
 		} else {
 			fmt.Printf("   ✓ %s\n", msg)
 		}
