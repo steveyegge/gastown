@@ -152,7 +152,14 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// Persistent polecat model (gt-4ac): try to reuse an idle polecat first.
 	// Idle polecats have completed their work but kept their sandbox (worktree).
 	// Reusing avoids the overhead of creating a new worktree.
+	// Skip idle reuse when a specific name is requested (satellite bootstrap
+	// pre-allocates names for cert CN matching — reusing a different polecat
+	// would break the identity flow).
 	idlePolecat, findErr := polecatMgr.FindIdlePolecat()
+	if opts.Name != "" {
+		idlePolecat = nil
+		findErr = fmt.Errorf("skipping idle reuse: specific name %q requested", opts.Name)
+	}
 	if findErr == nil && idlePolecat != nil {
 		polecatName := idlePolecat.Name
 		fmt.Printf("Reusing idle polecat: %s\n", polecatName)
