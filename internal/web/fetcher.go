@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/activity"
@@ -50,9 +51,22 @@ var fetcherGetSessionEnv = func(sessionName, key string) (string, error) {
 }
 
 // runBdCmd executes a bd command with the configured cmdTimeout in the specified beads directory.
+// Results are cached for bdCacheTTL to prevent spawning duplicate bd processes when the
+// dashboard's 14 concurrent fetches request the same data within a short window (GH#2618).
 func (f *LiveConvoyFetcher) runBdCmd(beadsDir string, args ...string) (*bytes.Buffer, error) {
 	// bd v0.59+ requires --flat for list --json to produce JSON output
 	args = beads.InjectFlatForListJSON(args)
+
+	// Check cache for recent identical query
+	cacheKey := beadsDir + "\x00" + strings.Join(args, "\x00")
+	if f.bdCacheTTL > 0 {
+		f.bdCacheMu.Lock()
+		if entry, ok := f.bdCache[cacheKey]; ok && time.Since(entry.created) < f.bdCacheTTL {
+			f.bdCacheMu.Unlock()
+			return bytes.NewBuffer(append([]byte(nil), entry.data...)), nil
+		}
+		f.bdCacheMu.Unlock()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), f.cmdTimeout)
 	defer cancel()
@@ -77,7 +91,30 @@ func (f *LiveConvoyFetcher) runBdCmd(beadsDir string, args ...string) (*bytes.Bu
 		}
 		return nil, err
 	}
+
+	// Cache successful result
+	if f.bdCacheTTL > 0 {
+		f.bdCacheMu.Lock()
+		f.bdCache[cacheKey] = &bdCacheEntry{
+			data:    append([]byte(nil), stdout.Bytes()...),
+			created: time.Now(),
+		}
+		// Evict expired entries to prevent unbounded growth
+		for k, v := range f.bdCache {
+			if time.Since(v.created) > f.bdCacheTTL {
+				delete(f.bdCache, k)
+			}
+		}
+		f.bdCacheMu.Unlock()
+	}
+
 	return &stdout, nil
+}
+
+// bdCacheEntry holds a cached bd command result with expiry.
+type bdCacheEntry struct {
+	data    []byte
+	created time.Time
 }
 
 // LiveConvoyFetcher fetches convoy data from beads.
@@ -98,6 +135,13 @@ type LiveConvoyFetcher struct {
 	stuckThreshold          time.Duration
 	heartbeatFreshThreshold time.Duration
 	mayorActiveThreshold    time.Duration
+
+	// bdCache deduplicates identical bd subprocess calls within a short TTL window.
+	// This prevents the CPU spike from 14 concurrent dashboard fetches each spawning
+	// multiple bd processes on every 30s refresh cycle. See GH#2618.
+	bdCache    map[string]*bdCacheEntry
+	bdCacheMu  sync.Mutex
+	bdCacheTTL time.Duration
 }
 
 // NewLiveConvoyFetcher creates a fetcher for the current workspace.
@@ -131,6 +175,8 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 		stuckThreshold:          config.ParseDurationOrDefault(workerCfg.StuckThreshold, constants.GUPPViolationTimeout),
 		heartbeatFreshThreshold: config.ParseDurationOrDefault(workerCfg.HeartbeatFreshThreshold, 5*time.Minute),
 		mayorActiveThreshold:    config.ParseDurationOrDefault(workerCfg.MayorActiveThreshold, 5*time.Minute),
+		bdCache:                 make(map[string]*bdCacheEntry),
+		bdCacheTTL:              5 * time.Second,
 	}, nil
 }
 
