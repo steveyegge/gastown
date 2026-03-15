@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -87,7 +88,7 @@ func loadMachinesConfig(townRoot string) (*config.MachinesConfig, error) {
 	path := constants.MayorMachinesPath(townRoot)
 	cfg, err := config.LoadMachinesConfig(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("loading machines config: %w", err)
@@ -225,10 +226,11 @@ func preAllocatePolecatName(townRoot, rigName string) (string, error) {
 
 // issueCertViaSSH issues a polecat client cert by calling the admin API on the hub.
 func issueCertViaSSH(hubHost, rigName, polecatName string) (*issueCertResponse, error) {
-	cmd := fmt.Sprintf(
-		`curl -sf -X POST http://127.0.0.1:9877/v1/admin/issue-cert -d '{"rig":"%s","name":"%s"}'`,
-		rigName, polecatName,
-	)
+	payload, err := json.Marshal(map[string]string{"rig": rigName, "name": polecatName})
+	if err != nil {
+		return nil, fmt.Errorf("marshaling cert request: %w", err)
+	}
+	cmd := fmt.Sprintf(`curl -sf -X POST http://127.0.0.1:9877/v1/admin/issue-cert -d %q`, string(payload))
 	stdout, err := runSSH(hubHost, cmd, 30*time.Second)
 	if err != nil {
 		return nil, err
@@ -243,11 +245,12 @@ func issueCertViaSSH(hubHost, rigName, polecatName string) (*issueCertResponse, 
 
 // denyCertViaSSH revokes a cert on the hub.
 func denyCertViaSSH(hubHost, serial string) error {
-	cmd := fmt.Sprintf(
-		`curl -sf -X POST http://127.0.0.1:9877/v1/admin/deny-cert -d '{"serial":"%s"}'`,
-		serial,
-	)
-	_, err := runSSH(hubHost, cmd, 15*time.Second)
+	payload, err := json.Marshal(map[string]string{"serial": serial})
+	if err != nil {
+		return fmt.Errorf("marshaling deny request: %w", err)
+	}
+	cmd := fmt.Sprintf(`curl -sf -X POST http://127.0.0.1:9877/v1/admin/deny-cert -d %q`, string(payload))
+	_, err = runSSH(hubHost, cmd, 15*time.Second)
 	return err
 }
 

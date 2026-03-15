@@ -7,15 +7,15 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/gt-proxy-server</string>
+        <string>__GT_BINARY_DIR__/gt-proxy-server</string>
         <string>--listen</string>
         <string>0.0.0.0:9876</string>
         <string>--admin-listen</string>
         <string>127.0.0.1:9877</string>
         <string>--ca-dir</string>
-        <string>/Users/trilliumsmith/gt/.runtime/ca</string>
+        <string>__TOWN_ROOT__/.runtime/ca</string>
         <string>--town-root</string>
-        <string>/Users/trilliumsmith/gt</string>
+        <string>__TOWN_ROOT__</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -25,12 +25,12 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/Users/trilliumsmith/gt/.runtime/proxy.log</string>
+    <string>__TOWN_ROOT__/.runtime/proxy.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/trilliumsmith/gt/.runtime/proxy.err</string>
+    <string>__TOWN_ROOT__/.runtime/proxy.err</string>
 
     <key>WorkingDirectory</key>
-    <string>/Users/trilliumsmith/gt</string>
+    <string>__TOWN_ROOT__</string>
 </dict>
 </plist>
