@@ -78,6 +78,13 @@ type DoltServerConfig struct {
 	// detection of Dolt server crashes without changing the overall
 	// heartbeat frequency. Default 30s.
 	HealthCheckInterval time.Duration `json:"health_check_interval,omitempty"`
+
+	// FallbackHosts is an ordered list of "host:port" addresses to try when
+	// the primary host is unreachable. Used only when External is true.
+	// The daemon walks the list on health-check failure and reverts to the
+	// primary when it recovers. Failover state is persisted to
+	// daemon/dolt-failover-state.json so child processes pick it up.
+	FallbackHosts []string `json:"fallback_hosts,omitempty"`
 }
 
 // DefaultDoltServerConfig returns sensible defaults for Dolt server config.
@@ -131,6 +138,14 @@ type DoltServerManager struct {
 
 	// Identity verification state
 	lastIdentityCheck time.Time // Last time we ran the database identity check
+
+	// Failover state (External mode only).
+	// When the primary host is unreachable, the manager walks FallbackHosts
+	// and switches config.Host to the first reachable one. On each subsequent
+	// health tick it probes the primary; when the primary recovers it reverts.
+	primaryHost string // Original configured host (empty until first failover)
+	primaryPort int    // Original configured port
+	inFailover  bool   // True when connected to a fallback host
 
 	// Health check warnings (Option B throttling for doctor molecule).
 	// Populated by checkHealthLocked(), consumed by Daemon.ensureDoltServerRunning().
@@ -367,8 +382,36 @@ func (m *DoltServerManager) EnsureRunning() error {
 	}
 
 	if m.IsExternal() {
-		// External mode: just check health, don't manage lifecycle
-		return m.checkHealth()
+		// External mode: check health with failover/failback support.
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
+		// If currently in failover, probe the primary first.
+		if m.tryFailback() {
+			m.clearUnhealthySignal()
+		}
+
+		if err := m.checkHealthLocked(); err != nil {
+			m.logger("Dolt external server unhealthy: %v", err)
+			m.writeUnhealthySignal("external_health_check_failed", err.Error())
+
+			// Try failover to a fallback host.
+			if foErr := m.tryFailover(); foErr != nil {
+				m.sendUnhealthyAlert(fmt.Errorf("external server and all fallbacks unreachable: %w", err))
+				return err
+			}
+			// Re-check health on the new host.
+			if err2 := m.checkHealthLocked(); err2 != nil {
+				m.logger("Dolt failover host also unhealthy: %v", err2)
+				return err2
+			}
+			m.clearUnhealthySignal()
+			return nil
+		}
+
+		m.clearUnhealthySignal()
+		m.maybeResetBackoff()
+		return nil
 	}
 
 	m.mu.Lock()
@@ -753,6 +796,152 @@ func (m *DoltServerManager) clearUnhealthySignal() {
 func IsDoltUnhealthy(townRoot string) bool {
 	_, err := os.Stat(filepath.Join(townRoot, "daemon", "DOLT_UNHEALTHY"))
 	return err == nil
+}
+
+// --- Failover / Failback (External mode only) ---
+//
+// When FallbackHosts is configured and the primary external host fails health
+// checks, the daemon tries each fallback in order. The first reachable host
+// becomes the active host. On every subsequent health tick the daemon probes
+// the primary; when it recovers, the daemon reverts automatically.
+//
+// Active-host state is written to daemon/dolt-failover-state.json so that
+// child processes (bd, gt subcommands) resolve the correct host via
+// doltserver.DefaultConfig without anyone mutating ~/.zshenv.
+
+// failoverStateFile is the path to the failover state JSON.
+func (m *DoltServerManager) failoverStateFile() string {
+	return filepath.Join(m.townRoot, "daemon", "dolt-failover-state.json")
+}
+
+// failoverState is persisted to dolt-failover-state.json.
+type failoverState struct {
+	ActiveHost  string `json:"active_host"`
+	ActivePort  int    `json:"active_port"`
+	PrimaryHost string `json:"primary_host"`
+	PrimaryPort int    `json:"primary_port"`
+	InFailover  bool   `json:"in_failover"`
+	Since       string `json:"since,omitempty"`
+}
+
+// writeFailoverState persists the current failover state.
+func (m *DoltServerManager) writeFailoverState() {
+	state := failoverState{
+		ActiveHost:  m.config.Host,
+		ActivePort:  m.config.Port,
+		PrimaryHost: m.primaryHost,
+		PrimaryPort: m.primaryPort,
+		InFailover:  m.inFailover,
+		Since:       m.now().UTC().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		m.logger("Warning: failed to marshal failover state: %v", err)
+		return
+	}
+	if err := os.WriteFile(m.failoverStateFile(), data, 0644); err != nil {
+		m.logger("Warning: failed to write failover state: %v", err)
+	}
+}
+
+// clearFailoverState removes the failover state file (primary is active).
+func (m *DoltServerManager) clearFailoverState() {
+	_ = os.Remove(m.failoverStateFile())
+}
+
+// probeHost checks if a host:port is reachable with a TCP dial.
+func (m *DoltServerManager) probeHost(hostPort string) bool {
+	conn, err := net.DialTimeout("tcp", hostPort, 5*time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// tryFailover attempts to switch to a fallback host after the primary fails.
+// Must be called with m.mu held. Returns nil if a fallback was found, or an
+// error if all fallbacks are also unreachable.
+func (m *DoltServerManager) tryFailover() error {
+	if len(m.config.FallbackHosts) == 0 {
+		return fmt.Errorf("no fallback hosts configured")
+	}
+
+	// Remember the primary on first failover.
+	if m.primaryHost == "" {
+		m.primaryHost = m.config.Host
+		m.primaryPort = m.config.Port
+	}
+
+	primary := fmt.Sprintf("%s:%d", m.primaryHost, m.primaryPort)
+
+	for _, candidate := range m.config.FallbackHosts {
+		// Skip the primary (already known down) and current host.
+		if candidate == primary || candidate == fmt.Sprintf("%s:%d", m.config.Host, m.config.Port) {
+			continue
+		}
+		if m.probeHost(candidate) {
+			// Parse host:port from the candidate.
+			host, portStr, err := net.SplitHostPort(candidate)
+			if err != nil {
+				m.logger("Warning: invalid fallback host %q: %v", candidate, err)
+				continue
+			}
+			port, err := strconv.Atoi(portStr)
+			if err != nil {
+				m.logger("Warning: invalid fallback port %q: %v", candidate, err)
+				continue
+			}
+
+			m.config.Host = host
+			m.config.Port = port
+			m.inFailover = true
+			m.writeFailoverState()
+			m.logger("Dolt failover: switched from %s to %s", primary, candidate)
+			return nil
+		}
+	}
+	return fmt.Errorf("all fallback hosts unreachable")
+}
+
+// tryFailback checks if the primary host has recovered and reverts if so.
+// Must be called with m.mu held. Returns true if failback occurred.
+func (m *DoltServerManager) tryFailback() bool {
+	if !m.inFailover || m.primaryHost == "" {
+		return false
+	}
+	primary := fmt.Sprintf("%s:%d", m.primaryHost, m.primaryPort)
+	if !m.probeHost(primary) {
+		return false
+	}
+
+	m.logger("Dolt failback: primary %s recovered, reverting from %s:%d",
+		primary, m.config.Host, m.config.Port)
+	m.config.Host = m.primaryHost
+	m.config.Port = m.primaryPort
+	m.inFailover = false
+	m.primaryHost = ""
+	m.primaryPort = 0
+	m.clearFailoverState()
+	return true
+}
+
+// ReadFailoverState reads the current failover state from the state file.
+// Returns nil if no failover is active (file doesn't exist or is empty).
+// This is a package-level function for use by doltserver.DefaultConfig.
+func ReadFailoverState(townRoot string) *failoverState {
+	data, err := os.ReadFile(filepath.Join(townRoot, "daemon", "dolt-failover-state.json"))
+	if err != nil {
+		return nil
+	}
+	var state failoverState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil
+	}
+	if !state.InFailover {
+		return nil
+	}
+	return &state
 }
 
 // Start starts the Dolt SQL server.

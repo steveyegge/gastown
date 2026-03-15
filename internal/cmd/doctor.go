@@ -97,6 +97,13 @@ Session hook checks:
   - deprecated-merge-queue-keys  Detect stale deprecated keys in merge_queue config (fixable)
   - stale-task-dispatch      Detect stale task-dispatch guard in settings.json (fixable)
 
+Satellite transport checks:
+  - machines-config          Validate machines.json and dispatch policy
+  - satellite-ssh            Check SSH connectivity to satellite workers
+  - satellite-proxy          Check mTLS proxy reachability on hub
+  - satellite-capacity       Check satellite worker load vs capacity
+  - dispatch-policy          Verify dispatch policy produces valid routing decisions
+
 Dolt checks:
   - dolt-binary              Check that dolt is installed and meets minimum version
   - dolt-metadata            Check dolt metadata tables exist
@@ -264,6 +271,13 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewDoltOrphanedDatabaseCheck())
 	d.Register(doctor.NewUnregisteredBeadsDirsCheck())
 	d.Register(doctor.NewNullAssigneeCheck())
+
+	// Satellite transport checks
+	d.Register(doctor.NewMachinesConfigCheck())
+	d.Register(doctor.NewSatelliteSSHCheck())
+	d.Register(doctor.NewSatelliteProxyCheck())
+	d.Register(doctor.NewSatelliteCapacityCheck())
+	d.Register(doctor.NewDispatchPolicyCheck())
 
 	// Worktree gitdir validity (runs across all rigs, or specific rig with --rig)
 	d.Register(doctor.NewWorktreeGitdirCheck())
