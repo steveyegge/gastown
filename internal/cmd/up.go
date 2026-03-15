@@ -477,6 +477,12 @@ func disableCurrentAgentDND(townRoot string) (bool, error) {
 
 // ensureDaemon starts the daemon if not running.
 func ensureDaemon(townRoot string) error {
+	// Refuse to start during shutdown — prevents the race where a dying
+	// agent's subprocess restarts the daemon mid-teardown (GH#2656).
+	if daemon.IsShutdownInProgress(townRoot) {
+		return fmt.Errorf("shutdown in progress — refusing to start daemon")
+	}
+
 	running, _, err := daemon.IsRunning(townRoot)
 	if err != nil {
 		return err

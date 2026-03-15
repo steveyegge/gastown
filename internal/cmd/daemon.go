@@ -169,6 +169,12 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
+	// Refuse to start during shutdown — prevents the race where a dying
+	// agent's subprocess restarts the daemon mid-teardown (GH#2656).
+	if daemon.IsShutdownInProgress(townRoot) {
+		return fmt.Errorf("shutdown in progress — refusing to start daemon")
+	}
+
 	// Check if already running
 	running, pid, err := daemon.IsRunning(townRoot)
 	if err != nil {
