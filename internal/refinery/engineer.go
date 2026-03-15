@@ -879,6 +879,21 @@ func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult 
 	_, _ = fmt.Fprintf(e.output, "  Worker: %s\n", mr.Worker)
 	_, _ = fmt.Fprintf(e.output, "  Source: %s\n", mr.SourceIssue)
 
+	// Belt-and-suspenders: check no_merge flag on source issue.
+	// gt done already skips MR creation for no_merge issues, but if an MR
+	// slips through (race, manual creation, etc.), skip it here.
+	if mr.SourceIssue != "" {
+		if sourceIssue, err := e.beads.Show(mr.SourceIssue); err == nil && sourceIssue != nil {
+			if af := beads.ParseAttachmentFields(sourceIssue); af != nil && af.NoMerge {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Skipping MR %s: source issue %s has no_merge flag (branch left for manual review)\n", mr.ID, mr.SourceIssue)
+				return ProcessResult{
+					Success: false,
+					Error:   fmt.Sprintf("source issue %s has no_merge flag — skipping merge, branch left as-is", mr.SourceIssue),
+				}
+			}
+		}
+	}
+
 	// Phase 3: Check pre-verification fast-path.
 	// If the polecat already rebased onto the target and ran gates, and the target
 	// hasn't moved since, we can skip running gates entirely (~5s merge).
@@ -1334,6 +1349,18 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 		fields := beads.ParseMRFields(issue)
 		if fields == nil {
 			continue // Skip issues without MR fields
+		}
+
+		// Belt-and-suspenders: skip MRs whose source issue has no_merge flag.
+		// gt done already skips MR creation for no_merge issues, but if an MR
+		// slips through, the refinery should not pick it up.
+		if fields.SourceIssue != "" {
+			if sourceIssue, showErr := e.beads.Show(fields.SourceIssue); showErr == nil && sourceIssue != nil {
+				if af := beads.ParseAttachmentFields(sourceIssue); af != nil && af.NoMerge {
+					_, _ = fmt.Fprintf(e.output, "[Engineer] Skipping MR %s: source issue %s has no_merge flag\n", issue.ID, fields.SourceIssue)
+					continue
+				}
+			}
 		}
 
 		// Skip if already assigned, unless claim is stale (allows re-claim after crash).
