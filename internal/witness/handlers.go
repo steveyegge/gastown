@@ -1737,15 +1737,15 @@ func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *Po
 			discovery.Error = fmt.Errorf("updating wisp state: %w", err)
 		}
 
-		// Nudge refinery to check merge queue (no permanent mail needed).
-		townRoot, _ := workspace.Find(workDir)
-		if nudgeErr := nudgeRefinery(townRoot, rigName); nudgeErr != nil {
-			if discovery.Error == nil {
-				discovery.Error = fmt.Errorf("nudging refinery: %w (non-fatal)", nudgeErr)
-			}
+		// Emit MERGE_READY channel event AND nudge refinery (belt-and-suspenders).
+		// Previously only nudged — the channel event is what unblocks await-event.
+		result := &HandlerResult{ProtocolType: ProtoPolecatDone}
+		notifyRefineryMergeReady(workDir, rigName, result)
+		if result.Error != nil && discovery.Error == nil {
+			discovery.Error = result.Error
 		}
 
-		discovery.Action = fmt.Sprintf("merge-ready-nudged (MR=%s, wisp=%s)", payload.MRID, wispID)
+		discovery.Action = fmt.Sprintf("merge-ready-sent (MR=%s, wisp=%s)", payload.MRID, wispID)
 
 		// Notify Mayor that a slot is open even with pending MR — polecat is idle. (GH#2727)
 		notifyMayorSlotOpen(workDir, rigName, payload.PolecatName, payload.Exit)
@@ -1757,6 +1757,148 @@ func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *Po
 
 	// Notify Mayor that a slot is open (bead-based discovery path). (GH#2727)
 	notifyMayorSlotOpen(workDir, rigName, payload.PolecatName, payload.Exit)
+}
+
+// ReconcileResult contains the outcome of one reconciliation check for a polecat.
+type ReconcileResult struct {
+	PolecatName string
+	AgentBeadID string
+	MRID        string
+	Action      string // "emitted", "already-processed", "no-mr", "skipped"
+	Error       error
+}
+
+// ReconcileIdlePolecatsResult contains the results of the reconciliation loop.
+type ReconcileIdlePolecatsResult struct {
+	Checked      int
+	Emitted      int
+	Skipped      int
+	Reconciled   []ReconcileResult
+	Errors       []error
+}
+
+// ReconcileIdlePolecats is the safety-net reconciliation loop for the witness.
+// It scans all polecat agent beads for idle polecats with pending MRs that the
+// refinery hasn't processed yet. For each, it emits a MERGE_READY event to the
+// refinery channel.
+//
+// This catches ALL dropped signals regardless of cause (tmux nudge failure,
+// witness crash, race condition, etc.). It is idempotent — the refinery's
+// queue-scan deduplicates by MR bead ID.
+//
+// Deduplication: uses the provided dedup tracker to avoid re-emitting for the
+// same polecat within a single witness session. Pass nil to skip dedup.
+func ReconcileIdlePolecats(bd *BdCli, workDir, rigName string, dedup *MessageDeduplicator) *ReconcileIdlePolecatsResult {
+	result := &ReconcileIdlePolecatsResult{}
+
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		townRoot = workDir
+	}
+
+	polecatsDir := filepath.Join(townRoot, rigName, "polecats")
+	entries, err := os.ReadDir(polecatsDir)
+	if err != nil {
+		return result
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		polecatName := entry.Name()
+		prefix := beads.GetPrefixForRig(townRoot, rigName)
+		agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+		result.Checked++
+
+		rr := ReconcileResult{
+			PolecatName: polecatName,
+			AgentBeadID: agentBeadID,
+		}
+
+		// Get agent bead fields
+		fields := getAgentBeadFields(bd, workDir, agentBeadID)
+		if fields == nil {
+			rr.Action = "skipped"
+			result.Skipped++
+			result.Reconciled = append(result.Reconciled, rr)
+			continue
+		}
+
+		// Only interested in idle polecats with exit_type (completed normally)
+		if beads.AgentState(fields.AgentState) != beads.AgentStateIdle || fields.ExitType == "" {
+			rr.Action = "skipped"
+			result.Skipped++
+			result.Reconciled = append(result.Reconciled, rr)
+			continue
+		}
+
+		// Must have an MR ID (either from bead or discovered)
+		mrID := fields.MRID
+		if mrID == "" && fields.Branch != "" {
+			mrID = findMRBeadForBranch(bd, workDir, fields.Branch)
+		}
+		if mrID == "" {
+			rr.Action = "no-mr"
+			result.Skipped++
+			result.Reconciled = append(result.Reconciled, rr)
+			continue
+		}
+		rr.MRID = mrID
+
+		// Check if the MR bead is still open (refinery hasn't processed it)
+		mrOutput, mrErr := bd.Exec(workDir, "show", mrID, "--json")
+		if mrErr != nil || mrOutput == "" {
+			// MR bead not found or error — skip
+			rr.Action = "skipped"
+			rr.Error = fmt.Errorf("checking MR bead %s: %v", mrID, mrErr)
+			result.Skipped++
+			result.Reconciled = append(result.Reconciled, rr)
+			continue
+		}
+		// Parse status from JSON
+		var mrIssues []struct {
+			Status string `json:"status"`
+		}
+		if json.Unmarshal([]byte(mrOutput), &mrIssues) != nil || len(mrIssues) == 0 {
+			rr.Action = "skipped"
+			result.Skipped++
+			result.Reconciled = append(result.Reconciled, rr)
+			continue
+		}
+		if mrIssues[0].Status == "closed" {
+			rr.Action = "already-processed"
+			result.Skipped++
+			result.Reconciled = append(result.Reconciled, rr)
+			continue
+		}
+
+		// Dedup: don't re-emit for the same polecat in this session
+		dedupKey := "reconcile:" + agentBeadID + ":" + mrID
+		if dedup != nil && dedup.AlreadyProcessed(dedupKey) {
+			rr.Action = "already-processed"
+			result.Skipped++
+			result.Reconciled = append(result.Reconciled, rr)
+			continue
+		}
+
+		// Emit MERGE_READY to refinery channel
+		if townRoot != "" {
+			_, _ = channelevents.EmitToTown(townRoot, "refinery", "MERGE_READY", []string{
+				"source=witness-reconcile",
+				"rig=" + rigName,
+				"polecat=" + polecatName,
+				"mr=" + mrID,
+			})
+		}
+
+		rr.Action = "emitted"
+		result.Emitted++
+		result.Reconciled = append(result.Reconciled, rr)
+	}
+
+	return result
 }
 
 // agentBeadSnapshot holds all fields from a single bd show --json call for an agent bead.
