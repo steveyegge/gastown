@@ -364,6 +364,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 				Agent:       slingAgent,
 				HookRawBead: slingHookRawBead,
 				Ralph:       slingRalph,
+				Machine:     slingMachine,
 			})
 		}
 	}
@@ -403,6 +404,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 			Agent:       slingAgent,
 			HookRawBead: slingHookRawBead,
 			Ralph:       slingRalph,
+			Machine:     slingMachine,
 		})
 	}
 
@@ -439,6 +441,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 				Agent:       slingAgent,
 				HookRawBead: slingHookRawBead,
 				Ralph:       slingRalph,
+				Machine:     slingMachine,
 			})
 		}
 		// Non-rig target in deferred mode — reject to prevent bypassing capacity control

@@ -639,7 +639,13 @@ func (m *Manager) AllocateAndAdd(opts AddOptions) (string, *Polecat, error) {
 	var name string
 	if opts.Name != "" {
 		// Use pre-allocated name (for satellite bootstrap where cert CN
-		// needs the name before spawn).
+		// needs the name before spawn). Guard against collision with an
+		// existing polecat to avoid overwriting its worktree.
+		polecatDir := m.polecatDir(opts.Name)
+		if _, statErr := os.Stat(polecatDir); statErr == nil {
+			_ = poolLock.Unlock()
+			return "", nil, fmt.Errorf("polecat %q already exists", opts.Name)
+		}
 		name = opts.Name
 	} else {
 		var allocErr error
