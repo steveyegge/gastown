@@ -10,6 +10,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // TestCreateBatchConvoy_CreatesOneConvoyTrackingAllBeads verifies that
@@ -30,6 +33,7 @@ func TestCreateBatchConvoy_CreatesOneConvoyTrackingAllBeads(t *testing.T) {
 	if err := os.MkdirAll(townBeads, 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
+	ensureTypesSentinel(t, townBeads)
 
 	binDir := filepath.Join(townRoot, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
@@ -138,6 +142,7 @@ func TestCreateBatchConvoy_OwnedLabel(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
+	ensureTypesSentinel(t, filepath.Join(townRoot, ".beads"))
 
 	binDir := filepath.Join(townRoot, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
@@ -200,6 +205,7 @@ func TestCreateBatchConvoy_MergeStrategyInDescription(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
+	ensureTypesSentinel(t, filepath.Join(townRoot, ".beads"))
 
 	binDir := filepath.Join(townRoot, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
@@ -273,6 +279,7 @@ func TestCreateBatchConvoy_TitleIncludesBeadCount(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
+	ensureTypesSentinel(t, filepath.Join(townRoot, ".beads"))
 
 	binDir := filepath.Join(townRoot, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
@@ -337,6 +344,7 @@ func TestCreateBatchConvoy_PartialDepFailureContinues(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
+	ensureTypesSentinel(t, filepath.Join(townRoot, ".beads"))
 
 	binDir := filepath.Join(townRoot, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
@@ -520,6 +528,7 @@ exit 0
 	if err := os.MkdirAll(townBeads, 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
+	ensureTypesSentinel(t, townBeads)
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", binDir+":"+origPath)
@@ -709,6 +718,7 @@ func TestBatchSling_EmptyConvoyCleanupOnAllFailures(t *testing.T) {
 	if err := os.MkdirAll(townBeads, 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
+	ensureTypesSentinel(t, townBeads)
 
 	closeLogPath := filepath.Join(townRoot, "bd-close.log")
 
@@ -821,6 +831,17 @@ func TestConvoyInfo_IsOwnedDirect(t *testing.T) {
 // createAutoConvoy tests
 // ---------------------------------------------------------------------------
 
+// ensureTypesSentinel writes the types sentinel file so EnsureCustomTypes
+// takes the fast path and doesn't shell out to bd (which is a stub in tests).
+func ensureTypesSentinel(t *testing.T, beadsDir string) {
+	t.Helper()
+	typesList := strings.Join(constants.BeadsCustomTypesList(), ",")
+	if err := os.WriteFile(filepath.Join(beadsDir, ".gt-types-configured"), []byte(typesList+"\n"), 0644); err != nil {
+		t.Fatalf("write types sentinel: %v", err)
+	}
+	beads.ResetEnsuredDirs()
+}
+
 // setupTownWithBdStub creates a minimal town workspace and installs a bd
 // shell stub that logs all commands. Returns townRoot and logPath.
 func setupTownWithBdStub(t *testing.T, bdScript string) (townRoot, logPath string) {
@@ -830,9 +851,12 @@ func setupTownWithBdStub(t *testing.T, bdScript string) (townRoot, logPath strin
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
 		t.Fatalf("mkdir mayor/rig: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
+
+	ensureTypesSentinel(t, beadsDir)
 
 	binDir := filepath.Join(townRoot, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
@@ -1271,6 +1295,7 @@ func TestCreateBatchConvoy_ReturnsTrackedBeadSet(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
+	ensureTypesSentinel(t, filepath.Join(townRoot, ".beads"))
 
 	binDir := filepath.Join(townRoot, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
@@ -1841,6 +1866,7 @@ func TestGetConvoyInfoForIssue_PhantomConvoy(t *testing.T) {
 	if err := os.MkdirAll(townBeads, 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
+	ensureTypesSentinel(t, townBeads)
 
 	// Install a bd stub that:
 	// - For "dep list": returns phantom convoy (simulating stale tracking dep)
