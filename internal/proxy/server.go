@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -69,6 +70,11 @@ type Server struct {
 	resolvedPaths map[string]string
 	log           *slog.Logger
 	denyList      *DenyList
+
+	// startTime records when the server started for /healthz uptime reporting.
+	startTime time.Time
+	// certsIssued tracks the total number of certificates issued via the admin API.
+	certsIssued uint64
 
 	// execSem is a semaphore limiting global concurrent exec subprocesses.
 	execSem chan struct{}
@@ -163,6 +169,7 @@ func New(cfg Config, ca *CA) (*Server, error) {
 		resolvedPaths: resolvedPaths,
 		log:           l,
 		denyList:      NewDenyList(),
+		startTime:     time.Now(),
 		execSem:       make(chan struct{}, maxConcurrent),
 		execTimeout:   et,
 		rateLimit:     rate.Limit(rl),
@@ -286,6 +293,7 @@ func (s *Server) Start(ctx context.Context) error {
 	var adminSrv *http.Server
 	if s.cfg.AdminListenAddr != "" {
 		adminMux := http.NewServeMux()
+		adminMux.HandleFunc("/healthz", s.handleHealthz)
 		adminMux.HandleFunc("/v1/admin/deny-cert", s.handleDenyCert)
 		adminMux.HandleFunc("/v1/admin/issue-cert", s.handleIssueCert)
 
@@ -465,6 +473,7 @@ func (s *Server) handleIssueCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	atomic.AddUint64(&s.certsIssued, 1)
 	s.log.Info("cert issued via admin API", "cn", cn, "serial", leaf.SerialNumber.Text(16))
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(issueCertResponse{
@@ -515,6 +524,22 @@ func (s *Server) handleDenyCert(w http.ResponseWriter, r *http.Request) {
 	s.denyList.Deny(serial)
 	s.log.Info("cert revoked via admin API", "serial", req.Serial)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleHealthz handles GET /healthz on the admin server.
+// Returns 200 with status, uptime, and cert count for operator visibility.
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	uptime := time.Since(s.startTime).Truncate(time.Second)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":       "ok",
+		"uptime":       uptime.String(),
+		"certs_issued": atomic.LoadUint64(&s.certsIssued),
+	})
 }
 
 // minimalEnv returns a minimal environment for git and gt/bd subprocesses,
