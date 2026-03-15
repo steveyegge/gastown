@@ -973,20 +973,23 @@ func TestCleanupOrphanedSessions(t *testing.T) {
 	_ = tm.KillSession(hqSession)
 	_ = tm.KillSession(nonGtSession)
 
-	// Create zombie sessions (tmux alive, but just shell - no Claude)
-	if err := tm.NewSession(gtSession, ""); err != nil {
-		t.Fatalf("NewSession(gt): %v", err)
+	// Create zombie sessions (tmux alive, but process is sleep - no Claude/node).
+	// Use NewSessionWithCommand with sleep to avoid loading .zshrc, which spawns
+	// a node process on this system. A node child of the zsh shell would cause
+	// IsAgentAlive to return true, preventing cleanup (gt-it10f6p).
+	if err := tm.NewSessionWithCommand(gtSession, "", "sleep 9999"); err != nil {
+		t.Fatalf("NewSessionWithCommand(gt): %v", err)
 	}
 	defer func() { _ = tm.KillSession(gtSession) }()
 
-	if err := tm.NewSession(hqSession, ""); err != nil {
-		t.Fatalf("NewSession(hq): %v", err)
+	if err := tm.NewSessionWithCommand(hqSession, "", "sleep 9999"); err != nil {
+		t.Fatalf("NewSessionWithCommand(hq): %v", err)
 	}
 	defer func() { _ = tm.KillSession(hqSession) }()
 
 	// Create a non-GT session (should NOT be cleaned up)
-	if err := tm.NewSession(nonGtSession, ""); err != nil {
-		t.Fatalf("NewSession(other): %v", err)
+	if err := tm.NewSessionWithCommand(nonGtSession, "", "sleep 9999"); err != nil {
+		t.Fatalf("NewSessionWithCommand(other): %v", err)
 	}
 	defer func() { _ = tm.KillSession(nonGtSession) }()
 
