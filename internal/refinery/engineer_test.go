@@ -839,3 +839,115 @@ func TestIsClaimStale(t *testing.T) {
 		})
 	}
 }
+
+// TestProcessMRInfo_SkipsNoMerge verifies that ProcessMRInfo returns a failure
+// when the source issue has no_merge=true. This prevents the refinery from
+// auto-merging work that needs human or automated review. (GH#2778)
+func TestProcessMRInfo_SkipsNoMerge(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mock for bd")
+	}
+
+	// Create a fake bd that returns an issue with no_merge: true.
+	// Write the JSON to a file and cat it, to avoid shell escaping issues.
+	binDir := t.TempDir()
+	issueJSON := `[{"id":"test-issue","status":"in_progress","description":"no_merge: true\ndispatched_by: crew"}]`
+	jsonFile := filepath.Join(binDir, "response.json")
+	if err := os.WriteFile(jsonFile, []byte(issueJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf("#!/bin/sh\ncat %s\n", jsonFile)
+	bdPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	// Set up a minimal rig with beads client.
+	// Create .beads dir so ResolveBeadsDir doesn't fail.
+	rigDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(rigDir, ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	r := &rig.Rig{Name: "test-rig", Path: rigDir}
+	e := NewEngineer(r)
+	var buf bytes.Buffer
+	e.output = &buf
+
+	mr := &MRInfo{
+		ID:          "mr-001",
+		Branch:      "feat/something",
+		Target:      "main",
+		SourceIssue: "test-issue",
+	}
+
+	result := e.ProcessMRInfo(context.Background(), mr)
+
+	if result.Success {
+		t.Error("expected ProcessMRInfo to fail for no_merge issue")
+	}
+	if !strings.Contains(result.Error, "no_merge") {
+		t.Errorf("expected error to mention no_merge, got: %s", result.Error)
+	}
+	output := buf.String()
+	if !strings.Contains(output, "no_merge=true") {
+		t.Errorf("expected output to mention no_merge=true, got: %s", output)
+	}
+}
+
+// TestProcessMRInfo_AllowsMergeWithoutNoMerge verifies that ProcessMRInfo
+// proceeds normally when the source issue does NOT have no_merge set.
+func TestProcessMRInfo_AllowsMergeWithoutNoMerge(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mock for bd")
+	}
+
+	// Create a fake bd that returns an issue without no_merge.
+	binDir := t.TempDir()
+	issueJSON := `[{"id":"test-issue","status":"in_progress","description":"dispatched_by: crew"}]`
+	jsonFile := filepath.Join(binDir, "response.json")
+	if err := os.WriteFile(jsonFile, []byte(issueJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf("#!/bin/sh\ncat %s\n", jsonFile)
+	bdPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	// Set up a real git repo so doMerge can proceed
+	workDir, g, cleanup := testGitRepo(t)
+	defer cleanup()
+	createFeatureBranch(t, workDir, "feat/normal", "normal.txt", "content\n")
+
+	r := &rig.Rig{Name: "test-rig", Path: workDir}
+	e := NewEngineer(r)
+	e.git = g
+	e.workDir = workDir
+	var buf bytes.Buffer
+	e.output = &buf
+	e.mergeSlotEnsureExists = func() (string, error) { return "test-slot", nil }
+	e.mergeSlotAcquire = func(holder string, addWaiter bool) (*beads.MergeSlotStatus, error) {
+		return &beads.MergeSlotStatus{Available: true, Holder: holder}, nil
+	}
+	e.mergeSlotRelease = func(holder string) error { return nil }
+
+	mr := &MRInfo{
+		ID:          "mr-002",
+		Branch:      "feat/normal",
+		Target:      "main",
+		SourceIssue: "test-issue",
+	}
+
+	result := e.ProcessMRInfo(context.Background(), mr)
+
+	output := buf.String()
+	if strings.Contains(output, "no_merge") {
+		t.Errorf("did not expect no_merge skip, got output: %s", output)
+	}
+	// The merge should proceed (may succeed or fail on gates, but shouldn't be blocked by no_merge)
+	if !result.Success && strings.Contains(result.Error, "no_merge") {
+		t.Errorf("merge should not be blocked by no_merge, got error: %s", result.Error)
+	}
+}
