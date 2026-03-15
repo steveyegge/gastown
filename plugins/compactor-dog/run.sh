@@ -273,10 +273,11 @@ for entry in "${CANDIDATES[@]}"; do
     HAS_REMOTE=true
     log "  Remote detected ('$REMOTE_NAME'). Fetching to check for divergence..."
     if ! dolt_exec "$DB" "CALL DOLT_FETCH('$REMOTE_NAME')"; then
-      log "  ERROR: Fetch from remote failed for $DB — skipping compaction to avoid data loss"
-      ERRORS=$((ERRORS + 1))
-      ERROR_DETAILS="${ERROR_DETAILS}${DB}: remote fetch failed (skipped to avoid divergence)\n"
-      continue
+      # Fetch timeout/failure is a warning, not a blocker. For local-source-of-truth
+      # databases (hq/bd/gt), the local data IS the authority — we compact and
+      # force-push. Aborting on fetch failure causes the escalation feedback loop:
+      # timeout → abort → escalate → more commits → slower fetch → repeat.
+      log "  WARNING: Fetch from remote failed for $DB — proceeding with compaction (local is source of truth)"
     fi
     # Verify local HEAD is at or ahead of remote HEAD.
     # If remote has commits we don't have, compaction would lose them.
@@ -325,9 +326,18 @@ for entry in "${CANDIDATES[@]}"; do
   fi
 
   # Step 3d: Commit all data as a single commit.
+  # "nothing to commit" is valid when soft-reset lands on identical data
+  # (e.g., only commit metadata changed, not table content). dolt_exec
+  # sends stderr to LOGFILE, so check LOGFILE for the "nothing to commit"
+  # message when the command fails.
   COMMIT_MSG="compaction: flatten history to single commit"
   log "  Committing flattened data..."
   if ! dolt_exec "$DB" "CALL DOLT_COMMIT('-Am', '$COMMIT_MSG')"; then
+    if grep -q "nothing to commit" "$LOGFILE" 2>/dev/null; then
+      log "  Nothing to commit (data unchanged) — compaction is a no-op, skipping"
+      SKIPPED+=("$DB (nothing to commit)")
+      continue
+    fi
     log "  ERROR: Flatten commit failed for $DB"
     ERRORS=$((ERRORS + 1))
     ERROR_DETAILS="${ERROR_DETAILS}${DB}: commit failed\n"
@@ -396,9 +406,10 @@ for entry in "${CANDIDATES[@]}"; do
   # Step 5b: Push compacted history to remote to maintain sync.
   # This MUST be a force-push because flatten rewrites the commit graph.
   # Safe here because: (1) we pulled first, (2) integrity is verified.
+  # Use --set-upstream because flatten loses branch tracking metadata.
   if $HAS_REMOTE; then
     log "  Pushing compacted history to remote ('$REMOTE_NAME')..."
-    if ! dolt_exec "$DB" "CALL DOLT_PUSH('--force', '$REMOTE_NAME')"; then
+    if ! dolt_exec "$DB" "CALL DOLT_PUSH('--force', '--set-upstream', '$REMOTE_NAME', 'main')"; then
       log "  WARNING: Force-push to remote failed for $DB"
       log "  Remote will be out of sync — manual 'dolt push --force' may be needed"
       ERROR_DETAILS="${ERROR_DETAILS}${DB}: force-push failed (local compacted, remote diverged)\n"
