@@ -122,3 +122,7 @@ func (f *fakeWLCommonsStore) QueryWanted(wantedID string) (*WantedItem, error) {
 	cp := *item
 	return &cp, nil
 }
+
+func (f *fakeWLCommonsStore) QueryWantedFull(wantedID string) (*WantedItem, error) {
+	return f.QueryWanted(wantedID)
+}
