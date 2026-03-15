@@ -879,6 +879,20 @@ func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult 
 	_, _ = fmt.Fprintf(e.output, "  Worker: %s\n", mr.Worker)
 	_, _ = fmt.Fprintf(e.output, "  Source: %s\n", mr.SourceIssue)
 
+	// Check no_merge flag on source issue — if set, skip the merge and leave
+	// the PR open for review (GH#2778).
+	if mr.SourceIssue != "" {
+		if sourceIssue, err := e.beads.Show(mr.SourceIssue); err == nil && sourceIssue != nil {
+			if af := beads.ParseAttachmentFields(sourceIssue); af != nil && af.NoMerge {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Source issue %s has no_merge=true — skipping merge\n", mr.SourceIssue)
+				return ProcessResult{
+					Success: false,
+					Error:   fmt.Sprintf("source issue %s has no_merge flag set — skipping merge (GH#2778)", mr.SourceIssue),
+				}
+			}
+		}
+	}
+
 	// Phase 3: Check pre-verification fast-path.
 	// If the polecat already rebased onto the target and ran gates, and the target
 	// hasn't moved since, we can skip running gates entirely (~5s merge).
