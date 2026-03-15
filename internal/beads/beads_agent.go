@@ -212,6 +212,15 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// Don't bail out — try the bd create calls anyway (GH#1769).
 	_ = EnsureCustomTypes(targetDir)
 
+	// Use target-scoped Beads instance when routing crosses rigs.
+	// Without this, b.run() uses b's own beadsDir which causes bd to
+	// double-stack the rig path (e.g., pata/mayor/rig/pata/mayor/rig/.beads).
+	// This matches the pattern used in CreateOrReopenAgentBead.
+	target := b
+	if targetDir != b.getResolvedBeadsDir() {
+		target = NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
+	}
+
 	description := FormatAgentDescription(title, fields)
 
 	buildArgs := func() []string {
@@ -228,7 +237,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		}
 		// Default actor from BD_ACTOR env var for provenance tracking
 		// Uses getActor() to respect isolated mode (tests)
-		if actor := b.getActor(); actor != "" {
+		if actor := target.getActor(); actor != "" {
 			a = append(a, "--actor="+actor)
 		}
 		return a
@@ -236,9 +245,9 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 
 	// Create ephemeral agent bead (wisps table). Agent operational state has
 	// zero git history consumers (gt-bewatn.9).
-	out, err := b.run(buildArgs()...)
+	out, err := target.run(buildArgs()...)
 	if err != nil {
-		out, err = b.run(buildArgs()...)
+		out, err = target.run(buildArgs()...)
 		if err != nil {
 			// Both bd create attempts failed. Dolt server is required —
 			// no JSONL fallback. Surface the error directly.
@@ -258,7 +267,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// The fallback query (status=hooked + assignee) is unreliable for
 	// cross-database scenarios. Restoring per hq-gfg.
 	if fields != nil && fields.HookBead != "" {
-		if _, slotErr := b.run("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
+		if _, slotErr := target.run("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
 			// Non-fatal: fallback query may still find the work bead
 		}
 	}
