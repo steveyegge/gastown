@@ -56,6 +56,7 @@ type SlingSpawnOptions struct {
 	HookBead   string // Bead ID to set as hook_bead at spawn time (atomic assignment)
 	Agent      string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
 	BaseBranch string // Override base branch for polecat worktree (e.g., "develop", "release/v2")
+	Name       string // Pre-allocated polecat name (if empty, auto-allocate from pool)
 }
 
 // SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
@@ -265,6 +266,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	addOpts := polecat.AddOptions{
 		HookBead:   opts.HookBead,
 		BaseBranch: baseBranch,
+		Name:       opts.Name,
 	}
 
 	// No idle polecat available — allocate and create atomically (GH#2215).

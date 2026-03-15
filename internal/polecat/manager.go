@@ -501,6 +501,7 @@ func (m *Manager) exists(name string) bool {
 type AddOptions struct {
 	HookBead   string // Bead ID to set as hook_bead at spawn time (atomic assignment)
 	BaseBranch string // Override base branch for worktree (e.g., "origin/integration/gt-epic")
+	Name       string // Pre-allocated name (if empty, auto-allocate from pool)
 }
 
 // Add creates a new polecat as a git worktree from the repo base.
@@ -635,10 +636,18 @@ func (m *Manager) AllocateAndAdd(opts AddOptions) (string, *Polecat, error) {
 
 	m.reconcilePoolInternal()
 
-	name, err := m.namePool.Allocate()
-	if err != nil {
-		_ = poolLock.Unlock()
-		return "", nil, err
+	var name string
+	if opts.Name != "" {
+		// Use pre-allocated name (for satellite bootstrap where cert CN
+		// needs the name before spawn).
+		name = opts.Name
+	} else {
+		var allocErr error
+		name, allocErr = m.namePool.Allocate()
+		if allocErr != nil {
+			_ = poolLock.Unlock()
+			return "", nil, allocErr
+		}
 	}
 
 	if err := m.namePool.Save(); err != nil {

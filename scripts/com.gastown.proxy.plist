@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.gastown.proxy</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/gt-proxy-server</string>
+        <string>--listen</string>
+        <string>0.0.0.0:9876</string>
+        <string>--admin-listen</string>
+        <string>127.0.0.1:9877</string>
+        <string>--ca-dir</string>
+        <string>/Users/trilliumsmith/gt/.runtime/ca</string>
+        <string>--town-root</string>
+        <string>/Users/trilliumsmith/gt</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/trilliumsmith/gt/.runtime/proxy.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/trilliumsmith/gt/.runtime/proxy.err</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/trilliumsmith/gt</string>
+</dict>
+</plist>

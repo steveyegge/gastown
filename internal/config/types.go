@@ -1530,3 +1530,70 @@ func NewEscalationConfig() *EscalationConfig {
 		MaxReescalations: intPtr(2),
 	}
 }
+
+// MachinesConfig represents the machine registry (mayor/machines.json).
+// It maps machine names to their connection details and dispatch configuration.
+type MachinesConfig struct {
+	Type           string                   `json:"type"`            // "machines"
+	Version        int                      `json:"version"`         // schema version
+	Machines       map[string]*MachineEntry `json:"machines"`
+	DispatchPolicy string                   `json:"dispatch_policy"` // "round-robin"
+	DoltHost       string                   `json:"dolt_host"`      // Hub machine IP (Tailscale)
+	DoltPort       int                      `json:"dolt_port"`      // Hub Dolt port (default 3307)
+}
+
+// MachineEntry describes a single machine in the fleet.
+type MachineEntry struct {
+	Host        string   `json:"host"`                  // IP or hostname (Tailscale IP)
+	SSHAlias    string   `json:"ssh_alias,omitempty"`    // SSH config alias (e.g., "trillium-mini")
+	User        string   `json:"user,omitempty"`         // SSH user
+	TownRoot    string   `json:"town_root,omitempty"`    // Path to ~/gt on this machine
+	GtBinary    string   `json:"gt_binary,omitempty"`    // gt binary name or path
+	MaxPolecats int      `json:"max_polecats,omitempty"` // Max concurrent polecats
+	Roles       []string `json:"roles"`                  // e.g., ["worker"]
+	Enabled     bool     `json:"enabled"`
+}
+
+// SSHTarget returns the SSH target string for this machine.
+// Prefers ssh_alias if set, otherwise uses user@host.
+func (m *MachineEntry) SSHTarget() string {
+	if m.SSHAlias != "" {
+		return m.SSHAlias
+	}
+	if m.User != "" {
+		return m.User + "@" + m.Host
+	}
+	return m.Host
+}
+
+// IsWorker returns true if the machine has the "worker" role.
+func (m *MachineEntry) IsWorker() bool {
+	for _, r := range m.Roles {
+		if r == "worker" {
+			return true
+		}
+	}
+	return false
+}
+
+// WorkerMachines returns only enabled machines with the "worker" role.
+func (mc *MachinesConfig) WorkerMachines() map[string]*MachineEntry {
+	workers := make(map[string]*MachineEntry)
+	for name, m := range mc.Machines {
+		if m.Enabled && m.IsWorker() {
+			workers[name] = m
+		}
+	}
+	return workers
+}
+
+// ProxyURL returns the GT_PROXY_URL for a polecat on the given machine.
+// If the machine host matches DoltHost, returns loopback (polecat is on the hub).
+// Otherwise returns the DoltHost Tailscale IP.
+func (mc *MachinesConfig) ProxyURL(machineHost string) string {
+	port := 9876
+	if machineHost == mc.DoltHost {
+		return fmt.Sprintf("https://127.0.0.1:%d", port)
+	}
+	return fmt.Sprintf("https://%s:%d", mc.DoltHost, port)
+}
