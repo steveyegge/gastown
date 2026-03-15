@@ -44,3 +44,45 @@ func CleanStaleDoltServerPID(beadsDir string) {
 		fmt.Fprintf(os.Stderr, "Cleaned stale dolt-server.pid (PID %d) from %s\n", pid, beadsDir)
 	}
 }
+
+// CleanStaleSQLServerInfo removes the sql-server.info file inside
+// .beads/dolt/.dolt/ if the referenced process is no longer alive. Dolt writes
+// this file (format: "PID:PORT:UUID") when starting a SQL server. In server
+// mode, this local lock file is irrelevant — bd should connect directly to the
+// central Dolt server — but a stale copy causes bd to refuse to connect,
+// producing "database not found" errors even though the central server is
+// healthy.
+func CleanStaleSQLServerInfo(beadsDir string) {
+	infoPath := filepath.Join(beadsDir, "dolt", ".dolt", "sql-server.info")
+	data, err := os.ReadFile(infoPath) //nolint:gosec // G304: path is constructed internally
+	if err != nil {
+		return // No info file, nothing to clean
+	}
+
+	// Format: "PID:PORT:UUID"
+	parts := strings.SplitN(strings.TrimSpace(string(data)), ":", 3)
+	if len(parts) < 1 {
+		_ = os.Remove(infoPath)
+		return
+	}
+
+	pid, err := strconv.Atoi(parts[0])
+	if err != nil || pid <= 0 {
+		// Corrupt info file — remove it
+		_ = os.Remove(infoPath)
+		return
+	}
+
+	// Check if the process is alive using signal 0 (no-op probe)
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		_ = os.Remove(infoPath)
+		return
+	}
+
+	if err := proc.Signal(syscall.Signal(0)); err != nil {
+		// Process is dead — remove stale info file
+		_ = os.Remove(infoPath)
+		fmt.Fprintf(os.Stderr, "Cleaned stale sql-server.info (PID %d) from %s\n", pid, beadsDir)
+	}
+}

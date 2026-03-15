@@ -57,10 +57,11 @@ func (e *bdError) ContainsError(substr string) bool {
 func runBdCommand(ctx context.Context, args []string, workDir, beadsDir string, extraEnv ...string) (_ []byte, retErr error) {
 	defer func() { telemetry.RecordMail(ctx, "bd."+firstArg(args), retErr) }()
 
-	// Remove stale dolt-server.pid before spawning bd. A stale PID file causes
-	// bd to connect to port 3307 which may be occupied by a different Dolt server
-	// serving different databases, resulting in hangs until the read timeout kills it.
+	// Remove stale Dolt state files before spawning bd. A stale PID or
+	// sql-server.info file causes bd to connect to the wrong port or refuse
+	// to connect, resulting in hangs or "database not found" errors.
 	beads.CleanStaleDoltServerPID(beadsDir)
+	beads.CleanStaleSQLServerInfo(beadsDir)
 
 	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = workDir
