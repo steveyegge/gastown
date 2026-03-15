@@ -114,11 +114,24 @@ func EnsureCustomTypes(beadsDir string) error {
 	// The sentinel stores the types that were configured. If types have changed
 	// (e.g., "queue" and "event" added), the sentinel won't match and we'll
 	// re-configure. Legacy "v1\n" sentinels also won't match.
+	//
+	// However, the sentinel can lie if the database was reset/cleaned after the
+	// sentinel was written. Verify the database actually has the types before
+	// trusting the sentinel (lightweight bd config get check).
 	sentinelPath := filepath.Join(beadsDir, typesSentinel)
 	if data, err := os.ReadFile(sentinelPath); err == nil {
 		if strings.TrimSpace(string(data)) == typesList {
-			ensuredDirs[beadsDir] = true
-			return nil
+			// Verify database still has types configured (sentinel may be stale
+			// if the database was recreated since the sentinel was written).
+			bdEnvCheck := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
+			verifyCmd := exec.Command("bd", "config", "get", "types.custom")
+			verifyCmd.Dir = beadsDir
+			verifyCmd.Env = bdEnvCheck
+			if verifyOutput, err := verifyCmd.Output(); err == nil && strings.Contains(string(verifyOutput), "convoy") {
+				ensuredDirs[beadsDir] = true
+				return nil
+			}
+			// Database doesn't have types — sentinel is stale, fall through to re-configure
 		}
 		// Sentinel exists but is stale — fall through to re-configure
 	}

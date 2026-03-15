@@ -346,7 +346,9 @@ func createBatchConvoy(beadIDs []string, rigName string, owned bool, mergeStrate
 
 	// Use BdCmd with WithAutoCommit to ensure convoy is persisted even when
 	// gt sling has set BD_DOLT_AUTO_COMMIT=off globally (gt-9xum2 root cause fix).
-	if out, err := BdCmd(createArgs...).Dir(townBeads).WithAutoCommit().CombinedOutput(); err != nil {
+	// WithBeadsDir ensures bd targets the correct database in server mode, where
+	// directory-based discovery fails (no local .db file to find).
+	if out, err := BdCmd(createArgs...).Dir(townBeads).WithBeadsDir(resolvedBeads).WithAutoCommit().CombinedOutput(); err != nil {
 		return "", nil, fmt.Errorf("creating batch convoy: %w\noutput: %s", err, out)
 	}
 
@@ -419,7 +421,9 @@ func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy, baseB
 
 	// Use BdCmd with WithAutoCommit to ensure convoy is persisted even when
 	// gt sling has set BD_DOLT_AUTO_COMMIT=off globally (gt-9xum2 root cause fix).
-	if out, err := BdCmd(createArgs...).Dir(townBeads).WithAutoCommit().CombinedOutput(); err != nil {
+	// WithBeadsDir ensures bd targets the correct database in server mode, where
+	// directory-based discovery fails (no local .db file to find).
+	if out, err := BdCmd(createArgs...).Dir(townBeads).WithBeadsDir(resolvedBeads).WithAutoCommit().CombinedOutput(); err != nil {
 		return "", fmt.Errorf("creating convoy: %w\noutput: %s", err, out)
 	}
 
