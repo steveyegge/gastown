@@ -153,11 +153,11 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	return server.ListenAndServe()
 }
 
-// ensureDoltPortEnv sets GT_DOLT_PORT and BEADS_DOLT_PORT to the actual Dolt
-// SQL server port. This prevents bd subprocesses from inheriting a stale or
-// incorrect port (e.g., the dashboard's HTTP listen port) from the environment.
-// Reads the running port from daemon/dolt-state.json; falls back to the
-// daemon.json env config; otherwise uses the Dolt default (3307).
+// ensureDoltPortEnv sets GT_DOLT_PORT, BEADS_DOLT_PORT, and BEADS_DOLT_SERVER_HOST
+// to the actual Dolt server connection info. This prevents bd subprocesses from
+// inheriting stale or incorrect values from the environment.
+// Reads the running state from daemon/dolt-state.json; falls back to
+// doltserver.DefaultConfig; otherwise uses the Dolt defaults.
 func ensureDoltPortEnv(townRoot string) {
 	var port int
 	if state, err := doltserver.LoadState(townRoot); err == nil && state.Port > 0 {
@@ -168,6 +168,12 @@ func ensureDoltPortEnv(townRoot string) {
 	portStr := strconv.Itoa(port)
 	os.Setenv("GT_DOLT_PORT", portStr)
 	os.Setenv("BEADS_DOLT_PORT", portStr)
+
+	// Propagate host so bd doesn't fall back to 127.0.0.1.
+	doltCfg := doltserver.DefaultConfig(townRoot)
+	if doltCfg.Host != "" {
+		os.Setenv("BEADS_DOLT_SERVER_HOST", doltCfg.Host)
+	}
 }
 
 // openBrowser opens the specified URL in the default browser.

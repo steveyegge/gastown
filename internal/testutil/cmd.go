@@ -7,9 +7,9 @@ import (
 )
 
 // CleanGTEnv returns os.Environ() with GT_* and BD_* variables removed, except
-// GT_DOLT_PORT which is preserved so subprocesses connect to the ephemeral test
-// Dolt server instead of production on port 3307. BEADS_DOLT_PORT (prefix
-// BEADS_, not BD_) passes through implicitly since only BD_* is stripped.
+// GT_DOLT_PORT and GT_DOLT_HOST which are preserved so subprocesses connect to
+// the correct Dolt server. BEADS_DOLT_PORT and BEADS_DOLT_SERVER_HOST (prefix
+// BEADS_, not BD_) pass through implicitly since only BD_* is stripped.
 //
 // Use this when setting cmd.Env on bd/gt subprocess calls in tests.
 // If you do NOT set cmd.Env, the process env (including GT_DOLT_PORT) is
@@ -17,7 +17,9 @@ import (
 func CleanGTEnv(extraEnv ...string) []string {
 	var clean []string
 	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "GT_") && !strings.HasPrefix(e, "GT_DOLT_PORT=") {
+		if strings.HasPrefix(e, "GT_") &&
+			!strings.HasPrefix(e, "GT_DOLT_PORT=") &&
+			!strings.HasPrefix(e, "GT_DOLT_HOST=") {
 			continue
 		}
 		if strings.HasPrefix(e, "BD_") {
