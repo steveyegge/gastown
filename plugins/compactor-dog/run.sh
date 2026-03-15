@@ -22,7 +22,7 @@ set -euo pipefail
 DOLT_HOST="${DOLT_HOST:-127.0.0.1}"
 DOLT_PORT="${DOLT_PORT:-3307}"
 DOLT_USER="${DOLT_USER:-root}"
-COMMIT_THRESHOLD="${COMMIT_THRESHOLD:-500}"
+COMMIT_THRESHOLD="${COMMIT_THRESHOLD:-2000}"
 # Default: auto-discover production databases via SHOW DATABASES.
 # Override with --databases db1,db2,... for an explicit list.
 DEFAULT_DBS="auto"
@@ -41,7 +41,7 @@ while [[ $# -gt 0 ]]; do
     --check-only)  CHECK_ONLY=true; shift ;;
     --help|-h)
       echo "Usage: $0 [--threshold N] [--databases db1,db2,...] [--dry-run] [--check-only]"
-      echo "  --threshold N        Commit count before compaction (default: 500)"
+      echo "  --threshold N        Commit count before compaction (default: 2000)"
       echo "  --databases db1,...  Comma-separated database list (default: auto-discover)"
       echo "  --dry-run            Report only, don't compact"
       echo "  --check-only         Monitor and report only (no compaction)"
