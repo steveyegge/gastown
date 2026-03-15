@@ -58,13 +58,14 @@ check-up-to-date:
 ifndef SKIP_UPDATE_CHECK
 	@# Skip check on detached HEAD (tag checkouts, CI builds)
 	@if ! git symbolic-ref HEAD >/dev/null 2>&1; then exit 0; fi
-	@git fetch origin main --quiet 2>/dev/null || true
-	@LOCAL=$$(git rev-parse HEAD 2>/dev/null); \
-	REMOTE=$$(git rev-parse origin/main 2>/dev/null); \
+	@BRANCH=$$(git symbolic-ref --short HEAD 2>/dev/null); \
+	git fetch origin "$$BRANCH" --quiet 2>/dev/null || true; \
+	LOCAL=$$(git rev-parse HEAD 2>/dev/null); \
+	REMOTE=$$(git rev-parse "origin/$$BRANCH" 2>/dev/null); \
 	if [ -n "$$REMOTE" ] && [ "$$LOCAL" != "$$REMOTE" ]; then \
-		echo "ERROR: Local branch is not up to date with origin/main"; \
+		echo "ERROR: Local branch is not up to date with origin/$$BRANCH"; \
 		echo "  Local:  $$(git rev-parse --short HEAD)"; \
-		echo "  Remote: $$(git rev-parse --short origin/main)"; \
+		echo "  Remote: $$(git rev-parse --short origin/$$BRANCH)"; \
 		echo "Run 'git pull' first, or use SKIP_UPDATE_CHECK=1 to override"; \
 		exit 1; \
 	fi

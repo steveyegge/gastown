@@ -315,6 +315,12 @@ func createBatchConvoy(beadIDs []string, rigName string, owned bool, mergeStrate
 
 	townBeads := filepath.Join(townRoot, ".beads")
 
+	// Ensure custom types (including 'convoy') are registered in town beads.
+	resolvedBeads := beads.ResolveBeadsDir(townBeads)
+	if err := beads.EnsureCustomTypes(resolvedBeads); err != nil {
+		return "", nil, fmt.Errorf("ensuring custom types: %w", err)
+	}
+
 	convoyID := fmt.Sprintf("hq-cv-%s", slingGenerateShortID())
 
 	convoyTitle := fmt.Sprintf("Batch: %d beads to %s", len(beadIDs), rigName)
@@ -377,6 +383,13 @@ func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy, baseB
 	}
 
 	townBeads := filepath.Join(townRoot, ".beads")
+
+	// Ensure custom types (including 'convoy') are registered in town beads.
+	// Without this, bd create --type=convoy fails with "invalid issue type: convoy".
+	resolvedBeads := beads.ResolveBeadsDir(townBeads)
+	if err := beads.EnsureCustomTypes(resolvedBeads); err != nil {
+		return "", fmt.Errorf("ensuring custom types: %w", err)
+	}
 
 	// Generate convoy ID with hq-cv- prefix for visual distinction
 	// The hq-cv- prefix is registered in routes during gt install
