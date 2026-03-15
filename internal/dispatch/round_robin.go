@@ -13,18 +13,19 @@ var roundRobinCounter uint64
 type RoundRobinPolicy struct{}
 
 func (RoundRobinPolicy) Route(ctx RoutingContext) (RoutingResult, error) {
-	// Build candidate list: local (as "") + all satellites
+	// Build candidate list: satellites first, local last (operator's
+	// laptop is the overflow bucket, not a primary compute target).
 	type candidate struct {
 		name string // "" = local
 		load MachineLoad
 	}
 	var candidates []candidate
 
-	if ctx.LocalLoad != nil {
-		candidates = append(candidates, candidate{name: "", load: *ctx.LocalLoad})
-	}
 	for _, m := range ctx.Machines {
 		candidates = append(candidates, candidate{name: m.Name, load: m})
+	}
+	if ctx.LocalLoad != nil {
+		candidates = append(candidates, candidate{name: "", load: *ctx.LocalLoad})
 	}
 
 	if len(candidates) == 0 {
