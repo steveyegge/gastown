@@ -125,3 +125,7 @@ func (f *fakeWLCommonsStore) QueryWanted(wantedID string) (*doltserver.WantedIte
 	cp := *item
 	return &cp, nil
 }
+
+func (f *fakeWLCommonsStore) QueryWantedFull(wantedID string) (*doltserver.WantedItem, error) {
+	return f.QueryWanted(wantedID)
+}
