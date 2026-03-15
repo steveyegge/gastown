@@ -350,8 +350,11 @@ for entry in "${CANDIDATES[@]}"; do
       log "  WARNING: Table $TABLE appeared after compaction (new table?)"
       continue
     fi
-    if [[ "$POST_COUNT" != "$PRE" ]]; then
-      log "  INTEGRITY FAILURE: $DB.$TABLE — pre=$PRE post=$POST_COUNT"
+    # Only fail on data loss (postCount < preCount).
+    # postCount > preCount is safe: concurrent writes during flatten add rows
+    # (merge base shifts, txn is preserved — see compactor_dog.go).
+    if [[ -n "$POST_COUNT" && "$POST_COUNT" -lt "$PRE" ]]; then
+      log "  INTEGRITY FAILURE: $DB.$TABLE — data loss: pre=$PRE post=$POST_COUNT"
       INTEGRITY_OK=false
     fi
   done <<< "$PRE_TABLES"
