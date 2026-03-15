@@ -177,10 +177,14 @@ func New(config *Config) (*Daemon, error) {
 			logger.Printf("Dolt server management enabled (port %d)", patrolConfig.Patrols.DoltServer.Port)
 			// Propagate Dolt connection info to process env so AgentEnv() passes it to
 			// all spawned agent sessions. Without this, bd in agent sessions
-			// auto-starts rogue Dolt instances. (GH#2412)
+			// auto-starts rogue Dolt instances or connects to localhost. (GH#2412)
 			portStr := strconv.Itoa(patrolConfig.Patrols.DoltServer.Port)
 			os.Setenv("GT_DOLT_PORT", portStr)
 			os.Setenv("BEADS_DOLT_PORT", portStr)
+			if patrolConfig.Patrols.DoltServer.Host != "" {
+				os.Setenv("GT_DOLT_HOST", patrolConfig.Patrols.DoltServer.Host)
+				os.Setenv("BEADS_DOLT_SERVER_HOST", patrolConfig.Patrols.DoltServer.Host)
+			}
 		}
 	}
 
