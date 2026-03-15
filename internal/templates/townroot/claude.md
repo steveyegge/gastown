@@ -60,6 +60,25 @@ production server and degrade performance. This is a recurring problem.
 {{cmd}} dolt cleanup             # Remove orphan test databases
 ```
 
+### External server failover (automatic)
+
+When the Dolt server runs on an external host, the daemon handles failover
+automatically using `fallback_hosts` from daemon.json. **You do not need to
+intervene.**
+
+- **The daemon** detects outages (30s health ticks), fails over to the next
+  reachable host, and fails back when the primary recovers.
+- **Active host** is persisted to `daemon/dolt-failover-state.json`. All
+  `bd`/`gt` commands read this file automatically.
+- **NEVER modify `~/.zshenv`** to change `GT_DOLT_HOST` as a failover
+  workaround. This causes stale overrides that survive reboots and prevent
+  automatic failback. The daemon manages failover state — not agents.
+- **NEVER set `GT_DOLT_HOST=127.0.0.1`** manually. Localhost typically has
+  only system DBs, not the production data. This breaks `bd` and mail.
+- If you see `DOLT_UNHEALTHY` during a patrol, check
+  `daemon/dolt-failover-state.json` for the current active host.
+  Escalate only if the daemon's failover also failed (all hosts unreachable).
+
 ### Communication hygiene
 
 Every `{{cmd}} mail send` creates a permanent bead + Dolt commit. Every `{{cmd}} nudge`
