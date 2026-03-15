@@ -35,18 +35,23 @@ var (
 // The town root is identified by the presence of mayor/town.json.
 // Returns empty string if not found (reached filesystem root).
 func FindTownRoot(startDir string) string {
+	// Walk up to find the OUTERMOST town root. Imported rigs (e.g., pata)
+	// contain their own mayor/town.json from the gastown source checkout,
+	// which would shadow the real town root if we returned the first match.
+	var found string
 	dir := startDir
 	for {
 		townFile := filepath.Join(dir, "mayor", "town.json")
 		if _, err := os.Stat(townFile); err == nil {
-			return dir
+			found = dir // Keep walking — prefer outermost
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "" // Reached filesystem root
+			break // Reached filesystem root
 		}
 		dir = parent
 	}
+	return found
 }
 
 // ResolveRoutingTarget determines which beads directory a bead ID will route to.

@@ -212,13 +212,16 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// Don't bail out — try the bd create calls anyway (GH#1769).
 	_ = EnsureCustomTypes(targetDir)
 
-	// Use target-scoped Beads instance when routing crosses rigs.
-	// Without this, b.run() uses b's own beadsDir which causes bd to
-	// double-stack the rig path (e.g., pata/mayor/rig/pata/mayor/rig/.beads).
-	// This matches the pattern used in CreateOrReopenAgentBead.
+	// Always run bd from the town root when a routable prefix exists.
+	// bd does its own prefix-based routing internally. When BEADS_DIR points
+	// to a rig subdirectory (e.g., pata/mayor/rig/.beads), bd re-resolves
+	// the prefix and double-stacks the rig path. Running from town root with
+	// BEADS_DIR=townRoot/.beads lets bd's routing work correctly.
 	target := b
-	if targetDir != b.getResolvedBeadsDir() {
-		target = NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
+	townRoot := b.getTownRoot()
+	if townRoot != "" && ExtractPrefix(id) != "" {
+		townBeads := filepath.Join(townRoot, ".beads")
+		target = NewWithBeadsDir(townRoot, townBeads)
 	}
 
 	description := FormatAgentDescription(title, fields)
