@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/circuit"
 	"github.com/steveyegge/gastown/internal/scheduler/capacity"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -433,6 +434,13 @@ func runSchedulerRunBead(townRoot, beadID string, dryRun bool) error {
 	if fields.DispatchFailures >= maxDispatchFailures {
 		return fmt.Errorf("bead %s is circuit-broken (%d failures) — use 'gt scheduler clear --bead %s' to reset",
 			beadID, fields.DispatchFailures, beadID)
+	}
+
+	// Check rig-level circuit breaker
+	if fields.TargetRig != "" {
+		if err := circuit.CheckDispatchForRig(townRoot, fields.TargetRig); err != nil {
+			return err
+		}
 	}
 
 	pending := capacity.PendingBead{

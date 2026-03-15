@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/circuit"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
@@ -120,6 +121,14 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 				undoCmd = "gt rig undock"
 			}
 			return result, fmt.Errorf("cannot sling to %s rig %q\n%s %s", reason, params.RigName, undoCmd, params.RigName)
+		}
+	}
+
+	// 0b. Check circuit breaker — block dispatch if circuit is OPEN
+	if params.RigName != "" {
+		if err := circuit.CheckDispatchForRig(townRoot, params.RigName); err != nil {
+			result.ErrMsg = err.Error()
+			return result, err
 		}
 	}
 
