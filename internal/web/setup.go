@@ -790,7 +790,7 @@ const setupHTML = `<!DOCTYPE html>
             </p>
             <div class="form-group">
                 <label>Rig Name</label>
-                <input type="text" id="rig-name" placeholder="my-project">
+                <input type="text" id="rig-name" placeholder="my_project">
                 <div class="hint">Short name for this rig (no spaces)</div>
             </div>
             <div class="form-group">

@@ -1102,7 +1102,7 @@ func (m *Manager) ensureGitignoreEntry(gitignorePath, entry string) error {
 }
 
 // deriveBeadsPrefix generates a beads prefix from a rig name.
-// Examples: "gastown" -> "gt", "my-project" -> "mp", "foo" -> "foo"
+// Examples: "gastown" -> "gt", "my_project" -> "mp", "foo" -> "foo"
 func deriveBeadsPrefix(name string) string {
 	// Strip path separators — callers should validate names, but be defensive
 	name = filepath.Base(name)
