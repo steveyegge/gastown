@@ -291,3 +291,65 @@ func TestCheckPolecatHealth_NotifiesWitnessOnCrash(t *testing.T) {
 		t.Errorf("expected witness address myr/witness, got: %q", invocations)
 	}
 }
+
+// TestCheckPolecatHealth_DeduplicatesCrashNotification verifies that the daemon
+// does NOT send duplicate CRASHED_POLECAT notifications on subsequent heartbeat
+// cycles for the same crashed polecat (GH#2795).
+func TestCheckPolecatHealth_DeduplicatesCrashNotification(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+	binDir := t.TempDir()
+	writeFakeTestTmux(t, binDir)
+	recentTime := time.Now().UTC().Format(time.RFC3339)
+	bdPath := writeFakeTestBD(t, binDir, "working", "working", "gt-xyz", recentTime)
+
+	// Create a fake gt script that logs invocations to a file
+	gtLog := filepath.Join(t.TempDir(), "gt-invocations.log")
+	fakeGt := filepath.Join(binDir, "gt")
+	gtScript := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %s\n", gtLog)
+	if err := os.WriteFile(fakeGt, []byte(gtScript), 0755); err != nil {
+		t.Fatalf("writing fake gt: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	townRoot := t.TempDir()
+	var logBuf strings.Builder
+	d := &Daemon{
+		config: &Config{TownRoot: townRoot},
+		logger: log.New(&logBuf, "", 0),
+		tmux:   tmux.NewTmux(),
+		bdPath: bdPath,
+		gtPath: fakeGt,
+	}
+
+	// First call: should send notification
+	d.checkPolecatHealth("myr", "mycat")
+
+	logData, err := os.ReadFile(gtLog)
+	if err != nil {
+		t.Fatalf("reading gt invocation log: %v", err)
+	}
+	firstCallCount := strings.Count(string(logData), "CRASHED_POLECAT")
+	if firstCallCount != 1 {
+		t.Fatalf("expected exactly 1 CRASHED_POLECAT on first call, got %d", firstCallCount)
+	}
+
+	// Second call: should be deduplicated (no new notification)
+	d.checkPolecatHealth("myr", "mycat")
+
+	logData, err = os.ReadFile(gtLog)
+	if err != nil {
+		t.Fatalf("reading gt invocation log: %v", err)
+	}
+	secondCallCount := strings.Count(string(logData), "CRASHED_POLECAT")
+	if secondCallCount != 1 {
+		t.Errorf("expected still 1 CRASHED_POLECAT after second call (dedup), got %d", secondCallCount)
+	}
+
+	got := logBuf.String()
+	if !strings.Contains(got, "Skipping duplicate CRASHED_POLECAT") {
+		t.Errorf("expected dedup log message, got: %q", got)
+	}
+}
