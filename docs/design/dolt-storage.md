@@ -54,6 +54,70 @@ gt dolt list           # List all databases
 If the server isn't running, `bd` fails fast with a clear message
 pointing to `gt dolt start`.
 
+## External Server Failover
+
+When the Dolt server runs on an external host (e.g., a dedicated machine on
+the Tailnet), the daemon monitors it in external mode (`"external": true` in
+daemon.json). If the external host becomes unreachable, the daemon
+automatically fails over to the next reachable host in `fallback_hosts`.
+
+### Configuration
+
+```json
+"dolt_server": {
+  "enabled": true,
+  "host": "0.0.0.0",
+  "port": 3307,
+  "external": true,
+  "fallback_hosts": [
+    "100.111.197.110:3307",
+    "100.86.9.58:3307",
+    "127.0.0.1:3307"
+  ]
+}
+```
+
+`fallback_hosts` is an ordered list. On primary failure, the daemon tries
+each in order and switches to the first reachable one. The primary host
+is derived from the configured `host` and `port` (or from `GT_DOLT_HOST`).
+
+### How it works
+
+1. **Health tick** (every 30s): daemon runs `checkHealthLocked()` on the
+   active host.
+2. **Primary fails**: daemon writes `DOLT_UNHEALTHY` signal, then calls
+   `tryFailover()` — walks `fallback_hosts`, TCP-probes each, switches
+   `config.Host`/`config.Port` to the first reachable one.
+3. **State persisted**: active host written to `daemon/dolt-failover-state.json`.
+   Child processes (`bd`, `gt` subcommands) read this file in
+   `doltserver.DefaultConfig()` — it takes precedence over `GT_DOLT_HOST`.
+4. **Failback**: on every subsequent health tick, the daemon probes the
+   primary. When it responds, the daemon reverts automatically and removes
+   the state file.
+
+### Critical rules for agents
+
+- **NEVER mutate `~/.zshenv`** to change `GT_DOLT_HOST` for failover.
+  The daemon manages failover state via `dolt-failover-state.json`. Shell
+  env mutations persist across reboots and break failback.
+- **NEVER manually set `GT_DOLT_HOST=127.0.0.1`** as a workaround for
+  external server outages. This causes localhost connections that return
+  only system DBs, breaking `bd` and mail.
+- If you see `DOLT_UNHEALTHY` during a patrol, the daemon is already
+  handling failover. Check `daemon/dolt-failover-state.json` for the
+  current active host. Escalate only if failover also fails.
+
+### File layout
+
+```
+~/gt/daemon/
+├── dolt.pid                     # Server PID
+├── dolt.log                     # Server log
+├── dolt-state.json              # Daemon state
+├── dolt-failover-state.json     # Failover state (only during failover)
+└── DOLT_UNHEALTHY               # Signal file (only when unhealthy)
+```
+
 ## Write Concurrency: All-on-Main
 
 All agents — polecats, crew, witness, refinery, deacon — write directly
