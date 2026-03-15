@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/dispatch"
 )
 
 // resolveConfigMu serializes agent config resolution across all callers.
@@ -2650,4 +2651,25 @@ func (c *EscalationConfig) GetMaxReescalations() int {
 		return 2
 	}
 	return *c.MaxReescalations
+}
+
+// LoadMachinesConfig loads the machines registry from the given path.
+func LoadMachinesConfig(path string) (*MachinesConfig, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally
+	if err != nil {
+		return nil, err
+	}
+	var cfg MachinesConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing machines config: %w", err)
+	}
+	if cfg.Machines == nil {
+		cfg.Machines = make(map[string]*MachineEntry)
+	}
+	if cfg.DispatchPolicy != "" {
+		if !dispatch.IsValidPolicy(cfg.DispatchPolicy) {
+			return nil, fmt.Errorf("invalid dispatch_policy %q in machines config", cfg.DispatchPolicy)
+		}
+	}
+	return &cfg, nil
 }
