@@ -252,9 +252,11 @@ func (m *DoltServerManager) buildDoltSQLCmd(ctx context.Context, args ...string)
 	fullArgs = append(fullArgs, args...)
 	cmd := exec.CommandContext(ctx, "dolt", fullArgs...)
 
-	if !m.isRemote() {
-		cmd.Dir = m.config.DataDir
-	}
+	// Always set working directory to DataDir so dolt finds the canonical .doltcfg
+	// there instead of creating stray .doltcfg/privileges.db in the caller's CWD.
+	// For local servers this also enables embedded-mode auto-detection.
+	// See GH#2537.
+	cmd.Dir = m.config.DataDir
 
 	if m.isRemote() && m.config.Password != "" {
 		cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+m.config.Password)
