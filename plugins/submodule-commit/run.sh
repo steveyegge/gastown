@@ -19,7 +19,7 @@ if [ -z "$RIG_JSON" ]; then
   exit 0
 fi
 
-declare -a ENABLED_RIGS
+declare -a ENABLED_RIGS=()
 while IFS= read -r REPO_PATH; do
   [ -z "$REPO_PATH" ] && continue
   [ ! -f "$REPO_PATH/.gitmodules" ] && continue
