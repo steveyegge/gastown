@@ -526,11 +526,12 @@ gt crew post <name> <posting>     # Set persistent posting for a worker
 gt crew post <name> --clear       # Remove persistent posting
 
 # Session layer (transient)
-gt posting assume <posting>       # Assume session-level posting
-gt posting drop                   # Drop session-level posting
-gt posting cycle <posting>        # Drop current and assume new
-gt posting show                   # Show current posting (both layers)
-gt posting list                   # List all configured postings
+gt posting assume <posting>              # Assume session-level posting
+gt posting assume <posting> --reason "…" # Assume with logged reason (autonomous use)
+gt posting drop                          # Drop session-level posting (in-session)
+gt posting cycle [posting]               # Drop current, restart session (clean context)
+gt posting show                          # Show current posting (both layers)
+gt posting list                          # List all configured postings
 ```
 
 **Sling integration:**
@@ -546,8 +547,9 @@ gt sling <bead> <rig> --posting <posting>   # Assume a posting for the spawned p
 | `gt posting assume` | No posting set | Assumes the posting |
 | `gt posting assume` | Session posting already set | **Blocked** — must drop first |
 | `gt posting assume` | Persistent posting exists | **Blocked** — must clear config first (`gt crew post <name> --clear`) |
-| `gt posting cycle <new>` | Session posting set | **Allowed** — atomically drops current and assumes new |
-| `gt posting cycle <new>` | Persistent posting exists | **Blocked** — must clear config first |
+| `gt posting cycle [new]` | Session posting set | **Allowed** — drops current, optionally assumes new, restarts session via `gt handoff --cycle` |
+| `gt posting cycle` | No posting set | No-op — no session restart needed |
+| `gt posting cycle [new]` | Persistent posting exists | **Blocked** — must clear config first |
 | `gt posting drop` | Posting set | Clears session-level posting only (`.runtime/posting`) |
 | `gt posting drop` | No posting set | No-op |
 | Crew `gt handoff` | Session posting set | **Clears** posting — crew handoffs mean "done for now," next session may be different work |
@@ -565,22 +567,22 @@ the successor session inherits it.
 
 **Nonexistent posting behavior:**
 
-If a posting name is assigned that has no matching template (not found at any
-resolution level — rig, town, or embedded), the agent **proceeds without posting
-augmentation**. The posting name is still stored in `.runtime/posting` and resolved
-by `resolvePostingName`, but `LoadPosting` returns an error at prime time. The
-agent receives its base role context without the posting overlay.
+`gt posting assume` validates that a template exists before writing to
+`.runtime/posting`. If no matching template is found at any resolution level
+(rig, town, or embedded), the command **fails fast** with an actionable error
+listing where to define the posting.
 
-This is a warn-and-proceed design: the system does not block agent startup for a
-missing posting template. When `--explain` mode is active, the error is logged as
-`[EXPLAIN] Posting "<name>": posting "<name>" not found (checked rig, town, and
-built-in postings)`. Without `--explain`, the failure is silent — the posting
-section is simply omitted from the prime output.
+If a posting name reaches `.runtime/posting` through other paths (e.g., direct
+file write, `gt sling --posting` with a name that later becomes invalid), the
+agent proceeds without posting augmentation at prime time. When `--explain` mode
+is active, the error is logged as `[EXPLAIN] Posting "<name>": posting "<name>"
+not found (checked rig, town, and built-in postings)`.
 
 | Scenario | Behavior |
 |----------|----------|
 | Valid posting name | Posting template rendered and appended to role context |
-| Nonexistent posting name | No posting context rendered; agent proceeds with base role only |
+| `gt posting assume <nonexistent>` | **Fails fast** — error with guidance on where to define the template |
+| Nonexistent name in `.runtime/posting` (other paths) | No posting context rendered; agent proceeds with base role only |
 | Empty posting name | No posting resolution attempted; same as no posting assigned |
 
 **Autonomous assumption protocol:**
@@ -591,17 +593,13 @@ primary way polecats adapt to work that requires specialized context mid-session
 
 When an agent autonomously assumes a posting, it must:
 
-1. **Assume the posting:**
+1. **Assume the posting with a reason:**
    ```bash
-   gt posting assume <posting>
+   gt posting assume <posting> --reason "bead X requires triage"
    ```
+   The `--reason` flag logs to stderr for audit visibility.
 
-2. **Log the reason** by updating the active bead with context:
-   ```bash
-   bd update <issue> --notes "Assumed posting <posting>: <why>"
-   ```
-
-3. **Communicate the change** to the Witness so the posting is visible in
+2. **Communicate the change** to the Witness so the posting is visible in
    status checks and patrol reports:
    ```bash
    gt nudge <rig>/witness "Assumed posting <posting> for <issue>: <reason>"
