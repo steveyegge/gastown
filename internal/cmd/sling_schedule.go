@@ -59,6 +59,7 @@ type ScheduleOptions struct {
 	Agent       string   // Agent override (e.g., "gemini", "codex")
 	HookRawBead bool     // Hook raw bead without default formula
 	Ralph       bool     // Ralph Wiggum loop mode
+	Posting     string   // Assumed posting for the polecat session
 }
 
 // scheduleBead schedules a bead for deferred dispatch via the capacity scheduler.
@@ -162,6 +163,9 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 		fields.Mode = "ralph"
 	}
 	fields.Owned = opts.Owned
+	if opts.Posting != "" {
+		fields.Posting = opts.Posting
+	}
 
 	// Create sling context bead — single atomic operation. No two-step write.
 	ctxBead, err := townBeads.CreateSlingContext(info.Title, beadID, fields)

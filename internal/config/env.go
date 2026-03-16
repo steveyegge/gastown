@@ -62,6 +62,14 @@ type AgentEnvConfig struct {
 	// Added as gt.session to OTEL_RESOURCE_ATTRIBUTES so all Claude logs from a
 	// single GT session can be correlated, and as GT_SESSION env var.
 	SessionName string
+
+	// Posting is the posting name assigned to this agent (e.g., "dispatcher", "scout").
+	// Sets GT_POSTING environment variable.
+	Posting string
+
+	// PostingLevel is the template resolution level (e.g., "embedded", "town", "rig").
+	// Sets GT_POSTING_LEVEL environment variable.
+	PostingLevel string
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -171,6 +179,16 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["GT_AGENT"] = cfg.Agent
 	}
 
+	// Set GT_POSTING and GT_POSTING_LEVEL when a posting is assigned.
+	// Resolved from session state (.runtime/posting) or persistent config
+	// (RigSettings.WorkerPostings) by the caller.
+	if cfg.Posting != "" {
+		env["GT_POSTING"] = cfg.Posting
+	}
+	if cfg.PostingLevel != "" {
+		env["GT_POSTING_LEVEL"] = cfg.PostingLevel
+	}
+
 	// Disable bd's per-repo JSONL auto-backup for all Gas Town agents.
 	// bd auto-enables backup when a git remote exists, then force-adds
 	// .beads/backup/ files (bypassing .gitignore) and commits/pushes them
@@ -259,6 +277,9 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		}
 		if cfg.SessionName != "" {
 			attrs = append(attrs, "gt.session="+sanitizeOTELAttrValue(cfg.SessionName, 80))
+		}
+		if cfg.Posting != "" {
+			attrs = append(attrs, "gt.posting="+sanitizeOTELAttrValue(cfg.Posting, 40))
 		}
 		if len(attrs) > 0 {
 			env["OTEL_RESOURCE_ATTRIBUTES"] = strings.Join(attrs, ",")

@@ -1,18 +1,22 @@
 package cmd
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/checkpoint"
+	"github.com/steveyegge/gastown/internal/cli"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -89,7 +93,105 @@ func outputPrimeContext(ctx RoleContext) (string, error) {
 	}
 
 	fmt.Print(output)
+
+	// Resolve and render posting for crew and polecat roles
+	if ctx.Role == RolePolecat || ctx.Role == RoleCrew {
+		outputPostingContext(ctx, data)
+	}
+
 	return output, nil
+}
+
+// resolvePostingName determines the active posting for the current worker.
+// Resolution order (highest priority first):
+//  1. Session state: .runtime/posting (transient, set via gt posting assume)
+//  2. Rig config: RigSettings.WorkerPostings[workerName] (persistent)
+//  3. None (no posting active)
+//
+// Returns (postingName, level) where level is "session", "config", or "".
+func resolvePostingName(ctx RoleContext) (string, string) {
+	// 1. Check session state (.runtime/posting)
+	if name := posting.Read(ctx.WorkDir); name != "" {
+		return name, "session"
+	}
+
+	// 2. Check rig config (WorkerPostings)
+	if ctx.Rig != "" && ctx.TownRoot != "" && ctx.Polecat != "" {
+		rigPath := filepath.Join(ctx.TownRoot, ctx.Rig)
+		settingsPath := config.RigSettingsPath(rigPath)
+		if settings, err := config.LoadRigSettings(settingsPath); err == nil {
+			if name, ok := settings.WorkerPostings[ctx.Polecat]; ok && name != "" {
+				return name, "config"
+			}
+		}
+	}
+
+	return "", ""
+}
+
+// resolvePostingLevel determines the template resolution level and ambiguity
+// for the active posting. It calls LoadPosting to find which level the template
+// was resolved from ("embedded", "town", or "rig"), and checks PostingLevels
+// to detect whether the same posting name exists at multiple levels.
+//
+// Returns (level, ambiguous) where level is the winning resolution level
+// and ambiguous is true if the posting exists at more than one level.
+func resolvePostingLevel(ctx RoleContext) (string, bool) {
+	if ctx.Posting == "" {
+		return "", false
+	}
+
+	rigPath := ""
+	if ctx.Rig != "" && ctx.TownRoot != "" {
+		rigPath = filepath.Join(ctx.TownRoot, ctx.Rig)
+	}
+
+	result, err := templates.LoadPosting(ctx.TownRoot, rigPath, ctx.Posting)
+	if err != nil {
+		return "", false
+	}
+
+	levels := templates.PostingLevels(ctx.TownRoot, rigPath, ctx.Posting)
+	return result.Level, len(levels) > 1
+}
+
+// outputPostingContext renders the posting template for the current worker,
+// appending it after the base role context. The posting name and level must
+// already be resolved on ctx (done in runPrime).
+func outputPostingContext(ctx RoleContext, data templates.RoleData) {
+	if ctx.Posting == "" {
+		return
+	}
+
+	rigPath := ""
+	if ctx.Rig != "" && ctx.TownRoot != "" {
+		rigPath = filepath.Join(ctx.TownRoot, ctx.Rig)
+	}
+
+	result, err := templates.LoadPosting(ctx.TownRoot, rigPath, ctx.Posting)
+	if err != nil {
+		explain(true, fmt.Sprintf("Posting %q: %v", ctx.Posting, err))
+		return
+	}
+
+	// Render the posting template with the same RoleData (posting name set)
+	data.Posting = ctx.Posting
+
+	tmpl, err := template.New("posting").Parse(result.Content)
+	if err != nil {
+		explain(true, fmt.Sprintf("Posting %q: template parse error: %v", ctx.Posting, err))
+		return
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		explain(true, fmt.Sprintf("Posting %q: template render error: %v", ctx.Posting, err))
+		return
+	}
+
+	explain(true, fmt.Sprintf("Posting: %s (level=%s, source=%s)", ctx.Posting, ctx.PostingLevel, result.Level))
+	fmt.Println()
+	fmt.Print(buf.String())
 }
 
 func outputPrimeContextFallback(ctx RoleContext) {

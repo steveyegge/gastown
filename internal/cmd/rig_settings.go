@@ -331,6 +331,7 @@ func setNestedValue(obj interface{}, keyPath string, value interface{}) error {
 					"type", "version",
 					"merge_queue", "theme", "namepool", "crew", "workflow",
 					"runtime", "agent", "agents", "role_agents",
+					"worker_agents", "worker_postings",
 				}
 				return fmt.Errorf("unknown key %q (valid top-level keys: %s)", keyPath, strings.Join(validKeys, ", "))
 			}

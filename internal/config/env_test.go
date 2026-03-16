@@ -988,6 +988,22 @@ func TestAgentEnv_OTELPromptAndTown(t *testing.T) {
 	}
 }
 
+func TestAgentEnv_OTELPosting(t *testing.T) {
+	t.Setenv("GT_OTEL_METRICS_URL", "http://localhost:8428/opentelemetry/api/v1/push")
+
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "polecat",
+		Rig:       "gastown",
+		AgentName: "rust",
+		Posting:   "dispatcher",
+	})
+
+	attrs := env["OTEL_RESOURCE_ATTRIBUTES"]
+	if !containsAttr(attrs, "gt.posting=dispatcher") {
+		t.Errorf("OTEL_RESOURCE_ATTRIBUTES missing gt.posting=dispatcher, got: %s", attrs)
+	}
+}
+
 func TestAgentEnv_OTELNoPromptNoTown(t *testing.T) {
 	t.Setenv("GT_OTEL_METRICS_URL", "http://localhost:8428/opentelemetry/api/v1/push")
 	t.Setenv("GT_OTEL_LOGS_URL", "http://localhost:9428/insert/opentelemetry/v1/logs")
@@ -1208,6 +1224,46 @@ func TestAgentEnv_NoDoltPortWithoutTownRoot(t *testing.T) {
 	})
 	assertNotSet(t, env, "GT_DOLT_PORT")
 	assertNotSet(t, env, "BEADS_DOLT_PORT")
+}
+
+func TestAgentEnv_PostingInjection(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sets GT_POSTING and GT_POSTING_LEVEL when configured", func(t *testing.T) {
+		t.Parallel()
+		env := AgentEnv(AgentEnvConfig{
+			Role:         "polecat",
+			Rig:          "myrig",
+			AgentName:    "Toast",
+			Posting:      "dispatcher",
+			PostingLevel: "rig",
+		})
+		assertEnv(t, env, "GT_POSTING", "dispatcher")
+		assertEnv(t, env, "GT_POSTING_LEVEL", "rig")
+	})
+
+	t.Run("omits GT_POSTING when empty", func(t *testing.T) {
+		t.Parallel()
+		env := AgentEnv(AgentEnvConfig{
+			Role:      "polecat",
+			Rig:       "myrig",
+			AgentName: "Toast",
+		})
+		assertNotSet(t, env, "GT_POSTING")
+		assertNotSet(t, env, "GT_POSTING_LEVEL")
+	})
+
+	t.Run("sets GT_POSTING without GT_POSTING_LEVEL", func(t *testing.T) {
+		t.Parallel()
+		env := AgentEnv(AgentEnvConfig{
+			Role:      "crew",
+			Rig:       "myrig",
+			AgentName: "alice",
+			Posting:   "scout",
+		})
+		assertEnv(t, env, "GT_POSTING", "scout")
+		assertNotSet(t, env, "GT_POSTING_LEVEL")
+	})
 }
 
 func TestAgentEnv_NoDoltPortWithoutConfig(t *testing.T) {

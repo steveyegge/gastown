@@ -69,6 +69,26 @@ Ephemeral Beads destroyed after runs. Wisps are lightweight work items used for 
 ### Hook
 A special pinned Bead for each agent. The Hook is an agent's primary work queue - when work appears on your Hook, GUPP dictates you must run it.
 
+## Postings
+
+### Posting
+A behavioral specialization that augments an agent's base role with additional responsibilities and context. Postings inject a role-specific prompt template into the agent's session at prime time. There are two layers: session-level (assumed) postings and persistent postings.
+
+### Assumed Posting
+A transient, session-level posting set via `gt posting assume <name>`. Stored in `.runtime/posting` and automatically cleared on handoff, polecat completion, or explicit drop. An assumed posting cannot coexist with a persistent posting — if a crew member has a persistent posting, `gt posting assume` is blocked until the persistent posting is cleared.
+
+### Persistent Posting
+A posting assigned to a worker through rig configuration via `gt crew post <name> <posting>`. Stored in `RigSettings.WorkerPostings` and applied on every session start. A persistent posting blocks `gt posting assume` until cleared with `gt crew post <name> --clear`.
+
+### Dispatcher (built-in posting)
+A posting that augments a worker with coordination responsibilities: routing incoming beads to the right polecat, load-balancing work across workers, tracking dependencies, triaging priority, and aggressively unblocking stalled work.
+
+### Inspector (built-in posting)
+A posting that augments a worker with quality assurance responsibilities: reviewing diffs for correctness and security, enforcing codebase conventions, detecting regressions, and verifying quality gates pass before work enters the merge queue.
+
+### Scout (built-in posting)
+A posting that augments a worker with exploration and research responsibilities: mapping unfamiliar areas of the codebase, running research spikes, analyzing the impact of proposed changes, and persisting findings to beads so they survive session death.
+
 ## Workflow Commands
 
 ### Convoy

@@ -152,6 +152,18 @@ func runPrime(cmd *cobra.Command, args []string) (retErr error) {
 		WorkDir:  cwd,
 	}
 
+	// Resolve posting for crew/polecat roles so it propagates to all downstream output.
+	// Two-phase resolution:
+	//  1. resolvePostingName: determines the posting name from session state or rig config
+	//  2. resolvePostingLevel: determines where the template was resolved from (embedded/town/rig)
+	//     and whether the posting exists at multiple levels (ambiguity check)
+	if ctx.Role == RolePolecat || ctx.Role == RoleCrew {
+		ctx.Posting, _ = resolvePostingName(ctx)
+		if ctx.Posting != "" {
+			ctx.PostingLevel, ctx.PostingAmbiguous = resolvePostingLevel(ctx)
+		}
+	}
+
 	// --state mode: output state only and exit
 	if primeState {
 		outputState(ctx, primeStateJSON)

@@ -34,7 +34,10 @@ type RoleInfo struct {
 	Mismatch      bool   `json:"mismatch,omitempty"`    // True if env != cwd detection
 	EnvIncomplete bool   `json:"env_incomplete,omitempty"` // True if env was set but missing rig/polecat, filled from cwd
 	TownRoot      string `json:"town_root,omitempty"`
-	WorkDir       string `json:"work_dir,omitempty"`    // Current working directory
+	WorkDir       string `json:"work_dir,omitempty"`       // Current working directory
+	Posting          string `json:"posting,omitempty"`           // Posting name (e.g., "dispatcher", "scout")
+	PostingLevel     string `json:"posting_level,omitempty"`    // Template resolution level: "embedded", "town", or "rig"
+	PostingAmbiguous bool   `json:"posting_ambiguous,omitempty"` // True when posting template exists at multiple resolution levels
 }
 
 var roleCmd = &cobra.Command{
@@ -392,12 +395,27 @@ func parseRoleString(s string) (Role, string, string) {
 	}
 }
 
+// PostingDisplay returns the posting bracket notation for display.
+// If ambiguous is false, returns "[posting]" (e.g., "[dispatcher]").
+// If ambiguous is true, includes the level: "[level:posting]" (e.g., "[rig:dispatcher]").
+// Returns "" if no posting is set.
+func (info RoleInfo) PostingDisplay(ambiguous bool) string {
+	if info.Posting == "" {
+		return ""
+	}
+	if ambiguous && info.PostingLevel != "" {
+		return fmt.Sprintf("[%s:%s]", info.PostingLevel, info.Posting)
+	}
+	return fmt.Sprintf("[%s]", info.Posting)
+}
+
 // ActorString returns the actor identity string for beads attribution.
 // Format matches beads created_by convention:
 //   - Simple roles: "mayor", "deacon"
 //   - Dog roles: "deacon-boot" (hyphenated, matching BD_ACTOR)
 //   - Rig-specific: "gastown/witness", "gastown/refinery"
 //   - Workers: "gastown/crew/max", "gastown/polecats/Toast"
+//   - Workers with posting: "gastown/polecats/Toast[dispatcher]"
 func (info RoleInfo) ActorString() string {
 	switch info.Role {
 	case RoleMayor:
@@ -416,12 +434,12 @@ func (info RoleInfo) ActorString() string {
 		return "refinery"
 	case RolePolecat:
 		if info.Rig != "" && info.Polecat != "" {
-			return fmt.Sprintf("%s/polecats/%s", info.Rig, info.Polecat)
+			return fmt.Sprintf("%s/polecats/%s%s", info.Rig, info.Polecat, info.PostingDisplay(info.PostingAmbiguous))
 		}
 		return "polecat"
 	case RoleCrew:
 		if info.Rig != "" && info.Polecat != "" {
-			return fmt.Sprintf("%s/crew/%s", info.Rig, info.Polecat)
+			return fmt.Sprintf("%s/crew/%s%s", info.Rig, info.Polecat, info.PostingDisplay(info.PostingAmbiguous))
 		}
 		return "crew"
 	case RoleBoot:
