@@ -12,10 +12,12 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var postingRig string
+var postingAssumeReason string
 
 var postingCmd = &cobra.Command{
 	Use:     "posting",
@@ -88,6 +90,7 @@ the session posting only.
 
 Examples:
   gt posting assume dispatcher
+  gt posting assume dispatcher --reason "bead X needs triage"
   gt posting assume security-reviewer`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPostingAssume,
@@ -156,6 +159,7 @@ func init() {
 
 	postingListCmd.Flags().StringVar(&postingRig, "rig", "", "Rig to list postings from")
 	postingCreateCmd.Flags().StringVar(&postingRig, "rig", "", "Rig to create posting in")
+	postingAssumeCmd.Flags().StringVar(&postingAssumeReason, "reason", "", "Reason for assuming this posting (logged to stderr)")
 
 	rootCmd.AddCommand(postingCmd)
 }
@@ -366,8 +370,24 @@ func runPostingAssume(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("already assumed posting %q — drop it first with: gt posting drop", current)
 	}
 
+	// Validate that a template exists for this posting name.
+	// Resolve town root and rig path for template lookup.
+	townRoot, _ := workspace.FindFromCwd()
+	rigPath := ""
+	if info, err := GetRole(); err == nil && info.Rig != "" && townRoot != "" {
+		rigPath = filepath.Join(townRoot, info.Rig)
+	}
+	if _, err := templates.LoadPosting(townRoot, rigPath, postingName); err != nil {
+		return fmt.Errorf("posting %q not found: %w\n  Define it at:\n    Rig:  %s/postings/%s.md.tmpl\n    Town: %s/postings/%s.md.tmpl\n  Or use a built-in: %v",
+			postingName, err, rigPath, postingName, townRoot, postingName, templates.BuiltinPostingNames())
+	}
+
 	if err := posting.Write(workDir, postingName); err != nil {
 		return fmt.Errorf("writing posting: %w", err)
+	}
+
+	if postingAssumeReason != "" {
+		fmt.Fprintf(os.Stderr, "posting assume: %s (reason: %s)\n", postingName, postingAssumeReason)
 	}
 
 	fmt.Printf("%s Assumed posting: %s\n", style.Success.Render("✓"), postingName)

@@ -310,6 +310,10 @@ func PostingLevels(townRoot, rigPath, postingName string) []string {
 }
 
 // BuiltinPostingNames returns the list of built-in posting template names.
+// BuiltinPostingNames returns the names of built-in postings.
+// Hardcoded rather than derived from postingsFS because it's simpler and
+// TestBuiltinPostingNames already verifies each name loads from the embedded FS,
+// so any drift between this list and the actual files fails tests.
 func BuiltinPostingNames() []string {
 	return []string{"dispatcher", "inspector", "scout"}
 }
