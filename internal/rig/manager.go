@@ -912,21 +912,30 @@ func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 	}
 	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
 
-	// Ensure BEADS_DOLT_PORT is set when GT_DOLT_PORT is present, so that
-	// bd subprocesses connect to the correct Dolt server (especially in tests
-	// where an ephemeral server runs on a non-default port).
-	var gtDoltPort string
-	hasBDP := false
+	// Ensure BEADS_DOLT_PORT and BEADS_DOLT_SERVER_HOST are set when their GT_
+	// counterparts are present, so that bd subprocesses connect to the correct
+	// Dolt server (especially in tests or when the server is remote).
+	var gtDoltPort, gtDoltHost string
+	hasBDP, hasBDH := false, false
 	for _, e := range filteredEnv {
 		if strings.HasPrefix(e, "GT_DOLT_PORT=") {
 			gtDoltPort = strings.TrimPrefix(e, "GT_DOLT_PORT=")
 		}
+		if strings.HasPrefix(e, "GT_DOLT_HOST=") {
+			gtDoltHost = strings.TrimPrefix(e, "GT_DOLT_HOST=")
+		}
 		if strings.HasPrefix(e, "BEADS_DOLT_PORT=") {
 			hasBDP = true
+		}
+		if strings.HasPrefix(e, "BEADS_DOLT_SERVER_HOST=") {
+			hasBDH = true
 		}
 	}
 	if gtDoltPort != "" && !hasBDP {
 		filteredEnv = append(filteredEnv, "BEADS_DOLT_PORT="+gtDoltPort)
+	}
+	if gtDoltHost != "" && !hasBDH {
+		filteredEnv = append(filteredEnv, "BEADS_DOLT_SERVER_HOST="+gtDoltHost)
 	}
 
 	// Run bd init if available (Dolt is the only backend since bd v0.51.0).
