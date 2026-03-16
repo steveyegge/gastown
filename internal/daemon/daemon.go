@@ -1936,6 +1936,17 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 		return
 	}
 
+	// Terminal state guard: skip polecats whose agent_state indicates the
+	// session being dead is expected (done, nuked). When a polecat completes
+	// normally or is intentionally nuked, the hook_bead may still reference
+	// an open bead (nuked polecats leave the bead open by design). Without
+	// this check, every heartbeat fires a false CRASHED_POLECAT alert.
+	if beads.AgentState(info.State).IsTerminal() {
+		d.logger.Printf("Skipping crash detection for %s/%s: agent_state=%s (terminal — session death expected)",
+			rigName, polecatName, info.State)
+		return
+	}
+
 	// Stale hook guard: skip polecats whose hook_bead is already closed.
 	// When a polecat completes work normally (gt done), the hook_bead gets closed
 	// but may not be cleared from the agent bead before the session stops.

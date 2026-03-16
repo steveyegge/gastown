@@ -45,6 +45,19 @@ func (s AgentState) IsActive() bool {
 	}
 }
 
+// IsTerminal returns true if the agent has reached a final state where its
+// session being dead is expected, not a crash. Used by crash detection to
+// avoid false CRASHED_POLECAT alerts for polecats that completed normally
+// or were intentionally nuked.
+func (s AgentState) IsTerminal() bool {
+	switch s {
+	case AgentStateDone, AgentStateNuked:
+		return true
+	default:
+		return false
+	}
+}
+
 // IssueStatus represents the lifecycle status of a beads issue.
 // These values are stored in the status field and govern issue workflow transitions.
 //

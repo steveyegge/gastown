@@ -235,6 +235,71 @@ func TestCheckPolecatHealth_SkipsClosedHookBead(t *testing.T) {
 	}
 }
 
+// TestCheckPolecatHealth_SkipsTerminalState verifies that checkPolecatHealth
+// does NOT fire CRASHED_POLECAT when the agent_state is terminal (done/nuked).
+// This is the regression test for the false positive flood bug (gt-tey0i):
+// nuked polecats leave the hook_bead open by design, causing repeated false
+// alerts every heartbeat cycle because isBeadClosed returns false.
+func TestCheckPolecatHealth_SkipsTerminalDone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+	binDir := t.TempDir()
+	writeFakeTestTmux(t, binDir)
+	recentTime := time.Now().UTC().Format(time.RFC3339)
+	bdPath := writeFakeTestBD(t, binDir, "done", "done", "gt-xyz", recentTime)
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	var logBuf strings.Builder
+	d := &Daemon{
+		config: &Config{TownRoot: t.TempDir()},
+		logger: log.New(&logBuf, "", 0),
+		tmux:   tmux.NewTmux(),
+		bdPath: bdPath,
+	}
+
+	d.checkPolecatHealth("myr", "mycat")
+
+	got := logBuf.String()
+	if !strings.Contains(got, "agent_state=done (terminal") {
+		t.Errorf("expected log about terminal agent_state, got: %q", got)
+	}
+	if strings.Contains(got, "CRASH DETECTED") {
+		t.Errorf("terminal agent_state must not trigger CRASH DETECTED, got: %q", got)
+	}
+}
+
+func TestCheckPolecatHealth_SkipsTerminalNuked(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+	binDir := t.TempDir()
+	writeFakeTestTmux(t, binDir)
+	recentTime := time.Now().UTC().Format(time.RFC3339)
+	bdPath := writeFakeTestBD(t, binDir, "nuked", "nuked", "gt-xyz", recentTime)
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	var logBuf strings.Builder
+	d := &Daemon{
+		config: &Config{TownRoot: t.TempDir()},
+		logger: log.New(&logBuf, "", 0),
+		tmux:   tmux.NewTmux(),
+		bdPath: bdPath,
+	}
+
+	d.checkPolecatHealth("myr", "mycat")
+
+	got := logBuf.String()
+	if !strings.Contains(got, "agent_state=nuked (terminal") {
+		t.Errorf("expected log about terminal agent_state, got: %q", got)
+	}
+	if strings.Contains(got, "CRASH DETECTED") {
+		t.Errorf("terminal agent_state must not trigger CRASH DETECTED, got: %q", got)
+	}
+}
+
 // TestCheckPolecatHealth_NotifiesWitnessOnCrash verifies that when a polecat
 // crash is detected, the daemon sends a notification to the witness via
 // `gt mail send` with a CRASHED_POLECAT subject. Restart is deferred to the

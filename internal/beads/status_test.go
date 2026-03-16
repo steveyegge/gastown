@@ -47,6 +47,30 @@ func TestAgentStateIsActive(t *testing.T) {
 	}
 }
 
+func TestAgentStateIsTerminal(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		state AgentState
+		want  bool
+	}{
+		{AgentStateDone, true},
+		{AgentStateNuked, true},
+		{AgentStateWorking, false},
+		{AgentStateRunning, false},
+		{AgentStateSpawning, false},
+		{AgentStateIdle, false},
+		{AgentStateStuck, false},
+		{AgentStateEscalated, false},
+		{AgentStateAwaitingGate, false},
+		{AgentState(""), false},
+	}
+	for _, tt := range tests {
+		if got := tt.state.IsTerminal(); got != tt.want {
+			t.Errorf("AgentState(%q).IsTerminal() = %v, want %v", tt.state, got, tt.want)
+		}
+	}
+}
+
 func TestIssueStatusBlocksRemoval(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
