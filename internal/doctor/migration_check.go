@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/util"
 )
@@ -69,9 +70,17 @@ func (c *DoltMetadataCheck) Run(ctx *CheckContext) *CheckResult {
 	rigsPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
 	rigs := c.loadRigs(rigsPath)
 	for rigName := range rigs {
-		// Only check rigs that have a dolt database
+		// Resolve the expected DB name: some rigs use their prefix as the
+		// database name (e.g., "lc" for laneassist) rather than the rig name.
+		// Check both rig name and prefix in .dolt-data/. (gt-85w7)
+		expectedDB := rigName
+		prefix := config.GetRigPrefix(ctx.TownRoot, rigName)
 		if _, err := os.Stat(filepath.Join(doltDataDir, rigName)); os.IsNotExist(err) {
-			continue
+			// Rig name not found — check if prefix-named DB exists
+			if _, err := os.Stat(filepath.Join(doltDataDir, prefix)); os.IsNotExist(err) {
+				continue // No database under either name
+			}
+			expectedDB = prefix
 		}
 
 		beadsDir := c.findRigBeadsDir(ctx.TownRoot, rigName)
@@ -81,7 +90,7 @@ func (c *DoltMetadataCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		if !c.hasDoltMetadata(beadsDir, rigName) {
+		if !c.hasDoltMetadata(beadsDir, expectedDB) {
 			relPath, _ := filepath.Rel(ctx.TownRoot, beadsDir)
 			missing = append(missing, rigName+" ("+relPath+")")
 			c.missingMetadata = append(c.missingMetadata, rigName)
@@ -168,11 +177,23 @@ func (c *DoltMetadataCheck) writeDoltMetadata(townRoot, rigName string) error {
 		_ = json.Unmarshal(data, &existing)
 	}
 
+	// Resolve the correct database name. Some rigs use their prefix as the
+	// DB name (e.g., "lc" for laneassist). Preserve existing dolt_database
+	// if it matches a known prefix; otherwise fall back to rig name. (gt-85w7)
+	dbName := rigName
+	if existingDB, ok := existing["dolt_database"].(string); ok && existingDB != "" {
+		// Preserve the existing DB name if it's a known prefix
+		prefix := config.GetRigPrefix(townRoot, rigName)
+		if existingDB == prefix {
+			dbName = existingDB
+		}
+	}
+
 	// Set dolt server fields
 	existing["database"] = "dolt"
 	existing["backend"] = "dolt"
 	existing["dolt_mode"] = "server"
-	existing["dolt_database"] = rigName
+	existing["dolt_database"] = dbName
 
 	data, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
