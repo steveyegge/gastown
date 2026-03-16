@@ -1336,6 +1336,19 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 			continue // Skip issues without MR fields
 		}
 
+		// Check no_merge flag on the source issue (GH#2778).
+		// gt done enforces no_merge at the polecat level, but manually-created
+		// PRs can bypass that. The refinery must also check before merging.
+		if fields.SourceIssue != "" {
+			if sourceIssue, err := e.beads.Show(fields.SourceIssue); err == nil {
+				attachFields := beads.ParseAttachmentFields(sourceIssue)
+				if attachFields != nil && attachFields.NoMerge {
+					_, _ = fmt.Fprintf(e.output, "[Engineer] Skipping MR %s: source issue %s has no_merge=true\n", issue.ID, fields.SourceIssue)
+					continue
+				}
+			}
+		}
+
 		// Skip if already assigned, unless claim is stale (allows re-claim after crash).
 		// NOTE: Only one refinery runs per rig (enforced by ErrAlreadyRunning in
 		// manager.go), so concurrent re-claim race conditions are not a concern.
