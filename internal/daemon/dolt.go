@@ -321,29 +321,42 @@ func (m *DoltServerManager) isRunning() (int, bool) {
 
 	// Check PID file with nonce-based ownership verification
 	pid, alive, err := verifyPIDOwnership(m.pidFile())
-	if err != nil || pid == 0 {
-		return 0, false
+	if err == nil && pid > 0 {
+		if !alive {
+			// Process not running, clean up stale PID file
+			_ = os.Remove(m.pidFile())
+		} else if m.isDoltServerOnPort() {
+			// PID alive and port responding — adopt it
+			process, findErr := os.FindProcess(pid)
+			if findErr == nil {
+				m.process = process
+				return pid, true
+			}
+		} else {
+			// PID alive but port not responding — stale PID file
+			_ = os.Remove(m.pidFile())
+		}
 	}
 
-	if !alive {
-		// Process not running, clean up stale PID file
-		_ = os.Remove(m.pidFile())
-		return 0, false
+	// Fallback: check for an orphan dolt process listening on our port.
+	// This catches servers orphaned by a previous daemon restart (PPID=1)
+	// whose PID file was lost. Without this, startLocked() blindly spawns
+	// a new server that either fails to bind (port conflict) or creates a
+	// duplicate — the root cause of gt-0cf.
+	if orphanPID := doltserver.FindDoltServerOnPort(m.config.Port); orphanPID > 0 {
+		m.logger("Found orphan Dolt server (PID %d) on port %d, adopting", orphanPID, m.config.Port)
+		process, findErr := os.FindProcess(orphanPID)
+		if findErr == nil {
+			m.process = process
+			// Re-create PID file so future checks don't repeat the lsof scan
+			if _, writeErr := writePIDFile(m.pidFile(), orphanPID); writeErr != nil {
+				m.logger("Warning: failed to write PID file for adopted orphan: %v", writeErr)
+			}
+			return orphanPID, true
+		}
 	}
 
-	// Verify it's actually our dolt server by checking port connectivity.
-	// More reliable than ps string matching (ZFC fix: gt-utuk).
-	if !m.isDoltServerOnPort() {
-		_ = os.Remove(m.pidFile())
-		return 0, false
-	}
-
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return 0, false
-	}
-	m.process = process
-	return pid, true
+	return 0, false
 }
 
 // isDoltServerOnPort checks if the configured dolt port is accepting connections.
@@ -776,6 +789,28 @@ func (m *DoltServerManager) startLocked() error {
 		return nil
 	}
 
+	// Kill any orphan Dolt process on our port before spawning a new one.
+	// Without this, the new server fails to bind and we enter a tight
+	// spawn-die-spawn loop (gt-0cf). isRunning() above already attempted
+	// adoption via lsof — if we reach here, the port may still be held by
+	// a non-dolt process or a dolt process that appeared between checks.
+	if orphanPID := doltserver.FindDoltServerOnPort(m.config.Port); orphanPID > 0 {
+		m.logger("Killing orphan Dolt server (PID %d) on port %d before restart", orphanPID, m.config.Port)
+		if p, err := os.FindProcess(orphanPID); err == nil {
+			_ = sendTermSignal(p)
+			// Brief wait for graceful shutdown
+			for i := 0; i < 20; i++ {
+				time.Sleep(100 * time.Millisecond)
+				if !isProcessAlive(p) {
+					break
+				}
+				if i == 19 {
+					_ = sendKillSignal(p)
+				}
+			}
+		}
+	}
+
 	// Ensure data directory exists
 	if err := os.MkdirAll(m.config.DataDir, 0755); err != nil {
 		return fmt.Errorf("creating data directory: %w", err)
@@ -817,9 +852,12 @@ func (m *DoltServerManager) startLocked() error {
 		return fmt.Errorf("starting dolt sql-server: %w", err)
 	}
 
-	// Don't wait for it - it's a long-running server
+	// Channel to detect early exit. The goroutine signals if the process
+	// dies before we finish the startup verification window.
+	earlyExit := make(chan struct{})
 	go func() {
 		_ = cmd.Wait()
+		close(earlyExit)
 		if closeErr := logFile.Close(); closeErr != nil {
 			m.logger("Warning: failed to close dolt log file: %v", closeErr)
 		}
@@ -835,8 +873,19 @@ func (m *DoltServerManager) startLocked() error {
 
 	m.logger("Started Dolt SQL server (PID %d) on %s:%d", cmd.Process.Pid, m.config.Host, m.config.Port)
 
-	// Wait a moment for server to initialize
-	time.Sleep(500 * time.Millisecond)
+	// Wait for server to initialize, checking for early exit
+	select {
+	case <-earlyExit:
+		// Process died during startup — clean up and return error so
+		// restartWithBackoff applies proper backoff instead of recording
+		// a "successful" start that immediately becomes dead.
+		m.logger("Dolt server (PID %d) exited immediately after start", cmd.Process.Pid)
+		m.process = nil
+		_ = os.Remove(m.pidFile())
+		return fmt.Errorf("dolt sql-server exited immediately (check logs: %s)", m.config.LogFile)
+	case <-time.After(500 * time.Millisecond):
+		// Still alive after 500ms — check health
+	}
 
 	// Verify it started successfully
 	if err := m.checkHealthLocked(); err != nil {

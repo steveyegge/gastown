@@ -666,6 +666,12 @@ func CheckPortConflict(townRoot string) (int, string) {
 // findDoltServerOnPort finds a process listening on the given port.
 // Returns the PID or 0 if not found. Uses lsof to identify the listener PID.
 // Does not verify process identity via ps string matching (ZFC fix: gt-utuk).
+// FindDoltServerOnPort returns the PID of the process listening on the given
+// TCP port, or 0 if the port is free. Uses lsof for reliable listener discovery.
+func FindDoltServerOnPort(port int) int {
+	return findDoltServerOnPort(port)
+}
+
 func findDoltServerOnPort(port int) int {
 	// Use lsof to find the LISTENING process on port (not clients connected to it).
 	// Without -sTCP:LISTEN, lsof returns client PIDs (e.g., gt daemon) first,
