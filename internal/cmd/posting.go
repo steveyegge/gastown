@@ -1,11 +1,9 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -41,7 +39,7 @@ Conflict rules:
 
 Commands:
   gt posting show       Show current posting (session + persistent)
-  gt posting list       List available postings in rig settings
+  gt posting list       List available posting definitions
   gt posting assume     Assume a session-level posting
   gt posting drop       Drop the current session-level posting
   gt posting cycle      Drop current and assume a new posting
@@ -64,10 +62,11 @@ Examples:
 
 var postingListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all posting assignments in the rig",
-	Long: `List all persistent posting assignments from rig settings.
+	Short: "List all available posting definitions",
+	Long: `List all available postings (built-in + town + rig).
 
-Shows which workers have postings assigned via "gt crew post".
+Shows posting definitions that can be assumed, not worker assignments.
+Each posting is shown with its resolution level (embedded, town, rig).
 
 Examples:
   gt posting list
@@ -318,32 +317,16 @@ func runPostingList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	settingsPath := filepath.Join(r.Path, "settings", "config.json")
-	settings, err := config.LoadRigSettings(settingsPath)
-	if err != nil {
-		if errors.Is(err, config.ErrNotFound) {
-			fmt.Println("No postings configured (no settings file)")
-			return nil
-		}
-		return fmt.Errorf("loading settings: %w", err)
-	}
-
-	if len(settings.WorkerPostings) == 0 {
-		fmt.Println("No postings configured")
+	postings := templates.ListAvailablePostings(townRoot, r.Path)
+	if len(postings) == 0 {
+		fmt.Println("No postings available")
 		return nil
 	}
 
-	fmt.Printf("%s Worker postings for %s:\n\n", style.Bold.Render("📋"), rigName)
+	fmt.Printf("%s Available postings for %s:\n\n", style.Bold.Render("📋"), rigName)
 
-	// Sort by worker name for consistent output
-	names := make([]string, 0, len(settings.WorkerPostings))
-	for name := range settings.WorkerPostings {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	for _, name := range names {
-		fmt.Printf("  %-16s %s\n", name, settings.WorkerPostings[name])
+	for _, p := range postings {
+		fmt.Printf("  %-20s (%s)\n", p.Name, p.Level)
 	}
 
 	return nil
