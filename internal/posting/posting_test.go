@@ -16,6 +16,13 @@ func TestReadEmpty(t *testing.T) {
 	}
 }
 
+func TestReadEmptyString(t *testing.T) {
+	got := Read("")
+	if got != "" {
+		t.Errorf("Read(\"\") = %q, want empty", got)
+	}
+}
+
 func TestWriteAndRead(t *testing.T) {
 	dir := t.TempDir()
 	if err := Write(dir, "security-reviewer"); err != nil {
@@ -108,5 +115,25 @@ func TestOverwrite(t *testing.T) {
 	got := Read(dir)
 	if got != "second" {
 		t.Errorf("Read() = %q, want %q", got, "second")
+	}
+}
+
+func TestAppendBracket(t *testing.T) {
+	tests := []struct {
+		base    string
+		posting string
+		want    string
+	}{
+		{"gastown/crew/diesel", "scout", "gastown/crew/diesel[scout]"},
+		{"gastown/polecats/furiosa", "dispatcher", "gastown/polecats/furiosa[dispatcher]"},
+		{"gastown/crew/diesel", "", "gastown/crew/diesel"},
+		{"", "scout", "[scout]"},
+	}
+
+	for _, tt := range tests {
+		got := AppendBracket(tt.base, tt.posting)
+		if got != tt.want {
+			t.Errorf("AppendBracket(%q, %q) = %q, want %q", tt.base, tt.posting, got, tt.want)
+		}
 	}
 }

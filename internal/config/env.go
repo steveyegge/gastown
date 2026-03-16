@@ -64,6 +64,8 @@ type AgentEnvConfig struct {
 	SessionName string
 
 	// Posting is the posting name assigned to this agent (e.g., "dispatcher", "scout").
+	// When set, bracket notation is appended to BD_ACTOR and GIT_AUTHOR_NAME
+	// (e.g., "gastown/crew/diesel[scout]"). Only applies to polecat and crew roles.
 	// Sets GT_POSTING environment variable.
 	Posting string
 
@@ -109,11 +111,15 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["GIT_AUTHOR_NAME"] = fmt.Sprintf("%s/refinery", cfg.Rig)
 
 	case constants.RolePolecat:
-		env["GT_ROLE"] = fmt.Sprintf("%s/polecats/%s", cfg.Rig, cfg.AgentName)
+		base := fmt.Sprintf("%s/polecats/%s", cfg.Rig, cfg.AgentName)
+		env["GT_ROLE"] = base
 		env["GT_RIG"] = cfg.Rig
 		env["GT_POLECAT"] = cfg.AgentName
-		env["BD_ACTOR"] = fmt.Sprintf("%s/polecats/%s", cfg.Rig, cfg.AgentName)
-		env["GIT_AUTHOR_NAME"] = cfg.AgentName
+		env["BD_ACTOR"] = appendPostingBracket(base, cfg.Posting)
+		env["GIT_AUTHOR_NAME"] = appendPostingBracket(cfg.AgentName, cfg.Posting)
+		if cfg.Posting != "" {
+			env["GT_POSTING"] = cfg.Posting
+		}
 		// Disable Dolt auto-commit for polecats. With branch-per-polecat,
 		// individual commits are pointless — all changes merge at gt done time
 		// via DOLT_MERGE. Without this, concurrent polecats cause manifest
@@ -121,11 +127,15 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["BD_DOLT_AUTO_COMMIT"] = "off"
 
 	case constants.RoleCrew:
-		env["GT_ROLE"] = fmt.Sprintf("%s/crew/%s", cfg.Rig, cfg.AgentName)
+		base := fmt.Sprintf("%s/crew/%s", cfg.Rig, cfg.AgentName)
+		env["GT_ROLE"] = base
 		env["GT_RIG"] = cfg.Rig
 		env["GT_CREW"] = cfg.AgentName
-		env["BD_ACTOR"] = fmt.Sprintf("%s/crew/%s", cfg.Rig, cfg.AgentName)
-		env["GIT_AUTHOR_NAME"] = cfg.AgentName
+		env["BD_ACTOR"] = appendPostingBracket(base, cfg.Posting)
+		env["GIT_AUTHOR_NAME"] = appendPostingBracket(cfg.AgentName, cfg.Posting)
+		if cfg.Posting != "" {
+			env["GT_POSTING"] = cfg.Posting
+		}
 
 	case "dog":
 		// Dogs are town-level workers with role_agents key "dog".
@@ -382,6 +392,15 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	}
 
 	return env
+}
+
+// appendPostingBracket appends bracket notation to a base identity string if posting is non-empty.
+// Example: appendPostingBracket("gastown/crew/diesel", "scout") => "gastown/crew/diesel[scout]"
+func appendPostingBracket(base, p string) string {
+	if p == "" {
+		return base
+	}
+	return base + "[" + p + "]"
 }
 
 // sanitizeOTELAttrValue prepares a string for use as a value in OTEL_RESOURCE_ATTRIBUTES.
