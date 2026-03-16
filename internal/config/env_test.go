@@ -582,6 +582,52 @@ func TestEnvToSlice(t *testing.T) {
 	}
 }
 
+func TestAgentEnv_PolecatWithPosting(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "polecat",
+		Rig:       "myrig",
+		AgentName: "Toast",
+		TownRoot:  "/town",
+		Posting:   "scout",
+	})
+
+	assertEnv(t, env, "GT_ROLE", "myrig/polecats/Toast")          // GT_ROLE stays without bracket
+	assertEnv(t, env, "BD_ACTOR", "myrig/polecats/Toast[scout]")  // BD_ACTOR gets bracket notation
+	assertEnv(t, env, "GIT_AUTHOR_NAME", "Toast[scout]")          // GIT_AUTHOR_NAME gets bracket notation
+	assertEnv(t, env, "GT_POSTING", "scout")                      // GT_POSTING propagated
+}
+
+func TestAgentEnv_CrewWithPosting(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "crew",
+		Rig:       "myrig",
+		AgentName: "diesel",
+		TownRoot:  "/town",
+		Posting:   "dispatcher",
+	})
+
+	assertEnv(t, env, "GT_ROLE", "myrig/crew/diesel")                   // GT_ROLE stays without bracket
+	assertEnv(t, env, "BD_ACTOR", "myrig/crew/diesel[dispatcher]")      // BD_ACTOR gets bracket notation
+	assertEnv(t, env, "GIT_AUTHOR_NAME", "diesel[dispatcher]")          // GIT_AUTHOR_NAME gets bracket notation
+	assertEnv(t, env, "GT_POSTING", "dispatcher")                       // GT_POSTING propagated
+}
+
+func TestAgentEnv_PolecatNoPosting(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "polecat",
+		Rig:       "myrig",
+		AgentName: "Toast",
+		TownRoot:  "/town",
+	})
+
+	assertEnv(t, env, "BD_ACTOR", "myrig/polecats/Toast") // No bracket when no posting
+	assertEnv(t, env, "GIT_AUTHOR_NAME", "Toast")         // No bracket when no posting
+	assertNotSet(t, env, "GT_POSTING")                     // GT_POSTING not set
+}
+
 // Helper functions
 
 func assertEnv(t *testing.T, env map[string]string, key, expected string) {

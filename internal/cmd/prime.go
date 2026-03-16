@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/lock"
+	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
@@ -926,12 +927,18 @@ func getGitRoot() (string, error) {
 }
 
 // getAgentIdentity returns the agent identity string for hook lookup.
+// For crew and polecat roles, reads .runtime/posting and appends bracket
+// notation if a posting is active (e.g., "gastown/crew/diesel[scout]").
 func getAgentIdentity(ctx RoleContext) string {
 	switch ctx.Role {
 	case RoleCrew:
-		return fmt.Sprintf("%s/crew/%s", ctx.Rig, ctx.Polecat)
+		base := fmt.Sprintf("%s/crew/%s", ctx.Rig, ctx.Polecat)
+		p := postingForCtx(ctx)
+		return posting.AppendBracket(base, p)
 	case RolePolecat:
-		return fmt.Sprintf("%s/polecats/%s", ctx.Rig, ctx.Polecat)
+		base := fmt.Sprintf("%s/polecats/%s", ctx.Rig, ctx.Polecat)
+		p := postingForCtx(ctx)
+		return posting.AppendBracket(base, p)
 	case RoleMayor:
 		return "mayor"
 	case RoleDeacon:
@@ -945,6 +952,15 @@ func getAgentIdentity(ctx RoleContext) string {
 	default:
 		return ""
 	}
+}
+
+// postingForCtx returns the active posting for the context.
+// Uses ctx.Posting if already set, otherwise reads from .runtime/posting in WorkDir.
+func postingForCtx(ctx RoleContext) string {
+	if ctx.Posting != "" {
+		return ctx.Posting
+	}
+	return posting.Read(ctx.WorkDir)
 }
 
 // acquireIdentityLock checks and acquires the identity lock for worker roles.

@@ -6,6 +6,9 @@
 // Polecat handoffs preserve the posting (it's tied to the bead assignment).
 //
 // The file contains a single line: the posting name.
+// When active, the posting name appears in bracket notation in identity strings:
+//
+//	gastown/crew/diesel[scout]
 package posting
 
 import (
@@ -28,6 +31,9 @@ func postingPath(workDir string) string {
 // Read returns the current posting name for the given work directory.
 // Returns empty string if no posting is assumed or the file doesn't exist.
 func Read(workDir string) string {
+	if workDir == "" {
+		return ""
+	}
 	data, err := os.ReadFile(postingPath(workDir))
 	if err != nil {
 		return ""
@@ -58,4 +64,13 @@ func Clear(workDir string) error {
 		return nil // already clear
 	}
 	return err
+}
+
+// AppendBracket appends bracket notation to a base identity string if posting is non-empty.
+// Example: AppendBracket("gastown/crew/diesel", "scout") => "gastown/crew/diesel[scout]"
+func AppendBracket(base, posting string) string {
+	if posting == "" {
+		return base
+	}
+	return base + "[" + posting + "]"
 }

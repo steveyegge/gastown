@@ -34,8 +34,8 @@ type RoleInfo struct {
 	Mismatch      bool   `json:"mismatch,omitempty"`    // True if env != cwd detection
 	EnvIncomplete bool   `json:"env_incomplete,omitempty"` // True if env was set but missing rig/polecat, filled from cwd
 	TownRoot      string `json:"town_root,omitempty"`
-	WorkDir       string `json:"work_dir,omitempty"`       // Current working directory
-	Posting          string `json:"posting,omitempty"`           // Posting name (e.g., "dispatcher", "scout")
+	WorkDir          string `json:"work_dir,omitempty"`         // Current working directory
+	Posting          string `json:"posting,omitempty"`          // Posting name (e.g., "dispatcher", "scout") — appears as bracket notation in identity
 	PostingLevel     string `json:"posting_level,omitempty"`    // Template resolution level: "embedded", "town", or "rig"
 	PostingAmbiguous bool   `json:"posting_ambiguous,omitempty"` // True when posting template exists at multiple resolution levels
 }
@@ -415,7 +415,7 @@ func (info RoleInfo) PostingDisplay(ambiguous bool) string {
 //   - Dog roles: "deacon-boot" (hyphenated, matching BD_ACTOR)
 //   - Rig-specific: "gastown/witness", "gastown/refinery"
 //   - Workers: "gastown/crew/max", "gastown/polecats/Toast"
-//   - Workers with posting: "gastown/polecats/Toast[dispatcher]"
+//   - Workers with posting: "gastown/polecats/Toast[dispatcher]" (bracket notation)
 func (info RoleInfo) ActorString() string {
 	switch info.Role {
 	case RoleMayor:
