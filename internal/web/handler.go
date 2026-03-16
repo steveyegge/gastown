@@ -43,7 +43,20 @@ type ConvoyHandler struct {
 	template     *template.Template
 	fetchTimeout time.Duration
 	csrfToken    string
+
+	// Response cache: prevents cascading bd process storms when multiple
+	// browser tabs or htmx auto-refresh requests arrive faster than fetches
+	// complete. See GH#2618.
+	cacheMu    sync.Mutex
+	cacheBody  []byte
+	cacheTime  time.Time
+	cacheTTL   time.Duration
+	cacheInUse sync.Mutex // serializes concurrent fetches (only one runs at a time)
 }
+
+// defaultCacheTTL is the minimum interval between full dashboard fetches.
+// Requests arriving within this window get the cached response.
+const defaultCacheTTL = 10 * time.Second
 
 // NewConvoyHandler creates a new convoy handler with the given fetcher, fetch timeout, and CSRF token.
 func NewConvoyHandler(fetcher ConvoyFetcher, fetchTimeout time.Duration, csrfToken string) (*ConvoyHandler, error) {
@@ -57,15 +70,77 @@ func NewConvoyHandler(fetcher ConvoyFetcher, fetchTimeout time.Duration, csrfTok
 		template:     tmpl,
 		fetchTimeout: fetchTimeout,
 		csrfToken:    csrfToken,
+		cacheTTL:     defaultCacheTTL,
 	}, nil
 }
 
 // ServeHTTP handles GET / requests and renders the convoy dashboard.
+// Uses a response cache to prevent bd process storms from overlapping
+// requests (htmx auto-refresh, multiple tabs). Only one fetch cycle
+// runs at a time; concurrent requests get the cached response.
 func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Check for expand parameter (fullscreen a specific panel)
+	// Check for expand parameter — expanded views bypass cache since they
+	// render a different template variant.
 	expandPanel := r.URL.Query().Get("expand")
 
-	// Create a timeout context for all fetches
+	// Fast path: serve from cache if fresh and no expand param.
+	if expandPanel == "" {
+		h.cacheMu.Lock()
+		if len(h.cacheBody) > 0 && time.Since(h.cacheTime) < h.cacheTTL {
+			body := h.cacheBody
+			h.cacheMu.Unlock()
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if _, err := w.Write(body); err != nil {
+				log.Printf("dashboard: cached response write failed: %v", err)
+			}
+			return
+		}
+		h.cacheMu.Unlock()
+	}
+
+	// Serialize fetch cycles: only one request triggers a full fetch at a time.
+	// Others wait and will likely hit the cache when this one finishes.
+	h.cacheInUse.Lock()
+	defer h.cacheInUse.Unlock()
+
+	// Double-check cache after acquiring lock (another request may have populated it).
+	if expandPanel == "" {
+		h.cacheMu.Lock()
+		if len(h.cacheBody) > 0 && time.Since(h.cacheTime) < h.cacheTTL {
+			body := h.cacheBody
+			h.cacheMu.Unlock()
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if _, err := w.Write(body); err != nil {
+				log.Printf("dashboard: cached response write failed: %v", err)
+			}
+			return
+		}
+		h.cacheMu.Unlock()
+	}
+
+	body := h.fetchAndRender(r, expandPanel)
+	if body == nil {
+		http.Error(w, "Failed to render template", http.StatusInternalServerError)
+		return
+	}
+
+	// Update cache for non-expanded views
+	if expandPanel == "" {
+		h.cacheMu.Lock()
+		h.cacheBody = body
+		h.cacheTime = time.Now()
+		h.cacheMu.Unlock()
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if _, err := w.Write(body); err != nil {
+		log.Printf("dashboard: response write failed: %v", err)
+	}
+}
+
+// fetchAndRender runs all 14 fetchers in parallel and renders the template.
+// Returns the rendered HTML bytes, or nil on template error.
+func (h *ConvoyHandler) fetchAndRender(r *http.Request, expandPanel string) []byte {
 	ctx, cancel := context.WithTimeout(r.Context(), h.fetchTimeout)
 	defer cancel()
 
@@ -245,18 +320,11 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var buf bytes.Buffer
 	if err := h.template.ExecuteTemplate(&buf, "convoy.html", data); err != nil {
-		// Security: intentionally returns a generic error message to the client.
-		// Internal error details (err) are not exposed in the HTTP response to
-		// prevent information leakage. The error is logged server-side only.
 		log.Printf("dashboard: template execution failed: %v", err)
-		http.Error(w, "Failed to render template", http.StatusInternalServerError)
-		return
+		return nil
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if _, err := buf.WriteTo(w); err != nil {
-		log.Printf("dashboard: response write failed: %v", err)
-	}
+	return buf.Bytes()
 }
 
 // computeSummary calculates dashboard stats and alerts from fetched data.
