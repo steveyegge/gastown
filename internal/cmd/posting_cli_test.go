@@ -197,6 +197,42 @@ func TestPostingCycle_FromEmpty(t *testing.T) {
 	}
 }
 
+func TestPostingCycle_NoArgDropsOnly(t *testing.T) {
+	t.Parallel()
+	workDir := t.TempDir()
+
+	// Start with dispatcher
+	if err := posting.Write(workDir, "dispatcher"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Cycle with no argument: should just drop
+	old := posting.Read(workDir)
+	if old != "dispatcher" {
+		t.Fatalf("precondition: posting = %q, want %q", old, "dispatcher")
+	}
+	if err := posting.Clear(workDir); err != nil {
+		t.Fatal(err)
+	}
+
+	got := posting.Read(workDir)
+	if got != "" {
+		t.Errorf("after no-arg cycle, Read() = %q, want empty", got)
+	}
+}
+
+func TestPostingCycle_NoArgFromEmpty(t *testing.T) {
+	t.Parallel()
+	workDir := t.TempDir()
+
+	// Cycle with no argument from empty state: should be a no-op
+	got := posting.Read(workDir)
+	if got != "" {
+		t.Fatalf("precondition: should have no posting, got %q", got)
+	}
+	// No error, no state change expected
+}
+
 func TestPostingCycle_BlockedByPersistentPosting(t *testing.T) {
 	t.Parallel()
 	townRoot := t.TempDir()

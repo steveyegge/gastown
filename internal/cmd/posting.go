@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -106,21 +107,26 @@ Examples:
 }
 
 var postingCycleCmd = &cobra.Command{
-	Use:   "cycle <posting>",
-	Short: "Drop current posting and assume a new one",
-	Long: `Drop the current session-level posting and assume a new one.
+	Use:   "cycle [posting]",
+	Short: "Drop current posting and restart session with clean context",
+	Long: `Drop the current session-level posting and restart the session.
 
-Equivalent to "gt posting drop && gt posting assume <posting>".
-This bypasses the "must drop before re-assume" check since the
-drop happens first.
+Unlike "gt posting drop" (which injects a system-reminder into the current
+context), cycle triggers a full session restart via "gt handoff --cycle".
+The new session starts with fresh priming — no stale posting instructions
+polluting the context window.
+
+With an argument: drops current posting, assumes the new one, then restarts.
+Without an argument: drops current posting and restarts with no posting.
 
 A persistent posting still blocks cycle. Clear it with
 "gt crew post <name> --clear" first.
 
 Examples:
-  gt posting cycle scout
-  gt posting cycle dispatcher`,
-	Args: cobra.ExactArgs(1),
+  gt posting cycle              # drop posting, restart clean
+  gt posting cycle scout        # drop current, assume scout, restart
+  gt posting cycle dispatcher   # drop current, assume dispatcher, restart`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runPostingCycle,
 }
 
@@ -385,19 +391,25 @@ func runPostingDrop(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s Dropped posting: %s\n", style.Success.Render("✓"), current)
-
-	// Emit system-reminder so the agent knows it's no longer posted.
-	fmt.Printf("<system-reminder>\n")
-	fmt.Printf("Your posting %q has been dropped. You are no longer posted.\n", current)
-	fmt.Printf("You have returned to your base role. Any posting-specific context\n")
-	fmt.Printf("or instructions no longer apply.\n")
-	fmt.Printf("</system-reminder>\n")
+	outputPostingDropReminder(current)
 
 	return nil
 }
 
+// outputPostingDropReminder emits a system-reminder so the agent knows it's no longer posted.
+func outputPostingDropReminder(name string) {
+	fmt.Printf("<system-reminder>\n")
+	fmt.Printf("Your posting %q has been dropped. You are no longer posted.\n", name)
+	fmt.Printf("You have returned to your base role. Any posting-specific context\n")
+	fmt.Printf("or instructions no longer apply.\n")
+	fmt.Printf("</system-reminder>\n")
+}
+
 func runPostingCycle(cmd *cobra.Command, args []string) error {
-	newPosting := args[0]
+	var newPosting string
+	if len(args) > 0 {
+		newPosting = args[0]
+	}
 
 	workDir, err := getWorkDir()
 	if err != nil {
@@ -419,15 +431,32 @@ func runPostingCycle(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Assume new
-	if err := posting.Write(workDir, newPosting); err != nil {
-		return fmt.Errorf("writing posting: %w", err)
+	// Assume new posting if requested
+	if newPosting != "" {
+		if err := posting.Write(workDir, newPosting); err != nil {
+			return fmt.Errorf("writing posting: %w", err)
+		}
 	}
 
-	if old != "" {
-		fmt.Printf("%s Cycled posting: %s → %s\n", style.Success.Render("✓"), old, newPosting)
-	} else {
-		fmt.Printf("%s Assumed posting: %s\n", style.Success.Render("✓"), newPosting)
+	// Report what happened
+	switch {
+	case old != "" && newPosting != "":
+		fmt.Printf("%s Cycling posting: %s → %s (restarting session)\n", style.Success.Render("✓"), old, newPosting)
+	case old != "" && newPosting == "":
+		fmt.Printf("%s Cycling out of posting: %s (restarting session)\n", style.Success.Render("✓"), old)
+	case old == "" && newPosting != "":
+		fmt.Printf("%s Cycling into posting: %s (restarting session)\n", style.Success.Render("✓"), newPosting)
+	default:
+		fmt.Println("No posting to cycle — no session restart needed")
+		return nil
 	}
-	return nil
+
+	// Trigger session restart for clean priming context.
+	// This execs gt handoff --cycle, which replaces the current process.
+	gtBin, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("finding gt executable: %w", err)
+	}
+	handoffArgs := []string{gtBin, "handoff", "--cycle"}
+	return syscall.Exec(gtBin, handoffArgs, os.Environ())
 }
