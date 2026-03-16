@@ -1220,7 +1220,7 @@ listener:
 data_dir: "%s"
 
 behavior:
-  dolt_transaction_commit: true
+  dolt_transaction_commit: false
   auto_gc_behavior:
     enable: true
     archive_level: 1
