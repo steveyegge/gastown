@@ -29,7 +29,9 @@ This is set automatically when agents are spawned and used for all attribution.
 | **Witness** | `{rig}/witness` | `gastown/witness` |
 | **Refinery** | `{rig}/refinery` | `gastown/refinery` |
 | **Crew** | `{rig}/crew/{name}` | `gastown/crew/joe` |
+| **Crew + posting** | `{rig}/crew/{name}[{posting}]` | `gastown/crew/joe[scout]` |
 | **Polecat** | `{rig}/polecats/{name}` | `gastown/polecats/toast` |
+| **Polecat + posting** | `{rig}/polecats/{name}[{posting}]` | `gastown/polecats/toast[dispatcher]` |
 
 ### Why Slashes?
 
@@ -131,6 +133,73 @@ bd create --title="Test issue"  # Will show created_by: gastown/crew/debug
 See [reference.md](reference.md#environment-variables) for the complete
 environment variable reference.
 
+## Posting Bracket Notation
+
+Workers (crew and polecats) can have a **posting** — a specialized role that augments
+their base identity. When a posting is active, it appears in bracket notation appended
+to the ActorString:
+
+```
+gastown/polecats/Toast[dispatcher]    ← polecat with posting
+gastown/crew/max[scout]               ← crew with posting
+gastown/polecats/Toast                ← no posting (base identity)
+```
+
+### When Brackets Appear
+
+Bracket notation is added by `ActorString()` for **worker roles only** (crew and polecat).
+Non-worker roles (mayor, deacon, witness, refinery, boot) ignore the posting field entirely,
+even if one is set:
+
+| Role | With Posting | ActorString |
+|------|-------------|-------------|
+| Polecat | dispatcher | `gastown/polecats/Toast[dispatcher]` |
+| Crew | scout | `gastown/crew/max[scout]` |
+| Witness | dispatcher | `gastown/witness` (posting ignored) |
+| Mayor | dispatcher | `mayor` (posting ignored) |
+
+### Namespaced Brackets
+
+When a posting template exists at multiple resolution levels (ambiguous), the bracket
+notation includes a **level prefix** indicating where the template was resolved from:
+
+```
+gastown/polecats/Toast[rig:dispatcher]      ← template from rig-level override
+gastown/polecats/Toast[town:dispatcher]     ← template from town-level override
+gastown/polecats/Toast[embedded:dispatcher] ← template from built-in binary
+```
+
+The `PostingDisplay(ambiguous)` method controls this:
+- `PostingDisplay(false)` → `[dispatcher]` (simple, used when only one level defines the posting)
+- `PostingDisplay(true)` → `[rig:dispatcher]` (namespaced, used when multiple levels define the posting)
+
+`ActorString()` automatically uses `PostingDisplay(info.PostingAmbiguous)`, so the level
+prefix appears only when the same posting name exists at multiple resolution levels.
+
+If no `PostingLevel` is set, even `PostingDisplay(true)` falls back to simple brackets.
+
+### Posting Name Resolution
+
+The posting **name** is resolved with highest priority first:
+
+1. **Session**: Set via `gt posting assume <posting>`, stored in `.runtime/posting`.
+   Cleared on handoff, completion, or drop.
+2. **Config**: Set via `gt crew post <name> <posting>`, stored in rig settings
+   (`WorkerPostings`). Persistent across sessions.
+
+If both are set, session takes precedence.
+
+### Template Resolution
+
+Once the posting name is known, the **template** is resolved with highest priority first:
+
+1. **Rig-level** (`rig`): `<rigPath>/postings/<name>.md.tmpl`
+2. **Town-level** (`town`): `<townRoot>/postings/<name>.md.tmpl`
+3. **Embedded** (`embedded`): Built into the binary via `postings/*.md.tmpl`
+
+`PostingLevel` in `RoleInfo` reflects the template resolution level, not the name
+assignment source. `PostingAmbiguous` is true when the template exists at multiple levels.
+
 ## Identity Parsing
 
 The format supports programmatic parsing:
@@ -140,6 +209,7 @@ The format supports programmatic parsing:
 // Town level: mayor, deacon
 // Rig level: {rig}/witness, {rig}/refinery
 // Workers: {rig}/crew/{name}, {rig}/polecats/{name}
+// Workers with posting: {rig}/polecats/{name}[posting]
 ```
 
 | Input | Parsed Components |
@@ -150,6 +220,8 @@ The format supports programmatic parsing:
 | `gastown/refinery` | rig=gastown, role=refinery |
 | `gastown/crew/joe` | rig=gastown, role=crew, name=joe |
 | `gastown/polecats/toast` | rig=gastown, role=polecat, name=toast |
+| `gastown/polecats/toast[dispatcher]` | rig=gastown, role=polecat, name=toast, posting=dispatcher |
+| `gastown/crew/joe[scout]` | rig=gastown, role=crew, name=joe, posting=scout |
 
 ## Audit Queries
 
