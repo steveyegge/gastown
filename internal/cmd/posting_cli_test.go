@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/posting"
+	"github.com/steveyegge/gastown/internal/templates"
 )
 
 // ---------------------------------------------------------------------------
@@ -383,5 +385,92 @@ func TestPostingCreate_CreatesDirectory(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Error("postings path is not a directory")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// gt posting assume: validates posting existence
+// ---------------------------------------------------------------------------
+
+func TestPostingAssume_RejectsNonexistentPosting(t *testing.T) {
+	t.Parallel()
+	// LoadPosting with empty town/rig paths and a nonexistent name should error.
+	// This validates the same check runPostingAssume now performs.
+	_, err := templates.LoadPosting("", "", "totally-fake-posting-xyz")
+	if err == nil {
+		t.Fatal("expected error for nonexistent posting, got nil")
+	}
+}
+
+func TestPostingAssume_AcceptsBuiltinPosting(t *testing.T) {
+	t.Parallel()
+	for _, name := range templates.BuiltinPostingNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			result, err := templates.LoadPosting("", "", name)
+			if err != nil {
+				t.Fatalf("LoadPosting(%q) should succeed for built-in: %v", name, err)
+			}
+			if result.Level != "embedded" {
+				t.Errorf("Level = %q, want %q", result.Level, "embedded")
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// crew list: posting column
+// ---------------------------------------------------------------------------
+
+func TestCrewListItem_PostingFields(t *testing.T) {
+	t.Parallel()
+
+	// Verify the struct has posting fields and they serialize correctly
+	item := CrewListItem{
+		Name:          "alice",
+		Rig:           "myrig",
+		Branch:        "main",
+		Path:          "/tmp/test",
+		HasSession:    true,
+		GitClean:      true,
+		Posting:       "dispatcher",
+		PostingSource: "config",
+	}
+
+	data, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded CrewListItem
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+
+	if decoded.Posting != "dispatcher" {
+		t.Errorf("Posting = %q, want %q", decoded.Posting, "dispatcher")
+	}
+	if decoded.PostingSource != "config" {
+		t.Errorf("PostingSource = %q, want %q", decoded.PostingSource, "config")
+	}
+}
+
+func TestCrewListItem_PostingOmittedWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	item := CrewListItem{
+		Name:   "bob",
+		Rig:    "myrig",
+		Branch: "main",
+	}
+
+	data, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dataStr := string(data)
+	if strings.Contains(dataStr, "posting") {
+		t.Errorf("empty posting should be omitted from JSON, got: %s", dataStr)
 	}
 }
