@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"text/template"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/posting"
@@ -300,4 +303,50 @@ func TestPrimePostingInjection_EmptyPostingSkipsOutput(t *testing.T) {
 	}
 
 	// outputPostingContext would return immediately because ctx.Posting == ""
+}
+
+// TestPrimePostingInjection_CmdFuncRendersInAllBuiltins verifies that every
+// built-in posting template renders without error when {{ cmd }} is used.
+// This is the regression test for gt-bwn: without the FuncMap, templates
+// that reference {{ cmd }} (dispatcher, scout) fail silently.
+func TestPrimePostingInjection_CmdFuncRendersInAllBuiltins(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range templates.BuiltinPostingNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			result, err := templates.LoadPosting("", "", name)
+			if err != nil {
+				t.Fatalf("LoadPosting(%q): %v", name, err)
+			}
+
+			// Parse with the shared FuncMap — same path as outputPostingContext
+			tmpl, err := template.New("posting").Funcs(templates.TemplateFuncs()).Parse(result.Content)
+			if err != nil {
+				t.Fatalf("template parse %q: %v", name, err)
+			}
+
+			data := templates.RoleData{
+				Role:    "polecat",
+				RigName: "testrig",
+				Polecat: "testcat",
+				Posting: name,
+			}
+
+			var buf bytes.Buffer
+			if err := tmpl.Execute(&buf, data); err != nil {
+				t.Fatalf("template execute %q: %v", name, err)
+			}
+
+			rendered := buf.String()
+			if rendered == "" {
+				t.Errorf("posting %q rendered to empty string", name)
+			}
+
+			// Verify {{ cmd }} resolved (should not contain literal "{{ cmd }}")
+			if strings.Contains(rendered, "{{ cmd }}") || strings.Contains(rendered, "{{cmd}}") {
+				t.Errorf("posting %q still contains unresolved {{ cmd }}", name)
+			}
+		})
+	}
 }

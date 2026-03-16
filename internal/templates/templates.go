@@ -38,6 +38,13 @@ var templateFuncs = template.FuncMap{
 	"cmd": CmdName, // {{ cmd }} returns the CLI command name
 }
 
+// TemplateFuncs returns the shared FuncMap used by all Gas Town templates.
+// Callers that parse templates outside of Templates.RenderRole (e.g. posting
+// templates) must register these functions to ensure {{ cmd }} etc. resolve.
+func TemplateFuncs() template.FuncMap {
+	return templateFuncs
+}
+
 //go:embed roles/*.md.tmpl messages/*.md.tmpl
 var templateFS embed.FS
 
