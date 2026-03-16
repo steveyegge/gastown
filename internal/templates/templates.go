@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"text/template"
 
@@ -323,6 +325,61 @@ func PostingLevels(townRoot, rigPath, postingName string) []string {
 // so any drift between this list and the actual files fails tests.
 func BuiltinPostingNames() []string {
 	return []string{"dispatcher", "inspector", "scout"}
+}
+
+// PostingInfo describes an available posting definition.
+type PostingInfo struct {
+	Name  string // e.g. "dispatcher"
+	Level string // "embedded", "town", or "rig"
+}
+
+// ListAvailablePostings returns all posting definitions across all three
+// resolution levels (embedded, town, rig). Each posting appears once with its
+// highest-priority level (rig > town > embedded).
+func ListAvailablePostings(townRoot, rigPath string) []PostingInfo {
+	// Collect all names with their highest-priority level
+	seen := make(map[string]string) // name → level
+
+	// 1. Embedded (lowest priority)
+	for _, name := range BuiltinPostingNames() {
+		seen[name] = "embedded"
+	}
+
+	// 2. Town-level
+	if townRoot != "" {
+		scanPostingsDir(filepath.Join(townRoot, "postings"), "town", seen)
+	}
+
+	// 3. Rig-level (highest priority)
+	if rigPath != "" {
+		scanPostingsDir(filepath.Join(rigPath, "postings"), "rig", seen)
+	}
+
+	// Build sorted result
+	result := make([]PostingInfo, 0, len(seen))
+	for name, level := range seen {
+		result = append(result, PostingInfo{Name: name, Level: level})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+	return result
+}
+
+// scanPostingsDir reads *.md.tmpl files from dir and records them in seen
+// with the given level, overwriting any existing lower-priority entry.
+func scanPostingsDir(dir, level string, seen map[string]string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md.tmpl") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".md.tmpl")
+		seen[name] = level
+	}
 }
 
 // ProvisionCommands creates the .claude/commands/ directory with standard slash commands.
