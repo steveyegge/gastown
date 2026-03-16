@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -90,10 +89,6 @@ func detectSender() string {
 // GT_ROLE can be either a simple role name ("crew", "polecat") or a full address
 // ("greenplace/crew/joe") depending on how the session was started.
 //
-// For crew and polecat roles, if GT_POSTING is set (or .runtime/posting exists),
-// bracket notation is appended to the display address (e.g., "gastown/crew/diesel[scout]").
-// Note: brackets are display-only — mail routing uses the base address without brackets.
-//
 // If GT_ROLE is a simple name but required env vars (GT_RIG, GT_POLECAT, etc.)
 // are missing, falls back to cwd-based detection. This could return "overseer"
 // if cwd doesn't match any known agent path - a misconfigured agent session.
@@ -102,8 +97,8 @@ func detectSenderFromRole(role string) string {
 
 	// Check if role is already a full address (contains /)
 	if strings.Contains(role, "/") {
-		// GT_ROLE is already a full address — append posting if available
-		return posting.AppendBracket(role, detectPosting())
+		// GT_ROLE is already a full address, use it directly
+		return role
 	}
 
 	// GT_ROLE is a simple role name, build the full address
@@ -115,16 +110,14 @@ func detectSenderFromRole(role string) string {
 	case constants.RolePolecat:
 		polecat := os.Getenv("GT_POLECAT")
 		if rig != "" && polecat != "" {
-			base := fmt.Sprintf("%s/%s", rig, polecat)
-			return posting.AppendBracket(base, detectPosting())
+			return fmt.Sprintf("%s/%s", rig, polecat)
 		}
 		// Fallback to cwd detection for polecats
 		return detectSenderFromCwd()
 	case constants.RoleCrew:
 		crew := os.Getenv("GT_CREW")
 		if rig != "" && crew != "" {
-			base := fmt.Sprintf("%s/crew/%s", rig, crew)
-			return posting.AppendBracket(base, detectPosting())
+			return fmt.Sprintf("%s/crew/%s", rig, crew)
 		}
 		// Fallback to cwd detection for crew
 		return detectSenderFromCwd()
@@ -148,19 +141,6 @@ func detectSenderFromRole(role string) string {
 		// Unknown role, try cwd detection
 		return detectSenderFromCwd()
 	}
-}
-
-// detectPosting returns the active posting from GT_POSTING env var,
-// falling back to reading .runtime/posting from cwd.
-func detectPosting() string {
-	if p := os.Getenv("GT_POSTING"); p != "" {
-		return p
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	return posting.Read(cwd)
 }
 
 // detectSenderFromCwd is the legacy cwd-based detection for edge cases.

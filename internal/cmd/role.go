@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -36,7 +35,6 @@ type RoleInfo struct {
 	EnvIncomplete bool   `json:"env_incomplete,omitempty"` // True if env was set but missing rig/polecat, filled from cwd
 	TownRoot      string `json:"town_root,omitempty"`
 	WorkDir       string `json:"work_dir,omitempty"`    // Current working directory
-	Posting       string `json:"posting,omitempty"`     // Active posting (e.g., "scout") — appears as bracket notation in identity
 }
 
 var roleCmd = &cobra.Command{
@@ -400,7 +398,6 @@ func parseRoleString(s string) (Role, string, string) {
 //   - Dog roles: "deacon-boot" (hyphenated, matching BD_ACTOR)
 //   - Rig-specific: "gastown/witness", "gastown/refinery"
 //   - Workers: "gastown/crew/max", "gastown/polecats/Toast"
-//   - With posting: "gastown/crew/diesel[scout]" (bracket notation)
 func (info RoleInfo) ActorString() string {
 	switch info.Role {
 	case RoleMayor:
@@ -419,14 +416,12 @@ func (info RoleInfo) ActorString() string {
 		return "refinery"
 	case RolePolecat:
 		if info.Rig != "" && info.Polecat != "" {
-			base := fmt.Sprintf("%s/polecats/%s", info.Rig, info.Polecat)
-			return posting.AppendBracket(base, info.Posting)
+			return fmt.Sprintf("%s/polecats/%s", info.Rig, info.Polecat)
 		}
 		return "polecat"
 	case RoleCrew:
 		if info.Rig != "" && info.Polecat != "" {
-			base := fmt.Sprintf("%s/crew/%s", info.Rig, info.Polecat)
-			return posting.AppendBracket(base, info.Posting)
+			return fmt.Sprintf("%s/crew/%s", info.Rig, info.Polecat)
 		}
 		return "crew"
 	case RoleBoot:
