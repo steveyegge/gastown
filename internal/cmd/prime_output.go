@@ -177,7 +177,7 @@ func outputPostingContext(ctx RoleContext, data templates.RoleData) {
 	// Render the posting template with the same RoleData (posting name set)
 	data.Posting = ctx.Posting
 
-	tmpl, err := template.New("posting").Parse(result.Content)
+	tmpl, err := template.New("posting").Funcs(templates.TemplateFuncs()).Parse(result.Content)
 	if err != nil {
 		explain(true, fmt.Sprintf("Posting %q: template parse error: %v", ctx.Posting, err))
 		return
