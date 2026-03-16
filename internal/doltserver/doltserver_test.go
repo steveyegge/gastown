@@ -3522,9 +3522,9 @@ func TestBuildDoltSQLCmd_Remote(t *testing.T) {
 	ctx := t.Context()
 	cmd := buildDoltSQLCmd(ctx, config, "-q", "SELECT 1")
 
-	// Should NOT set Dir for remote
-	if cmd.Dir != "" {
-		t.Errorf("cmd.Dir = %q, want empty for remote", cmd.Dir)
+	// Should set Dir to DataDir even for remote to prevent stray .doltcfg (GH#2537)
+	if cmd.Dir != config.DataDir {
+		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, config.DataDir)
 	}
 
 	// Should have connection flags
