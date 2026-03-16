@@ -651,11 +651,6 @@ type RigSettings struct {
 	// Takes precedence over RoleAgents["crew"] but is overridden by explicit --agent flags.
 	// Example: {"denali": "codex", "glacier": "gemini"}
 	WorkerAgents map[string]string `json:"worker_agents,omitempty"`
-
-	// WorkerPostings maps worker names to their posting assignments.
-	// A posting is a specialized role template that augments the base role context.
-	// Example: {"furiosa": "dispatcher", "nux": "scout"}
-	WorkerPostings map[string]string `json:"worker_postings,omitempty"`
 }
 
 // CrewConfig represents crew workspace settings for a rig.
