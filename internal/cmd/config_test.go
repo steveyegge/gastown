@@ -369,6 +369,109 @@ func TestConfigAgentSet(t *testing.T) {
 	})
 }
 
+func TestConfigAgentSetProviderInference(t *testing.T) {
+	t.Run("infers provider from known command name", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// "gemini" is a known preset — provider should be inferred
+		configAgentSetProvider = ""
+		cmd := &cobra.Command{}
+		args := []string{"gemini-custom", "gemini --fast-mode"}
+		if err := runConfigAgentSet(cmd, args); err != nil {
+			t.Fatalf("runConfigAgentSet failed: %v", err)
+		}
+
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+
+		agent := loaded.Agents["gemini-custom"]
+		if agent == nil {
+			t.Fatal("agent not found")
+		}
+		if agent.Provider != "gemini" {
+			t.Errorf("Provider = %q, want 'gemini' (inferred from command)", agent.Provider)
+		}
+		if agent.Command != "gemini" {
+			t.Errorf("Command = %q, want 'gemini'", agent.Command)
+		}
+	})
+
+	t.Run("no provider inferred for unknown command", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// "my-custom-tool" is not a known preset — provider should remain empty
+		configAgentSetProvider = ""
+		cmd := &cobra.Command{}
+		args := []string{"my-bot", "my-custom-tool --flag"}
+		if err := runConfigAgentSet(cmd, args); err != nil {
+			t.Fatalf("runConfigAgentSet failed: %v", err)
+		}
+
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+
+		agent := loaded.Agents["my-bot"]
+		if agent == nil {
+			t.Fatal("agent not found")
+		}
+		if agent.Provider != "" {
+			t.Errorf("Provider = %q, want '' (no inference for unknown command)", agent.Provider)
+		}
+	})
+
+	t.Run("explicit --provider flag overrides inference", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Command name is unknown, but explicit provider is given
+		configAgentSetProvider = "claude"
+		defer func() { configAgentSetProvider = "" }()
+
+		cmd := &cobra.Command{}
+		args := []string{"my-claude-wrapper", "my-claude-wrapper --custom"}
+		if err := runConfigAgentSet(cmd, args); err != nil {
+			t.Fatalf("runConfigAgentSet failed: %v", err)
+		}
+
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+
+		agent := loaded.Agents["my-claude-wrapper"]
+		if agent == nil {
+			t.Fatal("agent not found")
+		}
+		if agent.Provider != "claude" {
+			t.Errorf("Provider = %q, want 'claude' (explicit --provider flag)", agent.Provider)
+		}
+	})
+}
+
 func TestConfigAgentRemove(t *testing.T) {
 	t.Run("removes custom agent", func(t *testing.T) {
 		townRoot := setupTestTownForConfig(t)
