@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -688,17 +689,30 @@ func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
 		return nil, err
 	}
 
-	// bd list --json may return plain text (e.g., "No issues found.") instead
-	// of an empty JSON array when there are no results. Handle gracefully.
-	if len(out) == 0 || !isJSONBytes(out) {
+	if isJSONBytes(out) {
+		var issues []*Issue
+		if err := json.Unmarshal(out, &issues); err != nil {
+			return nil, fmt.Errorf("parsing bd list output: %w", err)
+		}
+		return issues, nil
+	}
+
+	// bd list --json regression (bd v0.59.0+): returns human-readable text
+	// instead of JSON even with --json flag. Fall back: parse IDs from text
+	// output, then fetch full data via bd show --json.
+	ids := parseIDsFromBDListText(out)
+	if len(ids) == 0 {
 		return nil, nil
 	}
-
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
+	showArgs := append([]string{"show", "--json"}, ids...)
+	showOut, err := b.run(showArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("bd show fallback: %w", err)
 	}
-
+	var issues []*Issue
+	if err := json.Unmarshal(showOut, &issues); err != nil {
+		return nil, fmt.Errorf("parsing bd show fallback output: %w", err)
+	}
 	return issues, nil
 }
 
@@ -795,6 +809,30 @@ func isJSONBytes(b []byte) bool {
 		}
 	}
 	return false
+}
+
+// bdListIDRe matches bead IDs in bd list text output.
+// bd list lines look like: "○ hq-wisp-itai [● P2] ..." or "? hq-abc ● P1 ..."
+// The ID is the second whitespace-separated token on result lines.
+var bdListIDRe = regexp.MustCompile(`(?m)^[^\w\s]\s+([a-z][a-z0-9_-]+-[a-z0-9]+)\b`)
+
+// parseIDsFromBDListText extracts bead IDs from bd list human-readable text output.
+// Used as a fallback when bd list --json returns text instead of JSON (bd regression).
+func parseIDsFromBDListText(out []byte) []string {
+	matches := bdListIDRe.FindAllSubmatch(out, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(matches))
+	seen := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		id := string(m[1])
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // ListMergeRequests returns merge-request beads from both the issues table
