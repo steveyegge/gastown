@@ -472,9 +472,9 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
 		}
 		rc := config.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
-		if !config.IsResolvedAgentClaude(rc) || !isBuiltinClaudeStartCommand(roleConfig.StartCommand) {
-			// Non-Claude agent OR custom start_command: use TOML pattern
-			// with template expansion.
+		if config.IsResolvedAgentClaude(rc) && !isBuiltinClaudeStartCommand(roleConfig.StartCommand) {
+			// Claude agent with custom (non-built-in) start_command: use
+			// TOML pattern with template expansion.
 			cmd := beads.ExpandRolePattern(roleConfig.StartCommand, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType, session.PrefixFor(parsed.RigName))
 			if strings.HasPrefix(cmd, "exec ") {
 				cmd = "exec env -u CLAUDECODE NODE_OPTIONS='' " + cmd[len("exec "):]
@@ -483,8 +483,9 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			}
 			return cmd
 		}
-		// Claude agent with built-in start_command: fall through to
-		// BuildStartupCommandFromConfig for proper model flag resolution.
+		// Non-Claude agent OR Claude with built-in start_command: fall
+		// through to BuildStartupCommandFromConfig for proper agent and
+		// model flag resolution.
 	}
 
 	rigPath := ""
