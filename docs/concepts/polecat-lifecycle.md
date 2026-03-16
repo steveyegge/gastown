@@ -374,7 +374,7 @@ two points in the lifecycle:
 | Method | When | Persistence |
 |--------|------|-------------|
 | `gt sling --posting <name>` | At spawn | Session-level (`.runtime/posting`) |
-| `gt posting assume <name>` | During a session | Session-level (`.runtime/posting`) |
+| `gt posting assume <name> [--reason "…"]` | During a session | Session-level (`.runtime/posting`) |
 
 **At spawn** is the most common path. When the Witness or Mayor dispatches work
 with `gt sling --posting scout`, the posting file is written to the polecat's
@@ -382,7 +382,9 @@ worktree before the session starts. The polecat sees its posting on the first
 `gt prime`.
 
 **During a session**, a polecat can assume a posting with `gt posting assume`.
-This is blocked if a posting is already active (must drop first).
+The posting must exist (template validation is performed at assume time). This
+is blocked if a posting is already active (must drop first). The `--reason` flag
+logs the assumption reason to stderr for audit visibility.
 
 Note: Persistent postings (`gt crew post`) are a crew-only feature. Polecats
 do not have persistent postings — their postings are always tied to the current
@@ -409,8 +411,8 @@ The resolved posting is injected into the environment as `GT_POSTING` and
 
 | Command | Effect |
 |---------|--------|
-| `gt posting drop` | Clears session-level posting (`.runtime/posting`). |
-| `gt posting cycle <new>` | Atomically drops current session posting and assumes a new one. |
+| `gt posting drop` | Clears session-level posting (`.runtime/posting`). Injects a `<system-reminder>` into the current context. Stale posting priming remains in the context window. |
+| `gt posting cycle [new]` | Drops current posting, optionally assumes a new one, then restarts the session via `gt handoff --cycle` for clean priming context. |
 
 ### Postings and the Polecat Lifecycle
 
