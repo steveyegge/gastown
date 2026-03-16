@@ -19,6 +19,7 @@ import (
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/protocol"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -152,7 +153,7 @@ func HandlePolecatDone(bd *BdCli, workDir, rigName string, msg *mail.Message, ro
 	}
 
 	if hasPendingMR {
-		result = handlePolecatDonePendingMR(bd, workDir, rigName, payload, result)
+		result = handlePolecatDonePendingMR(bd, workDir, rigName, payload, result, router)
 	} else {
 		result = handlePolecatDoneNoMR(workDir, rigName, payload, result)
 	}
@@ -215,7 +216,7 @@ func HandlePolecatDoneFromBead(bd *BdCli, workDir, rigName, polecatName string, 
 	}
 
 	if hasPendingMR {
-		return handlePolecatDonePendingMR(bd, workDir, rigName, payload, result)
+		return handlePolecatDonePendingMR(bd, workDir, rigName, payload, result, router)
 	}
 	return handlePolecatDoneNoMR(workDir, rigName, payload, result)
 }
@@ -232,7 +233,7 @@ func TransitionPolecatToIdle(workDir, agentBeadID string) error {
 
 // handlePolecatDonePendingMR handles a POLECAT_DONE when there's a pending MR.
 // Creates a cleanup wisp, sends MERGE_READY to the Refinery, and nudges it.
-func handlePolecatDonePendingMR(bd *BdCli, workDir, rigName string, payload *PolecatDonePayload, result *HandlerResult) *HandlerResult {
+func handlePolecatDonePendingMR(bd *BdCli, workDir, rigName string, payload *PolecatDonePayload, result *HandlerResult, router *mail.Router) *HandlerResult {
 	wispID, err := createCleanupWisp(bd, workDir, payload.PolecatName, payload.IssueID, payload.Branch)
 	if err != nil {
 		result.Error = fmt.Errorf("creating cleanup wisp: %w", err)
@@ -244,7 +245,7 @@ func handlePolecatDonePendingMR(bd *BdCli, workDir, rigName string, payload *Pol
 		return result
 	}
 
-	notifyRefineryMergeReady(workDir, rigName, result)
+	notifyRefineryMergeReady(workDir, rigName, payload.PolecatName, payload.Branch, payload.IssueID, router, result)
 
 	result.Handled = true
 	result.WispCreated = wispID
@@ -252,13 +253,24 @@ func handlePolecatDonePendingMR(bd *BdCli, workDir, rigName string, payload *Pol
 	return result
 }
 
-// notifyRefineryMergeReady emits a MERGE_READY channel event and nudges the
-// Refinery to check the merge queue. The channel event unblocks the refinery's
-// await-event loop instantly; the tmux nudge is a belt-and-suspenders fallback
-// for when the refinery is at the Claude prompt rather than in await-event.
+// notifyRefineryMergeReady sends MERGE_READY mail to the Refinery, emits a
+// channel event, and nudges the Refinery session. The mail is the primary
+// notification (the refinery's inbox-check step processes MERGE_READY mail).
+// The channel event unblocks the refinery's await-event loop instantly; the
+// tmux nudge is a belt-and-suspenders fallback for when the refinery is at
+// the Claude prompt rather than in await-event.
 // Errors are non-fatal (Refinery will still pick up work on next patrol cycle).
-func notifyRefineryMergeReady(workDir, rigName string, result *HandlerResult) {
+func notifyRefineryMergeReady(workDir, rigName, polecatName, branch, issueID string, router *mail.Router, result *HandlerResult) {
 	townRoot, _ := workspace.Find(workDir)
+
+	// Send MERGE_READY mail so the refinery's inbox-check can process it.
+	if router != nil {
+		msg := protocol.NewMergeReadyMessage(rigName, polecatName, branch, issueID)
+		if err := router.Send(msg); err != nil {
+			fmt.Fprintf(os.Stderr, "witness: failed to send MERGE_READY mail for %s: %v\n", polecatName, err)
+		}
+	}
+
 	// Emit file-based event so refinery's await-event unblocks instantly.
 	if townRoot != "" {
 		_, _ = channelevents.EmitToTown(townRoot, "refinery", "MERGE_READY", []string{
@@ -1691,7 +1703,7 @@ func DiscoverCompletions(bd *BdCli, workDir, rigName string, router *mail.Router
 		}
 
 		// Route based on exit type and MR presence
-		processDiscoveredCompletion(bd, workDir, rigName, payload, &discovery)
+		processDiscoveredCompletion(bd, workDir, rigName, payload, &discovery, router)
 
 		// Clear completion metadata to prevent re-processing next cycle
 		if err := clearCompletionMetadata(bd, workDir, agentBeadID); err != nil {
@@ -1708,7 +1720,7 @@ func DiscoverCompletions(bd *BdCli, workDir, rigName string, router *mail.Router
 // processDiscoveredCompletion routes a discovered completion through the same
 // logic as HandlePolecatDone, creating cleanup wisps and sending MERGE_READY
 // as appropriate. This is the bead-based equivalent of POLECAT_DONE mail handling.
-func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *PolecatDonePayload, discovery *CompletionDiscovery) {
+func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *PolecatDonePayload, discovery *CompletionDiscovery, router *mail.Router) {
 	if payload.Exit == string(ExitTypePhaseComplete) {
 		discovery.Action = "phase-complete"
 		return
@@ -1737,15 +1749,27 @@ func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *Po
 			discovery.Error = fmt.Errorf("updating wisp state: %w", err)
 		}
 
-		// Nudge refinery to check merge queue (no permanent mail needed).
+		// Send MERGE_READY mail and nudge refinery.
 		townRoot, _ := workspace.Find(workDir)
+		if router != nil {
+			msg := protocol.NewMergeReadyMessage(rigName, payload.PolecatName, payload.Branch, payload.IssueID)
+			if err := router.Send(msg); err != nil {
+				fmt.Fprintf(os.Stderr, "witness: failed to send MERGE_READY mail for %s: %v\n", payload.PolecatName, err)
+			}
+		}
+		if townRoot != "" {
+			_, _ = channelevents.EmitToTown(townRoot, "refinery", "MERGE_READY", []string{
+				"source=witness",
+				"rig=" + rigName,
+			})
+		}
 		if nudgeErr := nudgeRefinery(townRoot, rigName); nudgeErr != nil {
 			if discovery.Error == nil {
 				discovery.Error = fmt.Errorf("nudging refinery: %w (non-fatal)", nudgeErr)
 			}
 		}
 
-		discovery.Action = fmt.Sprintf("merge-ready-nudged (MR=%s, wisp=%s)", payload.MRID, wispID)
+		discovery.Action = fmt.Sprintf("merge-ready-notified (MR=%s, wisp=%s)", payload.MRID, wispID)
 
 		// Notify Mayor that a slot is open even with pending MR — polecat is idle. (GH#2727)
 		notifyMayorSlotOpen(workDir, rigName, payload.PolecatName, payload.Exit)

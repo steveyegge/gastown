@@ -1626,7 +1626,7 @@ func TestProcessDiscoveredCompletion_PhaseComplete(t *testing.T) {
 		Exit:        "PHASE_COMPLETE",
 	}
 	discovery := &CompletionDiscovery{}
-	processDiscoveredCompletion(DefaultBdCli(), "/tmp", "testrig", payload, discovery)
+	processDiscoveredCompletion(DefaultBdCli(), "/tmp", "testrig", payload, discovery, nil)
 	if discovery.Action != "phase-complete" {
 		t.Errorf("Action = %q, want %q", discovery.Action, "phase-complete")
 	}
@@ -1640,7 +1640,7 @@ func TestProcessDiscoveredCompletion_NoMR(t *testing.T) {
 		MRFailed:    true, // Prevents fallback MR lookup
 	}
 	discovery := &CompletionDiscovery{}
-	processDiscoveredCompletion(DefaultBdCli(), "/tmp", "testrig", payload, discovery)
+	processDiscoveredCompletion(DefaultBdCli(), "/tmp", "testrig", payload, discovery, nil)
 	if !strings.Contains(discovery.Action, "acknowledged-idle") {
 		t.Errorf("Action = %q, want to contain %q", discovery.Action, "acknowledged-idle")
 	}
@@ -1653,7 +1653,7 @@ func TestProcessDiscoveredCompletion_EscalatedNoMR(t *testing.T) {
 		Exit:        "ESCALATED",
 	}
 	discovery := &CompletionDiscovery{}
-	processDiscoveredCompletion(DefaultBdCli(), "/tmp", "testrig", payload, discovery)
+	processDiscoveredCompletion(DefaultBdCli(), "/tmp", "testrig", payload, discovery, nil)
 	if !strings.Contains(discovery.Action, "acknowledged-idle") {
 		t.Errorf("Action = %q, want to contain %q for ESCALATED exit", discovery.Action, "acknowledged-idle")
 	}
@@ -1844,7 +1844,7 @@ func TestNotifyRefineryMergeReady_EmitsChannelEvent(t *testing.T) {
 
 	result := &HandlerResult{}
 	// notifyRefineryMergeReady takes workDir and calls workspace.Find(workDir) internally
-	notifyRefineryMergeReady(townRoot, "dashboard", result)
+	notifyRefineryMergeReady(townRoot, "dashboard", "nux", "polecat/nux/gt-abc", "gt-abc", nil, result)
 
 	// Verify that a MERGE_READY event file was created in the refinery channel
 	eventDir := filepath.Join(townRoot, "events", "refinery")
