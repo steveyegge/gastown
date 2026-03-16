@@ -221,7 +221,6 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 			"--description=" + description,
 			"--type=agent",
 			"--labels=gt:agent",
-			"--ephemeral",
 		}
 		if NeedsForceForID(id) {
 			a = append(a, "--force")
@@ -234,8 +233,10 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		return a
 	}
 
-	// Create ephemeral agent bead (wisps table). Agent operational state has
-	// zero git history consumers (gt-bewatn.9).
+	// Create persistent agent bead (issues table). Agent beads were previously
+	// ephemeral (wisps table) but wisp GC deleted them, causing gt-doctor to
+	// report 85+ missing agent beads (GH#2768). When bd gains --no-history
+	// support, agent beads should use that instead to avoid Dolt commit noise.
 	out, err := b.run(buildArgs()...)
 	if err != nil {
 		out, err = b.run(buildArgs()...)
@@ -344,12 +345,8 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	if _, err := target.run("update", id, "--type=agent"); err != nil {
 		return nil, fmt.Errorf("fixing agent bead type: %w", err)
 	}
-	// Ensure agent bead is ephemeral (wisp) — agent operational state has
-	// zero git history consumers (gt-bewatn.9)
-	if _, err := target.run("update", id, "--ephemeral"); err != nil {
-		// Non-fatal: the bead is functional without ephemeral flag
-		_ = err
-	}
+	// Agent beads are now persistent (GH#2768). Previously set --ephemeral here
+	// but wisp GC was deleting them. Will switch to --no-history when bd supports it.
 
 	// Note: role slot no longer set - role definitions are config-based
 
@@ -635,7 +632,10 @@ func (b *Beads) ListAgentBeads() (map[string]*Issue, error) {
 	// doctor checks (for example, validating gt:agent labels).
 	// Agent beads are type=agent (infrastructure), hidden by bd list default filter.
 	// Use --include-infra so they appear in results.
-	out, err := b.run("list", "--label=gt:agent", "--include-infra", "--json", "--no-pager")
+	// GH#2499: Use --flat to guarantee JSON output even when tree-view is the
+	// default mode. Without --flat, bd list --json can return tree-formatted
+	// text instead of JSON, causing unmarshal failures.
+	out, err := b.run("list", "--label=gt:agent", "--include-infra", "--json", "--flat", "--no-pager")
 	if err != nil {
 		return nil, err
 	}

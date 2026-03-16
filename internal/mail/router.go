@@ -729,7 +729,8 @@ func (r *Router) queryAgents(descContains string) []*agentBead {
 // queryAgentsInDir queries agent beads in a specific beads directory with optional description filtering.
 // Queries both the issues and wisps tables, merging results.
 func (r *Router) queryAgentsInDir(beadsDir, descContains string) ([]*agentBead, error) {
-	args := []string{"list", "--label=gt:agent", "--json", "--limit=0"}
+	// GH#2499: Use --flat to guarantee JSON output when tree-view is default.
+	args := []string{"list", "--label=gt:agent", "--json", "--flat", "--limit=0"}
 
 	if descContains != "" {
 		args = append(args, "--desc-contains="+descContains)
