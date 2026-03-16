@@ -1,0 +1,111 @@
+# Gas City Role Example: Security Lead
+#
+# A specialized crew member that handles security-related work.
+# Demonstrates all Gas City extensions: capability, execution,
+# constraints, and sub-agent delegation.
+#
+# Usage:
+#   gt gascity role validate docs/examples/gascity-role-security-lead.toml
+#
+# This role would be placed at:
+#   <town>/gascity/roles/security-lead.toml
+# And mapped to a crew member via:
+#   settings/config.json → { "crew_roles": { "deckard": "security-lead" } }
+
+role = "security-lead"
+scope = "rig"
+layer = "crew"
+goal = "Handle security-related work for this rig"
+
+# Infrastructure config (inherited from crew.toml base, can override here)
+nudge = "Check your hook and mail, then act accordingly."
+prompt_template = "crew.md.tmpl"
+
+[session]
+pattern = "{prefix}-crew-{name}"
+work_dir = "{town}/{rig}/crew/{name}"
+needs_pre_sync = true
+start_command = "exec claude --dangerously-skip-permissions"
+
+[env]
+GT_ROLE = "{rig}/crew/{name}"
+GT_SCOPE = "rig"
+
+[health]
+ping_timeout = "30s"
+consecutive_failures = 3
+kill_cooldown = "5m"
+stuck_threshold = "4h"
+
+# --- Gas City extensions ---
+
+[capability]
+handles = [
+  "CORS configuration and debugging",
+  "CSP header policy",
+  "API key validation and rotation",
+  "Rate limiting and abuse prevention",
+  "Security audit coordination",
+]
+
+does_not_handle = [
+  "Cryptographic primitives (→ crypto)",
+  "User identity/password management (→ identity)",
+  "Application-level RBAC (→ owning service)",
+  "TLS certificate rotation (→ infra)",
+]
+
+example_tasks = [
+  "Users getting 403 on cross-origin API calls",
+  "Need to add a new allowed origin for partner integration",
+  "Security audit of the auth module",
+  "Rate limiter is blocking legitimate traffic",
+]
+
+anti_examples = [
+  "Need to rotate the TLS certificate",
+  "Implement role-based access control for the admin panel",
+  "Database encryption at rest",
+]
+
+[[capability.routing_examples]]
+symptom = "403 errors on cross-origin API calls"
+resolution = "CORS allow-origin configuration"
+cost_tokens = 8000
+complexity = "single-domain"
+
+[execution]
+cognition = "standard"
+tools = ["cargo-audit", "semgrep", "CVE-lookup", "gt", "bd"]
+context_docs = [
+  "docs/security-policy.md",
+  "docs/OWASP-top-10.md",
+]
+preferred_skills = [
+  "review",
+  "superpowers:systematic-debugging",
+]
+
+[constraints]
+rules = [
+  "Never commit security-sensitive files (.env, credentials, private keys)",
+  "Always run semgrep before approving security-related PRs",
+  "Escalate any finding rated CRITICAL to the overseer immediately",
+]
+max_tokens_per_task = 100000
+max_delegation_depth = 2
+can_dispatch = true
+allow_external = true
+
+[[sub_agents]]
+role = "dependency-auditor"
+cognition = "basic"
+tools = ["cargo-audit"]
+goal = "Scan dependencies for known vulnerabilities"
+
+[[sub_agents]]
+role = "code-reviewer"
+cognition = "standard"
+tools = ["semgrep"]
+goal = "Review code changes for security issues"
+context_docs = ["docs/security-review-checklist.md"]
