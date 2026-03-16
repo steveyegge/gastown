@@ -184,7 +184,7 @@ if ! $SKIP_DOLT_PUSH; then
     log "  $DB: pushing to remotes..."
     cd "$DB_DIR"
 
-    for REMOTE_NAME in $(dolt remote -v 2>/dev/null | awk '{print $1}' | sort -u); do
+    for REMOTE_NAME in $(dolt remote -v 2>/dev/null | awk '{print $1}' | sort -u || true); do
       if timeout 120 dolt push "$REMOTE_NAME" main 2>/dev/null; then
         log "    $REMOTE_NAME: pushed"
         DOLT_PUSHED=$((DOLT_PUSHED + 1))
