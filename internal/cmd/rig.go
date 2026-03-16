@@ -76,8 +76,8 @@ Use --adopt to register an existing directory instead of creating new:
 
 Example:
   gt rig add gastown https://github.com/steveyegge/gastown
-  gt rig add my-project git@github.com:user/repo.git --prefix mp
-  gt rig add existing-rig --adopt`,
+  gt rig add my_project git@github.com:user/repo.git --prefix mp
+  gt rig add existing_rig --adopt`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runRigAdd,
 }
@@ -1101,7 +1101,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 					}
 				}
 				// Fallback: extract prefix from dolt_database name in metadata.json.
-				// Format: "beads_<prefix>" (e.g. "beads_my-project" → "my-project").
+				// Format: "beads_<prefix>" (e.g. "beads_my_project" → "my_project").
 				// This survives clone because metadata.json is tracked by git.
 				if !prefixDetected {
 					var fullMeta struct {
