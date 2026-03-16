@@ -468,7 +468,7 @@ func runBdJSON(dir string, args ...string) ([]byte, error) {
 // depType filters by dependency type (e.g., "tracks", "blocks"); empty means all types.
 //
 // Returns deduplicated, unwrapped issue IDs (external:prefix:id → id).
-func bdDepListRawIDs(dir, issueID, direction, depType string) ([]string, error) { //nolint:unparam // depType kept for API generality; callers currently only use "tracks"
+func bdDepListRawIDs(dir, issueID, direction, depType string) ([]string, error) {
 	// Determine query columns based on direction.
 	// "down": issueID depends on targets → SELECT depends_on_id WHERE issue_id = ?
 	// "up":   issueID is depended on → SELECT issue_id WHERE depends_on_id = ?
@@ -2225,19 +2225,26 @@ func applyFreshIssueDetails(dep *trackedDependency, details *issueDetails) {
 // getTrackedIssues gets issues tracked by a convoy with fresh cross-rig details.
 // Returns issue details including status, type, and worker info.
 //
-// Uses bd dep list to query tracked dependencies. If dep list returns empty
-// (e.g., cross-database deps where the JOIN fails — see GH #2624), falls back
-// to bd show and extracts tracked dependencies from the convoy's dependencies
-// array. Then fetches fresh issue details via bd show with prefix routing.
+// Prefers raw SQL query against the dependencies table (bdDepListRawIDs) which
+// avoids the JOIN with the issues table that silently drops cross-database
+// dependencies (see GH #2624, #2832). Falls back to bd dep list and bd show
+// for older bd versions that don't support bd sql.
+// Then fetches fresh issue details via bd show with prefix routing.
 func getTrackedIssues(townBeads, convoyID string) ([]trackedIssueInfo, error) {
-	// Try bd dep list first — the standard dependency query path.
-	trackedIDs, err := bdDepListTracked(townBeads, convoyID)
+	// Prefer raw SQL — works for cross-database deps where tracked beads
+	// live in different Dolt databases. Falls back to bd dep list if bd sql
+	// is not available (older bd versions).
+	trackedIDs, err := bdDepListRawIDs(townBeads, convoyID, "down", "tracks")
 	if err != nil {
-		return nil, fmt.Errorf("querying tracked issues for %s: %w", convoyID, err)
+		// bd sql not supported (older bd) — fall back to bd dep list.
+		trackedIDs, err = bdDepListTracked(townBeads, convoyID)
+		if err != nil {
+			return nil, fmt.Errorf("querying tracked issues for %s: %w", convoyID, err)
+		}
 	}
 
-	// Fallback: when dep list returns empty (common for cross-database deps),
-	// parse tracked dependencies from bd show output.
+	// Fallback: when dep queries return empty (common for cross-database deps
+	// on older bd where the JOIN fails), try parsing from bd show output.
 	if len(trackedIDs) == 0 {
 		trackedIDs, err = bdShowTrackedDeps(townBeads, convoyID)
 		if err != nil {
