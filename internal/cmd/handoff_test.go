@@ -10,6 +10,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -856,6 +857,91 @@ func TestEnforceHandoffCooldown(t *testing.T) {
 
 		if elapsed > 1*time.Second {
 			t.Errorf("mayor should be exempt from cooldown, but waited %v", elapsed)
+		}
+	})
+}
+
+// TestClearPostingOnCrewHandoff verifies that clearPostingOnCrewHandoff
+// clears the posting file for crew roles and preserves it for others. (gt-pio)
+func TestClearPostingOnCrewHandoff(t *testing.T) {
+	t.Run("crew role clears posting", func(t *testing.T) {
+		t.Setenv("GT_ROLE", "gastown/crew/max")
+		tmpDir := t.TempDir()
+		t.Chdir(tmpDir)
+
+		// Write a posting file
+		if err := posting.Write(tmpDir, "dispatcher"); err != nil {
+			t.Fatalf("posting.Write: %v", err)
+		}
+		if got := posting.Read(tmpDir); got != "dispatcher" {
+			t.Fatalf("posting.Read = %q, want %q", got, "dispatcher")
+		}
+
+		clearPostingOnCrewHandoff()
+
+		if got := posting.Read(tmpDir); got != "" {
+			t.Errorf("posting.Read after crew handoff = %q, want empty", got)
+		}
+	})
+
+	t.Run("witness role preserves posting", func(t *testing.T) {
+		t.Setenv("GT_ROLE", "gastown/witness")
+		tmpDir := t.TempDir()
+		t.Chdir(tmpDir)
+
+		if err := posting.Write(tmpDir, "inspector"); err != nil {
+			t.Fatalf("posting.Write: %v", err)
+		}
+
+		clearPostingOnCrewHandoff()
+
+		if got := posting.Read(tmpDir); got != "inspector" {
+			t.Errorf("posting.Read after witness handoff = %q, want %q", got, "inspector")
+		}
+	})
+
+	t.Run("mayor role preserves posting", func(t *testing.T) {
+		t.Setenv("GT_ROLE", "mayor")
+		tmpDir := t.TempDir()
+		t.Chdir(tmpDir)
+
+		if err := posting.Write(tmpDir, "scout"); err != nil {
+			t.Fatalf("posting.Write: %v", err)
+		}
+
+		clearPostingOnCrewHandoff()
+
+		if got := posting.Read(tmpDir); got != "scout" {
+			t.Errorf("posting.Read after mayor handoff = %q, want %q", got, "scout")
+		}
+	})
+
+	t.Run("no GT_ROLE preserves posting", func(t *testing.T) {
+		t.Setenv("GT_ROLE", "")
+		tmpDir := t.TempDir()
+		t.Chdir(tmpDir)
+
+		if err := posting.Write(tmpDir, "dispatcher"); err != nil {
+			t.Fatalf("posting.Write: %v", err)
+		}
+
+		clearPostingOnCrewHandoff()
+
+		if got := posting.Read(tmpDir); got != "dispatcher" {
+			t.Errorf("posting.Read with no GT_ROLE = %q, want %q", got, "dispatcher")
+		}
+	})
+
+	t.Run("crew with no posting is no-op", func(t *testing.T) {
+		t.Setenv("GT_ROLE", "gastown/crew/bear")
+		tmpDir := t.TempDir()
+		t.Chdir(tmpDir)
+
+		// No posting file exists — should not error
+		clearPostingOnCrewHandoff()
+
+		if got := posting.Read(tmpDir); got != "" {
+			t.Errorf("posting.Read = %q, want empty", got)
 		}
 	})
 }

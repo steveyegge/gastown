@@ -65,6 +65,10 @@ Your personal workspace within a rig. Where you do hands-on work.
 
 Worker agents with persistent identity but ephemeral sessions. Spawned for tasks, sessions end on completion, but identity and work history persist.
 
+### Postings 📋
+
+Behavioral specializations that shape how crew members and polecats approach their work. A posting injects role-specific context (prompt templates, priorities, workflows) into an agent's session without changing its identity. Gas Town ships with three built-in postings: **dispatcher** (work routing and assignment), **inspector** (code review and quality checks), and **scout** (exploration and research). Postings are transient — assumed for a session and cleared on handoff or completion.
+
 ### Hooks 🪝
 
 Git worktree-based persistent storage for agent work. Survives crashes and restarts.
