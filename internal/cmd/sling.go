@@ -15,6 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/nudge"
+	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/witness"
@@ -133,6 +134,7 @@ var (
 	slingRalph         bool   // --ralph: enable Ralph Wiggum loop mode for multi-step workflows
 	slingFormula       string // --formula: override formula for dispatch (default: mol-polecat-work)
 	slingCrew          string // --crew: target a crew member in the specified rig
+	slingPosting       string // --posting: assume a posting for the spawned polecat session
 )
 
 func init() {
@@ -160,6 +162,7 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingRalph, "ralph", false, "Enable Ralph Wiggum loop mode (fresh context per step, for multi-step workflows)")
 	slingCmd.Flags().StringVar(&slingFormula, "formula", "", "Formula to apply (default: mol-polecat-work for polecat targets)")
 	slingCmd.Flags().StringVar(&slingCrew, "crew", "", "Target a crew member in the specified rig (e.g., --crew mel with target gastown → gastown/crew/mel)")
+	slingCmd.Flags().StringVar(&slingPosting, "posting", "", "Assume a posting for the spawned polecat session (written to .runtime/posting)")
 
 	slingCmd.AddCommand(slingRespawnResetCmd)
 	rootCmd.AddCommand(slingCmd)
@@ -401,6 +404,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 			Agent:       slingAgent,
 			HookRawBead: slingHookRawBead,
 			Ralph:       slingRalph,
+			Posting:     slingPosting,
 		})
 	}
 
@@ -964,6 +968,15 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 			return fmt.Errorf("starting delayed dog session: %w", err)
 		}
 		targetPane = pane
+	}
+
+	// Write posting to polecat's .runtime/posting before starting session.
+	// This ensures the polecat sees its assumed posting when gt prime runs.
+	if slingPosting != "" && newPolecatInfo != nil && newPolecatInfo.ClonePath != "" {
+		if err := posting.Write(newPolecatInfo.ClonePath, slingPosting); err != nil {
+			return fmt.Errorf("writing posting to polecat: %w", err)
+		}
+		fmt.Printf("%s Posting: %s\n", style.Bold.Render("→"), slingPosting)
 	}
 
 	// Start polecat session now that attached_molecule is set.

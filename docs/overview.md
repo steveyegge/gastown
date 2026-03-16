@@ -92,6 +92,56 @@ Both do project work, but with key differences:
 - Parallelizable work
 - Work that benefits from supervision
 
+## Postings: Behavioral Specializations
+
+A **posting** is a behavioral overlay that specializes a crew or polecat worker
+without changing their base role. While roles define *what* an agent is (crew,
+polecat), postings define *how* it approaches work.
+
+### Built-in Postings
+
+| Posting | Behavior |
+|---------|----------|
+| **dispatcher** | Routes and prioritizes incoming work |
+| **inspector** | Reviews code and validates quality |
+| **scout** | Explores codebases and gathers context |
+
+Postings are composable with any worker role — a polecat with a `dispatcher`
+posting is still a polecat (Witness-managed, branch-based), but receives
+additional context that shapes its working style.
+
+### How Postings Are Assigned
+
+There are two layers, with session taking priority over persistent:
+
+| Layer | Set via | Lifetime | Cleared by |
+|-------|---------|----------|------------|
+| **Persistent** | `gt crew post <name> <posting>` | Survives sessions | `gt crew post <name> --clear` |
+| **Session** | `gt posting assume <posting>` | Current session only | Handoff, completion, or `gt posting drop` |
+
+Polecats can also receive a posting at dispatch time via `gt sling --posting <name>`.
+
+### Resolution Order
+
+When `gt prime` runs, the active posting is resolved as:
+
+1. **Session state** (`.runtime/posting`) — highest priority
+2. **Rig config** (`WorkerPostings` in rig settings) — persistent default
+3. **None** — base role only
+
+The resolved posting template is appended to the agent's context, augmenting
+(not replacing) their base role instructions.
+
+### Custom Postings
+
+Posting templates use 3-layer resolution (later overrides earlier):
+
+1. **Built-in** — embedded in the `gt` binary (`postings/*.md.tmpl`)
+2. **Town-level** — `<townRoot>/postings/<name>.md.tmpl`
+3. **Rig-level** — `<rigPath>/postings/<name>.md.tmpl`
+
+Create a custom posting by placing a template at the town or rig level.
+
 ## Dogs vs Crew
 
 **Dogs are NOT workers**. This is a common misconception.

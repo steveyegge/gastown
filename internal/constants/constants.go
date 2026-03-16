@@ -157,6 +157,11 @@ const (
 
 	// FileQuotaJSON is the quota state file in mayor/.
 	FileQuotaJSON = "quota.json"
+
+	// FilePosting is the session-level posting state file in .runtime/.
+	// Contains the name of the currently assumed posting (transient, cleared
+	// on handoff/completion/explicit drop). See internal/posting package.
+	FilePosting = "posting"
 )
 
 // Beads configuration constants.

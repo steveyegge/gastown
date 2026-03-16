@@ -9,6 +9,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -36,6 +37,7 @@ type SlingParams struct {
 	HookRawBead bool    // --hook-raw-bead
 	NoBoot     bool     // --no-boot
 	Mode       string   // --ralph: "" (normal) or "ralph"
+	Posting    string   // --posting: assumed posting for the polecat session
 
 	// Execution behavior (set by caller, not serialized to queue)
 	SkipCook         bool   // Batch optimization: formula already cooked
@@ -354,6 +356,15 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	// Update agent bead mode (for stuck detector to identify ralphcats)
 	if params.Mode != "" {
 		updateAgentMode(targetAgent, params.Mode, hookWorkDir, beadsDir)
+	}
+
+	// Write posting to polecat's .runtime/posting before starting session
+	if params.Posting != "" && spawnInfo.ClonePath != "" {
+		if err := posting.Write(spawnInfo.ClonePath, params.Posting); err != nil {
+			fmt.Printf("  %s Could not write posting: %v\n", style.Dim.Render("Warning:"), err)
+		} else {
+			fmt.Printf("  %s Posting: %s\n", style.Bold.Render("→"), params.Posting)
+		}
 	}
 
 	// 11. Start polecat session

@@ -376,10 +376,89 @@ track_record:
 | Agent framework survey | Gastown PR #2581 (w-gc-004) | Merged |
 | Wasteland stamps | HOP federation | Live |
 | Role format design | **w-gc-001** | **This document informs it** |
+| Postings system | Gastown `feat/postings` branch | Implemented (see §6) |
 
 ---
 
-## 6. Open Questions
+## 6. Postings: The First Implementation
+
+The **postings system** (`gt posting`, `gt crew post`) is the first concrete
+implementation of the capability-based specialization described in this document.
+Postings are lightweight, composable role augmentations that give a polecat
+domain-specific responsibilities without changing its base role.
+
+### Built-in Postings
+
+Three postings ship embedded in the `gt` binary. They correspond to the
+first three capability profiles the system needs:
+
+| Posting | Capability domain | Maps to (§1) |
+|---------|------------------|--------------|
+| **Dispatcher** | Work distribution, dependency tracking, priority triage, load balancing | Coordination capability — the "decomposition strategy" from the cellular model |
+| **Inspector** | Code review, convention enforcement, regression detection, quality gates | Quality assurance capability with structured grading (A-F) |
+| **Scout** | Codebase exploration, research spikes, impact analysis, persisted findings | Research capability — breadth-first exploration and documentation |
+
+Templates live in [`internal/templates/postings/`](../../internal/templates/postings/)
+and are loaded by the template resolution system in
+[`internal/templates/templates.go`](../../internal/templates/templates.go).
+
+### How Postings Map to Capability Profiles
+
+Postings are the pragmatic 80/20 slice of the full capability profile vision
+(§2). The mapping:
+
+| Capability profile concept (§2) | Posting implementation |
+|--------------------------------|----------------------|
+| `handles` / `does_not_handle` | Posting template defines responsibilities and principles |
+| `example_tasks` / `anti_examples` | Implicit in the posting's responsibility list |
+| `cognition` tier | Inherited from the base polecat — postings don't change the model tier |
+| `tools` | Postings reference specific commands (e.g., dispatcher uses `bd ready`, inspector uses `/review`) |
+| `track_record` / evidence | Not yet implemented — postings are claims-only today |
+
+The key simplification: postings are **stateless augmentations**. They don't
+track completions or build evidence over time (the evidence lifecycle from §2).
+That's the gap between the current implementation and the full vision.
+
+### Assignment and Resolution
+
+Postings use a two-layer resolution model (session overrides config):
+
+1. **Session-level** — `gt posting assume <name>` or `--posting` flag on `gt sling`
+2. **Config-level** — `gt crew post <worker> <posting>` writes to `RigSettings.WorkerPostings`
+
+See [`internal/cmd/posting.go`](../../internal/cmd/posting.go) and
+[`internal/cmd/crew_post.go`](../../internal/cmd/crew_post.go) for the
+implementation, and
+[`internal/cmd/resolve_posting_test.go`](../../internal/cmd/resolve_posting_test.go)
+for conflict rules.
+
+### Three-Layer Template Override
+
+Posting templates resolve through three layers (later overrides earlier):
+
+1. **Embedded** — built into the binary (`internal/templates/postings/*.md.tmpl`)
+2. **Town-level** — `<townRoot>/postings/<name>.md.tmpl`
+3. **Rig-level** — `<rigPath>/postings/<name>.md.tmpl`
+
+This allows rigs to customize or extend the built-in postings without forking
+the binary, following the same "prefer editing to creating" principle from §4.
+
+### What Postings Don't (Yet) Do
+
+Postings are claims-only (§2 trust level: speculative). The system doesn't yet:
+
+- Track which postings lead to successful completions
+- Build routing examples from real task outcomes
+- Auto-refine posting boundaries from bounces
+- Weight dispatch decisions by posting evidence
+
+These are the capabilities described in §2's evidence lifecycle and §3's routing
+system. When Gas City role format (w-gc-001) matures, postings should evolve
+into full capability profiles with evidence-backed routing.
+
+---
+
+## 7. Open Questions
 
 1. **How deep should delegation recurse?** A crew member managing sub-agents
    that manage sub-sub-agents is powerful but complex. Is 2-3 levels sufficient?
@@ -399,4 +478,5 @@ track_record:
 5. **What's the minimum viable version?** The full cellular model with recursive
    sub-agents and dynamic track records is the vision. What's the 80/20 slice
    that delivers value with the beads tier system and existing Gas Town
-   primitives?
+   primitives? **Partial answer: the postings system (§6) is that 80/20 slice —
+   stateless capability augmentations without evidence tracking.**
