@@ -48,6 +48,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/util"
 	"gopkg.in/yaml.v3"
@@ -2443,6 +2444,14 @@ func collectReferencedDatabases(townRoot string) map[string]bool {
 				referenced[db] = true
 			}
 		}
+	}
+
+	// Safety net: also mark all rig prefixes from rigs.json as referenced.
+	// Some rigs use their prefix as the database name (e.g., "lc" for laneassist,
+	// "gt" for gastown). If metadata.json is missing or corrupted, the prefix-named
+	// DB would appear orphaned without this fallback. (gt-85w7)
+	for _, prefix := range config.AllRigPrefixes(townRoot) {
+		referenced[prefix] = true
 	}
 
 	return referenced
