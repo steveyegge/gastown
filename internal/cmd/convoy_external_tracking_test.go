@@ -69,6 +69,9 @@ case "$*" in
   "dep list hq-cv-ext --direction=down --type=tracks --json")
     echo '[]'
     ;;
+  "sql SELECT depends_on_id FROM dependencies WHERE issue_id = 'hq-cv-ext' AND type = 'tracks' --json")
+    echo '[]'
+    ;;
   "show hq-cv-ext --json")
     echo '[{"id":"hq-cv-ext","title":"External convoy","status":"open","issue_type":"convoy","dependencies":[{"id":"external:ghostty:ghostty-123","title":"Ghost 123","status":"open","type":"task","dependency_type":"tracks"},{"id":"external:ghostty:ghostty-456","title":"Ghost 456","status":"closed","type":"task","dependency_type":"tracks"},{"id":"gt-ignore","title":"Ignore me","status":"open","type":"task","dependency_type":"blocks"}]}]'
     ;;
@@ -109,5 +112,51 @@ esac
 	}
 	if statusByID["ghostty-123"] != "open" || statusByID["ghostty-456"] != "closed" {
 		t.Fatalf("unexpected tracked statuses: %#v", statusByID)
+	}
+}
+
+// TestGetTrackedIssues_RawSQLResolvesCrossPrefixDeps verifies that when
+// bd dep list returns empty (cross-database JOIN failure), the raw SQL
+// fallback via bdDepListRawIDs finds the dependency. (GH#2786)
+func TestGetTrackedIssues_RawSQLResolvesCrossPrefixDeps(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows - shell stubs")
+	}
+
+	townRoot, townBeads, _ := makeExternalTrackingTownWorkspace(t)
+	chdirExternalTrackingTest(t, townRoot)
+
+	// bd dep list returns empty (cross-db JOIN fails), but raw SQL finds the dep.
+	scriptBody := fmt.Sprintf(`
+case "$*" in
+  "dep list hq-cv-cross --direction=down --type=tracks --json")
+    echo '[]'
+    ;;
+  "sql SELECT depends_on_id FROM dependencies WHERE issue_id = 'hq-cv-cross' AND type = 'tracks' --json")
+    echo '[{"depends_on_id":"external:gt:gt-pye"}]'
+    ;;
+  "show gt-pye --json")
+    echo '[{"id":"gt-pye","title":"Cross-prefix bead","status":"closed","issue_type":"task"}]'
+    ;;
+  *)
+    echo "unexpected bd args: $*" >&2
+    exit 1
+    ;;
+esac
+`)
+	writeExternalTrackingBdStub(t, scriptBody)
+
+	tracked, err := getTrackedIssues(townBeads, "hq-cv-cross")
+	if err != nil {
+		t.Fatalf("getTrackedIssues: %v", err)
+	}
+	if len(tracked) != 1 {
+		t.Fatalf("expected 1 tracked issue, got %d", len(tracked))
+	}
+	if tracked[0].ID != "gt-pye" {
+		t.Fatalf("expected tracked ID gt-pye, got %s", tracked[0].ID)
+	}
+	if tracked[0].Status != "closed" {
+		t.Fatalf("expected status closed, got %s", tracked[0].Status)
 	}
 }

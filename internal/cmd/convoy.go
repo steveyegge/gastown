@@ -2236,8 +2236,16 @@ func getTrackedIssues(townBeads, convoyID string) ([]trackedIssueInfo, error) {
 		return nil, fmt.Errorf("querying tracked issues for %s: %w", convoyID, err)
 	}
 
-	// Fallback: when dep list returns empty (common for cross-database deps),
-	// parse tracked dependencies from bd show output.
+	// Fallback 1: raw SQL query on dependencies table — works for cross-database
+	// deps where bd dep list's JOIN fails silently. (GH#2786, GH#2624)
+	if len(trackedIDs) == 0 {
+		trackedIDs, err = bdDepListRawIDs(townBeads, convoyID, "down", "tracks")
+		if err != nil {
+			return nil, fmt.Errorf("raw sql dep query for %s: %w", convoyID, err)
+		}
+	}
+
+	// Fallback 2: parse tracked dependencies from bd show output.
 	if len(trackedIDs) == 0 {
 		trackedIDs, err = bdShowTrackedDeps(townBeads, convoyID)
 		if err != nil {

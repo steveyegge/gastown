@@ -111,6 +111,9 @@ case "$*" in
     fi
     echo '[]'
     ;;
+  "sql SELECT depends_on_id FROM dependencies WHERE issue_id = 'hq-cv-town' AND type = 'tracks' --json")
+    echo '[]'
+    ;;
   "show hq-cv-town --json")
     if [ "$PWD" != "%s" ]; then
       echo "expected town root, got $PWD" >&2
@@ -177,6 +180,9 @@ case "$*" in
       echo "expected town root, got $PWD" >&2
       exit 1
     fi
+    echo '[]'
+    ;;
+  "sql SELECT depends_on_id FROM dependencies WHERE issue_id = 'hq-cv-status' AND type = 'tracks' --json")
     echo '[]'
     ;;
   *)
