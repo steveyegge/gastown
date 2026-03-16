@@ -41,6 +41,9 @@ var templateFuncs = template.FuncMap{
 //go:embed roles/*.md.tmpl messages/*.md.tmpl
 var templateFS embed.FS
 
+//go:embed postings/*.md.tmpl
+var postingsFS embed.FS
+
 //go:embed launchd/*.plist systemd/*.service
 var supervisorFS embed.FS
 
@@ -375,4 +378,101 @@ func provisionSystemd(data SupervisorData) (string, error) {
 	}
 
 	return "Created and enabled systemd user service: gastown-daemon.service", nil
+}
+
+// PostingResult contains a resolved posting template.
+type PostingResult struct {
+	Content string // Raw template content (Go template syntax)
+	Level   string // Resolution level: "embedded", "town", or "rig"
+	Name    string // Posting name (e.g., "dispatcher")
+}
+
+// LoadPosting loads a posting template with 3-layer resolution.
+// Resolution order (later overrides earlier):
+//  1. Built-in defaults (embedded in binary via postings/*.md.tmpl)
+//  2. Town-level override (<townRoot>/postings/<name>.md.tmpl)
+//  3. Rig-level override (<rigPath>/postings/<name>.md.tmpl)
+//
+// Unlike role definitions, postings don't merge — the highest-priority
+// layer that exists wins entirely.
+func LoadPosting(townRoot, rigPath, postingName string) (*PostingResult, error) {
+	if postingName == "" {
+		return nil, fmt.Errorf("posting name cannot be empty")
+	}
+
+	fileName := postingName + ".md.tmpl"
+
+	// 3. Check rig-level override (highest priority)
+	if rigPath != "" {
+		rigPostingPath := filepath.Join(rigPath, "postings", fileName)
+		if data, err := os.ReadFile(rigPostingPath); err == nil {
+			return &PostingResult{
+				Content: string(data),
+				Level:   "rig",
+				Name:    postingName,
+			}, nil
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("reading rig posting %s: %w", rigPostingPath, err)
+		}
+	}
+
+	// 2. Check town-level override
+	if townRoot != "" {
+		townPostingPath := filepath.Join(townRoot, "postings", fileName)
+		if data, err := os.ReadFile(townPostingPath); err == nil {
+			return &PostingResult{
+				Content: string(data),
+				Level:   "town",
+				Name:    postingName,
+			}, nil
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("reading town posting %s: %w", townPostingPath, err)
+		}
+	}
+
+	// 1. Check built-in embedded postings (lowest priority)
+	if data, err := postingsFS.ReadFile("postings/" + fileName); err == nil {
+		return &PostingResult{
+			Content: string(data),
+			Level:   "embedded",
+			Name:    postingName,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("posting %q not found (checked rig, town, and built-in postings)", postingName)
+}
+
+// PostingLevels returns all resolution levels where a posting template exists.
+func PostingLevels(townRoot, rigPath, postingName string) []string {
+	if postingName == "" {
+		return nil
+	}
+
+	fileName := postingName + ".md.tmpl"
+	var levels []string
+
+	if rigPath != "" {
+		rigPostingPath := filepath.Join(rigPath, "postings", fileName)
+		if _, err := os.Stat(rigPostingPath); err == nil {
+			levels = append(levels, "rig")
+		}
+	}
+
+	if townRoot != "" {
+		townPostingPath := filepath.Join(townRoot, "postings", fileName)
+		if _, err := os.Stat(townPostingPath); err == nil {
+			levels = append(levels, "town")
+		}
+	}
+
+	if _, err := postingsFS.ReadFile("postings/" + fileName); err == nil {
+		levels = append(levels, "embedded")
+	}
+
+	return levels
+}
+
+// BuiltinPostingNames returns the names of built-in postings.
+func BuiltinPostingNames() []string {
+	return []string{"dispatcher", "inspector", "scout"}
 }
