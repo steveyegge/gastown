@@ -402,7 +402,13 @@ func runPostingDrop(cmd *cobra.Command, args []string) error {
 
 	current := posting.Read(workDir)
 	if current == "" {
-		fmt.Println("No session posting to drop")
+		persistent, workerName := getPersistentPosting()
+		if persistent != "" {
+			fmt.Printf("No session posting to drop (persistent posting %q is set for %s; use: gt crew post %s --clear)\n",
+				persistent, workerName, workerName)
+		} else {
+			fmt.Println("No session posting to drop")
+		}
 		return nil
 	}
 
