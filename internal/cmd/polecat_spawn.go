@@ -2,7 +2,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -187,16 +186,12 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		}
 		reuseOK := false
 		if _, err := polecatMgr.ReuseIdlePolecat(polecatName, addOpts); err != nil {
-			if errors.Is(err, polecat.ErrSessionRunning) {
-				fmt.Printf("  Idle polecat %s still has a live session, allocating new...\n", polecatName)
+			// Branch-only reuse failed — try full worktree repair as fallback
+			fmt.Printf("  Branch-only reuse failed for idle polecat %s: %v, trying full repair...\n", polecatName, err)
+			if _, err := polecatMgr.RepairWorktreeWithOptions(polecatName, true, addOpts); err != nil {
+				fmt.Printf("  Full repair also failed for %s: %v, allocating new...\n", polecatName, err)
 			} else {
-				// Branch-only reuse failed — try full worktree repair as fallback
-				fmt.Printf("  Branch-only reuse failed for idle polecat %s: %v, trying full repair...\n", polecatName, err)
-				if _, err := polecatMgr.RepairWorktreeWithOptions(polecatName, true, addOpts); err != nil {
-					fmt.Printf("  Full repair also failed for %s: %v, allocating new...\n", polecatName, err)
-				} else {
-					reuseOK = true
-				}
+				reuseOK = true
 			}
 		} else {
 			reuseOK = true
