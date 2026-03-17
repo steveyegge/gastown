@@ -583,11 +583,11 @@ func TestCreatePolecatCLAUDEmd(t *testing.T) {
 	}
 }
 
-func TestCreatePolecatCLAUDEmd_NoOverwrite(t *testing.T) {
+func TestCreatePolecatCLAUDEmd_AppendsToExisting(t *testing.T) {
 	dir := t.TempDir()
 
-	// Write a pre-existing CLAUDE.md (user customization)
-	existing := "# Custom CLAUDE.md\nUser customizations here.\n"
+	// Write a pre-existing CLAUDE.md (e.g., tracked in the repo or town-root content)
+	existing := "# Project CLAUDE.md\nSome repo-specific instructions.\n"
 	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte(existing), 0644); err != nil {
 		t.Fatalf("writing existing CLAUDE.md: %v", err)
 	}
@@ -596,16 +596,55 @@ func TestCreatePolecatCLAUDEmd_NoOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePolecatCLAUDEmd() error = %v", err)
 	}
-	if created {
-		t.Fatal("CreatePolecatCLAUDEmd() created = true, want false (should preserve existing)")
+	if !created {
+		t.Fatal("CreatePolecatCLAUDEmd() created = false, want true (should append lifecycle instructions)")
 	}
 
-	// Verify original content is preserved
 	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
 	if err != nil {
 		t.Fatalf("reading CLAUDE.md: %v", err)
 	}
-	if string(data) != existing {
-		t.Fatalf("existing CLAUDE.md was overwritten: got %q", string(data))
+	content := string(data)
+
+	// Original content preserved
+	if !strings.Contains(content, "Project CLAUDE.md") {
+		t.Error("existing CLAUDE.md content was not preserved")
+	}
+
+	// Polecat lifecycle instructions appended
+	if !strings.Contains(content, "IDLE POLECAT HERESY") {
+		t.Error("polecat lifecycle instructions not appended")
+	}
+	if !strings.Contains(content, "gt done") {
+		t.Fatal("gt done instructions not appended — polecats will not know to call it")
+	}
+}
+
+func TestCreatePolecatCLAUDEmd_SkipsWhenAlreadyProvisioned(t *testing.T) {
+	dir := t.TempDir()
+
+	// First call — creates the file
+	created, err := CreatePolecatCLAUDEmd(dir, "greenplace", "furiosa")
+	if err != nil {
+		t.Fatalf("first CreatePolecatCLAUDEmd() error = %v", err)
+	}
+	if !created {
+		t.Fatal("first call should create")
+	}
+
+	data1, _ := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+
+	// Second call — should skip (marker already present)
+	created, err = CreatePolecatCLAUDEmd(dir, "greenplace", "furiosa")
+	if err != nil {
+		t.Fatalf("second CreatePolecatCLAUDEmd() error = %v", err)
+	}
+	if created {
+		t.Fatal("second call should skip (lifecycle instructions already present)")
+	}
+
+	data2, _ := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if string(data1) != string(data2) {
+		t.Fatal("file was modified on second call — should be idempotent")
 	}
 }
