@@ -945,6 +945,7 @@ func (r *Router) validateRecipient(identity string) error {
 	}
 
 	// Query agents from rig-level beads via routes.jsonl
+	var routeQueryErr error
 	if r.townRoot != "" {
 		townBeadsDir := filepath.Join(r.townRoot, ".beads")
 		routes, err := beads.LoadRoutes(townBeadsDir)
@@ -968,7 +969,7 @@ func (r *Router) validateRecipient(identity string) error {
 				}
 			}
 			if len(queryErrors) > 0 {
-				return fmt.Errorf("no agent found (query errors: %s)", strings.Join(queryErrors, "; "))
+				routeQueryErr = fmt.Errorf("no agent found (query errors: %s)", strings.Join(queryErrors, "; "))
 			}
 		}
 	}
@@ -977,6 +978,10 @@ func (r *Router) validateRecipient(identity string) error {
 	// (e.g., Dolt DB reset) even though the agent's workspace directory exists.
 	if r.townRoot != "" && r.validateAgentWorkspace(identity) {
 		return nil
+	}
+
+	if routeQueryErr != nil {
+		return routeQueryErr
 	}
 
 	return fmt.Errorf("no agent found")
@@ -1005,6 +1010,10 @@ func (r *Router) validateAgentWorkspace(identity string) bool {
 			}
 		}
 	case 3:
+		// Explicit role paths: rig/crew/<name> or rig/polecats/<name>
+		if parts[1] == "crew" || parts[1] == "polecats" {
+			return dirExists(filepath.Join(r.townRoot, parts[0], parts[1], parts[2]))
+		}
 		// Dog addresses: deacon/dogs/<name>
 		if dirExists(filepath.Join(r.townRoot, parts[0], parts[1], parts[2])) {
 			return true
