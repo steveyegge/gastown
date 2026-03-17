@@ -64,7 +64,7 @@ deletions, mergeable status, and CI check results without per-PR API overhead:
 
 ```bash
 PRS=$(gh pr list --repo "$REPO" --state open \
-  --json number,title,author,additions,deletions,mergeable,statusCheckRollup,url \
+  --json number,title,author,additions,deletions,mergeable,statusCheckRollup,url,headRefName \
   --limit 100)
 
 PR_COUNT=$(echo "$PRS" | jq length)
@@ -90,6 +90,7 @@ while IFS= read -r PR_JSON; do
   PR_NUM=$(echo "$PR_JSON" | jq -r '.number')
   PR_TITLE=$(echo "$PR_JSON" | jq -r '.title')
   AUTHOR=$(echo "$PR_JSON" | jq -r '.author.login')
+  HEAD_REF=$(echo "$PR_JSON" | jq -r '.headRefName // empty')
   ADDITIONS=$(echo "$PR_JSON" | jq -r '.additions // 0')
   DELETIONS=$(echo "$PR_JSON" | jq -r '.deletions // 0')
   MERGEABLE=$(echo "$PR_JSON" | jq -r '.mergeable')
@@ -113,7 +114,7 @@ while IFS= read -r PR_JSON; do
     [ -z "$CHECK" ] && continue
     CHECK_NAME=$(echo "$CHECK" | jq -r '.name')
     CHECK_URL=$(echo "$CHECK" | jq -r '.detailsUrl // .targetUrl // empty')
-    FAILURES+=("$PR_NUM|$PR_TITLE|$CHECK_NAME|$CHECK_URL")
+    FAILURES+=("$PR_NUM|$PR_TITLE|$CHECK_NAME|$CHECK_URL|$HEAD_REF")
   done < <(echo "$PR_JSON" | jq -c '.statusCheckRollup[] | select(
     .conclusion == "FAILURE" or .conclusion == "CANCELLED" or
     .conclusion == "TIMED_OUT" or .state == "FAILURE" or .state == "ERROR"
@@ -160,7 +161,7 @@ else
 EXISTING=$(bd list --label ci-failure --status open --json 2>/dev/null || echo "[]")
 
 for F in "${FAILURES[@]}"; do
-  IFS='|' read -r PR_NUM PR_TITLE CHECK_NAME CHECK_URL <<< "$F"
+  IFS='|' read -r PR_NUM PR_TITLE CHECK_NAME CHECK_URL HEAD_REF <<< "$F"
   BEAD_TITLE="CI failure: $CHECK_NAME on PR #$PR_NUM"
 
   # Check for duplicate (use jq --arg for safe string comparison)
@@ -169,15 +170,26 @@ for F in "${FAILURES[@]}"; do
     continue
   fi
 
+  # Extract assignee from PR branch name. Polecat branches follow the pattern
+  # polecat/<name>/<bead>, so the second segment is the polecat name.
+  # The rig is detected from GT_RIG (set by deacon) or falls back to the repo name.
+  ASSIGNEE="mayor/"
+  if [[ "$HEAD_REF" =~ ^polecat/([^/]+)/ ]]; then
+    POLECAT_NAME="${BASH_REMATCH[1]}"
+    RIG_NAME="${GT_RIG:-$(basename "$REPO")}"
+    ASSIGNEE="${RIG_NAME}/polecats/${POLECAT_NAME}"
+  fi
+
   DESCRIPTION="CI check \`$CHECK_NAME\` failed on PR #$PR_NUM ($PR_TITLE)
 
 PR: https://github.com/$REPO/pull/$PR_NUM"
   [ -n "$CHECK_URL" ] && DESCRIPTION="$DESCRIPTION
 Check: $CHECK_URL"
 
-  BEAD_ID=$(bd create "$BEAD_TITLE" -t task -p 2 \
+  BEAD_ID=$(bd create "$BEAD_TITLE" -t task -p 0 \
     -d "$DESCRIPTION" \
     -l ci-failure \
+    --assignee "$ASSIGNEE" \
     --json 2>/dev/null | jq -r '.id // empty')
 
   if [ -n "$BEAD_ID" ]; then

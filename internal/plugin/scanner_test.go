@@ -400,6 +400,43 @@ func TestParsePluginMD_GitHubSheriff(t *testing.T) {
 	}
 }
 
+func TestGitHubSheriff_AssigneeFromBranch(t *testing.T) {
+	// Verify github-sheriff plugin assigns CI failure beads to the polecat that
+	// authored the PR (extracted from headRefName), falling back to mayor/.
+	// This is a content test — validates the plugin.md contains the required patterns.
+	content, err := os.ReadFile(filepath.Join("..", "..", "plugins", "github-sheriff", "plugin.md"))
+	if err != nil {
+		t.Skipf("github-sheriff plugin not found: %v", err)
+	}
+
+	src := string(content)
+
+	// Must fetch headRefName from gh pr list
+	if !strings.Contains(src, "headRefName") {
+		t.Error("plugin must fetch headRefName from gh pr list to extract polecat identity")
+	}
+
+	// Must extract polecat name from branch pattern polecat/<name>/<bead>
+	if !strings.Contains(src, `polecat/([^/]+)/`) {
+		t.Error("plugin must extract polecat name from branch pattern polecat/<name>/<bead>")
+	}
+
+	// Must pass --assignee to bd create
+	if !strings.Contains(src, `--assignee "$ASSIGNEE"`) {
+		t.Error("plugin must pass --assignee to bd create")
+	}
+
+	// Must default to mayor/ when branch is not a polecat branch
+	if !strings.Contains(src, `ASSIGNEE="mayor/"`) {
+		t.Error("plugin must default assignee to mayor/ for non-polecat branches")
+	}
+
+	// Must NOT assign to 'tester' (the bug we're fixing)
+	if strings.Contains(src, `--assignee "tester"`) || strings.Contains(src, `--assignee=tester`) {
+		t.Error("plugin must not assign to 'tester' — use polecat identity or mayor/ fallback")
+	}
+}
+
 func TestParsePluginMD_SessionHygiene(t *testing.T) {
 	// Use a temp dir with a fixture plugin.md and run.sh so the test
 	// doesn't depend on the local filesystem layout (fails in CI).
