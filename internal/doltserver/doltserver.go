@@ -501,8 +501,21 @@ func IsRunning(townRoot string) (bool, int, error) {
 	// No valid PID file - check if port is in use by dolt anyway.
 	// This catches externally-started dolt servers.
 	pid := findDoltServerOnPort(config.Port)
-	if pid > 0 && doltProcessMatchesTown(townRoot, pid, config) {
-		return true, pid, nil
+	if pid > 0 {
+		serverDataDir := getServerDataDir(townRoot, pid)
+		if serverDataDir == "" || serverDataDir == config.DataDir {
+			// Cross-check process args to guard against PID reuse.
+			actualDir := getDoltDataDirFromProcess(pid)
+			if actualDir == "" {
+				return true, pid, nil
+			}
+			expected, _ := filepath.Abs(config.DataDir)
+			actual, _ := filepath.Abs(actualDir)
+			if actual == expected {
+				return true, pid, nil
+			}
+		}
+		// Port is used by a different town's Dolt — not ours
 	}
 
 	// Last resort: TCP reachability check. This handles Docker containers
@@ -658,10 +671,11 @@ func CheckPortConflict(townRoot string) (int, string) {
 	if pid <= 0 {
 		return 0, ""
 	}
-	if doltProcessMatchesTown(townRoot, pid, cfg) {
-		return 0, ""
+	dataDir := getServerDataDir(townRoot, pid)
+	if dataDir == "" || dataDir == cfg.DataDir {
+		return 0, "" // It's ours or unknown
 	}
-	return pid, doltProcessOwnerPath(townRoot, pid)
+	return pid, dataDir
 }
 
 // findDoltServerOnPort finds a process listening on the given port.
@@ -911,26 +925,6 @@ func doltProcessOwnerPath(townRoot string, pid int) string {
 		getProcessCWD(pid),
 		getServerDataDir(townRoot, pid),
 	)
-}
-
-// getDoltCwdFromProcess returns the working directory of the given process.
-// Used as a fallback when the process has no --data-dir flag (started bare from a rig dir).
-// Returns empty string on error or Windows.
-func getDoltCwdFromProcess(pid int) string {
-	if runtime.GOOS == "windows" {
-		return ""
-	}
-	cmd := exec.Command("lsof", "-p", strconv.Itoa(pid), "-a", "-d", "cwd", "-Fn")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if strings.HasPrefix(line, "n") {
-			return strings.TrimPrefix(line, "n")
-		}
-	}
-	return ""
 }
 
 // VerifyServerDataDir checks whether the running Dolt server is serving the

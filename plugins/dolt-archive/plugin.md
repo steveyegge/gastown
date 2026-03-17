@@ -32,7 +32,7 @@ whether the other layers work.
 
 ```bash
 DOLT_DATA_DIR="$HOME/gt/.dolt-data"
-PROD_DBS=("beads" "beads_gt" "beads_hq" "beads_mm" "gt" "lc" "lilypad_chat" "myndy_api" "myndy_ios" "rt" "th" "tr" "vitalitek" "wandering_river" "wr")
+PROD_DBS=("beads" "beads_gt" "beads_hq" "beads_mm" "gt" "lc" "lilypad_chat" "myndy_api" "myndy_ios" "rally_tavern" "theoutlived" "tr" "vitalitek" "wandering_river" "wr")
 JSONL_EXPORT_DIR="$HOME/gt/.dolt-archive/jsonl"
 DOLT_HOST="127.0.0.1"
 DOLT_PORT=3307
