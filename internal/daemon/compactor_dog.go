@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -437,11 +438,22 @@ func (d *Daemon) surgicalRebaseOnce(dbName string, keepRecent int) error {
 	d.logger.Printf("compactor_dog: %s: interactive rebase started", dbName)
 
 	// Step 4: Read rebase plan bounds and mark old commits as squash.
-	// Dolt returns MIN/MAX as decimal strings (e.g. "1.00"), so scan as float64 then cast.
-	var minOrderF, maxOrderF float64
-	if err := db.QueryRowContext(ctx, "SELECT MIN(rebase_order), MAX(rebase_order) FROM dolt_rebase").Scan(&minOrderF, &maxOrderF); err != nil {
+	// Dolt returns MIN/MAX as decimal strings (e.g. "1.00") via []uint8 byte slices,
+	// which cannot be scanned directly into int or float64. Scan as string, parse, cast.
+	var minOrderStr, maxOrderStr string
+	if err := db.QueryRowContext(ctx, "SELECT MIN(rebase_order), MAX(rebase_order) FROM dolt_rebase").Scan(&minOrderStr, &maxOrderStr); err != nil {
 		d.surgicalAbortAndCleanup(db, baseBranch, workBranch)
 		return fmt.Errorf("read rebase bounds: %w", err)
+	}
+	minOrderF, err := strconv.ParseFloat(minOrderStr, 64)
+	if err != nil {
+		d.surgicalAbortAndCleanup(db, baseBranch, workBranch)
+		return fmt.Errorf("parsing min rebase_order %q: %w", minOrderStr, err)
+	}
+	maxOrderF, err := strconv.ParseFloat(maxOrderStr, 64)
+	if err != nil {
+		d.surgicalAbortAndCleanup(db, baseBranch, workBranch)
+		return fmt.Errorf("parsing max rebase_order %q: %w", maxOrderStr, err)
 	}
 	minOrder, maxOrder := int(minOrderF), int(maxOrderF)
 

@@ -6,10 +6,11 @@ import (
 	"testing"
 )
 
-// TestDoltRebase_FloatScanForMinMax verifies that dolt_rebase.go scans
-// MIN/MAX(rebase_order) as float64, not int. Dolt returns decimal strings
-// like "1.00" which cannot be scanned directly into int.
-func TestDoltRebase_FloatScanForMinMax(t *testing.T) {
+// TestDoltRebase_DecimalScanForMinMax verifies that dolt_rebase.go scans
+// MIN/MAX(rebase_order) as string then parses, not as int directly.
+// Dolt returns decimal strings like "1.00" as []uint8 byte slices which
+// cannot be scanned directly into int or float64.
+func TestDoltRebase_DecimalScanForMinMax(t *testing.T) {
 	content, err := os.ReadFile("dolt_rebase.go")
 	if err != nil {
 		t.Fatalf("reading dolt_rebase.go: %v", err)
@@ -17,14 +18,18 @@ func TestDoltRebase_FloatScanForMinMax(t *testing.T) {
 
 	src := string(content)
 
-	// Must scan as float64, not int
+	// Must NOT scan directly as int
 	if strings.Contains(src, "var minOrder, maxOrder int") {
-		t.Error("dolt_rebase.go must scan MIN/MAX(rebase_order) as float64, not int — Dolt returns decimal strings")
+		t.Error("dolt_rebase.go must not scan MIN/MAX(rebase_order) as int — Dolt returns decimal strings as []uint8")
 	}
-	if !strings.Contains(src, "var minOrderF, maxOrderF float64") {
-		t.Error("dolt_rebase.go must use float64 variables for MIN/MAX scan")
+	// Must scan as string then parse
+	if !strings.Contains(src, "var minOrderStr, maxOrderStr string") {
+		t.Error("dolt_rebase.go must use string variables for MIN/MAX scan (Dolt returns []uint8 byte slices)")
+	}
+	if !strings.Contains(src, "strconv.ParseFloat(minOrderStr") {
+		t.Error("dolt_rebase.go must parse string to float after scanning")
 	}
 	if !strings.Contains(src, "int(minOrderF)") {
-		t.Error("dolt_rebase.go must cast float64 to int after scanning")
+		t.Error("dolt_rebase.go must cast float64 to int after parsing")
 	}
 }

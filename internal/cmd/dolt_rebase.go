@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -189,11 +190,22 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Rebase plan: %d commits\n", totalPlan)
 
 	// Calculate how many to squash: everything except first (must stay pick) and last N.
-	// Dolt returns MIN/MAX as decimal strings (e.g. "1.00"), so scan as float64 then cast.
-	var minOrderF, maxOrderF float64
-	if err := db.QueryRowContext(ctx, "SELECT MIN(rebase_order), MAX(rebase_order) FROM dolt_rebase").Scan(&minOrderF, &maxOrderF); err != nil {
+	// Dolt returns MIN/MAX as decimal strings (e.g. "1.00") via []uint8 byte slices,
+	// which cannot be scanned directly into int or float64. Scan as string, parse, cast.
+	var minOrderStr, maxOrderStr string
+	if err := db.QueryRowContext(ctx, "SELECT MIN(rebase_order), MAX(rebase_order) FROM dolt_rebase").Scan(&minOrderStr, &maxOrderStr); err != nil {
 		rebaseAbortAndCleanup(db, baseBranch, workBranch)
 		return fmt.Errorf("getting rebase order range: %w", err)
+	}
+	minOrderF, err := strconv.ParseFloat(minOrderStr, 64)
+	if err != nil {
+		rebaseAbortAndCleanup(db, baseBranch, workBranch)
+		return fmt.Errorf("parsing min rebase_order %q: %w", minOrderStr, err)
+	}
+	maxOrderF, err := strconv.ParseFloat(maxOrderStr, 64)
+	if err != nil {
+		rebaseAbortAndCleanup(db, baseBranch, workBranch)
+		return fmt.Errorf("parsing max rebase_order %q: %w", maxOrderStr, err)
 	}
 	minOrder, maxOrder := int(minOrderF), int(maxOrderF)
 
