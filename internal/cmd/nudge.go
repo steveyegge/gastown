@@ -174,11 +174,15 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 		if townRoot == "" {
 			return fmt.Errorf("--mode=queue requires a Gas Town workspace")
 		}
-		return nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
+		if err := nudge.Enqueue(townRoot, sessionName, nudge.QueuedNudge{
 			Sender:   sender,
 			Message:  message,
 			Priority: nudgePriorityFlag,
-		})
+		}); err != nil {
+			return err
+		}
+		ensureQueuedNudgeDelivery(t, townRoot, sessionName)
+		return nil
 
 	case NudgeModeWaitIdle:
 		if townRoot == "" {
@@ -255,6 +259,7 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 			}})
 			return t.NudgeSession(sessionName, formatted)
 		}
+		ensureQueuedNudgeDelivery(t, townRoot, sessionName)
 		// Run watcher synchronously: polls for idle over a longer window.
 		// The UserPromptSubmit hook drains the queue on agent input, but an
 		// idle agent receives no input — so queued nudges are lost without
@@ -275,6 +280,26 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 			}
 		}
 		return t.NudgeSessionWithOpts(sessionName, prefixedMessage, opts)
+	}
+}
+
+func ensureQueuedNudgeDelivery(t *tmux.Tmux, townRoot, sessionName string) {
+	if townRoot == "" || sessionName == "" {
+		return
+	}
+
+	agentName, err := t.GetEnvironment(sessionName, "GT_AGENT")
+	if err != nil || agentName == "" {
+		return
+	}
+
+	preset := config.GetAgentPresetByName(agentName)
+	if preset == nil || preset.HasTurnBoundaryDrain {
+		return
+	}
+
+	if _, err := nudge.StartPoller(townRoot, sessionName); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to start nudge poller for %s: %v\n", sessionName, err)
 	}
 }
 

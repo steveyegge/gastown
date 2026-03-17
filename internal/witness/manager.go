@@ -246,6 +246,8 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		log.Printf("warning: tracking session PID for %s: %v", sessionID, err)
 	}
 
+	session.EnsureNudgePoller(townRoot, sessionID, runtimeConfig)
+
 	_ = runtime.RunStartupFallback(t, sessionID, "witness", runtimeConfig)
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
 		Recipient: session.BeaconRecipient("witness", "", m.rig.Name),

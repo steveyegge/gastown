@@ -31,7 +31,6 @@ func debugSession(context string, err error) {
 	}
 }
 
-
 // Session errors
 var (
 	ErrSessionRunning  = errors.New("session already running")
@@ -494,6 +493,10 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Touch initial heartbeat so liveness detection works from the start (gt-qjtq).
 	// Subsequent touches happen on every gt command via persistentPreRun.
 	TouchSessionHeartbeat(townRoot, sessionID)
+
+	// Codex/Gemini-style runtimes need a background nudge poller because they
+	// do not drain queued nudges at turn boundaries the way Claude does.
+	session.EnsureNudgePoller(townRoot, sessionID, runtimeConfig)
 
 	// Stream polecat's Claude Code JSONL conversation log to VictoriaLogs (opt-in).
 	if os.Getenv("GT_LOG_AGENT_OUTPUT") == "true" && os.Getenv("GT_OTEL_LOGS_URL") != "" {

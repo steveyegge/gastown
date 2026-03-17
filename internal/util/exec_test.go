@@ -2,6 +2,7 @@ package util
 
 import (
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
@@ -114,5 +115,20 @@ func TestExecWithOutput_StderrInError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "error message") {
 		t.Errorf("expected error to contain stderr, got %q", err.Error())
+	}
+}
+
+func TestSetProcessGroupAllowsPlainExecCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process groups are a no-op on Windows")
+	}
+
+	cmd := exec.Command("true")
+	SetProcessGroup(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start() failed after SetProcessGroup: %v", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("Wait() failed after SetProcessGroup: %v", err)
 	}
 }

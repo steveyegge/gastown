@@ -1639,6 +1639,7 @@ func (r *Router) notifyRecipient(msg *Message) error {
 			}); err != nil {
 				return err
 			}
+			r.ensureQueuedDelivery(sessionID)
 			r.enqueueReplyReminder(msg, sessionID)
 			return nil
 		}
@@ -1653,17 +1654,41 @@ func (r *Router) notifyRecipient(msg *Message) error {
 	// This handles headless ACP mode where there's no tmux session
 	if r.townRoot != "" && len(sessionIDs) > 0 {
 		notification := formatNotificationMessage(msg)
-		return nudge.Enqueue(r.townRoot, sessionIDs[0], nudge.QueuedNudge{
+		if err := nudge.Enqueue(r.townRoot, sessionIDs[0], nudge.QueuedNudge{
 			Sender:   msg.From,
 			Message:  notification,
 			Priority: nudgePriorityForMailPriority(msg.Priority),
 			Kind:     nudgeKindForMessage(msg),
 			ThreadID: msg.ThreadID,
 			Severity: prioritySeverityLabel(msg.Priority),
-		})
+		}); err != nil {
+			return err
+		}
+		r.ensureQueuedDelivery(sessionIDs[0])
+		return nil
 	}
 
 	return nil // No active session found
+}
+
+func (r *Router) ensureQueuedDelivery(sessionID string) {
+	if r.townRoot == "" || sessionID == "" {
+		return
+	}
+
+	agentName, err := r.tmux.GetEnvironment(sessionID, "GT_AGENT")
+	if err != nil || agentName == "" {
+		return
+	}
+
+	preset := config.GetAgentPresetByName(agentName)
+	if preset == nil || preset.HasTurnBoundaryDrain {
+		return
+	}
+
+	if _, err := nudge.StartPoller(r.townRoot, sessionID); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to start nudge poller for %s: %v\n", sessionID, err)
+	}
 }
 
 func nudgeKindForMessage(msg *Message) string {

@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -227,6 +228,10 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (_ *StartResult, retErr error
 		_ = t.SetEnvironment(cfg.SessionID, k, cfg.ExtraEnv[k])
 	}
 
+	// Non-Claude agents rely on a background poller to drain queued nudges/mail
+	// because they lack Claude's turn-boundary hook path.
+	EnsureNudgePoller(cfg.TownRoot, cfg.SessionID, runtimeConfig)
+
 	// 7. Apply theme.
 	if cfg.Theme != nil {
 		_ = t.ConfigureGasTownSession(cfg.SessionID, *cfg.Theme, cfg.RigName, cfg.AgentName, cfg.Role)
@@ -303,6 +308,25 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (_ *StartResult, retErr error
 		cfg.Role, cfg.AgentName, cfg.SessionID, cfg.RigName, cfg.TownRoot, "", cfg.WorkDir)
 
 	return &StartResult{RuntimeConfig: runtimeConfig, RunID: runID}, nil
+}
+
+// EnsureNudgePoller bootstraps the background nudge poller for runtimes that
+// lack turn-boundary queue draining (for example Codex and Gemini).
+//
+// This is safe to call repeatedly: StartPoller is idempotent for a session.
+func EnsureNudgePoller(townRoot, sessionID string, runtimeConfig *config.RuntimeConfig) {
+	if townRoot == "" || sessionID == "" || runtimeConfig == nil {
+		return
+	}
+
+	preset := config.GetAgentPresetByName(runtimeConfig.ResolvedAgent)
+	if preset == nil || preset.HasTurnBoundaryDrain {
+		return
+	}
+
+	if _, err := nudge.StartPoller(townRoot, sessionID); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not start nudge poller for %s: %v\n", sessionID, err)
+	}
 }
 
 // RecordAgentInstantiateFromDir resolves the git branch/commit from workDir and

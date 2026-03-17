@@ -166,6 +166,8 @@ func (m *Manager) Start(agentOverride string) error {
 		_ = session.TrackSessionPID(m.townRoot, sessionID, realTmux)
 	}
 
+	session.EnsureNudgePoller(m.townRoot, sessionID, runtimeConfig)
+
 	// PATCH-010: Set auto-respawn hook for Deacon resilience.
 	// When Claude exits (for any reason), tmux will automatically respawn it.
 	// This prevents the crash loop where daemon repeatedly restarts Deacon.
