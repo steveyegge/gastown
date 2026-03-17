@@ -868,6 +868,7 @@ func idlePolecatNames() map[string]bool {
 		var agents []struct {
 			ID          string `json:"id"`
 			Description string `json:"description"`
+			AgentState  string `json:"agent_state,omitempty"`
 		}
 		if err := json.Unmarshal(out, &agents); err != nil {
 			continue
@@ -882,6 +883,13 @@ func idlePolecatNames() map[string]bool {
 			fields := beads.ParseAgentFields(agent.Description)
 			if fields == nil {
 				continue
+			}
+			// Prefer the structured agent_state column over description-parsed
+			// state. `bd agent state` updates the DB column directly without
+			// rewriting the description, so the description can be stale.
+			// This matches GetAgentBead() behavior (beads_agent.go:621-623).
+			if agent.AgentState != "" {
+				fields.AgentState = agent.AgentState
 			}
 			agentState := beads.AgentState(fields.AgentState)
 			if (agentState == beads.AgentStateIdle || agentState == beads.AgentStateDone) &&
