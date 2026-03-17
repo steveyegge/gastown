@@ -294,6 +294,14 @@ func TestPostingContent_Dispatcher_ConsciousChoice(t *testing.T) {
 	}
 }
 
+func TestPostingContent_Dispatcher_PostingShowForUnfamiliar(t *testing.T) {
+	t.Parallel()
+	rendered := renderPosting(t, "dispatcher")
+	if !strings.Contains(rendered, "posting show") {
+		t.Error("dispatcher posting should mention 'posting show' for unfamiliar postings")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 16.17–16.20: Active polling loop crew-only scoping (gt-5wi)
 //
