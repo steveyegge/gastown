@@ -12,14 +12,14 @@ import (
 // mockBdForConvoyTest creates a fake bd binary tailored for convoy empty-check
 // tests. The script handles show, dep, close, and list subcommands.
 // closeLogPath is the file where close commands are logged for verification.
-func mockBdForConvoyTest(t *testing.T, convoyID, convoyTitle string) (binDir, townBeads, closeLogPath string) {
+func mockBdForConvoyTest(t *testing.T, convoyID, convoyTitle string) (binDir, townRoot, closeLogPath string) {
 	t.Helper()
 
 	binDir = t.TempDir()
-	townRoot := t.TempDir()
-	townBeads = filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
-		t.Fatalf("mkdir townBeads: %v", err)
+	townRoot = t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
 	}
 
 	closeLogPath = filepath.Join(binDir, "bd-close.log")
@@ -83,7 +83,7 @@ esac
 	// Prepend mock bd to PATH
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	return binDir, townBeads, closeLogPath
+	return binDir, townRoot, closeLogPath
 }
 
 func TestCheckSingleConvoy_EmptyConvoyAutoCloses(t *testing.T) {
@@ -157,12 +157,12 @@ func TestFindStrandedConvoys_MixedConvoys(t *testing.T) {
 
 	binDir := t.TempDir()
 	townRoot := t.TempDir()
-	townBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
-		t.Fatalf("mkdir townBeads: %v", err)
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
 	}
 	// Routes needed so isSlingableBead can resolve gt- prefix to a rig
-	if err := os.WriteFile(filepath.Join(townBeads, "routes.jsonl"), []byte(`{"prefix":"gt-","path":"gastown/mayor/rig"}`+"\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(`{"prefix":"gt-","path":"gastown/mayor/rig"}`+"\n"), 0644); err != nil {
 		t.Fatalf("write routes: %v", err)
 	}
 
@@ -230,7 +230,8 @@ esac
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	stranded, err := findStrandedConvoys(townBeads)
+	// Pass townRoot (not .beads) — matches getTownBeadsDir() which returns the workspace root.
+	stranded, err := findStrandedConvoys(townRoot)
 	if err != nil {
 		t.Fatalf("findStrandedConvoys() error: %v", err)
 	}
@@ -300,11 +301,11 @@ func TestFindStrandedConvoys_StuckConvoy(t *testing.T) {
 
 	binDir := t.TempDir()
 	townRoot := t.TempDir()
-	townBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
-		t.Fatalf("mkdir townBeads: %v", err)
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(townBeads, "routes.jsonl"), []byte(`{"prefix":"gt-","path":"gastown/mayor/rig"}`+"\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(`{"prefix":"gt-","path":"gastown/mayor/rig"}`+"\n"), 0644); err != nil {
 		t.Fatalf("write routes: %v", err)
 	}
 
@@ -350,7 +351,7 @@ esac
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	stranded, err := findStrandedConvoys(townBeads)
+	stranded, err := findStrandedConvoys(townRoot)
 	if err != nil {
 		t.Fatalf("findStrandedConvoys() error: %v", err)
 	}

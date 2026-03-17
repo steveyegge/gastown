@@ -201,3 +201,71 @@ esac
 		t.Fatalf("unexpected status output:\n%s", out)
 	}
 }
+
+// TestConvoyCreate_DepAddUsesTownRoot verifies that `dep add` during convoy
+// create runs from the town root (not its parent), so bd's prefix routing
+// can resolve cross-rig beads via routes.jsonl. This was the root cause of
+// "no beads database found" when tracking beads from other rigs. (GH#2960)
+func TestConvoyCreate_DepAddUsesTownRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows - shell stubs")
+	}
+
+	townRoot, expectedWD := makeRoutingTownWorkspace(t)
+	chdirConvoyTest(t, townRoot)
+
+	// Write sentinel files to skip EnsureCustomTypes/Statuses (they call bd
+	// config set/get which isn't relevant to routing).
+	beadsDir := filepath.Join(townRoot, ".beads")
+	typesList := "agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request"
+	_ = os.WriteFile(filepath.Join(beadsDir, ".gt-types-configured"), []byte(typesList), 0644)
+	_ = os.WriteFile(filepath.Join(beadsDir, ".gt-statuses-configured"), []byte("staged_ready,staged_warnings"), 0644)
+
+	// Track which directory dep add runs from.
+	depLogPath := filepath.Join(t.TempDir(), "dep-add.log")
+
+	scriptBody := fmt.Sprintf(`
+case "$1" in
+  create)
+    echo '[{"id":"hq-cv-test"}]'
+    ;;
+  dep)
+    # Log the working directory for dep add calls
+    echo "$PWD" >> %s
+    if [ "$PWD" != "%s" ]; then
+      echo "dep add: expected town root %s, got $PWD" >&2
+      exit 1
+    fi
+    ;;
+  init|config)
+    exit 0
+    ;;
+  *)
+    echo '[]'
+    ;;
+esac
+`, depLogPath, expectedWD, expectedWD)
+	writeRoutingBdStub(t, scriptBody)
+
+	// Override the entropy source for deterministic convoy IDs.
+	oldEntropy := convoyIDEntropy
+	convoyIDEntropy = strings.NewReader("abcde")
+	t.Cleanup(func() { convoyIDEntropy = oldEntropy })
+
+	_, err := captureConvoyStdoutErr(t, func() error {
+		return runConvoyCreate(nil, []string{"test-convoy", "mo-2sh.1"})
+	})
+	if err != nil {
+		t.Fatalf("runConvoyCreate: %v", err)
+	}
+
+	// Verify dep add was called from the town root
+	logData, err := os.ReadFile(depLogPath)
+	if err != nil {
+		t.Fatalf("dep add was never called (no log file): %v", err)
+	}
+	logged := strings.TrimSpace(string(logData))
+	if logged != expectedWD {
+		t.Errorf("dep add ran from %q, want town root %q", logged, expectedWD)
+	}
+}
