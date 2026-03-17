@@ -23,10 +23,9 @@ var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 // DefaultDatabases is the static fallback list of known production databases.
 // Used only when SHOW DATABASES fails (server unreachable).
-// GH#2385: Removed legacy "gt" name — modern towns use "hq" (town beads) and
-// rig-specific names. The "gt" database no longer exists in most installations
-// and its presence in the fallback caused false "database not found" errors.
-var DefaultDatabases = []string{"hq", "bd"}
+// The production databases are: hq (town beads), gt (gastown rig beads),
+// mo (monorepo rig beads).
+var DefaultDatabases = []string{"hq", "gt", "mo"}
 
 // testPollutionPrefixes are database name prefixes created by tests.
 var testPollutionPrefixes = []string{"testdb_", "beads_t", "beads_pt", "doctest_"}
