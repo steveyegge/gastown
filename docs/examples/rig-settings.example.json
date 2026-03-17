@@ -37,6 +37,10 @@
         "lint_command": "golangci-lint run",
         "setup_command": "",
         "typecheck_command": "",
+        "pre_merge_checks": {
+            "build": {"cmd": "go build ./...", "timeout": "2m"},
+            "imports": {"cmd": "go vet ./...", "timeout": "1m"}
+        },
         "delete_merged_branches": true,
         "retry_flaky_tests": 1,
         "poll_interval": "30s",

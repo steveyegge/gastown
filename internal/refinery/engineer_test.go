@@ -839,3 +839,181 @@ func TestIsClaimStale(t *testing.T) {
 		})
 	}
 }
+
+func TestRunPreMergeChecks_AllPass(t *testing.T) {
+	r := &rig.Rig{Name: "test-rig", Path: t.TempDir()}
+	e := NewEngineer(r)
+	e.workDir = t.TempDir()
+	e.output = io.Discard
+	e.config.PreMergeChecks = map[string]*GateConfig{
+		"check-a": {Cmd: "true"},
+		"check-b": {Cmd: "true"},
+	}
+
+	result := e.runPreMergeChecks(context.Background())
+	if !result.Success {
+		t.Errorf("expected success, got error: %s", result.Error)
+	}
+}
+
+func TestRunPreMergeChecks_FailureStopsExecution(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("gate commands run via sh -c; touch with Windows paths breaks under MSYS2 shell")
+	}
+	r := &rig.Rig{Name: "test-rig", Path: t.TempDir()}
+	e := NewEngineer(r)
+	e.workDir = t.TempDir()
+	e.output = io.Discard
+
+	markerDir := t.TempDir()
+	e.config.PreMergeChecks = map[string]*GateConfig{
+		"a_pass": {Cmd: fmt.Sprintf("touch %s/a", markerDir)},
+		"b_fail": {Cmd: "exit 1"},
+		"c_skip": {Cmd: fmt.Sprintf("touch %s/c", markerDir)},
+	}
+
+	result := e.runPreMergeChecks(context.Background())
+	if result.Success {
+		t.Error("expected failure")
+	}
+	if !result.PreMergeCheckFailed {
+		t.Error("expected PreMergeCheckFailed to be true")
+	}
+	if !strings.Contains(result.Error, "b_fail") {
+		t.Errorf("expected error to mention 'b_fail', got: %s", result.Error)
+	}
+
+	// Gate "a_pass" should have run
+	if _, err := os.Stat(filepath.Join(markerDir, "a")); os.IsNotExist(err) {
+		t.Error("check 'a_pass' should have run")
+	}
+	// Gate "c_skip" should NOT have run (stopped after b_fail)
+	if _, err := os.Stat(filepath.Join(markerDir, "c")); !os.IsNotExist(err) {
+		t.Error("check 'c_skip' should not have run after failure")
+	}
+}
+
+func TestRunPreMergeChecks_Empty(t *testing.T) {
+	r := &rig.Rig{Name: "test-rig", Path: t.TempDir()}
+	e := NewEngineer(r)
+	e.workDir = t.TempDir()
+	e.output = io.Discard
+	e.config.PreMergeChecks = nil
+
+	result := e.runPreMergeChecks(context.Background())
+	if !result.Success {
+		t.Error("expected success with no pre-merge checks configured")
+	}
+}
+
+func TestRunPreMergeChecks_WithTimeout(t *testing.T) {
+	r := &rig.Rig{Name: "test-rig", Path: t.TempDir()}
+	e := NewEngineer(r)
+	e.workDir = t.TempDir()
+	e.output = io.Discard
+	e.config.PreMergeChecks = map[string]*GateConfig{
+		"slow": {Cmd: "sleep 10", Timeout: 100 * time.Millisecond},
+	}
+
+	result := e.runPreMergeChecks(context.Background())
+	if result.Success {
+		t.Error("expected timeout failure")
+	}
+	if !result.PreMergeCheckFailed {
+		t.Error("expected PreMergeCheckFailed to be true")
+	}
+	if !strings.Contains(result.Error, "timed out") {
+		t.Errorf("expected timeout error, got: %s", result.Error)
+	}
+}
+
+func TestEngineer_LoadConfig_WithPreMergeChecks(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "engineer-premerge-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	config := map[string]interface{}{
+		"merge_queue": map[string]interface{}{
+			"pre_merge_checks": map[string]interface{}{
+				"boot": map[string]interface{}{
+					"cmd":     "python -c 'from app import create_app; create_app()'",
+					"timeout": "30s",
+				},
+				"imports": map[string]interface{}{
+					"cmd": "python -m compileall src/",
+				},
+			},
+		},
+	}
+
+	data, _ := json.MarshalIndent(config, "", "  ")
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{Name: "test-rig", Path: tmpDir}
+	e := NewEngineer(r)
+
+	if err := e.LoadConfig(); err != nil {
+		t.Fatalf("unexpected error loading config: %v", err)
+	}
+
+	if len(e.config.PreMergeChecks) != 2 {
+		t.Fatalf("expected 2 pre-merge checks, got %d", len(e.config.PreMergeChecks))
+	}
+	if e.config.PreMergeChecks["boot"].Cmd != "python -c 'from app import create_app; create_app()'" {
+		t.Errorf("expected boot check cmd, got %q", e.config.PreMergeChecks["boot"].Cmd)
+	}
+	if e.config.PreMergeChecks["boot"].Timeout != 30*time.Second {
+		t.Errorf("expected boot timeout 30s, got %v", e.config.PreMergeChecks["boot"].Timeout)
+	}
+	if e.config.PreMergeChecks["imports"].Timeout != 0 {
+		t.Errorf("expected imports timeout 0 (no timeout), got %v", e.config.PreMergeChecks["imports"].Timeout)
+	}
+}
+
+func TestEngineer_LoadConfig_PreMergeCheckInvalidTimeout(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "engineer-premerge-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tests := []struct {
+		name    string
+		timeout string
+	}{
+		{"not a duration", "not-a-duration"},
+		{"negative", "-5m"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := map[string]interface{}{
+				"merge_queue": map[string]interface{}{
+					"pre_merge_checks": map[string]interface{}{
+						"bad": map[string]interface{}{
+							"cmd":     "echo test",
+							"timeout": tt.timeout,
+						},
+					},
+				},
+			}
+
+			data, _ := json.MarshalIndent(config, "", "  ")
+			if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), data, 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			r := &rig.Rig{Name: "test-rig", Path: tmpDir}
+			e := NewEngineer(r)
+
+			err := e.LoadConfig()
+			if err == nil {
+				t.Errorf("expected error for pre_merge_check timeout %q", tt.timeout)
+			}
+		})
+	}
+}

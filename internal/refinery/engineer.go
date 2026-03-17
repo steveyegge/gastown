@@ -124,6 +124,13 @@ type MergeQueueConfig struct {
 	// before escalation to Mayor.
 	MaxRetryCount int `json:"max_retry_count"`
 
+	// PreMergeChecks defines commands to run on the merged result before pushing.
+	// Unlike Gates (which run before merge on the target branch), PreMergeChecks
+	// validate the actual squash-merged code. This catches issues like broken
+	// imports, boot failures, and missing templates that only manifest in the
+	// combined result. Each check uses the same GateConfig format as Gates.
+	PreMergeChecks map[string]*GateConfig `json:"pre_merge_checks"`
+
 	// Batch holds configuration for the batch-then-bisect merge queue.
 	// When nil or MaxBatchSize <= 1, batching is disabled and MRs process sequentially.
 	Batch *BatchConfig `json:"batch,omitempty"`
@@ -298,6 +305,7 @@ func (e *Engineer) LoadConfig() error {
 		StaleClaimTimeout    *string                    `json:"stale_claim_timeout"`
 		Gates                map[string]*gateConfigRaw  `json:"gates"`
 		GatesParallel        *bool                      `json:"gates_parallel"`
+		PreMergeChecks       map[string]*gateConfigRaw  `json:"pre_merge_checks"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -366,6 +374,25 @@ func (e *Engineer) LoadConfig() error {
 		e.config.GatesParallel = *mqRaw.GatesParallel
 	}
 
+	// Parse pre-merge checks configuration
+	if mqRaw.PreMergeChecks != nil {
+		e.config.PreMergeChecks = make(map[string]*GateConfig, len(mqRaw.PreMergeChecks))
+		for name, raw := range mqRaw.PreMergeChecks {
+			gc := &GateConfig{Cmd: raw.Cmd}
+			if raw.Timeout != "" {
+				dur, err := time.ParseDuration(raw.Timeout)
+				if err != nil {
+					return fmt.Errorf("invalid timeout for pre_merge_check %q: %w", name, err)
+				}
+				if dur <= 0 {
+					return fmt.Errorf("pre_merge_check %q timeout must be positive, got %v", name, dur)
+				}
+				gc.Timeout = dur
+			}
+			e.config.PreMergeChecks[name] = gc
+		}
+	}
+
 	return nil
 }
 
@@ -383,13 +410,14 @@ func (e *Engineer) Config() *MergeQueueConfig {
 
 // ProcessResult contains the result of processing a merge request.
 type ProcessResult struct {
-	Success        bool
-	MergeCommit    string
-	Error          string
-	Conflict       bool
-	TestsFailed    bool
-	SlotTimeout    bool // Merge slot contention timeout (distinct from build/test failure)
-	BranchNotFound bool // Source branch no longer exists (e.g. cleaned up after cherry-pick)
+	Success             bool
+	MergeCommit         string
+	Error               string
+	Conflict            bool
+	TestsFailed         bool
+	PreMergeCheckFailed bool // Pre-merge validation failed on the merged result
+	SlotTimeout         bool // Merge slot contention timeout (distinct from build/test failure)
+	BranchNotFound      bool // Source branch no longer exists (e.g. cleaned up after cherry-pick)
 }
 
 // doMerge performs the actual git merge operation.
@@ -544,6 +572,20 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		return ProcessResult{
 			Success: false,
 			Error:   fmt.Sprintf("merge failed: %v", err),
+		}
+	}
+
+	// Step 5.5: Run pre-merge checks on the merged result.
+	// These validate the actual combined code before it goes anywhere.
+	// If any check fails, reset the merge and reject.
+	if !shouldSkipGates && len(e.config.PreMergeChecks) > 0 {
+		pmResult := e.runPreMergeChecks(ctx)
+		if !pmResult.Success {
+			// Reset the target branch to undo the local squash commit
+			if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after pre-merge check failure: %v\n", target, resetErr)
+			}
+			return pmResult
 		}
 	}
 
@@ -850,6 +892,45 @@ func (e *Engineer) runGates(ctx context.Context) ProcessResult {
 	return ProcessResult{Success: true}
 }
 
+// runPreMergeChecks executes configured pre-merge validation checks on the
+// merged result. These run after the squash merge but before pushing, so they
+// validate the actual combined code. Uses the same gate infrastructure as
+// quality gates. Checks always run sequentially since they validate a single
+// merged state and early termination on failure saves time.
+func (e *Engineer) runPreMergeChecks(ctx context.Context) ProcessResult {
+	checks := e.config.PreMergeChecks
+	if len(checks) == 0 {
+		return ProcessResult{Success: true}
+	}
+
+	// Sort check names for deterministic ordering
+	names := make([]string, 0, len(checks))
+	for name := range checks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Running %d pre-merge check(s) on merged result\n", len(names))
+
+	for _, name := range names {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Pre-merge check %q: starting (%s)\n", name, checks[name].Cmd)
+		result := e.runGate(ctx, name, checks[name])
+		if result.Success {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Pre-merge check %q: passed (%v)\n", result.Name, result.Elapsed.Truncate(time.Millisecond))
+		} else {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Pre-merge check %q: FAILED (%v) - %s\n", result.Name, result.Elapsed.Truncate(time.Millisecond), result.Error)
+			return ProcessResult{
+				Success:             false,
+				PreMergeCheckFailed: true,
+				Error:               fmt.Sprintf("pre-merge check %q failed: %s", name, result.Error),
+			}
+		}
+	}
+
+	_, _ = fmt.Fprintln(e.output, "[Engineer] All pre-merge checks passed")
+	return ProcessResult{Success: true}
+}
+
 // syncCrewWorkspaces pulls latest changes to all crew workspaces.
 // This ensures crew members have access to newly merged code without manual sync.
 func (e *Engineer) syncCrewWorkspaces() {
@@ -1050,6 +1131,8 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 	failureType := "build"
 	if result.Conflict {
 		failureType = "conflict"
+	} else if result.PreMergeCheckFailed {
+		failureType = "pre_merge_check"
 	} else if result.TestsFailed {
 		failureType = "tests"
 	}
