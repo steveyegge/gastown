@@ -756,6 +756,12 @@ func (m *Manager) addWithOptionsLocked(name string, opts AddOptions, polecatDir 
 	}
 	worktreeCreated = true
 
+	// Provision CLAUDE.md with gt done instructions (same as AddWithOptions path).
+	lockedRigName := filepath.Base(m.rig.Path)
+	if _, err := templates.CreatePolecatCLAUDEmd(clonePath, lockedRigName, name); err != nil {
+		style.PrintWarning("could not provision polecat CLAUDE.md: %v", err)
+	}
+
 	if err := m.setupSharedBeads(clonePath); err != nil {
 		cleanupOnError()
 		return nil, fmt.Errorf("setting up shared beads: %w (polecat cannot submit MRs without shared beads)", err)
@@ -1585,6 +1591,15 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 	// be overwritten" errors when the start point has different file content.
 	_ = polecatGit.ResetHard(startPoint)
 	_ = polecatGit.CleanForce()
+
+	// Re-provision CLAUDE.md after reset — git reset --hard restores the tracked
+	// version (which lacks gt done instructions), and git clean -f removes any
+	// untracked CLAUDE.md we previously wrote. Without this, reused polecats
+	// lose all lifecycle instructions and never call gt done.
+	reuseRigName := filepath.Base(m.rig.Path)
+	if _, err := templates.CreatePolecatCLAUDEmd(clonePath, reuseRigName, name); err != nil {
+		style.PrintWarning("could not re-provision polecat CLAUDE.md on reuse: %v", err)
+	}
 
 	// Create fresh branch from start point (branch-only, no worktree add/remove)
 	branchName := m.buildBranchName(name, opts.HookBead)
