@@ -61,6 +61,7 @@ var agentAllowlist = map[string][]string{
 	"polecat": {
 		"?? .claude/",   // bd init: creates .claude/commands/ with handoff/review slash commands
 		"?? .gitignore", // EnsureGitignorePatterns: adds .claude/, .runtime/, .logs/, __pycache__/ patterns
+		"?? CLAUDE.md",  // CreatePolecatCLAUDEmd: gt done instructions and lifecycle context
 	},
 }
 
@@ -1117,7 +1118,7 @@ func TestAgentBeadIDs(t *testing.T) {
 // Known issues this test catches:
 // - Extra files in .beads/ beyond redirect (e.g., PRIME.md, databases)
 // - AGENTS.md being copied/created in worktrees
-// - CLAUDE.md being created in worktrees
+// - CLAUDE.md being created in non-polecat worktrees (polecats need it for gt done)
 // - Any other Gas Town artifacts polluting the repo
 //
 // Tests two scenarios:
