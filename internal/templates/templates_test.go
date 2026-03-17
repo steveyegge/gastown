@@ -2,6 +2,8 @@ package templates
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -533,5 +535,77 @@ func TestRoleNames(t *testing.T) {
 		if name != expected[i] {
 			t.Errorf("RoleNames()[%d] = %q, want %q", i, name, expected[i])
 		}
+	}
+}
+
+func TestCreatePolecatCLAUDEmd(t *testing.T) {
+	dir := t.TempDir()
+
+	created, err := CreatePolecatCLAUDEmd(dir, "greenplace", "furiosa")
+	if err != nil {
+		t.Fatalf("CreatePolecatCLAUDEmd() error = %v", err)
+	}
+	if !created {
+		t.Fatal("CreatePolecatCLAUDEmd() created = false, want true")
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md: %v", err)
+	}
+	content := string(data)
+
+	// Verify placeholders were replaced
+	if strings.Contains(content, "{{rig}}") {
+		t.Error("CLAUDE.md still contains {{rig}} placeholder")
+	}
+	if strings.Contains(content, "{{name}}") {
+		t.Error("CLAUDE.md still contains {{name}} placeholder")
+	}
+
+	// Verify substituted values are present
+	if !strings.Contains(content, "greenplace") {
+		t.Error("CLAUDE.md does not contain rig name 'greenplace'")
+	}
+	if !strings.Contains(content, "furiosa") {
+		t.Error("CLAUDE.md does not contain polecat name 'furiosa'")
+	}
+
+	// Verify critical gt done instructions are present
+	if !strings.Contains(content, "gt done") {
+		t.Fatal("CLAUDE.md does not contain 'gt done' — polecats will not know to call it")
+	}
+	if !strings.Contains(content, "IDLE POLECAT HERESY") {
+		t.Error("CLAUDE.md missing 'IDLE POLECAT HERESY' warning section")
+	}
+	if !strings.Contains(content, "MANDATORY FINAL STEP") {
+		t.Error("CLAUDE.md missing completion protocol with MANDATORY FINAL STEP")
+	}
+}
+
+func TestCreatePolecatCLAUDEmd_NoOverwrite(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write a pre-existing CLAUDE.md (user customization)
+	existing := "# Custom CLAUDE.md\nUser customizations here.\n"
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte(existing), 0644); err != nil {
+		t.Fatalf("writing existing CLAUDE.md: %v", err)
+	}
+
+	created, err := CreatePolecatCLAUDEmd(dir, "greenplace", "furiosa")
+	if err != nil {
+		t.Fatalf("CreatePolecatCLAUDEmd() error = %v", err)
+	}
+	if created {
+		t.Fatal("CreatePolecatCLAUDEmd() created = true, want false (should preserve existing)")
+	}
+
+	// Verify original content is preserved
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md: %v", err)
+	}
+	if string(data) != existing {
+		t.Fatalf("existing CLAUDE.md was overwritten: got %q", string(data))
 	}
 }
