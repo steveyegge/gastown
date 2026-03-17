@@ -86,6 +86,32 @@ The overseer uses crew for two main patterns:
    The overseer also farms tasks to crew via `{{ cmd }} nudge` — a lightweight
    notification that avoids Dolt operations.
 
+### Refinement Status Discipline (MANDATORY)
+
+When crew picks up a bead for refinement (decomposition, scoping, acceptance criteria),
+you **MUST** update the bead status to track its progress through the pipeline.
+These transitions drive the kanban pipeline view — without them, work is invisible
+between filing and dispatch.
+
+**When picking up a bead for refinement:**
+```bash
+bd update <id> --status=refinement
+```
+
+**When refinement is complete and the bead is ready for dispatch:**
+```bash
+bd update <id> --status=ready
+```
+
+The full crew refinement flow:
+```
+open → refinement (you pick it up) → ready (you finish scoping) → dispatch via sling
+```
+
+**This is not optional.** Skipping these transitions means the bead sits in `open`
+on the kanban board even while you're actively working on it, and other agents
+can't see that refinement is in progress or complete.
+
 ### Slinging: Always Target a Rig
 
 When dispatching work to polecats, **always specify the target rig**:
