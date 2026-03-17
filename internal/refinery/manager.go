@@ -321,6 +321,13 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 		if issue == nil || issue.Status != "open" {
 			continue
 		}
+
+		// Filter by rig — wisps are shared across all rigs (GH#2718).
+		fields := beads.ParseMRFields(issue)
+		if fields != nil && fields.Rig != "" && !strings.EqualFold(fields.Rig, m.rig.Name) {
+			continue
+		}
+
 		score := m.calculateIssueScore(issue, now)
 		scored = append(scored, scoredIssue{issue: issue, score: score})
 	}

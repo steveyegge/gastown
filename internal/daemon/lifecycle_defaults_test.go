@@ -137,12 +137,13 @@ func TestEnsureLifecycleDefaults_FullyConfigured(t *testing.T) {
 		Type:    "daemon-patrol-config",
 		Version: 1,
 		Patrols: &PatrolsConfig{
-			WispReaper:   &WispReaperConfig{Enabled: false},
-			CompactorDog: &CompactorDogConfig{Enabled: false},
-			DoctorDog:    &DoctorDogConfig{Enabled: false},
+			WispReaper:           &WispReaperConfig{Enabled: false},
+			CompactorDog:         &CompactorDogConfig{Enabled: false},
+			DoctorDog:            &DoctorDogConfig{Enabled: false},
 			JsonlGitBackup:       &JsonlGitBackupConfig{Enabled: false},
 			DoltBackup:           &DoltBackupConfig{Enabled: false},
 			ScheduledMaintenance: &ScheduledMaintenanceConfig{Enabled: false, Threshold: &threshold},
+			Handler:              &PatrolConfig{Enabled: false},
 		},
 	}
 

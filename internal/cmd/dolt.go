@@ -766,6 +766,8 @@ func runDoltSQL(cmd *cobra.Command, args []string) error {
 			"sql",
 		}
 		sqlCmd := exec.Command("dolt", sqlArgs...)
+		// GH#2537: Set cmd.Dir to prevent stray .doltcfg/privileges.db in CWD.
+		sqlCmd.Dir = config.DataDir
 		if config.Password != "" {
 			sqlCmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+config.Password)
 		}

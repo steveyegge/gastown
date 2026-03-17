@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 
@@ -143,6 +144,9 @@ func TestPollerAlive_LiveProcess(t *testing.T) {
 }
 
 func TestBuildPollerCommand_UsesDetachedProcessGroup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process group management is not supported on Windows")
+	}
 	townRoot := t.TempDir()
 	cmd := buildPollerCommand("/tmp/fake-gt", townRoot, "gt-gastown-crew-bear")
 
@@ -167,6 +171,9 @@ func TestBuildPollerCommand_UsesDetachedProcessGroup(t *testing.T) {
 }
 
 func TestSetProcessGroup_InstallsCancelHook(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SetProcessGroup is a no-op on Windows")
+	}
 	cmd := exec.Command("true")
 	util.SetProcessGroup(cmd)
 

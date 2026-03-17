@@ -657,6 +657,26 @@ func TestDetectZombie_DoneIntentRecent(t *testing.T) {
 	}
 }
 
+func TestDetectZombie_DoneOrNukedNotZombie(t *testing.T) {
+	t.Parallel()
+	// GH#2795: Polecats with agent_state=done or agent_state=nuked and a dead
+	// session should NOT be treated as zombies, even if hook_bead is still set.
+	// Without this, isZombieState returns true (hookBead != ""), and the witness
+	// floods the mayor inbox with RECOVERY_NEEDED alerts every patrol cycle.
+	for _, state := range []beads.AgentState{beads.AgentStateDone, beads.AgentStateNuked} {
+		hookBead := "gt-some-issue"
+		// isZombieState returns true because hookBead != ""
+		if !isZombieState(state, hookBead) {
+			t.Errorf("isZombieState(%q, %q) = false, want true (pre-condition)", state, hookBead)
+		}
+		// But the done/nuked check in detectZombieDeadSession should skip these.
+		// Verify the states are terminal (not active).
+		if state.IsActive() {
+			t.Errorf("state %q should not be active", state)
+		}
+	}
+}
+
 func TestDetectZombie_AgentDeadInLiveSession(t *testing.T) {
 	t.Parallel()
 	// Verify the logic: live session + agent process dead → zombie

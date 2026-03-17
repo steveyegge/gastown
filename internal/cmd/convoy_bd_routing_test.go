@@ -104,7 +104,7 @@ case "$*" in
     fi
     echo '[{"id":"hq-cv-town","title":"Town convoy","status":"open","created_at":"2026-03-09T00:00:00Z"}]'
     ;;
-  "dep list hq-cv-town --direction=down --type=tracks --json")
+  "dep list hq-cv-town --direction=down --type=tracks --allow-stale --json")
     if [ "$PWD" != "%s" ]; then
       echo "expected town root, got $PWD" >&2
       exit 1
@@ -172,7 +172,7 @@ case "$*" in
     fi
     echo '[{"id":"hq-cv-status","title":"Status convoy","status":"open","issue_type":"convoy","created_at":"2026-03-09T00:00:00Z","labels":[],"dependencies":[]}]'
     ;;
-  "dep list hq-cv-status --direction=down --type=tracks --json")
+  "dep list hq-cv-status --direction=down --type=tracks --allow-stale --json")
     if [ "$PWD" != "%s" ]; then
       echo "expected town root, got $PWD" >&2
       exit 1

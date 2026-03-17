@@ -400,14 +400,14 @@ func TestParsePluginMD_GitHubSheriff(t *testing.T) {
 	}
 }
 
-func TestParsePluginMD_SessionHygiene(t *testing.T) {
+func TestParsePluginMD_WithRunScript(t *testing.T) {
 	// Use a temp dir with a fixture plugin.md and run.sh so the test
 	// doesn't depend on the local filesystem layout (fails in CI).
 	pluginDir := t.TempDir()
 
 	pluginContent := []byte(`+++
-name = "session-hygiene"
-description = "Clean up zombie tmux sessions and orphaned dog sessions"
+name = "example-plugin"
+description = "Example plugin with run script and all features"
 version = 2
 
 [gate]
@@ -415,7 +415,7 @@ type = "cooldown"
 duration = "30m"
 
 [tracking]
-labels = ["plugin:session-hygiene", "category:cleanup"]
+labels = ["plugin:example-plugin", "category:cleanup"]
 digest = true
 
 [execution]
@@ -424,9 +424,9 @@ notify_on_failure = true
 severity = "low"
 +++
 
-# Session Hygiene
+# Example Plugin
 
-Deterministic cleanup of zombie tmux sessions and orphaned dog sessions.
+Deterministic cleanup plugin with run.sh script.
 `)
 
 	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.md"), pluginContent, 0644); err != nil {
@@ -452,11 +452,11 @@ Deterministic cleanup of zombie tmux sessions and orphaned dog sessions.
 		plugin.HasRunScript = true
 	}
 	if !plugin.HasRunScript {
-		t.Error("expected HasRunScript=true for session-hygiene (has run.sh)")
+		t.Error("expected HasRunScript=true for plugin with run.sh")
 	}
 
-	if plugin.Name != "session-hygiene" {
-		t.Errorf("expected name 'session-hygiene', got %q", plugin.Name)
+	if plugin.Name != "example-plugin" {
+		t.Errorf("expected name 'example-plugin', got %q", plugin.Name)
 	}
 	if plugin.Gate == nil {
 		t.Fatal("expected gate to be non-nil")

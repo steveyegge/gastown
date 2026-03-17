@@ -298,6 +298,17 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		}
 	}
 
+	// Suppress bd's Dolt auto-start for all Gas Town agents (GH#2930).
+	// Gas Town manages its own Dolt server (gt dolt start/stop). When the
+	// server is momentarily unreachable (restart, journal hiccup), bd's
+	// auto-start tries to launch a shadow server in the agent's .beads/dolt/
+	// directory — which conflicts with the real server on the same port and
+	// triggers an escalation flood loop. Dogs are especially affected because
+	// their kennel's .beads/ has no explicit dolt_server_port in metadata.json.
+	if cfg.TownRoot != "" {
+		env["BEADS_DOLT_AUTO_START"] = "0"
+	}
+
 	// Pass through cloud API credentials and provider configuration from the parent shell.
 	// Only variables explicitly listed here are forwarded; all others are blocked for isolation.
 	for _, key := range []string{

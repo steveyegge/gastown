@@ -242,6 +242,13 @@ func runPrimeCompactResume(ctx RoleContext) {
 	fmt.Println("\n---")
 	fmt.Println()
 	fmt.Println("**Continue your current task.** If you've lost context, run `gt prime` for full reload.")
+
+	// Remind polecats about gt done — after compaction the agent may have lost
+	// the formula checklist and forgotten that gt done is required to submit work.
+	// Without this, polecats finish implementation and sit at the prompt forever.
+	if ctx.Role == RolePolecat {
+		fmt.Printf("\n**IMPORTANT**: When all work is complete (code committed, tests pass), run `%s done` to submit to the merge queue.\n", cli.Name())
+	}
 }
 
 // validatePrimeFlags checks that CLI flag combinations are valid.
@@ -581,9 +588,10 @@ func findAgentWork(ctx RoleContext) (*beads.Issue, error) {
 		return nil, nil
 	}
 
-	// Polecats and crew use a retry loop to handle the timing race where
-	// the hook write (status=hooked + assignee) hasn't propagated to new
-	// Dolt connections by the time gt prime runs on session startup.
+	// Polecats, crew, and dogs use a retry loop to handle the timing race
+	// where the hook write (status=hooked + assignee) hasn't propagated to
+	// new Dolt connections by the time gt prime runs on session startup.
+	// Dogs are especially affected since dispatch is fire-and-forget. (GH#2748)
 	// Uses exponential backoff: 500ms, 1s, 2s, 4s, 8s (total ~15.5s max).
 	// See: https://github.com/steveyegge/gastown/issues/2389
 	//
@@ -591,7 +599,7 @@ func findAgentWork(ctx RoleContext) (*beads.Issue, error) {
 	// A single attempt suffices — retries would add ~15s of latency to
 	// compaction hooks, causing non-Claude runtimes to report hook failure.
 	maxAttempts := 1
-	if (ctx.Role == RolePolecat || ctx.Role == RoleCrew) && !isCompactResume() {
+	if (ctx.Role == RolePolecat || ctx.Role == RoleCrew || ctx.Role == RoleDog) && !isCompactResume() {
 		maxAttempts = 5
 	}
 
@@ -801,8 +809,9 @@ func outputMoleculeWorkflow(ctx RoleContext, attachment *beads.AttachmentFields)
 	if attachment.AttachedFormula != "" {
 		showFormulaStepsFull(attachment.AttachedFormula, strings.Split(attachment.FormulaVars, "\n"))
 		fmt.Println()
-		fmt.Printf("%s\n", style.Bold.Render("Work through the checklist above. When all steps complete, run `"+cli.Name()+" done`."))
+		fmt.Printf("%s\n", style.Bold.Render("Work through ALL steps above, including submit and cleanup."))
 		fmt.Println("The base bead is your assignment. The formula steps define your workflow.")
+		fmt.Printf("\n%s\n", style.Bold.Render("REQUIRED: When all steps complete, run `"+cli.Name()+" done` to submit to the merge queue. Do NOT stop after implementation — the formula has submit steps you must follow."))
 		return
 	}
 
@@ -813,44 +822,40 @@ func outputMoleculeWorkflow(ctx RoleContext, attachment *beads.AttachmentFields)
 	fmt.Println("The base bead is just a container. The molecule steps define your workflow.")
 }
 
-// outputRalphLoopDirective emits the Ralph Wiggum loop command for ralphcat mode.
-// The agent sees this and runs the slash command, activating the Ralph plugin's
-// stop hook loop. Each iteration gets a fresh context window while preserving
-// artifacts on disk via git.
+// outputRalphLoopDirective emits inline iterative work instructions for ralph mode.
+// Ralph mode is designed for long, iterative workflows (e.g., quality improvement
+// loops) that benefit from committing progress incrementally. The agent works
+// through formula steps iteratively, committing after each meaningful change,
+// and calls gt done when all acceptance criteria are met or no further progress
+// can be made.
 func outputRalphLoopDirective(_ RoleContext, attachment *beads.AttachmentFields) {
-	fmt.Printf("%s\n\n", style.Bold.Render("## 🐱 RALPH LOOP MODE (RALPHCAT)"))
-	fmt.Println("This work uses Ralph Wiggum loop mode for multi-step execution.")
-	fmt.Println("Each step runs in a fresh context window to avoid context exhaustion.")
+	fmt.Printf("%s\n\n", style.Bold.Render("## RALPH LOOP MODE (ITERATIVE WORKFLOW)"))
+	fmt.Println("This work uses iterative loop mode. Work through the steps below,")
+	fmt.Println("committing after each meaningful change. Loop until acceptance criteria")
+	fmt.Println("are met or no further progress can be made.")
 	fmt.Println()
 
-	// Build the ralph prompt from the molecule steps
-	prompt := buildRalphPromptFromMolecule(attachment)
-
-	fmt.Printf("Run this command NOW:\n\n")
-	fmt.Printf("```\n/ralph-loop \"%s\" --max-iterations 20 --completion-phrase \"POLECAT_DONE\"\n```\n\n",
-		strings.ReplaceAll(prompt, "\"", "\\\""))
-
-	fmt.Println("The Ralph loop will:")
-	fmt.Println("1. Execute each step in a fresh context")
-	fmt.Println("2. Preserve work via git commits between steps")
-	fmt.Println("3. Stop when POLECAT_DONE is output or max iterations reached")
-	fmt.Println()
-	fmt.Printf("%s\n", style.Bold.Render("⚠️  Run the /ralph-loop command above. Do NOT work step-by-step manually."))
-}
-
-// buildRalphPromptFromMolecule constructs the Ralph loop prompt text from molecule steps.
-func buildRalphPromptFromMolecule(attachment *beads.AttachmentFields) string {
-	var b strings.Builder
-	b.WriteString("Execute the attached molecule workflow. ")
-	if len(attachment.AttachedVars) > 0 {
-		b.WriteString("Formula vars: " + strings.Join(attachment.AttachedVars, ", ") + ". ")
+	// Show the formula steps inline (same as normal mode) so the agent has
+	// the full checklist. Previously this emitted a /ralph-loop slash command
+	// that didn't exist, causing the polecat to die immediately.
+	if attachment.AttachedFormula != "" {
+		showFormulaStepsFull(attachment.AttachedFormula, strings.Split(attachment.FormulaVars, "\n"))
+		fmt.Println()
 	}
+
 	if attachment.AttachedArgs != "" {
-		b.WriteString("Context: " + attachment.AttachedArgs + ". ")
+		fmt.Printf("%s\n", style.Bold.Render("Context:"))
+		fmt.Printf("  %s\n\n", attachment.AttachedArgs)
 	}
-	b.WriteString("Work through steps in order, committing after each. ")
-	b.WriteString("When all steps complete, output POLECAT_DONE.")
-	return b.String()
+
+	fmt.Printf("%s\n", style.Bold.Render("Iterative workflow:"))
+	fmt.Println("1. Work through the formula steps above")
+	fmt.Println("2. Commit after each meaningful change (preserve progress via git)")
+	fmt.Println("3. After completing a pass, evaluate results against acceptance criteria")
+	fmt.Println("4. If criteria not met, loop: identify the worst gap, fix it, commit, re-evaluate")
+	fmt.Println("5. When all criteria are met (or no further progress possible), run `" + cli.Name() + " done`")
+	fmt.Println()
+	fmt.Printf("%s\n", style.Bold.Render("Commit frequently. Each commit preserves your progress."))
 }
 
 // outputBeadPreview runs `bd show` and displays a truncated preview of the bead.

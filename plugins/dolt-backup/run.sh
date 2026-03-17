@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# dolt-backup/run.sh — Deterministic Dolt database backup.
+#
+# Syncs production databases to filesystem backups via `dolt backup sync`.
+# Skips databases that haven't changed since last backup (hash check).
+# Only escalates when actual backup operations fail — not on ping failures.
+#
+# Usage: ./run.sh [--databases db1,db2,...] [--dry-run]
+
+set -euo pipefail
+
+# --- Configuration -----------------------------------------------------------
+
+DOLT_DATA_DIR="${DOLT_DATA_DIR:-$HOME/gt/.dolt-data}"
+BACKUP_DIR="${DOLT_BACKUP_DIR:-$HOME/gt/.dolt-backup}"
+PROD_DBS=("hq" "bd" "gt")
+BACKUP_TIMEOUT=60
+
+# --- Argument parsing ---------------------------------------------------------
+
+DRY_RUN=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --databases) IFS=',' read -ra PROD_DBS <<< "$2"; shift 2 ;;
+    --dry-run)   DRY_RUN=true; shift ;;
+    --help|-h)
+      echo "Usage: $0 [--databases db1,db2,...] [--dry-run]"
+      exit 0
+      ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
+
+# --- Helpers ------------------------------------------------------------------
+
+log() {
+  echo "[dolt-backup] $*"
+}
+
+# --- Step 1: Backup each database ---------------------------------------------
+
+SYNCED=0
+SKIPPED=0
+FAILED=0
+FAILED_DBS=""
+
+for DB in "${PROD_DBS[@]}"; do
+  DB_DIR="$DOLT_DATA_DIR/$DB"
+  BACKUP_NAME="${DB}-backup"
+  HASH_FILE="$BACKUP_DIR/${DB}/.last-backup-hash"
+
+  # Check DB dir exists
+  if [[ ! -d "$DB_DIR/.dolt" ]]; then
+    log "  $DB: no .dolt directory, skipping"
+    FAILED=$((FAILED + 1))
+    FAILED_DBS="$FAILED_DBS $DB(no-dir)"
+    continue
+  fi
+
+  # Get current HEAD hash
+  CURRENT_HASH=$(cd "$DB_DIR" && dolt log -n 1 --oneline 2>/dev/null | head -1 | cut -d' ' -f1 || true)
+  if [[ -z "$CURRENT_HASH" ]]; then
+    log "  $DB: could not get HEAD hash, will sync anyway"
+    CURRENT_HASH="unknown"
+  fi
+
+  # Check last backed-up hash
+  LAST_HASH=""
+  if [[ -f "$HASH_FILE" ]]; then
+    LAST_HASH=$(cat "$HASH_FILE")
+  fi
+
+  if [[ "$CURRENT_HASH" = "$LAST_HASH" ]] && [[ "$CURRENT_HASH" != "unknown" ]]; then
+    log "  $DB: unchanged ($CURRENT_HASH), skipping"
+    SKIPPED=$((SKIPPED + 1))
+    continue
+  fi
+
+  if $DRY_RUN; then
+    log "  $DB: DRY RUN would sync ($LAST_HASH -> $CURRENT_HASH)"
+    SYNCED=$((SYNCED + 1))
+    continue
+  fi
+
+  # Sync backup with timeout
+  log "  $DB: syncing ($LAST_HASH -> $CURRENT_HASH)..."
+  SYNC_START=$(date +%s)
+
+  SYNC_OUTPUT=$(cd "$DB_DIR" && timeout "$BACKUP_TIMEOUT" dolt backup sync "$BACKUP_NAME" 2>&1) || true
+  SYNC_RC=${PIPESTATUS[0]:-$?}
+  SYNC_ELAPSED=$(( $(date +%s) - SYNC_START ))
+
+  if [[ $SYNC_RC -eq 0 ]]; then
+    # Record the hash we just backed up
+    mkdir -p "$(dirname "$HASH_FILE")"
+    echo "$CURRENT_HASH" > "$HASH_FILE"
+
+    DB_SIZE=$(du -sh "$BACKUP_DIR/$DB" 2>/dev/null | cut -f1 || echo "?")
+    SYNCED=$((SYNCED + 1))
+    log "  $DB: synced in ${SYNC_ELAPSED}s ($DB_SIZE)"
+  elif [[ $SYNC_RC -eq 124 ]]; then
+    FAILED=$((FAILED + 1))
+    FAILED_DBS="$FAILED_DBS $DB(timeout)"
+    log "  $DB: TIMEOUT after ${BACKUP_TIMEOUT}s"
+  else
+    FAILED=$((FAILED + 1))
+    FAILED_DBS="$FAILED_DBS $DB(exit-$SYNC_RC)"
+    log "  $DB: FAILED (exit $SYNC_RC): $SYNC_OUTPUT"
+  fi
+done
+
+# --- Step 2: Report results ---------------------------------------------------
+
+SUMMARY="Backup: $SYNCED synced, $SKIPPED unchanged, $FAILED failed (of ${#PROD_DBS[@]} DBs)"
+log "$SUMMARY"
+
+# --- Step 3: Record result and escalate if needed -----------------------------
+
+if [[ "$FAILED" -eq 0 ]]; then
+  # Success — record quietly
+  bd create --title "dolt-backup: $SUMMARY" -t chore --ephemeral \
+    -l type:plugin-run,plugin:dolt-backup,result:success \
+    -d "$SUMMARY" --silent 2>/dev/null || true
+else
+  # Failure — record and escalate
+  FAIL_MSG="$SUMMARY. Failed:$FAILED_DBS"
+  bd create --title "dolt-backup: FAILED - $FAIL_MSG" -t chore --ephemeral \
+    -l type:plugin-run,plugin:dolt-backup,result:failure \
+    -d "$FAIL_MSG" --silent 2>/dev/null || true
+
+  gt escalate "dolt-backup FAILED: $FAIL_MSG" \
+    --severity high \
+    --reason "$FAIL_MSG" 2>/dev/null || true
+
+  exit 1
+fi

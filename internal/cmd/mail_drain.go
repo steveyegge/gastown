@@ -62,6 +62,7 @@ func init() {
 // bulk-archive. These are routine notifications that don't require individual
 // attention once the information is stale.
 var drainableSubjects = []string{
+	"CRASHED_POLECAT",
 	"POLECAT_DONE",
 	"POLECAT_STARTED",
 	"LIFECYCLE:",

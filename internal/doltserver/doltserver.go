@@ -381,8 +381,9 @@ func buildDoltSQLCmd(ctx context.Context, config *Config, args ...string) *exec.
 
 	cmd := exec.CommandContext(ctx, "dolt", fullArgs...)
 
-	// Always set cmd.Dir to DataDir — even for remote connections (GH#2537).
-	// Without this, dolt auto-creates .doltcfg/privileges.db in $CWD.
+	// GH#2537: Always set cmd.Dir to prevent dolt from creating stray
+	// .doltcfg/privileges.db files in the caller's CWD. Even TCP client
+	// connections can trigger .doltcfg creation if CWD is uncontrolled.
 	cmd.Dir = config.DataDir
 
 	if config.IsRemote() && config.Password != "" {
@@ -1240,7 +1241,7 @@ listener:
 data_dir: "%s"
 
 behavior:
-  dolt_transaction_commit: true
+  dolt_transaction_commit: false
   auto_gc_behavior:
     enable: true
     archive_level: 1
@@ -3128,8 +3129,9 @@ func GetActiveConnectionCount(townRoot string) (int, error) {
 		"-q", "SELECT COUNT(*) AS cnt FROM information_schema.PROCESSLIST",
 	}
 	cmd := exec.CommandContext(ctx, "dolt", fullArgs...)
-	// Run from the data dir to prevent dolt from creating stray .doltcfg/
-	// in the process CWD (GH#2537).
+	// GH#2537: Set cmd.Dir to the server's data directory to prevent dolt from
+	// creating stray .doltcfg/privileges.db files in the caller's CWD. Even in
+	// TCP client mode, dolt may auto-create .doltcfg/ in the working directory.
 	cmd.Dir = config.DataDir
 	// Always set DOLT_CLI_PASSWORD to prevent interactive password prompt.
 	// When empty, dolt connects without a password (which is the default for local servers).
