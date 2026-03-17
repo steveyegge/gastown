@@ -282,6 +282,12 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  %s Rebase executed successfully\n", style.Bold.Render("✓"))
 
 	// Step 7: Verify integrity — row counts must match pre-flight.
+	// Re-establish database context after rebase — Dolt's information_schema
+	// is branch-aware and rebase may leave session in an ambiguous state.
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("USE `%s`", dbName)); err != nil {
+		fmt.Printf("  %s WARNING: could not re-select database after rebase: %v\n",
+			style.Bold.Render("!"), err)
+	}
 	postCounts, err := flattenGetRowCounts(db, dbName)
 	if err != nil {
 		// Rebase succeeded but we can't verify — this is concerning.
@@ -292,9 +298,17 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 		for table, preCount := range preCounts {
 			postCount, ok := postCounts[table]
 			if !ok {
-				// Abort — don't swap branches with missing tables.
-				rebaseCleanupAll(db, baseBranch, workBranch)
-				return fmt.Errorf("integrity FAIL: table %q missing after rebase", table)
+				// Table not listed in information_schema — try querying it directly.
+				// Dolt's information_schema can be stale after rebase operations.
+				var directCount int
+				directErr := db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `%s`.`%s`", dbName, table)).Scan(&directCount)
+				if directErr != nil {
+					rebaseCleanupAll(db, baseBranch, workBranch)
+					return fmt.Errorf("integrity FAIL: table %q missing after rebase (not in information_schema, direct query failed: %w)", table, directErr)
+				}
+				postCount = directCount
+				fmt.Printf("  %s Table %q not in information_schema but exists (direct count: %d)\n",
+					style.Bold.Render("!"), table, directCount)
 			}
 			if preCount != postCount {
 				rebaseCleanupAll(db, baseBranch, workBranch)
