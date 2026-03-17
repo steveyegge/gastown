@@ -437,11 +437,13 @@ func (d *Daemon) surgicalRebaseOnce(dbName string, keepRecent int) error {
 	d.logger.Printf("compactor_dog: %s: interactive rebase started", dbName)
 
 	// Step 4: Read rebase plan bounds and mark old commits as squash.
-	var minOrder, maxOrder int
-	if err := db.QueryRowContext(ctx, "SELECT MIN(rebase_order), MAX(rebase_order) FROM dolt_rebase").Scan(&minOrder, &maxOrder); err != nil {
+	// Dolt returns MIN/MAX as decimal strings (e.g. "1.00"), so scan as float64 then cast.
+	var minOrderF, maxOrderF float64
+	if err := db.QueryRowContext(ctx, "SELECT MIN(rebase_order), MAX(rebase_order) FROM dolt_rebase").Scan(&minOrderF, &maxOrderF); err != nil {
 		d.surgicalAbortAndCleanup(db, baseBranch, workBranch)
 		return fmt.Errorf("read rebase bounds: %w", err)
 	}
+	minOrder, maxOrder := int(minOrderF), int(maxOrderF)
 
 	squashThreshold := maxOrder - keepRecent
 	if squashThreshold <= minOrder {
