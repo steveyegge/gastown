@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestFindRemote_NoRemote verifies FindRemote returns empty when no remote is configured.
@@ -48,7 +49,7 @@ func TestSyncDatabases_EmptyDir(t *testing.T) {
 
 // TestSyncDatabases_FilterSkipsOthers verifies the filter option.
 func TestSyncDatabases_FilterSkipsOthers(t *testing.T) {
-	townRoot := t.TempDir()
+	townRoot := tempDirRetryCleanup(t)
 	dataDir := filepath.Join(townRoot, ".dolt-data")
 
 	// Create two fake database dirs with noms/manifest
@@ -86,7 +87,7 @@ func TestSyncDatabasesSQL_EmptyDir(t *testing.T) {
 
 // TestSyncDatabasesSQL_FilterSkipsOthers verifies the SQL sync filter option.
 func TestSyncDatabasesSQL_FilterSkipsOthers(t *testing.T) {
-	townRoot := t.TempDir()
+	townRoot := tempDirRetryCleanup(t)
 	dataDir := filepath.Join(townRoot, ".dolt-data")
 
 	for _, db := range []string{"alpha", "beta"} {
@@ -124,6 +125,26 @@ func TestValidSQLName(t *testing.T) {
 			t.Errorf("validSQLName(%q) = true, want false", name)
 		}
 	}
+}
+
+// tempDirRetryCleanup creates a temp directory with cleanup that tolerates
+// brief file-lock delays on Windows (e.g., dolt subprocess handle release).
+func tempDirRetryCleanup(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "sync-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() {
+		for i := 0; i < 10; i++ {
+			if err := os.RemoveAll(dir); err == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Logf("warning: could not fully remove temp dir %s", dir)
+	})
+	return dir
 }
 
 // initDoltDB runs "dolt init" in a directory. Returns error if dolt isn't available.
