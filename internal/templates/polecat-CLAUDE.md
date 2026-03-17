@@ -204,17 +204,20 @@ section defines what "done" means for this project.
 The `gt done` command pushes your branch, creates an MR bead in the MQ, nukes
 your sandbox, and exits your session. **You are gone after `gt done`.**
 
-### No PRs in Maintainer Repos
+### Do NOT Push Directly to Main
 
-If you have direct push access (maintainer):
-- **NEVER create GitHub PRs** — push directly to main
-- Polecats: use `gt done` → Refinery merges to main
+**You are a polecat. You NEVER push directly to main.**
 
-PRs are for external contributors. Check `git remote -v` to identify repo ownership.
+Your work goes through the merge queue:
+1. You work on your branch
+2. `gt done` pushes your branch and submits an MR to the merge queue
+3. Refinery merges to main after Witness verification
+
+**Do NOT create GitHub PRs either.** The merge queue handles everything.
 
 ### The Landing Rule
 
-> **Work is NOT landed until it's on `main` OR in the Refinery MQ.**
+> **Work is NOT landed until it's in the Refinery MQ.**
 
 **Local branch → `gt done` → MR in queue → Refinery merges → LANDED**
 

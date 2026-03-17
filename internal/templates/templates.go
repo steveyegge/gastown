@@ -212,27 +212,45 @@ func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSessi
 	return true, os.WriteFile(claudePath, []byte(content), 0644)
 }
 
+// polecatLifecycleMarker is a unique string present in the polecat CLAUDE.md
+// template. If an existing CLAUDE.md lacks this marker, polecat lifecycle
+// instructions are appended — the agent won't know to call `gt done` otherwise.
+const polecatLifecycleMarker = "IDLE POLECAT HERESY"
+
 // CreatePolecatCLAUDEmd writes the polecat CLAUDE.md template to the worktree.
 // This is the primary mechanism for polecats to learn about `gt done` and other
 // lifecycle commands — the file persists across compaction and session restarts.
 //
-// Returns (created bool, error) - created is false if file already exists.
-// Existing files are preserved to respect user customizations.
+// If the worktree already has a CLAUDE.md (e.g., tracked in the repo or
+// inherited from the town root), the polecat lifecycle instructions are
+// appended rather than skipping entirely — without them the agent will
+// finish work but never call `gt done`.
+//
+// Returns (created bool, error).
 func CreatePolecatCLAUDEmd(worktreePath, rigName, polecatName string) (bool, error) {
 	claudePath := filepath.Join(worktreePath, "CLAUDE.md")
 
-	// Check if file already exists - preserve user customizations
-	if _, err := os.Stat(claudePath); err == nil {
-		return false, nil
-	} else if !os.IsNotExist(err) {
-		return false, err
-	}
-
-	// Simple string replacement for {{rig}} and {{name}} placeholders
+	// Render the polecat template with rig/name substitutions
 	content := polecatCLAUDEmd
 	content = strings.ReplaceAll(content, "{{rig}}", rigName)
 	content = strings.ReplaceAll(content, "{{name}}", polecatName)
 
+	existing, err := os.ReadFile(claudePath)
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+
+	if err == nil {
+		// File exists — check if it already has polecat lifecycle instructions
+		if strings.Contains(string(existing), polecatLifecycleMarker) {
+			return false, nil // Already has our instructions
+		}
+		// Append polecat lifecycle instructions to existing content
+		merged := string(existing) + "\n---\n\n" + content
+		return true, os.WriteFile(claudePath, []byte(merged), 0644)
+	}
+
+	// No file — write the full template
 	return true, os.WriteFile(claudePath, []byte(content), 0644)
 }
 
