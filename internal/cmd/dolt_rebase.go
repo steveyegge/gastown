@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -120,10 +121,14 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Record pre-flight row counts.
+	// Record pre-flight row counts and table schemas.
 	preCounts, err := flattenGetRowCounts(db, dbName)
 	if err != nil {
 		return fmt.Errorf("recording row counts: %w", err)
+	}
+	preSchemas, err := rebaseGetTableSchemas(db, dbName)
+	if err != nil {
+		return fmt.Errorf("recording table schemas: %w", err)
 	}
 	fmt.Printf("  Tables: %d\n", len(preCounts))
 	for table, count := range preCounts {
@@ -281,53 +286,85 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  %s Rebase executed successfully\n", style.Bold.Render("✓"))
 
-	// Step 7: Verify integrity — row counts must match pre-flight.
-	// Re-establish database context after rebase — Dolt's information_schema
-	// is branch-aware and rebase may leave session in an ambiguous state.
+	// Step 7: Verify integrity and repair tables dropped by squash.
+	// Dolt's squash is lossy — it can drop tables whose DDL was in squashed
+	// commits. We detect missing tables and restore them from 'main' (which
+	// still exists at this point) before the branch swap.
 	if _, err := db.ExecContext(ctx, fmt.Sprintf("USE `%s`", dbName)); err != nil {
 		fmt.Printf("  %s WARNING: could not re-select database after rebase: %v\n",
 			style.Bold.Render("!"), err)
 	}
 	postCounts, err := flattenGetRowCounts(db, dbName)
 	if err != nil {
-		// Rebase succeeded but we can't verify — this is concerning.
 		fmt.Printf("  %s WARNING: could not verify row counts after rebase: %v\n",
 			style.Bold.Render("!"), err)
 		fmt.Printf("  Proceeding with branch swap — data should be intact\n")
 	} else {
+		var restoredTables []string
 		var droppedEmpty []string
 		for table, preCount := range preCounts {
 			postCount, ok := postCounts[table]
 			if !ok {
-				// Dolt's squash drops empty tables (DDL-only changes get lost).
-				// Empty tables carry no data to verify — skip them.
-				if preCount == 0 {
-					droppedEmpty = append(droppedEmpty, table)
-					continue
-				}
-				// Non-empty table missing — try querying it directly.
-				// Dolt's information_schema can be stale after rebase operations.
+				// Table missing after squash. Try direct query first (stale info_schema).
 				var directCount int
 				directErr := db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `%s`.`%s`", dbName, table)).Scan(&directCount)
-				if directErr != nil {
-					rebaseCleanupAll(db, baseBranch, workBranch)
-					return fmt.Errorf("integrity FAIL: table %q (%d rows) missing after rebase: %w", table, preCount, directErr)
+				if directErr == nil {
+					// Table exists, just not in information_schema.
+					postCount = directCount
+				} else if preCount == 0 {
+					// Empty table dropped by squash — recreate from saved schema.
+					ddl, hasDDL := preSchemas[table]
+					if hasDDL {
+						if _, createErr := db.ExecContext(ctx, ddl); createErr != nil {
+							fmt.Printf("  %s Could not recreate empty table %q: %v\n",
+								style.Bold.Render("!"), table, createErr)
+							droppedEmpty = append(droppedEmpty, table)
+						} else {
+							restoredTables = append(restoredTables, table)
+						}
+					} else {
+						droppedEmpty = append(droppedEmpty, table)
+					}
+					continue
+				} else {
+					// Non-empty table genuinely lost — restore from main branch.
+					ddl, hasDDL := preSchemas[table]
+					if !hasDDL {
+						rebaseCleanupAll(db, baseBranch, workBranch)
+						return fmt.Errorf("integrity FAIL: table %q (%d rows) dropped by squash, no schema to restore", table, preCount)
+					}
+					if restoreErr := rebaseRestoreTable(db, ctx, dbName, table, ddl); restoreErr != nil {
+						rebaseCleanupAll(db, baseBranch, workBranch)
+						return fmt.Errorf("integrity FAIL: table %q (%d rows) dropped by squash, restore failed: %w", table, preCount, restoreErr)
+					}
+					// Verify restored count.
+					if verifyErr := db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `%s`.`%s`", dbName, table)).Scan(&postCount); verifyErr != nil {
+						rebaseCleanupAll(db, baseBranch, workBranch)
+						return fmt.Errorf("integrity FAIL: restored table %q but cannot verify: %w", table, verifyErr)
+					}
+					restoredTables = append(restoredTables, table)
 				}
-				postCount = directCount
-				fmt.Printf("  %s Table %q not in information_schema but exists (direct count: %d)\n",
-					style.Bold.Render("!"), table, directCount)
 			}
 			if preCount != postCount {
 				rebaseCleanupAll(db, baseBranch, workBranch)
 				return fmt.Errorf("integrity FAIL: %q pre=%d post=%d", table, preCount, postCount)
 			}
 		}
+		if len(restoredTables) > 0 {
+			fmt.Printf("  %s Restored %d tables dropped by squash: %v\n",
+				style.Bold.Render("!"), len(restoredTables), restoredTables)
+			// Commit the restored tables so they're part of the rebased history.
+			if _, commitErr := db.ExecContext(ctx, `CALL DOLT_COMMIT('-Am', 'chore: restore tables dropped by rebase squash')`); commitErr != nil {
+				fmt.Printf("  %s WARNING: could not commit restored tables: %v\n",
+					style.Bold.Render("!"), commitErr)
+			}
+		}
 		if len(droppedEmpty) > 0 {
-			fmt.Printf("  %s %d empty tables dropped by squash (expected): %v\n",
+			fmt.Printf("  %s %d empty tables could not be restored (no schema): %v\n",
 				style.Bold.Render("!"), len(droppedEmpty), droppedEmpty)
 		}
-		fmt.Printf("  %s Integrity verified (%d tables match, %d empty tables skipped)\n",
-			style.Bold.Render("✓"), len(preCounts)-len(droppedEmpty), len(droppedEmpty))
+		fmt.Printf("  %s Integrity verified (%d tables, %d restored)\n",
+			style.Bold.Render("✓"), len(preCounts), len(restoredTables))
 	}
 
 	// Step 8: Concurrency check — verify main hasn't moved.
@@ -401,4 +438,54 @@ func rebaseCleanupBase(db *sql.DB, baseBranch string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", baseBranch))
+}
+
+// rebaseGetTableSchemas captures SHOW CREATE TABLE for all user tables.
+func rebaseGetTableSchemas(db *sql.DB, dbName string) (map[string]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	query := fmt.Sprintf("SELECT table_name FROM information_schema.tables WHERE table_schema = '%s' AND table_name NOT LIKE 'dolt_%%'", dbName)
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		tables = append(tables, name)
+	}
+
+	schemas := make(map[string]string, len(tables))
+	for _, table := range tables {
+		var tblName, ddl string
+		if err := db.QueryRowContext(ctx, fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", dbName, table)).Scan(&tblName, &ddl); err != nil {
+			return nil, fmt.Errorf("schema for %s: %w", table, err)
+		}
+		schemas[table] = ddl
+	}
+	return schemas, nil
+}
+
+// rebaseRestoreTable recreates a table dropped by squash and copies data from main.
+// Assumes we're on compact-work and main still exists with the original data.
+func rebaseRestoreTable(db *sql.DB, ctx context.Context, dbName, table, ddl string) error {
+	// Strip any IF NOT EXISTS and add it, in case the DDL doesn't have it.
+	createStmt := strings.Replace(ddl, "CREATE TABLE `"+table+"`", "CREATE TABLE IF NOT EXISTS `"+table+"`", 1)
+	if _, err := db.ExecContext(ctx, createStmt); err != nil {
+		return fmt.Errorf("recreate table: %w", err)
+	}
+
+	// Copy data from main branch using Dolt's AS OF syntax.
+	insertSQL := fmt.Sprintf("INSERT INTO `%s` SELECT * FROM `%s`.`%s` AS OF 'main'", table, dbName, table)
+	if _, err := db.ExecContext(ctx, insertSQL); err != nil {
+		return fmt.Errorf("copy data from main: %w", err)
+	}
+
+	return nil
 }
