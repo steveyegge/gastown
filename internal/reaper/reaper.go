@@ -32,6 +32,123 @@ func isNothingToCommit(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "nothing to commit")
 }
 
+// isTableNotFound returns true if the error indicates a missing table.
+func isTableNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "table not found") || strings.Contains(msg, "doesn't exist")
+}
+
+// HasReaperSchema checks whether the database has the tables required for reaper
+// operations (wisps and issues). Returns false (no error) when tables are missing
+// — callers use this to skip databases that have incomplete beads schema (e.g.
+// partially initialized databases on the central Dolt server).
+func HasReaperSchema(db *sql.DB) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var count int
+	err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM information_schema.tables WHERE table_name IN ('wisps', 'issues') AND table_schema = DATABASE()").Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("check reaper schema: %w", err)
+	}
+	return count >= 2, nil
+}
+
+// ClosePluginReceiptResult holds the results of closing plugin run receipts.
+type ClosePluginReceiptResult struct {
+	Database  string    `json:"database"`
+	Closed    int       `json:"closed"`
+	DryRun    bool      `json:"dry_run,omitempty"`
+	Anomalies []Anomaly `json:"anomalies,omitempty"`
+}
+
+// ClosePluginReceipts closes open issues labeled "type:plugin-run" that are
+// older than maxAge. These are transient run receipts created by deacon dog
+// plugins; they should be closed shortly after creation since they exist only
+// for audit/cooldown-gate purposes. The standard AutoClose path requires 7 days
+// of staleness, which lets plugin receipts accumulate into the hundreds.
+func ClosePluginReceipts(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ClosePluginReceiptResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultQueryTimeout)
+	defer cancel()
+
+	cutoff := time.Now().UTC().Add(-maxAge)
+	result := &ClosePluginReceiptResult{Database: dbName, DryRun: dryRun}
+
+	// Find open issues with the "type:plugin-run" label older than maxAge.
+	selectQuery := fmt.Sprintf(`
+		SELECT i.id FROM `+"`%s`"+`.issues i
+		INNER JOIN `+"`%s`"+`.labels l ON i.id = l.issue_id
+		WHERE i.status IN ('open', 'in_progress')
+		AND l.label = 'type:plugin-run'
+		AND i.created_at < ?`, dbName, dbName)
+
+	rows, err := db.QueryContext(ctx, selectQuery, cutoff)
+	if err != nil {
+		if isTableNotFound(err) {
+			return result, nil
+		}
+		return nil, fmt.Errorf("select plugin receipts: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan plugin receipt id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+
+	result.Closed = len(ids)
+	if len(ids) == 0 || dryRun {
+		return result, nil
+	}
+
+	if _, err := db.ExecContext(ctx, "SET @@autocommit = 0"); err != nil {
+		return nil, fmt.Errorf("disable autocommit: %w", err)
+	}
+	defer func() {
+		_, _ = db.ExecContext(context.Background(), "SET @@autocommit = 1")
+	}()
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	updateQuery := fmt.Sprintf(
+		"UPDATE `%s`.issues SET status = 'closed', closed_at = NOW() WHERE id IN (%s)",
+		dbName, strings.Join(placeholders, ","))
+	if _, err := db.ExecContext(ctx, updateQuery, args...); err != nil {
+		return nil, fmt.Errorf("close plugin receipts: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, "COMMIT"); err != nil {
+		result.Anomalies = append(result.Anomalies, Anomaly{
+			Type:    "sql_commit_failed",
+			Message: fmt.Sprintf("sql commit after plugin receipt close failed: %v", err),
+		})
+		return result, nil
+	}
+	commitMsg := fmt.Sprintf("reaper: close %d plugin receipts in %s", len(ids), dbName)
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
+		if !isNothingToCommit(err) {
+			result.Anomalies = append(result.Anomalies, Anomaly{
+				Type:    "dolt_commit_failed",
+				Message: fmt.Sprintf("dolt commit after plugin receipt close failed: %v", err),
+			})
+		}
+	}
+
+	return result, nil
+}
+
 // DiscoverDatabases queries SHOW DATABASES on the Dolt server and returns
 // all production databases, filtering out system databases and test pollution.
 // Falls back to DefaultDatabases on any error.

@@ -443,3 +443,20 @@ func ResetEnsuredDirs() {
 	defer ensuredMu.Unlock()
 	ensuredDirs = make(map[string]bool)
 }
+
+// isJSONBytes returns true if b looks like a JSON value (starts with [ or {).
+// bd list --json may return plain text like "No issues found." instead of JSON
+// when there are no results.
+func isJSONBytes(b []byte) bool {
+	for _, c := range b {
+		switch c {
+		case ' ', '\t', '\n', '\r':
+			continue
+		case '[', '{':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}

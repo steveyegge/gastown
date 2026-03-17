@@ -2,8 +2,40 @@
 package beads
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 )
+
+// FindLatestIssueByTitleAndAssignee finds the newest issue matching the given title and assignee.
+func (b *Beads) FindLatestIssueByTitleAndAssignee(title, assignee string) (*Issue, error) {
+	out, err := b.run("list", "--json", "--limit", "0", "--title", title, "--assignee", assignee)
+	if err != nil {
+		return nil, fmt.Errorf("bd list: %w", err)
+	}
+
+	var issues []*Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return nil, fmt.Errorf("parsing bd list output: %w", err)
+	}
+	if len(issues) == 0 {
+		return nil, ErrNotFound
+	}
+
+	var newest *Issue
+	for _, issue := range issues {
+		if issue.Title != title || issue.Assignee != assignee {
+			continue
+		}
+		if newest == nil || issue.CreatedAt > newest.CreatedAt {
+			newest = issue
+		}
+	}
+	if newest == nil {
+		return nil, ErrNotFound
+	}
+	return newest, nil
+}
 
 // FindMRForBranch searches for an open merge-request bead for the given branch.
 // Returns the MR bead if found, nil if not found.
@@ -27,7 +59,7 @@ func (b *Beads) FindMRForBranchAny(branch string) (*Issue, error) {
 func (b *Beads) findMRForBranch(branch string, skipClosed bool) (*Issue, error) {
 	branchPrefix := "branch: " + branch + "\n"
 
-	issues, err := b.ListMergeRequests(ListOptions{
+	issues, err := b.List(ListOptions{
 		Status: "all",
 		Label:  "gt:merge-request",
 	})
@@ -50,7 +82,7 @@ func (b *Beads) findMRForBranch(branch string, skipClosed bool) (*Issue, error) 
 // matches the given issue ID. Used to find prior attempts when re-dispatching
 // an issue and to supersede old MRs when a new one is created.
 func (b *Beads) FindOpenMRsForIssue(issueID string) ([]*Issue, error) {
-	issues, err := b.ListMergeRequests(ListOptions{
+	issues, err := b.List(ListOptions{
 		Status: "open",
 		Label:  "gt:merge-request",
 	})

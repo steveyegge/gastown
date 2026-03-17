@@ -134,6 +134,59 @@ func IsAgentBead(issue *Issue) bool {
 	return HasLabel(issue, "gt:agent")
 }
 
+// IsProtectedBead checks if a bead has any protection labels that should
+// prevent automated status changes (AutoClose, unassign on polecat removal, etc.).
+// Protected labels: gt:standing-orders, gt:keep, gt:role, gt:rig.
+func IsProtectedBead(issue *Issue) bool {
+	if issue == nil {
+		return false
+	}
+	for _, l := range issue.Labels {
+		switch l {
+		case "gt:standing-orders", "gt:keep", "gt:role", "gt:rig":
+			return true
+		}
+	}
+	return false
+}
+
+// InjectFlatForListJSON adds --flat to bd list commands that use --json.
+// bd v0.59+ tree-format output ignores --json; --flat is required for JSON.
+// Exported for use by other packages that call bd list directly.
+func InjectFlatForListJSON(args []string) []string {
+	// Only apply to top-level "bd list" commands (args[0] == "list"),
+	// not subcommands like "bd dep list" where --flat is unsupported.
+	if len(args) == 0 || args[0] != "list" {
+		return args
+	}
+	hasJSON := false
+	hasFlat := false
+	for _, a := range args[1:] {
+		switch {
+		case a == "--json":
+			hasJSON = true
+		case a == "--flat":
+			hasFlat = true
+		}
+	}
+	if hasJSON && !hasFlat {
+		return append(args, "--flat")
+	}
+	return args
+}
+
+// BdSupportsAllowStale returns false — --allow-stale is no longer used.
+// Retained for API compatibility with callers that haven't been updated.
+func BdSupportsAllowStale() bool {
+	return false
+}
+
+// MaybePrependAllowStale returns args unchanged — --allow-stale is no longer used.
+// Retained for API compatibility with callers that haven't been updated.
+func MaybePrependAllowStale(args []string) []string {
+	return args
+}
+
 // IssueDep represents a dependency or dependent issue with its relation.
 type IssueDep struct {
 	ID             string `json:"id"`

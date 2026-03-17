@@ -304,7 +304,7 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 	// Query beads for open merge-request issues
 	// BeadsPath() returns the git-synced beads location
 	b := beads.New(m.rig.BeadsPath())
-	issues, err := b.ListMergeRequests(beads.ListOptions{
+	issues, err := b.List(beads.ListOptions{
 		Label:    "gt:merge-request",
 		Status:   "open",
 		Priority: -1, // No priority filter
