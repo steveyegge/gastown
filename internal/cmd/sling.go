@@ -974,10 +974,14 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	// For fresh spawns, pass posting via SessionStartOptions so Start() handles it.
 	// For reuse (existing polecat), clear/write directly since Start() isn't called.
 	if newPolecatInfo != nil {
-		// Fresh spawn: Start() will clear stale posting and write new one if set.
+		// Fresh spawn or reuse: Start() will also clear, but defensively clear here
+		// too so the posting is gone before StartSession() (gt-puj).
 		newPolecatInfo.posting = slingPosting
 		if slingPosting != "" {
 			fmt.Printf("%s Posting: %s\n", style.Bold.Render("→"), slingPosting)
+		} else if newPolecatInfo.ClonePath != "" {
+			// No --posting flag: clear any stale posting from prior session (gt-puj).
+			_ = posting.Clear(newPolecatInfo.ClonePath)
 		}
 	} else if hookWorkDir != "" {
 		// Reuse: clear stale posting before the polecat's next gt prime (gt-jdv).

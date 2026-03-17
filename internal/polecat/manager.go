@@ -21,6 +21,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -1576,6 +1577,11 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 	// be overwritten" errors when the start point has different file content.
 	_ = polecatGit.ResetHard(startPoint)
 	_ = polecatGit.CleanForce()
+
+	// CleanForce uses --exclude=.runtime, so stale .runtime/posting survives.
+	// Clear it here to prevent the reused polecat from inheriting an irrelevant
+	// posting from the prior session (gt-puj).
+	_ = posting.Clear(clonePath)
 
 	// Create fresh branch from start point (branch-only, no worktree add/remove)
 	branchName := m.buildBranchName(name, opts.HookBead)

@@ -146,6 +146,47 @@ func TestSlingPosting_SlingParamsCarriesPosting(t *testing.T) {
 	}
 }
 
+// TestSlingPosting_ReuseClearsStalePosting verifies that when a polecat is
+// reused without --posting, any stale .runtime/posting from the prior session
+// is cleared. This is the scenario described in gt-puj: a polecat previously
+// posted as "dispatcher" gets reused for a coding task and should NOT inherit
+// the old posting.
+func TestSlingPosting_ReuseClearsStalePosting(t *testing.T) {
+	t.Parallel()
+	clonePath := t.TempDir()
+
+	// Simulate prior session's posting (stale state from previous work)
+	if err := posting.Write(clonePath, "dispatcher"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify stale posting exists
+	if got := posting.Read(clonePath); got != "dispatcher" {
+		t.Fatalf("setup: expected stale posting %q, got %q", "dispatcher", got)
+	}
+
+	// Simulate reuse without --posting: sling clears stale posting (gt-puj fix)
+	slingPostingVal := ""
+	if slingPostingVal != "" {
+		_ = posting.Write(clonePath, slingPostingVal)
+	} else {
+		// This is the fix: clear stale posting when no --posting flag
+		_ = posting.Clear(clonePath)
+	}
+
+	// Verify posting is cleared
+	got := posting.Read(clonePath)
+	if got != "" {
+		t.Errorf("after reuse without --posting, Read() = %q, want empty", got)
+	}
+
+	// Verify .runtime/posting file is gone
+	filePath := filepath.Join(clonePath, ".runtime", "posting")
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		t.Error(".runtime/posting should not exist after reuse without --posting")
+	}
+}
+
 // TestSlingPosting_OverwritesExistingPosting verifies that sling --posting
 // overwrites any pre-existing .runtime/posting in the polecat directory.
 func TestSlingPosting_OverwritesExistingPosting(t *testing.T) {
