@@ -1657,11 +1657,11 @@ func TestPollAllStores_SkipsParkedRigs(t *testing.T) {
 	// Note: the parked store's events may still be visible through other stores
 	// if they share the same underlying Dolt server (test infrastructure detail).
 	// What matters is that the "shippercrm" store key is never polled.
-	if _, hasHW := m.lastEventIDs.Load("shippercrm"); hasHW {
+	if _, hasHW := m.lastEventTimes.Load("shippercrm"); hasHW {
 		t.Errorf("parked rig (shippercrm) should not have been polled, but has a high-water mark")
 	}
 	// Active rig should have been polled
-	if _, hasHW := m.lastEventIDs.Load("gastown"); !hasHW {
+	if _, hasHW := m.lastEventTimes.Load("gastown"); !hasHW {
 		t.Errorf("active rig (gastown) should have been polled, but has no high-water mark")
 	}
 }
