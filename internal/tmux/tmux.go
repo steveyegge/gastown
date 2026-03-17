@@ -203,10 +203,21 @@ func NewTmuxWithSocket(socket string) *Tmux {
 	return &Tmux{socketName: socket}
 }
 
+// tmuxCommandTimeout is the maximum time to wait for any tmux subprocess.
+// All tmux commands (send-keys, list-sessions, show-environment, etc.) should
+// complete in well under 1 second. A 10-second timeout catches hung tmux servers
+// (e.g., under extreme load) that would otherwise block the entire gt process.
+// See: aegis-9rfyen (gt mail send hangs in sigsuspend).
+const tmuxCommandTimeout = 10 * time.Second
+
 // run executes a tmux command and returns stdout.
 // All commands include -u flag for UTF-8 support regardless of locale settings.
+// Commands are killed after tmuxCommandTimeout to prevent indefinite hangs.
 // See: https://github.com/steveyegge/gastown/issues/1219
 func (t *Tmux) run(args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), tmuxCommandTimeout)
+	defer cancel()
+
 	// Prepend global flags: -u (UTF-8 mode, PATCH-004) and optionally -L (socket).
 	// The -L flag must come before the subcommand, so it goes in the prefix.
 	allArgs := []string{"-u"}
@@ -214,13 +225,16 @@ func (t *Tmux) run(args ...string) (string, error) {
 		allArgs = append(allArgs, "-L", t.socketName)
 	}
 	allArgs = append(allArgs, args...)
-	cmd := exec.Command("tmux", allArgs...)
+	cmd := exec.CommandContext(ctx, "tmux", allArgs...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("tmux command timed out after %s: %v", tmuxCommandTimeout, args)
+		}
 		return "", t.wrapError(err, stderr.String(), args)
 	}
 
