@@ -78,9 +78,18 @@ func (h *DefaultRefineryHandler) SendMerged(polecat, branch, issue, targetBranch
 }
 
 // SendMergeFailed sends a MERGE_FAILED message to the Witness.
+// LEGACY: Prefer SendFixNeeded which sends directly to the polecat.
 // Called by the Refinery when a merge fails.
 func (h *DefaultRefineryHandler) SendMergeFailed(polecat, branch, issue, targetBranch, failureType, errorMsg string) error {
 	msg := NewMergeFailedMessage(h.Rig, polecat, branch, issue, targetBranch, failureType, errorMsg)
+	return h.Router.Send(msg)
+}
+
+// SendFixNeeded sends a FIX_NEEDED message directly to the Polecat.
+// Called by the Refinery when a merge fails due to quality checks/tests.
+// The polecat fixes the code in-place and resubmits without losing context.
+func (h *DefaultRefineryHandler) SendFixNeeded(polecat, branch, issue, targetBranch, failureType, errorMsg, mrBeadID string, attemptNumber int) error {
+	msg := NewFixNeededMessage(h.Rig, polecat, branch, issue, targetBranch, failureType, errorMsg, mrBeadID, attemptNumber)
 	return h.Router.Send(msg)
 }
 
@@ -111,9 +120,17 @@ type MergeOutcome struct {
 
 	// ConflictFiles lists files with conflicts (if Conflict is true).
 	ConflictFiles []string
+
+	// MRBeadID is the merge-request bead ID (for FIX_NEEDED tracking).
+	MRBeadID string
+
+	// AttemptNumber tracks how many fix attempts have been made.
+	AttemptNumber int
 }
 
 // NotifyMergeOutcome sends the appropriate protocol message based on the outcome.
+// For failures (non-conflict), sends FIX_NEEDED directly to the polecat
+// so it can fix the code in-place without context loss.
 func (h *DefaultRefineryHandler) NotifyMergeOutcome(polecat, branch, issue, targetBranch string, outcome MergeOutcome) error {
 	if outcome.Success {
 		return h.SendMerged(polecat, branch, issue, targetBranch, outcome.MergeCommit)
@@ -123,7 +140,9 @@ func (h *DefaultRefineryHandler) NotifyMergeOutcome(polecat, branch, issue, targ
 		return h.SendReworkRequest(polecat, branch, issue, targetBranch, outcome.ConflictFiles)
 	}
 
-	return h.SendMergeFailed(polecat, branch, issue, targetBranch, outcome.FailureType, outcome.Error)
+	// Send FIX_NEEDED directly to polecat (event-driven lifecycle).
+	// The polecat stays alive and fixes in-place.
+	return h.SendFixNeeded(polecat, branch, issue, targetBranch, outcome.FailureType, outcome.Error, outcome.MRBeadID, outcome.AttemptNumber)
 }
 
 // Ensure DefaultRefineryHandler implements RefineryHandler.

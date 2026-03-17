@@ -217,6 +217,28 @@ func (r *Router) ensureCustomTypes(beadsDir string) error {
 	return nil
 }
 
+func (r *Router) buildLabels(msg *Message) []string {
+	var labels []string
+	labels = append(labels, "gt:message")
+	if msg.Type == TypeEscalation {
+		labels = append(labels, "gt:escalation")
+	}
+	labels = append(labels, "from:"+msg.From)
+	labels = append(labels, "msg-type:"+string(msg.Type))
+	labels = append(labels, DeliverySendLabels()...)
+	if msg.ThreadID != "" {
+		labels = append(labels, "thread:"+msg.ThreadID)
+	}
+	if msg.ReplyTo != "" {
+		labels = append(labels, "reply-to:"+msg.ReplyTo)
+	}
+	for _, cc := range msg.CC {
+		ccIdentity := AddressToIdentity(cc)
+		labels = append(labels, "cc:"+ccIdentity)
+	}
+	return labels
+}
+
 // isTownLevelAddress returns true if the address is for a town-level agent or the overseer.
 func isTownLevelAddress(address string) bool {
 	addr := strings.TrimSuffix(address, "/")
@@ -1078,21 +1100,7 @@ func (r *Router) sendToSingle(msg *Message) error {
 	}
 
 	// Build labels for type, from/thread/reply-to/cc
-	var labels []string
-	labels = append(labels, "gt:message")
-	labels = append(labels, "from:"+msg.From)
-	labels = append(labels, DeliverySendLabels()...)
-	if msg.ThreadID != "" {
-		labels = append(labels, "thread:"+msg.ThreadID)
-	}
-	if msg.ReplyTo != "" {
-		labels = append(labels, "reply-to:"+msg.ReplyTo)
-	}
-	// Add CC labels (one per recipient)
-	for _, cc := range msg.CC {
-		ccIdentity := AddressToIdentity(cc)
-		labels = append(labels, "cc:"+ccIdentity)
-	}
+	labels := r.buildLabels(msg)
 
 	// Build command: bd create --assignee=<recipient> -d <body> --labels=gt:message,... -- <subject>
 	// Flags go first, then -- to end flag parsing, then the positional subject.
@@ -1556,6 +1564,10 @@ func (r *Router) GetMailbox(address string) (*Mailbox, error) {
 //     the next turn boundary.
 //  3. For the overseer (human operator), always use a visible banner.
 //
+// After a successful notification, a deferred reply-reminder nudge is also
+// enqueued (after a configurable delay, default 30s) to prompt the recipient
+// to reply via gt mail send rather than in chat.
+//
 // Supports mayor/, deacon/, rig/crew/name, rig/polecats/name, and rig/name addresses.
 // Respects agent DND/muted state - skips notification if recipient has DND enabled.
 func (r *Router) notifyRecipient(msg *Message) error {
@@ -1591,7 +1603,8 @@ func (r *Router) notifyRecipient(msg *Message) error {
 			return r.tmux.SendNotificationBanner(sessionID, msg.From, msg.Subject)
 		}
 
-		notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
+		notification := formatNotificationMessage(msg)
+		priority := nudgePriorityForMailPriority(msg.Priority)
 
 		// Wait-idle-first delivery: try direct nudge if the agent is idle,
 		// fall back to cooperative queue if busy. WaitForIdle requires 2
@@ -1602,6 +1615,7 @@ func (r *Router) notifyRecipient(msg *Message) error {
 		if waitErr == nil {
 			// Agent is idle — deliver directly for immediate wakeup.
 			if err := r.tmux.NudgeSession(sessionID, notification); err == nil {
+				r.enqueueReplyReminder(msg, sessionID)
 				return nil
 			} else if errors.Is(err, tmux.ErrSessionNotFound) {
 				continue
@@ -1615,16 +1629,106 @@ func (r *Router) notifyRecipient(msg *Message) error {
 		} else if r.townRoot != "" {
 			// Timeout (agent busy) — queue for cooperative delivery
 			// at the next turn boundary.
-			return nudge.Enqueue(r.townRoot, sessionID, nudge.QueuedNudge{
-				Sender:  msg.From,
-				Message: notification,
-			})
+			if err := nudge.Enqueue(r.townRoot, sessionID, nudge.QueuedNudge{
+				Sender:   msg.From,
+				Message:  notification,
+				Priority: priority,
+				Kind:     nudgeKindForMessage(msg),
+				ThreadID: msg.ThreadID,
+				Severity: prioritySeverityLabel(msg.Priority),
+			}); err != nil {
+				return err
+			}
+			r.enqueueReplyReminder(msg, sessionID)
+			return nil
 		}
 		// No town root available — last resort direct delivery.
-		return r.tmux.NudgeSession(sessionID, notification)
+		err = r.tmux.NudgeSession(sessionID, notification)
+		if err == nil {
+			r.enqueueReplyReminder(msg, sessionID)
+		}
+		return err
+	}
+	// No tmux session found - enqueue nudge for ACP/propeller delivery
+	// This handles headless ACP mode where there's no tmux session
+	if r.townRoot != "" && len(sessionIDs) > 0 {
+		notification := formatNotificationMessage(msg)
+		return nudge.Enqueue(r.townRoot, sessionIDs[0], nudge.QueuedNudge{
+			Sender:   msg.From,
+			Message:  notification,
+			Priority: nudgePriorityForMailPriority(msg.Priority),
+			Kind:     nudgeKindForMessage(msg),
+			ThreadID: msg.ThreadID,
+			Severity: prioritySeverityLabel(msg.Priority),
+		})
 	}
 
 	return nil // No active session found
+}
+
+func nudgeKindForMessage(msg *Message) string {
+	if msg.Type == TypeEscalation {
+		return "escalation"
+	}
+	return "mail"
+}
+
+func nudgePriorityForMailPriority(priority Priority) string {
+	switch priority {
+	case PriorityUrgent, PriorityHigh:
+		return nudge.PriorityUrgent
+	default:
+		return nudge.PriorityNormal
+	}
+}
+
+func formatNotificationMessage(msg *Message) string {
+	if msg.Type == TypeEscalation {
+		return fmt.Sprintf("🚨 Escalation mail from %s. ID: %s. Severity: %s. Subject: %s. Run 'gt mail read %s' or 'gt escalate ack %s'.", msg.From, msg.ThreadID, prioritySeverityLabel(msg.Priority), msg.Subject, msg.ThreadID, msg.ThreadID)
+	}
+	return fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
+}
+
+func prioritySeverityLabel(priority Priority) string {
+	switch priority {
+	case PriorityUrgent:
+		return "critical"
+	case PriorityHigh:
+		return "high"
+	case PriorityLow:
+		return "low"
+	default:
+		return "medium"
+	}
+}
+
+// enqueueReplyReminder queues a deferred nudge reminding the recipient to reply
+// via gt mail send rather than in chat. Best-effort: errors are logged, not returned.
+//
+// Skipped when:
+//   - No town root (can't use nudge queue)
+//   - Message type is TypeReply (recipient is already replying)
+//   - Configured delay is zero or negative (feature disabled)
+func (r *Router) enqueueReplyReminder(msg *Message, sessionID string) {
+	if r.townRoot == "" {
+		return
+	}
+	if msg.Type == TypeReply {
+		return // Already a reply — reminder would be redundant
+	}
+	delay := config.LoadOperationalConfig(r.townRoot).GetMailConfig().ReplyReminderDelayD()
+	if delay <= 0 {
+		return // Disabled by config
+	}
+	reminder := nudge.QueuedNudge{
+		Sender:       "system",
+		Message:      fmt.Sprintf("Remember to reply to %s (subject: %q) via `gt mail send %s` — not in chat.", msg.From, msg.Subject, msg.From),
+		Priority:     nudge.PriorityNormal,
+		DeliverAfter: time.Now().Add(delay),
+	}
+	if err := nudge.Enqueue(r.townRoot, sessionID, reminder); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to enqueue reply reminder for %s: %v\n", sessionID, err)
+	}
 }
 
 // IsRecipientMuted checks if a mail recipient has DND/muted notifications enabled.
@@ -1754,4 +1858,3 @@ func AddressToSessionIDs(address string) []string {
 		session.PolecatSessionName(rigPrefix, target), // <prefix>-name
 	}
 }
-

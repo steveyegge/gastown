@@ -384,9 +384,6 @@ gt config agent set codex-low "codex --thinking low"
 
 # Set default agent
 gt config default-agent claude-glm
-
-# View config
-gt config show
 ```
 
 ### Beads Integration

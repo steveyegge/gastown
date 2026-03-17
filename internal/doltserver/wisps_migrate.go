@@ -9,15 +9,22 @@
 //   3. Copies associated labels, comments, events, and dependencies
 //   4. Closes the originals in the issues table
 //
-// The migration uses `bd sql` for all database operations because the `dolt sql` CLI
-// can crash when operating on dolt_ignored tables. The `bd` tool properly connects to
-// the running Dolt server and handles the dolt_ignore semantics.
+// The migration uses `bd sql` for beads-side operations (copying agent beads between
+// the issues and wisps tables in bd's own database). Additionally, it ensures that
+// the wisps tables exist on the gt Dolt server (port 3307), since the reaper connects
+// directly to that server. Without this, `bd sql` creates the tables on bd's Dolt
+// instance (a separate process/port), and the reaper fails with "table not found".
 package doltserver
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 // MigrateWispsResult holds migration statistics.
@@ -48,19 +55,41 @@ func MigrateAgentBeadsToWisps(townRoot, workDir string, dryRun bool) (*MigrateWi
 		}
 	}
 
-	// Step 2: Create wisps table if it doesn't exist
+	// Step 2: Create wisps table if it doesn't exist (in bd's database)
 	created, err := ensureWispsTable(workDir)
 	if err != nil {
 		return nil, fmt.Errorf("creating wisps table: %w", err)
 	}
 	result.WispsTableCreated = created
 
-	// Step 3: Create auxiliary tables
+	// Step 3: Create auxiliary tables (in bd's database)
 	auxTables, err := ensureWispAuxTables(workDir)
 	if err != nil {
 		return nil, fmt.Errorf("creating auxiliary tables: %w", err)
 	}
 	result.AuxTablesCreated = auxTables
+
+	// Step 3b: Ensure wisps tables also exist on the gt Dolt server.
+	// The reaper connects directly to the gt Dolt server (port 3307), which is
+	// a separate process from bd's Dolt instance. Without this step, bd creates
+	// the tables on its own server but the reaper fails with "table not found".
+	gtConfig := DefaultConfig(townRoot)
+	dbName := deriveDBName(townRoot, workDir)
+	if dbName != "" {
+		gtCreated, gtAux, err := ensureWispsOnGTServer(gtConfig.Host, gtConfig.Port, dbName)
+		if err != nil {
+			fmt.Printf("  Note: gt Dolt server table creation failed: %v\n", err)
+		} else {
+			if gtCreated {
+				result.WispsTableCreated = true
+				fmt.Printf("  ✓ Created wisps table on gt Dolt server (%s:%d/%s)\n", gtConfig.Host, gtConfig.Port, dbName)
+			}
+			for _, t := range gtAux {
+				result.AuxTablesCreated = append(result.AuxTablesCreated, t+" (gt server)")
+				fmt.Printf("  ✓ Created %s on gt Dolt server\n", t)
+			}
+		}
+	}
 
 	if dryRun {
 		cnt, _ := bdSQLCount(workDir, "SELECT COUNT(*) as cnt FROM issues WHERE issue_type = 'agent' AND status = 'open'")
@@ -147,72 +176,9 @@ func ensureWispsTable(workDir string) (bool, error) {
 		return false, nil
 	}
 
-	// Create the wisps table with all columns the bd tool expects.
 	// We use individual column definitions instead of CREATE TABLE LIKE because
 	// LIKE can cause Dolt server crashes with dolt_ignored tables.
-	err := bdSQL(workDir, `CREATE TABLE wisps (
-  id varchar(255) NOT NULL,
-  content_hash varchar(64),
-  title varchar(500) NOT NULL,
-  description text NOT NULL,
-  design text NOT NULL DEFAULT '',
-  acceptance_criteria text NOT NULL DEFAULT '',
-  notes text NOT NULL DEFAULT '',
-  status varchar(32) NOT NULL DEFAULT 'open',
-  priority int NOT NULL DEFAULT 2,
-  issue_type varchar(32) NOT NULL DEFAULT 'task',
-  assignee varchar(255),
-  estimated_minutes int,
-  created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  created_by varchar(255) DEFAULT '',
-  owner varchar(255) DEFAULT '',
-  updated_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  closed_at datetime,
-  closed_by_session varchar(255) DEFAULT '',
-  external_ref varchar(255),
-  compaction_level int DEFAULT 0,
-  compacted_at datetime,
-  compacted_at_commit varchar(64),
-  original_size int,
-  deleted_at datetime,
-  deleted_by varchar(255) DEFAULT '',
-  delete_reason text DEFAULT '',
-  original_type varchar(32) DEFAULT '',
-  sender varchar(255) DEFAULT '',
-  ephemeral tinyint(1) DEFAULT 1,
-  pinned tinyint(1) DEFAULT 0,
-  is_template tinyint(1) DEFAULT 0,
-  crystallizes tinyint(1) DEFAULT 0,
-  mol_type varchar(32) DEFAULT '',
-  work_type varchar(32) DEFAULT 'mutex',
-  quality_score double,
-  source_system varchar(255) DEFAULT '',
-  metadata json,
-  source_repo varchar(512) DEFAULT '',
-  close_reason text DEFAULT '',
-  event_kind varchar(32) DEFAULT '',
-  actor varchar(255) DEFAULT '',
-  target varchar(255) DEFAULT '',
-  payload text DEFAULT '',
-  await_type varchar(32) DEFAULT '',
-  await_id varchar(255) DEFAULT '',
-  timeout_ns bigint DEFAULT 0,
-  waiters text DEFAULT '',
-  hook_bead varchar(255) DEFAULT '',
-  role_bead varchar(255) DEFAULT '',
-  agent_state varchar(32) DEFAULT '',
-  last_activity datetime,
-  role_type varchar(32) DEFAULT '',
-  rig varchar(255) DEFAULT '',
-  due_at datetime,
-  defer_until datetime,
-  wisp_type varchar(32) DEFAULT NULL,
-  spec_id text,
-  PRIMARY KEY (id),
-  KEY idx_wisps_status (status),
-  KEY idx_wisps_issue_type (issue_type)
-)`)
-	if err != nil {
+	if err := bdSQL(workDir, wispsCreateDDL); err != nil {
 		return false, err
 	}
 
@@ -223,63 +189,7 @@ func ensureWispsTable(workDir string) (bool, error) {
 func ensureWispAuxTables(workDir string) ([]string, error) {
 	var created []string
 
-	auxTables := []struct {
-		name string
-		ddl  string
-	}{
-		{
-			name: "wisp_labels",
-			ddl: `CREATE TABLE wisp_labels (
-  issue_id varchar(255) NOT NULL,
-  label varchar(255) NOT NULL,
-  PRIMARY KEY (issue_id, label),
-  KEY idx_wisp_labels_label (label)
-)`,
-		},
-		{
-			name: "wisp_comments",
-			ddl: `CREATE TABLE wisp_comments (
-  id bigint NOT NULL AUTO_INCREMENT,
-  issue_id varchar(255) NOT NULL,
-  author varchar(255) NOT NULL,
-  text text NOT NULL,
-  created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  KEY idx_wisp_comments_issue (issue_id)
-)`,
-		},
-		{
-			name: "wisp_events",
-			ddl: `CREATE TABLE wisp_events (
-  id bigint NOT NULL AUTO_INCREMENT,
-  issue_id varchar(255) NOT NULL,
-  event_type varchar(32) NOT NULL,
-  actor varchar(255) NOT NULL,
-  old_value text,
-  new_value text,
-  comment text,
-  created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  KEY idx_wisp_events_issue (issue_id)
-)`,
-		},
-		{
-			name: "wisp_dependencies",
-			ddl: `CREATE TABLE wisp_dependencies (
-  issue_id varchar(255) NOT NULL,
-  depends_on_id varchar(255) NOT NULL,
-  type varchar(32) NOT NULL DEFAULT 'blocks',
-  created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  created_by varchar(255) NOT NULL DEFAULT '',
-  metadata json,
-  thread_id varchar(255) DEFAULT '',
-  PRIMARY KEY (issue_id, depends_on_id),
-  KEY idx_wisp_deps_depends_on (depends_on_id)
-)`,
-		},
-	}
-
-	for _, t := range auxTables {
+	for _, t := range wispAuxTableDDLs {
 		if bdTableExists(workDir, t.name) {
 			continue
 		}
@@ -353,6 +263,209 @@ func copyAuxiliaryData(workDir string, result *MigrateWispsResult) error {
 	result.DepsCopied = cnt
 
 	return nil
+}
+
+// deriveDBName extracts the database name from the workDir relative to townRoot.
+// For the town root itself, returns "hq". For rig directories, returns the rig name.
+func deriveDBName(townRoot, workDir string) string {
+	// Normalize paths
+	if townRoot == workDir {
+		return "hq"
+	}
+	// workDir is typically townRoot/<rigname>
+	rel := strings.TrimPrefix(workDir, townRoot)
+	rel = strings.TrimPrefix(rel, "/")
+	rel = strings.TrimSuffix(rel, "/")
+	// Take just the first path component (the rig name)
+	if idx := strings.Index(rel, "/"); idx >= 0 {
+		rel = rel[:idx]
+	}
+	if rel == "" {
+		return ""
+	}
+	return rel
+}
+
+// ensureWispsOnGTServer creates the wisps and auxiliary tables directly on the
+// gt Dolt server via MySQL protocol. This is needed because the reaper connects
+// to this server, not to bd's separate Dolt instance.
+func ensureWispsOnGTServer(host string, port int, dbName string) (wispsCreated bool, auxCreated []string, err error) {
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	dsn := fmt.Sprintf("root@tcp(%s:%d)/%s?parseTime=true&timeout=10s", host, port, dbName)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return false, nil, fmt.Errorf("connect to gt Dolt server: %w", err)
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Check if wisps table exists
+	if !gtTableExists(ctx, db, dbName, "wisps") {
+		if _, err := db.ExecContext(ctx, wispsCreateDDL); err != nil {
+			return false, nil, fmt.Errorf("create wisps: %w", err)
+		}
+		wispsCreated = true
+	}
+
+	// Create auxiliary tables
+	for _, t := range wispAuxTableDDLs {
+		if gtTableExists(ctx, db, dbName, t.name) {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, t.ddl); err != nil {
+			return wispsCreated, auxCreated, fmt.Errorf("create %s: %w", t.name, err)
+		}
+		auxCreated = append(auxCreated, t.name)
+	}
+
+	// Commit the DDL changes to Dolt history
+	if wispsCreated || len(auxCreated) > 0 {
+		commitMsg := fmt.Sprintf("migrate-wisps: create wisps tables in %s", dbName)
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil {
+			// Non-fatal: tables are created in working set even without commit
+			fmt.Printf("  Note: dolt commit after table creation: %v\n", err)
+		}
+	}
+
+	return wispsCreated, auxCreated, nil
+}
+
+// gtTableExists checks if a table exists on the gt Dolt server.
+func gtTableExists(ctx context.Context, db *sql.DB, dbName, tableName string) bool {
+	var dummy int
+	// Use information_schema for a safe, parameterized check.
+	err := db.QueryRowContext(ctx,
+		"SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
+		dbName, tableName).Scan(&dummy)
+	return err == nil
+}
+
+// wispsCreateDDL is the CREATE TABLE statement for the wisps table.
+var wispsCreateDDL = `CREATE TABLE wisps (
+  id varchar(255) NOT NULL,
+  content_hash varchar(64),
+  title varchar(500) NOT NULL,
+  description text NOT NULL,
+  design text NOT NULL DEFAULT '',
+  acceptance_criteria text NOT NULL DEFAULT '',
+  notes text NOT NULL DEFAULT '',
+  status varchar(32) NOT NULL DEFAULT 'open',
+  priority int NOT NULL DEFAULT 2,
+  issue_type varchar(32) NOT NULL DEFAULT 'task',
+  assignee varchar(255),
+  estimated_minutes int,
+  created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by varchar(255) DEFAULT '',
+  owner varchar(255) DEFAULT '',
+  updated_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  closed_at datetime,
+  closed_by_session varchar(255) DEFAULT '',
+  external_ref varchar(255),
+  compaction_level int DEFAULT 0,
+  compacted_at datetime,
+  compacted_at_commit varchar(64),
+  original_size int,
+  deleted_at datetime,
+  deleted_by varchar(255) DEFAULT '',
+  delete_reason text DEFAULT '',
+  original_type varchar(32) DEFAULT '',
+  sender varchar(255) DEFAULT '',
+  ephemeral tinyint(1) DEFAULT 1,
+  pinned tinyint(1) DEFAULT 0,
+  is_template tinyint(1) DEFAULT 0,
+  crystallizes tinyint(1) DEFAULT 0,
+  mol_type varchar(32) DEFAULT '',
+  work_type varchar(32) DEFAULT 'mutex',
+  quality_score double,
+  source_system varchar(255) DEFAULT '',
+  metadata json,
+  source_repo varchar(512) DEFAULT '',
+  close_reason text DEFAULT '',
+  event_kind varchar(32) DEFAULT '',
+  actor varchar(255) DEFAULT '',
+  target varchar(255) DEFAULT '',
+  payload text DEFAULT '',
+  await_type varchar(32) DEFAULT '',
+  await_id varchar(255) DEFAULT '',
+  timeout_ns bigint DEFAULT 0,
+  waiters text DEFAULT '',
+  hook_bead varchar(255) DEFAULT '',
+  role_bead varchar(255) DEFAULT '',
+  agent_state varchar(32) DEFAULT '',
+  last_activity datetime,
+  role_type varchar(32) DEFAULT '',
+  rig varchar(255) DEFAULT '',
+  due_at datetime,
+  defer_until datetime,
+  wisp_type varchar(32) DEFAULT NULL,
+  spec_id text,
+  PRIMARY KEY (id),
+  KEY idx_wisps_status (status),
+  KEY idx_wisps_issue_type (issue_type)
+)`
+
+// wispAuxTableDDL holds the name and DDL for an auxiliary wisp table.
+type wispAuxTableDDL struct {
+	name string
+	ddl  string
+}
+
+// wispAuxTableDDLs are the auxiliary tables needed alongside wisps.
+var wispAuxTableDDLs = []wispAuxTableDDL{
+	{
+		name: "wisp_labels",
+		ddl: `CREATE TABLE wisp_labels (
+  issue_id varchar(255) NOT NULL,
+  label varchar(255) NOT NULL,
+  PRIMARY KEY (issue_id, label),
+  KEY idx_wisp_labels_label (label)
+)`,
+	},
+	{
+		name: "wisp_comments",
+		ddl: `CREATE TABLE wisp_comments (
+  id bigint NOT NULL AUTO_INCREMENT,
+  issue_id varchar(255) NOT NULL,
+  author varchar(255) NOT NULL,
+  text text NOT NULL,
+  created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_wisp_comments_issue (issue_id)
+)`,
+	},
+	{
+		name: "wisp_events",
+		ddl: `CREATE TABLE wisp_events (
+  id bigint NOT NULL AUTO_INCREMENT,
+  issue_id varchar(255) NOT NULL,
+  event_type varchar(32) NOT NULL,
+  actor varchar(255) NOT NULL,
+  old_value text,
+  new_value text,
+  comment text,
+  created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_wisp_events_issue (issue_id)
+)`,
+	},
+	{
+		name: "wisp_dependencies",
+		ddl: `CREATE TABLE wisp_dependencies (
+  issue_id varchar(255) NOT NULL,
+  depends_on_id varchar(255) NOT NULL,
+  type varchar(32) NOT NULL DEFAULT 'blocks',
+  created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by varchar(255) NOT NULL DEFAULT '',
+  metadata json,
+  thread_id varchar(255) DEFAULT '',
+  PRIMARY KEY (issue_id, depends_on_id),
+  KEY idx_wisp_deps_depends_on (depends_on_id)
+)`,
+	},
 }
 
 // closeOriginalAgentBeads closes the original agent beads in the issues table.

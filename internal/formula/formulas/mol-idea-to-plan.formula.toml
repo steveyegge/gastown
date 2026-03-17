@@ -19,28 +19,32 @@ They'll pour this formula and it takes over from there.
 [generate-plan]  6 polecats design the implementation in parallel (design convoy)
                  → api, data, ux, scale, security, integration
       ↓
-[plan-review]    5 polecats review the plan in parallel (mol-plan-review convoy)
-                 → completeness, sequencing, risk, scope-creep, testability
+[prd-align 1-3]  3 rounds × 2 polecats: align plan with PRD, apply fixes each round
+                 → requirements, goals, constraints, non-goals, user-stories, open-questions
       ↓
-[human-approve]  You review the go/no-go verdict and greenlight
+[plan-review 1-3] 3 rounds × 2 polecats: review plan itself, apply fixes each round
+                  → completeness, sequencing, risk, scope-creep, testability, coherence
       ↓
-[create-beads]   Agent converts the approved plan into beads with dependencies
+[create-beads]   Agent converts the refined plan into beads with dependencies
+      ↓
+[verify-beads 1-3] 3 sequential passes comparing plan to beads, filling gaps
 ```
 
-## Human Gates
+## Human Gate
 
-There are two human gates built in:
+There is one human gate:
 1. **After PRD review**: You answer clarifying questions before plan generation
-2. **After plan review**: You approve the plan before bead creation
 
-These are the only steps requiring your input. Everything else runs autonomously.
+This is the only step requiring your input. The 6-round iterative plan review
+runs autonomously — polecats review, orchestrator applies fixes, repeat.
 
 ## Orchestration Model
 
 This is a workflow formula. The orchestrating crew worker runs through
 steps sequentially. The parallel review steps kick off convoy sub-workflows
 (separate polecats for each review dimension) and await their synthesis reports
-via mail before proceeding.
+via mail before proceeding. The iterative plan review rounds dispatch 2 polecats
+each, await their findings, apply fixes to the plan, then proceed to the next round.
 
 ## Variables
 
@@ -51,7 +55,7 @@ via mail before proceeding.
 """
 formula = "mol-idea-to-plan"
 type = "workflow"
-version = 1
+version = 2
 
 [[steps]]
 id = "intake"
@@ -159,31 +163,29 @@ This is a human gate. The molecule pauses here until you have answers.
 cat .prd-reviews/<review-id>/prd-review.md
 ```
 
-**2. Mail the human with the critical questions:**
-```bash
-gt mail send --human -s "PRD Questions: {{problem}}" -m "
-I've completed a 6-leg parallel review of the PRD for: {{problem}}
+**2. Present the critical questions directly in conversation:**
+
+Output the following to the human (they're in this chat session with you):
+
+```
+## PRD Review Complete: {{problem}}
 
 Full report: .prd-reviews/<review-id>/prd-review.md
 
-## Overall PRD Health
+### Overall PRD Health
 <paste executive summary from synthesis>
 
-## Questions Needing Your Input Before We Proceed
-
+### Questions Needing Your Input Before We Proceed
 <paste the 'Before You Build: Critical Questions' section from synthesis>
 
 ---
-Reply with numbered answers matching the questions above.
+Please reply with numbered answers matching the questions above.
 I'll incorporate your answers and kick off implementation plan generation.
-"
 ```
 
 **3. Await reply:**
-Monitor your inbox for the human's response:
-```bash
-gt mail inbox
-```
+Wait for the human to respond in this conversation. They will type their
+answers directly. Do NOT use `gt mail inbox` — the reply comes in chat.
 
 **4. Incorporate answers:**
 Update the PRD draft at `.prd-reviews/{{review_id}}/prd-draft.md` with the
@@ -240,102 +242,459 @@ Pay attention to:
 
 **Exit criteria:** Design synthesis complete. Design doc exists and covers the requirements."""
 
+# ============================================================================
+# PRD ALIGNMENT ROUNDS (1-3)
+#
+# Three rounds of 2 polecats each. Each round identifies gaps between the PRD
+# and the implementation plan, then the orchestrator applies all must-fix and
+# should-fix changes before proceeding to the next round.
+# ============================================================================
+
 [[steps]]
-id = "plan-review"
-title = "Run parallel plan review (5 legs)"
+id = "prd-align-1"
+title = "PRD alignment round 1: requirements + goals"
 needs = ["generate-plan"]
 description = """
-Pour the mol-plan-review convoy to run 5 parallel plan reviewers.
+First PRD-alignment round. Dispatch 2 polecats to check the plan against the PRD.
 
-**1. Pour the convoy:**
+**1. Dispatch 2 polecats:**
+
+Polecat A — **requirements-coverage**:
 ```bash
-gt formula run mol-plan-review \\
-  --plan=".designs/<design-id>/design-doc.md" \\
-  --problem="{{problem}}" \\
-  --prd_review=".prd-reviews/<review-id>/prd-review.md"
+gt sling --prompt="Review an implementation plan for PRD alignment.
+
+Read the PRD: .prd-reviews/{{review_id}}/prd-draft.md
+Read the plan: .designs/<design-id>/design-doc.md
+
+Walk through every REQUIREMENT in the PRD (Problem Statement, Goals, Acceptance
+Criteria, any explicitly stated requirements). For each, verify the plan has a
+concrete task/phase that addresses it.
+
+Report format:
+- COVERED: <requirement> → <plan section that addresses it>
+- GAP: <requirement> — not addressed in plan. Suggested fix: ...
+- PARTIAL: <requirement> — partially addressed. Missing: ...
+
+Classify each GAP/PARTIAL as must-fix or should-fix.
+Mail your full report back when done." --mail-back
 ```
 
-This spawns 5 polecats in parallel:
-- completeness — are all requirements covered?
-- sequencing — is the order right and are dependencies correct?
-- risk — what could go wrong or is still unknown?
-- scope-creep — is there unnecessary work to cut?
-- testability — can we verify this plan worked?
-
-**2. Await synthesis:**
+Polecat B — **goals-alignment**:
 ```bash
-gt mail inbox  # synthesis mails when complete
+gt sling --prompt="Review an implementation plan for PRD alignment.
+
+Read the PRD: .prd-reviews/{{review_id}}/prd-draft.md
+Read the plan: .designs/<design-id>/design-doc.md
+
+Walk through every GOAL in the PRD. For each, trace through the plan and verify
+that executing the plan as written will achieve this goal.
+
+Report format:
+- ALIGNED: <goal> → <how the plan achieves it>
+- MISALIGNED: <goal> — the plan won't achieve this because... Suggested fix: ...
+- PARTIAL: <goal> — partially achieved. Gap: ...
+
+Classify each MISALIGNED/PARTIAL as must-fix or should-fix.
+Mail your full report back when done." --mail-back
 ```
 
-Mail subject: `Plan Review Complete: {{problem}}`
-Review file: `.plan-reviews/<review-id>/plan-review.md`
-
-**3. Read the verdict:**
+**2. Await reports:**
 ```bash
-cat .plan-reviews/<review-id>/plan-review.md
+gt mail inbox  # wait for both polecats to report back
 ```
 
-Note the overall verdict: GO / GO WITH FIXES / NO-GO
+**3. Apply fixes to the plan:**
+Read both reports. For each must-fix and should-fix finding:
+- Edit `.designs/<design-id>/design-doc.md` directly
+- Add missing tasks, expand partial coverage, fix misalignments
+- Log all changes in `.plan-reviews/{{review_id}}/prd-align-round-1.md`
 
-If NO-GO: The plan needs significant revision before proceeding.
-Go back to `generate-plan` with the must-fix items as additional context.
-
-**Exit criteria:** Plan review synthesis received. Verdict is GO or GO WITH FIXES."""
+**Exit criteria:** Both reports received. All must-fix and should-fix items applied to the plan."""
 
 [[steps]]
-id = "human-approve"
-title = "Human reviews plan and approves"
-needs = ["plan-review"]
+id = "prd-align-2"
+title = "PRD alignment round 2: constraints + non-goals"
+needs = ["prd-align-1"]
 description = """
-Present the plan review verdict to the human for final approval.
+Second PRD-alignment round. The plan has been updated from round 1 findings.
 
-This is the second human gate. The molecule pauses here until approved.
+**1. Dispatch 2 polecats:**
 
-**1. Summarize for the human:**
+Polecat A — **constraints-compliance**:
 ```bash
-gt mail send --human -s "Plan Ready for Approval: {{problem}}" -m "
-The implementation plan for '{{problem}}' is ready for your review.
+gt sling --prompt="Review an implementation plan for PRD alignment (round 2).
 
-## Plan Review Verdict
-<paste overall verdict from plan-review.md>
+Read the PRD: .prd-reviews/{{review_id}}/prd-draft.md
+Read the plan: .designs/<design-id>/design-doc.md
+Read round 1 changes: .plan-reviews/{{review_id}}/prd-align-round-1.md
 
-## Full Reports
-- PRD Review: .prd-reviews/<review-id>/prd-review.md
-- Design / Implementation Plan: .designs/<design-id>/design-doc.md
-- Plan Review: .plan-reviews/<review-id>/plan-review.md
+Check every CONSTRAINT in the PRD (technical, business, timeline, resource).
+Verify the plan respects each constraint. Flag any plan items that violate or
+ignore stated constraints.
 
-## Must-Fix Items (if any)
-<paste from plan-review.md — or 'None'>
+Report format:
+- RESPECTED: <constraint> → <how plan respects it>
+- VIOLATED: <constraint> — plan violates this at <section>. Suggested fix: ...
+- UNADDRESSED: <constraint> — plan doesn't account for this. Risk: ...
 
-## What Happens Next
-If you approve, I'll convert this plan into beads with full dependency graph.
-
-Reply:
-- APPROVE — proceed to bead creation
-- APPROVE WITH NOTES — proceed but note changes to make during bead creation
-- REVISE — explain what needs to change and I'll redo the plan generation
-"
+Classify each as must-fix or should-fix.
+Mail your full report back when done." --mail-back
 ```
 
-**2. Await approval:**
+Polecat B — **non-goals-enforcement**:
+```bash
+gt sling --prompt="Review an implementation plan for PRD alignment (round 2).
+
+Read the PRD: .prd-reviews/{{review_id}}/prd-draft.md
+Read the plan: .designs/<design-id>/design-doc.md
+Read round 1 changes: .plan-reviews/{{review_id}}/prd-align-round-1.md
+
+Check the PRD's Non-Goals section. Verify the plan does NOT include work that
+falls into non-goal territory. Flag scope creep — tasks that go beyond what
+the PRD calls for.
+
+Report format:
+- CLEAN: <plan section> — stays within scope
+- SCOPE-CREEP: <plan section> — this work falls under non-goal '<non-goal>'. Cut or justify.
+- BORDERLINE: <plan section> — could be interpreted as in/out of scope. Recommendation: ...
+
+Classify each SCOPE-CREEP as must-fix. BORDERLINE as should-fix.
+Mail your full report back when done." --mail-back
+```
+
+**2. Await reports:**
 ```bash
 gt mail inbox
 ```
 
-**3. If REVISE:**
-Return to generate-plan step with the human's revision notes as added context.
-You may re-pour the design convoy with additional constraints.
+**3. Apply fixes to the plan:**
+Read both reports. Apply must-fix and should-fix changes to `.designs/<design-id>/design-doc.md`.
+Cut scope-creep items. Add constraint-respecting guardrails. Log changes in
+`.plan-reviews/{{review_id}}/prd-align-round-2.md`.
 
-**Exit criteria:** Human has replied APPROVE or APPROVE WITH NOTES."""
+**Exit criteria:** Both reports received. All fixes applied."""
+
+[[steps]]
+id = "prd-align-3"
+title = "PRD alignment round 3: user-stories + open-questions"
+needs = ["prd-align-2"]
+description = """
+Third and final PRD-alignment round. Plan has been updated from rounds 1-2.
+
+**1. Dispatch 2 polecats:**
+
+Polecat A — **user-stories-coverage**:
+```bash
+gt sling --prompt="Review an implementation plan for PRD alignment (round 3).
+
+Read the PRD: .prd-reviews/{{review_id}}/prd-draft.md
+Read the plan: .designs/<design-id>/design-doc.md
+Read prior changes:
+- .plan-reviews/{{review_id}}/prd-align-round-1.md
+- .plan-reviews/{{review_id}}/prd-align-round-2.md
+
+Walk through every USER STORY and SCENARIO in the PRD. For each, trace the
+end-to-end user journey through the plan. Verify every step in the scenario
+is covered by a plan task.
+
+Report format:
+- COVERED: <user story> → <plan tasks that implement this journey>
+- GAP: <user story> — step '<step>' has no corresponding plan task. Fix: ...
+- PARTIAL: <user story> — happy path covered but <edge case> is missing. Fix: ...
+
+Classify each as must-fix or should-fix.
+Mail your full report back when done." --mail-back
+```
+
+Polecat B — **open-questions-resolution**:
+```bash
+gt sling --prompt="Review an implementation plan for PRD alignment (round 3).
+
+Read the PRD: .prd-reviews/{{review_id}}/prd-draft.md
+Read the plan: .designs/<design-id>/design-doc.md
+Read prior changes:
+- .plan-reviews/{{review_id}}/prd-align-round-1.md
+- .plan-reviews/{{review_id}}/prd-align-round-2.md
+
+Check every OPEN QUESTION from the PRD (both the original Open Questions section
+and any questions raised in the Clarifications from Human Review section).
+Verify each question is either:
+- Answered and reflected in the plan
+- Explicitly deferred with a plan task to resolve it
+
+Report format:
+- RESOLVED: <question> → <where/how the plan addresses it>
+- UNRESOLVED: <question> — not addressed anywhere. Suggested resolution: ...
+- DEFERRED-OK: <question> — explicitly deferred with task to resolve later
+
+Classify UNRESOLVED as must-fix.
+Mail your full report back when done." --mail-back
+```
+
+**2. Await reports:**
+```bash
+gt mail inbox
+```
+
+**3. Apply fixes to the plan:**
+Read both reports. Apply all fixes to `.designs/<design-id>/design-doc.md`.
+Log changes in `.plan-reviews/{{review_id}}/prd-align-round-3.md`.
+
+**4. PRD alignment summary:**
+After applying fixes, output a brief status in conversation:
+```
+PRD Alignment Complete (3 rounds):
+- Round 1 (requirements + goals): <N> fixes applied
+- Round 2 (constraints + non-goals): <N> fixes applied
+- Round 3 (user-stories + open-questions): <N> fixes applied
+Proceeding to plan self-review...
+```
+
+**Exit criteria:** All 3 PRD-alignment rounds complete. Plan updated. Summary logged."""
+
+# ============================================================================
+# PLAN SELF-REVIEW ROUNDS (1-3)
+#
+# Three rounds of 2 polecats each. Each round reviews the plan itself (not
+# against the PRD) for internal quality. Covers the 5 original review angles
+# (completeness, sequencing, risk, scope-creep, testability) plus coherence,
+# distributed across 6 polecat slots.
+# ============================================================================
+
+[[steps]]
+id = "plan-review-1"
+title = "Plan self-review round 1: completeness + sequencing"
+needs = ["prd-align-3"]
+description = """
+First plan self-review round. The plan has been PRD-aligned through 3 rounds.
+Now review the plan itself for internal quality.
+
+**1. Dispatch 2 polecats:**
+
+Polecat A — **completeness**:
+```bash
+gt sling --prompt="Review an implementation plan for completeness.
+
+Read the plan: .designs/<design-id>/design-doc.md
+Read the PRD alignment logs: .plan-reviews/{{review_id}}/prd-align-round-*.md
+
+Is the plan complete? Check for:
+- Missing infrastructure setup (build config, CI, env vars, feature flags)
+- Missing data migrations or schema changes
+- Missing test tasks (unit, integration, e2e)
+- Missing documentation updates
+- Missing error handling or rollback procedures
+- Implicit dependencies that aren't called out as tasks
+- Tasks that are too coarse-grained to be actionable
+
+Report format for each finding:
+- FINDING: <what's missing or incomplete>
+  Severity: must-fix | should-fix
+  Suggested addition: <specific task or expansion to add>
+
+Mail your full report back when done." --mail-back
+```
+
+Polecat B — **sequencing**:
+```bash
+gt sling --prompt="Review an implementation plan for correct sequencing.
+
+Read the plan: .designs/<design-id>/design-doc.md
+
+Check the ordering and dependencies of all plan phases and tasks:
+- Are tasks in the right order? Would any task fail if executed in sequence?
+- Are there hidden dependencies (task X needs task Y but doesn't say so)?
+- Are there unnecessary serial dependencies (tasks that could be parallelized)?
+- Is there a critical path? Is it the shortest possible?
+- Are there circular dependencies?
+
+Report format for each finding:
+- FINDING: <sequencing issue>
+  Severity: must-fix | should-fix
+  Suggested reorder: <how to fix the sequence>
+
+Mail your full report back when done." --mail-back
+```
+
+**2. Await reports:**
+```bash
+gt mail inbox
+```
+
+**3. Apply fixes to the plan:**
+Read both reports. Apply all must-fix and should-fix changes to
+`.designs/<design-id>/design-doc.md`. Log in `.plan-reviews/{{review_id}}/review-round-1.md`.
+
+**Exit criteria:** Both reports received. All fixes applied."""
+
+[[steps]]
+id = "plan-review-2"
+title = "Plan self-review round 2: risk + scope-creep"
+needs = ["plan-review-1"]
+description = """
+Second plan self-review round.
+
+**1. Dispatch 2 polecats:**
+
+Polecat A — **risk**:
+```bash
+gt sling --prompt="Review an implementation plan for risk.
+
+Read the plan: .designs/<design-id>/design-doc.md
+Read prior review changes: .plan-reviews/{{review_id}}/review-round-1.md
+
+Identify risks in the plan:
+- Technical risks: unproven approaches, complex integrations, performance unknowns
+- Dependency risks: external services, third-party libraries, API stability
+- Knowledge risks: areas requiring expertise not mentioned in the plan
+- Rollback risks: what if a phase fails mid-execution? Is there a recovery path?
+- Missing spike/POC tasks for high-uncertainty items
+
+Report format for each risk:
+- RISK: <description>
+  Impact: HIGH | MEDIUM | LOW
+  Likelihood: HIGH | MEDIUM | LOW
+  Mitigation: must-fix | should-fix
+  Suggested action: <add spike, add fallback plan, add monitoring, etc.>
+
+Mail your full report back when done." --mail-back
+```
+
+Polecat B — **scope-creep**:
+```bash
+gt sling --prompt="Review an implementation plan for scope creep.
+
+Read the plan: .designs/<design-id>/design-doc.md
+Read the PRD: .prd-reviews/{{review_id}}/prd-draft.md
+Read prior review changes: .plan-reviews/{{review_id}}/review-round-1.md
+
+Look for unnecessary work in the plan:
+- Gold-plating: tasks that go beyond what's needed for the stated goals
+- Premature optimization: performance work before proving it's needed
+- Over-engineering: abstractions, frameworks, or generalization beyond requirements
+- Nice-to-haves disguised as requirements
+- Tasks that could be deferred to a follow-up without impacting the core feature
+
+Report format:
+- CUT: <task/section> — unnecessary because... Suggested action: remove or defer
+- SIMPLIFY: <task/section> — over-engineered. Simpler approach: ...
+- DEFER: <task/section> — not needed for MVP. Move to follow-up.
+
+Classify each as must-fix or should-fix.
+Mail your full report back when done." --mail-back
+```
+
+**2. Await reports:**
+```bash
+gt mail inbox
+```
+
+**3. Apply fixes to the plan:**
+Read both reports. Apply fixes to `.designs/<design-id>/design-doc.md`.
+Add risk mitigations, cut scope-creep items, add spikes for unknowns.
+Log in `.plan-reviews/{{review_id}}/review-round-2.md`.
+
+**Exit criteria:** Both reports received. All fixes applied."""
+
+[[steps]]
+id = "plan-review-3"
+title = "Plan self-review round 3: testability + coherence"
+needs = ["plan-review-2"]
+description = """
+Third and final plan self-review round.
+
+**1. Dispatch 2 polecats:**
+
+Polecat A — **testability**:
+```bash
+gt sling --prompt="Review an implementation plan for testability.
+
+Read the plan: .designs/<design-id>/design-doc.md
+Read prior review changes:
+- .plan-reviews/{{review_id}}/review-round-1.md
+- .plan-reviews/{{review_id}}/review-round-2.md
+
+For each task/phase in the plan, check:
+- Does it have clear acceptance criteria? (How do we know it's done?)
+- Can the acceptance criteria be verified automatically (test, script, query)?
+- Are there tasks for writing tests, or are tests assumed but not planned?
+- Is there an integration test or e2e test that validates the whole feature?
+- Can each phase be independently verified before moving to the next?
+
+Report format:
+- UNTESTABLE: <task> — no clear way to verify completion. Suggested criteria: ...
+- MISSING-TEST: <task> — needs a test task added. Suggested: ...
+- VAGUE-CRITERIA: <task> — acceptance criteria too vague. Suggested rewrite: ...
+
+Classify each as must-fix or should-fix.
+Mail your full report back when done." --mail-back
+```
+
+Polecat B — **coherence**:
+```bash
+gt sling --prompt="Review an implementation plan for overall coherence.
+
+Read the plan: .designs/<design-id>/design-doc.md
+Read the PRD: .prd-reviews/{{review_id}}/prd-draft.md
+Read ALL prior review changes: .plan-reviews/{{review_id}}/*.md
+
+This is the final review pass. Check the plan holistically:
+- Internal contradictions: do any tasks conflict with each other?
+- Naming consistency: are the same concepts named consistently throughout?
+- Architecture coherence: do all pieces fit together into a working system?
+- Missing glue: are there integration points between phases that aren't addressed?
+- Completeness delta: after 5 prior review rounds, is anything STILL missing?
+- Overall readability: could a developer pick this up and start building?
+
+Report format:
+- ISSUE: <description>
+  Severity: must-fix | should-fix
+  Suggested fix: <specific change>
+
+Mail your full report back when done." --mail-back
+```
+
+**2. Await reports:**
+```bash
+gt mail inbox
+```
+
+**3. Apply fixes to the plan:**
+Read both reports. Apply final fixes to `.designs/<design-id>/design-doc.md`.
+Log in `.plan-reviews/{{review_id}}/review-round-3.md`.
+
+**4. Iterative review summary — output in conversation:**
+```
+## Plan Review Complete: {{problem}}
+
+### 6-Round Iterative Review Summary
+
+**PRD Alignment (3 rounds):**
+- Round 1 (requirements + goals): <N> fixes
+- Round 2 (constraints + non-goals): <N> fixes
+- Round 3 (user-stories + open-questions): <N> fixes
+
+**Plan Self-Review (3 rounds):**
+- Round 4 (completeness + sequencing): <N> fixes
+- Round 5 (risk + scope-creep): <N> fixes
+- Round 6 (testability + coherence): <N> fixes
+
+**Final plan:** .designs/<design-id>/design-doc.md
+**Review logs:** .plan-reviews/{{review_id}}/
+
+Proceeding to bead creation...
+```
+
+**Exit criteria:** All 6 review rounds complete. Plan is refined. Summary output to human."""
 
 [[steps]]
 id = "create-beads"
 title = "Convert approved plan to beads"
-needs = ["human-approve"]
+needs = ["plan-review-3"]
 description = """
-Convert the approved implementation plan into beads with dependencies.
+Convert the refined implementation plan into beads with dependencies.
 
-**1. Read the approved plan:**
+**1. Read the final plan:**
 ```bash
 cat .designs/<design-id>/design-doc.md
 ```
@@ -359,51 +718,232 @@ From: {{problem}} implementation plan
 "
 ```
 
-**3. Set up dependencies:**
+**3. Create eval/smoke-test beads inline (REQUIRED):**
 
-After creating all beads, wire up the dependencies based on the plan's
-sequencing (from the mol-plan-review 'sequencing' leg):
+For each implementation bead that adds a skill, workflow, UI flow, or agent
+capability, create a corresponding eval bead immediately after:
+
+```bash
+bd create "Eval: <feature name>" --type=task --description="
+## Context
+Eval bead for: <implementation bead ID and title>
+
+## What
+Validate that <feature> works correctly end-to-end.
+
+## Eval Criteria
+- <For LLM/agent skills>: test extraction quality, grading accuracy, edge cases
+- <For UI features>: E2E smoke test — start the stack, navigate to the feature,
+  click through every user story, take screenshots as evidence
+- <For workflows>: run the workflow end-to-end, verify expected outputs
+- <For API endpoints>: test request/response, error cases, auth
+
+## Acceptance Criteria
+- All success criteria from the PRD are verified (not just code-reviewed)
+- Evidence is captured (screenshots, test output, logs)
+- CI passes on the integrated branch (not just per-package)
+"
+# Wire eval bead to depend on its implementation bead:
+bd dep add <eval-bead-id> <impl-bead-id>
+```
+
+**Rules for eval beads:**
+- Every implementation bead that adds user-facing behavior gets an eval bead
+- Eval beads depend on their implementation bead (eval runs after impl)
+- Infrastructure/refactoring beads (no user-facing behavior) do NOT need evals
+- The eval bead validates the feature works, not just that the code compiles
+- For UI features: the eval must use browser automation (Playwright MCP) to
+  take actual screenshots — code-level review alone is insufficient
+- A capstone eval bead should exist that validates the full integrated feature
+
+**4. Set up dependencies:**
+
+After creating all beads (implementation + eval), wire up the dependencies
+based on the plan's sequencing:
 
 ```bash
 # X needs Y means Y blocks X:
 bd dep add <task-x-id> <task-y-id>  # x depends on y (y blocks x)
 ```
 
-**4. Create a tracking epic:**
+**5. Create a tracking epic:**
 ```bash
 bd create "{{problem}}" --type=epic --description="
 Implementation of: {{problem}}
 
 ## Planning Artifacts
+- PRD: .prd-reviews/<review-id>/prd-draft.md
 - PRD Review: .prd-reviews/<review-id>/prd-review.md
 - Design Doc: .designs/<design-id>/design-doc.md
-- Plan Review: .plan-reviews/<review-id>/plan-review.md
+- Review Logs: .plan-reviews/<review-id>/
 "
 ```
 
-**5. Verify the dependency graph:**
+**6. Verify the dependency graph:**
 ```bash
 bd blocked  # should show clean topological order
 bv --robot-mode  # if available: graph visualization
 ```
 
-**6. Notify the human:**
-```bash
-gt mail send --human -s "Beads Ready: {{problem}}" -m "
-Bead graph created for: {{problem}}
+**7. Notify the human in conversation:**
 
-## Summary
+Output:
+
+```
+## Beads Created: {{problem}}
+
+### Summary
 <list of created beads with IDs>
 
-## Next Steps
+### Next Steps
 - Review beads: bd list --type=task
 - Start work: bd ready (shows unblocked tasks)
-- Kick off agent swarm: gt sling <first-bead-id> gastown
+- Kick off agent swarm: gt sling <first-bead-id> <rig>
+```
+
+**Exit criteria:** All plan tasks exist as beads with corresponding eval beads
+for user-facing features. Dependencies are correctly wired. Epic created. Human notified."""
+
+[[steps]]
+id = "verify-beads-pass-1"
+title = "Verify beads coverage against plan (pass 1)"
+needs = ["create-beads"]
+description = """
+First pass: find gaps between the implementation plan and the beads just created.
+
+**1. Read the implementation plan:**
+```bash
+cat .designs/<design-id>/design-doc.md
+```
+
+**2. List all beads just created:**
+```bash
+bd list --status=open
+```
+
+For each bead, read its full content:
+```bash
+bd show <id>
+```
+
+**3. Systematically compare:**
+
+Walk through every section, phase, and task in the implementation plan. For each
+discrete work item, verify a corresponding bead exists that covers it. Check:
+
+- Does a bead exist for this work item?
+- Does the bead's description capture the key requirements from the plan?
+- Are acceptance criteria present and specific?
+- Are file paths and technical details preserved?
+- Does every user-facing implementation bead have a corresponding eval bead?
+- Do eval beads specify concrete validation steps (not just code review)?
+
+**4. Create missing beads:**
+
+For any plan item not covered by an existing bead, create one:
+```bash
+bd create --title="<task>" --type=task --description="
+## Context
+Gap found in verify-beads pass 1. This was in the implementation plan but
+not captured in the initial bead creation.
+
+## What
+<task description from plan>
+
+## Acceptance Criteria
+<derived from plan>
 "
 ```
 
-**Exit criteria:** All plan tasks exist as beads. Dependencies are correctly wired.
-Epic created. Human notified."""
+Wire dependencies for any newly created beads:
+```bash
+bd dep add <new-bead> <dependency-bead>
+```
+
+**5. Report:**
+Log what you found and created. If no gaps: say so explicitly.
+
+**Exit criteria:** All plan items have corresponding beads after this pass."""
+
+[[steps]]
+id = "verify-beads-pass-2"
+title = "Verify beads coverage against plan (pass 2)"
+needs = ["verify-beads-pass-1"]
+description = """
+Second pass: re-read the plan from scratch and verify coverage again.
+
+This catches items missed in pass 1 due to context, ordering, or implicit
+requirements that only become visible after the first pass filled gaps.
+
+**Same process as pass 1:**
+
+1. Re-read the full implementation plan
+2. List ALL beads (including those created in pass 1)
+3. Walk through every plan section again — fresh eyes
+4. Create beads for any remaining gaps
+5. Wire dependencies
+
+**Additional checks this pass:**
+- Are there implicit requirements (e.g., "update exports", "run migrations",
+  "add tests") that the plan mentions in passing but weren't called out as
+  discrete tasks?
+- Are there cross-cutting concerns (e.g., feature flags, config changes,
+  documentation updates) mentioned across multiple phases?
+- Do any beads have descriptions that are too vague to be actionable?
+  If so, update them with specifics from the plan.
+- Are there implementation beads for skills, workflows, or UI flows that are
+  missing eval beads? Create eval beads for any that were missed.
+- Is there a capstone eval bead that validates the full integrated feature
+  end-to-end? If not, create one.
+
+**Exit criteria:** Second pass complete. Any new gaps filled."""
+
+[[steps]]
+id = "verify-beads-pass-3"
+title = "Final verification pass"
+needs = ["verify-beads-pass-2"]
+description = """
+Third and final pass: validate completeness and dependency graph integrity.
+
+**1. Final plan-to-beads comparison:**
+Re-read the plan one more time. At this point you should find zero gaps.
+If you do find something, create the bead.
+
+**2. Validate the dependency graph:**
+```bash
+bd blocked       # verify topological order makes sense
+bd ready         # verify at least one task is unblocked and ready to start
+bd stats         # summary of what was created
+```
+
+**3. Spot-check 3 random beads:**
+Pick 3 beads at random. For each, re-read the corresponding plan section
+and verify the bead fully captures the work. If not, update the bead.
+
+**4. Final report to human in conversation:**
+
+Output:
+
+```
+## Beads Verified: {{problem}}
+
+### Coverage
+- Total beads: <count> (implementation: <count>, eval: <count>)
+- Created in initial pass: <count>
+- Added in verification pass 1: <count>
+- Added in verification pass 2: <count>
+- Added in verification pass 3: <count>
+
+### Dependency Graph
+- Ready to start: <bd ready count>
+- Blocked: <bd blocked count>
+
+### Confidence
+<HIGH if 0 gaps in pass 3, MEDIUM if 1-2 gaps found in pass 3>
+```
+
+**Exit criteria:** Three passes complete. Zero gaps in final pass. Human notified
+with coverage report."""
 
 [vars]
 [vars.review_id]

@@ -61,6 +61,28 @@ func TestAcceptWorkspaceTrustDialog_DetectsDialog(t *testing.T) {
 	// but the function should return without error after detecting the dialog)
 }
 
+// TestAcceptWorkspaceTrustDialog_DetectsCodexDialog verifies that Codex's
+// workspace trust prompt is treated as a trust dialog instead of an agent prompt.
+func TestAcceptWorkspaceTrustDialog_DetectsCodexDialog(t *testing.T) {
+	tm := newTestTmux(t)
+	sessionName := "gt-test-trust-codex-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	if err := tm.SendKeys(sessionName, "echo '> You are in /tmp/demo'; echo 'Do you trust the contents of this directory?'"); err != nil {
+		t.Fatalf("SendKeys: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	if err := tm.AcceptWorkspaceTrustDialog(sessionName); err != nil {
+		t.Fatalf("AcceptWorkspaceTrustDialog: %v", err)
+	}
+}
+
 // TestAcceptBypassPermissionsWarning_NoDialog verifies that when no bypass
 // permissions dialog is present, the function returns quickly without error.
 func TestAcceptBypassPermissionsWarning_NoDialog(t *testing.T) {
@@ -173,6 +195,29 @@ func TestContainsPromptIndicator(t *testing.T) {
 			got := containsPromptIndicator(tt.content)
 			if got != tt.want {
 				t.Errorf("containsPromptIndicator(%q) = %v, want %v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContainsWorkspaceTrustDialog(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"claude trust prompt", "Quick safety check\nDo you trust this folder?", true},
+		{"codex trust prompt", "> You are in /tmp/demo\nDo you trust the contents of this directory?", true},
+		{"bypass dialog", "Bypass Permissions mode\n1. No\n2. Yes, I accept", false},
+		{"shell prompt", "user@host:~$", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := containsWorkspaceTrustDialog(tt.content)
+			if got != tt.want {
+				t.Errorf("containsWorkspaceTrustDialog(%q) = %v, want %v", tt.content, got, tt.want)
 			}
 		})
 	}

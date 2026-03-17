@@ -6,9 +6,11 @@
 package hooks
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/steveyegge/gastown/internal/hookutil"
@@ -45,9 +47,14 @@ func InstallForRole(provider, settingsDir, workDir, role, hooksDir, hooksFile st
 
 	targetPath := filepath.Join(installDir, hooksDir, hooksFile)
 
-	// Don't overwrite existing files
-	if _, err := os.Stat(targetPath); err == nil {
-		return nil
+	// Check if existing file needs upgrading. Stale hooks from earlier
+	// versions used `export PATH=...` which breaks Gemini CLI's hook runner.
+	// Replace them with the current template that uses absolute gt paths.
+	if existing, err := os.ReadFile(targetPath); err == nil {
+		if !needsUpgrade(existing) {
+			return nil // Existing file is current — don't overwrite
+		}
+		// Stale file detected — fall through to overwrite with current template
 	}
 
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
@@ -58,6 +65,15 @@ func InstallForRole(provider, settingsDir, workDir, role, hooksDir, hooksFile st
 	content, err := resolveTemplate(provider, hooksFile, role)
 	if err != nil {
 		return fmt.Errorf("resolving template for %s: %w", provider, err)
+	}
+
+	// Substitute {{GT_BIN}} with the resolved gt binary path.
+	// Templates use this placeholder so hooks call gt directly instead of
+	// relying on PATH exports, which fail on Gemini CLI (the hook runner
+	// expands $PATH into an enormous string that breaks command parsing).
+	if bytes.Contains(content, []byte("{{GT_BIN}}")) {
+		gtBin := resolveGTBinary()
+		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBin))
 	}
 
 	// Use restrictive permissions for settings that may contain role instructions
@@ -122,4 +138,31 @@ func roleAwarePatterns(roleType, hooksFile string) []string {
 // isSettingsFile returns true for files that may contain sensitive role config.
 func isSettingsFile(name string) bool {
 	return filepath.Ext(name) == ".json"
+}
+
+// needsUpgrade returns true if an existing hooks file contains stale patterns
+// that should be replaced by the current template. This allows the installer
+// to auto-upgrade hooks from earlier versions without requiring manual intervention.
+func needsUpgrade(content []byte) bool {
+	// Stale pattern: export PATH=... && gt — replaced by {{GT_BIN}} in current templates.
+	// The PATH export breaks Gemini CLI's hook runner which expands $PATH into
+	// an enormous string. Also catches files missing GT_HOOK_SOURCE env vars.
+	if bytes.Contains(content, []byte(`export PATH=`)) {
+		return true
+	}
+	return false
+}
+
+// resolveGTBinary returns the absolute path to the gt binary.
+// Tries os.Executable() first (most reliable when running as gt), then
+// falls back to exec.LookPath for PATH-based discovery. If both fail,
+// returns "gt" and hopes the runtime PATH has it.
+func resolveGTBinary() string {
+	if exe, err := os.Executable(); err == nil {
+		return exe
+	}
+	if path, err := exec.LookPath("gt"); err == nil {
+		return path
+	}
+	return "gt"
 }

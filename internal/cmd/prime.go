@@ -29,6 +29,7 @@ var primeDryRun bool
 var primeState bool
 var primeStateJSON bool
 var primeExplain bool
+var primeStructuredSessionStartOutput bool
 
 // primeHookSource stores the SessionStart source ("startup", "resume", "clear", "compact")
 // when running in hook mode. Used to provide lighter output on compaction/resume.
@@ -73,16 +74,26 @@ Role detection:
 This command is typically used in shell prompts or agent initialization.
 
 HOOK MODE (--hook):
-  When called as an LLM runtime hook, use --hook to enable session ID handling.
-  This reads session metadata from stdin and persists it for the session.
+  When called as an LLM runtime hook, use --hook to enable session ID handling,
+  agent-ready signaling, and session persistence.
+
+  Session ID resolution (first match wins):
+    1. GT_SESSION_ID env var
+    2. CLAUDE_SESSION_ID env var
+    3. Persisted .runtime/session_id (from prior SessionStart)
+    4. Stdin JSON (Claude Code format)
+    5. Auto-generated UUID
+
+  Source resolution: GT_HOOK_SOURCE env var, then stdin JSON "source" field.
 
   Claude Code integration (in .claude/settings.json):
     "SessionStart": [{"hooks": [{"type": "command", "command": "gt prime --hook"}]}]
+    Claude sends JSON on stdin: {"session_id":"uuid","source":"startup|resume|compact"}
 
-  Claude Code sends JSON on stdin:
-    {"session_id": "uuid", "transcript_path": "/path", "source": "startup|resume"}
-
-  Other agents can set GT_SESSION_ID environment variable instead.`,
+  Gemini CLI / other runtimes (in .gemini/settings.json):
+    "SessionStart": "export GT_SESSION_ID=$(uuidgen) GT_HOOK_SOURCE=startup && gt prime --hook"
+    "PreCompress":  "export GT_HOOK_SOURCE=compact && gt prime --hook"
+    Set GT_SESSION_ID + GT_HOOK_SOURCE as env vars to skip the stdin read entirely.`,
 	RunE: runPrime,
 }
 
@@ -156,7 +167,7 @@ func runPrime(cmd *cobra.Command, args []string) (retErr error) {
 	// any new mail. This keeps PreCompress hooks under 1s for non-Claude
 	// runtimes that have short hook timeouts (Gemini CLI).
 	if isCompactResume() {
-		runPrimeCompactResume(ctx, cwd)
+		runPrimeCompactResume(ctx)
 		return nil
 	}
 
@@ -168,7 +179,17 @@ func runPrime(cmd *cobra.Command, args []string) (retErr error) {
 	// injectWorkContext sets GT_WORK_RIG/BEAD/MOL in the current process env and
 	// in the tmux session env so all subsequent subprocesses (bd, mail, …) carry
 	// the correct work attribution until the next gt prime overwrites it.
-	hookedBead := findAgentWork(ctx)
+	hookedBead, hookErr := findAgentWork(ctx)
+	if hookErr != nil {
+		// Database error during hook query — NOT the same as "no work assigned".
+		// Emit a loud warning so the agent does NOT run gt done / close the bead.
+		// This prevents the destructive cycle: DB error → "no work" → gt done → bead lost. (GH#2638)
+		fmt.Fprintf(os.Stderr, "\n%s\n", style.Bold.Render("## ⚠️  DATABASE ERROR — DO NOT RUN gt done ⚠️"))
+		fmt.Fprintf(os.Stderr, "Hook query failed: %v\n", hookErr)
+		fmt.Fprintf(os.Stderr, "This is a database connectivity error, NOT an empty hook.\n")
+		fmt.Fprintf(os.Stderr, "Your work may still be assigned. Do NOT close any beads.\n")
+		fmt.Fprintf(os.Stderr, "Escalate to witness/mayor and wait for resolution.\n\n")
+	}
 	injectWorkContext(ctx, hookedBead)
 
 	formula, err := outputRoleContext(ctx)
@@ -208,7 +229,7 @@ func runPrime(cmd *cobra.Command, args []string) (retErr error) {
 // Unlike the full prime path, this outputs a brief recovery line instead of
 // the full AUTONOMOUS WORK MODE block. This prevents agents from re-announcing
 // and re-initializing after compaction. (GH#1965)
-func runPrimeCompactResume(ctx RoleContext, cwd string) {
+func runPrimeCompactResume(ctx RoleContext) {
 	// Brief identity confirmation
 	actor := getAgentIdentity(ctx)
 	source := primeHookSource
@@ -224,6 +245,13 @@ func runPrimeCompactResume(ctx RoleContext, cwd string) {
 	fmt.Println("\n---")
 	fmt.Println()
 	fmt.Println("**Continue your current task.** If you've lost context, run `gt prime` for full reload.")
+
+	// Remind polecats about gt done — after compaction the agent may have lost
+	// the formula checklist and forgotten that gt done is required to submit work.
+	// Without this, polecats finish implementation and sit at the prompt forever.
+	if ctx.Role == RolePolecat {
+		fmt.Printf("\n**IMPORTANT**: When all work is complete (code committed, tests pass), run `%s done` to submit to the merge queue.\n", cli.Name())
+	}
 }
 
 // validatePrimeFlags checks that CLI flag combinations are valid.
@@ -285,10 +313,24 @@ func handlePrimeHookMode(townRoot, cwd string) {
 	primeHookSource = source
 
 	explain(true, "Session beacon: hook mode enabled, session ID from stdin")
-	fmt.Printf("[session:%s]\n", sessionID)
-	if source != "" {
-		fmt.Printf("[source:%s]\n", source)
+	for _, line := range hookSessionBeaconLines(sessionID, source) {
+		fmt.Println(line)
 	}
+}
+
+// hookSessionBeaconLines returns the bracketed session/source markers used by
+// the normal hook path. Structured SessionStart output skips them because Codex
+// tries to auto-detect JSON, sees the leading '[', and misclassifies the startup
+// stream as JSON instead of plain text metadata.
+func hookSessionBeaconLines(sessionID, source string) []string {
+	if primeStructuredSessionStartOutput {
+		return nil
+	}
+	lines := []string{fmt.Sprintf("[session:%s]", sessionID)}
+	if source != "" {
+		lines = append(lines, fmt.Sprintf("[source:%s]", source))
+	}
+	return lines
 }
 
 // signalAgentReady sets GT_AGENT_READY=1 in the current tmux session environment.
@@ -416,34 +458,65 @@ func runBdPrime(workDir string) {
 	}
 }
 
+// memoryTypeLabels maps type keys to human-readable section headers for prime injection.
+var memoryTypeLabels = map[string]string{
+	"feedback":  "Behavioral Rules (from user feedback)",
+	"user":      "User Context",
+	"project":   "Project Context",
+	"reference":  "Reference Links",
+	"general":   "General",
+}
+
 // runMemoryInject loads memories from beads kv and outputs them during prime.
-// This replaces MEMORY.md injection with bead-backed agent memory.
+// Memories are grouped by type and ordered by priority (feedback first).
 func runMemoryInject() {
 	kvs, err := bdKvListJSON()
 	if err != nil {
 		return // Silently skip if kv list fails
 	}
 
-	var memories []string
+	// Group memories by type
+	type mem struct {
+		shortKey string
+		value    string
+	}
+	grouped := make(map[string][]mem)
+
 	for k, v := range kvs {
 		if !strings.HasPrefix(k, memoryKeyPrefix) {
 			continue
 		}
-		shortKey := strings.TrimPrefix(k, memoryKeyPrefix)
-		memories = append(memories, fmt.Sprintf("- **%s**: %s", shortKey, v))
+		memType, shortKey := parseMemoryKey(k)
+		grouped[memType] = append(grouped[memType], mem{shortKey: shortKey, value: v})
 	}
 
-	if len(memories) == 0 {
+	if len(grouped) == 0 {
 		return
 	}
 
-	sort.Strings(memories)
+	// Sort each group by key
+	for t := range grouped {
+		sort.Slice(grouped[t], func(i, j int) bool {
+			return grouped[t][i].shortKey < grouped[t][j].shortKey
+		})
+	}
 
 	fmt.Println()
 	fmt.Println("# Agent Memories")
-	fmt.Println()
-	for _, m := range memories {
-		fmt.Println(m)
+
+	for _, t := range memoryTypeOrder {
+		mems, ok := grouped[t]
+		if !ok || len(mems) == 0 {
+			continue
+		}
+		label := memoryTypeLabels[t]
+		if label == "" {
+			label = t
+		}
+		fmt.Printf("\n## %s\n\n", label)
+		for _, m := range mems {
+			fmt.Printf("- **%s**: %s\n", m.shortKey, m.value)
+		}
 	}
 }
 
@@ -508,16 +581,20 @@ func hasWorkflowAttachment(attachment *beads.AttachmentFields) bool {
 // For polecats and crew, retries up to 3 times with 2-second delays to handle
 // the timing race where hook state hasn't propagated by the time gt prime runs.
 // See: https://github.com/steveyegge/gastown/issues/1438
-// Returns nil if no work is found.
-func findAgentWork(ctx RoleContext) *beads.Issue {
+//
+// Returns (nil, nil) if no work is found.
+// Returns (nil, err) if all attempts failed due to database errors — the caller
+// MUST distinguish this from "no work" to avoid silently closing beads. (GH#2638)
+func findAgentWork(ctx RoleContext) (*beads.Issue, error) {
 	agentID := getAgentIdentity(ctx)
 	if agentID == "" {
-		return nil
+		return nil, nil
 	}
 
-	// Polecats and crew use a retry loop to handle the timing race where
-	// the hook write (status=hooked + assignee) hasn't propagated to new
-	// Dolt connections by the time gt prime runs on session startup.
+	// Polecats, crew, and dogs use a retry loop to handle the timing race
+	// where the hook write (status=hooked + assignee) hasn't propagated to
+	// new Dolt connections by the time gt prime runs on session startup.
+	// Dogs are especially affected since dispatch is fire-and-forget. (GH#2748)
 	// Uses exponential backoff: 500ms, 1s, 2s, 4s, 8s (total ~15.5s max).
 	// See: https://github.com/steveyegge/gastown/issues/2389
 	//
@@ -525,10 +602,11 @@ func findAgentWork(ctx RoleContext) *beads.Issue {
 	// A single attempt suffices — retries would add ~15s of latency to
 	// compaction hooks, causing non-Claude runtimes to report hook failure.
 	maxAttempts := 1
-	if (ctx.Role == RolePolecat || ctx.Role == RoleCrew) && !isCompactResume() {
+	if (ctx.Role == RolePolecat || ctx.Role == RoleCrew || ctx.Role == RoleDog) && !isCompactResume() {
 		maxAttempts = 5
 	}
 
+	var lastErr error
 	backoff := 500 * time.Millisecond
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
@@ -536,16 +614,26 @@ func findAgentWork(ctx RoleContext) *beads.Issue {
 			backoff *= 2
 		}
 
-		if result := findAgentWorkOnce(ctx, agentID); result != nil {
-			return result
+		result, err := findAgentWorkOnce(ctx, agentID)
+		if result != nil {
+			return result, nil
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			// Successful query returned no work — not a DB error
+			lastErr = nil
 		}
 	}
 
-	return nil
+	return nil, lastErr
 }
 
 // findAgentWorkOnce performs a single attempt to find hooked work for an agent.
-func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
+// Returns (nil, nil) when no work is found.
+// Returns (nil, err) when the database query itself failed — the caller must
+// not treat this as "no work assigned". (GH#2638)
+func findAgentWorkOnce(ctx RoleContext, agentID string) (*beads.Issue, error) {
 	// Use rig root for beads queries instead of ctx.WorkDir. Polecat worktrees
 	// rely on .beads/redirect which can fail to resolve in edge cases, causing
 	// polecats to miss hooked work and exit immediately. The rig root directory
@@ -564,7 +652,7 @@ func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
 			hb := beads.New(hookBeadDir)
 			if hookBead, err := hb.Show(agentBead.HookBead); err == nil && hookBead != nil &&
 				(hookBead.Status == beads.StatusHooked || hookBead.Status == "in_progress") {
-				return hookBead
+				return hookBead, nil
 			}
 		}
 	}
@@ -576,7 +664,7 @@ func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
 		Priority: -1,
 	})
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("querying hooked beads: %w", err)
 	}
 
 	// Fall back to in_progress beads (session interrupted before completion)
@@ -586,7 +674,10 @@ func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
 			Assignee: agentID,
 			Priority: -1,
 		})
-		if err == nil && len(inProgressBeads) > 0 {
+		if err != nil {
+			return nil, fmt.Errorf("querying in-progress beads: %w", err)
+		}
+		if len(inProgressBeads) > 0 {
 			hookedBeads = inProgressBeads
 		}
 	}
@@ -609,12 +700,13 @@ func findAgentWorkOnce(ctx RoleContext, agentID string) *beads.Issue {
 		}); err == nil && len(townIP) > 0 {
 			hookedBeads = townIP
 		}
+		// Town-level fallback errors are non-fatal — rig-level query succeeded
 	}
 
 	if len(hookedBeads) == 0 {
-		return nil
+		return nil, nil
 	}
-	return hookedBeads[0]
+	return hookedBeads[0], nil
 }
 
 // rigBeadsRoot returns the directory to use for beads queries.
@@ -718,10 +810,11 @@ func outputMoleculeWorkflow(ctx RoleContext, attachment *beads.AttachmentFields)
 
 	// Show inline formula steps from the embedded binary (root-only: no child wisps to query).
 	if attachment.AttachedFormula != "" {
-		showFormulaStepsFull(attachment.AttachedFormula)
+		showFormulaStepsFull(attachment.AttachedFormula, strings.Split(attachment.FormulaVars, "\n"))
 		fmt.Println()
-		fmt.Printf("%s\n", style.Bold.Render("Work through the checklist above. When all steps complete, run `"+cli.Name()+" done`."))
+		fmt.Printf("%s\n", style.Bold.Render("Work through ALL steps above, including submit and cleanup."))
 		fmt.Println("The base bead is your assignment. The formula steps define your workflow.")
+		fmt.Printf("\n%s\n", style.Bold.Render("REQUIRED: When all steps complete, run `"+cli.Name()+" done` to submit to the merge queue. Do NOT stop after implementation — the formula has submit steps you must follow."))
 		return
 	}
 
@@ -732,44 +825,40 @@ func outputMoleculeWorkflow(ctx RoleContext, attachment *beads.AttachmentFields)
 	fmt.Println("The base bead is just a container. The molecule steps define your workflow.")
 }
 
-// outputRalphLoopDirective emits the Ralph Wiggum loop command for ralphcat mode.
-// The agent sees this and runs the slash command, activating the Ralph plugin's
-// stop hook loop. Each iteration gets a fresh context window while preserving
-// artifacts on disk via git.
+// outputRalphLoopDirective emits inline iterative work instructions for ralph mode.
+// Ralph mode is designed for long, iterative workflows (e.g., quality improvement
+// loops) that benefit from committing progress incrementally. The agent works
+// through formula steps iteratively, committing after each meaningful change,
+// and calls gt done when all acceptance criteria are met or no further progress
+// can be made.
 func outputRalphLoopDirective(_ RoleContext, attachment *beads.AttachmentFields) {
-	fmt.Printf("%s\n\n", style.Bold.Render("## 🐱 RALPH LOOP MODE (RALPHCAT)"))
-	fmt.Println("This work uses Ralph Wiggum loop mode for multi-step execution.")
-	fmt.Println("Each step runs in a fresh context window to avoid context exhaustion.")
+	fmt.Printf("%s\n\n", style.Bold.Render("## RALPH LOOP MODE (ITERATIVE WORKFLOW)"))
+	fmt.Println("This work uses iterative loop mode. Work through the steps below,")
+	fmt.Println("committing after each meaningful change. Loop until acceptance criteria")
+	fmt.Println("are met or no further progress can be made.")
 	fmt.Println()
 
-	// Build the ralph prompt from the molecule steps
-	prompt := buildRalphPromptFromMolecule(attachment)
-
-	fmt.Printf("Run this command NOW:\n\n")
-	fmt.Printf("```\n/ralph-loop \"%s\" --max-iterations 20 --completion-phrase \"POLECAT_DONE\"\n```\n\n",
-		strings.ReplaceAll(prompt, "\"", "\\\""))
-
-	fmt.Println("The Ralph loop will:")
-	fmt.Println("1. Execute each step in a fresh context")
-	fmt.Println("2. Preserve work via git commits between steps")
-	fmt.Println("3. Stop when POLECAT_DONE is output or max iterations reached")
-	fmt.Println()
-	fmt.Printf("%s\n", style.Bold.Render("⚠️  Run the /ralph-loop command above. Do NOT work step-by-step manually."))
-}
-
-// buildRalphPromptFromMolecule constructs the Ralph loop prompt text from molecule steps.
-func buildRalphPromptFromMolecule(attachment *beads.AttachmentFields) string {
-	var b strings.Builder
-	b.WriteString("Execute the attached molecule workflow. ")
-	if len(attachment.AttachedVars) > 0 {
-		b.WriteString("Formula vars: " + strings.Join(attachment.AttachedVars, ", ") + ". ")
+	// Show the formula steps inline (same as normal mode) so the agent has
+	// the full checklist. Previously this emitted a /ralph-loop slash command
+	// that didn't exist, causing the polecat to die immediately.
+	if attachment.AttachedFormula != "" {
+		showFormulaStepsFull(attachment.AttachedFormula, strings.Split(attachment.FormulaVars, "\n"))
+		fmt.Println()
 	}
+
 	if attachment.AttachedArgs != "" {
-		b.WriteString("Context: " + attachment.AttachedArgs + ". ")
+		fmt.Printf("%s\n", style.Bold.Render("Context:"))
+		fmt.Printf("  %s\n\n", attachment.AttachedArgs)
 	}
-	b.WriteString("Work through steps in order, committing after each. ")
-	b.WriteString("When all steps complete, output POLECAT_DONE.")
-	return b.String()
+
+	fmt.Printf("%s\n", style.Bold.Render("Iterative workflow:"))
+	fmt.Println("1. Work through the formula steps above")
+	fmt.Println("2. Commit after each meaningful change (preserve progress via git)")
+	fmt.Println("3. After completing a pass, evaluate results against acceptance criteria")
+	fmt.Println("4. If criteria not met, loop: identify the worst gap, fix it, commit, re-evaluate")
+	fmt.Println("5. When all criteria are met (or no further progress possible), run `" + cli.Name() + " done`")
+	fmt.Println()
+	fmt.Printf("%s\n", style.Bold.Render("Commit frequently. Each commit preserves your progress."))
 }
 
 // outputBeadPreview runs `bd show` and displays a truncated preview of the bead.

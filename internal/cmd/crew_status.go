@@ -50,7 +50,7 @@ func runCrewStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	crewMgr, r, err := getCrewManager(crewRig)
+	crewMgr, r, err := getCrewManagerForMember(crewRig, targetName)
 	if err != nil {
 		return err
 	}

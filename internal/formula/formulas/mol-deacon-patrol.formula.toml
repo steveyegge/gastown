@@ -869,10 +869,12 @@ needs = ["orphan-check"]
 description = """
 **DETECT ONLY** - Check if cleanup is needed and dispatch to dog.
 
-**Step 1: Preview cleanup needs**
+**Step 1: Quick cleanup check (avoid gt doctor -v — takes 60s, blocks patrol)**
 ```bash
-gt doctor -v
-# Check output for issues that need cleaning
+# Fast orphan session check only
+tmux list-sessions 2>/dev/null | wc -l
+# Count open wisps as a proxy for system load
+bd list --status=open --json 2>/dev/null | jq length
 ```
 
 **Step 2: If cleanup needed, dispatch to dog**
@@ -881,8 +883,9 @@ gt doctor -v
 gt sling mol-session-gc deacon/dogs --var mode=conservative
 ```
 
-**Important:** Do NOT run `gt doctor --fix` inline. Dogs handle cleanup.
-The Deacon stays lightweight - detection only.
+**Important:** Do NOT run `gt doctor -v` or `gt doctor --fix` inline.
+`gt doctor -v` takes 60+ seconds and blocks the patrol loop.
+Dogs handle cleanup. The Deacon stays lightweight - detection only.
 
 **Step 3: If nothing to clean**
 Skip dispatch - system is healthy.

@@ -571,7 +571,7 @@ exit /b 0
 		{"setup_command", ""},
 		{"typecheck_command", ""},
 		{"lint_command", ""},
-		{"test_command", "go test ./..."},
+		{"test_command", ""},
 		{"build_command", ""},
 	} {
 		if !containsVarArg(fallbackBondLine, required.key, required.value) {

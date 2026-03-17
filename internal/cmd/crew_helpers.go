@@ -14,6 +14,26 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+// getCrewManagerForMember returns a crew manager, inferring the rig from the
+// crew member name if cwd-based inference fails. Use this when a crew member
+// name is known (e.g., gt crew at <name>).
+func getCrewManagerForMember(rigName, crewName string) (*crew.Manager, *rig.Rig, error) {
+	if rigName == "" {
+		townRoot, err := workspace.FindFromCwdOrError()
+		if err != nil {
+			return nil, nil, fmt.Errorf("not in a Gas Town workspace: %w", err)
+		}
+		rigName, err = inferRigFromCwd(townRoot)
+		if err != nil && crewName != "" {
+			rigName, err = inferRigFromCrewName(townRoot, crewName)
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("could not determine rig (use --rig flag): %w", err)
+		}
+	}
+	return getCrewManager(rigName)
+}
+
 // getCrewManager returns a crew manager for the specified or inferred rig.
 func getCrewManager(rigName string) (*crew.Manager, *rig.Rig, error) {
 	// Handle optional rig inference from cwd

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -17,12 +18,15 @@ import (
 
 // Plugin command flags
 var (
-	pluginListJSON    bool
-	pluginShowJSON    bool
-	pluginRunForce    bool
-	pluginRunDryRun   bool
-	pluginHistoryJSON bool
+	pluginListJSON     bool
+	pluginShowJSON     bool
+	pluginRunForce     bool
+	pluginRunDryRun    bool
+	pluginHistoryJSON  bool
 	pluginHistoryLimit int
+	pluginSyncSource   string
+	pluginSyncClean    bool
+	pluginSyncDryRun   bool
 )
 
 var pluginCmd = &cobra.Command{
@@ -98,6 +102,24 @@ Examples:
 	RunE: runPluginRun,
 }
 
+var pluginSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync plugins from source repo to runtime directories",
+	Long: `Copy plugins from the gastown source repository to runtime plugin directories.
+
+By default, auto-detects the source by walking up from the current directory
+looking for a gastown repo, or checks known locations within the town.
+
+Syncs to town-level plugins (~/gt/plugins/) so all rigs see the latest plugins.
+
+Examples:
+  gt plugin sync                           # Auto-detect source, sync to town
+  gt plugin sync --source ./plugins        # Explicit source directory
+  gt plugin sync --clean                   # Remove plugins not in source
+  gt plugin sync --dry-run                 # Show what would happen`,
+	RunE: runPluginSync,
+}
+
 var pluginHistoryCmd = &cobra.Command{
 	Use:   "history <name>",
 	Short: "Show plugin execution history",
@@ -128,11 +150,17 @@ func init() {
 	pluginHistoryCmd.Flags().BoolVar(&pluginHistoryJSON, "json", false, "Output as JSON")
 	pluginHistoryCmd.Flags().IntVar(&pluginHistoryLimit, "limit", 10, "Maximum number of runs to show")
 
+	// Sync subcommand flags
+	pluginSyncCmd.Flags().StringVar(&pluginSyncSource, "source", "", "Source plugins directory (auto-detected if omitted)")
+	pluginSyncCmd.Flags().BoolVar(&pluginSyncClean, "clean", false, "Remove plugins from target that don't exist in source")
+	pluginSyncCmd.Flags().BoolVar(&pluginSyncDryRun, "dry-run", false, "Show what would happen without syncing")
+
 	// Add subcommands
 	pluginCmd.AddCommand(pluginListCmd)
 	pluginCmd.AddCommand(pluginShowCmd)
 	pluginCmd.AddCommand(pluginRunCmd)
 	pluginCmd.AddCommand(pluginHistoryCmd)
+	pluginCmd.AddCommand(pluginSyncCmd)
 
 	rootCmd.AddCommand(pluginCmd)
 }
@@ -257,7 +285,12 @@ func printPluginSummary(p *plugin.Plugin) {
 		desc = desc[:47] + "..."
 	}
 
-	fmt.Printf("    %s %s\n", style.Bold.Render(p.Name), style.Dim.Render(fmt.Sprintf("[%s]", gateType)))
+	typeTag := gateType
+	if p.IsExecWrapper() {
+		typeTag = "exec-wrapper"
+	}
+
+	fmt.Printf("    %s %s\n", style.Bold.Render(p.Name), style.Dim.Render(fmt.Sprintf("[%s]", typeTag)))
 	if desc != "" {
 		fmt.Printf("      %s\n", style.Dim.Render(desc))
 	}
@@ -341,6 +374,12 @@ func outputPluginShowText(p *plugin.Plugin) error {
 	if p.Execution != nil {
 		fmt.Println()
 		fmt.Printf("%s\n", style.Bold.Render("Execution:"))
+		if p.Execution.Type != "" {
+			fmt.Printf("  Type: %s\n", p.Execution.Type)
+		}
+		if len(p.Execution.Wrapper) > 0 {
+			fmt.Printf("  Wrapper: %s\n", strings.Join(p.Execution.Wrapper, " "))
+		}
 		if p.Execution.Timeout != "" {
 			fmt.Printf("  Timeout: %s\n", p.Execution.Timeout)
 		}
@@ -445,6 +484,90 @@ func runPluginRun(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to record run: %v\n", err)
 	} else {
 		fmt.Printf("\n%s Recorded run: %s\n", style.Dim.Render("●"), beadID)
+	}
+
+	return nil
+}
+
+func runPluginSync(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Determine source directory
+	sourceDir := pluginSyncSource
+	if sourceDir == "" {
+		sourceDir, err = plugin.FindGastownSource(townRoot)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Resolve to absolute path
+	if !filepath.IsAbs(sourceDir) {
+		abs, err := filepath.Abs(sourceDir)
+		if err != nil {
+			return fmt.Errorf("resolving source path: %w", err)
+		}
+		sourceDir = abs
+	}
+
+	targetDir := filepath.Join(townRoot, "plugins")
+
+	if pluginSyncDryRun {
+		report, err := plugin.DetectDrift(sourceDir, targetDir)
+		if err != nil {
+			return fmt.Errorf("detecting drift: %w", err)
+		}
+
+		fmt.Printf("%s Plugin sync dry run\n", style.Bold.Render("Plugin sync:"))
+		fmt.Printf("  Source: %s\n", sourceDir)
+		fmt.Printf("  Target: %s\n\n", targetDir)
+
+		if !report.HasDrift() && len(report.Extra) == 0 {
+			fmt.Printf("  %s All plugins up to date\n", style.Success.Render("✓"))
+			return nil
+		}
+
+		for _, d := range report.Drifted {
+			fmt.Printf("  %s %s (content differs)\n", style.Warning.Render("~"), d.Name)
+		}
+		for _, name := range report.Missing {
+			fmt.Printf("  %s %s (new, would be copied)\n", style.Success.Render("+"), name)
+		}
+		if pluginSyncClean {
+			for _, name := range report.Extra {
+				fmt.Printf("  %s %s (would be removed)\n", style.Error.Render("-"), name)
+			}
+		}
+		return nil
+	}
+
+	result, err := plugin.SyncPlugins(sourceDir, targetDir, pluginSyncClean)
+	if err != nil {
+		return fmt.Errorf("syncing plugins: %w", err)
+	}
+
+	if len(result.Copied) == 0 && len(result.Removed) == 0 {
+		fmt.Printf("%s Plugins already up to date (%d checked)\n",
+			style.Success.Render("✓"), len(result.Skipped))
+		return nil
+	}
+
+	fmt.Printf("%s Synced plugins from %s\n", style.Success.Render("●"), style.Dim.Render(sourceDir))
+	for _, name := range result.Copied {
+		fmt.Printf("  %s %s\n", style.Success.Render("↑"), name)
+	}
+	for _, name := range result.Removed {
+		fmt.Printf("  %s %s\n", style.Error.Render("×"), name)
+	}
+	if len(result.Skipped) > 0 {
+		fmt.Printf("  %s %d plugin(s) already current\n",
+			style.Dim.Render("·"), len(result.Skipped))
+	}
+	for _, e := range result.Errors {
+		fmt.Fprintf(os.Stderr, "  %s %s\n", style.Error.Render("!"), e)
 	}
 
 	return nil

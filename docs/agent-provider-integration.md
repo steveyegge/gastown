@@ -430,6 +430,42 @@ exec codex "$@"
 The wrapper runs `gt prime` before `exec`-ing the real agent binary. Users
 install it as `gt-codex` in their PATH.
 
+### Experimental Codex hooks via custom profile
+
+Gas Town also supports an experimental opt-in Codex hooks path for users who define a custom Codex agent profile with explicit hook settings.
+
+Use this only when both of these are true:
+- Your custom agent profile sets `prompt_mode: "arg"` plus `hooks.provider: "codex"`, `hooks.dir: ".codex"`, and `hooks.settings_file: "hooks.json"`
+- Codex has its upstream hooks feature enabled via `[features].codex_hooks = true`
+
+This installs `.codex/hooks.json` through the existing provider installer path and keeps the implementation intentionally small:
+- `SessionStart` runs `gt prime --hook`
+- Autonomous `SessionStart` also runs `gt mail check --inject`
+- `Stop` runs `gt costs record`
+
+Example custom profile:
+
+```json
+{
+  "agents": {
+    "codex-worker-hooks": {
+      "command": "codex",
+      "args": ["--dangerously-bypass-approvals-and-sandbox"],
+      "prompt_mode": "arg",
+      "hooks": {
+        "provider": "codex",
+        "dir": ".codex",
+        "settings_file": "hooks.json"
+      }
+    }
+  }
+}
+```
+
+This path does not attempt broader hook parity such as tool guards, prompt-submit hooks, or pre-compact behavior.
+
+The default built-in `codex` preset does not change. It remains on the no-hooks fallback path, and the `gt-codex` wrapper guidance above still applies to that default path unless you explicitly opt into a custom hook-capable Codex profile.
+
 ### Slash commands
 
 Gas Town provisions slash commands (like `/commit`, `/handoff`) into agent

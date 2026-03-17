@@ -67,6 +67,12 @@ type TownSettings struct {
 	// Example: {"mayor": "claude-opus", "witness": "claude-haiku", "polecat": "claude-sonnet"}
 	RoleAgents map[string]string `json:"role_agents,omitempty"`
 
+	// CrewAgents maps individual crew worker names to agent aliases at the town level.
+	// This allows town-wide per-crew agent assignment without modifying each rig's config.
+	// Resolution: --agent flag > rig WorkerAgents > town CrewAgents > role agents > defaults.
+	// Example: {"bob": "codex", "alice": "claude"}
+	CrewAgents map[string]string `json:"crew_agents,omitempty"`
+
 	// AgentEmailDomain is the domain used for agent git identity emails.
 	// Agent addresses like "gastown/crew/jack" become "gastown.crew.jack@{domain}".
 	// Default: "gastown.local"
@@ -288,6 +294,11 @@ type DaemonThresholds struct {
 	// DogIdleRemoveTimeout is how long a dog can be idle before removal (default "4h").
 	DogIdleRemoveTimeout string `json:"dog_idle_remove_timeout,omitempty"`
 
+	// PolecatIdleSessionTimeout is how long a polecat can be idle before its session
+	// is killed to prevent API slot burn (default "15m"). Polecats are ephemeral workers;
+	// unlike dogs, they should not persist when idle.
+	PolecatIdleSessionTimeout string `json:"polecat_idle_session_timeout,omitempty"`
+
 	// StaleWorkingTimeout is how long a dog in state=working with no activity
 	// before considered stuck (default "2h").
 	StaleWorkingTimeout string `json:"stale_working_timeout,omitempty"`
@@ -313,6 +324,20 @@ type DaemonThresholds struct {
 
 	// DeaconGracePeriod is time to wait after starting Deacon before checking heartbeat (default "5m").
 	DeaconGracePeriod string `json:"deacon_grace_period,omitempty"`
+
+	// PressureCPUThreshold is the per-core load average above which new
+	// non-infrastructure spawns are deferred. Disabled by default (0).
+	// Recommended starting value: 3.0 (only trips under severe load).
+	PressureCPUThreshold *float64 `json:"pressure_cpu_threshold,omitempty"`
+
+	// PressureMemThresholdGB is the minimum available memory (in GB) below
+	// which new non-infrastructure spawns are deferred. Disabled by default (0).
+	// Recommended starting value: 0.5 (only trips when swapping).
+	PressureMemThresholdGB *float64 `json:"pressure_mem_threshold_gb,omitempty"`
+
+	// PressureMaxSessions is the maximum number of concurrent agent tmux
+	// sessions before new non-infrastructure spawns are deferred. Disabled by default (0 = unlimited).
+	PressureMaxSessions *int `json:"pressure_max_sessions,omitempty"`
 }
 
 // DeaconThresholds configures deacon health-check and dispatch thresholds.
@@ -394,6 +419,11 @@ type MailThresholds struct {
 
 	// MaxConcurrentAckOps is max concurrent mail acknowledge operations (default 8).
 	MaxConcurrentAckOps *int `json:"max_concurrent_ack_ops,omitempty"`
+
+	// ReplyReminderDelay is how long after mail delivery to nudge the recipient
+	// to reply via gt mail send rather than in chat (default "30s").
+	// Set to "0s" to disable reply reminders entirely.
+	ReplyReminderDelay string `json:"reply_reminder_delay,omitempty"`
 }
 
 // WebThresholds configures web API thresholds.
@@ -681,6 +711,17 @@ type RuntimeConfig struct {
 	// Instructions controls the per-workspace instruction file name.
 	Instructions *RuntimeInstructionsConfig `json:"instructions,omitempty"`
 
+	// ACP configures ACP (Agent Communication Protocol) support.
+	// When set, the agent can run in ACP mode. If nil, ACP support is
+	// determined by matching the Command to a known preset with ACP config.
+	ACP *ACPConfig `json:"acp,omitempty"`
+
+	// ExecWrapper is a command prefix inserted between environment variables
+	// and the agent binary in the startup command. Used for sandboxed execution.
+	// Example: ["exitbox", "run", "--profile=gastown-polecat", "--"]
+	// Produces: exec env VAR=val ... exitbox run --profile=gastown-polecat -- claude ...
+	ExecWrapper []string `json:"exec_wrapper,omitempty"`
+
 	// ResolvedAgent is the agent name that was resolved during config lookup.
 	// Set by ResolveRoleAgentConfig / resolveAgentConfigInternal so that
 	// BuildStartupCommand can export GT_AGENT for process detection.
@@ -741,16 +782,23 @@ func DefaultRuntimeConfig() *RuntimeConfig {
 }
 
 // BuildCommand returns the full command line string.
-// For use with tmux SendKeys.
+// For use with tmux SendKeys and respawn-pane, where the string is
+// interpreted by the user's shell. Args containing shell-special
+// characters (e.g., brackets in "sonnet[1m]") are quoted to prevent
+// glob expansion.
 func (rc *RuntimeConfig) BuildCommand() string {
 	resolved := normalizeRuntimeConfig(rc)
 
 	cmd := resolved.Command
 	args := resolved.Args
 
-	// Combine command and args
+	// Combine command and args, quoting any that contain shell metacharacters
 	if len(args) > 0 {
-		return cmd + " " + strings.Join(args, " ")
+		quoted := make([]string, len(args))
+		for i, a := range args {
+			quoted[i] = ShellQuote(a)
+		}
+		return cmd + " " + strings.Join(quoted, " ")
 	}
 	return cmd
 }
@@ -1224,7 +1272,7 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 		IntegrationBranchRefineryEnabled: boolPtr(true),
 		OnConflict:                       OnConflictAssignBack,
 		RunTests:                         boolPtr(true),
-		TestCommand:                      "go test ./...",
+		TestCommand:                      "",
 		DeleteMergedBranches:             boolPtr(true),
 		RetryFlakyTests:                  1,
 		PollInterval:                     "30s",
@@ -1414,6 +1462,12 @@ type EscalationContacts struct {
 	HumanEmail   string `json:"human_email,omitempty"`   // email address for email:human action
 	HumanSMS     string `json:"human_sms,omitempty"`     // phone number for sms:human action
 	SlackWebhook string `json:"slack_webhook,omitempty"` // webhook URL for slack action
+	SMTPHost     string `json:"smtp_host,omitempty"`     // SMTP server host (e.g. "smtp.gmail.com")
+	SMTPPort     string `json:"smtp_port,omitempty"`     // SMTP server port (default "587")
+	SMTPFrom     string `json:"smtp_from,omitempty"`     // sender address for email notifications
+	SMTPUser     string `json:"smtp_user,omitempty"`     // SMTP auth username (optional)
+	SMTPPass     string `json:"smtp_pass,omitempty"`     // SMTP auth password (optional)
+	SMSWebhook   string `json:"sms_webhook,omitempty"`   // webhook URL for SMS delivery (e.g. Twilio)
 }
 
 // CurrentEscalationVersion is the current schema version for EscalationConfig.

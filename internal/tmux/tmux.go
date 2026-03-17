@@ -57,6 +57,49 @@ func validateSessionName(name string) error {
 	return nil
 }
 
+// validateCommandBinary extracts the binary path from a tmux session command
+// and verifies it exists on disk. Handles common patterns:
+//   - "exec env VAR=val /path/to/binary --args"
+//   - "/path/to/binary --args"
+//   - "sh -c '...'" (skipped — shell will handle resolution)
+//
+// Only checks absolute paths to avoid false positives on shell builtins.
+func validateCommandBinary(command string) error {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return nil
+	}
+
+	// Skip past "exec" and "env" prefixes, and KEY=VAL assignments.
+	i := 0
+	for i < len(fields) {
+		f := fields[i]
+		if f == "exec" || f == "env" {
+			i++
+			continue
+		}
+		if strings.Contains(f, "=") && !strings.HasPrefix(f, "/") && !strings.HasPrefix(f, "-") {
+			i++
+			continue
+		}
+		break
+	}
+
+	if i >= len(fields) {
+		return nil
+	}
+
+	binary := fields[i]
+	// Only validate absolute paths — relative or bare names are resolved by shell.
+	if !strings.HasPrefix(binary, "/") {
+		return nil
+	}
+	if _, err := os.Stat(binary); err != nil {
+		return fmt.Errorf("command binary not found: %s", binary)
+	}
+	return nil
+}
+
 // defaultSocket is the tmux socket name (-L flag) for multi-instance isolation.
 // When set, all tmux commands use this socket instead of the default server.
 // Access is protected by defaultSocketMu for concurrent test safety.
@@ -139,8 +182,8 @@ const noTownSocket = "gt-no-town-socket"
 const EnvAgentReady = "GT_AGENT_READY"
 
 // NewTmux creates a new Tmux wrapper using the initialized town socket.
-// Falls back to GT_TOWN_SOCKET env var (set by cross-socket tmux bindings),
-// then to a sentinel socket that fails clearly if neither is available.
+// Falls back to GT_TOWN_SOCKET env var (set by cross-socket tmux bindings).
+// Empty socket means use the default tmux server.
 func NewTmux() *Tmux {
 	sock := GetDefaultSocket()
 	if sock == "" {
@@ -148,11 +191,6 @@ func NewTmux() *Tmux {
 		// so that "gt agents menu" / "gt feed" invoked from a personal terminal still
 		// target the correct town server even when InitRegistry was not called.
 		sock = os.Getenv("GT_TOWN_SOCKET")
-	}
-	if sock == "" {
-		// No town context available: use sentinel to produce a clear error rather
-		// than silently connecting to the user's personal tmux server.
-		sock = noTownSocket
 	}
 	return &Tmux{socketName: sock}
 }
@@ -255,6 +293,16 @@ func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 			return fmt.Errorf("work directory %q is not a directory", workDir)
 		}
 	}
+	if err := validateCommandBinary(command); err != nil {
+		return err
+	}
+
+	// Defense-in-depth: remove CLAUDECODE from the tmux server's global
+	// environment so new sessions don't inherit it. Claude Code sets this
+	// variable on startup and the tmux server inherits it if started from
+	// within a Claude Code session. This causes nested-session detection
+	// failures in all subsequently created sessions.
+	_, _ = t.run("set-environment", "-g", "-u", "CLAUDECODE")
 
 	// Two-step creation: create session with default shell first, configure
 	// remain-on-exit, then replace the shell with the actual command. This
@@ -302,6 +350,11 @@ func (t *Tmux) NewSessionWithCommandAndEnv(name, workDir, command string, env ma
 	if err := validateSessionName(name); err != nil {
 		return err
 	}
+
+	// Kill stale same-named sessions on other sockets to prevent split-brain.
+	// This is best-effort: failures are silently ignored.
+	t.killSplitBrainSession(name)
+
 	if workDir != "" {
 		info, err := os.Stat(workDir)
 		if err != nil {
@@ -310,6 +363,9 @@ func (t *Tmux) NewSessionWithCommandAndEnv(name, workDir, command string, env ma
 		if !info.IsDir() {
 			return fmt.Errorf("work directory %q is not a directory", workDir)
 		}
+	}
+	if err := validateCommandBinary(command); err != nil {
+		return err
 	}
 
 	// Two-step creation: create session with env vars and default shell, then
@@ -508,6 +564,12 @@ const processKillGracePeriod = 2 * time.Second
 //
 // This ensures Claude processes and all their children are properly terminated.
 func (t *Tmux) KillSessionWithProcesses(name string) error {
+	// Disarm auto-respawn BEFORE killing anything. The pane-died hook would
+	// otherwise respawn the process 3 seconds after we kill it, creating a
+	// zombie that fights every kill attempt.
+	_ = t.SetRemainOnExit(name, false)
+	_, _ = t.run("set-hook", "-t", name, "-u", "pane-died")
+
 	// Get the pane PID
 	pid, err := t.GetPanePID(name)
 	if err != nil {
@@ -576,6 +638,10 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 // the calling process (e.g., gt done) is running inside the session it's terminating.
 // Without exclusion, the caller would be killed before completing the cleanup.
 func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []string) error {
+	// Disarm auto-respawn BEFORE killing anything (same as KillSessionWithProcesses).
+	_ = t.SetRemainOnExit(name, false)
+	_, _ = t.run("set-hook", "-t", name, "-u", "pane-died")
+
 	// Build exclusion set for O(1) lookup
 	exclude := make(map[string]bool)
 	for _, pid := range excludePIDs {
@@ -661,6 +727,24 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 		return nil
 	}
 	return err
+}
+
+// killSplitBrainSession kills a same-named session on the "default" tmux socket
+// if this Tmux instance targets a different socket. This prevents split-brain
+// where stale sessions on the wrong socket shadow the real ones, causing nudge
+// and other session-discovery commands to fail.
+//
+// Best-effort: all errors are silently ignored. The stale session may not exist,
+// the default server may not be running, etc. — none of these should block
+// session creation on the correct socket.
+func (t *Tmux) killSplitBrainSession(name string) {
+	if t.socketName == "" || t.socketName == "default" || t.socketName == noTownSocket {
+		return // Already on default or no town context — nothing to clean up
+	}
+	other := NewTmuxWithSocket("default")
+	if running, _ := other.HasSession(name); running {
+		_ = other.KillSessionWithProcesses(name)
+	}
 }
 
 // collectReparentedGroupMembers returns process group members that have been
@@ -1320,6 +1404,21 @@ func (t *Tmux) sendKeysLiteralWithRetry(target, text string, timeout time.Durati
 // queue up and execute one at a time. This prevents garbled input when
 // SessionStart hooks and nudges arrive simultaneously.
 func (t *Tmux) NudgeSession(session, message string) error {
+	return t.NudgeSessionWithOpts(session, message, NudgeOpts{})
+}
+
+// NudgeOpts controls optional behavior for nudge delivery.
+type NudgeOpts struct {
+	// SkipEscape omits the Escape keystroke (step 5) and the 600ms readline
+	// timeout (step 6) from the delivery protocol. Set this for agents where
+	// Escape cancels in-flight generation (e.g., Gemini CLI) rather than
+	// harmlessly exiting vim INSERT mode.
+	SkipEscape bool
+}
+
+// NudgeSessionWithOpts is like NudgeSession but accepts delivery options.
+// See NudgeOpts for available options.
+func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) error {
 	// Serialize nudges to this session to prevent interleaving.
 	// Use a timed lock to avoid permanent blocking if a previous nudge hung.
 	if !acquireNudgeLock(session, nudgeLockTimeout) {
@@ -1353,15 +1452,17 @@ func (t *Tmux) NudgeSession(session, message string) error {
 	// 4. Wait 500ms for text delivery to complete (tested, required)
 	time.Sleep(500 * time.Millisecond)
 
-	// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
-	// See: https://github.com/anthropics/gastown/issues/307
-	_, _ = t.run("send-keys", "-t", target, "Escape")
+	if !opts.SkipEscape {
+		// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
+		// See: https://github.com/anthropics/gastown/issues/307
+		_, _ = t.run("send-keys", "-t", target, "Escape")
 
-	// 6. Wait 600ms — must exceed bash readline's keyseq-timeout (500ms default)
-	// so ESC is processed alone, not as a meta prefix for the subsequent Enter.
-	// Without this, ESC+Enter within 500ms becomes M-Enter (meta-return) which
-	// does NOT submit the line.
-	time.Sleep(600 * time.Millisecond)
+		// 6. Wait 600ms — must exceed bash readline's keyseq-timeout (500ms default)
+		// so ESC is processed alone, not as a meta prefix for the subsequent Enter.
+		// Without this, ESC+Enter within 500ms becomes M-Enter (meta-return) which
+		// does NOT submit the line.
+		time.Sleep(600 * time.Millisecond)
+	}
 
 	// 7. Send Enter with retry (critical for message submission)
 	var lastErr error
@@ -1435,12 +1536,12 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
 }
 
-// AcceptStartupDialogs dismisses all Claude Code startup dialogs that can block
-// automated sessions. Currently handles (in order):
-//  1. Workspace trust dialog ("Quick safety check" / "trust this folder") — v2.1.55+
+// AcceptStartupDialogs dismisses startup dialogs that can block automated
+// sessions. Currently handles (in order):
+//  1. Workspace trust dialog (Claude "Quick safety check", Codex "Do you trust the contents of this directory?")
 //  2. Bypass permissions warning ("Bypass Permissions mode") — requires Down+Enter
 //
-// Call this after starting Claude and waiting for it to initialize (WaitForCommand),
+// Call this after starting the agent and waiting for it to initialize (WaitForCommand),
 // but before sending any prompts. Idempotent: safe to call on sessions without dialogs.
 func (t *Tmux) AcceptStartupDialogs(session string) error {
 	if err := t.AcceptWorkspaceTrustDialog(session); err != nil {
@@ -1452,14 +1553,13 @@ func (t *Tmux) AcceptStartupDialogs(session string) error {
 	return nil
 }
 
-// AcceptWorkspaceTrustDialog dismisses the Claude Code workspace trust dialog.
-// Starting with Claude Code v2.1.55, a "Quick safety check" dialog appears on first launch
-// in a workspace, asking the user to confirm they trust the folder. Option 1 ("Yes, I trust
-// this folder") is pre-selected, so we just need to press Enter to accept.
-// This dialog appears BEFORE the bypass permissions warning, so call this first.
+// AcceptWorkspaceTrustDialog dismisses workspace trust dialogs for supported
+// agents. Claude shows "Quick safety check"; Codex shows
+// "Do you trust the contents of this directory?". In both cases the safe
+// continue option is pre-selected, so Enter accepts the dialog.
 //
 // Uses a polling loop instead of a single check to handle the race condition where
-// Claude hasn't rendered the dialog yet when we first check. Exits early if the
+// the agent hasn't rendered the dialog yet when we first check. Exits early if the
 // agent prompt appears (indicating no dialog will be shown).
 func (t *Tmux) AcceptWorkspaceTrustDialog(session string) error {
 	deadline := time.Now().Add(constants.DialogPollTimeout)
@@ -1470,8 +1570,10 @@ func (t *Tmux) AcceptWorkspaceTrustDialog(session string) error {
 			continue
 		}
 
-		// Look for characteristic trust dialog text
-		if strings.Contains(content, "trust this folder") || strings.Contains(content, "Quick safety check") {
+		// Look for characteristic trust dialog text before prompt detection.
+		// Codex trust screens include a leading ">" banner line, so prompt
+		// detection alone would exit too early.
+		if containsWorkspaceTrustDialog(content) {
 			// Dialog found — accept it (option 1 is pre-selected, just press Enter)
 			if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
 				return err
@@ -1493,6 +1595,12 @@ func (t *Tmux) AcceptWorkspaceTrustDialog(session string) error {
 
 	// Timeout — no dialog detected, safe to proceed
 	return nil
+}
+
+func containsWorkspaceTrustDialog(content string) bool {
+	return strings.Contains(content, "trust this folder") ||
+		strings.Contains(content, "Quick safety check") ||
+		strings.Contains(content, "Do you trust the contents of this directory?")
 }
 
 // promptSuffixes are strings that indicate a shell or agent prompt is visible.
@@ -2534,6 +2642,14 @@ func (t *Tmux) ApplyTheme(session string, theme Theme) error {
 	return err
 }
 
+// ApplyWindowStyle sets the pane background (window-style) for a session.
+// This gives each session a distinct background color matching its theme,
+// complementing the status bar theme set by ApplyTheme.
+func (t *Tmux) ApplyWindowStyle(session string, theme Theme) error {
+	_, err := t.run("set-option", "-t", session, "window-style", theme.Style())
+	return err
+}
+
 // roleIcons maps role names to display icons for the status bar.
 // Uses centralized emojis from constants package.
 // Includes legacy keys ("coordinator", "health-check") for backwards compatibility.
@@ -2599,10 +2715,14 @@ func (t *Tmux) SetDynamicStatus(session string) error {
 }
 
 // ConfigureGasTownSession applies full Gas Town theming to a session.
-// This is a convenience method that applies theme, status format, and dynamic status.
+// This is a convenience method that applies theme, status format, dynamic status,
+// and pane background (window-style).
 func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker, role string) error {
 	if err := t.ApplyTheme(session, theme); err != nil {
 		return fmt.Errorf("applying theme: %w", err)
+	}
+	if err := t.ApplyWindowStyle(session, theme); err != nil {
+		return fmt.Errorf("applying window style: %w", err)
 	}
 	if err := t.SetStatusFormat(session, rig, worker, role); err != nil {
 		return fmt.Errorf("setting status format: %w", err)

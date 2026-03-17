@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -125,6 +127,7 @@ func TestAgentEnv_Dog(t *testing.T) {
 	})
 
 	assertEnv(t, env, "GT_ROLE", "dog")
+	assertEnv(t, env, "GT_DOG_NAME", "alpha")
 	assertEnv(t, env, "BD_ACTOR", "deacon/dogs/alpha")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "alpha")
 	assertEnv(t, env, "GT_ROOT", "/town")
@@ -827,6 +830,53 @@ func TestAgentEnv_DisablesBdBackup(t *testing.T) {
 	}
 }
 
+// TestAgentEnv_PropagatesDoltPort verifies that GT_DOLT_PORT and BEADS_DOLT_PORT
+// are propagated from the process env to agent sessions, preventing bd from
+// auto-starting rogue Dolt instances. (GH#2412)
+func TestAgentEnv_PropagatesDoltPort(t *testing.T) {
+	// Subtest: GT_DOLT_PORT set → both vars propagated
+	t.Run("gt_dolt_port_set", func(t *testing.T) {
+		t.Setenv("GT_DOLT_PORT", "13307")
+		t.Setenv("BEADS_DOLT_PORT", "")
+		env := AgentEnv(AgentEnvConfig{Role: "crew", Rig: "myrig", AgentName: "alice"})
+		assertEnv(t, env, "GT_DOLT_PORT", "13307")
+		assertEnv(t, env, "BEADS_DOLT_PORT", "13307")
+	})
+
+	// Subtest: BEADS_DOLT_PORT explicitly set → preserved
+	t.Run("beads_dolt_port_override", func(t *testing.T) {
+		t.Setenv("GT_DOLT_PORT", "13307")
+		t.Setenv("BEADS_DOLT_PORT", "99999")
+		env := AgentEnv(AgentEnvConfig{Role: "polecat", Rig: "myrig", AgentName: "Toast"})
+		assertEnv(t, env, "GT_DOLT_PORT", "13307")
+		assertEnv(t, env, "BEADS_DOLT_PORT", "99999")
+	})
+
+	// Subtest: only BEADS_DOLT_PORT set (no GT_DOLT_PORT) → still propagated
+	t.Run("beads_only", func(t *testing.T) {
+		t.Setenv("GT_DOLT_PORT", "")
+		t.Setenv("BEADS_DOLT_PORT", "3307")
+		env := AgentEnv(AgentEnvConfig{Role: "witness", Rig: "myrig"})
+		if _, ok := env["GT_DOLT_PORT"]; ok {
+			t.Error("GT_DOLT_PORT should not be set when env is empty")
+		}
+		assertEnv(t, env, "BEADS_DOLT_PORT", "3307")
+	})
+
+	// Subtest: neither set → neither propagated
+	t.Run("neither_set", func(t *testing.T) {
+		t.Setenv("GT_DOLT_PORT", "")
+		t.Setenv("BEADS_DOLT_PORT", "")
+		env := AgentEnv(AgentEnvConfig{Role: "mayor"})
+		if _, ok := env["GT_DOLT_PORT"]; ok {
+			t.Error("GT_DOLT_PORT should not be set")
+		}
+		if _, ok := env["BEADS_DOLT_PORT"]; ok {
+			t.Error("BEADS_DOLT_PORT should not be set")
+		}
+	})
+}
+
 func TestBuildStartupCommandWithEnv_IncludesNodeOptions(t *testing.T) {
 	t.Parallel()
 	// Integration test: verify BuildStartupCommandWithEnv output includes NODE_OPTIONS=
@@ -977,4 +1027,197 @@ func splitAttrs(attrs string) []string {
 
 func containsStr(s, sub string) bool {
 	return strings.Contains(s, sub)
+}
+
+// ---------------------------------------------------------------------------
+// Dolt port injection tests (GH #2405 / GH #2406)
+// ---------------------------------------------------------------------------
+
+func TestParsePortFromConfigYAML(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		yaml string
+		want int
+	}{
+		{
+			name: "standard gt-generated config",
+			yaml: "log_level: warning\n\nlistener:\n  port: 3307\n  max_connections: 1000\n",
+			want: 3307,
+		},
+		{
+			name: "custom port",
+			yaml: "listener:\n  port: 3308\n",
+			want: 3308,
+		},
+		{
+			name: "no listener block",
+			yaml: "log_level: warning\n",
+			want: 0,
+		},
+		{
+			name: "listener without port",
+			yaml: "listener:\n  max_connections: 1000\n",
+			want: 0,
+		},
+		{
+			name: "empty file",
+			yaml: "",
+			want: 0,
+		},
+		{
+			name: "port in non-listener block ignored",
+			yaml: "other:\n  port: 9999\n",
+			want: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := parsePortFromConfigYAML([]byte(tt.yaml))
+			if got != tt.want {
+				t.Errorf("parsePortFromConfigYAML() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveDoltPort_FromConfigYAML(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	doltDataDir := filepath.Join(tmpDir, ".dolt-data")
+	if err := os.MkdirAll(doltDataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(doltDataDir, "config.yaml"),
+		[]byte("listener:\n  port: 3309\n"),
+		0644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	got := resolveDoltPort(tmpDir)
+	if got != 3309 {
+		t.Errorf("resolveDoltPort() = %d, want 3309", got)
+	}
+}
+
+func TestResolveDoltPort_FromEnvVar(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("GT_DOLT_PORT", "3310")
+
+	got := resolveDoltPort(tmpDir)
+	if got != 3310 {
+		t.Errorf("resolveDoltPort() = %d, want 3310", got)
+	}
+}
+
+func TestResolveDoltPort_ConfigYAMLTakesPrecedence(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("GT_DOLT_PORT", "9999")
+
+	doltDataDir := filepath.Join(tmpDir, ".dolt-data")
+	if err := os.MkdirAll(doltDataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(doltDataDir, "config.yaml"),
+		[]byte("listener:\n  port: 3307\n"),
+		0644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	got := resolveDoltPort(tmpDir)
+	if got != 3307 {
+		t.Errorf("resolveDoltPort() = %d, want 3307 (config.yaml > env var)", got)
+	}
+}
+
+func TestResolveDoltPort_FromDaemonJSON(t *testing.T) {
+	t.Setenv("GT_DOLT_PORT", "") // isolate from live Dolt server
+	tmpDir := t.TempDir()
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	daemonJSON := `{"env": {"GT_DOLT_PORT": "3311"}, "type": "daemon-patrol-config"}`
+	if err := os.WriteFile(filepath.Join(mayorDir, "daemon.json"), []byte(daemonJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := resolveDoltPort(tmpDir)
+	if got != 3311 {
+		t.Errorf("resolveDoltPort() = %d, want 3311", got)
+	}
+}
+
+func TestResolveDoltPort_NoConfig(t *testing.T) {
+	t.Setenv("GT_DOLT_PORT", "") // isolate from live Dolt server
+	tmpDir := t.TempDir()
+	got := resolveDoltPort(tmpDir)
+	if got != 0 {
+		t.Errorf("resolveDoltPort() = %d, want 0 (no config)", got)
+	}
+}
+
+func TestAgentEnv_InjectsDoltPort(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	doltDataDir := filepath.Join(tmpDir, ".dolt-data")
+	if err := os.MkdirAll(doltDataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(doltDataDir, "config.yaml"),
+		[]byte("listener:\n  port: 3307\n"),
+		0644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []struct {
+		name string
+		cfg  AgentEnvConfig
+	}{
+		{"mayor", AgentEnvConfig{Role: "mayor", TownRoot: tmpDir}},
+		{"witness", AgentEnvConfig{Role: "witness", Rig: "myrig", TownRoot: tmpDir}},
+		{"refinery", AgentEnvConfig{Role: "refinery", Rig: "myrig", TownRoot: tmpDir}},
+		{"polecat", AgentEnvConfig{Role: "polecat", Rig: "myrig", AgentName: "Toast", TownRoot: tmpDir}},
+		{"crew", AgentEnvConfig{Role: "crew", Rig: "myrig", AgentName: "emma", TownRoot: tmpDir}},
+		{"deacon", AgentEnvConfig{Role: "deacon", TownRoot: tmpDir}},
+	}
+
+	for _, tc := range roles {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := AgentEnv(tc.cfg)
+			assertEnv(t, env, "GT_DOLT_PORT", "3307")
+			assertEnv(t, env, "BEADS_DOLT_PORT", "3307")
+		})
+	}
+}
+
+func TestAgentEnv_NoDoltPortWithoutTownRoot(t *testing.T) {
+	t.Setenv("GT_DOLT_PORT", "")   // isolate from live Dolt server
+	t.Setenv("BEADS_DOLT_PORT", "") // isolate from live Dolt server
+	env := AgentEnv(AgentEnvConfig{
+		Role: "mayor",
+	})
+	assertNotSet(t, env, "GT_DOLT_PORT")
+	assertNotSet(t, env, "BEADS_DOLT_PORT")
+}
+
+func TestAgentEnv_NoDoltPortWithoutConfig(t *testing.T) {
+	t.Setenv("GT_DOLT_PORT", "")   // isolate from live Dolt server
+	t.Setenv("BEADS_DOLT_PORT", "") // isolate from live Dolt server
+	tmpDir := t.TempDir()
+	env := AgentEnv(AgentEnvConfig{
+		Role:     "mayor",
+		TownRoot: tmpDir,
+	})
+	assertNotSet(t, env, "GT_DOLT_PORT")
+	assertNotSet(t, env, "BEADS_DOLT_PORT")
 }

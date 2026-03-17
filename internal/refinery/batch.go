@@ -292,6 +292,8 @@ func (e *Engineer) processSingleMR(ctx context.Context, mr *MRInfo, target strin
 	if processResult.Success {
 		result.Merged = []*MRInfo{mr}
 		result.MergeCommit = processResult.MergeCommit
+		// GH#2321: Run post-merge cleanup (close beads, delete branch, nudge mayor)
+		e.HandleMRInfoSuccess(mr, processResult)
 	} else if processResult.Conflict {
 		result.Conflicts = []*MRInfo{mr}
 	} else if processResult.TestsFailed {
@@ -393,6 +395,16 @@ func (e *Engineer) fastForwardBatch(ctx context.Context, stacked []*MRInfo, targ
 
 	result.Merged = stacked
 	result.MergeCommit = tipSHA
+
+	// GH#2321: Run post-merge cleanup for each merged MR — close source beads,
+	// delete branches, nudge mayor, and check convoy completion.
+	// HandleMRInfoSuccess was previously dead code (never called), causing task
+	// beads to remain open after successful merges.
+	for _, mr := range stacked {
+		mergeResult := ProcessResult{Success: true, MergeCommit: tipSHA}
+		e.HandleMRInfoSuccess(mr, mergeResult)
+	}
+
 	return result
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	gitpkg "github.com/steveyegge/gastown/internal/git"
 )
 
 // TestDoneUsesResolveBeadsDir verifies that the done command correctly uses
@@ -1212,5 +1213,138 @@ func TestHookedBeadCloseNotRestrictedToHookedStatus(t *testing.T) {
 				t.Errorf("shouldClose for status %q = %v, want %v", tt.status, shouldClose, tt.wantClose)
 			}
 		})
+	}
+}
+
+// TestPushSubmoduleChanges_Integration verifies that pushSubmoduleChanges detects
+// modified submodules and pushes their commits before the parent repo push (gt-dzs).
+func TestPushSubmoduleChanges_Integration(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Allow file:// transport for submodule operations
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
+	t.Setenv("GIT_CONFIG_VALUE_0", "always")
+
+	// Create a "remote" bare repo for the submodule
+	subRemote := filepath.Join(tmp, "sub-remote.git")
+	testRunGit(t, tmp, "init", "--bare", "--initial-branch", "main", subRemote)
+
+	// Create a working clone of the submodule to add initial content
+	subWork := filepath.Join(tmp, "sub-work")
+	testRunGit(t, tmp, "clone", subRemote, subWork)
+	testRunGit(t, subWork, "config", "user.email", "test@test.com")
+	testRunGit(t, subWork, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(subWork, "lib.go"), []byte("package lib\n"), 0644); err != nil {
+		t.Fatalf("write sub file: %v", err)
+	}
+	testRunGit(t, subWork, "add", ".")
+	testRunGit(t, subWork, "commit", "-m", "initial sub commit")
+	testRunGit(t, subWork, "push", "origin", "main")
+
+	// Create a "remote" bare repo for the parent
+	parentRemote := filepath.Join(tmp, "parent-remote.git")
+	testRunGit(t, tmp, "init", "--bare", "--initial-branch", "main", parentRemote)
+
+	// Create the parent repo
+	parent := filepath.Join(tmp, "parent")
+	testRunGit(t, tmp, "init", "--initial-branch", "main", parent)
+	testRunGit(t, parent, "config", "user.email", "test@test.com")
+	testRunGit(t, parent, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(parent, "README.md"), []byte("# Parent\n"), 0644); err != nil {
+		t.Fatalf("write parent file: %v", err)
+	}
+	testRunGit(t, parent, "add", ".")
+	testRunGit(t, parent, "commit", "-m", "initial parent commit")
+
+	// Add the submodule
+	testRunGit(t, parent, "submodule", "add", subRemote, "libs/sub")
+	testRunGit(t, parent, "commit", "-m", "add submodule")
+
+	// Add remote and push to parent remote
+	testRunGit(t, parent, "remote", "add", "origin", parentRemote)
+	testRunGit(t, parent, "push", "origin", "main")
+
+	// Make a new commit in the submodule (but don't push it to submodule remote)
+	subPath := filepath.Join(parent, "libs", "sub")
+	if err := os.WriteFile(filepath.Join(subPath, "new.go"), []byte("package lib\n// new\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	testRunGit(t, subPath, "add", ".")
+	testRunGit(t, subPath, "commit", "-m", "unpushed submodule commit")
+
+	// Get the new submodule SHA
+	cmd := exec.Command("git", "-C", subPath, "rev-parse", "HEAD")
+	shaBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse: %v", err)
+	}
+	newSHA := strings.TrimSpace(string(shaBytes))
+
+	// Update parent to point to new submodule commit
+	testRunGit(t, parent, "add", "libs/sub")
+	testRunGit(t, parent, "commit", "-m", "update submodule pointer")
+
+	// Verify the new submodule commit is NOT on the submodule remote yet
+	lsCmd := exec.Command("git", "ls-remote", subRemote, "refs/heads/main")
+	lsOut, _ := lsCmd.Output()
+	remoteSHA := strings.Fields(string(lsOut))[0]
+	if remoteSHA == newSHA {
+		t.Fatal("new submodule commit should not be on remote yet")
+	}
+
+	// Call pushSubmoduleChanges — this should push the submodule commit
+	g := gitpkg.NewGit(parent)
+	pushSubmoduleChanges(g, "main")
+
+	// Verify the submodule commit IS now on the remote
+	lsCmd = exec.Command("git", "ls-remote", subRemote, "refs/heads/main")
+	lsOut, _ = lsCmd.Output()
+	remoteSHA = strings.Fields(string(lsOut))[0]
+	if remoteSHA != newSHA {
+		t.Errorf("expected submodule remote main to be %s, got %s", newSHA, remoteSHA)
+	}
+}
+
+// TestPushSubmoduleChanges_NoSubmodules verifies pushSubmoduleChanges is a no-op
+// for repos without submodules (gt-dzs).
+func TestPushSubmoduleChanges_NoSubmodules(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Create a simple repo with a remote
+	parent := filepath.Join(tmp, "repo")
+	remote := filepath.Join(tmp, "remote.git")
+	testRunGit(t, tmp, "init", "--bare", "--initial-branch", "main", remote)
+	testRunGit(t, tmp, "init", "--initial-branch", "main", parent)
+	testRunGit(t, parent, "config", "user.email", "test@test.com")
+	testRunGit(t, parent, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(parent, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	testRunGit(t, parent, "add", ".")
+	testRunGit(t, parent, "commit", "-m", "initial commit")
+	testRunGit(t, parent, "remote", "add", "origin", remote)
+	testRunGit(t, parent, "push", "origin", "main")
+
+	// Add another commit
+	if err := os.WriteFile(filepath.Join(parent, "main.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	testRunGit(t, parent, "add", ".")
+	testRunGit(t, parent, "commit", "-m", "add main.go")
+
+	// Should not panic or error — just a no-op
+	g := gitpkg.NewGit(parent)
+	pushSubmoduleChanges(g, "main")
+}
+
+func testRunGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	fullArgs := append([]string{"-c", "protocol.file.allow=always"}, args...)
+	cmd := exec.Command("git", fullArgs...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
 	}
 }

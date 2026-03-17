@@ -38,6 +38,7 @@ Workspace checks:
 Town root protection:
   - town-git                 Verify town root is under version control
   - town-root-branch         Verify town root is on main branch (fixable)
+  - foreign-remotes          Detect git remotes from unrelated repos (fixable)
   - pre-checkout-hook        Verify pre-checkout hook prevents branch switches (fixable)
 
 Infrastructure checks:
@@ -164,6 +165,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	d.Register(doctor.NewTownGitCheck())
 	d.Register(doctor.NewTownRootBranchCheck())
+	d.Register(doctor.NewForeignRemoteCheck())
 	d.Register(doctor.NewPreCheckoutHookCheck())
 	// Claude settings must be fixed BEFORE the daemon starts, so sessions
 	// launched by the daemon find correct settings files. If daemon runs first,
@@ -176,7 +178,6 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewTownBeadsConfigCheck())
 	d.Register(doctor.NewCustomTypesCheck())
 	d.Register(doctor.NewCustomStatusesCheck())
-	d.Register(doctor.NewRoleLabelCheck())
 	d.Register(doctor.NewFormulaCheck())
 	d.Register(doctor.NewPrefixConflictCheck())
 	d.Register(doctor.NewRigNameMismatchCheck())
@@ -203,6 +204,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewDefaultBranchAllRigsCheck())
 	d.Register(doctor.NewIdentityCollisionCheck())
 	d.Register(doctor.NewLinkedPaneCheck())
+	d.Register(doctor.NewSocketSplitBrainCheck())
 	d.Register(doctor.NewThemeCheck())
 	d.Register(doctor.NewCrashReportCheck())
 	d.Register(doctor.NewEnvVarsCheck())
@@ -212,6 +214,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewPatrolHooksWiredCheck())
 	d.Register(doctor.NewPatrolNotStuckCheck())
 	d.Register(doctor.NewPatrolPluginsAccessibleCheck())
+	d.Register(doctor.NewPatrolPluginDriftCheck())
 	d.Register(doctor.NewAgentBeadsCheck())
 	d.Register(doctor.NewStaleAgentBeadsCheck())
 	d.Register(doctor.NewRigBeadsCheck())

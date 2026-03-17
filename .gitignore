@@ -72,5 +72,8 @@ result
 # bv (beads viewer) local config and caches
 .bv/
 
+# Opencode
+.opencode/
+
 # Gas Town (added by gt)
 __pycache__/

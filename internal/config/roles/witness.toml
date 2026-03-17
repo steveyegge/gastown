@@ -13,7 +13,7 @@ needs_pre_sync = false
 start_command = "exec claude --dangerously-skip-permissions"
 
 [env]
-GT_ROLE = "witness"
+GT_ROLE = "{rig}/witness"
 GT_SCOPE = "rig"
 
 [health]

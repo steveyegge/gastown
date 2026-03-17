@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -89,6 +90,71 @@ func TestExtractMailTargetsFromActions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestExecuteExternalActionsReportsWarningsAndFailures(t *testing.T) {
+	townRoot := t.TempDir()
+	statuses := executeExternalActions([]string{"email:human", "log"}, &config.EscalationConfig{}, "hq-esc1", "high", "desc", townRoot)
+	if len(statuses) != 2 {
+		t.Fatalf("expected 2 statuses, got %d", len(statuses))
+	}
+	if statuses[0].Channel != "email" || statuses[0].Warning == "" {
+		t.Fatalf("expected email warning status, got %#v", statuses[0])
+	}
+	if statuses[1].Channel != "log" || !statuses[1].RuntimeNotified {
+		t.Fatalf("expected successful log delivery status, got %#v", statuses[1])
+	}
+}
+
+func TestDeliveryStatusJSONContainsPartialFailure(t *testing.T) {
+	statuses := []deliveryStatus{{Channel: "bead", Created: true}, {Channel: "mail", Target: "mayor", Error: "notify failed"}}
+	hasFailure := false
+	for _, status := range statuses {
+		if status.Error != "" {
+			hasFailure = true
+			break
+		}
+	}
+	result := map[string]interface{}{
+		"id":       "hq-esc1",
+		"severity": "critical",
+		"actions":  []string{"bead", "mail:mayor"},
+		"targets":  []string{"mayor"},
+		"delivery": statuses,
+		"status":   map[bool]string{true: "partial_failure", false: "ok"}[hasFailure],
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{"\"status\":\"partial_failure\"", "\"delivery\"", "\"channel\":\"mail\"", "\"error\":\"notify failed\""} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("json output missing %q: %s", want, text)
+		}
+	}
+}
+
+func TestDeliveryStatusJSONContainsSuccessfulMailPathDetails(t *testing.T) {
+	statuses := []deliveryStatus{{Channel: "bead", Created: true, Severity: "critical"}, {Channel: "mail", Target: "mayor", Persisted: true, RuntimeNotified: true, Annotated: true, Severity: "critical", NotificationRoute: "mail+nudge"}}
+	result := map[string]interface{}{
+		"id":       "hq-esc2",
+		"severity": "critical",
+		"actions":  []string{"bead", "mail:mayor"},
+		"targets":  []string{"mayor"},
+		"delivery": statuses,
+		"status":   "ok",
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{"\"status\":\"ok\"", "\"runtime_notified\":true", "\"annotated\":true", "\"notification_route\":\"mail+nudge\""} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("json output missing %q: %s", want, text)
+		}
 	}
 }
 
@@ -293,10 +359,10 @@ func TestDetectSenderFallback(t *testing.T) {
 	}()
 
 	tests := []struct {
-		name    string
-		actor   string
-		role    string
-		want    string
+		name  string
+		actor string
+		role  string
+		want  string
 	}{
 		{
 			name:  "BD_ACTOR takes priority",
@@ -412,9 +478,34 @@ func TestExecuteExternalActions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
 			// Should not panic
-			executeExternalActions(tt.actions, tt.cfg, "hq-test", "high", "Test escalation")
+			executeExternalActions(tt.actions, tt.cfg, "hq-test", "high", "Test escalation", tmpDir)
 		})
+	}
+}
+
+func TestWriteEscalationLog(t *testing.T) {
+	tmpDir := t.TempDir()
+	err := writeEscalationLog(tmpDir, "hq-abc", "critical", "Test failure")
+	if err != nil {
+		t.Fatalf("writeEscalationLog returned error: %v", err)
+	}
+
+	logPath := tmpDir + "/logs/escalations.log"
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("reading log file: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "[CRITICAL]") {
+		t.Errorf("log entry missing severity, got: %s", content)
+	}
+	if !strings.Contains(content, "hq-abc") {
+		t.Errorf("log entry missing bead ID, got: %s", content)
+	}
+	if !strings.Contains(content, "Test failure") {
+		t.Errorf("log entry missing description, got: %s", content)
 	}
 }
 
@@ -470,6 +561,20 @@ func TestRunEscalateValidation(t *testing.T) {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
+}
+
+func TestFormatEscalationMailBodyNeutralSubjectStillCarriesStructuredBody(t *testing.T) {
+	body := formatEscalationMailBody("hq-abc123", "high", "Database drift", "deacon/", "gt-xyz")
+	for _, want := range []string{
+		"Escalation ID: hq-abc123",
+		"Severity: high",
+		"From: deacon/",
+		"Related: gt-xyz",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q: %s", want, body)
+		}
+	}
 }
 
 func TestGetNextSeverityMatchesConfig(t *testing.T) {

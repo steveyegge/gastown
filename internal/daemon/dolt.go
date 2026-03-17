@@ -252,9 +252,11 @@ func (m *DoltServerManager) buildDoltSQLCmd(ctx context.Context, args ...string)
 	fullArgs = append(fullArgs, args...)
 	cmd := exec.CommandContext(ctx, "dolt", fullArgs...)
 
-	if !m.isRemote() {
-		cmd.Dir = m.config.DataDir
-	}
+	// Always set cmd.Dir to DataDir — even for remote connections (GH#2537).
+	// Without this, dolt auto-creates .doltcfg/privileges.db in $CWD,
+	// which accumulates stray privilege files that cause "multiple
+	// .doltcfg directories detected" or "Access denied" errors.
+	cmd.Dir = m.config.DataDir
 
 	if m.isRemote() && m.config.Password != "" {
 		cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+m.config.Password)

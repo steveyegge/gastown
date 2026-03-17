@@ -3,6 +3,7 @@ package mail
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/testutil"
@@ -135,9 +137,9 @@ func TestAddressToSessionIDs(t *testing.T) {
 		{"gastown/polecats/nux", []string{"gt-nux"}},
 
 		// Invalid addresses - empty result
-		{"gastown/", nil},  // Empty target
-		{"gastown", nil},   // No slash
-		{"", nil},          // Empty address
+		{"gastown/", nil}, // Empty target
+		{"gastown", nil},  // No slash
+		{"", nil},         // Empty address
 	}
 
 	for _, tt := range tests {
@@ -192,9 +194,9 @@ func TestShouldBeWisp(t *testing.T) {
 	r := &Router{}
 
 	tests := []struct {
-		name    string
-		msg     *Message
-		want    bool
+		name string
+		msg  *Message
+		want bool
 	}{
 		{
 			name: "explicit wisp flag",
@@ -308,6 +310,12 @@ func TestSendFromCrewWorkspace_AvoidsEphemeralPrefixMismatch(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test"}`), 0644); err != nil {
 		t.Fatalf("write town.json: %v", err)
+	}
+
+	// Write sentinel files so beads.EnsureCustomTypes skips bd config calls.
+	typesList := strings.Join(constants.BeadsCustomTypesList(), ",")
+	if err := os.WriteFile(filepath.Join(townBeadsDir, ".gt-types-configured"), []byte(typesList+"\n"), 0644); err != nil {
+		t.Fatalf("write types sentinel: %v", err)
 	}
 
 	// Stub bd to reproduce the old behavior where --id msg-* with --ephemeral
@@ -828,9 +836,9 @@ func TestParseGroupAddress(t *testing.T) {
 
 func TestAgentBeadToAddress(t *testing.T) {
 	tests := []struct {
-		name   string
-		bead   *agentBead
-		want   string
+		name string
+		bead *agentBead
+		want string
 	}{
 		{
 			name: "nil bead",
@@ -1549,10 +1557,21 @@ func TestNotifyRecipient_IdleAgent(t *testing.T) {
 		t.Fatalf("notifyRecipient returned error: %v", err)
 	}
 
-	// Verify no nudge was queued — delivery should have been direct.
+	// The main notification was delivered directly (no immediate queue).
+	// But the reply-reminder is deferred — it should be in the queue with a
+	// future DeliverAfter, waiting for the configured delay to elapse.
 	pending, _ := nudge.Pending(townRoot, sessionName)
-	if pending != 0 {
-		t.Errorf("expected 0 queued nudges for idle agent, got %d", pending)
+	if pending != 1 {
+		t.Errorf("expected 1 queued nudge (deferred reply-reminder) for idle agent, got %d", pending)
+	}
+
+	// Confirm the queued nudge is deferred, not a missed immediate notification.
+	nudges, err := nudge.Drain(townRoot, sessionName)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(nudges) != 0 {
+		t.Errorf("expected 0 immediately-deliverable nudges (reminder should be deferred), got %d", len(nudges))
 	}
 }
 
@@ -1584,9 +1603,246 @@ func TestNotifyRecipient_BusyAgent(t *testing.T) {
 		t.Fatalf("notifyRecipient returned error: %v", err)
 	}
 
-	// Verify the nudge was queued since the agent was busy.
+	// Two nudges should be queued:
+	//   1. The immediate "you have mail" notification (deliverable now).
+	//   2. The deferred reply-reminder (not ready until configured delay elapses).
 	pending, _ := nudge.Pending(townRoot, sessionName)
+	if pending != 2 {
+		t.Errorf("expected 2 queued nudges (notification + reply-reminder) for busy agent, got %d", pending)
+	}
+
+	// Exactly 1 should be immediately deliverable (the main notification).
+	nudges, err := nudge.Drain(townRoot, sessionName)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(nudges) != 1 {
+		t.Errorf("expected 1 immediately-deliverable nudge, got %d", len(nudges))
+	}
+	if nudges[0].Priority != nudge.PriorityNormal {
+		t.Errorf("queued mail notification priority = %q, want %q", nudges[0].Priority, nudge.PriorityNormal)
+	}
+
+	// The reply-reminder should still be in queue (deferred).
+	remaining, _ := nudge.Pending(townRoot, sessionName)
+	if remaining != 1 {
+		t.Errorf("expected 1 deferred reply-reminder still in queue, got %d", remaining)
+	}
+}
+
+func TestNotifyRecipient_BusyAgentEscalationUsesUrgentQueuedNudge(t *testing.T) {
+	socket := requireNotifyTestSocket(t)
+	sessionName := "gt-crew-busy-escalation"
+	createNotifyTestSession(t, socket, sessionName, "sleep 300")
+
+	townRoot := t.TempDir()
+	r := &Router{
+		workDir:           t.TempDir(),
+		townRoot:          townRoot,
+		tmux:              tmux.NewTmuxWithSocket(socket),
+		IdleNotifyTimeout: 1 * time.Second,
+	}
+
+	msg := &Message{
+		From:     "gastown/witness",
+		To:       "gastown/crew/busy-escalation",
+		Subject:  "[CRITICAL] Database identity mismatch",
+		Type:     TypeEscalation,
+		Priority: PriorityUrgent,
+		ThreadID: "hq-esc123",
+	}
+
+	if err := r.notifyRecipient(msg); err != nil {
+		t.Fatalf("notifyRecipient returned error: %v", err)
+	}
+
+	nudges, err := nudge.Drain(townRoot, sessionName)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(nudges) != 1 {
+		t.Fatalf("expected 1 immediately-deliverable escalation nudge, got %d", len(nudges))
+	}
+	if nudges[0].Priority != nudge.PriorityUrgent {
+		t.Fatalf("queued escalation priority = %q, want %q", nudges[0].Priority, nudge.PriorityUrgent)
+	}
+	for _, want := range []string{"Escalation mail from gastown/witness", "ID: hq-esc123", "Severity: critical", "gt mail read hq-esc123", "gt escalate ack hq-esc123"} {
+		if !strings.Contains(nudges[0].Message, want) {
+			t.Fatalf("queued escalation message missing %q: %s", want, nudges[0].Message)
+		}
+	}
+
+	remaining, _ := nudge.Pending(townRoot, sessionName)
+	if remaining != 1 {
+		t.Fatalf("expected 1 deferred reply-reminder after draining escalation nudge, got %d", remaining)
+	}
+}
+
+func TestFormatNotificationMessageForEscalation(t *testing.T) {
+	msg := &Message{
+		From:     "gastown/witness",
+		Subject:  "[HIGH] Polecat stuck",
+		Type:     TypeEscalation,
+		Priority: PriorityHigh,
+		ThreadID: "hq-esc456",
+	}
+
+	notification := formatNotificationMessage(msg)
+	for _, want := range []string{"Escalation mail from gastown/witness", "ID: hq-esc456", "Severity: high", "gt mail read hq-esc456", "gt escalate ack hq-esc456"} {
+		if !strings.Contains(notification, want) {
+			t.Fatalf("escalation notification missing %q: %s", want, notification)
+		}
+	}
+}
+
+func TestRouterSendEscalationAddsStructuredLabels(t *testing.T) {
+	r := &Router{}
+	msg := &Message{From: "deacon/", Type: TypeEscalation, ThreadID: "hq-abc123"}
+	labels := r.buildLabels(msg)
+	for _, want := range []string{"gt:message", "gt:escalation", "msg-type:escalation", "from:deacon/", "thread:hq-abc123"} {
+		if !containsLabel(labels, want) {
+			t.Fatalf("labels %v missing %q", labels, want)
+		}
+	}
+}
+
+func containsLabel(labels []string, want string) bool {
+	for _, label := range labels {
+		if label == want {
+			return true
+		}
+	}
+	return false
+}
+
+// --- enqueueReplyReminder tests ---
+
+// TestEnqueueReplyReminder_Basic verifies that a deferred reply-reminder nudge is
+// enqueued with the correct sender, message content, and DeliverAfter timestamp.
+func TestEnqueueReplyReminder_Basic(t *testing.T) {
+	townRoot := t.TempDir()
+	r := &Router{
+		workDir:  t.TempDir(),
+		townRoot: townRoot,
+	}
+	msg := &Message{
+		From:    "gastown/witness",
+		To:      "gastown/crew/alice",
+		Subject: "status check",
+		Type:    TypeNotification,
+	}
+	sessionID := "gt-gastown-crew-alice"
+
+	before := time.Now()
+	r.enqueueReplyReminder(msg, sessionID)
+	after := time.Now()
+
+	// Exactly one nudge should be queued.
+	pending, err := nudge.Pending(townRoot, sessionID)
+	if err != nil {
+		t.Fatalf("Pending: %v", err)
+	}
 	if pending != 1 {
-		t.Errorf("expected 1 queued nudge for busy agent, got %d", pending)
+		t.Fatalf("expected 1 queued reminder, got %d", pending)
+	}
+
+	// Nudge should not be immediately deliverable (DeliverAfter in future).
+	nudges, err := nudge.Drain(townRoot, sessionID)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(nudges) != 0 {
+		t.Errorf("reminder should be deferred, but Drain returned %d nudges", len(nudges))
+	}
+
+	// File still in queue — confirm DeliverAfter is ~30s ahead.
+	dir := filepath.Join(townRoot, ".runtime", "nudge_queue", sessionID)
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 file in queue dir, got %d", len(entries))
+	}
+
+	// Read the raw JSON to inspect DeliverAfter.
+	data, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var q nudge.QueuedNudge
+	if err := json.Unmarshal(data, &q); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if q.DeliverAfter.IsZero() {
+		t.Error("DeliverAfter should be set")
+	}
+	minDelay := before.Add(29 * time.Second)
+	maxDelay := after.Add(31 * time.Second)
+	if q.DeliverAfter.Before(minDelay) || q.DeliverAfter.After(maxDelay) {
+		t.Errorf("DeliverAfter = %v, want ~30s from [%v, %v]", q.DeliverAfter, before, after)
+	}
+	if !strings.Contains(q.Message, msg.From) {
+		t.Errorf("reminder message should mention sender %q, got %q", msg.From, q.Message)
+	}
+	if !strings.Contains(q.Message, "gt mail send") {
+		t.Errorf("reminder message should mention 'gt mail send', got %q", q.Message)
+	}
+}
+
+// TestEnqueueReplyReminder_SkipsReply verifies that reply-type messages do not
+// trigger a reply reminder (would be redundant noise).
+func TestEnqueueReplyReminder_SkipsReply(t *testing.T) {
+	townRoot := t.TempDir()
+	r := &Router{workDir: t.TempDir(), townRoot: townRoot}
+	msg := &Message{
+		From:    "gastown/witness",
+		To:      "gastown/crew/alice",
+		Subject: "re: status",
+		Type:    TypeReply,
+	}
+	r.enqueueReplyReminder(msg, "gt-gastown-crew-alice")
+
+	pending, _ := nudge.Pending(townRoot, "gt-gastown-crew-alice")
+	if pending != 0 {
+		t.Errorf("TypeReply should not enqueue a reminder, got %d", pending)
+	}
+}
+
+// TestEnqueueReplyReminder_NoTownRoot verifies that the function is a no-op
+// when no town root is set (nudge queue requires a town root).
+func TestEnqueueReplyReminder_NoTownRoot(t *testing.T) {
+	r := &Router{workDir: t.TempDir(), townRoot: ""}
+	msg := &Message{From: "mayor/", To: "gastown/crew/bob", Subject: "task"}
+	// Should not panic or error — just silently skip.
+	r.enqueueReplyReminder(msg, "gt-gastown-crew-bob")
+}
+
+// TestEnqueueReplyReminder_DisabledByConfig verifies that setting
+// reply_reminder_delay = "0s" suppresses all reply reminders.
+func TestEnqueueReplyReminder_DisabledByConfig(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Write a settings/config.json with reply_reminder_delay disabled.
+	// LoadOperationalConfig reads from {townRoot}/settings/config.json and
+	// expects the operational block nested under the "operational" key.
+	settingsDir := filepath.Join(townRoot, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"operational":{"mail":{"reply_reminder_delay":"0s"}}}`
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &Router{workDir: t.TempDir(), townRoot: townRoot}
+	msg := &Message{
+		From:    "mayor/",
+		To:      "gastown/crew/bob",
+		Subject: "task",
+		Type:    TypeTask,
+	}
+	r.enqueueReplyReminder(msg, "gt-gastown-crew-bob")
+
+	pending, _ := nudge.Pending(townRoot, "gt-gastown-crew-bob")
+	if pending != 0 {
+		t.Errorf("reply_reminder_delay=0s should disable reminders, got %d pending", pending)
 	}
 }

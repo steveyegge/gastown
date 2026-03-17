@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -449,6 +450,14 @@ func (d *Daemon) getNeedsPreSync(config *beads.RoleConfig, parsed *ParsedIdentit
 	}
 }
 
+// isBuiltinClaudeStartCommand returns true if the start_command is the
+// built-in default from role TOMLs ("exec claude --dangerously-skip-permissions").
+// Custom start_commands (e.g., "exec run --town {town}") return false.
+func isBuiltinClaudeStartCommand(cmd string) bool {
+	trimmed := strings.TrimPrefix(cmd, "exec ")
+	return trimmed == "claude --dangerously-skip-permissions"
+}
+
 // getStartCommand determines the startup command for an agent.
 // Uses role config if available, then role-based agent selection, then hardcoded defaults.
 // Includes beacon + role-specific instructions in the CLI prompt.
@@ -463,9 +472,24 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
 		}
 		rc := config.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
-		if config.IsResolvedAgentClaude(rc) {
-			return beads.ExpandRolePattern(roleConfig.StartCommand, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType, session.PrefixFor(parsed.RigName))
+		if !config.IsResolvedAgentClaude(rc) {
+			// Non-Claude agent: skip TOML start_command entirely (GH#2417).
+			// Built-in role TOMLs hardcode "exec claude ..." which is wrong
+			// for non-Claude agents. Fall through to BuildStartupCommandFromConfig
+			// which uses the resolved agent's command and args.
+		} else if !isBuiltinClaudeStartCommand(roleConfig.StartCommand) {
+			// Custom (non-builtin) start_command with Claude agent: use TOML
+			// pattern with template expansion.
+			cmd := beads.ExpandRolePattern(roleConfig.StartCommand, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType, session.PrefixFor(parsed.RigName))
+			if strings.HasPrefix(cmd, "exec ") {
+				cmd = "exec env -u CLAUDECODE NODE_OPTIONS='' " + cmd[len("exec "):]
+			} else {
+				cmd = "env -u CLAUDECODE NODE_OPTIONS='' " + cmd
+			}
+			return cmd
 		}
+		// Claude agent with built-in start_command: fall through to
+		// BuildStartupCommandFromConfig for proper model flag resolution.
 	}
 
 	rigPath := ""
@@ -552,9 +576,15 @@ func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.Rol
 		_ = d.tmux.SetEnvironment(sessionName, "GT_PANE_ID", paneID)
 	}
 
-	// Set any custom env vars from role config
+	// Set any custom env vars from role config.
+	// Skip keys already set by AgentEnv to prevent TOML [env] from clobbering
+	// canonical qualified values (e.g., GT_ROLE). See: https://github.com/steveyegge/gastown/issues/2492
 	if roleConfig != nil {
 		for k, v := range roleConfig.EnvVars {
+			if existing, alreadySet := envVars[k]; alreadySet {
+				log.Printf("daemon env: skipping TOML %s=%q (AgentEnv already set %q)", k, v, existing)
+				continue
+			}
 			expanded := beads.ExpandRolePattern(v, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType, session.PrefixFor(parsed.RigName))
 			_ = d.tmux.SetEnvironment(sessionName, k, expanded)
 		}
@@ -1054,6 +1084,12 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 			continue // No hooked work - no GUPP violation possible
 		}
 
+		// Skip nuked agents — they're intentionally terminated and should not
+		// trigger alerts even if stale hook_bead data remains in the database.
+		if beads.AgentState(agent.AgentState) == beads.AgentStateNuked {
+			continue
+		}
+
 		// Per gt-zecmc: derive running state from tmux, not agent_state
 		// Extract polecat name from agent ID (<prefix>-<rig>-polecat-<name> -> <name>)
 		polecatName := strings.TrimPrefix(agent.ID, prefix)
@@ -1130,10 +1166,11 @@ func (d *Daemon) checkOrphanedWork() {
 func (d *Daemon) checkRigOrphanedWork(rigName string) {
 	// List polecat agent beads (issues + wisps tables)
 	var agents []struct {
-		ID       string   `json:"id"`
-		HookBead string   `json:"hook_bead"`
-		Labels   []string `json:"labels"`
-		Type     string   `json:"issue_type"`
+		ID         string   `json:"id"`
+		HookBead   string   `json:"hook_bead"`
+		AgentState string   `json:"agent_state"`
+		Labels     []string `json:"labels"`
+		Type       string   `json:"issue_type"`
 	}
 
 	if err := d.listAgentBeadsJSON(&agents); err != nil {
@@ -1153,6 +1190,12 @@ func (d *Daemon) checkRigOrphanedWork(rigName string) {
 
 		// No hooked work = nothing to orphan
 		if agent.HookBead == "" {
+			continue
+		}
+
+		// Skip nuked agents — they're intentionally terminated and should not
+		// trigger alerts even if stale hook_bead data remains in the database.
+		if beads.AgentState(agent.AgentState) == beads.AgentStateNuked {
 			continue
 		}
 

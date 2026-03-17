@@ -43,6 +43,9 @@ func init() {
 // StaleOutput represents the JSON output structure.
 type StaleOutput struct {
 	Stale         bool   `json:"stale"`
+	Forward       bool   `json:"forward"`
+	OnMainBranch  bool   `json:"on_main_branch"`
+	SafeToRebuild bool   `json:"safe_to_rebuild"`
 	BinaryCommit  string `json:"binary_commit"`
 	RepoCommit    string `json:"repo_commit"`
 	CommitsBehind int    `json:"commits_behind,omitempty"`
@@ -85,8 +88,13 @@ func runStale(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build output
+	// SafeToRebuild requires: stale + forward-only + on main branch
+	safeToRebuild := info.IsStale && info.IsForward && info.OnMainBranch
 	output := StaleOutput{
 		Stale:         info.IsStale,
+		Forward:       info.IsForward,
+		OnMainBranch:  info.OnMainBranch,
+		SafeToRebuild: safeToRebuild,
 		BinaryCommit:  info.BinaryCommit,
 		RepoCommit:    info.RepoCommit,
 		CommitsBehind: info.CommitsBehind,
@@ -113,7 +121,18 @@ func outputStaleText(output StaleOutput) error {
 		if output.CommitsBehind > 0 {
 			fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("(%d commits behind)", output.CommitsBehind)))
 		}
-		fmt.Printf("\n  Run 'go install ./cmd/gt' to rebuild\n")
+		if !output.Forward {
+			fmt.Printf("  %s repo HEAD is NOT a descendant of binary commit (diverged or older)\n", style.Error.Render("✗"))
+		}
+		if !output.OnMainBranch {
+			fmt.Printf("  %s repo is not on main branch\n", style.Warning.Render("⚠"))
+		}
+		if output.SafeToRebuild {
+			fmt.Printf("\n  Safe to rebuild: run 'make build && make install'\n")
+		} else {
+			fmt.Printf("\n  %s NOT safe for automated rebuild (forward=%v, main=%v)\n",
+				style.Error.Render("✗"), output.Forward, output.OnMainBranch)
+		}
 	} else {
 		fmt.Printf("%s Binary is fresh\n", style.Success.Render("✓"))
 		fmt.Printf("  Commit: %s\n", version.ShortCommit(output.BinaryCommit))

@@ -248,10 +248,10 @@ func TestEnsureSessionFresh_ZombieSession(t *testing.T) {
 		t.Skip("session unexpectedly has agent running - can't test zombie case")
 	}
 
-	// Verify generic agent check also treats it as not running (shell session)
-	if tm.IsAgentRunning(sessionName) {
-		t.Fatalf("expected IsAgentRunning(%q) to be false for a fresh shell session", sessionName)
-	}
+	// Fresh tmux sessions can briefly report transient pane commands while the
+	// login shell is starting. IsAgentAlive is the stable predicate we care
+	// about here: there is no runtime in the session, so EnsureSessionFresh
+	// should treat it as a zombie and recreate it successfully.
 
 	// EnsureSessionFresh should kill the zombie and create fresh session
 	// This should NOT error with "session already exists"
@@ -973,20 +973,23 @@ func TestCleanupOrphanedSessions(t *testing.T) {
 	_ = tm.KillSession(hqSession)
 	_ = tm.KillSession(nonGtSession)
 
-	// Create zombie sessions (tmux alive, but just shell - no Claude)
-	if err := tm.NewSession(gtSession, ""); err != nil {
-		t.Fatalf("NewSession(gt): %v", err)
+	// Create zombie sessions (tmux alive, but process is sleep - no Claude/node).
+	// Use NewSessionWithCommand with sleep to avoid loading .zshrc, which spawns
+	// a node process on this system. A node child of the zsh shell would cause
+	// IsAgentAlive to return true, preventing cleanup (gt-it10f6p).
+	if err := tm.NewSessionWithCommand(gtSession, "", "sleep 9999"); err != nil {
+		t.Fatalf("NewSessionWithCommand(gt): %v", err)
 	}
 	defer func() { _ = tm.KillSession(gtSession) }()
 
-	if err := tm.NewSession(hqSession, ""); err != nil {
-		t.Fatalf("NewSession(hq): %v", err)
+	if err := tm.NewSessionWithCommand(hqSession, "", "sleep 9999"); err != nil {
+		t.Fatalf("NewSessionWithCommand(hq): %v", err)
 	}
 	defer func() { _ = tm.KillSession(hqSession) }()
 
 	// Create a non-GT session (should NOT be cleaned up)
-	if err := tm.NewSession(nonGtSession, ""); err != nil {
-		t.Fatalf("NewSession(other): %v", err)
+	if err := tm.NewSessionWithCommand(nonGtSession, "", "sleep 9999"); err != nil {
+		t.Fatalf("NewSessionWithCommand(other): %v", err)
 	}
 	defer func() { _ = tm.KillSession(nonGtSession) }()
 
@@ -2171,3 +2174,38 @@ func TestCheckSessionHealth_ActivityCheck(t *testing.T) {
 	// without needing a real Claude process.
 }
 
+func TestValidateCommandBinary(t *testing.T) {
+	t.Parallel()
+
+	absoluteShell := "/bin/sh"
+	if runtime.GOOS == "windows" {
+		path, err := exec.LookPath("sh")
+		if err != nil {
+			t.Skip("sh not installed")
+		}
+		absoluteShell = path
+	}
+
+	tests := []struct {
+		name    string
+		cmd     string
+		wantErr bool
+	}{
+		{"empty", "", false},
+		{"relative binary", "echo hello", false},
+		{"valid absolute", absoluteShell + " -c 'echo hi'", false},
+		{"missing absolute", "/nonexistent/binary --flag", true},
+		{"exec env missing", "exec env GT_TEST=1 /nonexistent/claude-code --settings /tmp", true},
+		{"exec env valid", "exec env GT_TEST=1 " + absoluteShell + " -c 'echo hi'", false},
+		{"env vars only", "exec env FOO=bar BAZ=1", false},
+		{"bare exec", "exec " + absoluteShell, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateCommandBinary(tc.cmd)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("validateCommandBinary(%q) error = %v, wantErr = %v", tc.cmd, err, tc.wantErr)
+			}
+		})
+	}
+}

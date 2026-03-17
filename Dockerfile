@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     zsh \
     gh \
     netcat-openbsd \
+    tini \
     vim \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
@@ -51,5 +52,5 @@ RUN chmod +x /app/docker-entrypoint.sh
 
 WORKDIR /gt
 
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+ENTRYPOINT ["tini", "--", "/app/docker-entrypoint.sh"]
 CMD ["sleep", "infinity"]

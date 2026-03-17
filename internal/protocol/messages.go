@@ -131,6 +131,99 @@ func formatMergeFailedBody(p MergeFailedPayload) string {
 	return sb.String()
 }
 
+// NewFixNeededMessage creates a FIX_NEEDED protocol message.
+// Sent by Refinery directly to the Polecat when merge fails (tests, build, etc.).
+// Unlike MERGE_FAILED (which goes to Witness), FIX_NEEDED goes to the polecat
+// so it can fix the code in-place without losing context.
+func NewFixNeededMessage(rig, polecat, branch, issue, targetBranch, failureType, errorMsg, mrBeadID string, attemptNumber int) *mail.Message {
+	payload := FixNeededPayload{
+		Branch:        branch,
+		Issue:         issue,
+		Polecat:       polecat,
+		Rig:           rig,
+		FailedAt:      time.Now(),
+		FailureType:   failureType,
+		Error:         errorMsg,
+		TargetBranch:  targetBranch,
+		MRBeadID:      mrBeadID,
+		AttemptNumber: attemptNumber,
+	}
+
+	body := formatFixNeededBody(payload)
+
+	msg := mail.NewMessage(
+		fmt.Sprintf("%s/refinery", rig),
+		fmt.Sprintf("%s/polecats/%s", rig, polecat),
+		fmt.Sprintf("FIX_NEEDED %s", polecat),
+		body,
+	)
+	msg.Priority = mail.PriorityHigh
+	msg.Type = mail.TypeTask
+
+	return msg
+}
+
+// formatFixNeededBody formats the body of a FIX_NEEDED message.
+func formatFixNeededBody(p FixNeededPayload) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Branch: %s\n", p.Branch))
+	sb.WriteString(fmt.Sprintf("Issue: %s\n", p.Issue))
+	sb.WriteString(fmt.Sprintf("Polecat: %s\n", p.Polecat))
+	sb.WriteString(fmt.Sprintf("Rig: %s\n", p.Rig))
+	sb.WriteString(fmt.Sprintf("Target: %s\n", p.TargetBranch))
+	sb.WriteString(fmt.Sprintf("Failed-At: %s\n", p.FailedAt.Format(time.RFC3339)))
+	sb.WriteString(fmt.Sprintf("Failure-Type: %s\n", p.FailureType))
+	sb.WriteString(fmt.Sprintf("Error: %s\n", p.Error))
+	if p.MRBeadID != "" {
+		sb.WriteString(fmt.Sprintf("MR-Bead-ID: %s\n", p.MRBeadID))
+	}
+	sb.WriteString(fmt.Sprintf("Attempt-Number: %d\n", p.AttemptNumber))
+	return sb.String()
+}
+
+// ParseFixNeededPayload parses a FIX_NEEDED message body into a payload.
+// Returns an error if required fields (Branch, Polecat, Rig) are missing.
+func ParseFixNeededPayload(body string) (*FixNeededPayload, error) {
+	payload := &FixNeededPayload{
+		Branch:       parseField(body, "Branch"),
+		Issue:        parseField(body, "Issue"),
+		Polecat:      parseField(body, "Polecat"),
+		Rig:          parseField(body, "Rig"),
+		TargetBranch: parseField(body, "Target"),
+		FailureType:  parseField(body, "Failure-Type"),
+		Error:        parseField(body, "Error"),
+		MRBeadID:     parseField(body, "MR-Bead-ID"),
+	}
+
+	// Parse timestamp
+	if ts := parseField(body, "Failed-At"); ts != "" {
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			payload.FailedAt = t
+		}
+	}
+
+	// Parse attempt number
+	if an := parseField(body, "Attempt-Number"); an != "" {
+		fmt.Sscanf(an, "%d", &payload.AttemptNumber)
+	}
+
+	var errs []string
+	if payload.Branch == "" {
+		errs = append(errs, "Branch")
+	}
+	if payload.Polecat == "" {
+		errs = append(errs, "Polecat")
+	}
+	if payload.Rig == "" {
+		errs = append(errs, "Rig")
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("invalid FIX_NEEDED payload: missing required fields: %s", strings.Join(errs, ", "))
+	}
+
+	return payload, nil
+}
+
 // NewReworkRequestMessage creates a REWORK_REQUEST protocol message.
 // Sent by Refinery to Witness when a branch needs rebasing due to conflicts.
 func NewReworkRequestMessage(rig, polecat, branch, issue, targetBranch string, conflictFiles []string) *mail.Message {

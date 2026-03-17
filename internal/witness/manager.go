@@ -208,12 +208,12 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	}
 	_ = t.SetEnvironment(sessionID, "GT_RUN", runID)
 	// Apply role config env vars if present (non-fatal).
-	// Skip keys already set by AgentEnv — AgentEnv is the single source of truth
-	// for identity vars (GT_ROLE, BD_ACTOR, etc.) and produces fully-qualified
-	// values (e.g., "beacon/witness"). TOML [env] sections contain unqualified
-	// values (e.g., "witness") that would overwrite the correct ones.
+	// Skip keys already set by AgentEnv to prevent TOML env overriding
+	// the canonical qualified GT_ROLE (e.g., "gastown/witness" not "witness").
+	// See: https://github.com/steveyegge/gastown/issues/2492
 	for key, value := range roleConfigEnvVars(roleConfig, townRoot, m.rig.Name) {
-		if _, alreadySet := envVars[key]; alreadySet {
+		if existing, alreadySet := envVars[key]; alreadySet {
+			log.Printf("witness env: skipping TOML %s=%q (AgentEnv already set %q)", key, value, existing)
 			continue
 		}
 		_ = t.SetEnvironment(sessionID, key, value)
@@ -245,6 +245,14 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	if err := session.TrackSessionPID(townRoot, sessionID, t); err != nil {
 		log.Printf("warning: tracking session PID for %s: %v", sessionID, err)
 	}
+
+	_ = runtime.RunStartupFallback(t, sessionID, "witness", runtimeConfig)
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: session.BeaconRecipient("witness", "", m.rig.Name),
+		Sender:    "deacon",
+		Topic:     "patrol",
+	}, "Run `gt prime --hook` and begin patrol.")
+	_ = runtime.DeliverStartupPromptFallback(t, sessionID, initialPrompt, runtimeConfig, constants.ClaudeStartTimeout)
 
 	// Stream witness's Claude Code JSONL conversation log to VictoriaLogs (opt-in).
 	if os.Getenv("GT_LOG_AGENT_OUTPUT") == "true" && os.Getenv("GT_OTEL_LOGS_URL") != "" {
@@ -301,14 +309,27 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOver
 		roleConfig = nil
 	}
 	if roleConfig != nil && roleConfig.StartCommand != "" {
-		// Skip the hardcoded start_command when a non-Claude agent is configured.
-		// Built-in role TOMLs hardcode "exec claude ..." which bypasses the
-		// declarative agent resolution system. Fall through to
-		// BuildStartupCommandFromConfig so the correct agent command is built.
+		// Use the TOML start_command for custom (non-Claude) commands that
+		// need template expansion (e.g., "exec run --town {town} --rig {rig}").
+		// For Claude agents, skip the TOML shortcut and fall through to
+		// BuildStartupCommandFromConfig which resolves model flags from
+		// role_agents (e.g., --model sonnet[1m]). The built-in TOML
+		// start_command ("exec claude --dangerously-skip-permissions") strips
+		// these flags, breaking per-role model selection.
 		rc := config.ResolveRoleAgentConfig("witness", townRoot, rigPath)
-		if config.IsResolvedAgentClaude(rc) {
-			return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness", session.PrefixFor(rigName)), nil
+		if !config.IsResolvedAgentClaude(rc) || !isBuiltinClaudeStartCommand(roleConfig.StartCommand) {
+			// Non-Claude agent OR custom start_command: use TOML pattern
+			// with template expansion.
+			cmd := beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness", session.PrefixFor(rigName))
+			if strings.HasPrefix(cmd, "exec ") {
+				cmd = "exec env -u CLAUDECODE NODE_OPTIONS='' " + strings.TrimPrefix(cmd, "exec ")
+			} else {
+				cmd = "env -u CLAUDECODE NODE_OPTIONS='' " + cmd
+			}
+			return cmd, nil
 		}
+		// Claude agent with built-in start_command: fall through to
+		// BuildStartupCommandFromConfig for proper model flag resolution.
 	}
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
 		Recipient: session.BeaconRecipient("witness", "", rigName),
@@ -327,6 +348,14 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOver
 		return "", fmt.Errorf("building startup command: %w", err)
 	}
 	return command, nil
+}
+
+// isBuiltinClaudeStartCommand returns true if the start_command is the
+// built-in default from role TOMLs ("exec claude --dangerously-skip-permissions").
+// Custom start_commands (e.g., "exec run --town {town}") return false.
+func isBuiltinClaudeStartCommand(cmd string) bool {
+	trimmed := strings.TrimPrefix(cmd, "exec ")
+	return trimmed == "claude --dangerously-skip-permissions"
 }
 
 // Stop stops the witness.

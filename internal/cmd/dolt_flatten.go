@@ -162,8 +162,12 @@ func runDoltFlatten(cmd *cobra.Command, args []string) error {
 		if !ok {
 			return fmt.Errorf("integrity FAIL: table %q missing after flatten", table)
 		}
-		if preCount != postCount {
-			return fmt.Errorf("integrity FAIL: %q pre=%d post=%d", table, preCount, postCount)
+		if postCount < preCount {
+			return fmt.Errorf("integrity FAIL: %q lost rows: pre=%d post=%d", table, preCount, postCount)
+		}
+		if postCount > preCount {
+			fmt.Printf("  %s table %q gained %d rows during flatten (concurrent write, safe)\n",
+				style.Bold.Render("⚠"), table, postCount-preCount)
 		}
 	}
 	fmt.Printf("  %s Integrity verified (%d tables match)\n", style.Bold.Render("✓"), len(preCounts))

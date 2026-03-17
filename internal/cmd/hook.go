@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -389,6 +390,20 @@ func runHook(_ *cobra.Command, args []string) error {
 		break
 	}
 
+	// Emit a propulsion signal if the target is the mayor.
+	// This allows the ACP propeller to react to hook changes event-driven.
+	if agentID == "mayor/" {
+		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+			session := "hq-mayor"
+			message := fmt.Sprintf("Hook updated: attached bead %s", beadID)
+			_ = nudge.Enqueue(townRoot, session, nudge.QueuedNudge{
+				Sender:   "hook",
+				Message:  message,
+				Priority: nudge.PriorityNormal,
+			})
+		}
+	}
+
 	if targetAgent != "" {
 		fmt.Printf("%s Work attached to %s's hook\n", style.Bold.Render("✓"), agentID)
 	} else {
@@ -455,10 +470,30 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 		target = agentID
 	}
 
-	// Find beads directory
+	// Find beads directory.
+	// For remote rig-level targets (e.g. "myndy_monorepo/refinery"), resolve the
+	// rig's actual beads dir using the same rig-aware routing as runHook (attach).
+	// Without this, gt hook show always queries whatever DB is local (typically HQ),
+	// missing wisps stored in the target rig's database.
 	workDir, err := findLocalBeadsDir()
 	if err != nil {
 		return fmt.Errorf("not in a beads workspace: %w", err)
+	}
+	if len(args) > 0 && !isTownLevelRole(target) {
+		townRoot, townErr := workspace.FindFromCwd()
+		if townErr == nil && townRoot != "" {
+			agentBeadID := agentIDToBeadID(target, townRoot)
+			if agentBeadID != "" {
+				rigName := strings.Split(target, "/")[0]
+				var fallbackPath string
+				if rigName == "mayor" || rigName == "deacon" {
+					fallbackPath = townRoot
+				} else {
+					fallbackPath = filepath.Join(townRoot, rigName, "mayor", "rig")
+				}
+				workDir = beads.ResolveHookDir(townRoot, agentBeadID, fallbackPath)
+			}
+		}
 	}
 
 	b := beads.New(workDir)
@@ -555,6 +590,31 @@ func normalizeHookShowTarget(target string) string {
 	if identity, err := session.ParseAddress(target); err == nil {
 		return identity.Address()
 	}
+
+	// Direct shorthand expansion: rig/name → rig/polecats/name or rig/crew/name.
+	// This handles the case where the session name roundtrip fails due to
+	// uninitialized prefix registry. See GH#2371.
+	parts := strings.Split(target, "/")
+	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+		name := parts[1]
+		// Check for known roles — don't expand those
+		switch strings.ToLower(name) {
+		case "witness", "refinery", "mayor", "deacon":
+			// Already a valid canonical address
+		default:
+			// Check if it's a crew member by looking for the directory
+			townRoot := detectTownRootFromCwd()
+			if townRoot != "" {
+				crewPath := filepath.Join(townRoot, parts[0], "crew", name)
+				if info, statErr := os.Stat(crewPath); statErr == nil && info.IsDir() {
+					return parts[0] + "/crew/" + name
+				}
+			}
+			// Default to polecat
+			return parts[0] + "/polecats/" + strings.ToLower(name)
+		}
+	}
+
 	return target
 }
 

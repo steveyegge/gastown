@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -226,14 +227,16 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 
 // AddRigOptions configures rig creation.
 type AddRigOptions struct {
-	Name          string // Rig name (directory name)
-	GitURL        string // Repository URL (fetch/pull)
-	PushURL       string // Optional push URL (fork for read-only upstreams)
-	UpstreamURL   string // Optional upstream URL (for fork workflows)
-	BeadsPrefix   string // Beads issue prefix (defaults to derived from name)
-	LocalRepo     string // Optional local repo for reference clones
-	DefaultBranch string // Default branch (defaults to auto-detected from remote)
-	SkipDoltCheck bool   // Skip Dolt server availability check (for tests with mocked beads)
+	Name            string   // Rig name (directory name)
+	GitURL          string   // Repository URL (fetch/pull)
+	PushURL         string   // Optional push URL (fork for read-only upstreams)
+	UpstreamURL     string   // Optional upstream URL (for fork workflows)
+	BeadsPrefix     string   // Beads issue prefix (defaults to derived from name)
+	LocalRepo       string   // Optional local repo for reference clones
+	DefaultBranch   string   // Default branch (defaults to auto-detected from remote)
+	SkipDoltCheck   bool     // Skip Dolt server availability check (for tests with mocked beads)
+	CloneFilter     string   // Git clone filter spec (e.g. "blob:none", "tree:0") for partial clones
+	SparseCheckout  []string // Sparse checkout paths (cone mode); empty means no sparse checkout
 }
 
 func resolveLocalRepo(path, gitURL string) (string, string) {
@@ -368,7 +371,19 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Mayor remains a separate clone (doesn't need branch visibility).
 	fmt.Printf("  Cloning repository (this may take a moment)...\n")
 	bareRepoPath := filepath.Join(rigPath, ".repo.git")
-	if localRepo != "" {
+	if opts.CloneFilter != "" && localRepo != "" {
+		if err := m.git.CloneBarePartialWithReference(opts.GitURL, bareRepoPath, opts.CloneFilter, localRepo); err != nil {
+			fmt.Printf("  Warning: could not use local repo reference with filter: %v\n", err)
+			_ = os.RemoveAll(bareRepoPath)
+			if err := m.git.CloneBarePartial(opts.GitURL, bareRepoPath, opts.CloneFilter); err != nil {
+				return nil, wrapCloneError(err, opts.GitURL)
+			}
+		}
+	} else if opts.CloneFilter != "" {
+		if err := m.git.CloneBarePartial(opts.GitURL, bareRepoPath, opts.CloneFilter); err != nil {
+			return nil, wrapCloneError(err, opts.GitURL)
+		}
+	} else if localRepo != "" {
 		if err := m.git.CloneBareWithReference(opts.GitURL, bareRepoPath, localRepo); err != nil {
 			fmt.Printf("  Warning: could not use local repo reference: %v\n", err)
 			_ = os.RemoveAll(bareRepoPath)
@@ -381,7 +396,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			return nil, wrapCloneError(err, opts.GitURL)
 		}
 	}
-	fmt.Printf("   ✓ Created shared bare repo\n")
+	if opts.CloneFilter != "" {
+		fmt.Printf("   ✓ Created shared bare repo (partial: --filter=%s)\n", opts.CloneFilter)
+	} else {
+		fmt.Printf("   ✓ Created shared bare repo\n")
+	}
 	bareGit := git.NewGitWithDir(bareRepoPath, "")
 
 	// Detect empty repos (no commits) early with a clear diagnostic.
@@ -448,12 +467,28 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	if err := os.MkdirAll(filepath.Dir(mayorRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating mayor dir: %w", err)
 	}
-	if err := m.git.CloneBranchWithReference(opts.GitURL, mayorRigPath, defaultBranch, bareRepoPath); err != nil {
+	if opts.CloneFilter != "" {
+		if err := m.git.CloneBranchPartialWithReference(opts.GitURL, mayorRigPath, defaultBranch, opts.CloneFilter, bareRepoPath); err != nil {
+			fmt.Printf("  Warning: could not use bare repo as reference with filter: %v\n", err)
+			_ = os.RemoveAll(mayorRigPath)
+			if err := m.git.CloneBranchPartial(opts.GitURL, mayorRigPath, defaultBranch, opts.CloneFilter); err != nil {
+				return nil, fmt.Errorf("cloning for mayor: %w", err)
+			}
+		}
+	} else if err := m.git.CloneBranchWithReference(opts.GitURL, mayorRigPath, defaultBranch, bareRepoPath); err != nil {
 		fmt.Printf("  Warning: could not use bare repo as reference: %v\n", err)
 		_ = os.RemoveAll(mayorRigPath)
 		if err := m.git.CloneBranch(opts.GitURL, mayorRigPath, defaultBranch); err != nil {
 			return nil, fmt.Errorf("cloning for mayor: %w", err)
 		}
+	}
+
+	// Set up sparse checkout on mayor clone if requested
+	if len(opts.SparseCheckout) > 0 {
+		if err := git.InitSparseCheckout(mayorRigPath, opts.SparseCheckout); err != nil {
+			return nil, fmt.Errorf("initializing sparse checkout for mayor: %w", err)
+		}
+		fmt.Printf("   ✓ Configured sparse checkout: %v\n", opts.SparseCheckout)
 	}
 
 	// No explicit checkout needed - --branch already checked out the default branch
@@ -516,11 +551,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 				initArgs = append(initArgs, "--prefix", opts.BeadsPrefix)
 			}
 			initArgs = append(initArgs, "--server")
-			// Forward GT_DOLT_PORT so bd connects to the correct server
-			// (e.g., ephemeral test servers in CI).
-			if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-				initArgs = append(initArgs, "--server-port", p)
-			}
+			// Always pass --server-port so bd connects to gt's central Dolt
+			// server. Without this, bd auto-starts its own server on a random
+			// port, causing "database not found" errors. (GH #2405)
+			doltCfg := doltserver.DefaultConfig(m.townRoot)
+			initArgs = append(initArgs, "--server-port", strconv.Itoa(doltCfg.Port))
 			cmd := exec.Command("bd", initArgs...)
 			cmd.Dir = mayorRigPath
 			if output, err := cmd.CombinedOutput(); err != nil {
@@ -745,6 +780,12 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 		return nil, fmt.Errorf("creating settings dir: %w", err)
 	}
 
+	// Note: we intentionally do NOT seed local rig settings from
+	// .gastown/settings.json here. Repo settings are merged at runtime
+	// by loadRigCommandVars (repo defaults → local overrides → --var flags).
+	// Seeding at rig-add time would fork the config, silently shadowing
+	// any future repo-side updates.
+
 	// Create rig-level agent beads (witness, refinery) in rig beads.
 	// Town-level agents (mayor, deacon) are created by gt install in town beads.
 	if err := m.initAgentBeads(rigPath, opts.Name, opts.BeadsPrefix); err != nil {
@@ -896,11 +937,10 @@ func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 		initArgs = append(initArgs, "--prefix", prefix)
 	}
 	initArgs = append(initArgs, "--server")
-	// When GT_DOLT_PORT is set (e.g., test environment with ephemeral server),
-	// pass --server-port so bd init configures the correct port in metadata.
-	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-		initArgs = append(initArgs, "--server-port", p)
-	}
+	// Always pass --server-port so bd connects to gt's central Dolt server.
+	// Without this, bd auto-starts its own server on a random port. (GH #2405)
+	doltCfg := doltserver.DefaultConfig(m.townRoot)
+	initArgs = append(initArgs, "--server-port", strconv.Itoa(doltCfg.Port))
 	cmd := exec.Command("bd", initArgs...)
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv

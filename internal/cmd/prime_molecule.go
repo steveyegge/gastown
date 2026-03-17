@@ -172,7 +172,8 @@ func showFormulaStepsFull(formulaName string, extraVars ...[]string) {
 	fmt.Println()
 	fmt.Printf("**Formula Checklist** (%d steps from %s):\n\n", len(f.Steps), formulaName)
 	for i, step := range f.Steps {
-		fmt.Printf("### Step %d: %s\n\n", i+1, step.Title)
+		title := applyFormulaVars(step.Title, varMap)
+		fmt.Printf("### Step %d: %s\n\n", i+1, title)
 		if step.Description != "" {
 			fmt.Println(applyFormulaVars(step.Description, varMap))
 			fmt.Println()
@@ -205,6 +206,17 @@ func applyFormulaVars(text string, varMap map[string]string) string {
 	return text
 }
 
+// extractFormulaVar extracts a specific key's value from a newline-separated
+// key=value string (as stored in AttachmentFields.FormulaVars).
+// Returns "" if the key is not found.
+func extractFormulaVar(formulaVars, key string) string {
+	for _, line := range strings.Split(formulaVars, "\n") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok && k == key {
+			return v
+		}
+	}
+	return ""
+}
 // truncateDescription truncates a multi-line description to a single line summary.
 func truncateDescription(desc string, maxLen int) string {
 	// Take just the first line

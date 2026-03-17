@@ -53,6 +53,9 @@ switch ($cmd) {
     if ($args.Length -ge 3 -and $args[1] -eq 'get' -and $args[2] -eq 'status.custom') {
       Write-Output ''
     }
+    if ($args.Length -ge 3 -and $args[1] -eq 'get' -and $args[2] -eq 'types.custom') {
+      Write-Output 'agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request'
+    }
     exit 0
   }
   'migrate' { exit 0 }
@@ -92,7 +95,14 @@ case "$cmd" in
     printf 'prefix: %s\nissue-prefix: %s-\n' "$prefix" "$prefix" > "$target/config.yaml"
     exit 0
     ;;
-  config|migrate)
+  config)
+    # Return types list for "config get types.custom" verification
+    if echo "$*" | grep -q "get types.custom"; then
+      echo "agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request"
+    fi
+    exit 0
+    ;;
+  migrate)
     exit 0
     ;;
   *)
@@ -343,6 +353,69 @@ func TestEnsureCustomTypes(t *testing.T) {
 
 		if err := EnsureCustomTypes(beadsDir); err != nil {
 			t.Errorf("expected cache hit, got: %v", err)
+		}
+	})
+}
+
+func TestEnsureCustomTypes_VerifyPersistence(t *testing.T) {
+	t.Run("sentinel not written when db verify fails", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("test uses Unix shell script mock for bd")
+		}
+		// Install a mock bd that succeeds on "config set" but returns empty
+		// on "config get types.custom" — simulating a silent write failure.
+		binDir := t.TempDir()
+		logPath := filepath.Join(binDir, "bd.log")
+		script := `#!/bin/sh
+LOG_FILE='` + logPath + `'
+printf '%s\n' "$*" >> "$LOG_FILE"
+cmd=""
+for arg in "$@"; do
+  case "$arg" in --*) ;; *) cmd="$arg"; break ;; esac
+done
+case "$cmd" in
+  init)
+    target="${BEADS_DIR:-$(pwd)/.beads}"
+    mkdir -p "$target/dolt"
+    printf 'prefix: gt\nissue-prefix: gt-\n' > "$target/config.yaml"
+    exit 0
+    ;;
+  config)
+    # "config set" succeeds but "config get types.custom" returns empty
+    if echo "$*" | grep -q "get types.custom"; then
+      echo ""
+    fi
+    exit 0
+    ;;
+  migrate) exit 0 ;;
+  *) exit 0 ;;
+esac
+`
+		if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(script), 0755); err != nil {
+			t.Fatalf("write mock bd: %v", err)
+		}
+		t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+		tmpDir := t.TempDir()
+		beadsDir := filepath.Join(tmpDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		ResetEnsuredDirs()
+
+		err := EnsureCustomTypes(beadsDir)
+		if err == nil {
+			t.Fatal("expected error when types.custom verify fails, got nil")
+		}
+		if !strings.Contains(err.Error(), "not persisted") {
+			t.Fatalf("expected 'not persisted' error, got: %v", err)
+		}
+
+		// Sentinel file should NOT have been written
+		sentinelPath := filepath.Join(beadsDir, typesSentinel)
+		if _, err := os.Stat(sentinelPath); !os.IsNotExist(err) {
+			t.Error("sentinel file should not exist when verify fails")
 		}
 	})
 }

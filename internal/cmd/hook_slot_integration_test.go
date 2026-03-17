@@ -12,8 +12,10 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/testutil"
 )
 
@@ -33,6 +35,21 @@ func setupHookTestTown(t *testing.T) (townRoot, polecatDir, rigPrefix string) {
 	rigPrefix = fmt.Sprintf("ht%d", n)
 
 	townRoot = t.TempDir()
+
+	// Create a real town marker so workspace discovery resolves the outer town
+	// root instead of stopping at the nested rig mayor directory.
+	townMayorDir := filepath.Join(townRoot, "mayor")
+	if err := os.MkdirAll(townMayorDir, 0755); err != nil {
+		t.Fatalf("mkdir town mayor: %v", err)
+	}
+	if err := config.SaveTownConfig(filepath.Join(townMayorDir, "town.json"), &config.TownConfig{
+		Type:      "town",
+		Version:   config.CurrentTownVersion,
+		Name:      "hook-test-town",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("write town config: %v", err)
+	}
 
 	// Create town-level .beads directory
 	townBeadsDir := filepath.Join(townRoot, ".beads")
@@ -114,7 +131,7 @@ func TestHookSlot_BasicHook(t *testing.T) {
 	// Create a test bead
 	issue, err := b.Create(beads.CreateOptions{
 		Title:    "Test task for hooking",
-		Label:    "gt:task",
+		Labels:   []string{"gt:task"},
 		Priority: 2,
 	})
 	if err != nil {
@@ -170,7 +187,7 @@ func TestHookSlot_Singleton(t *testing.T) {
 	// Create and hook first bead
 	issue1, err := b.Create(beads.CreateOptions{
 		Title:    "First task",
-		Label:    "gt:task",
+		Labels:   []string{"gt:task"},
 		Priority: 2,
 	})
 	if err != nil {
@@ -187,7 +204,7 @@ func TestHookSlot_Singleton(t *testing.T) {
 	// Create second bead
 	issue2, err := b.Create(beads.CreateOptions{
 		Title:    "Second task",
-		Label:    "gt:task",
+		Labels:   []string{"gt:task"},
 		Priority: 2,
 	})
 	if err != nil {
@@ -243,7 +260,7 @@ func TestHookSlot_Unhook(t *testing.T) {
 	// Create and hook a bead
 	issue, err := b.Create(beads.CreateOptions{
 		Title:    "Task to unhook",
-		Label:    "gt:task",
+		Labels:   []string{"gt:task"},
 		Priority: 2,
 	})
 	if err != nil {
@@ -306,7 +323,7 @@ func TestHookSlot_DifferentAgents(t *testing.T) {
 	// Create and hook bead to first agent
 	issue1, err := b.Create(beads.CreateOptions{
 		Title:    "Toast's task",
-		Label:    "gt:task",
+		Labels:   []string{"gt:task"},
 		Priority: 2,
 	})
 	if err != nil {
@@ -323,7 +340,7 @@ func TestHookSlot_DifferentAgents(t *testing.T) {
 	// Create and hook bead to second agent
 	issue2, err := b.Create(beads.CreateOptions{
 		Title:    "Nux's task",
-		Label:    "gt:task",
+		Labels:   []string{"gt:task"},
 		Priority: 2,
 	})
 	if err != nil {
@@ -391,7 +408,7 @@ func TestHookSlot_HookPersistence(t *testing.T) {
 	b1 := beads.New(rigDir)
 	issue, err := b1.Create(beads.CreateOptions{
 		Title:    "Persistent task",
-		Label:    "gt:task",
+		Labels:   []string{"gt:task"},
 		Priority: 2,
 	})
 	if err != nil {
@@ -445,7 +462,7 @@ func TestHookSlot_StatusTransitions(t *testing.T) {
 	// Create a bead
 	issue, err := b.Create(beads.CreateOptions{
 		Title:    "Status transition test",
-		Label:    "gt:task",
+		Labels:   []string{"gt:task"},
 		Priority: 2,
 	})
 	if err != nil {

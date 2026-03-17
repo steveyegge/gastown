@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -251,8 +252,10 @@ func runUp(cmd *cobra.Command, args []string) error {
 		defer startupWg.Done()
 		mayorMgr := mayor.NewManager(townRoot)
 		if err := mayorMgr.Start(""); err != nil {
-			if err == mayor.ErrAlreadyRunning {
+			if errors.Is(err, mayor.ErrAlreadyRunning) {
 				mayorResult = agentStartResult{name: "Mayor", ok: true, detail: mayorMgr.SessionName()}
+			} else if errors.Is(err, mayor.ErrACPActive) {
+				mayorResult = agentStartResult{name: "Mayor", ok: true, detail: "ACP active"}
 			} else {
 				mayorResult = agentStartResult{name: "Mayor", ok: false, detail: err.Error()}
 			}
@@ -308,6 +311,13 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// was skipped, polling the port would just burn the full timeout. (review finding #1)
 	if !doltSkipped && doltOK {
 		waitForDoltReady(townRoot)
+		// Propagate Dolt port to process env so all subsequently spawned
+		// agents (witnesses, refineries, crew) inherit it. Without this,
+		// bd auto-starts rogue Dolt instances in agent tmux sessions. (GH#2412)
+		doltCfg := doltserver.DefaultConfig(townRoot)
+		portStr := fmt.Sprintf("%d", doltCfg.Port)
+		os.Setenv("GT_DOLT_PORT", portStr)
+		os.Setenv("BEADS_DOLT_PORT", portStr)
 	}
 
 	// 5 & 6. Witnesses and Refineries (using prefetched rigs)
@@ -467,6 +477,12 @@ func disableCurrentAgentDND(townRoot string) (bool, error) {
 
 // ensureDaemon starts the daemon if not running.
 func ensureDaemon(townRoot string) error {
+	// GH#2656: Don't restart the daemon while gt down is running.
+	sentinelPath := filepath.Join(townRoot, ShutdownSentinel)
+	if _, err := os.Stat(sentinelPath); err == nil {
+		return fmt.Errorf("shutdown in progress (sentinel exists: %s)", sentinelPath)
+	}
+
 	running, _, err := daemon.IsRunning(townRoot)
 	if err != nil {
 		return err

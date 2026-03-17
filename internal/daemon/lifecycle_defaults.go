@@ -47,6 +47,9 @@ func DefaultLifecycleConfig() *DaemonPatrolConfig {
 				Interval:  "daily",
 				Threshold: &threshold,
 			},
+			Handler: &PatrolConfig{
+				Enabled: true,
+			},
 		},
 	}
 }
@@ -94,6 +97,10 @@ func EnsureLifecycleDefaults(config *DaemonPatrolConfig) bool {
 	}
 	if p.ScheduledMaintenance == nil {
 		p.ScheduledMaintenance = d.ScheduledMaintenance
+		changed = true
+	}
+	if p.Handler == nil {
+		p.Handler = d.Handler
 		changed = true
 	}
 

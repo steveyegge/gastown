@@ -134,14 +134,28 @@ func EnsureCustomTypes(beadsDir string) error {
 	}
 
 	// Configure custom types via bd CLI
+	bdEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
 	cmd := exec.Command("bd", "config", "set", "types.custom", typesList)
 	cmd.Dir = beadsDir
 	// Set BEADS_DIR explicitly to ensure bd operates on the correct database.
 	// Strip inherited BEADS_DIR first — getenv() returns the first match (gt-uygpe).
-	cmd.Env = append(stripEnvPrefixes(os.Environ(), "BEADS_DIR="), "BEADS_DIR="+beadsDir)
+	cmd.Env = bdEnv
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("configure custom types in %s: %s: %w",
 			beadsDir, strings.TrimSpace(string(output)), err)
+	}
+
+	// Verify the config was actually persisted in the database (GH#2637).
+	// bd config set can exit 0 but fail to write if it targets the wrong
+	// database (redirect mismatch, stale metadata, server not running).
+	// Without this check, the sentinel file below would cache a lie,
+	// causing all future EnsureCustomTypes calls to skip re-configuration.
+	verifyCmd := exec.Command("bd", "config", "get", "types.custom")
+	verifyCmd.Dir = beadsDir
+	verifyCmd.Env = bdEnv
+	if verifyOutput, err := verifyCmd.Output(); err != nil || !strings.Contains(string(verifyOutput), "agent") {
+		return fmt.Errorf("types.custom not persisted in %s after bd config set (verify returned %q): db may be misconfigured",
+			beadsDir, strings.TrimSpace(string(verifyOutput)))
 	}
 
 	// Write sentinel file with the types list for staleness detection.

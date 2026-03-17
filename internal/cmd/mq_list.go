@@ -35,8 +35,10 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		gitClient = git.NewGit(refineryRigPath)
 	}
 
-	// Build list options - query for merge-request label
-	// Priority -1 means no priority filter (otherwise 0 would filter to P0 only)
+	// Build list options - query for merge-request label.
+	// Use ListMergeRequests to query both the issues table and wisps table,
+	// since MRs are created as ephemeral (wisps) by gt mq submit (GH#2446).
+	// Priority -1 means no priority filter (otherwise 0 would filter to P0 only).
 	opts := beads.ListOptions{
 		Label:    "gt:merge-request",
 		Priority: -1,
@@ -57,7 +59,7 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		// Cannot use b.Ready() because it excludes ephemeral beads,
 		// and MRs are ephemeral by design (see gt-t5t6y).
 		opts.Status = "open"
-		allOpen, err := b.List(opts)
+		allOpen, err := b.ListMergeRequests(opts)
 		if err != nil {
 			return fmt.Errorf("querying ready MRs: %w", err)
 		}
@@ -68,7 +70,7 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			issues = append(issues, issue)
 		}
 	} else {
-		issues, err = b.List(opts)
+		issues, err = b.ListMergeRequests(opts)
 		if err != nil {
 			return fmt.Errorf("querying merge queue: %w", err)
 		}
@@ -104,6 +106,12 @@ func runMQList(cmd *cobra.Command, args []string) error {
 
 		// Parse MR fields
 		fields := beads.ParseMRFields(issue)
+
+		// Filter by rig — wisps are shared across all rigs in the Dolt server,
+		// so we must filter to only show MRs belonging to this rig.
+		if fields != nil && fields.Rig != "" && !strings.EqualFold(fields.Rig, rigName) {
+			continue
+		}
 
 		// Filter by worker
 		if mqListWorker != "" {

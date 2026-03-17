@@ -126,13 +126,12 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 	vars := buildRefineryPatrolVars(ctx)
 
 	// DefaultMergeQueueConfig: refinery_enabled=true, auto_land=false, run_tests=true,
-	// test_command="go test ./...", target_branch="main" (from rig config), delete_merged_branches=true
+	// test_command="" (language-agnostic), target_branch="main" (from rig config), delete_merged_branches=true
 	// New commands (setup, typecheck, lint, build) default to empty = omitted
 	expected := map[string]string{
 		"integration_branch_refinery_enabled": "true",
 		"integration_branch_auto_land":        "false",
 		"run_tests":                           "true",
-		"test_command":                        "go test ./...",
 		"target_branch":                       "main",
 		"delete_merged_branches":              "true",
 	}
@@ -205,12 +204,11 @@ func TestBuildRefineryPatrolVars_AllCommandsSet(t *testing.T) {
 		}
 	}
 
-	// All 5 commands should be present
+	// All configured commands should be present (test_command is empty by default)
 	commandExpected := map[string]string{
 		"setup_command":     "pnpm install",
 		"typecheck_command": "tsc --noEmit",
 		"lint_command":      "eslint .",
-		"test_command":      "go test ./...",
 		"build_command":     "pnpm build",
 	}
 	for key, want := range commandExpected {

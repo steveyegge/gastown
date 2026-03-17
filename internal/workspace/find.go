@@ -94,20 +94,31 @@ func FindFromCwd() (string, error) {
 }
 
 // FindFromCwdOrError is like FindFromCwd but returns an error if not found.
-// If getcwd fails (e.g., worktree deleted), falls back to GT_TOWN_ROOT env var.
+// It searches for a workspace starting from the CWD. If none is found, it
+// falls back to the GT_TOWN_ROOT or GT_ROOT environment variables.
 func FindFromCwdOrError() (string, error) {
 	cwd, err := os.Getwd()
-	if err != nil {
-		// Fallback: try GT_TOWN_ROOT env var (set by polecat sessions)
-		if townRoot := os.Getenv("GT_TOWN_ROOT"); townRoot != "" {
+	if err == nil {
+		root, err := Find(cwd)
+		if err == nil && root != "" {
+			return root, nil
+		}
+	}
+
+	// Fallback: try GT_TOWN_ROOT or GT_ROOT env vars (set by shell integration or session manager)
+	for _, envName := range []string{"GT_TOWN_ROOT", "GT_ROOT"} {
+		if townRoot := os.Getenv(envName); townRoot != "" {
 			// Verify it's actually a workspace
-			if _, statErr := os.Stat(filepath.Join(townRoot, PrimaryMarker)); statErr == nil {
+			if ok, _ := IsWorkspace(townRoot); ok {
 				return townRoot, nil
 			}
 		}
+	}
+
+	if err != nil {
 		return "", fmt.Errorf("getting current directory: %w", err)
 	}
-	return FindOrError(cwd)
+	return "", ErrNotFound
 }
 
 // FindFromCwdWithFallback is like FindFromCwdOrError but returns (townRoot, cwd, error).

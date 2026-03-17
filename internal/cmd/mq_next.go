@@ -58,14 +58,16 @@ func runMQNext(cmd *cobra.Command, args []string) error {
 	// Create beads wrapper for the rig
 	b := beads.New(r.BeadsPath())
 
-	// Query for open merge-requests (ready to process)
+	// Query for open merge-requests (ready to process).
+	// Use ListMergeRequests to query both issues and wisps tables,
+	// since MRs are created as ephemeral (wisps) by gt mq submit (GH#2446).
 	opts := beads.ListOptions{
 		Label:    "gt:merge-request",
 		Status:   "open",
 		Priority: -1, // No priority filter
 	}
 
-	issues, err := b.List(opts)
+	issues, err := b.ListMergeRequests(opts)
 	if err != nil {
 		return fmt.Errorf("querying merge queue: %w", err)
 	}

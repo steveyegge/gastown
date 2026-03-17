@@ -375,6 +375,38 @@ func TestIfFreshSessionAgeCheck(t *testing.T) {
 	}
 }
 
+func TestPostQueueIdleRecovery_SkipsDeliveryWhenDrainEmpty(t *testing.T) {
+	// Behavioral test (gt-y2zk): when the idle recovery path fires but
+	// another process already drained the queue, we must NOT deliver to
+	// avoid duplicates. This exercises the len(drained) > 0 guard.
+	townRoot := t.TempDir()
+	session := "gt-crew-test"
+
+	// Enqueue a nudge, then drain it (simulating a racing hook).
+	if err := nudge.Enqueue(townRoot, session, nudge.QueuedNudge{
+		Sender:  "test",
+		Message: "hello",
+	}); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	drained, err := nudge.Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("first Drain: %v", err)
+	}
+	if len(drained) != 1 {
+		t.Fatalf("first Drain got %d entries, want 1", len(drained))
+	}
+
+	// Second drain should return empty — the racing hook already claimed it.
+	drained2, err := nudge.Drain(townRoot, session)
+	if err != nil {
+		t.Fatalf("second Drain: %v", err)
+	}
+	if len(drained2) != 0 {
+		t.Errorf("second Drain got %d entries, want 0 (already claimed)", len(drained2))
+	}
+}
+
 func TestValidModeMapsMatchConstants(t *testing.T) {
 	// Ensure the validation maps cover all defined mode constants.
 	modes := []string{NudgeModeImmediate, NudgeModeQueue, NudgeModeWaitIdle}
@@ -388,5 +420,88 @@ func TestValidModeMapsMatchConstants(t *testing.T) {
 		if !validNudgePriorities[p] {
 			t.Errorf("priority constant %q missing from validNudgePriorities", p)
 		}
+	}
+}
+
+func TestIdleWatcherTimeout(t *testing.T) {
+	// Verify the watcher timeout is in a reasonable range.
+	if idleWatcherTimeout < 10*time.Second {
+		t.Errorf("idleWatcherTimeout = %v, too short (min 10s)", idleWatcherTimeout)
+	}
+	if idleWatcherTimeout > 5*time.Minute {
+		t.Errorf("idleWatcherTimeout = %v, too long (max 5m)", idleWatcherTimeout)
+	}
+}
+
+func TestIdleWatcherPollInterval(t *testing.T) {
+	// Verify the poll interval is reasonable — fast enough to be responsive,
+	// slow enough to not burn CPU.
+	if idleWatcherPollInterval < 200*time.Millisecond {
+		t.Errorf("idleWatcherPollInterval = %v, too fast (min 200ms)", idleWatcherPollInterval)
+	}
+	if idleWatcherPollInterval > 5*time.Second {
+		t.Errorf("idleWatcherPollInterval = %v, too slow (max 5s)", idleWatcherPollInterval)
+	}
+}
+
+func TestIdleWatcherExitsOnEmptyQueue(t *testing.T) {
+	// watchAndDeliver should exit immediately when queue is empty
+	// (someone else drained it). We test this by calling with a
+	// temp dir that has no queue files.
+	origTimeout := idleWatcherTimeout
+	origInterval := idleWatcherPollInterval
+	defer func() {
+		idleWatcherTimeout = origTimeout
+		idleWatcherPollInterval = origInterval
+	}()
+
+	// Very short timeout so test doesn't hang
+	idleWatcherTimeout = 500 * time.Millisecond
+	idleWatcherPollInterval = 50 * time.Millisecond
+
+	tmpDir := t.TempDir()
+
+	// watchAndDeliver checks QueueLen first — with no queue files,
+	// it should exit immediately. We verify it doesn't block.
+	done := make(chan struct{})
+	go func() {
+		// Use a nil-safe Tmux — QueueLen returns 0 before IsIdle is called.
+		watchAndDeliver(nil, tmpDir, "test-session")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good — exited because queue was empty
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchAndDeliver did not exit within 2s for empty queue")
+	}
+}
+
+func TestQueueLen(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Empty queue
+	if got := nudge.QueueLen(tmpDir, "test-session"); got != 0 {
+		t.Errorf("QueueLen on empty dir = %d, want 0", got)
+	}
+
+	// Enqueue one
+	err := nudge.Enqueue(tmpDir, "test-session", nudge.QueuedNudge{
+		Sender:  "test",
+		Message: "hello",
+	})
+	if err != nil {
+		t.Fatalf("Enqueue failed: %v", err)
+	}
+
+	if got := nudge.QueueLen(tmpDir, "test-session"); got != 1 {
+		t.Errorf("QueueLen after enqueue = %d, want 1", got)
+	}
+
+	// Drain and verify empty
+	_, _ = nudge.Drain(tmpDir, "test-session")
+	if got := nudge.QueueLen(tmpDir, "test-session"); got != 0 {
+		t.Errorf("QueueLen after drain = %d, want 0", got)
 	}
 }

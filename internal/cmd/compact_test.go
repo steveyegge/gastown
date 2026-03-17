@@ -158,21 +158,71 @@ func TestIsReferenced(t *testing.T) {
 
 func TestCompactTruncate(t *testing.T) {
 	tests := []struct {
+		name   string
 		s      string
 		maxLen int
 		want   string
 	}{
-		{"short", 10, "short"},
-		{"exactly10!", 10, "exactly10!"},
-		{"this is too long", 10, "this is..."},
-		{"ab", 3, "ab"},
-		{"abcdef", 3, "abc"},
+		{"short ASCII", "short", 10, "short"},
+		{"exact length", "exactly10!", 10, "exactly10!"},
+		{"ASCII too long", "this is too long", 10, "this is..."},
+		{"short maxLen", "ab", 3, "ab"},
+		{"maxLen 3", "abcdef", 3, "abc"},
+		// Multi-byte UTF-8: emoji is 1 rune, not 4 bytes
+		{"emoji within limit", "🤝 HANDOFF", 10, "🤝 HANDOFF"},
+		{"emoji truncated", "🤝 HANDOFF: Routine cycle for witness", 15, "🤝 HANDOFF: R..."},
+		// CJK characters: each is 1 rune, 3 bytes
+		{"CJK within limit", "日本語テスト", 10, "日本語テスト"},
+		{"CJK truncated", "日本語テストデータ", 6, "日本語..."},
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.s, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			if got := compactTruncate(tc.s, tc.maxLen); got != tc.want {
 				t.Errorf("compactTruncate(%q, %d) = %q, want %q", tc.s, tc.maxLen, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtractJSONArray(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{
+			"clean JSON array",
+			`[{"id":"test"}]`,
+			`[{"id":"test"}]`,
+		},
+		{
+			"warning prefix before JSON",
+			"Warning: no route found for prefix \"gt-\"\n[{\"id\":\"test\"}]",
+			`[{"id":"test"}]`,
+		},
+		{
+			"unicode warning prefix",
+			"⚠ Warning: something with 🤝 emoji\n[{\"id\":\"test\"}]",
+			`[{"id":"test"}]`,
+		},
+		{
+			"no array in data",
+			"just some text without json",
+			"just some text without json",
+		},
+		{
+			"empty data",
+			"",
+			"",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(extractJSONArray([]byte(tc.data)))
+			if got != tc.want {
+				t.Errorf("extractJSONArray(%q) = %q, want %q", tc.data, got, tc.want)
 			}
 		})
 	}

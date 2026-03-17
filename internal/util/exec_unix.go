@@ -18,3 +18,9 @@ func SetProcessGroup(cmd *exec.Cmd) {
 		return nil
 	}
 }
+
+// SetDetachedProcessGroup configures a command to run in its own process
+// group without installing a cancellation hook.
+func SetDetachedProcessGroup(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+}

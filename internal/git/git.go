@@ -164,6 +164,7 @@ type cloneOptions struct {
 	singleBranch bool   // Pass --single-branch to git clone (only fetch default branch)
 	depth        int    // Pass --depth N to git clone (shallow clone); 0 means full history
 	branch       string // Pass --branch <name> to git clone (checkout specific branch)
+	filter       string // Pass --filter=<spec> to git clone (e.g. "blob:none", "tree:0")
 }
 
 // cloneInternal runs `git clone` in an isolated temp directory, moves the result
@@ -196,6 +197,9 @@ func (g *Git) cloneInternal(url, dest string, opts cloneOptions) error {
 	}
 	if opts.singleBranch {
 		args = append(args, "--single-branch")
+	}
+	if opts.filter != "" {
+		args = append(args, "--filter="+opts.filter)
 	}
 	if opts.depth > 0 {
 		args = append(args, "--depth", fmt.Sprintf("%d", opts.depth))
@@ -266,6 +270,27 @@ func (g *Git) CloneBranchWithReference(url, dest, branch, reference string) erro
 // This is used for the shared repo architecture where all worktrees share a single git database.
 func (g *Git) CloneBare(url, dest string) error {
 	return g.cloneInternal(url, dest, cloneOptions{bare: true, singleBranch: true, depth: 1})
+}
+
+// CloneBarePartial clones a bare repo with a partial clone filter (e.g. "blob:none", "tree:0").
+// Does not use --depth since partial clones handle size reduction via the filter.
+func (g *Git) CloneBarePartial(url, dest, filter string) error {
+	return g.cloneInternal(url, dest, cloneOptions{bare: true, singleBranch: true, filter: filter})
+}
+
+// CloneBarePartialWithReference clones a bare repo with a partial clone filter and local reference.
+func (g *Git) CloneBarePartialWithReference(url, dest, filter, reference string) error {
+	return g.cloneInternal(url, dest, cloneOptions{bare: true, singleBranch: true, filter: filter, reference: reference})
+}
+
+// CloneBranchPartialWithReference clones a specific branch with a partial clone filter and reference.
+func (g *Git) CloneBranchPartialWithReference(url, dest, branch, filter, reference string) error {
+	return g.cloneInternal(url, dest, cloneOptions{singleBranch: true, filter: filter, branch: branch, reference: reference})
+}
+
+// CloneBranchPartial clones a specific branch with a partial clone filter.
+func (g *Git) CloneBranchPartial(url, dest, branch, filter string) error {
+	return g.cloneInternal(url, dest, cloneOptions{singleBranch: true, filter: filter, branch: branch})
 }
 
 // configureHooksPath sets core.hooksPath to use the repo's .githooks directory
@@ -1012,6 +1037,13 @@ func (g *Git) ResetHard(ref string) error {
 	return err
 }
 
+// CleanForce removes untracked files and directories from the working tree.
+// Excludes .runtime/ to preserve agent lock files and session state.
+func (g *Git) CleanForce() error {
+	_, err := g.run("clean", "-fd", "--exclude=.runtime")
+	return err
+}
+
 // Rev returns the commit hash for the given ref.
 func (g *Git) Rev(ref string) (string, error) {
 	return g.run("rev-parse", ref)
@@ -1040,7 +1072,7 @@ func (g *Git) WorktreeAdd(path, branch string) error {
 	); err != nil {
 		return err
 	}
-	return InitSubmodules(path)
+	return InitSubmodules(path, g.submoduleReferencePath())
 }
 
 // WorktreeAddFromRef creates a new worktree at the given path with a new branch
@@ -1055,7 +1087,7 @@ func (g *Git) WorktreeAddFromRef(path, branch, startPoint string) error {
 	); err != nil {
 		return err
 	}
-	return InitSubmodules(path)
+	return InitSubmodules(path, g.submoduleReferencePath())
 }
 
 // WorktreeAddDetached creates a new worktree at the given path with a detached HEAD.
@@ -1067,7 +1099,7 @@ func (g *Git) WorktreeAddDetached(path, ref string) error {
 	); err != nil {
 		return err
 	}
-	return InitSubmodules(path)
+	return InitSubmodules(path, g.submoduleReferencePath())
 }
 
 // WorktreeAddExisting creates a new worktree at the given path for an existing branch.
@@ -1079,7 +1111,7 @@ func (g *Git) WorktreeAddExisting(path, branch string) error {
 	); err != nil {
 		return err
 	}
-	return InitSubmodules(path)
+	return InitSubmodules(path, g.submoduleReferencePath())
 }
 
 // WorktreeAddExistingForce creates a new worktree even if the branch is already checked out elsewhere.
@@ -1088,7 +1120,63 @@ func (g *Git) WorktreeAddExistingForce(path, branch string) error {
 	if _, err := g.run("worktree", "add", "--force", path, branch); err != nil {
 		return err
 	}
-	return InitSubmodules(path)
+	return InitSubmodules(path, g.submoduleReferencePath())
+}
+
+// submoduleReferencePath returns the mayor/rig path to use as --reference
+// for submodule init. For bare repos (.repo.git), this resolves to the
+// sibling mayor/rig directory which contains the initialized submodules.
+// Returns empty string if no suitable reference path exists or if the
+// reference repo is a shallow clone (git rejects shallow references).
+func (g *Git) submoduleReferencePath() string {
+	// For bare repos, the gitDir is <rig>/.repo.git
+	// The reference clone is at <rig>/mayor/rig/
+	if g.gitDir != "" {
+		rigDir := filepath.Dir(g.gitDir)
+		mayorRig := filepath.Join(rigDir, "mayor", "rig")
+		if isValidSubmoduleReference(mayorRig) {
+			return mayorRig
+		}
+	}
+
+	// For regular clones (workDir-based), the workDir itself could be mayor/rig
+	// but we don't want to reference ourselves. Check for a sibling .repo.git
+	// to find the rig root, then use mayor/rig.
+	if g.workDir != "" {
+		dir := g.workDir
+		for i := 0; i < 4; i++ {
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			if _, err := os.Stat(filepath.Join(parent, ".repo.git")); err == nil {
+				mayorRig := filepath.Join(parent, "mayor", "rig")
+				if mayorRig != g.workDir && isValidSubmoduleReference(mayorRig) {
+					return mayorRig
+				}
+				break
+			}
+			dir = parent
+		}
+	}
+
+	return ""
+}
+
+// isValidSubmoduleReference checks if a path is suitable as a --reference
+// for git submodule update. It must have .gitmodules and not be a shallow clone
+// (git rejects shallow repos as references).
+func isValidSubmoduleReference(repoPath string) bool {
+	if _, err := os.Stat(filepath.Join(repoPath, ".gitmodules")); err != nil {
+		return false
+	}
+	// Check if shallow — git rev-parse --is-shallow-repository
+	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--is-shallow-repository")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != "true"
 }
 
 // IsSparseCheckoutConfigured checks if sparse checkout is enabled for a given repo/worktree.
@@ -1672,16 +1760,53 @@ type SubmoduleChange struct {
 
 // InitSubmodules initializes and updates submodules if .gitmodules exists.
 // This is a no-op for repos without submodules.
-func InitSubmodules(repoPath string) error {
+//
+// If referencePath is non-empty and contains submodules, --reference is used
+// to share git objects from a local clone instead of fetching from remote.
+// This makes submodule init near-instant for large submodules (e.g. 655MB gitlabhq).
+func InitSubmodules(repoPath string, referencePath ...string) error {
 	gitmodules := filepath.Join(repoPath, ".gitmodules")
 	if _, err := os.Stat(gitmodules); os.IsNotExist(err) {
 		return nil
 	}
-	cmd := exec.Command("git", "-C", repoPath, "submodule", "update", "--init", "--recursive")
+
+	args := []string{"-C", repoPath, "submodule", "update", "--init", "--recursive"}
+
+	// Use --reference to share objects from a local clone (avoids remote fetch)
+	if len(referencePath) > 0 && referencePath[0] != "" {
+		refPath := referencePath[0]
+		refModules := filepath.Join(refPath, ".gitmodules")
+		if _, err := os.Stat(refModules); err == nil {
+			args = append(args, "--reference", refPath)
+		}
+	}
+
+	cmd := exec.Command("git", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("initializing submodules: %s", strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+// InitSparseCheckout initializes sparse checkout with cone mode and configures
+// the given paths. If paths is empty, initializes with cone mode only (checkout root files).
+func InitSparseCheckout(repoPath string, paths []string) error {
+	// Initialize sparse checkout in cone mode
+	cmd := exec.Command("git", "-C", repoPath, "sparse-checkout", "init", "--cone")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("initializing sparse checkout: %s", strings.TrimSpace(stderr.String()))
+	}
+	if len(paths) > 0 {
+		args := append([]string{"-C", repoPath, "sparse-checkout", "set"}, paths...)
+		cmd = exec.Command("git", args...)
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("setting sparse checkout paths: %s", strings.TrimSpace(stderr.String()))
+		}
 	}
 	return nil
 }

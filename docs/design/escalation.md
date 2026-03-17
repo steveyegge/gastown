@@ -49,7 +49,14 @@ Config file: `~/gt/settings/escalation.json`
   },
   "contacts": {
     "human_email": "",
-    "human_sms": ""
+    "human_sms": "",
+    "slack_webhook": "",
+    "smtp_host": "",
+    "smtp_port": "587",
+    "smtp_from": "",
+    "smtp_user": "",
+    "smtp_pass": "",
+    "sms_webhook": ""
   },
   "stale_threshold": "4h",
   "max_reescalations": 2

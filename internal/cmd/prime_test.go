@@ -16,6 +16,34 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
+// captureStdout redirects os.Stdout to a pipe, calls fn, then returns whatever
+// fn wrote. Reading happens in a goroutine so the pipe buffer cannot deadlock
+// even when fn produces more output than the OS pipe buffer (4 KB on Windows).
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+
+	// Drain the read side concurrently so writes never block.
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		io.Copy(&buf, r)
+		close(done)
+	}()
+
+	fn()
+
+	w.Close()
+	<-done
+	os.Stdout = oldStdout
+	return buf.String()
+}
+
 func writeTestRoutes(t *testing.T, townRoot string, routes []beads.Route) {
 	t.Helper()
 	beadsDir := filepath.Join(townRoot, ".beads")
@@ -105,11 +133,7 @@ func TestGetAgentBeadID_UsesRigPrefix(t *testing.T) {
 }
 
 func TestPrimeFlagCombinations(t *testing.T) {
-	// Find the gt binary - we need to test CLI flag validation
-	gtBin, err := exec.LookPath("gt")
-	if err != nil {
-		t.Skip("gt binary not found in PATH")
-	}
+	gtBin := buildGT(t)
 
 	cases := []struct {
 		name      string
@@ -190,24 +214,15 @@ func TestCheckHandoffMarkerDryRun(t *testing.T) {
 		t.Fatalf("write handoff marker: %v", err)
 	}
 
-	// Capture stdout to verify explain output
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
 	// Enable explain mode for this test
 	oldExplain := primeExplain
 	primeExplain = true
 	defer func() { primeExplain = oldExplain }()
 
-	// Call dry-run version
-	checkHandoffMarkerDryRun(workDir)
-
-	w.Close()
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	os.Stdout = oldStdout
-	output := buf.String()
+	// Capture stdout to verify explain output
+	output := captureStdout(t, func() {
+		checkHandoffMarkerDryRun(workDir)
+	})
 
 	// Verify marker still exists (not removed in dry-run)
 	if _, err := os.Stat(markerPath); os.IsNotExist(err) {
@@ -239,24 +254,15 @@ func TestCheckHandoffMarkerDryRun_NoMarker(t *testing.T) {
 		t.Fatalf("create runtime dir: %v", err)
 	}
 
-	// Capture stdout
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
 	// Enable explain mode
 	oldExplain := primeExplain
 	primeExplain = true
 	defer func() { primeExplain = oldExplain }()
 
 	// Should not panic when marker doesn't exist
-	checkHandoffMarkerDryRun(workDir)
-
-	w.Close()
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	os.Stdout = oldStdout
-	output := buf.String()
+	output := captureStdout(t, func() {
+		checkHandoffMarkerDryRun(workDir)
+	})
 
 	// Verify explain output indicates no marker
 	if !strings.Contains(output, "no handoff marker") {
@@ -449,18 +455,9 @@ func TestOutputState(t *testing.T) {
 			WorkDir: workDir,
 		}
 
-		// Capture stdout
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-
-		outputState(ctx, false)
-
-		w.Close()
-		var buf bytes.Buffer
-		io.Copy(&buf, r)
-		os.Stdout = oldStdout
-		output := buf.String()
+		output := captureStdout(t, func() {
+			outputState(ctx, false)
+		})
 
 		if !strings.Contains(output, "state: normal") {
 			t.Fatalf("expected 'state: normal' in output, got: %s", output)
@@ -479,18 +476,9 @@ func TestOutputState(t *testing.T) {
 			WorkDir: workDir,
 		}
 
-		// Capture stdout
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-
-		outputState(ctx, true)
-
-		w.Close()
-		var buf bytes.Buffer
-		io.Copy(&buf, r)
-		os.Stdout = oldStdout
-		output := buf.String()
+		output := captureStdout(t, func() {
+			outputState(ctx, true)
+		})
 
 		// Parse JSON output
 		var state SessionState
@@ -527,18 +515,9 @@ func TestOutputState(t *testing.T) {
 			WorkDir: workDir,
 		}
 
-		// Capture stdout
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-
-		outputState(ctx, true)
-
-		w.Close()
-		var buf bytes.Buffer
-		io.Copy(&buf, r)
-		os.Stdout = oldStdout
-		output := buf.String()
+		output := captureStdout(t, func() {
+			outputState(ctx, true)
+		})
 
 		// Parse JSON
 		var state SessionState
@@ -558,23 +537,14 @@ func TestOutputState(t *testing.T) {
 // TestExplain tests the explain function output.
 func TestExplain(t *testing.T) {
 	t.Run("explain_enabled_condition_true", func(t *testing.T) {
-		// Capture stdout
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-
 		// Enable explain mode
 		oldExplain := primeExplain
 		primeExplain = true
 		defer func() { primeExplain = oldExplain }()
 
-		explain(true, "This is a test explanation")
-
-		w.Close()
-		var buf bytes.Buffer
-		io.Copy(&buf, r)
-		os.Stdout = oldStdout
-		output := buf.String()
+		output := captureStdout(t, func() {
+			explain(true, "This is a test explanation")
+		})
 
 		if !strings.Contains(output, "[EXPLAIN]") {
 			t.Fatalf("expected [EXPLAIN] tag in output, got: %s", output)
@@ -585,23 +555,14 @@ func TestExplain(t *testing.T) {
 	})
 
 	t.Run("explain_enabled_condition_false", func(t *testing.T) {
-		// Capture stdout
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-
 		// Enable explain mode
 		oldExplain := primeExplain
 		primeExplain = true
 		defer func() { primeExplain = oldExplain }()
 
-		explain(false, "This should not appear")
-
-		w.Close()
-		var buf bytes.Buffer
-		io.Copy(&buf, r)
-		os.Stdout = oldStdout
-		output := buf.String()
+		output := captureStdout(t, func() {
+			explain(false, "This should not appear")
+		})
 
 		if strings.Contains(output, "[EXPLAIN]") {
 			t.Fatalf("expected no [EXPLAIN] tag when condition is false, got: %s", output)
@@ -609,23 +570,14 @@ func TestExplain(t *testing.T) {
 	})
 
 	t.Run("explain_disabled", func(t *testing.T) {
-		// Capture stdout
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-
 		// Disable explain mode
 		oldExplain := primeExplain
 		primeExplain = false
 		defer func() { primeExplain = oldExplain }()
 
-		explain(true, "This should not appear either")
-
-		w.Close()
-		var buf bytes.Buffer
-		io.Copy(&buf, r)
-		os.Stdout = oldStdout
-		output := buf.String()
+		output := captureStdout(t, func() {
+			explain(true, "This should not appear either")
+		})
 
 		if strings.Contains(output, "[EXPLAIN]") {
 			t.Fatalf("expected no [EXPLAIN] tag when explain mode disabled, got: %s", output)
@@ -635,11 +587,7 @@ func TestExplain(t *testing.T) {
 
 // TestDryRunSkipsSideEffects tests that --dry-run skips various side effects via CLI.
 func TestDryRunSkipsSideEffects(t *testing.T) {
-	// Find the gt binary
-	gtBin, err := exec.LookPath("gt")
-	if err != nil {
-		t.Skip("gt binary not found in PATH")
-	}
+	gtBin := buildGT(t)
 
 	// Create a temp workspace
 	townRoot := t.TempDir()
@@ -698,29 +646,29 @@ func TestIsCompactResume(t *testing.T) {
 	}()
 
 	cases := []struct {
-		name           string
-		hookSource     string
-		handoffReason  string
-		wantCompact    bool
+		name          string
+		hookSource    string
+		handoffReason string
+		wantCompact   bool
 	}{
 		{
-			name:       "fresh_startup",
-			hookSource: "startup",
+			name:        "fresh_startup",
+			hookSource:  "startup",
 			wantCompact: false,
 		},
 		{
-			name:       "compact_source",
-			hookSource: "compact",
+			name:        "compact_source",
+			hookSource:  "compact",
 			wantCompact: true,
 		},
 		{
-			name:       "resume_source",
-			hookSource: "resume",
+			name:        "resume_source",
+			hookSource:  "resume",
 			wantCompact: true,
 		},
 		{
-			name:       "clear_source",
-			hookSource: "clear",
+			name:        "clear_source",
+			hookSource:  "clear",
 			wantCompact: false,
 		},
 		{
@@ -757,6 +705,64 @@ func TestIsCompactResume(t *testing.T) {
 	}
 }
 
+func TestHookSessionBeaconLines(t *testing.T) {
+	origStructured := primeStructuredSessionStartOutput
+	defer func() {
+		primeStructuredSessionStartOutput = origStructured
+	}()
+
+	primeStructuredSessionStartOutput = false
+	lines := hookSessionBeaconLines("abc", "startup")
+	if len(lines) != 2 || lines[0] != "[session:abc]" || lines[1] != "[source:startup]" {
+		t.Fatalf("hookSessionBeaconLines() = %v", lines)
+	}
+
+	primeStructuredSessionStartOutput = true
+	lines = hookSessionBeaconLines("abc", "startup")
+	if len(lines) != 0 {
+		t.Fatalf("hookSessionBeaconLines() in structured mode = %v, want no beacon lines", lines)
+	}
+}
+
+func TestFormatSessionMetadataLine(t *testing.T) {
+	origStructured := primeStructuredSessionStartOutput
+	defer func() { primeStructuredSessionStartOutput = origStructured }()
+
+	primeStructuredSessionStartOutput = false
+	if got := formatSessionMetadataLine("crew/quick", "sess-1"); !strings.HasPrefix(got, "[GAS TOWN] ") {
+		t.Fatalf("formatSessionMetadataLine() = %q, want bracketed prefix", got)
+	}
+
+	primeStructuredSessionStartOutput = true
+	if got := formatSessionMetadataLine("crew/quick", "sess-1"); strings.HasPrefix(got, "[") {
+		t.Fatalf("formatSessionMetadataLine() structured = %q, should not start with '['", got)
+	}
+}
+
+func TestStructuredOutputOnlyForSessionStart(t *testing.T) {
+	origStructured := primeStructuredSessionStartOutput
+	defer func() { primeStructuredSessionStartOutput = origStructured }()
+
+	// Simulate a non-SessionStart hook event (e.g., Stop)
+	primeStructuredSessionStartOutput = false
+	input := hookInput{HookEventName: "Stop"}
+	primeStructuredSessionStartOutput = input.HookEventName == "SessionStart"
+	if primeStructuredSessionStartOutput {
+		t.Fatal("primeStructuredSessionStartOutput should be false for HookEventName=Stop")
+	}
+
+	// Verify beacon lines are emitted (not suppressed) for non-SessionStart
+	lines := hookSessionBeaconLines("abc", "startup")
+	if len(lines) != 2 {
+		t.Fatalf("hookSessionBeaconLines() for non-SessionStart = %v, want 2 beacon lines", lines)
+	}
+
+	// Verify metadata line retains brackets for non-SessionStart
+	if got := formatSessionMetadataLine("crew/quick", "sess-1"); !strings.HasPrefix(got, "[GAS TOWN]") {
+		t.Fatalf("formatSessionMetadataLine() for non-SessionStart = %q, want bracketed prefix", got)
+	}
+}
+
 // TestCheckHandoffMarkerParsesReason tests that checkHandoffMarker correctly
 // parses the reason field from the marker file (GH#1965).
 func TestCheckHandoffMarkerParsesReason(t *testing.T) {
@@ -780,14 +786,9 @@ func TestCheckHandoffMarkerParsesReason(t *testing.T) {
 		}
 
 		// Capture stdout (checkHandoffMarker outputs the warning)
-		oldStdout := os.Stdout
-		_, w, _ := os.Pipe()
-		os.Stdout = w
-
-		checkHandoffMarker(workDir)
-
-		w.Close()
-		os.Stdout = oldStdout
+		captureStdout(t, func() {
+			checkHandoffMarker(workDir)
+		})
 
 		// Verify reason was parsed
 		if primeHandoffReason != "compaction" {
@@ -815,14 +816,9 @@ func TestCheckHandoffMarkerParsesReason(t *testing.T) {
 			t.Fatalf("write marker: %v", err)
 		}
 
-		oldStdout := os.Stdout
-		_, w, _ := os.Pipe()
-		os.Stdout = w
-
-		checkHandoffMarker(workDir)
-
-		w.Close()
-		os.Stdout = oldStdout
+		captureStdout(t, func() {
+			checkHandoffMarker(workDir)
+		})
 
 		// Verify reason is empty (backward compatible)
 		if primeHandoffReason != "" {
@@ -847,21 +843,13 @@ func TestCheckHandoffMarkerParsesReason(t *testing.T) {
 // outputs the expected content without the full autonomous mode block (GH#1965).
 func TestOutputContinuationDirective(t *testing.T) {
 	t.Run("basic_bead", func(t *testing.T) {
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-
 		bead := &beads.Issue{
 			ID:    "gt-test123",
 			Title: "Test bead title",
 		}
-		outputContinuationDirective(bead, false)
-
-		w.Close()
-		var buf bytes.Buffer
-		io.Copy(&buf, r)
-		os.Stdout = oldStdout
-		output := buf.String()
+		output := captureStdout(t, func() {
+			outputContinuationDirective(bead, false)
+		})
 
 		// Should contain continuation directive
 		if !strings.Contains(output, "CONTINUE HOOKED WORK") {
@@ -881,21 +869,13 @@ func TestOutputContinuationDirective(t *testing.T) {
 	})
 
 	t.Run("bead_with_molecule", func(t *testing.T) {
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-
 		bead := &beads.Issue{
 			ID:    "gt-mol456",
 			Title: "Molecule bead",
 		}
-		outputContinuationDirective(bead, true)
-
-		w.Close()
-		var buf bytes.Buffer
-		io.Copy(&buf, r)
-		os.Stdout = oldStdout
-		output := buf.String()
+		output := captureStdout(t, func() {
+			outputContinuationDirective(bead, true)
+		})
 
 		if !strings.Contains(output, "bd mol current") {
 			t.Fatalf("expected molecule hint in output, got: %s", output)
@@ -914,17 +894,10 @@ func TestCheckSlungWork_StandaloneFormulaUsesWorkflowOutput(t *testing.T) {
 		}, "\n"),
 	}
 
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	found := checkSlungWork(ctx, hookedBead)
-
-	w.Close()
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	os.Stdout = oldStdout
-	output := buf.String()
+	var found bool
+	output := captureStdout(t, func() {
+		found = checkSlungWork(ctx, hookedBead)
+	})
 
 	if !found {
 		t.Fatalf("checkSlungWork() = false, want true")
@@ -937,5 +910,99 @@ func TestCheckSlungWork_StandaloneFormulaUsesWorkflowOutput(t *testing.T) {
 	}
 	if !strings.Contains(output, "--var version=1.2.3") {
 		t.Fatalf("expected standalone formula context to be shown, got:\n%s", output)
+	}
+}
+
+// TestCompactResumeReminder_PolecatGetsGtDone verifies that polecats get a
+// gt done reminder after context compaction. This is the regression test for
+// the polecats-no-gt-done bug: after long work sessions, compaction drops the
+// formula checklist and the agent forgets to call gt done.
+func TestCompactResumeReminder_PolecatGetsGtDone(t *testing.T) {
+	ctx := RoleContext{Role: RolePolecat}
+	// Simulate compact source
+	primeHookSource = "compact"
+	defer func() { primeHookSource = "" }()
+
+	output := captureStdout(t, func() {
+		runPrimeCompactResume(ctx)
+	})
+
+	if !strings.Contains(output, "gt done") {
+		t.Fatalf("compact/resume for polecat must remind about gt done, got:\n%s", output)
+	}
+}
+
+// TestCompactResumeReminder_NonPolecatNoGtDone verifies that non-polecat roles
+// do NOT get the gt done reminder (it's polecat-specific).
+func TestCompactResumeReminder_NonPolecatNoGtDone(t *testing.T) {
+	ctx := RoleContext{Role: RoleCrew}
+	primeHookSource = "compact"
+	defer func() { primeHookSource = "" }()
+
+	output := captureStdout(t, func() {
+		runPrimeCompactResume(ctx)
+	})
+
+	if strings.Contains(output, "gt done") {
+		t.Fatalf("compact/resume for non-polecat should NOT mention gt done, got:\n%s", output)
+	}
+}
+
+// TestOutputRalphLoopDirective_NoSlashCommand verifies that ralph mode emits
+// inline iterative work instructions instead of referencing a nonexistent
+// /ralph-loop slash command. This is the regression test for the ralph-loop
+// dies-on-spawn bug: polecats died immediately because Claude tried to run
+// /ralph-loop which didn't exist as a provisioned slash command.
+func TestOutputRalphLoopDirective_NoSlashCommand(t *testing.T) {
+	attachment := &beads.AttachmentFields{
+		Mode:         "ralph",
+		AttachedArgs: "Run story audit, fix worst gap, commit, loop",
+	}
+	output := captureStdout(t, func() {
+		outputRalphLoopDirective(RoleContext{}, attachment)
+	})
+
+	// Must NOT reference /ralph-loop (nonexistent slash command)
+	if strings.Contains(output, "/ralph-loop") {
+		t.Fatalf("ralph directive must NOT reference /ralph-loop (slash command doesn't exist), got:\n%s", output)
+	}
+
+	// Must contain iterative workflow instructions
+	if !strings.Contains(output, "RALPH LOOP MODE") {
+		t.Fatalf("expected 'RALPH LOOP MODE' header, got:\n%s", output)
+	}
+	if !strings.Contains(output, "gt done") {
+		t.Fatalf("expected 'gt done' instruction for completion, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Commit frequently") {
+		t.Fatalf("expected commit guidance, got:\n%s", output)
+	}
+
+	// Must include the context/args
+	if !strings.Contains(output, "story audit") {
+		t.Fatalf("expected attached args in output, got:\n%s", output)
+	}
+}
+
+// TestOutputRalphLoopDirective_WithFormula verifies that ralph mode shows
+// formula steps inline (same as normal mode) when a formula is attached.
+func TestOutputRalphLoopDirective_WithFormula(t *testing.T) {
+	attachment := &beads.AttachmentFields{
+		Mode:            "ralph",
+		AttachedFormula: "mol-polecat-work",
+		FormulaVars:     "base_branch=main",
+	}
+	output := captureStdout(t, func() {
+		outputRalphLoopDirective(RoleContext{}, attachment)
+	})
+
+	// Should NOT reference /ralph-loop
+	if strings.Contains(output, "/ralph-loop") {
+		t.Fatalf("ralph directive must NOT reference /ralph-loop, got:\n%s", output)
+	}
+
+	// Should show formula steps (from mol-polecat-work)
+	if !strings.Contains(output, "Formula Checklist") {
+		t.Fatalf("expected formula checklist in ralph output, got:\n%s", output)
 	}
 }

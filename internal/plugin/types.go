@@ -109,8 +109,28 @@ type Tracking struct {
 	Digest bool `json:"digest" toml:"digest"`
 }
 
+// ExecutionType controls how a plugin is executed.
+type ExecutionType string
+
+const (
+	// ExecTypeAgent is the default: a dog worker interprets the markdown instructions.
+	ExecTypeAgent ExecutionType = "agent"
+
+	// ExecTypeScript means a run.sh script is executed directly.
+	ExecTypeScript ExecutionType = "script"
+
+	// ExecTypeExecWrapper wraps session startup commands.
+	// Instead of being dispatched to a dog, the wrapper tokens are inserted
+	// between `exec env VAR=val ...` and the agent binary in the startup command.
+	// Example: ["exitbox", "run", "--profile=gastown-polecat", "--"]
+	ExecTypeExecWrapper ExecutionType = "exec-wrapper"
+)
+
 // Execution defines plugin execution settings.
 type Execution struct {
+	// Type is the execution type: "agent" (default), "script", or "exec-wrapper".
+	Type ExecutionType `json:"type,omitempty" toml:"type,omitempty"`
+
 	// Timeout is the maximum execution time (e.g., "5m").
 	Timeout string `json:"timeout,omitempty" toml:"timeout,omitempty"`
 
@@ -119,6 +139,12 @@ type Execution struct {
 
 	// Severity is the escalation severity on failure.
 	Severity string `json:"severity,omitempty" toml:"severity,omitempty"`
+
+	// Wrapper is the command tokens for exec-wrapper plugins.
+	// These are inserted between the env vars and the agent command at session startup.
+	// Example: ["exitbox", "run", "--profile=gastown-polecat", "--"]
+	// Only used when Type is "exec-wrapper".
+	Wrapper []string `json:"wrapper,omitempty" toml:"wrapper,omitempty"`
 }
 
 // PluginFrontmatter represents the TOML frontmatter in plugin.md files.
@@ -131,14 +157,29 @@ type PluginFrontmatter struct {
 	Execution   *Execution `toml:"execution,omitempty"`
 }
 
+// IsExecWrapper returns true if this plugin is an exec-wrapper type.
+func (p *Plugin) IsExecWrapper() bool {
+	return p.Execution != nil && p.Execution.Type == ExecTypeExecWrapper
+}
+
+// ExecWrapperArgs returns the wrapper command tokens for an exec-wrapper plugin.
+// Returns nil if the plugin is not an exec-wrapper or has no wrapper configured.
+func (p *Plugin) ExecWrapperArgs() []string {
+	if !p.IsExecWrapper() || len(p.Execution.Wrapper) == 0 {
+		return nil
+	}
+	return p.Execution.Wrapper
+}
+
 // PluginSummary provides a concise overview of a plugin.
 type PluginSummary struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Location    Location `json:"location"`
-	RigName     string   `json:"rig_name,omitempty"`
-	GateType    GateType `json:"gate_type,omitempty"`
-	Path        string   `json:"path"`
+	Name          string        `json:"name"`
+	Description   string        `json:"description"`
+	Location      Location      `json:"location"`
+	RigName       string        `json:"rig_name,omitempty"`
+	GateType      GateType      `json:"gate_type,omitempty"`
+	ExecutionType ExecutionType `json:"execution_type,omitempty"`
+	Path          string        `json:"path"`
 }
 
 // Summary returns a PluginSummary for this plugin.
@@ -150,13 +191,19 @@ func (p *Plugin) Summary() PluginSummary {
 		gateType = GateManual
 	}
 
+	var execType ExecutionType
+	if p.Execution != nil && p.Execution.Type != "" {
+		execType = p.Execution.Type
+	}
+
 	return PluginSummary{
-		Name:        p.Name,
-		Description: p.Description,
-		Location:    p.Location,
-		RigName:     p.RigName,
-		GateType:    gateType,
-		Path:        p.Path,
+		Name:          p.Name,
+		Description:   p.Description,
+		Location:      p.Location,
+		RigName:       p.RigName,
+		GateType:      gateType,
+		ExecutionType: execType,
+		Path:          p.Path,
 	}
 }
 

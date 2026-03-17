@@ -144,6 +144,7 @@ func TestParseMessageType(t *testing.T) {
 		expected MessageType
 	}{
 		{"task", TypeTask},
+		{"escalation", TypeEscalation},
 		{"scavenge", TypeScavenge},
 		{"notification", TypeNotification},
 		{"reply", TypeReply},
@@ -282,6 +283,41 @@ func TestBeadsMessageToMessageWithReplyTo(t *testing.T) {
 	}
 }
 
+func TestBeadsMessageToMessageWithEscalationTypeAndLabels(t *testing.T) {
+	bm := BeadsMessage{
+		ID:          "hq-esc",
+		Title:       "Escalation subject",
+		Description: "Escalation body",
+		Status:      "open",
+		Assignee:    "mayor",
+		Labels: []string{
+			"from:deacon/",
+			"thread:t-esc",
+			"msg-type:escalation",
+			"gt:escalation",
+			"severity:critical",
+			"escalation:hq-abc123",
+		},
+		CreatedAt: time.Now(),
+		Priority:  0,
+	}
+
+	msg := bm.ToMessage()
+
+	if msg.Type != TypeEscalation {
+		t.Errorf("Type = %q, want TypeEscalation", msg.Type)
+	}
+	if !bm.HasLabel("gt:escalation") {
+		t.Error("expected gt:escalation label to be preserved")
+	}
+	if !bm.HasLabel("severity:critical") {
+		t.Error("expected severity:critical label to be preserved")
+	}
+	if !bm.HasLabel("escalation:hq-abc123") {
+		t.Error("expected escalation linkage label to be preserved")
+	}
+}
+
 func TestBeadsMessageToMessagePriorities(t *testing.T) {
 	tests := []struct {
 		priority int
@@ -313,6 +349,7 @@ func TestBeadsMessageToMessageTypes(t *testing.T) {
 		expected MessageType
 	}{
 		{"task", TypeTask},
+		{"escalation", TypeEscalation},
 		{"scavenge", TypeScavenge},
 		{"reply", TypeReply},
 		{"notification", TypeNotification},

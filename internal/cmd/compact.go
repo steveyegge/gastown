@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -304,6 +306,12 @@ func listWisps(bd *beads.Beads) ([]*compactIssue, error) {
 		return nil, err
 	}
 
+	// Strip any non-JSON prefix (warnings, notices) that bd may emit to
+	// stdout before the JSON array. Without this, unicode characters like
+	// emoji in wisp subjects can trigger "invalid character looking for
+	// beginning of value" errors when a warning line contains non-ASCII.
+	out = extractJSONArray(out)
+
 	var allIssues []*compactIssue
 	if err := json.Unmarshal(out, &allIssues); err != nil {
 		return nil, fmt.Errorf("parsing issue list: %w", err)
@@ -318,6 +326,18 @@ func listWisps(bd *beads.Beads) ([]*compactIssue, error) {
 	}
 
 	return wisps, nil
+}
+
+// extractJSONArray finds the first '[' byte in data and returns from that
+// point onward. This strips any non-JSON prefix (warning messages, notices)
+// that a subprocess may emit to stdout before the actual JSON payload.
+// Returns the original data unchanged if no '[' is found.
+func extractJSONArray(data []byte) []byte {
+	idx := bytes.IndexByte(data, '[')
+	if idx < 0 {
+		return data
+	}
+	return data[idx:]
 }
 
 // promoteWisp makes a wisp permanent by setting --persistent and adding a comment.
@@ -414,15 +434,17 @@ func printCompactSummary(result *compactResult) {
 	}
 }
 
-// compactTruncate shortens a string to maxLen, adding "..." if truncated.
+// compactTruncate shortens a string to maxLen runes, adding "..." if truncated.
+// Uses rune count instead of byte length so multi-byte UTF-8 characters
+// (emoji, CJK, etc.) are never split mid-sequence.
 func compactTruncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if utf8.RuneCountInString(s) <= maxLen {
 		return s
 	}
 	if maxLen <= 3 {
-		return s[:maxLen]
+		return string([]rune(s)[:maxLen])
 	}
-	return s[:maxLen-3] + "..."
+	return string([]rune(s)[:maxLen-3]) + "..."
 }
 
 // hasComments checks the comment_count on the compactIssue.

@@ -9,6 +9,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -236,6 +237,20 @@ func runUnslingWith(cmd *cobra.Command, args []string, dryRun, force bool) error
 
 	// Log unhook event
 	_ = events.LogFeed(events.TypeUnhook, agentID, events.UnhookPayload(hookedBeadID))
+
+	// Emit a propulsion signal if the target is the mayor.
+	// This allows the ACP propeller to react to hook changes event-driven.
+	if agentID == "mayor/" {
+		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+			session := "hq-mayor"
+			message := fmt.Sprintf("Hook updated: cleared bead %s", hookedBeadID)
+			_ = nudge.Enqueue(townRoot, session, nudge.QueuedNudge{
+				Sender:   "unsling",
+				Message:  message,
+				Priority: nudge.PriorityNormal,
+			})
+		}
+	}
 
 	fmt.Printf("%s Work removed from hook\n", style.Bold.Render("✓"))
 	fmt.Printf("  Agent %s hook cleared (was: %s)\n", agentID, hookedBeadID)

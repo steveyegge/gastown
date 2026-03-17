@@ -103,7 +103,7 @@ func runArtisanList(cmd *cobra.Command, args []string) error {
 
 // getAllRigNames returns all rig names from the town.
 func getAllRigNames() ([]string, error) {
-	rigs, _, err := getAllRigs()
+	rigs, err := getAllRigs()
 	if err != nil {
 		return nil, err
 	}

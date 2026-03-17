@@ -541,6 +541,41 @@ func TestEngineer_DeleteMergedBranchesConfig(t *testing.T) {
 	}
 }
 
+func TestPolecatBranchAlwaysDeletedAfterMerge(t *testing.T) {
+	// Polecat branches should be cleaned up regardless of DeleteMergedBranches config.
+	// Non-polecat branches should only be deleted locally, never from the remote,
+	// because the remote may be a contributor's fork with open upstream PRs. (GH#2669)
+	tests := []struct {
+		name                 string
+		branch               string
+		deleteMergedBranches bool
+		wantLocalDelete      bool
+		wantRemoteDelete     bool
+	}{
+		{"polecat branch with config true", "polecat/nux/gt-abc", true, true, true},
+		{"polecat branch with config false", "polecat/nux/gt-abc", false, true, true},
+		{"non-polecat branch with config true", "feature/my-thing", true, true, false},
+		{"non-polecat branch with config false", "feature/my-thing", false, false, false},
+		{"empty branch", "", false, false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isPolecat := strings.HasPrefix(tt.branch, "polecat/")
+			shouldDeleteLocal := tt.branch != "" && (tt.deleteMergedBranches || isPolecat)
+			shouldDeleteRemote := tt.branch != "" && isPolecat
+			if shouldDeleteLocal != tt.wantLocalDelete {
+				t.Errorf("branch=%q deleteMerged=%v: got localDelete=%v, want %v",
+					tt.branch, tt.deleteMergedBranches, shouldDeleteLocal, tt.wantLocalDelete)
+			}
+			if shouldDeleteRemote != tt.wantRemoteDelete {
+				t.Errorf("branch=%q deleteMerged=%v: got remoteDelete=%v, want %v",
+					tt.branch, tt.deleteMergedBranches, shouldDeleteRemote, tt.wantRemoteDelete)
+			}
+		})
+	}
+}
+
 func TestPostMergeConvoyCheck_NoTownBeads(t *testing.T) {
 	// postMergeConvoyCheck should silently return when town-level beads doesn't exist
 	tmpDir, err := os.MkdirTemp("", "engineer-convoy-test-*")

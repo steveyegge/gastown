@@ -570,9 +570,38 @@ func (c *RefineryExistsCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	// Note: Cannot auto-fix clone without knowing the repo URL
+	// Auto-repair refinery worktree from shared bare repo (.repo.git).
+	// The refinery/rig is a worktree (not a full clone), so we don't need
+	// the repo URL -- we just create a worktree from the local bare repo.
 	if c.needsClone {
-		return fmt.Errorf("cannot auto-create refinery/rig/ clone (requires repo URL)")
+		bareRepoPath := filepath.Join(c.rigPath, ".repo.git")
+		if _, err := os.Stat(bareRepoPath); os.IsNotExist(err) {
+			return fmt.Errorf("cannot auto-create refinery/rig/ worktree: bare repo not found at %s", bareRepoPath)
+		}
+
+		bareGit := git.NewGitWithDir(bareRepoPath, "")
+		_ = bareGit.WorktreePrune()
+
+		rigClone := filepath.Join(refineryDir, "rig")
+		// Detect default branch from rig config
+		rigCfgPath := filepath.Join(c.rigPath, "settings", "rig.json")
+		defaultBranch := "main"
+		if data, err := os.ReadFile(rigCfgPath); err == nil {
+			var cfg struct {
+				DefaultBranch string `json:"default_branch"`
+			}
+			if json.Unmarshal(data, &cfg) == nil && cfg.DefaultBranch != "" {
+				defaultBranch = cfg.DefaultBranch
+			}
+		}
+
+		if err := bareGit.WorktreeAddExisting(rigClone, defaultBranch); err != nil {
+			return fmt.Errorf("creating refinery worktree from bare repo: %w", err)
+		}
+
+		// Configure hooks path
+		refineryGit := git.NewGit(rigClone)
+		_ = refineryGit.ConfigureHooksPath()
 	}
 
 	return nil

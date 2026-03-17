@@ -312,6 +312,10 @@ func startCoreAgents(townRoot string, agentOverride string, mu *sync.Mutex) erro
 				mu.Lock()
 				fmt.Printf("  %s Mayor already running\n", style.Dim.Render("○"))
 				mu.Unlock()
+			} else if errors.Is(err, mayor.ErrACPActive) {
+				mu.Lock()
+				fmt.Printf("  %s Mayor already running (ACP mode)\n", style.Dim.Render("○"))
+				mu.Unlock()
 			} else {
 				errMu.Lock()
 				if firstErr == nil {
@@ -985,11 +989,14 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// If rig still not specified, try to infer from cwd
+	// If rig still not specified, try to infer from cwd, then by crew name
 	if rigName == "" {
 		rigName, err = inferRigFromCwd(townRoot)
 		if err != nil {
-			return fmt.Errorf("could not determine rig (use --rig flag or rig/name format): %w", err)
+			rigName, err = inferRigFromCrewName(townRoot, name)
+			if err != nil {
+				return fmt.Errorf("could not determine rig (use --rig flag or rig/name format): %w", err)
+			}
 		}
 	}
 

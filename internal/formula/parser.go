@@ -3,7 +3,9 @@ package formula
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -41,7 +43,9 @@ func (f *Formula) inferType() {
 	}
 
 	// Infer from content
-	if len(f.Steps) > 0 {
+	if len(f.Extends) > 0 {
+		f.Type = TypeWorkflow // Composition formulas inherit steps after Resolve()
+	} else if len(f.Steps) > 0 {
 		f.Type = TypeWorkflow
 	} else if len(f.Legs) > 0 {
 		f.Type = TypeConvoy
@@ -117,7 +121,8 @@ func (f *Formula) validateConvoy() error {
 }
 
 func (f *Formula) validateWorkflow() error {
-	if len(f.Steps) == 0 {
+	// Allow empty steps when extends is set — steps come from parent after Resolve().
+	if len(f.Steps) == 0 && len(f.Extends) == 0 {
 		return fmt.Errorf("workflow formula requires at least one step")
 	}
 
@@ -491,4 +496,207 @@ func (f *Formula) GetAspect(id string) *Aspect {
 		}
 	}
 	return nil
+}
+
+// Resolve processes the extends and compose rules of a formula, returning a new
+// formula with all inherited steps merged and expansion rules applied.
+//
+// Parent formulas named in extends are loaded from the embedded formula FS first,
+// then from any additional searchPaths (in order). searchPaths may be nil.
+//
+// Cycles in extends chains are detected and reported as errors.
+func Resolve(formula *Formula, searchPaths []string) (*Formula, error) {
+	return resolveChain(formula, searchPaths, nil)
+}
+
+// resolveChain is the recursive workhorse for Resolve; chain tracks the current
+// extends chain for cycle detection.
+func resolveChain(formula *Formula, searchPaths []string, chain []string) (*Formula, error) {
+	// Cycle detection
+	for _, name := range chain {
+		if name == formula.Name {
+			return nil, fmt.Errorf("circular extends detected: %s", strings.Join(append(chain, formula.Name), " -> "))
+		}
+	}
+
+	// No inheritance or composition — validate and return as-is.
+	if len(formula.Extends) == 0 && formula.Compose == nil {
+		if err := formula.Validate(); err != nil {
+			return nil, err
+		}
+		return formula, nil
+	}
+
+	chain = append(chain, formula.Name)
+
+	merged := &Formula{
+		Name:        formula.Name,
+		Description: formula.Description,
+		Type:        formula.Type,
+		Version:     formula.Version,
+		Pour:        formula.Pour,
+		Agent:       formula.Agent,
+		Compose:     formula.Compose,
+		Vars:        make(map[string]Var),
+	}
+	if merged.Type == "" {
+		merged.Type = TypeWorkflow
+	}
+
+	// Merge each parent in order.
+	for _, parentName := range formula.Extends {
+		parent, err := loadFormulaByName(parentName, searchPaths)
+		if err != nil {
+			return nil, fmt.Errorf("extends %q: %w", parentName, err)
+		}
+		parent, err = resolveChain(parent, searchPaths, chain)
+		if err != nil {
+			return nil, fmt.Errorf("resolve parent %q: %w", parentName, err)
+		}
+
+		// Inherit vars (child overrides take precedence later).
+		for name, v := range parent.Vars {
+			if _, exists := merged.Vars[name]; !exists {
+				merged.Vars[name] = v
+			}
+		}
+		// Inherit steps (parent steps come first).
+		merged.Steps = append(merged.Steps, parent.Steps...)
+
+		// Use parent description as fallback.
+		if merged.Description == "" {
+			merged.Description = parent.Description
+		}
+	}
+
+	// Apply child vars (override any inherited).
+	for name, v := range formula.Vars {
+		merged.Vars[name] = v
+	}
+	// Append child's own steps after parent steps.
+	merged.Steps = append(merged.Steps, formula.Steps...)
+	// Child description takes priority.
+	if formula.Description != "" {
+		merged.Description = formula.Description
+	}
+
+	// Apply compose expand rules.
+	if formula.Compose != nil {
+		for _, rule := range formula.Compose.Expand {
+			expanded, err := applyExpandRule(merged.Steps, rule, searchPaths)
+			if err != nil {
+				return nil, fmt.Errorf("compose expand %q with %q: %w", rule.Target, rule.With, err)
+			}
+			merged.Steps = expanded
+		}
+		// compose.aspects is recorded but not yet acted upon (future work).
+	}
+
+	if err := merged.Validate(); err != nil {
+		return nil, err
+	}
+	return merged, nil
+}
+
+// loadFormulaByName loads a formula by name: embedded FS first, then searchPaths.
+func loadFormulaByName(name string, searchPaths []string) (*Formula, error) {
+	// Try the embedded formula filesystem first.
+	data, err := GetEmbeddedFormulaContent(name)
+	if err == nil {
+		return Parse(data)
+	}
+
+	// Fall back to on-disk search paths.
+	for _, dir := range searchPaths {
+		path := filepath.Join(dir, name+".formula.toml")
+		if data, err2 := os.ReadFile(path); err2 == nil { //nolint:gosec // G304: path from controlled search paths
+			return Parse(data)
+		}
+	}
+
+	return nil, fmt.Errorf("formula %q not found in embedded FS or search paths", name)
+}
+
+// applyExpandRule replaces a target step in steps with the template steps from an
+// expansion formula.  Steps that depended on the target are updated to depend on
+// the last expanded step instead.
+func applyExpandRule(steps []Step, rule *ExpandRule, searchPaths []string) ([]Step, error) {
+	// Load the expansion formula.
+	expansion, err := loadFormulaByName(rule.With, searchPaths)
+	if err != nil {
+		return nil, fmt.Errorf("expansion formula %q: %w", rule.With, err)
+	}
+	if expansion.Type != TypeExpansion {
+		return nil, fmt.Errorf("formula %q is type %q, want %q", rule.With, expansion.Type, TypeExpansion)
+	}
+	if len(expansion.Template) == 0 {
+		return nil, fmt.Errorf("expansion formula %q has no template steps", rule.With)
+	}
+
+	// Locate the target step.
+	targetIdx := -1
+	var targetStep Step
+	for i, s := range steps {
+		if s.ID == rule.Target {
+			targetIdx = i
+			targetStep = s
+			break
+		}
+	}
+	if targetIdx == -1 {
+		return nil, fmt.Errorf("target step %q not found in formula steps", rule.Target)
+	}
+
+	// Build expanded steps from the expansion template.
+	expanded := make([]Step, 0, len(expansion.Template))
+	for _, tmpl := range expansion.Template {
+		newStep := Step{
+			ID:          expandPlaceholders(tmpl.ID, rule.Target, targetStep),
+			Title:       expandPlaceholders(tmpl.Title, rule.Target, targetStep),
+			Description: expandPlaceholders(tmpl.Description, rule.Target, targetStep),
+		}
+		if len(tmpl.Needs) == 0 {
+			// First expanded step inherits the target's own needs.
+			newStep.Needs = append([]string(nil), targetStep.Needs...)
+		} else {
+			newStep.Needs = make([]string, len(tmpl.Needs))
+			for i, need := range tmpl.Needs {
+				newStep.Needs[i] = expandPlaceholders(need, rule.Target, targetStep)
+			}
+		}
+		expanded = append(expanded, newStep)
+	}
+
+	lastExpanded := expanded[len(expanded)-1].ID
+
+	// Rebuild step list: replace target with expanded steps; update dependents.
+	result := make([]Step, 0, len(steps)-1+len(expanded))
+	for i, step := range steps {
+		if i == targetIdx {
+			result = append(result, expanded...)
+			continue
+		}
+		// Rewrite any needs that referenced the replaced target.
+		updated := false
+		for j, need := range step.Needs {
+			if need == rule.Target {
+				if !updated {
+					step.Needs = append([]string(nil), step.Needs...)
+					updated = true
+				}
+				step.Needs[j] = lastExpanded
+			}
+		}
+		result = append(result, step)
+	}
+	return result, nil
+}
+
+// expandPlaceholders replaces {target} and {target.title}/{target.description}
+// in expansion template strings with the actual target step values.
+func expandPlaceholders(s, targetID string, targetStep Step) string {
+	s = strings.ReplaceAll(s, "{target.title}", targetStep.Title)
+	s = strings.ReplaceAll(s, "{target.description}", targetStep.Description)
+	s = strings.ReplaceAll(s, "{target}", targetID)
+	return s
 }

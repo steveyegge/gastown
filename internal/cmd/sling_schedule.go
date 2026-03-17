@@ -173,7 +173,7 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 	if !opts.NoConvoy {
 		existingConvoy := isTrackedByConvoy(beadID)
 		if existingConvoy == "" {
-			convoyID, err := createAutoConvoy(beadID, info.Title, opts.Owned, opts.Merge)
+			convoyID, err := createAutoConvoy(beadID, info.Title, opts.Owned, opts.Merge, opts.BaseBranch)
 			if err != nil {
 				fmt.Printf("%s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
 			} else {
@@ -198,7 +198,7 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 
 // runBatchSchedule schedules multiple beads for deferred dispatch.
 // Returns error when all schedule attempts fail.
-func runBatchSchedule(beadIDs []string, rigName string) error {
+func runBatchSchedule(beadIDs []string, rigName, townRoot string) error {
 	if slingDryRun {
 		fmt.Printf("%s Would schedule %d beads to rig '%s':\n", style.Bold.Render("📋"), len(beadIDs), rigName)
 		for _, beadID := range beadIDs {
@@ -211,7 +211,7 @@ func runBatchSchedule(beadIDs []string, rigName string) error {
 
 	successCount := 0
 	for _, beadID := range beadIDs {
-		formula := resolveFormula(slingFormula, slingHookRawBead)
+		formula := resolveFormula(slingFormula, slingHookRawBead, townRoot, rigName)
 		err := scheduleBead(beadID, rigName, ScheduleOptions{
 			Formula:     formula,
 			Args:        slingArgs,
@@ -251,13 +251,22 @@ func resolveRigForBead(townRoot, beadID string) string {
 	return beads.GetRigNameForPrefix(townRoot, prefix)
 }
 
-// resolveFormula determines the formula name from user flags.
-func resolveFormula(explicit string, hookRawBead bool) string {
+// resolveFormula determines the formula name from user flags and rig settings.
+// It checks the rig's workflow.default_formula setting before falling back to
+// the hardcoded "mol-polecat-work" default.
+func resolveFormula(explicit string, hookRawBead bool, townRoot, rigName string) string {
 	if hookRawBead {
 		return ""
 	}
 	if explicit != "" {
 		return explicit
+	}
+	// Check rig's default_formula setting (issue gt-boc).
+	if townRoot != "" && rigName != "" {
+		rigPath := filepath.Join(townRoot, rigName)
+		if df := config.GetDefaultFormula(rigPath); df != "" {
+			return df
+		}
 	}
 	return "mol-polecat-work"
 }

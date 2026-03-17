@@ -296,13 +296,13 @@ func (c *DoltServerReachableCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // findServerModeRigsByAddr returns rig names grouped by their configured server address.
-// Rigs without explicit host/port fall back to the default local server (127.0.0.1:3307).
+// Rigs without explicit host/port fall back to the port from config.yaml or daemon.json.
 func (c *DoltServerReachableCheck) findServerModeRigsByAddr(townRoot string) map[string][]string {
 	result := make(map[string][]string)
 
 	// Check town-level beads (hq)
 	townBeadsDir := filepath.Join(townRoot, ".beads")
-	if addr, ok := c.getServerAddr(townBeadsDir); ok {
+	if addr, ok := c.getServerAddr(townBeadsDir, townRoot); ok {
 		result[addr] = append(result[addr], "hq")
 	}
 
@@ -315,7 +315,7 @@ func (c *DoltServerReachableCheck) findServerModeRigsByAddr(townRoot string) map
 		if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
 			beadsDir = filepath.Join(townRoot, rigName, ".beads")
 		}
-		if addr, ok := c.getServerAddr(beadsDir); ok {
+		if addr, ok := c.getServerAddr(beadsDir, townRoot); ok {
 			result[addr] = append(result[addr], rigName)
 		}
 	}
@@ -325,7 +325,9 @@ func (c *DoltServerReachableCheck) findServerModeRigsByAddr(townRoot string) map
 
 // getServerAddr reads metadata.json and returns the configured server address if dolt_mode is "server".
 // Returns the address string (host:port) and true if server mode is configured.
-func (c *DoltServerReachableCheck) getServerAddr(beadsDir string) (string, bool) {
+// townRoot is used to read the effective port from config.yaml when metadata.json
+// doesn't specify one, avoiding a hardcoded fallback to 3307.
+func (c *DoltServerReachableCheck) getServerAddr(beadsDir string, townRoot string) (string, bool) {
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
@@ -347,6 +349,13 @@ func (c *DoltServerReachableCheck) getServerAddr(beadsDir string) (string, bool)
 	port := metadata.DoltServerPort
 	if host == "" {
 		host = "127.0.0.1"
+	}
+	if port == 0 {
+		// Use the same port resolution as Start/Stop/Status: config.yaml takes
+		// precedence over GT_DOLT_PORT env var, which takes precedence over
+		// daemon.json, which falls back to DefaultPort (3307). This ensures
+		// the doctor probes the same port that the server actually uses.
+		port = doltserver.DefaultConfig(townRoot).Port
 	}
 	if port == 0 {
 		port = doltserver.DefaultPort

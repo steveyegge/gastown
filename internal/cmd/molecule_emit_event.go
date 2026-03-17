@@ -4,18 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
-	"sync/atomic"
-	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/workspace"
+	"github.com/steveyegge/gastown/internal/channelevents"
 )
-
-// emitEventSeq is an atomic counter to ensure unique event filenames even when
-// time.Now().UnixNano() has low resolution (e.g., Windows ~100ns granularity).
-var emitEventSeq atomic.Uint64
 
 var (
 	emitEventChannel string
@@ -73,7 +65,7 @@ func init() {
 }
 
 func runMoleculeEmitEvent(cmd *cobra.Command, args []string) error {
-	path, err := EmitEvent(emitEventChannel, emitEventType, emitEventPayload)
+	path, err := channelevents.Emit(emitEventChannel, emitEventType, emitEventPayload)
 	if err != nil {
 		return err
 	}
@@ -90,82 +82,4 @@ func runMoleculeEmitEvent(cmd *cobra.Command, args []string) error {
 
 	fmt.Println(path)
 	return nil
-}
-
-// EmitEvent creates an event file in the channel directory.
-// This is the programmatic API used by both the CLI command and internal callers
-// (e.g., nudgeRefinery). Returns the path to the created event file.
-func EmitEvent(channel, eventType string, payloadPairs []string) (string, error) {
-	// Validate channel name before any filesystem operations (defense-in-depth)
-	if !validChannelName.MatchString(channel) {
-		return "", fmt.Errorf("invalid channel name %q: must match [a-zA-Z0-9_-]", channel)
-	}
-
-	// Resolve event directory
-	townRoot, err := workspace.FindFromCwd()
-	if err != nil || townRoot == "" {
-		home, _ := os.UserHomeDir()
-		townRoot = filepath.Join(home, "gt")
-	}
-	eventDir := filepath.Join(townRoot, "events", channel)
-	if err := os.MkdirAll(eventDir, 0755); err != nil {
-		return "", fmt.Errorf("creating event directory: %w", err)
-	}
-
-	return emitEventImpl(eventDir, channel, eventType, payloadPairs)
-}
-
-// EmitEventToTown creates an event file using an explicit town root.
-// Used by internal callers that already know the town root (e.g., nudgeRefinery).
-func EmitEventToTown(townRoot, channel, eventType string, payloadPairs []string) (string, error) {
-	// Validate channel name before any filesystem operations (defense-in-depth)
-	if !validChannelName.MatchString(channel) {
-		return "", fmt.Errorf("invalid channel name %q: must match [a-zA-Z0-9_-]", channel)
-	}
-
-	eventDir := filepath.Join(townRoot, "events", channel)
-	if err := os.MkdirAll(eventDir, 0755); err != nil {
-		return "", fmt.Errorf("creating event directory: %w", err)
-	}
-	return emitEventImpl(eventDir, channel, eventType, payloadPairs)
-}
-
-// emitEventImpl writes an event file to the given directory.
-func emitEventImpl(eventDir, channel, eventType string, payloadPairs []string) (string, error) {
-	// Validate channel name (prevent path traversal)
-	if !validChannelName.MatchString(channel) {
-		return "", fmt.Errorf("invalid channel name %q: must match [a-zA-Z0-9_-]", channel)
-	}
-
-	// Build payload from key=value pairs
-	payload := make(map[string]string)
-	for _, pair := range payloadPairs {
-		key, val, found := strings.Cut(pair, "=")
-		if found {
-			payload[key] = val
-		}
-	}
-
-	// Build event JSON
-	now := time.Now()
-	event := map[string]interface{}{
-		"type":      eventType,
-		"channel":   channel,
-		"timestamp": now.Format(time.RFC3339),
-		"payload":   payload,
-	}
-
-	data, err := json.MarshalIndent(event, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("marshaling event: %w", err)
-	}
-
-	// Write event file with nanosecond timestamp + sequence + PID for uniqueness
-	seq := emitEventSeq.Add(1)
-	eventFile := filepath.Join(eventDir, fmt.Sprintf("%d-%d-%d.event", now.UnixNano(), seq, os.Getpid()))
-	if err := os.WriteFile(eventFile, data, 0644); err != nil {
-		return "", fmt.Errorf("writing event file: %w", err)
-	}
-
-	return eventFile, nil
 }

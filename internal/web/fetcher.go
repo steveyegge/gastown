@@ -51,6 +51,9 @@ var fetcherGetSessionEnv = func(sessionName, key string) (string, error) {
 
 // runBdCmd executes a bd command with the configured cmdTimeout in the specified beads directory.
 func (f *LiveConvoyFetcher) runBdCmd(beadsDir string, args ...string) (*bytes.Buffer, error) {
+	// bd v0.59+ requires --flat for list --json to produce JSON output
+	args = beads.InjectFlatForListJSON(args)
+
 	ctx, cancel := context.WithTimeout(context.Background(), f.cmdTimeout)
 	defer cancel()
 
@@ -1462,7 +1465,7 @@ func (f *LiveConvoyFetcher) FetchMayor() (*MayorStatus, error) {
 	mayorSessionName := session.MayorSessionName()
 
 	// Check if mayor tmux session exists
-	stdout, err := runCmd(f.tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}:#{session_activity}")
+	stdout, err := fetcherRunCmd(f.tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}:#{session_activity}")
 	if err != nil {
 		// tmux not running or no sessions
 		return status, nil

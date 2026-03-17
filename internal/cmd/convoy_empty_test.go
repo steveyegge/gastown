@@ -51,6 +51,11 @@ case "$cmd" in
     echo '[{"id":"'"$CONVOY_ID"'","title":"'"$CONVOY_TITLE"'","status":"open","issue_type":"convoy"}]'
     exit 0
     ;;
+  sql)
+    # bdDepListRawIDs uses bd sql for dep queries — return empty
+    echo '[]'
+    exit 0
+    ;;
   dep)
     # Return empty tracked issues
     echo '[]'
@@ -180,6 +185,21 @@ case "$pos0" in
     echo '[{"id":"hq-empty-mix","title":"Empty convoy"},{"id":"hq-feed-mix","title":"Feedable convoy"}]'
     exit 0
     ;;
+  sql)
+    # bdDepListRawIDs: SELECT depends_on_id FROM dependencies WHERE issue_id = '<id>' AND type = 'tracks'
+    case "$*" in
+      *"issue_id = 'hq-empty-mix'"*)
+        echo '[]'
+        ;;
+      *"issue_id = 'hq-feed-mix'"*)
+        echo '[{"depends_on_id":"gt-ready1"}]'
+        ;;
+      *)
+        echo '[]'
+        ;;
+    esac
+    exit 0
+    ;;
   dep)
     # pos2 is the convoy ID (dep list <convoy-id> ...)
     case "$pos2" in
@@ -303,6 +323,11 @@ done
 case "$pos0" in
   list)
     echo '[{"id":"hq-stuck1","title":"Stuck convoy"}]'
+    exit 0
+    ;;
+  sql)
+    # bdDepListRawIDs: return tracked bead IDs for hq-stuck1
+    echo '[{"depends_on_id":"gt-busy1"},{"depends_on_id":"gt-busy2"}]'
     exit 0
     ;;
   dep)

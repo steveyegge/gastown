@@ -2,13 +2,15 @@
 package runtime
 
 import (
+	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/hookutil"
 	"github.com/steveyegge/gastown/internal/hooks"
+	"github.com/steveyegge/gastown/internal/hookutil"
 	"github.com/steveyegge/gastown/internal/templates/commands"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -52,6 +54,11 @@ func EnsureSettingsForRole(settingsDir, workDir, role string, rc *config.Runtime
 	}
 
 	return nil
+}
+
+type startupPromptSession interface {
+	NudgeSession(sessionID, message string) error
+	WaitForRuntimeReady(sessionID string, rc *config.RuntimeConfig, timeout time.Duration) error
 }
 
 // SessionIDFromEnv returns the runtime session ID, if present.
@@ -147,6 +154,18 @@ type StartupFallbackInfo struct {
 	StartupNudgeDelayMs int
 }
 
+// StartupPromptFallback describes whether a role's startup prompt must be
+// delivered via nudge after startup fallback commands have run.
+type StartupPromptFallback struct {
+	// Send indicates the startup prompt must be nudged because the runtime
+	// cannot receive it as a CLI prompt argument.
+	Send bool
+
+	// DelayMs is the minimum wait before sending the startup prompt so
+	// non-hook agents have time to finish `gt prime`.
+	DelayMs int
+}
+
 // GetStartupFallbackInfo returns the fallback actions needed based on agent capabilities.
 func GetStartupFallbackInfo(rc *config.RuntimeConfig) *StartupFallbackInfo {
 	if rc == nil {
@@ -178,6 +197,41 @@ func GetStartupFallbackInfo(rc *config.RuntimeConfig) *StartupFallbackInfo {
 	// else: hooks + prompt - nothing needed, all in CLI prompt + hook
 
 	return info
+}
+
+// GetStartupPromptFallback returns the post-startup prompt delivery behavior
+// for runtimes that cannot accept the startup prompt as a CLI argument.
+func GetStartupPromptFallback(rc *config.RuntimeConfig) StartupPromptFallback {
+	info := GetStartupFallbackInfo(rc)
+	return StartupPromptFallback{
+		Send:    info.SendBeaconNudge,
+		DelayMs: info.StartupNudgeDelayMs,
+	}
+}
+
+// DeliverStartupPromptFallback sends the startup prompt via nudge for runtimes
+// that cannot accept the prompt as a CLI argument.
+func DeliverStartupPromptFallback(
+	t startupPromptSession,
+	sessionID, prompt string,
+	rc *config.RuntimeConfig,
+	timeout time.Duration,
+) error {
+	fallback := GetStartupPromptFallback(rc)
+	if !fallback.Send {
+		return nil
+	}
+
+	if fallback.DelayMs > 0 {
+		if err := t.WaitForRuntimeReady(sessionID, RuntimeConfigWithMinDelay(rc, fallback.DelayMs), timeout); err != nil {
+			return fmt.Errorf("waiting for startup prompt fallback: %w", err)
+		}
+	}
+
+	if err := t.NudgeSession(sessionID, prompt); err != nil {
+		return fmt.Errorf("nudging startup prompt fallback: %w", err)
+	}
+	return nil
 }
 
 // StartupNudgeContent returns the work instructions to send as a startup nudge.

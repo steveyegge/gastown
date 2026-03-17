@@ -2762,3 +2762,138 @@ func TestBuildWavesJSON_TaskDetails(t *testing.T) {
 		t.Errorf("task b blocked_by = %v", wj[1].Tasks[0].BlockedBy)
 	}
 }
+
+// TestAppendValidationWave_CreatesCapstoneWave verifies that appendValidationWave
+// creates a validation bead blocked by all slingable tasks and appends it as the
+// final wave.
+func TestAppendValidationWave_CreatesCapstoneWave(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows — shell stubs")
+	}
+
+	testDAG := newTestDAG(t).
+		Epic("epic-1", "Test Epic").
+		Task("gt-a", "Task A", withRig("gastown")).ParentOf("epic-1").
+		Task("gt-b", "Task B", withRig("gastown")).ParentOf("epic-1").BlockedBy("gt-a")
+
+	_, logPath := testDAG.Setup(t)
+
+	// Build the ConvoyDAG.
+	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
+		"epic-1": {ID: "epic-1", Title: "Test Epic", Type: "epic", Status: "open"},
+		"gt-a":   {ID: "gt-a", Title: "Task A", Type: "task", Status: "open", Rig: "gastown", Blocks: []string{"gt-b"}},
+		"gt-b":   {ID: "gt-b", Title: "Task B", Type: "task", Status: "open", Rig: "gastown", BlockedBy: []string{"gt-a"}},
+	}}
+
+	// Compute waves first.
+	waves, _, err := computeWaves(dag)
+	if err != nil {
+		t.Fatalf("computeWaves: %v", err)
+	}
+	if len(waves) != 2 {
+		t.Fatalf("expected 2 waves before validation, got %d", len(waves))
+	}
+
+	// Append validation wave.
+	waves, validationID, err := appendValidationWave(dag, waves, "epic-1")
+	if err != nil {
+		t.Fatalf("appendValidationWave: %v", err)
+	}
+
+	// Verify validation bead was created.
+	if validationID == "" {
+		t.Fatal("expected non-empty validation bead ID")
+	}
+	if !strings.HasPrefix(validationID, "hq-") {
+		t.Errorf("validation bead ID should start with hq-, got %q", validationID)
+	}
+
+	// Verify waves: should now have 3 waves (original 2 + validation).
+	if len(waves) != 3 {
+		t.Fatalf("expected 3 waves after validation, got %d", len(waves))
+	}
+	if waves[2].Number != 3 {
+		t.Errorf("validation wave number = %d, want 3", waves[2].Number)
+	}
+	if len(waves[2].Tasks) != 1 || waves[2].Tasks[0] != validationID {
+		t.Errorf("validation wave tasks = %v, want [%s]", waves[2].Tasks, validationID)
+	}
+
+	// Verify the validation bead was added to the DAG.
+	valNode, ok := dag.Nodes[validationID]
+	if !ok {
+		t.Fatal("validation bead not found in DAG")
+	}
+	if valNode.Type != "task" {
+		t.Errorf("validation bead type = %q, want task", valNode.Type)
+	}
+	if valNode.Parent != "epic-1" {
+		t.Errorf("validation bead parent = %q, want epic-1", valNode.Parent)
+	}
+
+	// Verify it's blocked by all slingable beads.
+	blockedBy := make(map[string]bool)
+	for _, id := range valNode.BlockedBy {
+		blockedBy[id] = true
+	}
+	if !blockedBy["gt-a"] || !blockedBy["gt-b"] {
+		t.Errorf("validation bead should be blocked by gt-a and gt-b, got %v", valNode.BlockedBy)
+	}
+
+	// Verify slingable nodes now block the validation bead.
+	if nodeA, ok := dag.Nodes["gt-a"]; ok {
+		found := false
+		for _, id := range nodeA.Blocks {
+			if id == validationID {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("gt-a should block validation bead, Blocks = %v", nodeA.Blocks)
+		}
+	}
+
+	// Verify bd commands were logged: create, dep add parent-child, dep add blocks.
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read bd.log: %v", err)
+	}
+	logContent := string(logBytes)
+
+	if !strings.Contains(logContent, "create") {
+		t.Errorf("bd.log should contain 'create' command")
+	}
+	if !strings.Contains(logContent, "--type=task") {
+		t.Errorf("bd.log should contain '--type=task'")
+	}
+	if !strings.Contains(logContent, "mol-validate-prd") {
+		t.Errorf("bd.log should contain 'mol-validate-prd' in description")
+	}
+	if !strings.Contains(logContent, "dep add epic-1 "+validationID+" --type=parent-child") {
+		t.Errorf("bd.log should contain parent-child dep add, got:\n%s", logContent)
+	}
+	for _, beadID := range []string{"gt-a", "gt-b"} {
+		if !strings.Contains(logContent, "dep add "+beadID+" "+validationID+" --type=blocks") {
+			t.Errorf("bd.log should contain 'dep add %s %s --type=blocks', got:\n%s", beadID, validationID, logContent)
+		}
+	}
+}
+
+// TestAppendValidationWave_NoSlingableBeads verifies that appendValidationWave
+// returns early when there are no slingable beads (e.g., epic-only DAG).
+func TestAppendValidationWave_NoSlingableBeads(t *testing.T) {
+	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
+		"epic-1": {ID: "epic-1", Title: "Test Epic", Type: "epic", Status: "open"},
+	}}
+
+	waves, validationID, err := appendValidationWave(dag, nil, "epic-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if validationID != "" {
+		t.Errorf("expected empty validation ID for no slingable beads, got %q", validationID)
+	}
+	if len(waves) != 0 {
+		t.Errorf("expected 0 waves, got %d", len(waves))
+	}
+}

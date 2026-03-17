@@ -258,7 +258,7 @@ func runChannelShow(cmd *cobra.Command, args []string) error {
 			style.Dim.Render(msg.ID),
 			msg.From)
 		fmt.Printf("    %s\n",
-			style.Dim.Render(msg.Created.Format("2006-01-02 15:04")))
+			style.Dim.Render(msg.Created.Local().Format("2006-01-02 15:04")))
 		if msg.Body != "" {
 			// Show first line as preview
 			lines := strings.SplitN(msg.Body, "\n", 2)

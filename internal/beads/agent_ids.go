@@ -38,48 +38,6 @@ func DogBeadIDTown(name string) string {
 	return fmt.Sprintf("%s-dog-%s", TownBeadsPrefix, name)
 }
 
-// RoleBeadIDTown returns the role bead ID for town-level storage.
-// Role beads define lifecycle configuration for each agent type.
-// Uses "hq-" prefix for town-level storage: hq-<role>-role
-func RoleBeadIDTown(role string) string {
-	return fmt.Sprintf("%s-%s-role", TownBeadsPrefix, role)
-}
-
-// MayorRoleBeadIDTown returns the Mayor role bead ID for town-level storage.
-func MayorRoleBeadIDTown() string {
-	return RoleBeadIDTown(constants.RoleMayor)
-}
-
-// DeaconRoleBeadIDTown returns the Deacon role bead ID for town-level storage.
-func DeaconRoleBeadIDTown() string {
-	return RoleBeadIDTown(constants.RoleDeacon)
-}
-
-// DogRoleBeadIDTown returns the Dog role bead ID for town-level storage.
-func DogRoleBeadIDTown() string {
-	return RoleBeadIDTown("dog")
-}
-
-// WitnessRoleBeadIDTown returns the Witness role bead ID for town-level storage.
-func WitnessRoleBeadIDTown() string {
-	return RoleBeadIDTown(constants.RoleWitness)
-}
-
-// RefineryRoleBeadIDTown returns the Refinery role bead ID for town-level storage.
-func RefineryRoleBeadIDTown() string {
-	return RoleBeadIDTown(constants.RoleRefinery)
-}
-
-// PolecatRoleBeadIDTown returns the Polecat role bead ID for town-level storage.
-func PolecatRoleBeadIDTown() string {
-	return RoleBeadIDTown(constants.RolePolecat)
-}
-
-// CrewRoleBeadIDTown returns the Crew role bead ID for town-level storage.
-func CrewRoleBeadIDTown() string {
-	return RoleBeadIDTown(constants.RoleCrew)
-}
-
 // ===== Agent ID validation =====
 
 // ValidAgentRoles are the known agent role types for ID pattern validation.

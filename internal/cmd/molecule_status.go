@@ -354,10 +354,28 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Find beads directory
+	// Find beads directory.
+	// First try CWD-based discovery, then resolve to the correct rig database
+	// based on the agent's identity. Without this, CWD at the town root (~/gt)
+	// queries the hq database instead of the rig's database where hooked beads
+	// actually live. See bd-hook-status-cwd-bug.
 	workDir, err := findLocalBeadsDir()
 	if err != nil {
 		return fmt.Errorf("not in a beads workspace: %w", err)
+	}
+
+	// Resolve to the agent's rig beads directory if CWD-based discovery
+	// found the wrong database. This matches runHookShow's resolution logic.
+	if !isTownLevelRole(target) && townRoot != "" {
+		agentBeadID := buildAgentBeadID(target, roleCtx.Role, townRoot)
+		if agentBeadID != "" {
+			rigName := strings.Split(target, "/")[0]
+			fallbackPath := filepath.Join(townRoot, rigName)
+			resolvedDir := beads.ResolveHookDir(townRoot, agentBeadID, fallbackPath)
+			if resolvedDir != "" {
+				workDir = resolvedDir
+			}
+		}
 	}
 
 	b := beads.New(workDir)
@@ -371,41 +389,23 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 	// lookupHookedWork performs the full multi-step hook lookup for target.
 	// Called in a retry loop for polecats to handle Dolt propagation lag.
 	lookupHookedWork := func() *beads.Issue {
+		// Resolve agent bead ID for display purposes only.
+		// Agent bead's hook_bead field is no longer maintained (updateAgentHookBead is
+		// a no-op since hq-l6mm5), so reading it returns stale data. See GH#2371.
 		agentBeadID := buildAgentBeadID(target, roleCtx.Role, townRoot)
-
 		if agentBeadID != "" {
-			// Resolve the correct beads directory for the agent bead using prefix-based
-			// routing. This matches how updateAgentHookBead resolves the directory when
-			// setting the hook (via beads.ResolveHookDir).
 			agentBeadPath := beads.ResolveHookDir(townRoot, agentBeadID, workDir)
 			agentB := b
 			if agentBeadPath != workDir {
 				agentB = beads.New(agentBeadPath)
 			}
-
 			agentBead, err := agentB.Show(agentBeadID)
 			if err == nil && beads.IsAgentBead(agentBead) {
 				status.AgentBeadID = agentBeadID
-
-				// Read hook_bead from the agent bead's database field (not description!)
-				// The hook_bead column is updated by `bd slot set` in UpdateAgentState.
-				// IMPORTANT: Don't use ParseAgentFields on description - the description
-				// field may contain stale data, causing the wrong issue to be hooked.
-				if agentBead.HookBead != "" {
-					hookBeadPath := beads.ResolveHookDir(townRoot, agentBead.HookBead, workDir)
-					hookB := b
-					if hookBeadPath != workDir {
-						hookB = beads.New(hookBeadPath)
-					}
-					hookBead, err := hookB.Show(agentBead.HookBead)
-					if err == nil {
-						return hookBead
-					}
-				}
 			}
 		}
 
-		// FALLBACK: Query for hooked beads (work on agent's hook)
+		// Query for hooked beads using the authoritative source: bead status + assignee.
 		// First try status=hooked (work that's been slung but not yet claimed)
 		hookedBeads, err := b.List(beads.ListOptions{
 			Status:   beads.StatusHooked,
@@ -560,6 +560,11 @@ func buildAgentIdentity(ctx RoleContext) string {
 		return ctx.Rig + "/polecats/" + ctx.Polecat
 	case RoleCrew:
 		return ctx.Rig + "/crew/" + ctx.Polecat
+	case RoleDog:
+		if ctx.Polecat == "" {
+			return ""
+		}
+		return "deacon/dogs/" + ctx.Polecat
 	default:
 		return ""
 	}

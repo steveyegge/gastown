@@ -57,6 +57,27 @@ func (d *Daemon) handleDogs() {
 	d.dispatchPlugins(mgr, sm, rigsConfig)
 }
 
+// handleDogsCleanupOnly runs dog lifecycle cleanup (stuck, stale, idle) without
+// dispatching new work. Used when pressure checks block new spawns.
+func (d *Daemon) handleDogsCleanupOnly() {
+	rigsConfig, err := d.loadRigsConfig()
+	if err != nil {
+		d.logger.Printf("Handler: failed to load rigs config: %v", err)
+		return
+	}
+
+	opCfg := d.loadOperationalConfig().GetDaemonConfig()
+
+	mgr := dog.NewManager(d.config.TownRoot, rigsConfig)
+	t := tmux.NewTmux()
+	sm := dog.NewSessionManager(t, d.config.TownRoot, mgr)
+
+	d.cleanupStuckDogs(mgr, sm)
+	d.detectStaleWorkingDogs(mgr, sm, opCfg)
+	d.reapIdleDogs(mgr, sm, opCfg)
+	// Skip dispatchPlugins — under pressure
+}
+
 // cleanupStuckDogs finds dogs in state=working whose tmux session is dead and
 // clears their work so they return to idle.
 func (d *Daemon) cleanupStuckDogs(mgr *dog.Manager, sm *dog.SessionManager) {

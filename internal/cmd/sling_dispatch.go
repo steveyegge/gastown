@@ -251,7 +251,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		existingConvoy := isTrackedByConvoy(params.BeadID)
 		if existingConvoy == "" {
 			var err error
-			convoyID, err = createAutoConvoy(params.BeadID, info.Title, params.Owned, params.Merge)
+			convoyID, err = createAutoConvoy(params.BeadID, info.Title, params.Owned, params.Merge, params.BaseBranch)
 			if err != nil {
 				fmt.Printf("  %s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
 			} else {
@@ -282,13 +282,23 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	// 6. Instantiate formula on bead (wisp + bond)
 	beadToHook := params.BeadID
 	attachedMoleculeID := ""
+	var allVars []string
 	if params.FormulaName != "" && formulaCooked {
 		// Auto-inject rig command vars as defaults (user --var flags override)
 		rigCmdVars := loadRigCommandVars(townRoot, params.RigName)
 		// Build per-bead vars: rig defaults first, then user vars (higher priority)
-		allVars := append(rigCmdVars, params.Vars...)
+		allVars = append(rigCmdVars, params.Vars...)
 		if spawnInfo.BaseBranch != "" && spawnInfo.BaseBranch != "main" {
 			allVars = append(allVars, fmt.Sprintf("base_branch=%s", spawnInfo.BaseBranch))
+		}
+
+		// GH#gt-zqvj: Inject prior attempt context when re-dispatching an issue
+		// that already has an open MR from a previous polecat. The new polecat
+		// gets the old branch name so it can cherry-pick prior work instead of
+		// starting from scratch.
+		if priorVars := lookupPriorAttempt(beadsDir, params.BeadID); len(priorVars) > 0 {
+			allVars = append(allVars, priorVars...)
+			fmt.Printf("  %s Prior attempt found — context injected for polecat\n", style.Dim.Render("↻"))
 		}
 		formulaResult, err := InstantiateFormulaOnBead(context.Background(), params.FormulaName, params.BeadID, info.Title, hookWorkDir, townRoot, true, allVars)
 		if err != nil {
@@ -336,6 +346,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		AttachedFormula:  params.FormulaName,
 		NoMerge:          params.NoMerge,
 		Mode:             params.Mode,
+		FormulaVars:      strings.Join(allVars, "\n"),
 	}
 	// Use beadToHook for the update target (may differ from beadID when formula-on-bead)
 	if err := storeFieldsInBead(beadToHook, fieldUpdates); err != nil {

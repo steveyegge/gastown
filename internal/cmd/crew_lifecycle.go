@@ -41,7 +41,7 @@ func runCrewRemove(cmd *cobra.Command, args []string) error {
 			name = crewName
 		}
 
-		crewMgr, r, err := getCrewManager(rigOverride)
+		crewMgr, r, err := getCrewManagerForMember(rigOverride, name)
 		if err != nil {
 			fmt.Printf("Error removing %s: %v\n", arg, err)
 			lastErr = err
@@ -197,7 +197,7 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 		name = crewName
 	}
 
-	crewMgr, r, err := getCrewManager(crewRig)
+	crewMgr, r, err := getCrewManagerForMember(crewRig, name)
 	if err != nil {
 		return err
 	}
@@ -427,7 +427,7 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 			name = crewName
 		}
 
-		crewMgr, r, err := getCrewManager(rigOverride)
+		crewMgr, r, err := getCrewManagerForMember(rigOverride, name)
 		if err != nil {
 			fmt.Printf("Error restarting %s: %v\n", arg, err)
 			lastErr = err
@@ -590,7 +590,7 @@ func runCrewStop(cmd *cobra.Command, args []string) error {
 			name = crewName
 		}
 
-		_, r, err := getCrewManager(rigOverride)
+		_, r, err := getCrewManagerForMember(rigOverride, name)
 		if err != nil {
 			fmt.Printf("Error stopping %s: %v\n", arg, err)
 			lastErr = err

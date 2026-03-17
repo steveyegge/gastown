@@ -447,6 +447,33 @@ gt config default-agent claude-glm       # Set default
 }
 ```
 
+**ACP-enabled custom agents** (`settings/config.json`):
+```json
+{
+  "type": "town-settings",
+  "version": 1,
+  "default_agent": "opencode-acp-debug",
+  "agents": {
+    "opencode-acp-debug": {
+      "command": "opencode",
+      "acp": {
+        "command": "acp",
+        "args": ["--debug", "--print-logs"]
+      }
+    }
+  }
+}
+```
+
+The `acp` field configures Agent Communication Protocol support:
+- `command`: ACP subcommand (e.g., `"acp"` for `opencode acp`)
+- `args`: Additional arguments passed to the ACP subcommand
+
+Custom agents inherit ACP support from their base command's preset. For example,
+a custom agent with `"command": "opencode"` automatically inherits ACP support
+from the opencode preset. You can override or extend the ACP args by specifying
+the `acp` field explicitly.
+
 **Agent resolution order**: rig-level → town-level → built-in presets.
 
 For OpenCode autonomous mode, set env var in your shell profile:

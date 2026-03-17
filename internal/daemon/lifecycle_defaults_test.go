@@ -88,6 +88,9 @@ func TestEnsureLifecycleDefaults_EmptyConfig(t *testing.T) {
 	if config.Patrols.CompactorDog == nil || !config.Patrols.CompactorDog.Enabled {
 		t.Error("expected compactor_dog to be set")
 	}
+	if config.Patrols.Handler == nil || !config.Patrols.Handler.Enabled {
+		t.Error("expected handler to be set")
+	}
 }
 
 func TestEnsureLifecycleDefaults_PreservesExisting(t *testing.T) {
@@ -134,12 +137,13 @@ func TestEnsureLifecycleDefaults_FullyConfigured(t *testing.T) {
 		Type:    "daemon-patrol-config",
 		Version: 1,
 		Patrols: &PatrolsConfig{
-			WispReaper:   &WispReaperConfig{Enabled: false},
-			CompactorDog: &CompactorDogConfig{Enabled: false},
-			DoctorDog:    &DoctorDogConfig{Enabled: false},
+			WispReaper:           &WispReaperConfig{Enabled: false},
+			CompactorDog:         &CompactorDogConfig{Enabled: false},
+			DoctorDog:            &DoctorDogConfig{Enabled: false},
 			JsonlGitBackup:       &JsonlGitBackupConfig{Enabled: false},
 			DoltBackup:           &DoltBackupConfig{Enabled: false},
 			ScheduledMaintenance: &ScheduledMaintenanceConfig{Enabled: false, Threshold: &threshold},
+			Handler:              &PatrolConfig{Enabled: false},
 		},
 	}
 

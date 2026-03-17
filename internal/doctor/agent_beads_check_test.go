@@ -100,3 +100,87 @@ func TestAgentBeadsExistCheck_ExpectedIDs(t *testing.T) {
 
 	t.Logf("Result: status=%v, message=%s, details=%v", result.Status, result.Message, result.Details)
 }
+
+// TestListCrewWorkers_FiltersWorktrees verifies that listCrewWorkers skips
+// git worktrees (directories where .git is a file) and only returns canonical
+// crew workers (where .git is a directory). This is the fix for GH#2767.
+func TestListCrewWorkers_FiltersWorktrees(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "myrig"
+	crewDir := filepath.Join(tmpDir, rigName, "crew")
+
+	// Create a canonical crew worker: .git is a directory
+	canonicalDir := filepath.Join(crewDir, "alice")
+	if err := os.MkdirAll(filepath.Join(canonicalDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a worktree: .git is a file (contains gitdir pointer)
+	worktreeDir := filepath.Join(crewDir, "alice-worktree")
+	if err := os.MkdirAll(worktreeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreeDir, ".git"),
+		[]byte("gitdir: /path/to/main/.git/worktrees/alice-worktree\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a second canonical worker
+	bobDir := filepath.Join(crewDir, "bob")
+	if err := os.MkdirAll(filepath.Join(bobDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a directory without .git at all (should be included — not a worktree)
+	plainDir := filepath.Join(crewDir, "charlie")
+	if err := os.MkdirAll(plainDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workers := listCrewWorkers(tmpDir, rigName)
+
+	// Should include alice, bob, charlie but NOT alice-worktree
+	expected := map[string]bool{"alice": false, "bob": false, "charlie": false}
+	for _, w := range workers {
+		if w == "alice-worktree" {
+			t.Errorf("listCrewWorkers should skip worktree 'alice-worktree', got: %v", workers)
+		}
+		if _, ok := expected[w]; ok {
+			expected[w] = true
+		}
+	}
+	for name, found := range expected {
+		if !found {
+			t.Errorf("listCrewWorkers should include canonical worker %q, got: %v", name, workers)
+		}
+	}
+}
+
+// TestListPolecats_FiltersWorktrees verifies that listPolecats skips
+// git worktrees, same as listCrewWorkers. See GH#2767.
+func TestListPolecats_FiltersWorktrees(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "myrig"
+	polecatDir := filepath.Join(tmpDir, rigName, "polecats")
+
+	// Canonical polecat
+	if err := os.MkdirAll(filepath.Join(polecatDir, "scout", ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Worktree polecat (.git is a file)
+	wtDir := filepath.Join(polecatDir, "scout-wt")
+	if err := os.MkdirAll(wtDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, ".git"),
+		[]byte("gitdir: /path/to/main/.git/worktrees/scout-wt\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	polecats := listPolecats(tmpDir, rigName)
+
+	if len(polecats) != 1 || polecats[0] != "scout" {
+		t.Errorf("listPolecats should return only [scout], got: %v", polecats)
+	}
+}

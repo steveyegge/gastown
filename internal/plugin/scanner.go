@@ -229,6 +229,40 @@ func (s *Scanner) GetPlugin(name string) (*Plugin, error) {
 	return plugin, nil
 }
 
+// DiscoverExecWrappers returns all exec-wrapper plugins.
+// These are plugins with [execution] type = "exec-wrapper" that wrap session startup.
+func (s *Scanner) DiscoverExecWrappers() ([]*Plugin, error) {
+	all, err := s.DiscoverAll()
+	if err != nil {
+		return nil, err
+	}
+
+	var wrappers []*Plugin
+	for _, p := range all {
+		if p.IsExecWrapper() {
+			wrappers = append(wrappers, p)
+		}
+	}
+	return wrappers, nil
+}
+
+// GetExecWrapper returns a specific exec-wrapper plugin by name.
+// Returns an error if the plugin is not found or is not an exec-wrapper type.
+func (s *Scanner) GetExecWrapper(name string) (*Plugin, error) {
+	p, err := s.GetPlugin(name)
+	if err != nil {
+		return nil, err
+	}
+	if !p.IsExecWrapper() {
+		execType := ExecutionType("none")
+		if p.Execution != nil {
+			execType = p.Execution.Type
+		}
+		return nil, fmt.Errorf("plugin %q is not an exec-wrapper (type=%s)", name, execType)
+	}
+	return p, nil
+}
+
 // ListPluginDirs returns the directories where plugins are stored.
 func (s *Scanner) ListPluginDirs() []string {
 	dirs := []string{filepath.Join(s.townRoot, "plugins")}

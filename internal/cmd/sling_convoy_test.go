@@ -8,7 +8,7 @@ import (
 )
 
 // TestConvoyTracksBeadExactMatch verifies that convoyTracksBead finds a bead
-// when the dep list returns the raw beadID (no external: wrapping).
+// when the dep query returns the raw beadID.
 func TestConvoyTracksBeadExactMatch(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows")
@@ -17,9 +17,9 @@ func TestConvoyTracksBeadExactMatch(t *testing.T) {
 	binDir := t.TempDir()
 	beadsDir := t.TempDir()
 
-	// Stub bd to return a tracked dep with raw beadID
+	// Stub bd sql to return a tracked dep with raw beadID
 	bdScript := `#!/bin/sh
-echo '[{"id":"gt-abc123"}]'
+echo '[{"depends_on_id":"gt-abc123"}]'
 `
 	bdPath := filepath.Join(binDir, "bd")
 	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
@@ -35,7 +35,7 @@ echo '[{"id":"gt-abc123"}]'
 }
 
 // TestConvoyTracksBeadExternalRef verifies that convoyTracksBead finds a bead
-// when the dep list returns an external-formatted reference.
+// when the dep query returns an external-formatted reference.
 func TestConvoyTracksBeadExternalRef(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows")
@@ -44,9 +44,9 @@ func TestConvoyTracksBeadExternalRef(t *testing.T) {
 	binDir := t.TempDir()
 	beadsDir := t.TempDir()
 
-	// Stub bd to return a tracked dep with external:prefix:beadID format
+	// Stub bd sql to return a tracked dep with external:prefix:beadID format
 	bdScript := `#!/bin/sh
-echo '[{"id":"external:gt-abc:gt-abc123"}]'
+echo '[{"depends_on_id":"external:gt-abc:gt-abc123"}]'
 `
 	bdPath := filepath.Join(binDir, "bd")
 	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
@@ -71,9 +71,9 @@ func TestConvoyTracksBeadNoMatch(t *testing.T) {
 	binDir := t.TempDir()
 	beadsDir := t.TempDir()
 
-	// Stub bd to return a tracked dep with a different beadID
+	// Stub bd sql to return a tracked dep with a different beadID
 	bdScript := `#!/bin/sh
-echo '[{"id":"gt-other456"}]'
+echo '[{"depends_on_id":"gt-other456"}]'
 `
 	bdPath := filepath.Join(binDir, "bd")
 	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
@@ -98,7 +98,7 @@ func TestConvoyTracksBeadEmptyDeps(t *testing.T) {
 	binDir := t.TempDir()
 	beadsDir := t.TempDir()
 
-	// Stub bd to return empty array
+	// Stub bd sql to return empty array
 	bdScript := `#!/bin/sh
 echo '[]'
 `
@@ -125,9 +125,9 @@ func TestConvoyTracksBeadMultipleDeps(t *testing.T) {
 	binDir := t.TempDir()
 	beadsDir := t.TempDir()
 
-	// Stub bd to return multiple tracked deps, one of which matches
+	// Stub bd sql to return multiple tracked deps, one of which matches
 	bdScript := `#!/bin/sh
-echo '[{"id":"gt-other1"},{"id":"external:gt-abc:gt-abc123"},{"id":"gt-other2"}]'
+echo '[{"depends_on_id":"gt-other1"},{"depends_on_id":"external:gt-abc:gt-abc123"},{"depends_on_id":"gt-other2"}]'
 `
 	bdPath := filepath.Join(binDir, "bd")
 	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
@@ -139,5 +139,19 @@ echo '[{"id":"gt-other1"},{"id":"external:gt-abc:gt-abc123"},{"id":"gt-other2"}]
 
 	if !convoyTracksBead(beadsDir, "hq-cv-test5", "gt-abc123") {
 		t.Error("convoyTracksBead should return true when bead found among multiple deps")
+	}
+}
+
+// TestBdDepListRawIDsValidation verifies that bdDepListRawIDs rejects
+// invalid bead IDs to prevent SQL injection.
+func TestBdDepListRawIDsValidation(t *testing.T) {
+	_, err := bdDepListRawIDs("/tmp", "'; DROP TABLE deps; --", "down", "tracks")
+	if err == nil {
+		t.Error("bdDepListRawIDs should reject SQL injection attempts")
+	}
+
+	_, err = bdDepListRawIDs("/tmp", "valid-id", "down", "'; DROP TABLE deps; --")
+	if err == nil {
+		t.Error("bdDepListRawIDs should reject SQL injection in depType")
 	}
 }

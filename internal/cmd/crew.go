@@ -115,14 +115,20 @@ Branch Handling:
   shown if not on the default branch). Use --reset to switch to the
   default branch and pull latest changes.
 
-Role Discovery:
+Rig Discovery:
+  The rig is resolved in order: --rig flag, rig/name format, current
+  directory, or by scanning all rigs for the crew member name. This
+  means "gt crew at dave" works from anywhere in the town if dave
+  exists in exactly one rig.
+
   If no name is provided, attempts to detect the crew workspace from the
   current directory. If you're in <rig>/crew/<name>/, it will attach to
   that workspace automatically.
 
 Examples:
-  gt crew at dave                 # Attach to dave's session
+  gt crew at dave                 # Attach to dave's session (rig auto-detected)
   gt crew at                      # Auto-detect from cwd
+  gt crew at gastown/dave         # Explicit rig/name format
   gt crew at dave --reset         # Reset to default branch first
   gt crew at dave --detached      # Start session without attaching
   gt crew at dave --no-tmux       # Just print path`,

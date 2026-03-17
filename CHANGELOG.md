@@ -7,6 +7,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-03-15
+
+### Added
+
+- **Agent Client Protocol (ACP)** — New protocol for structured agent
+  communication with propulsion trigger detection and output suppression.
+- **gt mountain** — Stage, label, and launch epic work in one command.
+- **gt assign** — One-shot bead creation + hook for direct agent assignment.
+- **Convoy --from-epic** — `gt convoy create --from-epic` stages epic children
+  into convoy waves with automatic validation bead.
+- **Typed memories** — `gt remember --type feedback/project/user/reference` for
+  categorized agent memory storage.
+- **Repo-sourced rig settings** — `.gastown/settings.json` in repos auto-configures
+  rig behavior (test gates, merge strategy).
+- **exec-wrapper plugin type** — Plugins can now wrap agent execution.
+- **Prior attempt context** — Polecats receive context from previous failed
+  attempts when re-dispatched.
+- **Spider Protocol** — Fraud detection for Wasteland stamp system.
+
+### Changed
+
+- **Reaper plugin receipt cleanup** — Plugin run receipts now fast-tracked for
+  closure (1h) instead of waiting for 7-day stale issue AutoClose.
+- **Dog dispatch handler** — Daemon lifecycle defaults include handler for
+  direct dog dispatch.
+- **Formula v2** — mol-idea-to-plan with iterative review rounds and inline
+  eval/smoke-test bead creation.
+
+### Fixed
+
+- **Idle patrol CPU burn** — Patrol agents no longer burn CPU/tokens in handoff
+  restart loops.
+- **Compactor-dog false positives** — Fixed concurrent write detection and hash
+  validation for Dolt base32 format.
+- **Dolt server stability** — Fixed stale socket cleanup, server ownership
+  detection, rogue process race on restart, idle-monitor orphans on `gt down`.
+- **Cross-rig wisp contamination** — MQ list filtered by rig to prevent leaks.
+- **Polecat lifecycle** — Fixed idle reuse with live sessions, CRASHED_POLECAT
+  alerts for closed beads, spawn storm dedup.
+- **Session prefix parsing** — Fixed hq- prefix collision and rig-level fallback.
+- **Unicode handling** — Fixed parse errors in `gt compact`.
+- **Non-Claude agent support** — Liveness env vars, idle-wait instructions, and
+  nudge startup prompts for Gemini/Codex runtimes.
+- **Test isolation** — 5 tests isolated from live Dolt server; sleep sessions
+  used in cleanup tests to avoid .zshrc interference.
+- **Witness completion notifications** — Mayor now notified on polecat completion.
+- **Shell quoting** — Agent args properly quoted, model flags respected.
+- **Exponential backoff** — Convoy event poller backs off on Dolt errors.
+- **Docker** — Added tini for zombie process reaping in containers.
+
+## [0.12.0] - 2026-03-11
+
+### Added
+
+- **Event-driven polecat lifecycle** — Polecats now use FIX_NEEDED feedback loop
+  with awaiting_verdict state, replacing polling-based lifecycle (gt-k0h).
+- **Cross-database convoy resolution** — CLI-side dep resolution for multi-rig
+  towns where bd SQL JOINs fail across databases (GH#2624, GH#2625).
+- **Plugin sync** — `gt plugin sync` auto-deploys plugins after build (hq-o9gna).
+- **Compactor dog** — Executable `run.sh` for Dolt database compaction with
+  DoltHub remote sync, validation, and dry-run support.
+- **GitHub sheriff v2** — Single API call PR categorization with structured output.
+- **Mail reply reminders** — Deferred nudge delivery for unanswered mail.
+- **Git hygiene dog** — Automated repo cleanup plugin (gt-cdm).
+- **Crew agent assignment** — Town-level `crew_agents` config for per-crew
+  agent runtime selection.
+- **Partial clones** — `gt rig add` supports `--reference` for submodule init
+  and sparse checkout.
+- **Formula composition** — `extends` and `compose/expand` support for formulas.
+- **Background nudge poller** — Queue-based nudge delivery for non-Claude agents.
+- **Review command** — `/review` with A-F grading and refinery integration (#2636).
+- **Escalation channels** — Email, Slack, SMS, and log notification channels.
+- **Pressure checks** — Opt-in CPU/memory pressure gating before agent spawns.
+- **MVGT integration guide** — Comprehensive Wasteland federation guide for
+  non-Gas-Town systems.
+- **Crew specialization design** — Capability-based dispatch design doc.
+
+### Changed
+
+- **Refinery merge strategy** — Configurable direct vs PR mode (gt-fln).
+- **Polecat lifecycle patrol** — Redesigned formula for event-driven model.
+- **Session hygiene** — Converted from plugin.md to deterministic `run.sh`.
+- **DND auto-reset** — Muted mode auto-resets on `gt up`.
+- **Nudge degradation** — Wait-idle gracefully degrades to queue for agents
+  without prompt detection.
+
+### Fixed
+
+- **Install bootstrap** — `gt install` now waits for MySQL readiness and always
+  passes `--server-port` to `bd init` (GH#2572, GH#2573).
+- **Rig add database creation** — `InitRig` runs CREATE DATABASE on live server
+  before schema migration.
+- **Boot triage loop** — Removed ZFC-violating decision engine that consumed
+  unbounded tokens on failed installs.
+- **Polecat spawn storm** — Two-layer circuit breaker caps respawns and total
+  active polecats (clown show #22).
+- **Standing-order beads** — Protected from AutoClose reaper and polecat
+  removal status reset.
+- **Tmux socket split-brain** — Prevented nudge failures from socket mismatch
+  (GH#2442).
+- **Reaper Sprintf bugs** — Fixed format string issues and missing schema guard
+  (GH#2469).
+- **bd JSON corruption** — Strip bd stdout warnings before JSON parsing.
+- **Remote branch deletion** — Restricted to polecat branches only (GH#2669).
+- **EnsureAllMetadata** — Uses rig name and correct DB prefix (GH#2668).
+- **Ephemeral beads** — Auto-purge closed ephemeral beads on session end.
+- **MR back-link** — Source issue linked to MR bead on creation.
+- **Convoy routing** — Town root and BEADS_DIR properly stripped for bd
+  subprocess calls.
+- **CI stability** — Resolved lint warnings (unparam, misspell) and 5 test
+  failures on main.
+
 ## [0.11.0] - 2026-03-05
 
 ### Added

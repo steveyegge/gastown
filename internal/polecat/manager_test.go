@@ -1119,10 +1119,6 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 		if strings.Contains(line, ".beads") {
 			continue
 		}
-		// .gitignore is expected - Gas Town patterns added
-		if strings.Contains(line, ".gitignore") {
-			continue
-		}
 		unexpected = append(unexpected, line)
 	}
 	if len(unexpected) > 0 {

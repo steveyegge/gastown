@@ -31,6 +31,7 @@ var (
 	formulaRunRig     string
 	formulaRunDryRun  bool
 	formulaRunAgent   string
+	formulaRunFiles   []string
 	formulaCreateType string
 )
 
@@ -169,6 +170,7 @@ func init() {
 	formulaRunCmd.Flags().StringVar(&formulaRunRig, "rig", "", "Target rig (default: current or gastown)")
 	formulaRunCmd.Flags().BoolVar(&formulaRunDryRun, "dry-run", false, "Preview execution without running")
 	formulaRunCmd.Flags().StringVar(&formulaRunAgent, "agent", "", "Override agent/runtime for all legs (e.g., gemini, codex, claude-haiku)")
+	formulaRunCmd.Flags().StringSliceVar(&formulaRunFiles, "files", nil, "Files to pass to formula legs (available as {{.files}} in templates)")
 
 	// Create flags
 	formulaCreateCmd.Flags().StringVar(&formulaCreateType, "type", "task", "Formula type: task, workflow, or patrol")
@@ -364,6 +366,7 @@ func dryRunFormula(f *formula.Formula, formulaName, targetRig string) error {
 						"description": leg.Description,
 					},
 					"changed_files": changedFiles,
+					"files":         formulaRunFiles,
 				}
 				legPattern := renderTemplateOrDefault(f.Output.LegPattern, legCtx, leg.ID+"-findings.md")
 				outputPath := filepath.Join(outputDir, legPattern)
@@ -505,7 +508,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 						"description": leg.Description,
 					},
 					"changed_files": changedFiles,
-					"files":         []string{}, // TODO: support --files flag
+					"files":         formulaRunFiles,
 				}
 
 				// Compute output path for this leg

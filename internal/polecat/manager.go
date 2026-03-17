@@ -765,8 +765,8 @@ func (m *Manager) addWithOptionsLocked(name string, opts AddOptions, polecatDir 
 		style.PrintWarning("could not copy overlay files: %v", err)
 	}
 
-	if err := rig.EnsureGitignorePatterns(clonePath); err != nil {
-		style.PrintWarning("could not update .gitignore: %v", err)
+	if err := rig.EnsureLocalExcludePatterns(clonePath); err != nil {
+		style.PrintWarning("could not update local git excludes: %v", err)
 	}
 
 	townRoot := filepath.Dir(m.rig.Path)
@@ -945,9 +945,9 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (_ *Polecat, retE
 		style.PrintWarning("could not copy overlay files: %v", err)
 	}
 
-	// Ensure .gitignore has required Gas Town patterns
-	if err := rig.EnsureGitignorePatterns(clonePath); err != nil {
-		style.PrintWarning("could not update .gitignore: %v", err)
+	// Keep worktree runtime ignores local so the tracked tree stays clean.
+	if err := rig.EnsureLocalExcludePatterns(clonePath); err != nil {
+		style.PrintWarning("could not update local git excludes: %v", err)
 	}
 
 	// Install runtime settings in the shared polecats parent directory.
@@ -1448,9 +1448,9 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 		style.PrintWarning("could not copy overlay files: %v", err)
 	}
 
-	// Ensure .gitignore has required Gas Town patterns
-	if err := rig.EnsureGitignorePatterns(newClonePath); err != nil {
-		style.PrintWarning("could not update .gitignore: %v", err)
+	// Keep worktree runtime ignores local so the tracked tree stays clean.
+	if err := rig.EnsureLocalExcludePatterns(newClonePath); err != nil {
+		style.PrintWarning("could not update local git excludes: %v", err)
 	}
 
 	// NOTE: Slash commands inherited from town level - no per-workspace copies needed.
@@ -1510,6 +1510,20 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 		return nil, ErrPolecatNotFound
 	}
 
+	// Revalidate session state under the polecat lock. A prior dispatcher may
+	// have observed this polecat as idle, but by the time reuse begins the tmux
+	// session may still be alive or may have revived.
+	if running, stale := m.polecatSessionState(name); running {
+		if stale {
+			sessionName := session.PolecatSessionName(session.PrefixFor(m.rig.Name), name)
+			if err := m.tmux.KillSessionWithProcesses(sessionName); err != nil {
+				return nil, fmt.Errorf("killing stale session %s: %w", sessionName, err)
+			}
+		} else {
+			return nil, ErrSessionRunning
+		}
+	}
+
 	// Get worktree path (must already exist for reuse)
 	clonePath := m.clonePath(name)
 	if _, err := os.Stat(clonePath); err != nil {
@@ -1545,16 +1559,19 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 		return nil, fmt.Errorf("start point %s not found — fall back to full repair", startPoint)
 	}
 
-	// Clean worktree state before branch switch — the worktree may have stale
-	// state from a previous dog/pool dispatch (uncommitted changes, detached HEAD,
-	// or checked out on an old dog/alpha-* branch).
-	_ = polecatGit.ResetHard("HEAD")
+	// GH#2536: Clean worktree state before branch switch — the worktree may have
+	// stale state from a previous dog/pool dispatch (uncommitted changes, untracked
+	// files, detached HEAD, or checked out on an old dog/alpha-* branch).
+	// Reset to the start point directly (not HEAD) to avoid "local changes would
+	// be overwritten" errors when the start point has different file content.
+	_ = polecatGit.ResetHard(startPoint)
+	_ = polecatGit.CleanForce()
 
 	// Create fresh branch from start point (branch-only, no worktree add/remove)
 	branchName := m.buildBranchName(name, opts.HookBead)
 	if err := polecatGit.CheckoutNewBranch(branchName, startPoint); err != nil {
-		// checkout -b fails if we're in detached HEAD or branch already exists.
-		// Fall back to: create branch separately, then checkout.
+		// checkout -b fails if branch already exists or other edge case.
+		// Fall back to: checkout start point, then create branch.
 		_ = polecatGit.Checkout(startPoint)
 		if err2 := polecatGit.CheckoutNewBranch(branchName, startPoint); err2 != nil {
 			return nil, fmt.Errorf("creating branch %s from %s (retry after cleanup): %w", branchName, startPoint, err2)
@@ -2010,6 +2027,11 @@ func (m *Manager) unassignWorkBeads(name string) {
 			if beads.IsAgentBead(issue) {
 				continue
 			}
+			// Skip protected beads (standing orders, role defs, etc.) —
+			// they should retain their status and assignee across polecat lifecycles.
+			if beads.IsProtectedBead(issue) {
+				continue
+			}
 			openStatus := "open"
 			empty := ""
 			if err := m.beads.Update(issue.ID, beads.UpdateOptions{
@@ -2028,8 +2050,9 @@ func (m *Manager) unassignWorkBeads(name string) {
 //  2. Legacy agent hook_bead that still points to a currently hooked bead for this assignee
 //     → working (compatibility fallback during migration)
 //  3. Issue assigned via beads assignee (open/in_progress/hooked) → working
-//  4. Tmux session alive → working (session active even if assignment not yet recorded)
-//  5. None of the above → idle
+//  4. Live tmux session → working (session active even if assignment not yet recorded)
+//  5. agent_state=idle with no live session → idle
+//  6. None of the above → idle
 func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 	// Use clonePath which handles both new (polecats/<name>/<rigname>/)
 	// and old (polecats/<name>/) structures
@@ -2082,18 +2105,6 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		}
 	}
 
-	// Persistent polecat model (gt-4ac): check agent_state for idle detection.
-	// An idle polecat has no hook_bead and agent_state="idle".
-	if agentErr == nil && fields != nil && beads.AgentState(fields.AgentState) == beads.AgentStateIdle {
-		return &Polecat{
-			Name:      name,
-			Rig:       m.rig.Name,
-			State:     StateIdle,
-			ClonePath: clonePath,
-			Branch:    branchName,
-		}, nil
-	}
-
 	// Fallback: Query beads for assigned issue (for polecats without agent beads
 	// or with empty hook_bead)
 	issue, beadsErr := m.beads.GetAssignedIssue(assignee)
@@ -2109,21 +2120,29 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		}, nil
 	}
 
-	// Persistent model: has issue = working, no issue = check tmux session.
-	// If tmux session is alive, the polecat is still actively working even
-	// if beads hasn't recorded an assignment yet (timing, query failure, etc.).
-	// No issue + no session = idle (persistent) rather than done.
-	// Fixes: gt-o01h4l (polecat list shows 'done' for running polecats)
-	state := StateIdle
+	// Persistent model: has issue = working, otherwise a live tmux session still
+	// means working even if beads state has fallen behind.
 	issueID := ""
 	if issue != nil {
 		issueID = issue.ID
+	} else if running, stale := m.polecatSessionState(name); running && !stale {
+		return &Polecat{
+			Name:      name,
+			Rig:       m.rig.Name,
+			State:     StateWorking,
+			ClonePath: clonePath,
+			Branch:    branchName,
+		}, nil
+	}
+
+	// Persistent polecat model (gt-4ac): only trust agent_state=idle once the
+	// tmux session is gone. This prevents reusing a polecat that still has a live
+	// session when its bead state was cleared early.
+	state := StateIdle
+	if issueID != "" {
 		state = StateWorking
-	} else if m.tmux != nil {
-		sessionName := session.PolecatSessionName(session.PrefixFor(m.rig.Name), name)
-		if running, _ := m.tmux.HasSession(sessionName); running {
-			state = StateWorking
-		}
+	} else if agentErr == nil && fields != nil && beads.AgentState(fields.AgentState) == beads.AgentStateIdle {
+		state = StateIdle
 	}
 
 	return &Polecat{
@@ -2134,6 +2153,20 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		Branch:    branchName,
 		Issue:     issueID,
 	}, nil
+}
+
+func (m *Manager) polecatSessionState(name string) (running bool, stale bool) {
+	if m.tmux == nil {
+		return false, false
+	}
+
+	sessionName := session.PolecatSessionName(session.PrefixFor(m.rig.Name), name)
+	running, err := m.tmux.HasSession(sessionName)
+	if err != nil || !running {
+		return false, false
+	}
+
+	return true, NewSessionManager(m.tmux, m.rig).isSessionStale(sessionName)
 }
 
 func isCurrentHookedIssueForAssignee(issue *beads.Issue, assignee string) bool {

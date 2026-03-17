@@ -38,6 +38,7 @@ const (
 	DefaultMassDeathWindow                 = 30 * time.Second
 	DefaultMassDeathThreshold              = 3
 	DefaultDogIdleSessionTimeout           = 1 * time.Hour
+	DefaultPolecatIdleSessionTimeout       = 15 * time.Minute
 	DefaultDogIdleRemoveTimeout            = 4 * time.Hour
 	DefaultStaleWorkingTimeout             = 2 * time.Hour
 	DefaultMaxDogPoolSize                  = 4
@@ -47,6 +48,13 @@ const (
 	DefaultRecoveryHeartbeatInterval       = 3 * time.Minute
 	DefaultBootSpawnCooldown               = 2 * time.Minute
 	DefaultDeaconGracePeriod               = 5 * time.Minute
+
+	// Pressure check defaults — fully opt-in. All zero = disabled.
+	// Configure in settings/config.json under operational.daemon to enable.
+	// Example: {"pressure_cpu_threshold": 3.0, "pressure_mem_threshold_gb": 0.5}
+	DefaultPressureCPUThreshold   = 0.0
+	DefaultPressureMemThresholdGB = 0.0
+	DefaultPressureMaxSessions    = 0
 )
 
 // Deacon defaults.
@@ -86,6 +94,7 @@ const (
 	DefaultMailBdReadTimeout      = 60 * time.Second
 	DefaultMailBdWriteTimeout     = 60 * time.Second
 	DefaultMailMaxConcurrentAcks  = 8
+	DefaultMailReplyReminderDelay = 30 * time.Second
 )
 
 // Web defaults.
@@ -300,6 +309,17 @@ func (d *DaemonThresholds) DogIdleSessionTimeoutD() time.Duration {
 	return DefaultDogIdleSessionTimeout
 }
 
+// PolecatIdleSessionTimeoutD returns the configured or default polecat idle session timeout.
+// Polecats that have been idle (no hooked work, heartbeat state=idle) longer than this
+// threshold are auto-killed to prevent API slot burn. Default 15 minutes — long enough
+// for polecats to run gt done after completing work, short enough to prevent hour-long burns.
+func (d *DaemonThresholds) PolecatIdleSessionTimeoutD() time.Duration {
+	if d != nil {
+		return ParseDurationOrDefault(d.PolecatIdleSessionTimeout, DefaultPolecatIdleSessionTimeout)
+	}
+	return DefaultPolecatIdleSessionTimeout
+}
+
 // DogIdleRemoveTimeoutD returns the configured or default dog idle remove timeout.
 func (d *DaemonThresholds) DogIdleRemoveTimeoutD() time.Duration {
 	if d != nil {
@@ -370,6 +390,30 @@ func (d *DaemonThresholds) DeaconGracePeriodD() time.Duration {
 		return ParseDurationOrDefault(d.DeaconGracePeriod, DefaultDeaconGracePeriod)
 	}
 	return DefaultDeaconGracePeriod
+}
+
+// PressureCPUThresholdV returns the configured or default CPU pressure threshold (load per core).
+func (d *DaemonThresholds) PressureCPUThresholdV() float64 {
+	if d != nil && d.PressureCPUThreshold != nil {
+		return *d.PressureCPUThreshold
+	}
+	return DefaultPressureCPUThreshold
+}
+
+// PressureMemThresholdGBV returns the configured or default memory pressure threshold in GB.
+func (d *DaemonThresholds) PressureMemThresholdGBV() float64 {
+	if d != nil && d.PressureMemThresholdGB != nil {
+		return *d.PressureMemThresholdGB
+	}
+	return DefaultPressureMemThresholdGB
+}
+
+// PressureMaxSessionsV returns the configured or default max concurrent sessions (0 = unlimited).
+func (d *DaemonThresholds) PressureMaxSessionsV() int {
+	if d != nil && d.PressureMaxSessions != nil {
+		return *d.PressureMaxSessions
+	}
+	return DefaultPressureMaxSessions
 }
 
 // --- Deacon accessors ---
@@ -594,6 +638,15 @@ func (m *MailThresholds) MaxConcurrentAckOpsV() int {
 		return *m.MaxConcurrentAckOps
 	}
 	return DefaultMailMaxConcurrentAcks
+}
+
+// ReplyReminderDelayD returns the configured or default reply reminder delay.
+// A zero duration means reply reminders are disabled.
+func (m *MailThresholds) ReplyReminderDelayD() time.Duration {
+	if m != nil {
+		return ParseDurationOrDefault(m.ReplyReminderDelay, DefaultMailReplyReminderDelay)
+	}
+	return DefaultMailReplyReminderDelay
 }
 
 // --- Web accessors ---

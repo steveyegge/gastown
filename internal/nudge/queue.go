@@ -60,8 +60,14 @@ type QueuedNudge struct {
 	Sender    string    `json:"sender"`
 	Message   string    `json:"message"`
 	Priority  string    `json:"priority"`
+	Kind      string    `json:"kind,omitempty"`
+	ThreadID  string    `json:"thread_id,omitempty"`
+	Severity  string    `json:"severity,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
+	// DeliverAfter, if non-zero, defers delivery until this time has passed.
+	// Drain skips (but does not discard) the nudge until the deadline is met.
+	DeliverAfter time.Time `json:"deliver_after,omitempty"`
 }
 
 // queueDir returns the nudge queue directory for a given session.
@@ -128,6 +134,21 @@ func Enqueue(townRoot, session string, nudge QueuedNudge) error {
 		return fmt.Errorf("writing nudge to queue: %w", err)
 	}
 
+	return nil
+}
+
+// Requeue writes previously drained nudges back to the queue for later delivery.
+// Existing timestamps are preserved so FIFO ordering remains stable relative to
+// one another; only expired nudges are skipped.
+func Requeue(townRoot, session string, nudges []QueuedNudge) error {
+	for _, n := range nudges {
+		if !n.ExpiresAt.IsZero() && time.Now().After(n.ExpiresAt) {
+			continue
+		}
+		if err := Enqueue(townRoot, session, n); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -238,6 +259,14 @@ func Drain(townRoot, session string) ([]QueuedNudge, error) {
 			continue
 		}
 
+		// Deferred nudge: not ready yet — unclaim and leave in queue.
+		if !n.DeliverAfter.IsZero() && now.Before(n.DeliverAfter) {
+			if renameErr := os.Rename(claimPath, path); renameErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to unclaim deferred nudge %s: %v\n", entry.Name(), renameErr)
+			}
+			continue
+		}
+
 		nudges = append(nudges, n)
 
 		// Remove the claimed file after successful processing
@@ -270,6 +299,18 @@ func Pending(townRoot, session string) (int, error) {
 	}
 
 	return count, nil
+}
+
+// QueueLen returns the number of pending nudges for a session without draining.
+// Returns 0 on error — callers use this for quick checks. Missing queue
+// directories are expected (no nudges yet) and silenced; other filesystem
+// errors are logged to stderr so they don't go unnoticed.
+func QueueLen(townRoot, session string) int {
+	n, err := Pending(townRoot, session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: nudge queue check failed for %s: %v\n", session, err)
+	}
+	return n
 }
 
 // FormatForInjection formats queued nudges as a system-reminder block

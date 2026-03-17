@@ -40,6 +40,37 @@ func inferRigFromCwd(townRoot string) (string, error) {
 	return "", fmt.Errorf("could not infer rig from current directory")
 }
 
+// inferRigFromCrewName scans all rigs in the town root for a crew member
+// with the given name. Returns the rig name if the crew member is unique
+// across all rigs. Returns an error if not found or ambiguous.
+func inferRigFromCrewName(townRoot, crewName string) (string, error) {
+	entries, err := os.ReadDir(townRoot)
+	if err != nil {
+		return "", fmt.Errorf("reading town root: %w", err)
+	}
+
+	var matches []string
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		crewPath := filepath.Join(townRoot, entry.Name(), "crew", crewName)
+		if info, err := os.Stat(crewPath); err == nil && info.IsDir() {
+			matches = append(matches, entry.Name())
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no rig found with crew member %q", crewName)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("crew member %q exists in multiple rigs: %s (use --rig to specify)",
+			crewName, strings.Join(matches, ", "))
+	}
+}
+
 // parseRigSlashName parses "rig/name" format into separate rig and name parts.
 // Returns (rig, name, true) if the format matches, or ("", original, false) if not.
 // Examples:

@@ -137,10 +137,11 @@ func TestGetServerAddr(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			beadsDir := filepath.Join(t.TempDir(), ".beads")
+			townRoot := t.TempDir()
+			beadsDir := filepath.Join(townRoot, ".beads")
 			setupServerMetadata(t, beadsDir, tt.host, tt.port)
 
-			addr, ok := check.getServerAddr(beadsDir)
+			addr, ok := check.getServerAddr(beadsDir, townRoot)
 			if ok != tt.wantOK {
 				t.Fatalf("getServerAddr() ok = %v, want %v", ok, tt.wantOK)
 			}
@@ -166,7 +167,7 @@ func TestGetServerAddr_NotServerMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, ok := check.getServerAddr(beadsDir)
+	_, ok := check.getServerAddr(beadsDir, t.TempDir())
 	if ok {
 		t.Error("getServerAddr() returned ok=true for local mode, want false")
 	}
@@ -174,9 +175,37 @@ func TestGetServerAddr_NotServerMode(t *testing.T) {
 
 func TestGetServerAddr_NoMetadata(t *testing.T) {
 	check := NewDoltServerReachableCheck()
-	_, ok := check.getServerAddr(filepath.Join(t.TempDir(), "nonexistent"))
+	_, ok := check.getServerAddr(filepath.Join(t.TempDir(), "nonexistent"), t.TempDir())
 	if ok {
 		t.Error("getServerAddr() returned ok=true for missing metadata, want false")
+	}
+}
+
+func TestGetServerAddr_UsesConfigYAMLPort(t *testing.T) {
+	check := NewDoltServerReachableCheck()
+	townRoot := t.TempDir()
+
+	// Create config.yaml with custom port
+	doltDataDir := filepath.Join(townRoot, ".dolt-data")
+	if err := os.MkdirAll(doltDataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configYAML := "listener:\n  port: 13527\n  max_connections: 1000\n"
+	if err := os.WriteFile(filepath.Join(doltDataDir, "config.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create metadata.json with no port (should read from config.yaml)
+	beadsDir := filepath.Join(townRoot, ".beads")
+	setupServerMetadata(t, beadsDir, "", 0)
+
+	addr, ok := check.getServerAddr(beadsDir, townRoot)
+	if !ok {
+		t.Fatal("getServerAddr() returned ok=false, want true")
+	}
+	// Should use port from config.yaml, not default 3307
+	if addr != "127.0.0.1:13527" {
+		t.Errorf("getServerAddr() = %q, want %q (from config.yaml)", addr, "127.0.0.1:13527")
 	}
 }
 

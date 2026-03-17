@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -135,12 +136,18 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Background mode: spawn a Claude agent in a tmux session
 	// The Claude agent handles MR processing using git commands and beads
 
-	// Working directory is the refinery worktree (shares .git with mayor/polecats)
+	// Working directory is the refinery worktree (shares .git with mayor/polecats).
+	// If the worktree is missing (pruned, deleted, or corrupted), auto-repair it
+	// from the shared bare repo (.repo.git) instead of falling back to mayor/rig.
+	// Falling back to mayor/rig causes the refinery to operate in the mayor's
+	// clone, which can interfere with mayor operations and confuse agents.
 	refineryRigDir := filepath.Join(m.rig.Path, "refinery", "rig")
 	if _, err := os.Stat(refineryRigDir); os.IsNotExist(err) {
-		// Fall back to mayor/rig (legacy architecture) - ensures we use project git, not town git.
-		// Using rig.Path directly would find town's .git with rig-named remotes instead of "origin".
-		refineryRigDir = filepath.Join(m.rig.Path, "mayor", "rig")
+		if repairErr := m.repairRefineryWorktree(refineryRigDir); repairErr != nil {
+			// Repair failed — fall back to mayor/rig as last resort.
+			_, _ = fmt.Fprintf(m.output, "⚠ Could not repair refinery worktree: %v (falling back to mayor/rig)\n", repairErr)
+			refineryRigDir = filepath.Join(m.rig.Path, "mayor", "rig")
+		}
 	}
 
 	// Ensure runtime settings exist in the shared refinery parent directory.
@@ -221,6 +228,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	}
 
 	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)
+	_ = runtime.DeliverStartupPromptFallback(t, sessionID, initialPrompt, runtimeConfig, constants.ClaudeStartTimeout)
 
 	// Stream refinery's Claude Code JSONL conversation log to VictoriaLogs (opt-in).
 	if os.Getenv("GT_LOG_AGENT_OUTPUT") == "true" && os.Getenv("GT_OTEL_LOGS_URL") != "" {
@@ -233,6 +241,43 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	session.RecordAgentInstantiateFromDir(context.Background(), runID, runtimeConfig.ResolvedAgent,
 		"refinery", "refinery", sessionID, m.rig.Name, townRoot, "", refineryRigDir)
 
+	return nil
+}
+
+// repairRefineryWorktree recreates a missing refinery/rig worktree from the
+// shared bare repo (.repo.git). The refinery worktree is created during
+// `gt rig add` but can be lost if `git worktree prune` runs, the directory
+// is deleted, or the .git file becomes corrupted. This self-heals on startup
+// instead of requiring manual intervention.
+func (m *Manager) repairRefineryWorktree(refineryRigDir string) error {
+	bareRepoPath := filepath.Join(m.rig.Path, ".repo.git")
+	if _, err := os.Stat(bareRepoPath); os.IsNotExist(err) {
+		return fmt.Errorf("bare repo not found at %s", bareRepoPath)
+	}
+
+	// Ensure parent directory exists
+	if err := os.MkdirAll(filepath.Dir(refineryRigDir), 0755); err != nil {
+		return fmt.Errorf("creating refinery dir: %w", err)
+	}
+
+	// Prune stale worktree entries so git doesn't reject the add
+	bareGit := git.NewGitWithDir(bareRepoPath, "")
+	_ = bareGit.WorktreePrune()
+
+	// Create worktree on the rig's default branch
+	defaultBranch := m.rig.DefaultBranch()
+	if err := bareGit.WorktreeAddExisting(refineryRigDir, defaultBranch); err != nil {
+		return fmt.Errorf("git worktree add: %w", err)
+	}
+
+	// Configure hooks path (matches rig add behavior)
+	refineryGit := git.NewGit(refineryRigDir)
+	if err := refineryGit.ConfigureHooksPath(); err != nil {
+		// Non-fatal: worktree is usable without hooks
+		_, _ = fmt.Fprintf(m.output, "⚠ Could not configure hooks for repaired worktree: %v\n", err)
+	}
+
+	_, _ = fmt.Fprintf(m.output, "✓ Auto-repaired missing refinery worktree at %s\n", refineryRigDir)
 	return nil
 }
 
@@ -259,7 +304,7 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 	// Query beads for open merge-request issues
 	// BeadsPath() returns the git-synced beads location
 	b := beads.New(m.rig.BeadsPath())
-	issues, err := b.List(beads.ListOptions{
+	issues, err := b.ListMergeRequests(beads.ListOptions{
 		Label:    "gt:merge-request",
 		Status:   "open",
 		Priority: -1, // No priority filter
@@ -276,6 +321,13 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 		if issue == nil || issue.Status != "open" {
 			continue
 		}
+
+		// Filter by rig — wisps are shared across all rigs (GH#2718).
+		fields := beads.ParseMRFields(issue)
+		if fields != nil && fields.Rig != "" && !strings.EqualFold(fields.Rig, m.rig.Name) {
+			continue
+		}
+
 		score := m.calculateIssueScore(issue, now)
 		scored = append(scored, scoredIssue{issue: issue, score: score})
 	}

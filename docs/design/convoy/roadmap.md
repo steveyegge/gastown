@@ -267,12 +267,46 @@ dispatch strategy (Phase 1 feeder with blocks checking) covers the
 common case. The coordinator polecat is for complex epics where
 AI-driven task selection outperforms static dependency ordering.
 
+### Milestone 5: Mountain-Eater (autonomous epic grinding)
+
+**Goal:** Layer agent-driven judgment on top of the mechanical
+ConvoyManager so that large epics grind to completion autonomously.
+
+**Depends on:** Milestone 2 (stage-launch) for the `gt convoy stage/launch`
+pipeline that mountains build on.
+
+**Design doc:** [mountain-eater.md](mountain-eater.md)
+
+**What ships:**
+
+| Component | Description |
+|-----------|-------------|
+| `gt mountain <epic>` | CLI: validate + stage + label + launch |
+| `gt mountain status` | CLI: rich progress view (active, ready, blocked, skipped) |
+| `gt mountain pause/resume/cancel` | CLI: lifecycle management |
+| Witness failure tracking | Patrol step: count polecat failures per convoy issue, auto-skip after 3 |
+| Deacon mountain-audit | Patrol step: periodic progress check, dispatch Dog on stall |
+| `mol-mountain-dog` formula | Dog formula: investigate stall, sling orphaned issues, escalate |
+| ConvoyManager skip-after-N | Global: stranded scan stops re-slinging repeatedly-failed issues |
+| Enhanced convoy status | Global: `gt convoy status` shows active polecats, ready front, blocked issues |
+
+**Key insight:** No agent holds the thread. The `mountain` label on a
+convoy triggers patrol behavior in Witness (failure tracking) and Deacon
+(progress audit). Dogs bring fresh context to stall investigation. The
+ConvoyManager's mechanical feeding handles the happy path; the judgment
+layers handle the 20% that gets stuck.
+
+**Global improvements (benefit all convoys):**
+- Polecat failure tracking (Witness)
+- Skip-after-N-failures in stranded scan (ConvoyManager)
+- Enhanced `gt convoy status` output
+
 ---
 
 ## Dependency graph
 
 ```
-Milestone 0: Foundation  ← rewrite MERGED, safety guards in PR [#1759](https://github.com/steveyegge/gastown/pull/1759)
+Milestone 0: Foundation  ← MERGED
   │
   ├──────────────────────────┐
   │                          │
@@ -280,18 +314,21 @@ Milestone 0: Foundation  ← rewrite MERGED, safety guards in PR [#1759](https:/
 Milestone 1: Pipeline    Milestone 2: Stage/Launch
   (done/refinery fixes)    (gt convoy stage/launch)
   │                          │
-  │                          v
-  │                      Milestone 3: Sub-epic review gate
-  │                          │
-  └──────────┬───────────────┘
-             │
-             v
-         Milestone 4: Advanced dispatch
+  │                          ├───────────────────────┐
+  │                          v                       v
+  │                      Milestone 3: Review gate  Milestone 5: Mountain-Eater
+  │                          │                       │
+  └──────────┬───────────────┘                       │
+             │                                       │
+             v                                       │
+         Milestone 4: Advanced dispatch ◄────────────┘
 ```
 
 Milestones 1 and 2 are independent and can run in parallel.
 Milestone 3 depends on Milestone 2 (needs epic status management).
 Milestone 4 depends on both 2 and 3 being stable.
+Milestone 5 depends on Milestone 2 (uses stage-launch pipeline).
+Milestones 3 and 5 are independent and can run in parallel.
 
 ---
 
@@ -330,8 +367,9 @@ more reliable.
    (fixes "tasks don't land" for everyone). Milestone 2 enables the
    staged convoy UX. These can run in parallel.
 
-3. **After M2:** Milestone 3 (sub-epic review gate) is the key piece
-   connecting design-to-beads output to the full automated workflow.
+3. **After M2:** Milestone 3 (sub-epic review gate) and Milestone 5
+   (Mountain-Eater) can run in parallel. Milestone 5 is the "go to lunch"
+   autonomous grinding feature. Milestone 3 is the review quality gate.
 
 4. **Later:** Milestone 4 (advanced dispatch) when the common case is
    stable.
