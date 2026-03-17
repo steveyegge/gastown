@@ -583,11 +583,14 @@ func TestCreatePolecatCLAUDEmd(t *testing.T) {
 	}
 }
 
-func TestCreatePolecatCLAUDEmd_AppendsToExisting(t *testing.T) {
+func TestCreatePolecatCLAUDEmd_AppendsToTownRootContent(t *testing.T) {
 	dir := t.TempDir()
 
-	// Write a pre-existing CLAUDE.md (e.g., tracked in the repo or town-root content)
-	existing := "# Project CLAUDE.md\nSome repo-specific instructions.\n"
+	// Write a CLAUDE.md with the exact town-root template content that gets
+	// tracked in repos. This is the real-world scenario: gt install creates
+	// ~/gt/CLAUDE.md with Dolt operational awareness, the user commits it to
+	// their repo, and git worktree add checks it out in the polecat worktree.
+	existing := TownRootCLAUDEmd()
 	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte(existing), 0644); err != nil {
 		t.Fatalf("writing existing CLAUDE.md: %v", err)
 	}
@@ -607,8 +610,8 @@ func TestCreatePolecatCLAUDEmd_AppendsToExisting(t *testing.T) {
 	content := string(data)
 
 	// Original content preserved
-	if !strings.Contains(content, "Project CLAUDE.md") {
-		t.Error("existing CLAUDE.md content was not preserved")
+	if !strings.Contains(content, "Dolt Server") {
+		t.Error("existing town-root CLAUDE.md content was not preserved")
 	}
 
 	// Polecat lifecycle instructions appended
@@ -646,5 +649,109 @@ func TestCreatePolecatCLAUDEmd_SkipsWhenAlreadyProvisioned(t *testing.T) {
 	data2, _ := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
 	if string(data1) != string(data2) {
 		t.Fatal("file was modified on second call — should be idempotent")
+	}
+}
+
+// TestCreatePolecatCLAUDEmd_ReusePath simulates the polecat reuse scenario:
+// 1. Worktree has tracked CLAUDE.md from repo (town-root Dolt content)
+// 2. CreatePolecatCLAUDEmd appends lifecycle instructions
+// 3. git reset --hard restores the tracked version (losing our append)
+// 4. CreatePolecatCLAUDEmd must re-append on the second call
+//
+// This is the exact bug that caused polecats to never call gt done:
+// ReuseIdlePolecat runs git reset --hard + git clean -f, which nukes
+// the appended instructions, and then never re-provisioned them.
+func TestCreatePolecatCLAUDEmd_ReusePath(t *testing.T) {
+	dir := t.TempDir()
+	claudePath := filepath.Join(dir, "CLAUDE.md")
+
+	// Step 1: Simulate tracked CLAUDE.md from repo (town-root content)
+	townRoot := TownRootCLAUDEmd()
+	if err := os.WriteFile(claudePath, []byte(townRoot), 0644); err != nil {
+		t.Fatalf("writing tracked CLAUDE.md: %v", err)
+	}
+
+	// Step 2: First provision — appends lifecycle instructions
+	created, err := CreatePolecatCLAUDEmd(dir, "greenplace", "furiosa")
+	if err != nil {
+		t.Fatalf("first CreatePolecatCLAUDEmd() error = %v", err)
+	}
+	if !created {
+		t.Fatal("first call should append to existing file")
+	}
+
+	data, _ := os.ReadFile(claudePath)
+	if !strings.Contains(string(data), polecatLifecycleMarker) {
+		t.Fatal("lifecycle marker not found after first provision")
+	}
+
+	// Step 3: Simulate git reset --hard (restores tracked version without our append)
+	if err := os.WriteFile(claudePath, []byte(townRoot), 0644); err != nil {
+		t.Fatalf("simulating git reset --hard: %v", err)
+	}
+
+	// Verify the reset removed our instructions
+	data, _ = os.ReadFile(claudePath)
+	if strings.Contains(string(data), polecatLifecycleMarker) {
+		t.Fatal("git reset simulation should have removed lifecycle marker")
+	}
+
+	// Step 4: Second provision (reuse path) — must re-append
+	created, err = CreatePolecatCLAUDEmd(dir, "greenplace", "furiosa")
+	if err != nil {
+		t.Fatalf("second CreatePolecatCLAUDEmd() error = %v", err)
+	}
+	if !created {
+		t.Fatal("second call should re-append after git reset removed our instructions")
+	}
+
+	data, _ = os.ReadFile(claudePath)
+	content := string(data)
+
+	// Both original and appended content should be present
+	if !strings.Contains(content, "Dolt Server") {
+		t.Error("town-root content lost after re-provision")
+	}
+	if !strings.Contains(content, polecatLifecycleMarker) {
+		t.Fatal("lifecycle marker not found after re-provision")
+	}
+	if !strings.Contains(content, "gt done") {
+		t.Fatal("gt done instructions not found after re-provision")
+	}
+}
+
+// TestCreatePolecatCLAUDEmd_GitCleanScenario simulates git clean -f removing
+// an untracked CLAUDE.md (repo without tracked CLAUDE.md), then re-provisioning.
+func TestCreatePolecatCLAUDEmd_GitCleanScenario(t *testing.T) {
+	dir := t.TempDir()
+	claudePath := filepath.Join(dir, "CLAUDE.md")
+
+	// Step 1: First provision — creates fresh file
+	created, err := CreatePolecatCLAUDEmd(dir, "greenplace", "nux")
+	if err != nil {
+		t.Fatalf("first CreatePolecatCLAUDEmd() error = %v", err)
+	}
+	if !created {
+		t.Fatal("first call should create file")
+	}
+
+	// Step 2: Simulate git clean -f (removes untracked files)
+	os.Remove(claudePath)
+	if _, err := os.Stat(claudePath); !os.IsNotExist(err) {
+		t.Fatal("git clean simulation should have removed CLAUDE.md")
+	}
+
+	// Step 3: Re-provision after clean
+	created, err = CreatePolecatCLAUDEmd(dir, "greenplace", "nux")
+	if err != nil {
+		t.Fatalf("second CreatePolecatCLAUDEmd() error = %v", err)
+	}
+	if !created {
+		t.Fatal("second call should re-create file after git clean")
+	}
+
+	data, _ := os.ReadFile(claudePath)
+	if !strings.Contains(string(data), "gt done") {
+		t.Fatal("gt done instructions not found after re-creation")
 	}
 }
