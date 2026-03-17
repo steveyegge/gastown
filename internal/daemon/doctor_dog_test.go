@@ -33,10 +33,14 @@ func TestDoctorDogInterval(t *testing.T) {
 }
 
 func TestDoctorDogDatabases(t *testing.T) {
-	// Default databases
+	// Default databases: minimal universal fallback ("hq" only).
+	// Rig-specific databases vary by deployment and must be configured explicitly.
 	dbs := doctorDogDatabases(nil)
-	if len(dbs) != 6 {
-		t.Errorf("expected 6 default databases, got %d", len(dbs))
+	if len(dbs) != 1 {
+		t.Errorf("expected 1 default database, got %d: %v", len(dbs), dbs)
+	}
+	if len(dbs) > 0 && dbs[0] != "hq" {
+		t.Errorf("expected default database to be %q, got %q", "hq", dbs[0])
 	}
 
 	// Custom databases

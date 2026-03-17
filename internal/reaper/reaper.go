@@ -21,11 +21,11 @@ import (
 // validDBName matches safe database names (alphanumeric + underscore only).
 var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
-// DefaultDatabases is the static fallback list of known production databases.
-// Used only when SHOW DATABASES fails (server unreachable).
-// The production databases are: hq (town beads), gt (gastown rig beads),
-// mo (monorepo rig beads).
-var DefaultDatabases = []string{"hq", "gt", "mo"}
+// DefaultDatabases is the minimal fallback list used only when SHOW DATABASES
+// fails (server unreachable). "hq" is the only database universally present
+// in all gastown deployments. Rig-specific databases vary by installation
+// and should be discovered dynamically via DiscoverDatabases.
+var DefaultDatabases = []string{"hq"}
 
 // testPollutionPrefixes are database name prefixes created by tests.
 var testPollutionPrefixes = []string{"testdb_", "beads_t", "beads_pt", "doctest_"}

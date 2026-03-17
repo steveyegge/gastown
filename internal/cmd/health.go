@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/health"
+	"github.com/steveyegge/gastown/internal/reaper"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -172,7 +173,7 @@ func checkServerHealth(townRoot string) *ServerHealth {
 }
 
 func checkDatabaseHealth(port int) []DatabaseHealth {
-	productionDBs := []string{"hq", "gt", "mo"}
+	productionDBs := reaper.DiscoverDatabases("127.0.0.1", port)
 	var results []DatabaseHealth
 
 	for _, dbName := range productionDBs {
@@ -208,7 +209,7 @@ func checkDatabaseHealth(port int) []DatabaseHealth {
 }
 
 func checkPollution(port int) []PollutionRecord {
-	productionDBs := []string{"hq", "gt", "mo"}
+	productionDBs := reaper.DiscoverDatabases("127.0.0.1", port)
 	var records []PollutionRecord
 
 	// Known pollution patterns to check in the issues table.

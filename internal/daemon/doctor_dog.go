@@ -86,7 +86,10 @@ func doctorDogDatabases(config *DaemonPatrolConfig) []string {
 			return config.Patrols.DoctorDog.Databases
 		}
 	}
-	return []string{"hq", "gt", "mo"}
+	// "hq" is the only database universally present in all gastown deployments.
+	// Rig-specific databases vary by installation. Configure via DoctorDogConfig.Databases
+	// or discover dynamically for the full list.
+	return []string{"hq"}
 }
 
 // runDoctorDog pours a mol-dog-doctor molecule for agent execution.

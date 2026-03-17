@@ -32,7 +32,7 @@ whether the other layers work.
 
 ```bash
 DOLT_DATA_DIR="$HOME/gt/.dolt-data"
-PROD_DBS=("hq" "gt" "mo")
+PROD_DBS=("hq")  # Add your rig databases here (e.g. "gt" "mo"). "hq" is universal.
 JSONL_EXPORT_DIR="$HOME/gt/.dolt-archive/jsonl"
 DOLT_HOST="127.0.0.1"
 DOLT_PORT=3307
