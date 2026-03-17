@@ -240,9 +240,8 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	//   2. If in wisps table (open) → ensure gt:agent label
 	//   3. If exists but closed → REOPEN it (don't recreate)
 	//   4. If truly missing → CREATE it
-	// Uses CreateAgentBead which tries --ephemeral first and falls back to
-	// non-ephemeral if the subprocess crashes (GH#1769: Dolt nil pointer
-	// dereference when wisps table doesn't exist on fresh rigs).
+	// Uses CreateAgentBead which creates agent beads with --no-history
+	// (durable issues, not wisps) so they survive wisp GC (GH#2768).
 	// workDir is the rig directory for direct SQL fallback when bd update
 	// fails silently (e.g., legacy prefixes that can't be routed — GH#2127).
 	fixAgentBead := func(bd *beads.Beads, workDir, id, desc string, fields *beads.AgentFields) error {

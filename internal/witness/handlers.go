@@ -1310,6 +1310,15 @@ func detectZombieDeadSession(bd *BdCli, workDir, townRoot, rigName, polecatName,
 		return ZombieResult{}, false
 	}
 
+	// GH#2795: A "done" or "nuked" polecat with a dead session has completed
+	// or been intentionally stopped. The dead session is expected — the hook
+	// bead may not be "closed" yet (refinery queue, manual cleanup), but the
+	// polecat is not a zombie. Without this check, isZombieState returns true
+	// on every patrol cycle (hookBead != ""), flooding the mayor inbox.
+	if typedState == beads.AgentStateDone || typedState == beads.AgentStateNuked {
+		return ZombieResult{}, false
+	}
+
 	// GH#2036: Spawning polecats have hook_bead assigned but no tmux session yet.
 	// This is expected during worktree creation and session startup. Skip zombie
 	// detection if the polecat has been spawning for less than SpawnGracePeriod.

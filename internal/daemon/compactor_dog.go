@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -444,10 +446,17 @@ func (d *Daemon) surgicalRebaseOnce(dbName string, keepRecent int) error {
 	d.logger.Printf("compactor_dog: %s: interactive rebase started", dbName)
 
 	// Step 4: Read rebase plan bounds and mark old commits as squash.
-	var minOrder, maxOrder int
-	if err := db.QueryRowContext(ctx, "SELECT MIN(rebase_order), MAX(rebase_order) FROM dolt_rebase").Scan(&minOrder, &maxOrder); err != nil {
+	// Dolt returns rebase_order as DECIMAL — the MySQL driver delivers it as
+	// []uint8 (e.g. "1.00") which cannot be scanned directly into int.
+	var minOrderStr, maxOrderStr string
+	if err := db.QueryRowContext(ctx, "SELECT MIN(rebase_order), MAX(rebase_order) FROM dolt_rebase").Scan(&minOrderStr, &maxOrderStr); err != nil {
 		d.surgicalAbortAndCleanup(db, baseBranch, workBranch)
 		return fmt.Errorf("read rebase bounds: %w", err)
+	}
+	minOrder, maxOrder, err := parseRebaseOrder2(minOrderStr, maxOrderStr)
+	if err != nil {
+		d.surgicalAbortAndCleanup(db, baseBranch, workBranch)
+		return fmt.Errorf("parse rebase bounds: %w", err)
 	}
 
 	squashThreshold := maxOrder - keepRecent
@@ -544,6 +553,21 @@ func (d *Daemon) surgicalAbortAndCleanup(db *sql.DB, baseBranch, workBranch stri
 	_, _ = db.ExecContext(ctx, "CALL DOLT_CHECKOUT('main')")
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", workBranch))
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", baseBranch))
+}
+
+// parseRebaseOrder2 parses min/max rebase_order DECIMAL strings to ints.
+// Dolt's dolt_rebase table returns rebase_order as DECIMAL which the MySQL
+// driver delivers as []uint8 (e.g. "1.00"), not directly scannable to int.
+func parseRebaseOrder2(minStr, maxStr string) (int, int, error) {
+	minF, err := strconv.ParseFloat(minStr, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid min rebase_order %q: %w", minStr, err)
+	}
+	maxF, err := strconv.ParseFloat(maxStr, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid max rebase_order %q: %w", maxStr, err)
+	}
+	return int(math.Round(minF)), int(math.Round(maxF)), nil
 }
 
 // surgicalCleanupBase removes only the base branch (work branch not yet created).

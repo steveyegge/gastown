@@ -742,7 +742,7 @@ case "$*" in
     # bdDepListRawIDs down: return tracked bead IDs
     echo '[{"depends_on_id":"external:ghostty:ghostty-1i4.3"},{"depends_on_id":"external:ghostty:ghostty-1i4.4"}]'
     ;;
-  "dep list hq-cv-ext --direction=down --type=tracks --json")
+  "dep list hq-cv-ext --direction=down --type=tracks --allow-stale --json")
     echo '[{"id":"external:ghostty:ghostty-1i4.3"},{"id":"external:ghostty:ghostty-1i4.4"}]'
     ;;
   "dep list hq-cv-ext --json")

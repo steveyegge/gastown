@@ -2302,8 +2302,11 @@ func getTrackedIssues(townBeads, convoyID string) ([]trackedIssueInfo, error) {
 
 // bdDepListTracked runs `bd dep list <convoyID> --direction=down --type=tracks --json`
 // and returns the tracked issue IDs (unwrapped from external: prefixes).
+// Uses --allow-stale for consistency with sling's other bd calls (verifyBeadExists,
+// bdShowBead) — without it, a jsonl write that straddles a second boundary causes
+// "database out of sync" errors in CI and fast-turnaround production workflows.
 func bdDepListTracked(dir, convoyID string) ([]string, error) {
-	out, err := runBdJSON(dir, "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
+	out, err := runBdJSON(dir, "dep", "list", convoyID, "--direction=down", "--type=tracks", "--allow-stale", "--json")
 	if err != nil {
 		return nil, err
 	}

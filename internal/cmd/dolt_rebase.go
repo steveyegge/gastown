@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
+	"strconv"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -189,10 +191,18 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Rebase plan: %d commits\n", totalPlan)
 
 	// Calculate how many to squash: everything except first (must stay pick) and last N.
-	var minOrder, maxOrder int
-	if err := db.QueryRowContext(ctx, "SELECT MIN(rebase_order), MAX(rebase_order) FROM dolt_rebase").Scan(&minOrder, &maxOrder); err != nil {
+	// Dolt returns rebase_order as DECIMAL — the MySQL driver delivers it as
+	// []uint8 (e.g. "1.00") which cannot be scanned directly into int.
+	// Scan as string, parse to float, then truncate to int.
+	var minOrderStr, maxOrderStr string
+	if err := db.QueryRowContext(ctx, "SELECT MIN(rebase_order), MAX(rebase_order) FROM dolt_rebase").Scan(&minOrderStr, &maxOrderStr); err != nil {
 		rebaseAbortAndCleanup(db, baseBranch, workBranch)
 		return fmt.Errorf("getting rebase order range: %w", err)
+	}
+	minOrder, maxOrder, err := parseRebaseOrderRange(minOrderStr, maxOrderStr)
+	if err != nil {
+		rebaseAbortAndCleanup(db, baseBranch, workBranch)
+		return fmt.Errorf("parsing rebase order range: %w", err)
 	}
 
 	squashThreshold := maxOrder - doltRebaseKeepRecent
@@ -221,9 +231,13 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 		defer rows.Close()
 
 		for rows.Next() {
-			var order int
+			var orderStr string
 			var action, hash, msg string
-			if err := rows.Scan(&order, &action, &hash, &msg); err != nil {
+			if err := rows.Scan(&orderStr, &action, &hash, &msg); err != nil {
+				continue
+			}
+			order, err := parseRebaseOrder(orderStr)
+			if err != nil {
 				continue
 			}
 			marker := "pick"
@@ -354,6 +368,29 @@ func rebaseAbortAndCleanup(db *sql.DB, baseBranch, workBranch string) {
 //nolint:unparam // baseBranch always "compact-base" — API kept flexible for future callers
 func rebaseCleanupAll(db *sql.DB, baseBranch, workBranch string) {
 	rebaseCleanup(db, baseBranch, workBranch)
+}
+
+// parseRebaseOrder converts a rebase_order value (returned by Dolt as DECIMAL
+// string, e.g. "1.00") to an int.
+func parseRebaseOrder(s string) (int, error) {
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid rebase_order %q: %w", s, err)
+	}
+	return int(math.Round(f)), nil
+}
+
+// parseRebaseOrderRange parses min/max rebase_order strings to ints.
+func parseRebaseOrderRange(minStr, maxStr string) (int, int, error) {
+	minVal, err := parseRebaseOrder(minStr)
+	if err != nil {
+		return 0, 0, err
+	}
+	maxVal, err := parseRebaseOrder(maxStr)
+	if err != nil {
+		return 0, 0, err
+	}
+	return minVal, maxVal, nil
 }
 
 // rebaseCleanupBase cleans up only the base branch (work branch not yet created).
