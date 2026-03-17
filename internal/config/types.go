@@ -1114,6 +1114,10 @@ type ThemeConfig struct {
 	// RoleThemes overrides themes for specific roles in this rig.
 	// Keys: "witness", "refinery", "crew", "polecat"
 	RoleThemes map[string]string `json:"role_themes,omitempty"`
+
+	// WindowTint controls window background (window-style) coloring for this rig.
+	// If nil, falls back to town-level window tint config.
+	WindowTint *WindowTint `json:"window_tint,omitempty"`
 }
 
 // CustomTheme allows specifying exact colors for the status bar.
@@ -1127,6 +1131,31 @@ type TownThemeConfig struct {
 	// RoleDefaults sets default themes for roles across all rigs.
 	// Keys: "witness", "refinery", "crew", "polecat"
 	RoleDefaults map[string]string `json:"role_defaults,omitempty"`
+
+	// WindowTint controls window background (window-style) coloring globally.
+	// Per-rig WindowTint in ThemeConfig takes precedence over this.
+	WindowTint *WindowTint `json:"window_tint,omitempty"`
+}
+
+// WindowTint controls window background (window-style) coloring.
+// Mirrors status bar theme customization: palette name, custom colors, per-role overrides.
+// When Enabled is nil or true, window backgrounds are tinted.
+// When Enabled is false, window backgrounds use terminal defaults.
+type WindowTint struct {
+	// Enabled controls whether window tinting is active.
+	// nil or true = enabled, false = disabled (window uses terminal default).
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Name picks a palette theme for the window background.
+	// If empty, falls back to the session's status bar theme colors.
+	Name string `json:"name,omitempty"`
+
+	// Custom overrides the palette with specific window background colors.
+	Custom *CustomTheme `json:"custom,omitempty"`
+
+	// RoleTints overrides window tint themes for specific roles.
+	// Keys: "witness", "refinery", "crew", "polecat"
+	RoleTints map[string]string `json:"role_tints,omitempty"`
 }
 
 // BuiltinRoleThemes returns the default themes for each role.

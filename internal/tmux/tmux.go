@@ -2727,11 +2727,14 @@ func (t *Tmux) ApplyTheme(session string, theme Theme) error {
 	return err
 }
 
-// ApplyWindowStyle sets the pane background (window-style) for a session.
-// This gives each session a distinct background color matching its theme,
-// complementing the status bar theme set by ApplyTheme.
-func (t *Tmux) ApplyWindowStyle(session string, theme Theme) error {
-	_, err := t.run("set-option", "-t", session, "window-style", theme.Style())
+// ApplyWindowStyle sets or resets the window background (window-style).
+// If ws is nil, resets to terminal defaults. If non-nil, applies the colors.
+func (t *Tmux) ApplyWindowStyle(session string, ws *WindowStyle) error {
+	style := "bg=default,fg=default"
+	if ws != nil {
+		style = ws.Style()
+	}
+	_, err := t.run("set-option", "-t", session, "window-style", style)
 	return err
 }
 
@@ -2802,9 +2805,16 @@ func (t *Tmux) SetDynamicStatus(session string) error {
 // ConfigureGasTownSession applies full Gas Town theming to a session.
 // This is a convenience method that applies theme, status format, dynamic status,
 // and pane background (window-style).
+//
+// Window background is controlled by theme.Window:
+//   - non-nil: apply Window's colors as the window background
+//   - nil: reset window background to terminal defaults (disabled)
 func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker, role string) error {
 	if err := t.ApplyTheme(session, theme); err != nil {
 		return fmt.Errorf("applying theme: %w", err)
+	}
+	if err := t.ApplyWindowStyle(session, theme.Window); err != nil {
+		return fmt.Errorf("applying window style: %w", err)
 	}
 	if err := t.SetStatusFormat(session, rig, worker, role); err != nil {
 		return fmt.Errorf("setting status format: %w", err)

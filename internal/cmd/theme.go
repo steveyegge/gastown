@@ -80,6 +80,7 @@ func init() {
 	themeCmd.AddCommand(themeCLICmd)
 	themeCmd.Flags().BoolVarP(&themeListFlag, "list", "l", false, "List available themes")
 	themeApplyCmd.Flags().BoolVarP(&themeApplyAllFlag, "all", "a", false, "Apply to all rigs, not just current")
+
 }
 
 func runTheme(cmd *cobra.Command, args []string) error {
@@ -195,12 +196,20 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 			theme = getThemeForRole(rig, role)
 		}
 
-		// Apply theme, window style, and status format
+		// Resolve window tint from config.
+		// If ResolveWindowTint returns nil (no explicit window tint configured),
+		// check if window tinting is enabled — if so, match the status bar colors.
+		theme.Window = session.ResolveWindowTint(rig, role)
+		if theme.Window == nil && session.IsWindowTintEnabled(rig) {
+			theme.Window = &tmux.WindowStyle{BG: theme.BG, FG: theme.FG}
+		}
+
+		// Apply theme and pane tint
 		if err := t.ApplyTheme(sess, theme); err != nil {
 			fmt.Printf("  %s: failed (%v)\n", sess, err)
 			continue
 		}
-		if err := t.ApplyWindowStyle(sess, theme); err != nil {
+		if err := t.ApplyWindowStyle(sess, theme.Window); err != nil {
 			fmt.Printf("  %s: failed to set window style (%v)\n", sess, err)
 			continue
 		}
