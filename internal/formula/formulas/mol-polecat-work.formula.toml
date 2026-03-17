@@ -70,7 +70,7 @@ spawning → working → mr_submitted → awaiting_verdict
 | Unsure what to do | Mail Witness, don't guess |
 | Max fix attempts exceeded | Mail Witness, enter stuck state |"""
 formula = "mol-polecat-work"
-version = 9
+version = 10
 
 [[steps]]
 id = "load-context"
@@ -245,7 +245,9 @@ deliverable. There are no code changes to commit. You MUST persist all findings
 to the bead via --notes or --design. Without this, your entire work product is
 lost when the session ends.
 
-**Commit frequently (for code tasks):**
+**Commit as you go (MANDATORY for code tasks):**
+Your session can die at any point. Uncommitted code is LOST code. Commit after
+every logical unit of work — do NOT wait until "implementation is done."
 ```bash
 # After each logical unit of work:
 git add <files>
@@ -272,12 +274,68 @@ Problem: <what's blocking you>
 Tried: <what you've attempted>"
 ```
 
-**Exit criteria:** Implementation complete. Code tasks: all changes committed. Report tasks: all findings persisted to bead."""
+**Exit criteria (HARD GATE):** Implementation complete AND code committed to git.
+- Code tasks: `git status` shows clean working tree, `git log origin/{{base_branch}}..HEAD` shows at least 1 commit
+- Report tasks: all findings persisted to bead via --notes or --design
+Do NOT proceed to the next step with uncommitted changes."""
+
+[[steps]]
+id = "commit-changes"
+title = "Commit all implementation changes"
+needs = ["implement"]
+description = """
+Ensure ALL implementation work is committed IMMEDIATELY after implementation.
+This step exists to prevent the #1 polecat failure mode: context exhaustion
+before code is committed. Commit NOW, review and build AFTER.
+
+**CRITICAL: You MUST commit all changes from implementation.**
+NEVER use `git checkout -- .` or `git restore .` to discard implementation work.
+ALWAYS commit ALL uncommitted changes from your implementation.
+
+**1. Check for uncommitted changes:**
+```bash
+git status
+```
+
+**2. If there are ANY uncommitted changes, commit them now:**
+```bash
+git add -A && git commit -m "<type>: <descriptive message> ({{issue}})"
+```
+
+**3. If working tree is already clean, that's fine — but you MUST still have commits (step 4).**
+
+**4. VERIFY commits exist (HARD GATE — do NOT close this step without passing):**
+```bash
+git log origin/{{base_branch}}..HEAD --oneline
+```
+
+This MUST show at least 1 commit. If it shows NOTHING:
+- You have NOT completed your implementation. Do NOT close this step.
+- Go back to the implement step and do the work.
+- If the task genuinely requires no code changes (already fixed upstream, etc.),
+  run `gt done --status DEFERRED` and skip remaining steps.
+- Do NOT proceed to review or build with zero commits.
+
+**5. VERIFY clean working tree:**
+```bash
+git status
+```
+Must show "nothing to commit, working tree clean".
+
+**Report-only tasks (audits, reviews, research — no code changes):**
+If your task produced no code changes, verify your findings are persisted to the bead:
+```bash
+bd show {{issue}}    # Check notes/design fields have your findings
+```
+If findings are persisted, proceed to review. Report-only tasks with findings
+persisted can skip commit verification.
+
+**Exit criteria:** Working tree clean AND either (a) at least 1 commit ahead of origin/{{base_branch}}, or (b) report-only task with findings persisted to bead."""
 
 [[steps]]
 id = "self-review"
 title = "Self-review changes"
-needs = ["implement"]
+needs = ["commit-changes"]
 description = """
 Review your own changes before the build check. Use `/review --branch` for
 structured grading, or do a manual review.
@@ -380,60 +438,9 @@ If lint_command is set:
 **Exit criteria:** Code compiles. Obvious regressions caught. Ready to submit."""
 
 [[steps]]
-id = "commit-changes"
-title = "Commit all implementation changes"
-needs = ["build-check"]
-description = """
-Ensure ALL implementation work is committed before cleanup.
-
-**CRITICAL: You MUST commit all changes from implementation.**
-NEVER use `git checkout -- .` or `git restore .` to discard implementation work.
-ALWAYS commit ALL uncommitted changes from your implementation.
-
-**1. Check for uncommitted changes:**
-```bash
-git status
-```
-
-**2. If there are ANY uncommitted changes, commit them now:**
-```bash
-git add -A && git commit -m "<type>: <descriptive message> ({{issue}})"
-```
-
-**3. If working tree is already clean, that's fine — but you MUST still have commits (step 4).**
-
-**4. VERIFY commits exist (HARD GATE — do NOT close this step without passing):**
-```bash
-git log origin/{{base_branch}}..HEAD --oneline
-```
-
-This MUST show at least 1 commit. If it shows NOTHING:
-- You have NOT completed your implementation. Do NOT close this step.
-- Go back to the implement step and do the work.
-- If the task genuinely requires no code changes (already fixed upstream, etc.),
-  run `gt done --status DEFERRED` and skip remaining steps.
-- Do NOT proceed to cleanup or submit with zero commits.
-
-**5. VERIFY clean working tree:**
-```bash
-git status
-```
-Must show "nothing to commit, working tree clean".
-
-**Report-only tasks (audits, reviews, research — no code changes):**
-If your task produced no code changes, verify your findings are persisted to the bead:
-```bash
-bd show {{issue}}    # Check notes/design fields have your findings
-```
-If findings are persisted, proceed to cleanup. `gt done --cleanup-status clean`
-handles the no-commit case for report-only tasks.
-
-**Exit criteria:** Working tree clean AND either (a) at least 1 commit ahead of origin/{{base_branch}}, or (b) report-only task with findings persisted to bead."""
-
-[[steps]]
 id = "pre-verify"
 title = "Pre-merge rebase verification"
-needs = ["commit-changes"]
+needs = ["build-check"]
 description = """
 Rebase onto the target branch and run the full gate suite. This enables the
 refinery to fast-path merge your MR without re-running gates (~5s merge

@@ -363,7 +363,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			return fmt.Errorf("cannot complete: working directory not available (worktree deleted?)\nUse --status DEFERRED to exit without completing")
 		}
 
-		// Block if there are uncommitted changes (would be lost on completion).
+		// Check for uncommitted changes (would be lost on completion).
 		// Runtime artifacts (.claude/, .beads/, .runtime/, __pycache__/) are
 		// excluded — these are toolchain-managed and normally gitignored.
 		// Without this filter, gt done fails on virtually every polecat because
@@ -373,7 +373,24 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			return fmt.Errorf("checking git status: %w", err)
 		}
 		if workStatus.HasUncommittedChanges && !workStatus.CleanExcludingRuntime() {
-			return fmt.Errorf("cannot complete: uncommitted changes would be lost\nCommit your changes first, or use --status DEFERRED to exit without completing\nUncommitted: %s", workStatus.String())
+			// Auto-commit safety net (gt-ou68): Instead of blocking with an error,
+			// auto-commit uncommitted work. This is the #1 polecat failure mode —
+			// polecats complete implementation but exit before committing. The formula
+			// already tells them to commit, but if they reach gt done with uncommitted
+			// changes, saving their work is more important than failing the command.
+			autoMsg := fmt.Sprintf("chore: auto-commit uncommitted work (%s)", issueID)
+			if issueID == "" {
+				autoMsg = "chore: auto-commit uncommitted work before gt done"
+			}
+			style.PrintWarning("uncommitted changes detected — auto-committing to prevent work loss")
+			fmt.Printf("  Files: %s\n", workStatus.String())
+			if addErr := g.Add("."); addErr != nil {
+				return fmt.Errorf("auto-commit failed (git add): %w\nCommit your changes manually, or use --status DEFERRED", addErr)
+			}
+			if commitErr := g.Commit(autoMsg); commitErr != nil {
+				return fmt.Errorf("auto-commit failed (git commit): %w\nCommit your changes manually, or use --status DEFERRED", commitErr)
+			}
+			fmt.Printf("  %s Auto-committed as: %s\n", style.Success.Render("✓"), autoMsg)
 		}
 
 		// Check if branch has commits ahead of origin/default
