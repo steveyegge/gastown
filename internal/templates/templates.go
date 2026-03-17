@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"text/template"
 
@@ -43,6 +44,9 @@ var templateFS embed.FS
 
 //go:embed launchd/*.plist systemd/*.service
 var supervisorFS embed.FS
+
+//go:embed polecat-CLAUDE.md
+var polecatCLAUDEmd string
 
 // Templates manages role and message templates.
 type Templates struct {
@@ -204,6 +208,30 @@ func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSessi
 	if err != nil {
 		return false, err
 	}
+
+	return true, os.WriteFile(claudePath, []byte(content), 0644)
+}
+
+// CreatePolecatCLAUDEmd writes the polecat CLAUDE.md template to the worktree.
+// This is the primary mechanism for polecats to learn about `gt done` and other
+// lifecycle commands — the file persists across compaction and session restarts.
+//
+// Returns (created bool, error) - created is false if file already exists.
+// Existing files are preserved to respect user customizations.
+func CreatePolecatCLAUDEmd(worktreePath, rigName, polecatName string) (bool, error) {
+	claudePath := filepath.Join(worktreePath, "CLAUDE.md")
+
+	// Check if file already exists - preserve user customizations
+	if _, err := os.Stat(claudePath); err == nil {
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+
+	// Simple string replacement for {{rig}} and {{name}} placeholders
+	content := polecatCLAUDEmd
+	content = strings.ReplaceAll(content, "{{rig}}", rigName)
+	content = strings.ReplaceAll(content, "{{name}}", polecatName)
 
 	return true, os.WriteFile(claudePath, []byte(content), 0644)
 }
