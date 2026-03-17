@@ -184,7 +184,7 @@ func flattenGetRowCounts(db *sql.DB, dbName string) (map[string]int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := fmt.Sprintf("SELECT table_name FROM information_schema.tables WHERE table_schema = '%s' AND table_name NOT LIKE 'dolt_%%'", dbName)
+	query := fmt.Sprintf("SELECT table_name FROM information_schema.tables WHERE table_schema = '%s' AND table_name NOT LIKE 'dolt_%%' AND table_type = 'BASE TABLE'", dbName)
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err

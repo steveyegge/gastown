@@ -445,7 +445,9 @@ func rebaseGetTableSchemas(db *sql.DB, dbName string) (map[string]string, error)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := fmt.Sprintf("SELECT table_name FROM information_schema.tables WHERE table_schema = '%s' AND table_name NOT LIKE 'dolt_%%'", dbName)
+	// Filter to BASE TABLE only — views return 4 columns from SHOW CREATE TABLE
+	// and don't need to be restored (they're recreated from their definition).
+	query := fmt.Sprintf("SELECT table_name FROM information_schema.tables WHERE table_schema = '%s' AND table_name NOT LIKE 'dolt_%%' AND table_type = 'BASE TABLE'", dbName)
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -463,26 +465,54 @@ func rebaseGetTableSchemas(db *sql.DB, dbName string) (map[string]string, error)
 
 	schemas := make(map[string]string, len(tables))
 	for _, table := range tables {
-		var tblName, ddl string
-		if err := db.QueryRowContext(ctx, fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", dbName, table)).Scan(&tblName, &ddl); err != nil {
+		// SHOW CREATE TABLE returns 2 columns for base tables (Table, Create Table)
+		// but 4 for views (View, Create View, charset, collation). Dolt's
+		// information_schema sometimes misreports views as BASE TABLE, so we
+		// handle both cases by scanning all columns dynamically.
+		showRows, err := db.QueryContext(ctx, fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", dbName, table))
+		if err != nil {
 			return nil, fmt.Errorf("schema for %s: %w", table, err)
 		}
-		schemas[table] = ddl
+		cols, err := showRows.Columns()
+		if err != nil {
+			showRows.Close()
+			return nil, fmt.Errorf("schema columns for %s: %w", table, err)
+		}
+		if !showRows.Next() {
+			showRows.Close()
+			return nil, fmt.Errorf("schema for %s: no rows returned", table)
+		}
+		vals := make([]sql.NullString, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := showRows.Scan(ptrs...); err != nil {
+			showRows.Close()
+			return nil, fmt.Errorf("schema for %s: %w", table, err)
+		}
+		showRows.Close()
+		// DDL is always in the second column regardless of column count.
+		if len(vals) >= 2 && vals[1].Valid {
+			schemas[table] = vals[1].String
+		}
 	}
 	return schemas, nil
 }
 
 // rebaseRestoreTable recreates a table dropped by squash and copies data from main.
-// Assumes we're on compact-work and main still exists with the original data.
+// Uses Dolt's revision database syntax (dbName/main) to read from main without
+// checking out the branch, avoiding concurrency issues with other connections.
 func rebaseRestoreTable(db *sql.DB, ctx context.Context, dbName, table, ddl string) error {
-	// Strip any IF NOT EXISTS and add it, in case the DDL doesn't have it.
+	// Recreate the table on compact-work.
 	createStmt := strings.Replace(ddl, "CREATE TABLE `"+table+"`", "CREATE TABLE IF NOT EXISTS `"+table+"`", 1)
 	if _, err := db.ExecContext(ctx, createStmt); err != nil {
 		return fmt.Errorf("recreate table: %w", err)
 	}
 
-	// Copy data from main branch using Dolt's AS OF syntax.
-	insertSQL := fmt.Sprintf("INSERT INTO `%s` SELECT * FROM `%s`.`%s` AS OF 'main'", table, dbName, table)
+	// Copy data from main using Dolt's revision database syntax: `db/branch`.`table`
+	// This reads from main without switching branches.
+	insertSQL := fmt.Sprintf("INSERT INTO `%s`.`%s` SELECT * FROM `%s/main`.`%s`", dbName, table, dbName, table)
 	if _, err := db.ExecContext(ctx, insertSQL); err != nil {
 		return fmt.Errorf("copy data from main: %w", err)
 	}
