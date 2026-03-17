@@ -212,6 +212,15 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// Don't bail out — try the bd create calls anyway (GH#1769).
 	_ = EnsureCustomTypes(targetDir)
 
+	// For routed cross-rig bead IDs, run bd from the town root so bd's own
+	// prefix router resolves the target once. Running from a rig worktree with
+	// a routed BEADS_DIR can double-stack the path for imported rigs.
+	target := b
+	townRoot := b.getTownRoot()
+	if townRoot != "" && ExtractPrefix(id) != "" {
+		target = NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
+	}
+
 	description := FormatAgentDescription(title, fields)
 
 	buildArgs := func() []string {
@@ -228,7 +237,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		}
 		// Default actor from BD_ACTOR env var for provenance tracking
 		// Uses getActor() to respect isolated mode (tests)
-		if actor := b.getActor(); actor != "" {
+		if actor := target.getActor(); actor != "" {
 			a = append(a, "--actor="+actor)
 		}
 		return a
@@ -237,9 +246,9 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// Create agent bead in the issues table with --no-history to skip
 	// git commit overhead. Agent beads are durable identities that must
 	// survive wisp GC (GH#2768).
-	out, err := b.run(buildArgs()...)
+	out, err := target.run(buildArgs()...)
 	if err != nil {
-		out, err = b.run(buildArgs()...)
+		out, err = target.run(buildArgs()...)
 		if err != nil {
 			// Both bd create attempts failed. Dolt server is required —
 			// no JSONL fallback. Surface the error directly.
@@ -259,7 +268,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// The fallback query (status=hooked + assignee) is unreliable for
 	// cross-database scenarios. Restoring per hq-gfg.
 	if fields != nil && fields.HookBead != "" {
-		if _, slotErr := b.run("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
+		if _, slotErr := target.run("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
 			// Non-fatal: fallback query may still find the work bead
 		}
 	}

@@ -148,6 +148,17 @@ func TestFindTownRoot(t *testing.T) {
 	if err := os.MkdirAll(deepDir, 0755); err != nil {
 		t.Fatal(err)
 	}
+	innerTown := filepath.Join(tmpDir, "imported", "gastown")
+	if err := os.MkdirAll(filepath.Join(innerTown, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(innerTown, "mayor", "town.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	innerDeepDir := filepath.Join(innerTown, "crew", "worker2")
+	if err := os.MkdirAll(innerDeepDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	tests := []struct {
 		name     string
@@ -157,6 +168,7 @@ func TestFindTownRoot(t *testing.T) {
 		{"from town root", tmpDir, tmpDir},
 		{"from mayor dir", mayorDir, tmpDir},
 		{"from deep nested dir", deepDir, tmpDir},
+		{"prefers outermost town root", innerDeepDir, tmpDir},
 		{"from non-town dir", t.TempDir(), ""},
 	}
 
