@@ -437,6 +437,7 @@ func TestValidatePostingName_RejectsPathTraversal(t *testing.T) {
 		{"../../../tmp/evil", true},
 		{"..\\windows\\evil", true},
 		{"sub/dir", true},
+		{"sub\\dir", true},
 		{"..", true},
 		{".", true},
 		{"", true},

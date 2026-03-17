@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -110,8 +109,8 @@ func runCrewPost(cmd *cobra.Command, args []string) error {
 	// Set the posting
 	postingName := args[1]
 
-	if strings.TrimSpace(postingName) == "" {
-		return fmt.Errorf("posting name cannot be empty")
+	if err := validatePostingName(postingName); err != nil {
+		return err
 	}
 
 	if settings.WorkerPostings == nil {

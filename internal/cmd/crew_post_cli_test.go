@@ -334,36 +334,18 @@ func TestCrewPostCLI_NEG_ClearWithExtraArg(t *testing.T) {
 	}
 }
 
-// 7.12: NEG path traversal stored as-is with warning
-func TestCrewPostCLI_NEG_PathTraversalStoredWithWarning(t *testing.T) {
-	townRoot, cleanup := setupTestTownForCrewPost(t, "testrig", "dave")
+// 7.12: NEG path traversal rejected by validatePostingName
+func TestCrewPostCLI_NEG_PathTraversalRejected(t *testing.T) {
+	_, cleanup := setupTestTownForCrewPost(t, "testrig", "dave")
 	defer cleanup()
 
 	crewRig = "testrig"
 
-	var runErr error
-	stderr := captureStderr(t, func() {
-		captureStdout(t, func() {
-			runErr = runCrewPost(&cobra.Command{}, []string{"dave", "../../etc/passwd"})
-		})
-	})
-
-	// crew post stores the name as-is (no validation on the name itself)
-	// but warns that no template exists
-	if runErr != nil {
-		t.Fatalf("expected success (stored as-is), got error: %v", runErr)
+	err := runCrewPost(&cobra.Command{}, []string{"dave", "../../etc/passwd"})
+	if err == nil {
+		t.Fatal("expected error for path traversal posting name")
 	}
-	if !strings.Contains(stderr, "Warning") {
-		t.Errorf("expected warning on stderr for path traversal name, got: %q", stderr)
-	}
-
-	// Verify it was stored
-	settingsPath := filepath.Join(townRoot, "testrig", "settings", "config.json")
-	loaded, err := config.LoadRigSettings(settingsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := loaded.WorkerPostings["dave"]; got != "../../etc/passwd" {
-		t.Errorf("WorkerPostings[dave] = %q, want %q", got, "../../etc/passwd")
+	if !strings.Contains(err.Error(), "path") {
+		t.Errorf("expected 'path' in error message, got: %v", err)
 	}
 }
