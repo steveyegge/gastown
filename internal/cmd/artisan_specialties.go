@@ -3,9 +3,11 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -53,8 +55,9 @@ func runArtisanSpecialties(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	rigPath := fmt.Sprintf("%s/%s", townRoot, rigName)
-	specialties, err := config.LoadSpecialties(rigPath)
+	rigPath := filepath.Join(townRoot, rigName)
+	layout := rig.NewClassicLayout(rigPath)
+	specialties, err := config.LoadSpecialties(layout)
 	if err != nil {
 		return fmt.Errorf("loading specialties: %w", err)
 	}

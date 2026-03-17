@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/rig"
 )
 
 // FeatureStatus represents the overall status of a feature being orchestrated.
@@ -321,16 +323,16 @@ func (fs *FeatureState) MarkSubBeadFailed(branch, reason string) error {
 
 // StateStore handles persistence of feature state to disk.
 type StateStore struct {
-	rigPath string
+	layout rig.Layout
 }
 
-// NewStateStore creates a store for the given rig.
-func NewStateStore(rigPath string) *StateStore {
-	return &StateStore{rigPath: rigPath}
+// NewStateStore creates a store for the given rig layout.
+func NewStateStore(layout rig.Layout) *StateStore {
+	return &StateStore{layout: layout}
 }
 
 func (s *StateStore) dir() string {
-	return filepath.Join(s.rigPath, "conductor", "features")
+	return s.layout.ConductorFeaturesDir()
 }
 
 func (s *StateStore) path(featureName string) string {

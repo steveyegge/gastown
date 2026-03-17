@@ -3,9 +3,11 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/artisan"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -58,8 +60,9 @@ func runArtisanList(cmd *cobra.Command, args []string) error {
 	var allItems []ArtisanListItem
 
 	for _, rigName := range rigNames {
-		rigPath := fmt.Sprintf("%s/%s", townRoot, rigName)
-		mgr := artisan.NewManager(rigName, rigPath, townRoot)
+		rigPath := filepath.Join(townRoot, rigName)
+		layout := rig.NewClassicLayout(rigPath)
+		mgr := artisan.NewManager(rigName, layout, townRoot)
 
 		workers, err := mgr.List()
 		if err != nil {

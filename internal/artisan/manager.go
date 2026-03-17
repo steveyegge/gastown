@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/steveyegge/gastown/internal/rig"
 )
 
 // Common errors
@@ -22,22 +23,22 @@ var (
 // Manager manages artisan workspaces within a rig.
 type Manager struct {
 	rigName  string
-	rigPath  string
+	layout   rig.Layout
 	townRoot string
 }
 
 // NewManager creates a new artisan manager for the given rig.
-func NewManager(rigName, rigPath, townRoot string) *Manager {
+func NewManager(rigName string, layout rig.Layout, townRoot string) *Manager {
 	return &Manager{
 		rigName:  rigName,
-		rigPath:  rigPath,
+		layout:   layout,
 		townRoot: townRoot,
 	}
 }
 
 // artisanDir returns the path to an artisan's directory.
 func (m *Manager) artisanDir(name string) string {
-	return filepath.Join(m.rigPath, "artisans", name)
+	return m.layout.ArtisanDir(name)
 }
 
 // stateFile returns the path to an artisan's state file.
@@ -151,7 +152,7 @@ func (m *Manager) Remove(name string, force bool) error {
 
 // List returns all artisan workers in this rig.
 func (m *Manager) List() ([]*Worker, error) {
-	artisansDir := filepath.Join(m.rigPath, "artisans")
+	artisansDir := m.layout.ArtisansBaseDir()
 	entries, err := os.ReadDir(artisansDir)
 	if err != nil {
 		if os.IsNotExist(err) {

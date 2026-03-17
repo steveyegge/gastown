@@ -3,9 +3,9 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+	"github.com/steveyegge/gastown/internal/rig"
 )
 
 // SpecialtyConfig represents per-rig specialty definitions.
@@ -71,15 +71,15 @@ func BuiltinSpecialties() *SpecialtyConfig {
 }
 
 // LoadSpecialties loads specialty configuration for a rig.
-// Resolution: built-in defaults, then merged with <rig>/conductor/specialties.toml if present.
-func LoadSpecialties(rigPath string) (*SpecialtyConfig, error) {
+// Resolution: built-in defaults, then merged with conductor/specialties.toml if present.
+func LoadSpecialties(layout rig.Layout) (*SpecialtyConfig, error) {
 	base := BuiltinSpecialties()
 
-	if rigPath == "" {
+	if layout == nil {
 		return base, nil
 	}
 
-	overridePath := filepath.Join(rigPath, "conductor", "specialties.toml")
+	overridePath := layout.SpecialtiesFile()
 	data, err := os.ReadFile(overridePath)
 	if err != nil {
 		if os.IsNotExist(err) {

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/rig"
 )
 
 func TestValidateName(t *testing.T) {
@@ -41,7 +43,7 @@ func TestManager_Add(t *testing.T) {
 	rigPath := filepath.Join(townRoot, "gastown")
 	os.MkdirAll(rigPath, 0o755)
 
-	mgr := NewManager("gastown", rigPath, townRoot)
+	mgr := NewManager("gastown", rig.NewClassicLayout(rigPath), townRoot)
 
 	worker, err := mgr.Add("frontend-1", "frontend")
 	if err != nil {
@@ -82,7 +84,7 @@ func TestManager_Add_Duplicate(t *testing.T) {
 	rigPath := filepath.Join(townRoot, "gastown")
 	os.MkdirAll(rigPath, 0o755)
 
-	mgr := NewManager("gastown", rigPath, townRoot)
+	mgr := NewManager("gastown", rig.NewClassicLayout(rigPath), townRoot)
 
 	_, err := mgr.Add("frontend-1", "frontend")
 	if err != nil {
@@ -100,7 +102,7 @@ func TestManager_List(t *testing.T) {
 	rigPath := filepath.Join(townRoot, "gastown")
 	os.MkdirAll(rigPath, 0o755)
 
-	mgr := NewManager("gastown", rigPath, townRoot)
+	mgr := NewManager("gastown", rig.NewClassicLayout(rigPath), townRoot)
 
 	// Empty list
 	workers, err := mgr.List()
@@ -142,7 +144,7 @@ func TestManager_Get(t *testing.T) {
 	rigPath := filepath.Join(townRoot, "gastown")
 	os.MkdirAll(rigPath, 0o755)
 
-	mgr := NewManager("gastown", rigPath, townRoot)
+	mgr := NewManager("gastown", rig.NewClassicLayout(rigPath), townRoot)
 	mgr.Add("frontend-1", "frontend")
 
 	worker, err := mgr.Get("frontend-1")
@@ -162,7 +164,7 @@ func TestManager_Get_NotFound(t *testing.T) {
 	rigPath := filepath.Join(townRoot, "gastown")
 	os.MkdirAll(rigPath, 0o755)
 
-	mgr := NewManager("gastown", rigPath, townRoot)
+	mgr := NewManager("gastown", rig.NewClassicLayout(rigPath), townRoot)
 
 	_, err := mgr.Get("nonexistent")
 	if err == nil {
@@ -175,7 +177,7 @@ func TestManager_Remove(t *testing.T) {
 	rigPath := filepath.Join(townRoot, "gastown")
 	os.MkdirAll(rigPath, 0o755)
 
-	mgr := NewManager("gastown", rigPath, townRoot)
+	mgr := NewManager("gastown", rig.NewClassicLayout(rigPath), townRoot)
 	mgr.Add("frontend-1", "frontend")
 
 	err := mgr.Remove("frontend-1", false)
@@ -195,7 +197,7 @@ func TestManager_Remove_NotFound(t *testing.T) {
 	rigPath := filepath.Join(townRoot, "gastown")
 	os.MkdirAll(rigPath, 0o755)
 
-	mgr := NewManager("gastown", rigPath, townRoot)
+	mgr := NewManager("gastown", rig.NewClassicLayout(rigPath), townRoot)
 
 	err := mgr.Remove("nonexistent", false)
 	if err == nil {
@@ -208,7 +210,7 @@ func TestManager_MultipleSpecialties(t *testing.T) {
 	rigPath := filepath.Join(townRoot, "gastown")
 	os.MkdirAll(rigPath, 0o755)
 
-	mgr := NewManager("gastown", rigPath, townRoot)
+	mgr := NewManager("gastown", rig.NewClassicLayout(rigPath), townRoot)
 
 	specialties := []struct {
 		name      string
