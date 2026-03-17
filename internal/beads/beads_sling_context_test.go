@@ -24,6 +24,7 @@ func TestFormatParseSlingContextRoundTrip(t *testing.T) {
 		HookRawBead:      true,
 		Owned:            true,
 		Mode:             "ralph",
+		Posting:          "inspector",
 		DispatchFailures: 2,
 		LastFailure:      "sling failed: timeout",
 	}
@@ -82,6 +83,9 @@ func TestFormatParseSlingContextRoundTrip(t *testing.T) {
 	}
 	if parsed.Mode != original.Mode {
 		t.Errorf("Mode: got %q, want %q", parsed.Mode, original.Mode)
+	}
+	if parsed.Posting != original.Posting {
+		t.Errorf("Posting: got %q, want %q", parsed.Posting, original.Posting)
 	}
 	if parsed.DispatchFailures != original.DispatchFailures {
 		t.Errorf("DispatchFailures: got %d, want %d", parsed.DispatchFailures, original.DispatchFailures)

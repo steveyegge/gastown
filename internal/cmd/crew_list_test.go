@@ -127,6 +127,91 @@ func TestRunCrewList_PositionalRigArg(t *testing.T) {
 	})
 }
 
+func TestRunCrewList_OutsideRigDefaultsToAll(t *testing.T) {
+	townRoot := setupTestTownForCrewList(t, map[string][]string{
+		"rig-a": {"alice"},
+		"rig-b": {"bob"},
+	})
+
+	originalWd, _ := os.Getwd()
+	defer os.Chdir(originalWd)
+	// cd to town root (not inside any rig), so rig inference fails
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	crewRig = ""
+	crewListAll = false
+	crewJSON = true
+	defer func() {
+		crewRig = ""
+		crewListAll = false
+		crewJSON = false
+	}()
+
+	output := captureStdout(t, func() {
+		if err := runCrewList(&cobra.Command{}, nil); err != nil {
+			t.Fatalf("runCrewList error: %v", err)
+		}
+	})
+
+	var items []CrewListItem
+	if err := json.Unmarshal([]byte(output), &items); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 crew workers (all rigs), got %d", len(items))
+	}
+
+	rigs := map[string]bool{}
+	for _, item := range items {
+		rigs[item.Rig] = true
+	}
+	if !rigs["rig-a"] || !rigs["rig-b"] {
+		t.Fatalf("expected crew from rig-a and rig-b, got: %#v", rigs)
+	}
+}
+
+func TestRunCrewList_InsideRigInfersRig(t *testing.T) {
+	townRoot := setupTestTownForCrewList(t, map[string][]string{
+		"rig-a": {"alice"},
+		"rig-b": {"bob"},
+	})
+
+	originalWd, _ := os.Getwd()
+	defer os.Chdir(originalWd)
+	// cd into rig-a so rig inference succeeds
+	if err := os.Chdir(filepath.Join(townRoot, "rig-a")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	crewRig = ""
+	crewListAll = false
+	crewJSON = true
+	defer func() {
+		crewRig = ""
+		crewListAll = false
+		crewJSON = false
+	}()
+
+	output := captureStdout(t, func() {
+		if err := runCrewList(&cobra.Command{}, nil); err != nil {
+			t.Fatalf("runCrewList error: %v", err)
+		}
+	})
+
+	var items []CrewListItem
+	if err := json.Unmarshal([]byte(output), &items); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 crew worker (rig-a only), got %d", len(items))
+	}
+	if items[0].Rig != "rig-a" {
+		t.Errorf("expected rig-a, got %s", items[0].Rig)
+	}
+}
+
 func TestRunCrewList_AllWithRigErrors(t *testing.T) {
 	townRoot := setupTestTownForCrewList(t, map[string][]string{"rig-a": {"alice"}})
 

@@ -27,6 +27,12 @@ func TestAddressToIdentity(t *testing.T) {
 
 		// Rig broadcast (trailing slash removed)
 		{"gastown/", "gastown"},
+
+		// Bracket notation stripped (posting display-only)
+		{"gastown/crew/diesel[inspector]", "gastown/diesel"},
+		{"gastown/crew/diesel[scout]", "gastown/diesel"},
+		{"gastown/polecats/slit[dispatcher]", "gastown/slit"},
+		{"gastown/Toast[inspector]", "gastown/Toast"},
 	}
 
 	for _, tt := range tests {
@@ -59,6 +65,10 @@ func TestIdentityToAddress(t *testing.T) {
 
 		// Rig name only (no transformation)
 		{"gastown", "gastown"},
+
+		// Bracket notation stripped (posting display-only)
+		{"gastown/crew/diesel[inspector]", "gastown/diesel"},
+		{"gastown/polecats/slit[scout]", "gastown/slit"},
 	}
 
 	for _, tt := range tests {

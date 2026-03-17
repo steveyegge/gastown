@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/posting"
 )
 
 // TestNew verifies the constructor.
@@ -2874,6 +2876,107 @@ func TestTranslateDoltPort(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// getActor bracket notation tests (gt-cxs)
+// ---------------------------------------------------------------------------
+
+// TestGetActor_AppendsBracketsFromGT_POSTING verifies that getActor appends
+// bracket notation from GT_POSTING when BD_ACTOR lacks it. This exercises the
+// actual bd CLI code path (not RoleInfo.ActorString which pre-populates Posting).
+func TestGetActor_AppendsBracketsFromGT_POSTING(t *testing.T) {
+	t.Setenv("BD_ACTOR", "gastown/crew/diesel")
+	t.Setenv("GT_POSTING", "inspector")
+
+	b := New("/tmp/test")
+	got := b.getActor()
+	want := "gastown/crew/diesel[inspector]"
+	if got != want {
+		t.Errorf("getActor() = %q, want %q (should append GT_POSTING brackets)", got, want)
+	}
+}
+
+// TestGetActor_PreservesExistingBrackets verifies that getActor does not
+// double-bracket when BD_ACTOR already contains bracket notation.
+func TestGetActor_PreservesExistingBrackets(t *testing.T) {
+	t.Setenv("BD_ACTOR", "gastown/crew/diesel[inspector]")
+	t.Setenv("GT_POSTING", "inspector")
+
+	b := New("/tmp/test")
+	got := b.getActor()
+	want := "gastown/crew/diesel[inspector]"
+	if got != want {
+		t.Errorf("getActor() = %q, want %q (should not double-bracket)", got, want)
+	}
+}
+
+// TestGetActor_NoPostingNoChange verifies that getActor returns BD_ACTOR
+// unchanged when no posting is active.
+func TestGetActor_NoPostingNoChange(t *testing.T) {
+	t.Setenv("BD_ACTOR", "gastown/crew/diesel")
+	t.Setenv("GT_POSTING", "")
+
+	b := New("/tmp/test")
+	got := b.getActor()
+	want := "gastown/crew/diesel"
+	if got != want {
+		t.Errorf("getActor() = %q, want %q (should not append brackets without posting)", got, want)
+	}
+}
+
+// TestGetActor_ReadsRuntimePostingFile verifies that getActor falls back to
+// reading .runtime/posting from cwd when GT_POSTING is not set.
+func TestGetActor_ReadsRuntimePostingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("BD_ACTOR", "gastown/polecats/Toast")
+	t.Setenv("GT_POSTING", "")
+
+	// Write .runtime/posting
+	if err := posting.Write(tmpDir, "scout"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Change to tmpDir so getActor reads .runtime/posting from cwd
+	oldWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(oldWd) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	b := New(tmpDir)
+	got := b.getActor()
+	want := "gastown/polecats/Toast[scout]"
+	if got != want {
+		t.Errorf("getActor() = %q, want %q (should read .runtime/posting fallback)", got, want)
+	}
+}
+
+// TestGetActor_IsolatedReturnsEmpty verifies that getActor returns empty in
+// isolated mode regardless of env vars.
+func TestGetActor_IsolatedReturnsEmpty(t *testing.T) {
+	t.Setenv("BD_ACTOR", "gastown/crew/diesel")
+	t.Setenv("GT_POSTING", "inspector")
+
+	b := New("/tmp/test")
+	b.isolated = true
+	got := b.getActor()
+	if got != "" {
+		t.Errorf("getActor() = %q, want empty (isolated mode)", got)
+	}
+}
+
+// TestGetActor_EmptyBD_ACTOR verifies that getActor returns empty when
+// BD_ACTOR is not set, even with GT_POSTING set.
+func TestGetActor_EmptyBD_ACTOR(t *testing.T) {
+	t.Setenv("BD_ACTOR", "")
+	t.Setenv("GT_POSTING", "inspector")
+
+	b := New("/tmp/test")
+	got := b.getActor()
+	if got != "" {
+		t.Errorf("getActor() = %q, want empty (no BD_ACTOR)", got)
 	}
 }
 

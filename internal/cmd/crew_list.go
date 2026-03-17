@@ -6,8 +6,10 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -15,12 +17,14 @@ import (
 
 // CrewListItem represents a crew worker in list output.
 type CrewListItem struct {
-	Name       string `json:"name"`
-	Rig        string `json:"rig"`
-	Branch     string `json:"branch"`
-	Path       string `json:"path"`
-	HasSession bool   `json:"has_session"`
-	GitClean   bool   `json:"git_clean"`
+	Name           string `json:"name"`
+	Rig            string `json:"rig"`
+	Branch         string `json:"branch"`
+	Path           string `json:"path"`
+	HasSession     bool   `json:"has_session"`
+	GitClean       bool   `json:"git_clean"`
+	Posting        string `json:"posting,omitempty"`
+	PostingSource  string `json:"posting_source,omitempty"` // "session", "config", or ""
 }
 
 func runCrewList(cmd *cobra.Command, args []string) error {
@@ -46,9 +50,20 @@ func runCrewList(cmd *cobra.Command, args []string) error {
 	} else {
 		_, r, err := getCrewManager(crewRig)
 		if err != nil {
-			return err
+			// If no rig was explicitly specified and inference failed,
+			// fall back to --all behavior instead of erroring.
+			if crewRig == "" {
+				allRigs, err2 := getAllRigs()
+				if err2 != nil {
+					return err2
+				}
+				rigs = allRigs
+			} else {
+				return err
+			}
+		} else {
+			rigs = []*rig.Rig{r}
 		}
-		rigs = []*rig.Rig{r}
 	}
 
 	// Check session and git status for each worker
@@ -65,6 +80,14 @@ func runCrewList(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
+		// Load persistent postings from rig settings (once per rig)
+		settingsPath := config.RigSettingsPath(r.Path)
+		rigSettings, _ := config.LoadRigSettings(settingsPath)
+		var workerPostings map[string]string
+		if rigSettings != nil {
+			workerPostings = rigSettings.WorkerPostings
+		}
+
 		for _, w := range workers {
 			sessionID := crewSessionName(r.Name, w.Name)
 			hasSession, _ := t.HasSession(sessionID)
@@ -75,13 +98,27 @@ func runCrewList(cmd *cobra.Command, args []string) error {
 				gitClean = status.Clean
 			}
 
+			// Resolve posting: session (transient) takes priority over config (persistent)
+			var postingName, postingSource string
+			if sp := posting.Read(w.ClonePath); sp != "" {
+				postingName = sp
+				postingSource = "session"
+			} else if workerPostings != nil {
+				if pp, ok := workerPostings[w.Name]; ok && pp != "" {
+					postingName = pp
+					postingSource = "config"
+				}
+			}
+
 			items = append(items, CrewListItem{
-				Name:       w.Name,
-				Rig:        r.Name,
-				Branch:     w.Branch,
-				Path:       w.ClonePath,
-				HasSession: hasSession,
-				GitClean:   gitClean,
+				Name:          w.Name,
+				Rig:           r.Name,
+				Branch:        w.Branch,
+				Path:          w.ClonePath,
+				HasSession:    hasSession,
+				GitClean:      gitClean,
+				Posting:       postingName,
+				PostingSource: postingSource,
 			})
 		}
 	}
@@ -110,7 +147,12 @@ func runCrewList(cmd *cobra.Command, args []string) error {
 			gitStatus = style.Bold.Render("dirty")
 		}
 
-		fmt.Printf("  %s %s/%s\n", status, item.Rig, item.Name)
+		postingStr := ""
+		if item.Posting != "" {
+			postingStr = fmt.Sprintf("  [%s (%s)]", item.Posting, item.PostingSource)
+		}
+
+		fmt.Printf("  %s %s/%s%s\n", status, item.Rig, item.Name, postingStr)
 		fmt.Printf("    Branch: %s  Git: %s\n", item.Branch, gitStatus)
 		fmt.Printf("    %s\n", style.Dim.Render(item.Path))
 	}

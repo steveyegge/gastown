@@ -727,6 +727,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.ClaudeConfigDir,
 		Agent:            opts.AgentOverride,
+		Posting:          config.ResolveWorkerPosting(m.rig.Path, name),
 	})
 	envVars = session.MergeRuntimeLivenessEnv(envVars, runtimeConfig)
 

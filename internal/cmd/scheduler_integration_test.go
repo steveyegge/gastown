@@ -1170,3 +1170,23 @@ func TestSchedulerDirectConvoyDispatch(t *testing.T) {
 		t.Errorf("direct mode should NOT show 'Would schedule'\noutput: %s", out)
 	}
 }
+
+// TestSchedulerPostingPropagation verifies that --posting is preserved in the
+// sling context bead when dispatched through the scheduler (deferred path).
+func TestSchedulerPostingPropagation(t *testing.T) {
+	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
+
+	beadID := createTestBead(t, rigPath, "Posting propagation test")
+
+	// Schedule via gt sling with --posting inspector
+	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig", "--posting", "inspector")
+
+	// Verify: sling context should have Posting == "inspector"
+	fields := findSlingContext(t, hqPath, beadID)
+	if fields == nil {
+		t.Fatalf("bead %s has no sling context after scheduling", beadID)
+	}
+	if fields.Posting != "inspector" {
+		t.Errorf("Posting: got %q, want %q", fields.Posting, "inspector")
+	}
+}

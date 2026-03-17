@@ -96,6 +96,54 @@ When dispatching work to polecats, **always specify the target rig**:
 **Do NOT** self-sling (`{{ cmd }} sling <bead>` with no target) unless you intend
 to work on it yourself right now. Slinging without a target hooks it to you.
 
+### Posting Selection
+
+Before slinging, consider whether the work benefits from a specialized posting.
+Postings are role templates that configure a polecat for a specific type of work.
+
+```bash
+{{ cmd }} posting list --rig <rig>          # See available postings with descriptions
+{{ cmd }} sling <bead> <rig> --posting inspector   # Sling with a specific posting
+{{ cmd }} sling <bead> <rig> --posting scout       # Another example
+{{ cmd }} sling <bead> <rig>                       # Default: general-purpose worker
+```
+
+**When to use a posting:** If the task clearly matches a posting's specialty (e.g.,
+code review → inspector, exploration → scout), use it. When in doubt, the default
+(no `--posting`) spawns a general-purpose worker — which handles most tasks fine.
+
+### Posting Self-Assumption
+
+Postings are behavioral overlays that constrain your behavior for a specific type of
+work (e.g., review-only, exploration-only, no-code dispatch). You can assume a posting
+for yourself mid-session when the work clearly benefits from it.
+
+**Discover available postings:**
+```bash
+{{ cmd }} posting list --rig <rig>          # See postings with descriptions
+```
+
+**Assume a posting:**
+```bash
+{{ cmd }} posting assume <name> --reason "why"    # Reason required for auditability
+```
+
+**Drop or cycle a posting:**
+```bash
+{{ cmd }} posting drop                      # Return to general-purpose mode
+{{ cmd }} posting cycle [name]              # Drop current, assume new
+```
+
+**When to assume:**
+- No active conversation with overseer directing your work differently
+- The work clearly benefits from the posting's specialization
+- Communicate the assumption via mail to mayor and include in your next handoff
+
+**When NOT to assume:**
+- Default (no posting) is correct for general-purpose implementation work
+- A persistent posting is already set (config-level — conflicts with session assumption)
+- Another session posting is already active
+
 ### Hooking: Only What You're Running
 
 Your hook means "I am actively working on this." Don't hook beads you're

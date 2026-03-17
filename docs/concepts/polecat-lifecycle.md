@@ -358,6 +358,125 @@ This distinction matters for:
 - **Cost accounting** - Who pays for inference?
 - **Federation** - Agents having their own chains in a distributed world
 
+## Postings
+
+A **posting** is a transient role augmentation that gives a polecat specialized
+responsibilities for a work session. Postings layer on top of the base polecat
+role—they don't replace it. Three built-in postings ship with Gas Town:
+**dispatcher** (work routing), **inspector** (code review), and **scout**
+(codebase exploration).
+
+### How Postings Are Assumed
+
+Polecat postings are always transient (session-level). They can be assigned at
+two points in the lifecycle:
+
+| Method | When | Persistence |
+|--------|------|-------------|
+| `gt sling --posting <name>` | At spawn | Session-level (`.runtime/posting`) |
+| `gt posting assume <name> [--reason "…"]` | During a session | Session-level (`.runtime/posting`) |
+
+**At spawn** is the most common path. When the Witness or Mayor dispatches work
+with `gt sling --posting scout`, the posting file is written to the polecat's
+worktree before the session starts. The polecat sees its posting on the first
+`gt prime`.
+
+**During a session**, a polecat can assume a posting with `gt posting assume`.
+The posting must exist (template validation is performed at assume time). This
+is blocked if a posting is already active (must drop first). The `--reason` flag
+logs the assumption reason to stderr for audit visibility.
+
+Note: Persistent postings (`gt crew post`) are a crew-only feature. Polecats
+do not have persistent postings — their postings are always tied to the current
+work assignment and cleared when the polecat returns to idle.
+
+### Resolution Precedence
+
+When `gt prime` renders context, posting resolution follows this order:
+
+1. **Session state** (`.runtime/posting`) — highest priority
+2. **Rig config** (`WorkerPostings[workerName]`) — fallback
+3. **None** — no posting active
+
+Template resolution for the posting content:
+
+1. **Rig-level override** (`<rig>/postings/<name>.md.tmpl`)
+2. **Town-level override** (`<townRoot>/postings/<name>.md.tmpl`)
+3. **Embedded built-in** — ships with the `gt` binary
+
+The resolved posting is injected into the environment as `GT_POSTING` and
+`GT_POSTING_LEVEL` (either `"session"` or `"config"`).
+
+### Dropping and Cycling Postings
+
+| Command | Effect |
+|---------|--------|
+| `gt posting drop` | Clears session-level posting (`.runtime/posting`). Injects a `<system-reminder>` into the current context. Stale posting priming remains in the context window. |
+| `gt posting cycle [new]` | Drops current posting, optionally assumes a new one, then restarts the session via `gt handoff --cycle` for clean priming context. |
+
+### Postings and the Polecat Lifecycle
+
+Postings interact with the lifecycle at these key moments:
+
+```
+gt sling --posting scout
+    │
+    ▼
+┌──────────────────────────┐
+│  WORKING (posting=scout) │ ◄── posting written to .runtime/posting
+└────────┬─────────────────┘
+         │
+         │ gt handoff
+         ▼
+┌──────────────────────────┐
+│  WORKING (posting=scout) │ ◄── .runtime/posting persists across sessions
+└────────┬─────────────────┘
+         │
+         │ gt done
+         ▼
+┌──────────────────────────┐
+│  IDLE (no posting)       │ ◄── .runtime/ cleaned up with sandbox sync
+└──────────────────────────┘
+```
+
+**On `gt handoff`:** The posting file persists in the worktree. The successor
+session inherits the posting and sees it on `gt prime`. This is correct for
+polecats — a handoff is a context cycle mid-task, not a change of assignment.
+The posting is tied to the bead, not the session.
+
+Note: This differs from crew behavior, where `gt handoff` clears the assumed
+posting. Crew handoffs typically mean "done for now, next session may be
+different work." Polecat handoffs mean "continuing the same bead with fresh
+context."
+
+**On `gt done`:** The sandbox is synced back to main, which removes the
+`.runtime/` directory along with the posting file. The polecat returns to idle
+with no active posting.
+
+**On crash/respawn:** The Witness respawns the session in the same sandbox.
+The posting file survives because `.runtime/posting` lives in the worktree.
+The respawned session picks it up via `gt prime`.
+
+**On reuse (`gt sling` to idle polecat):** The sandbox is repaired (reset to
+fresh branch from main), which clears any leftover posting. The new `gt sling`
+can assign a fresh posting via `--posting`.
+
+### Conflict Rules
+
+| Scenario | Result |
+|----------|--------|
+| `assume` when session posting already set | **Blocked** — must drop first |
+| `cycle` when session posting set | **Allowed** — atomically drops and re-assumes |
+| `drop` when no posting set | No-op |
+
+### Key Files
+
+- `internal/posting/posting.go` — Core read/write/clear operations
+- `internal/cmd/posting.go` — CLI commands (`assume`, `drop`, `cycle`)
+- `internal/cmd/prime_output.go` — Posting resolution and rendering into prime context
+- `internal/cmd/sling_dispatch.go` — Writing posting during polecat spawn
+- `internal/templates/postings/` — Built-in posting templates (dispatcher, inspector, scout)
+
 ## Implementation Status
 
 As of 2026-03-07 (gt-o8g8 audit), all core lifecycle operations are **shipped and

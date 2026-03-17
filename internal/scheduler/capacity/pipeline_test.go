@@ -1,6 +1,7 @@
 package capacity
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -173,6 +174,7 @@ func TestReconstructFromContext(t *testing.T) {
 		Account:     "acme",
 		Agent:       "codex",
 		Mode:        "ralph",
+		Posting:     "inspector",
 		NoMerge:     true,
 		HookRawBead: true,
 	}
@@ -214,6 +216,32 @@ func TestReconstructFromContext(t *testing.T) {
 	}
 	if !params.HookRawBead {
 		t.Error("HookRawBead: expected true")
+	}
+	if params.Posting != "inspector" {
+		t.Errorf("Posting: got %q, want %q", params.Posting, "inspector")
+	}
+}
+
+func TestReconstructFromContext_PostingPreserved(t *testing.T) {
+	ctx := &SlingContextFields{
+		WorkBeadID: "bead-post",
+		TargetRig:  "testrig",
+		Posting:    "inspector",
+	}
+
+	// JSON round-trip
+	data, err := json.Marshal(ctx)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var decoded SlingContextFields
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	params := ReconstructFromContext(&decoded)
+	if params.Posting != "inspector" {
+		t.Errorf("Posting: got %q, want %q", params.Posting, "inspector")
 	}
 }
 

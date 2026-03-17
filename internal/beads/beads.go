@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/telemetry"
 )
@@ -336,14 +337,37 @@ func NewWithBeadsDir(workDir, beadsDir string) *Beads {
 	return &Beads{workDir: workDir, beadsDir: beadsDir}
 }
 
-// getActor returns the BD_ACTOR value for this context.
+// getActor returns the BD_ACTOR value for this context, with posting bracket
+// notation appended when GT_POSTING or .runtime/posting is set.
 // Returns empty string when in isolated mode (tests) to prevent
 // inherited actors from routing to production databases.
+//
+// BD_ACTOR is set at session start by AgentEnv and includes brackets when a
+// posting is configured at spawn time. However, when a posting is assumed
+// mid-session (via gt posting assume), GT_POSTING and .runtime/posting are
+// updated but BD_ACTOR is not. This method bridges that gap by checking for
+// an active posting and appending bracket notation if BD_ACTOR lacks it.
 func (b *Beads) getActor() string {
 	if b.isolated {
 		return ""
 	}
-	return os.Getenv("BD_ACTOR")
+	actor := os.Getenv("BD_ACTOR")
+	if actor == "" {
+		return ""
+	}
+	// If actor already has bracket notation, return as-is
+	if strings.Contains(actor, "[") {
+		return actor
+	}
+	// Check GT_POSTING env var, then fall back to .runtime/posting
+	p := os.Getenv("GT_POSTING")
+	if p == "" {
+		cwd, err := os.Getwd()
+		if err == nil {
+			p = posting.Read(cwd)
+		}
+	}
+	return posting.AppendBracket(actor, p)
 }
 
 // getTownRoot returns the Gas Town root directory, using lazy caching.

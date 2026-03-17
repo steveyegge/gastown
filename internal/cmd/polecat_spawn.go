@@ -35,6 +35,7 @@ type SpawnedPolecatInfo struct {
 	// Internal fields for deferred session start
 	account string
 	agent   string
+	posting string // Explicit posting to assume (from --posting flag)
 }
 
 // AgentID returns the agent identifier (e.g., "gastown/polecats/Toast")
@@ -357,6 +358,7 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	startOpts := polecat.SessionStartOptions{
 		RuntimeConfigDir: claudeConfigDir,
 		Agent:            s.agent,
+		Posting:          s.posting,
 	}
 	if s.agent != "" {
 		cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(s.RigName, s.PolecatName, r.Path, "", s.agent)

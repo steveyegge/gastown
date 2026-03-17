@@ -62,6 +62,16 @@ type AgentEnvConfig struct {
 	// Added as gt.session to OTEL_RESOURCE_ATTRIBUTES so all Claude logs from a
 	// single GT session can be correlated, and as GT_SESSION env var.
 	SessionName string
+
+	// Posting is the posting name assigned to this agent (e.g., "dispatcher", "scout").
+	// When set, bracket notation is appended to BD_ACTOR and GIT_AUTHOR_NAME
+	// (e.g., "gastown/crew/diesel[scout]"). Only applies to polecat and crew roles.
+	// Sets GT_POSTING environment variable.
+	Posting string
+
+	// PostingLevel is the template resolution level (e.g., "embedded", "town", "rig").
+	// Sets GT_POSTING_LEVEL environment variable.
+	PostingLevel string
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -101,11 +111,15 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["GIT_AUTHOR_NAME"] = fmt.Sprintf("%s/refinery", cfg.Rig)
 
 	case constants.RolePolecat:
-		env["GT_ROLE"] = fmt.Sprintf("%s/polecats/%s", cfg.Rig, cfg.AgentName)
+		base := fmt.Sprintf("%s/polecats/%s", cfg.Rig, cfg.AgentName)
+		env["GT_ROLE"] = base
 		env["GT_RIG"] = cfg.Rig
 		env["GT_POLECAT"] = cfg.AgentName
-		env["BD_ACTOR"] = fmt.Sprintf("%s/polecats/%s", cfg.Rig, cfg.AgentName)
-		env["GIT_AUTHOR_NAME"] = cfg.AgentName
+		env["BD_ACTOR"] = appendPostingBracket(base, cfg.Posting)
+		env["GIT_AUTHOR_NAME"] = appendPostingBracket(cfg.AgentName, cfg.Posting)
+		if cfg.Posting != "" {
+			env["GT_POSTING"] = cfg.Posting
+		}
 		// Disable Dolt auto-commit for polecats. With branch-per-polecat,
 		// individual commits are pointless — all changes merge at gt done time
 		// via DOLT_MERGE. Without this, concurrent polecats cause manifest
@@ -113,11 +127,15 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["BD_DOLT_AUTO_COMMIT"] = "off"
 
 	case constants.RoleCrew:
-		env["GT_ROLE"] = fmt.Sprintf("%s/crew/%s", cfg.Rig, cfg.AgentName)
+		base := fmt.Sprintf("%s/crew/%s", cfg.Rig, cfg.AgentName)
+		env["GT_ROLE"] = base
 		env["GT_RIG"] = cfg.Rig
 		env["GT_CREW"] = cfg.AgentName
-		env["BD_ACTOR"] = fmt.Sprintf("%s/crew/%s", cfg.Rig, cfg.AgentName)
-		env["GIT_AUTHOR_NAME"] = cfg.AgentName
+		env["BD_ACTOR"] = appendPostingBracket(base, cfg.Posting)
+		env["GIT_AUTHOR_NAME"] = appendPostingBracket(cfg.AgentName, cfg.Posting)
+		if cfg.Posting != "" {
+			env["GT_POSTING"] = cfg.Posting
+		}
 
 	case "dog":
 		// Dogs are town-level workers with role_agents key "dog".
@@ -169,6 +187,16 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// IsAgentAlive and waitForPolecatReady use the correct process names.
 	if cfg.Agent != "" {
 		env["GT_AGENT"] = cfg.Agent
+	}
+
+	// Set GT_POSTING and GT_POSTING_LEVEL when a posting is assigned.
+	// Resolved from session state (.runtime/posting) or persistent config
+	// (RigSettings.WorkerPostings) by the caller.
+	if cfg.Posting != "" {
+		env["GT_POSTING"] = cfg.Posting
+	}
+	if cfg.PostingLevel != "" {
+		env["GT_POSTING_LEVEL"] = cfg.PostingLevel
 	}
 
 	// Disable bd's per-repo JSONL auto-backup for all Gas Town agents.
@@ -259,6 +287,9 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		}
 		if cfg.SessionName != "" {
 			attrs = append(attrs, "gt.session="+sanitizeOTELAttrValue(cfg.SessionName, 80))
+		}
+		if cfg.Posting != "" {
+			attrs = append(attrs, "gt.posting="+sanitizeOTELAttrValue(cfg.Posting, 40))
 		}
 		if len(attrs) > 0 {
 			env["OTEL_RESOURCE_ATTRIBUTES"] = strings.Join(attrs, ",")
@@ -382,6 +413,43 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	}
 
 	return env
+}
+
+// appendPostingBracket appends bracket notation to a base identity string if posting is non-empty.
+// Example: appendPostingBracket("gastown/crew/diesel", "scout") => "gastown/crew/diesel[scout]"
+func appendPostingBracket(base, p string) string {
+	if p == "" {
+		return base
+	}
+	return base + "[" + p + "]"
+}
+
+// AppendPostingBracket is the exported version of appendPostingBracket.
+func AppendPostingBracket(base, p string) string {
+	return appendPostingBracket(base, p)
+}
+
+// StripPostingBracket removes bracket notation from an identity string.
+// Example: StripPostingBracket("gastown/crew/diesel[scout]") => "gastown/crew/diesel"
+// If no bracket notation is present, the string is returned unchanged.
+func StripPostingBracket(s string) string {
+	if idx := strings.IndexByte(s, '['); idx >= 0 {
+		return s[:idx]
+	}
+	return s
+}
+
+// ResolveWorkerPosting looks up the persistent posting for a worker from the
+// rig's WorkerPostings config. Returns the posting name or "" if none is set.
+// This is used by session managers to pass the posting to AgentEnv so that
+// GT_POSTING and BD_ACTOR bracket notation are set at spawn time.
+func ResolveWorkerPosting(rigPath, workerName string) string {
+	settingsPath := RigSettingsPath(rigPath)
+	settings, err := LoadRigSettings(settingsPath)
+	if err != nil {
+		return ""
+	}
+	return settings.WorkerPostings[workerName]
 }
 
 // sanitizeOTELAttrValue prepares a string for use as a value in OTEL_RESOURCE_ATTRIBUTES.

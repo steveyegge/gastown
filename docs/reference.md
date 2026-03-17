@@ -241,6 +241,18 @@ These are set in tmux session environment when agents are spawned.
 | `GT_CREW` | Crew worker name | crew only |
 | `BEADS_AGENT_NAME` | Agent name for beads operations | polecat, crew |
 
+### Posting Variables
+
+| Variable | Purpose | Roles |
+|----------|---------|-------|
+| `GT_POSTING` | Active posting name (e.g., `dispatcher`, `scout`) | polecat, crew |
+| `GT_POSTING_LEVEL` | Where the posting template was resolved from: `rig`, `town`, or `embedded` | polecat, crew |
+
+These are only set when a posting is assigned. `GT_POSTING_LEVEL` indicates
+which definition layer provided the posting template: `rig` means a rig-level
+override, `town` means a town-level override, `embedded` means the built-in
+default shipped with the `gt` binary.
+
 ### Other Variables
 
 | Variable | Purpose |
@@ -258,8 +270,10 @@ These are set in tmux session environment when agents are spawned.
 | **Boot** | `GT_ROLE=deacon/boot`, `BD_ACTOR=deacon-boot` |
 | **Witness** | `GT_ROLE=witness`, `GT_RIG=<rig>`, `BD_ACTOR=<rig>/witness` |
 | **Refinery** | `GT_ROLE=refinery`, `GT_RIG=<rig>`, `BD_ACTOR=<rig>/refinery` |
-| **Polecat** | `GT_ROLE=polecat`, `GT_RIG=<rig>`, `GT_POLECAT=<name>`, `BD_ACTOR=<rig>/polecats/<name>` |
-| **Crew** | `GT_ROLE=crew`, `GT_RIG=<rig>`, `GT_CREW=<name>`, `BD_ACTOR=<rig>/crew/<name>` |
+| **Polecat** | `GT_ROLE=polecat`, `GT_RIG=<rig>`, `GT_POLECAT=<name>`, `BD_ACTOR=<rig>/polecats/<name>`, `GT_POSTING=<posting>`¹ |
+| **Crew** | `GT_ROLE=crew`, `GT_RIG=<rig>`, `GT_CREW=<name>`, `BD_ACTOR=<rig>/crew/<name>`, `GT_POSTING=<posting>`¹ |
+
+¹ `GT_POSTING` and `GT_POSTING_LEVEL` are only set when a posting is assigned.
 
 ### Doctor Check
 
@@ -443,6 +457,10 @@ gt config default-agent claude-glm       # Set default
       "command": "opencode",
       "args": ["--session"]
     }
+  },
+  "worker_postings": {
+    "alice": "dispatcher",
+    "bob": "scout"
   }
 }
 ```
@@ -475,6 +493,132 @@ from the opencode preset. You can override or extend the ACP args by specifying
 the `acp` field explicitly.
 
 **Agent resolution order**: rig-level → town-level → built-in presets.
+
+#### Worker Postings (`worker_postings`)
+
+Maps crew member names to persistent posting assignments. A posting is a specialized
+role template that augments the base agent context with additional responsibilities.
+Persistent postings are crew-only — polecats receive postings transiently via
+`gt sling --posting` or `gt posting assume`.
+
+```json
+{
+  "worker_postings": {
+    "alice": "dispatcher",
+    "bob": "scout"
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `worker_postings` | `map[string]string` | `{}` | Maps crew member names to posting names |
+
+**Resolution order** (highest priority first):
+1. **Session state** (`.runtime/posting`) — transient, set by `gt posting assume`
+2. **Rig config** (`worker_postings`) — persistent, set by `gt crew post`
+
+**Management commands:**
+
+```bash
+# Persistent layer (rig config)
+gt crew post <name> <posting>     # Set persistent posting for a worker
+gt crew post <name> --clear       # Remove persistent posting
+
+# Session layer (transient)
+gt posting assume <posting>              # Assume session-level posting
+gt posting assume <posting> --reason "…" # Assume with logged reason (autonomous use)
+gt posting drop                          # Drop session-level posting (in-session)
+gt posting cycle [posting]               # Drop current, restart session (clean context)
+gt posting show                          # Show current posting (both layers)
+gt posting list                          # List available posting definitions
+```
+
+**Sling integration:**
+
+```bash
+gt sling <bead> <rig> --posting <posting>   # Assume a posting for the spawned polecat
+```
+
+**Conflict rules:**
+
+| Action | Condition | Result |
+|--------|-----------|--------|
+| `gt posting assume` | No posting set | Assumes the posting |
+| `gt posting assume` | Session posting already set | **Blocked** — must drop first |
+| `gt posting assume` | Persistent posting exists | **Blocked** — must clear config first (`gt crew post <name> --clear`) |
+| `gt posting cycle [new]` | Session posting set | **Allowed** — drops current, optionally assumes new, restarts session via `gt handoff --cycle` |
+| `gt posting cycle` | No posting set | No-op — no session restart needed |
+| `gt posting cycle [new]` | Persistent posting exists | **Blocked** — must clear config first |
+| `gt posting drop` | Posting set | Clears session-level posting only (`.runtime/posting`) |
+| `gt posting drop` | No posting set | No-op |
+| Crew `gt handoff` | Session posting set | **Clears** posting — crew handoffs mean "done for now," next session may be different work |
+| Polecat `gt handoff` | Session posting set | **Preserves** posting — polecat handoffs are context cycles mid-task, posting is tied to the bead assignment |
+| `gt done` (polecat) | Any posting | Posting cleared with sandbox cleanup |
+| Crash/respawn | Any posting | **Preserves** — `.runtime/posting` survives in worktree, picked up by `gt prime` |
+| `gt sling` to idle polecat | Leftover posting | **Clears** — sandbox repair resets to fresh branch, new `--posting` can be assigned |
+
+**Handoff role distinction:** Crew and polecats handle postings differently on
+handoff because they have different session semantics. A crew handoff means "I'm
+done for now" — the next session may work on entirely different tasks, so the
+posting should not carry over. A polecat handoff means "continuing the same bead
+with fresh context" — the posting is part of the assignment and must persist so
+the successor session inherits it.
+
+**Nonexistent posting behavior:**
+
+`gt posting assume` validates that a template exists before writing to
+`.runtime/posting`. If no matching template is found at any resolution level
+(rig, town, or embedded), the command **fails fast** with an actionable error
+listing where to define the posting.
+
+If a posting name reaches `.runtime/posting` through other paths (e.g., direct
+file write, `gt sling --posting` with a name that later becomes invalid), the
+agent proceeds without posting augmentation at prime time. When `--explain` mode
+is active, the error is logged as `[EXPLAIN] Posting "<name>": posting "<name>"
+not found (checked rig, town, and built-in postings)`.
+
+| Scenario | Behavior |
+|----------|----------|
+| Valid posting name | Posting template rendered and appended to role context |
+| `gt posting assume <nonexistent>` | **Fails fast** — error with guidance on where to define the template |
+| Nonexistent name in `.runtime/posting` (other paths) | No posting context rendered; agent proceeds with base role only |
+| Empty posting name | No posting resolution attempted; same as no posting assigned |
+
+**Autonomous assumption protocol:**
+
+Agents can assume postings on their own initiative — not only when dispatched
+with `gt sling --posting`. This is called **autonomous assumption** and is the
+primary way polecats adapt to work that requires specialized context mid-session.
+
+When an agent autonomously assumes a posting, it must:
+
+1. **Assume the posting with a reason:**
+   ```bash
+   gt posting assume <posting> --reason "bead X requires triage"
+   ```
+   The `--reason` flag logs to stderr for audit visibility.
+
+2. **Communicate the change** to the Witness so the posting is visible in
+   status checks and patrol reports:
+   ```bash
+   gt nudge <rig>/witness "Assumed posting <posting> for <issue>: <reason>"
+   ```
+
+**When to autonomously assume:**
+- The assigned work clearly falls within a posting's domain (e.g., research
+  spike → scout, code review → inspector, dispatch/triage → dispatcher)
+- The agent recognizes it needs specialized context that a posting provides
+- No posting is currently active (or the current one should be cycled)
+
+**When NOT to autonomously assume:**
+- A persistent posting is already set (blocked by conflict rules)
+- The work doesn't clearly benefit from specialization
+- Mid-way through work where changing context would be disruptive
+
+The autonomous assumption protocol enables distributed decision-making: agents
+closest to the work decide what specialization they need, rather than requiring
+a central dispatcher to predict posting assignments for every task.
 
 For OpenCode autonomous mode, set env var in your shell profile:
 ```bash

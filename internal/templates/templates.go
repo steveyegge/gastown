@@ -9,10 +9,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"text/template"
 
 	"github.com/steveyegge/gastown/internal/templates/commands"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -38,8 +41,18 @@ var templateFuncs = template.FuncMap{
 	"cmd": CmdName, // {{ cmd }} returns the CLI command name
 }
 
+// TemplateFuncs returns the shared FuncMap used by all Gas Town templates.
+// Callers that parse templates outside of Templates.RenderRole (e.g. posting
+// templates) must register these functions to ensure {{ cmd }} etc. resolve.
+func TemplateFuncs() template.FuncMap {
+	return templateFuncs
+}
+
 //go:embed roles/*.md.tmpl messages/*.md.tmpl
 var templateFS embed.FS
+
+//go:embed postings/*.md.tmpl
+var postingsFS embed.FS
 
 //go:embed launchd/*.plist systemd/*.service
 var supervisorFS embed.FS
@@ -65,6 +78,7 @@ type RoleData struct {
 	IssuePrefix    string   // beads issue prefix
 	MayorSession   string   // e.g., "gt-ai-mayor" - dynamic mayor session name
 	DeaconSession  string   // e.g., "gt-ai-deacon" - dynamic deacon session name
+	Posting        string   // posting name (e.g., "dispatcher", "scout") - set when agent has active posting
 }
 
 // SpawnData contains information for spawn assignment messages.
@@ -206,6 +220,213 @@ func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSessi
 	}
 
 	return true, os.WriteFile(claudePath, []byte(content), 0644)
+}
+
+// PostingResult contains a resolved posting template.
+type PostingResult struct {
+	Content     string // Raw template content (Go template syntax), frontmatter stripped
+	Level       string // Resolution level: "embedded", "town", or "rig"
+	Name        string // Posting name (e.g., "dispatcher")
+	Description string // From YAML frontmatter description field, if present
+}
+
+// postingFrontmatter represents the YAML frontmatter in a posting template.
+type postingFrontmatter struct {
+	Description string `yaml:"description"`
+}
+
+// parsePostingFrontmatter extracts YAML frontmatter from posting content.
+// If the content starts with "---\n", the block up to the next "---\n" is
+// parsed as YAML. Returns the description and the content with frontmatter stripped.
+func parsePostingFrontmatter(raw string) (description string, content string) {
+	const delim = "---\n"
+	if !strings.HasPrefix(raw, delim) {
+		return "", raw
+	}
+	rest := raw[len(delim):]
+	end := strings.Index(rest, delim)
+	if end < 0 {
+		return "", raw
+	}
+	yamlBlock := rest[:end]
+	content = rest[end+len(delim):]
+
+	var fm postingFrontmatter
+	if err := yaml.Unmarshal([]byte(yamlBlock), &fm); err != nil {
+		return "", raw
+	}
+	return fm.Description, content
+}
+
+// LoadPosting loads a posting template with 3-layer resolution.
+// Resolution order (later overrides earlier):
+//  1. Built-in defaults (embedded in binary via postings/*.md.tmpl)
+//  2. Town-level override (<townRoot>/postings/<name>.md.tmpl)
+//  3. Rig-level override (<rigPath>/postings/<name>.md.tmpl)
+//
+// Unlike role definitions, postings don't merge — the highest-priority
+// layer that exists wins entirely.
+func LoadPosting(townRoot, rigPath, postingName string) (*PostingResult, error) {
+	if postingName == "" {
+		return nil, fmt.Errorf("posting name cannot be empty")
+	}
+
+	fileName := postingName + ".md.tmpl"
+
+	// 3. Check rig-level override (highest priority)
+	if rigPath != "" {
+		rigPostingPath := filepath.Join(rigPath, "postings", fileName)
+		if data, err := os.ReadFile(rigPostingPath); err == nil {
+			desc, body := parsePostingFrontmatter(string(data))
+			return &PostingResult{
+				Content:     body,
+				Level:       "rig",
+				Name:        postingName,
+				Description: desc,
+			}, nil
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("reading rig posting %s: %w", rigPostingPath, err)
+		}
+	}
+
+	// 2. Check town-level override
+	if townRoot != "" {
+		townPostingPath := filepath.Join(townRoot, "postings", fileName)
+		if data, err := os.ReadFile(townPostingPath); err == nil {
+			desc, body := parsePostingFrontmatter(string(data))
+			return &PostingResult{
+				Content:     body,
+				Level:       "town",
+				Name:        postingName,
+				Description: desc,
+			}, nil
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("reading town posting %s: %w", townPostingPath, err)
+		}
+	}
+
+	// 1. Check built-in embedded postings (lowest priority)
+	if data, err := postingsFS.ReadFile("postings/" + fileName); err == nil {
+		desc, body := parsePostingFrontmatter(string(data))
+		return &PostingResult{
+			Content:     body,
+			Level:       "embedded",
+			Name:        postingName,
+			Description: desc,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("posting %q not found (checked rig, town, and built-in postings)", postingName)
+}
+
+// PostingLevels returns all resolution levels where a posting template exists.
+// This is used to detect ambiguity: if len(levels) > 1, the posting exists
+// at multiple levels and the bracket notation should include the level prefix.
+func PostingLevels(townRoot, rigPath, postingName string) []string {
+	if postingName == "" {
+		return nil
+	}
+
+	fileName := postingName + ".md.tmpl"
+	var levels []string
+
+	// Check rig-level
+	if rigPath != "" {
+		rigPostingPath := filepath.Join(rigPath, "postings", fileName)
+		if _, err := os.Stat(rigPostingPath); err == nil {
+			levels = append(levels, "rig")
+		}
+	}
+
+	// Check town-level
+	if townRoot != "" {
+		townPostingPath := filepath.Join(townRoot, "postings", fileName)
+		if _, err := os.Stat(townPostingPath); err == nil {
+			levels = append(levels, "town")
+		}
+	}
+
+	// Check embedded
+	if _, err := postingsFS.ReadFile("postings/" + fileName); err == nil {
+		levels = append(levels, "embedded")
+	}
+
+	return levels
+}
+
+// BuiltinPostingNames returns the list of built-in posting template names.
+// BuiltinPostingNames returns the names of built-in postings.
+// Hardcoded rather than derived from postingsFS because it's simpler and
+// TestBuiltinPostingNames already verifies each name loads from the embedded FS,
+// so any drift between this list and the actual files fails tests.
+func BuiltinPostingNames() []string {
+	return []string{"dispatcher", "inspector", "scout"}
+}
+
+// PostingInfo describes an available posting definition.
+type PostingInfo struct {
+	Name        string // e.g. "dispatcher"
+	Level       string // "embedded", "town", or "rig"
+	Description string // From YAML frontmatter, if present
+}
+
+// ListAvailablePostings returns all posting definitions across all three
+// resolution levels (embedded, town, rig). Each posting appears once with its
+// highest-priority level (rig > town > embedded).
+func ListAvailablePostings(townRoot, rigPath string) []PostingInfo {
+	// Collect all names with their highest-priority level and description.
+	// Use PostingInfo directly as the map value.
+	seen := make(map[string]PostingInfo) // name → info
+
+	// 1. Embedded (lowest priority) — load each to extract description
+	for _, name := range BuiltinPostingNames() {
+		if result, err := LoadPosting("", "", name); err == nil {
+			seen[name] = PostingInfo{Name: name, Level: "embedded", Description: result.Description}
+		} else {
+			seen[name] = PostingInfo{Name: name, Level: "embedded"}
+		}
+	}
+
+	// 2. Town-level
+	if townRoot != "" {
+		scanPostingsDirWithDesc(filepath.Join(townRoot, "postings"), "town", seen)
+	}
+
+	// 3. Rig-level (highest priority)
+	if rigPath != "" {
+		scanPostingsDirWithDesc(filepath.Join(rigPath, "postings"), "rig", seen)
+	}
+
+	// Build sorted result
+	result := make([]PostingInfo, 0, len(seen))
+	for _, info := range seen {
+		result = append(result, info)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+	return result
+}
+
+// scanPostingsDirWithDesc reads *.md.tmpl files from dir and records them in seen
+// with the given level and description extracted from frontmatter,
+// overwriting any existing lower-priority entry.
+func scanPostingsDirWithDesc(dir, level string, seen map[string]PostingInfo) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md.tmpl") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".md.tmpl")
+		var desc string
+		if data, err := os.ReadFile(filepath.Join(dir, e.Name())); err == nil {
+			desc, _ = parsePostingFrontmatter(string(data))
+		}
+		seen[name] = PostingInfo{Name: name, Level: level, Description: desc}
+	}
 }
 
 // ProvisionCommands creates the .claude/commands/ directory with standard slash commands.

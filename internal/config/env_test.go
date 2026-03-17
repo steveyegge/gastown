@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -582,6 +583,52 @@ func TestEnvToSlice(t *testing.T) {
 	}
 }
 
+func TestAgentEnv_PolecatWithPosting(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "polecat",
+		Rig:       "myrig",
+		AgentName: "Toast",
+		TownRoot:  "/town",
+		Posting:   "scout",
+	})
+
+	assertEnv(t, env, "GT_ROLE", "myrig/polecats/Toast")          // GT_ROLE stays without bracket
+	assertEnv(t, env, "BD_ACTOR", "myrig/polecats/Toast[scout]")  // BD_ACTOR gets bracket notation
+	assertEnv(t, env, "GIT_AUTHOR_NAME", "Toast[scout]")          // GIT_AUTHOR_NAME gets bracket notation
+	assertEnv(t, env, "GT_POSTING", "scout")                      // GT_POSTING propagated
+}
+
+func TestAgentEnv_CrewWithPosting(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "crew",
+		Rig:       "myrig",
+		AgentName: "diesel",
+		TownRoot:  "/town",
+		Posting:   "dispatcher",
+	})
+
+	assertEnv(t, env, "GT_ROLE", "myrig/crew/diesel")                   // GT_ROLE stays without bracket
+	assertEnv(t, env, "BD_ACTOR", "myrig/crew/diesel[dispatcher]")      // BD_ACTOR gets bracket notation
+	assertEnv(t, env, "GIT_AUTHOR_NAME", "diesel[dispatcher]")          // GIT_AUTHOR_NAME gets bracket notation
+	assertEnv(t, env, "GT_POSTING", "dispatcher")                       // GT_POSTING propagated
+}
+
+func TestAgentEnv_PolecatNoPosting(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "polecat",
+		Rig:       "myrig",
+		AgentName: "Toast",
+		TownRoot:  "/town",
+	})
+
+	assertEnv(t, env, "BD_ACTOR", "myrig/polecats/Toast") // No bracket when no posting
+	assertEnv(t, env, "GIT_AUTHOR_NAME", "Toast")         // No bracket when no posting
+	assertNotSet(t, env, "GT_POSTING")                     // GT_POSTING not set
+}
+
 // Helper functions
 
 func assertEnv(t *testing.T, env map[string]string, key, expected string) {
@@ -988,6 +1035,22 @@ func TestAgentEnv_OTELPromptAndTown(t *testing.T) {
 	}
 }
 
+func TestAgentEnv_OTELPosting(t *testing.T) {
+	t.Setenv("GT_OTEL_METRICS_URL", "http://localhost:8428/opentelemetry/api/v1/push")
+
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "polecat",
+		Rig:       "gastown",
+		AgentName: "rust",
+		Posting:   "dispatcher",
+	})
+
+	attrs := env["OTEL_RESOURCE_ATTRIBUTES"]
+	if !containsAttr(attrs, "gt.posting=dispatcher") {
+		t.Errorf("OTEL_RESOURCE_ATTRIBUTES missing gt.posting=dispatcher, got: %s", attrs)
+	}
+}
+
 func TestAgentEnv_OTELNoPromptNoTown(t *testing.T) {
 	t.Setenv("GT_OTEL_METRICS_URL", "http://localhost:8428/opentelemetry/api/v1/push")
 	t.Setenv("GT_OTEL_LOGS_URL", "http://localhost:9428/insert/opentelemetry/v1/logs")
@@ -1210,6 +1273,46 @@ func TestAgentEnv_NoDoltPortWithoutTownRoot(t *testing.T) {
 	assertNotSet(t, env, "BEADS_DOLT_PORT")
 }
 
+func TestAgentEnv_PostingInjection(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sets GT_POSTING and GT_POSTING_LEVEL when configured", func(t *testing.T) {
+		t.Parallel()
+		env := AgentEnv(AgentEnvConfig{
+			Role:         "polecat",
+			Rig:          "myrig",
+			AgentName:    "Toast",
+			Posting:      "dispatcher",
+			PostingLevel: "rig",
+		})
+		assertEnv(t, env, "GT_POSTING", "dispatcher")
+		assertEnv(t, env, "GT_POSTING_LEVEL", "rig")
+	})
+
+	t.Run("omits GT_POSTING when empty", func(t *testing.T) {
+		t.Parallel()
+		env := AgentEnv(AgentEnvConfig{
+			Role:      "polecat",
+			Rig:       "myrig",
+			AgentName: "Toast",
+		})
+		assertNotSet(t, env, "GT_POSTING")
+		assertNotSet(t, env, "GT_POSTING_LEVEL")
+	})
+
+	t.Run("sets GT_POSTING without GT_POSTING_LEVEL", func(t *testing.T) {
+		t.Parallel()
+		env := AgentEnv(AgentEnvConfig{
+			Role:      "crew",
+			Rig:       "myrig",
+			AgentName: "alice",
+			Posting:   "scout",
+		})
+		assertEnv(t, env, "GT_POSTING", "scout")
+		assertNotSet(t, env, "GT_POSTING_LEVEL")
+	})
+}
+
 func TestAgentEnv_NoDoltPortWithoutConfig(t *testing.T) {
 	t.Setenv("GT_DOLT_PORT", "")   // isolate from live Dolt server
 	t.Setenv("BEADS_DOLT_PORT", "") // isolate from live Dolt server
@@ -1250,4 +1353,101 @@ func TestClaudeConfigDir_EnvVar(t *testing.T) {
 	if got != customDir {
 		t.Errorf("ClaudeConfigDir() = %q, want %q", got, customDir)
 	}
+}
+
+func TestStripPostingBracket(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"gastown/crew/diesel[inspector]", "gastown/crew/diesel"},
+		{"gastown/polecats/dag[scout]", "gastown/polecats/dag"},
+		{"diesel[inspector]", "diesel"},
+		{"gastown/crew/diesel", "gastown/crew/diesel"},
+		{"diesel", "diesel"},
+		{"", ""},
+		{"a[b][c]", "a"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			if got := StripPostingBracket(tt.input); got != tt.want {
+				t.Errorf("StripPostingBracket(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAppendPostingBracket_Exported(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		base    string
+		posting string
+		want    string
+	}{
+		{"gastown/crew/diesel", "inspector", "gastown/crew/diesel[inspector]"},
+		{"diesel", "scout", "diesel[scout]"},
+		{"gastown/crew/diesel", "", "gastown/crew/diesel"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.base+"_"+tt.posting, func(t *testing.T) {
+			t.Parallel()
+			if got := AppendPostingBracket(tt.base, tt.posting); got != tt.want {
+				t.Errorf("AppendPostingBracket(%q, %q) = %q, want %q", tt.base, tt.posting, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveWorkerPosting(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns posting from WorkerPostings config", func(t *testing.T) {
+		t.Parallel()
+		rigPath := t.TempDir()
+		settingsDir := filepath.Join(rigPath, "settings")
+		if err := os.MkdirAll(settingsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		settings := NewRigSettings()
+		settings.WorkerPostings = map[string]string{"diesel": "dispatcher", "nux": "scout"}
+		data, _ := json.Marshal(settings)
+		if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := ResolveWorkerPosting(rigPath, "diesel"); got != "dispatcher" {
+			t.Errorf("ResolveWorkerPosting(diesel) = %q, want %q", got, "dispatcher")
+		}
+		if got := ResolveWorkerPosting(rigPath, "nux"); got != "scout" {
+			t.Errorf("ResolveWorkerPosting(nux) = %q, want %q", got, "scout")
+		}
+	})
+
+	t.Run("returns empty for unknown worker", func(t *testing.T) {
+		t.Parallel()
+		rigPath := t.TempDir()
+		settingsDir := filepath.Join(rigPath, "settings")
+		if err := os.MkdirAll(settingsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		settings := NewRigSettings()
+		settings.WorkerPostings = map[string]string{"diesel": "dispatcher"}
+		data, _ := json.Marshal(settings)
+		if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := ResolveWorkerPosting(rigPath, "unknown"); got != "" {
+			t.Errorf("ResolveWorkerPosting(unknown) = %q, want empty", got)
+		}
+	})
+
+	t.Run("returns empty when no config file", func(t *testing.T) {
+		t.Parallel()
+		if got := ResolveWorkerPosting("/nonexistent/path", "diesel"); got != "" {
+			t.Errorf("ResolveWorkerPosting(nonexistent) = %q, want empty", got)
+		}
+	})
 }

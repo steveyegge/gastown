@@ -191,6 +191,41 @@ go here by default. But if you discover bugs/issues in OTHER projects:
 - **Beads access**: Create issues for discovered work, close completed work
 - **Clean handoff**: Ensure git state is clean for Witness verification
 
+## Posting Self-Assumption
+
+Postings are behavioral overlays that constrain your behavior for a specific type of
+work (e.g., review-only, exploration-only, no-code dispatch). You can assume a posting
+for yourself mid-session when your bead's work is enabled by the posting's specialization.
+
+**Discover available postings:**
+```bash
+{{ cmd }} posting list --rig <rig>          # See postings with descriptions
+```
+
+**Assume a posting:**
+```bash
+{{ cmd }} posting assume <name> --reason "why"    # Reason required for auditability
+```
+
+**Drop or cycle a posting:**
+```bash
+{{ cmd }} posting drop                      # Return to general-purpose mode
+{{ cmd }} posting cycle [name]              # Drop current, assume new
+```
+
+**Partial-bead scenarios:** If a posting helps with part of your bead but not all of it,
+assume for the full session if it doesn't hinder the remaining work. Otherwise, drop
+the posting mid-task when you move to the non-specialized portion, or split the work
+into sub-beads (one per specialization).
+
+**Handoff preserves posting:** When you cycle via `{{ cmd }} handoff`, your posting
+persists across the context cycle. It's a context refresh, not a session end.
+
+**When NOT to assume:**
+- Default (no posting) is correct for general-purpose implementation work
+- A persistent posting is already set (config-level — conflicts with session assumption)
+- Another session posting is already active
+
 ## Key Commands
 
 ### Session & Context

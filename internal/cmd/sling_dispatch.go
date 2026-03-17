@@ -36,6 +36,7 @@ type SlingParams struct {
 	HookRawBead bool    // --hook-raw-bead
 	NoBoot     bool     // --no-boot
 	Mode       string   // --ralph: "" (normal) or "ralph"
+	Posting    string   // --posting: assumed posting for the polecat session
 
 	// Execution behavior (set by caller, not serialized to queue)
 	SkipCook         bool   // Batch optimization: formula already cooked
@@ -354,6 +355,13 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	// Update agent bead mode (for stuck detector to identify ralphcats)
 	if params.Mode != "" {
 		updateAgentMode(targetAgent, params.Mode, hookWorkDir, beadsDir)
+	}
+
+	// Pass posting to polecat's SessionStartOptions so Start() can clear stale
+	// state and write the new posting atomically (gt-jdv).
+	if params.Posting != "" {
+		spawnInfo.posting = params.Posting
+		fmt.Printf("  %s Posting: %s\n", style.Bold.Render("→"), params.Posting)
 	}
 
 	// 11. Start polecat session

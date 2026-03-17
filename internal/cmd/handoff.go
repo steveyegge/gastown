@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -159,6 +160,12 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	// When a patrol agent (e.g., witness) completes quickly on idle rigs,
 	// it can hand off immediately and the daemon respawns, creating a crash loop.
 	enforceHandoffCooldown()
+
+	// Clear posting for crew on handoff (gt-pio).
+	// Crew handoffs mean "done for now" — the next session may be different work,
+	// so the posting should not carry over. Polecats never reach here (they exit
+	// via gt done above), and other roles (mayor, witness, etc.) don't use postings.
+	clearPostingOnCrewHandoff()
 
 	// If --collect flag is set, auto-collect state into the message
 	if handoffCollect {
@@ -1635,6 +1642,28 @@ func enforceHandoffCooldown() {
 		style.Dim.Render("⏳"), remaining.Round(time.Second),
 		age.Round(time.Second), constants.MinHandoffCooldown)
 	time.Sleep(remaining)
+}
+
+// clearPostingOnCrewHandoff clears the .runtime/posting file if the current
+// role is crew. Crew handoffs mean "done for now" — the next session may be
+// different work, so the posting should not carry over. Polecats never reach
+// this code (they exit via gt done), and other roles don't use postings. (gt-pio)
+func clearPostingOnCrewHandoff() {
+	role := os.Getenv("GT_ROLE")
+	if role == "" {
+		return
+	}
+	parsedRole, _, _ := parseRoleString(role)
+	if parsedRole != RoleCrew {
+		return
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	if err := posting.Clear(cwd); err != nil {
+		style.PrintWarning("could not clear posting: %v", err)
+	}
 }
 
 // recordHandoffTime writes the current timestamp to the handoff cooldown file.

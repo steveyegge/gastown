@@ -165,6 +165,15 @@ func BuildCommandContext(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, "tmux", allArgs...)
 }
 
+// RenameWindow renames the current tmux window. No-op if $TMUX is not set.
+// Used to reflect the active posting in the tmux status bar.
+func RenameWindow(name string) {
+	if os.Getenv("TMUX") == "" {
+		return
+	}
+	_ = BuildCommand("rename-window", name).Run()
+}
+
 // Tmux wraps tmux operations.
 type Tmux struct {
 	socketName string // tmux socket name (-L flag), empty = default socket

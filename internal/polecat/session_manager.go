@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -75,6 +76,12 @@ type SessionStartOptions struct {
 	// If set, GT_AGENT is written to the tmux session environment table so that
 	// IsAgentAlive and waitForPolecatReady read the correct process names.
 	Agent string
+
+	// Posting is an explicit posting to assume for this session.
+	// If set, the posting is written to .runtime/posting after clearing stale state.
+	// If empty, .runtime/posting is cleared to prevent stale postings from prior
+	// sessions being inherited (gt-jdv).
+	Posting string
 }
 
 // SessionInfo contains information about a running polecat session.
@@ -236,6 +243,19 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		workDir = m.clonePath(polecat)
 	}
 
+	// Clear stale .runtime/posting from prior sessions (gt-jdv).
+	// If --posting was explicitly passed via gt sling, re-write it after clearing.
+	// This prevents polecats from inheriting incorrect postings from crashed sessions
+	// or manual tests.
+	if err := posting.Clear(workDir); err != nil {
+		debugSession("Clear stale posting", err)
+	}
+	if opts.Posting != "" {
+		if err := posting.Write(workDir, opts.Posting); err != nil {
+			return fmt.Errorf("writing posting to polecat: %w", err)
+		}
+	}
+
 	// Validate issue exists and isn't tombstoned BEFORE creating session.
 	// This prevents CPU spin loops from agents retrying work on invalid issues.
 	if opts.Issue != "" {
@@ -361,6 +381,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		RuntimeConfigDir: opts.RuntimeConfigDir,
 		Agent:            opts.Agent,
 		SessionName:      sessionID,
+		Posting:          config.ResolveWorkerPosting(m.rig.Path, polecat),
 	})
 	for k, v := range envVars {
 		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))

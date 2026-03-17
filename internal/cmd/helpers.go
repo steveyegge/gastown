@@ -33,7 +33,7 @@ func inferRigFromCwd(townRoot string) (string, error) {
 	rel = filepath.ToSlash(rel)
 	parts := strings.Split(rel, "/")
 
-	if len(parts) > 0 && parts[0] != "" && parts[0] != "." {
+	if len(parts) > 0 && parts[0] != "" && parts[0] != "." && parts[0] != ".." {
 		return parts[0], nil
 	}
 

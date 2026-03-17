@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -384,6 +385,7 @@ type PolecatListItem struct {
 	Name           string        `json:"name"`
 	State          polecat.State `json:"state"`
 	Issue          string        `json:"issue,omitempty"`
+	Posting        string        `json:"posting,omitempty"`
 	SessionRunning bool          `json:"session_running"`
 	Zombie         bool          `json:"zombie,omitempty"`
 	SessionName    string        `json:"session_name,omitempty"`
@@ -461,11 +463,13 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 		knownNames := make(map[string]bool)
 		for _, p := range polecats {
 			running, _ := polecatMgr.IsRunning(p.Name)
+			postingName := posting.Read(p.ClonePath)
 			allPolecats = append(allPolecats, PolecatListItem{
 				Rig:            r.Name,
 				Name:           p.Name,
 				State:          p.State,
 				Issue:          p.Issue,
+				Posting:        postingName,
 				SessionRunning: running,
 			})
 			knownNames[p.Name] = true
@@ -532,7 +536,12 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 			stateStr = style.Dim.Render(stateStr)
 		}
 
-		fmt.Printf("  %s %s/%s  %s\n", sessionStatus, p.Rig, p.Name, stateStr)
+		postingStr := ""
+		if p.Posting != "" {
+			postingStr = fmt.Sprintf("  [%s]", p.Posting)
+		}
+
+		fmt.Printf("  %s %s/%s%s  %s\n", sessionStatus, p.Rig, p.Name, postingStr, stateStr)
 		if p.Issue != "" {
 			fmt.Printf("    %s\n", style.Dim.Render(p.Issue))
 		}

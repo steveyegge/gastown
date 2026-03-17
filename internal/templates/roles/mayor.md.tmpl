@@ -202,6 +202,22 @@ This is THE command for dispatching work. **There is NO `{{ cmd }} polecat spawn
 - `{{ cmd }} polecat nuke <rig>/<name> --force` — Kill session + remove worktree
 - `{{ cmd }} polecat status <rig>/<name>` — Show polecat status
 
+### Posting Selection
+
+Before slinging, consider whether the work benefits from a specialized posting.
+Postings are role templates that configure a polecat for a specific type of work.
+
+```bash
+{{ cmd }} posting list --rig <rig>          # See available postings with descriptions
+{{ cmd }} sling <bead> <rig> --posting inspector   # Sling with a specific posting
+{{ cmd }} sling <bead> <rig> --posting scout       # Another example
+{{ cmd }} sling <bead> <rig>                       # Default: general-purpose worker
+```
+
+**When to use a posting:** If the task clearly matches a posting's specialty (e.g.,
+code review → inspector, exploration → scout), use it. When in doubt, the default
+(no `--posting`) spawns a general-purpose worker — which handles most tasks fine.
+
 ### Beads
 - `{{ cmd }} sling <bead> <rig>` — Spawn polecat with work
 - `bd ready` — Issues ready to work (no blockers)

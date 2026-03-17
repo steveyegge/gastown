@@ -194,6 +194,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			Agent:            crewAgentOverride,
 			Topic:            "start",
 			SessionName:      sessionID,
+			Posting:          config.ResolveWorkerPosting(r.Path, name),
 		})
 		// Merge liveness-critical env vars (GT_AGENT, GT_PROCESS_NAMES) so that
 		// IsAgentAlive can detect non-Claude runtimes. Without this, attach
@@ -278,6 +279,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 				Agent:            crewAgentOverride,
 				Topic:            "restart",
 				SessionName:      sessionID,
+				Posting:          config.ResolveWorkerPosting(r.Path, name),
 			})
 			restartEnv = session.MergeRuntimeLivenessEnv(restartEnv, runtimeConfig)
 			for k, v := range restartEnv {

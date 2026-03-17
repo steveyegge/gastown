@@ -551,6 +551,12 @@ func ParseMessageType(s string) MessageType {
 //   - "gastown/Toast" → "gastown/Toast" (already canonical)
 //   - "gastown/refinery" → "gastown/refinery"
 func normalizeAddress(s string) string {
+	// Strip bracket notation (display-only posting info, e.g. "gastown/crew/diesel[inspector]")
+	// before any normalization. Brackets must not affect routing or identity resolution.
+	if idx := strings.IndexByte(s, '['); idx >= 0 {
+		s = s[:idx]
+	}
+
 	// Overseer (human operator) - no trailing slash, distinct from agents
 	if s == "overseer" {
 		return "overseer"

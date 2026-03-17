@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/lock"
+	"github.com/steveyegge/gastown/internal/posting"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
@@ -150,6 +151,26 @@ func runPrime(cmd *cobra.Command, args []string) (retErr error) {
 		Polecat:  roleInfo.Polecat,
 		TownRoot: townRoot,
 		WorkDir:  cwd,
+	}
+
+	// Resolve posting for crew/polecat roles so it propagates to all downstream output.
+	// Two-phase resolution:
+	//  1. resolvePostingName: determines the posting name from session state or rig config
+	//  2. resolvePostingLevel: determines where the template was resolved from (embedded/town/rig)
+	//     and whether the posting exists at multiple levels (ambiguity check)
+	if ctx.Role == RolePolecat || ctx.Role == RoleCrew {
+		ctx.Posting, _ = resolvePostingName(ctx)
+		if ctx.Posting != "" {
+			ctx.PostingLevel, ctx.PostingAmbiguous = resolvePostingLevel(ctx)
+		}
+	}
+
+	// Update tmux window name to reflect active posting (gt-drc, gt-iew).
+	// Covers persistent postings (crew), session postings inherited across
+	// polecat handoffs, and postings set via gt sling --posting.
+	// Uses FormatWindowName for truncation within 24-char budget.
+	if (ctx.Role == RolePolecat || ctx.Role == RoleCrew) && ctx.Polecat != "" {
+		tmux.RenameWindow(posting.FormatWindowName(ctx.Polecat, ctx.Posting))
 	}
 
 	// --state mode: output state only and exit
@@ -919,12 +940,20 @@ func getGitRoot() (string, error) {
 }
 
 // getAgentIdentity returns the agent identity string for hook lookup.
+// For crew and polecat roles, reads .runtime/posting and appends bracket
+// notation if a posting is active (e.g., "gastown/crew/diesel[scout]").
+// Uses PostingDisplay to include the level prefix when the posting is ambiguous
+// (e.g., "[rig:scout]" instead of "[scout]").
 func getAgentIdentity(ctx RoleContext) string {
+	// Ensure ctx.Posting is populated from .runtime/posting if not already set
+	if ctx.Posting == "" {
+		ctx.Posting = posting.Read(ctx.WorkDir)
+	}
 	switch ctx.Role {
 	case RoleCrew:
-		return fmt.Sprintf("%s/crew/%s", ctx.Rig, ctx.Polecat)
+		return fmt.Sprintf("%s/crew/%s%s", ctx.Rig, ctx.Polecat, ctx.PostingDisplay(ctx.PostingAmbiguous))
 	case RolePolecat:
-		return fmt.Sprintf("%s/polecats/%s", ctx.Rig, ctx.Polecat)
+		return fmt.Sprintf("%s/polecats/%s%s", ctx.Rig, ctx.Polecat, ctx.PostingDisplay(ctx.PostingAmbiguous))
 	case RoleMayor:
 		return "mayor"
 	case RoleDeacon:
@@ -939,6 +968,7 @@ func getAgentIdentity(ctx RoleContext) string {
 		return ""
 	}
 }
+
 
 // acquireIdentityLock checks and acquires the identity lock for worker roles.
 // This prevents multiple agents from claiming the same worker identity.
