@@ -450,19 +450,19 @@ func (d *Daemon) surgicalRebaseOnce(dbName string, keepRecent int) error {
 	// []uint8 (e.g. "1.00") which cannot be scanned directly into int.
 	var minOrderStr, maxOrderStr string
 	if err := db.QueryRowContext(ctx, "SELECT MIN(rebase_order), MAX(rebase_order) FROM dolt_rebase").Scan(&minOrderStr, &maxOrderStr); err != nil {
-		d.surgicalAbortAndCleanup(db, baseBranch, workBranch)
+		d.surgicalAbortAndCleanup(db, workBranch)
 		return fmt.Errorf("read rebase bounds: %w", err)
 	}
 	minOrder, maxOrder, err := parseRebaseOrder2(minOrderStr, maxOrderStr)
 	if err != nil {
-		d.surgicalAbortAndCleanup(db, baseBranch, workBranch)
+		d.surgicalAbortAndCleanup(db, workBranch)
 		return fmt.Errorf("parse rebase bounds: %w", err)
 	}
 
 	squashThreshold := maxOrder - keepRecent
 	if squashThreshold <= minOrder {
 		d.logger.Printf("compactor_dog: %s: nothing to squash (all commits recent), aborting rebase", dbName)
-		d.surgicalAbortAndCleanup(db, baseBranch, workBranch)
+		d.surgicalAbortAndCleanup(db, workBranch)
 		return nil
 	}
 
@@ -470,7 +470,7 @@ func (d *Daemon) surgicalRebaseOnce(dbName string, keepRecent int) error {
 		"UPDATE dolt_rebase SET action = 'squash' WHERE rebase_order > %d AND rebase_order <= %d",
 		minOrder, squashThreshold))
 	if err != nil {
-		d.surgicalAbortAndCleanup(db, baseBranch, workBranch)
+		d.surgicalAbortAndCleanup(db, workBranch)
 		return fmt.Errorf("update rebase plan: %w", err)
 	}
 	affected, _ := result.RowsAffected()
@@ -546,13 +546,13 @@ func (d *Daemon) surgicalCleanup(db *sql.DB, baseBranch, workBranch string) {
 }
 
 // surgicalAbortAndCleanup aborts an in-progress rebase, then cleans up.
-func (d *Daemon) surgicalAbortAndCleanup(db *sql.DB, baseBranch, workBranch string) {
+func (d *Daemon) surgicalAbortAndCleanup(db *sql.DB, workBranch string) {
 	ctx, cancel := context.WithTimeout(context.Background(), compactorQueryTimeout)
 	defer cancel()
 	_, _ = db.ExecContext(ctx, "CALL DOLT_REBASE('--abort')")
 	_, _ = db.ExecContext(ctx, "CALL DOLT_CHECKOUT('main')")
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", workBranch))
-	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", baseBranch))
+	_, _ = db.ExecContext(ctx, "CALL DOLT_BRANCH('-D', 'compact-base')")
 }
 
 // parseRebaseOrder2 parses min/max rebase_order DECIMAL strings to ints.
