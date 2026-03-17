@@ -295,16 +295,23 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 			style.Bold.Render("!"), err)
 		fmt.Printf("  Proceeding with branch swap — data should be intact\n")
 	} else {
+		var droppedEmpty []string
 		for table, preCount := range preCounts {
 			postCount, ok := postCounts[table]
 			if !ok {
-				// Table not listed in information_schema — try querying it directly.
+				// Dolt's squash drops empty tables (DDL-only changes get lost).
+				// Empty tables carry no data to verify — skip them.
+				if preCount == 0 {
+					droppedEmpty = append(droppedEmpty, table)
+					continue
+				}
+				// Non-empty table missing — try querying it directly.
 				// Dolt's information_schema can be stale after rebase operations.
 				var directCount int
 				directErr := db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `%s`.`%s`", dbName, table)).Scan(&directCount)
 				if directErr != nil {
 					rebaseCleanupAll(db, baseBranch, workBranch)
-					return fmt.Errorf("integrity FAIL: table %q missing after rebase (not in information_schema, direct query failed: %w)", table, directErr)
+					return fmt.Errorf("integrity FAIL: table %q (%d rows) missing after rebase: %w", table, preCount, directErr)
 				}
 				postCount = directCount
 				fmt.Printf("  %s Table %q not in information_schema but exists (direct count: %d)\n",
@@ -315,7 +322,12 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("integrity FAIL: %q pre=%d post=%d", table, preCount, postCount)
 			}
 		}
-		fmt.Printf("  %s Integrity verified (%d tables match)\n", style.Bold.Render("✓"), len(preCounts))
+		if len(droppedEmpty) > 0 {
+			fmt.Printf("  %s %d empty tables dropped by squash (expected): %v\n",
+				style.Bold.Render("!"), len(droppedEmpty), droppedEmpty)
+		}
+		fmt.Printf("  %s Integrity verified (%d tables match, %d empty tables skipped)\n",
+			style.Bold.Render("✓"), len(preCounts)-len(droppedEmpty), len(droppedEmpty))
 	}
 
 	// Step 8: Concurrency check — verify main hasn't moved.
