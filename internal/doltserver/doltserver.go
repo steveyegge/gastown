@@ -665,30 +665,136 @@ func CheckPortConflict(townRoot string) (int, string) {
 }
 
 // findDoltServerOnPort finds a process listening on the given port.
-// Returns the PID or 0 if not found. Uses lsof to identify the listener PID.
-// Does not verify process identity via ps string matching (ZFC fix: gt-utuk).
+// Returns the PID or 0 if not found.
+// Uses ss (Linux), lsof (macOS/Linux), or /proc/net/tcp (Linux fallback)
+// to identify the listener PID. (gh-2968: lsof not universally available)
 func findDoltServerOnPort(port int) int {
-	// Use lsof to find the LISTENING process on port (not clients connected to it).
+	// Try ss first on Linux (iproute2, available on most modern Linux).
+	if runtime.GOOS == "linux" {
+		if pid := findPortWithSS(port); pid > 0 {
+			return pid
+		}
+	}
+
+	// Try lsof (available on macOS, and many Linux systems).
 	// Without -sTCP:LISTEN, lsof returns client PIDs (e.g., gt daemon) first,
 	// which aren't dolt processes — causing false negatives.
 	cmd := exec.Command("lsof", "-i", fmt.Sprintf(":%d", port), "-sTCP:LISTEN", "-t")
 	output, err := cmd.Output()
+	if err == nil {
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		if len(lines) > 0 && lines[0] != "" {
+			if pid, err := strconv.Atoi(lines[0]); err == nil {
+				return pid
+			}
+		}
+	}
+
+	// Last resort on Linux: parse /proc/net/tcp (no external tools required).
+	if runtime.GOOS == "linux" {
+		if pid := findPortViaProcNet(port); pid > 0 {
+			return pid
+		}
+	}
+
+	return 0
+}
+
+// findPortWithSS finds the PID listening on the given port using ss(8).
+// ss is part of iproute2 and available on most modern Linux systems.
+// Returns 0 if ss is not available or the port is not in use.
+func findPortWithSS(port int) int {
+	cmd := exec.Command("ss", "-tlnpH", fmt.Sprintf("sport = :%d", port))
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	// ss output with -p includes: users:(("dolt",pid=12345,fd=10))
+	// Extract pid=<N> from the output.
+	for _, line := range strings.Split(string(output), "\n") {
+		if idx := strings.Index(line, "pid="); idx >= 0 {
+			rest := line[idx+4:]
+			end := strings.IndexAny(rest, ",)")
+			if end < 0 {
+				end = len(rest)
+			}
+			if pid, err := strconv.Atoi(rest[:end]); err == nil {
+				return pid
+			}
+		}
+	}
+	return 0
+}
+
+// findPortViaProcNet finds the PID listening on the given port via /proc/net/tcp.
+// This is a zero-dependency fallback for Linux systems without lsof or ss.
+// Returns 0 if the port is not found or the inode→PID mapping fails.
+func findPortViaProcNet(port int) int {
+	// Format port as 4-digit hex (uppercase) as used in /proc/net/tcp.
+	hexPort := fmt.Sprintf("%04X", port)
+
+	data, err := os.ReadFile("/proc/net/tcp")
 	if err != nil {
 		return 0
 	}
 
-	// Parse first PID from output
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) == 0 || lines[0] == "" {
+	// Find the inode for the listening socket on this port.
+	var inode string
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		// Format: sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode
+		// local_address is "IPADDR:PORT" in hex. st 0A = LISTEN.
+		if len(fields) < 10 {
+			continue
+		}
+		localAddr := fields[1]
+		state := fields[3]
+		if state != "0A" { // 0A = TCP_LISTEN
+			continue
+		}
+		parts := strings.SplitN(localAddr, ":", 2)
+		if len(parts) == 2 && strings.EqualFold(parts[1], hexPort) {
+			inode = fields[9]
+			break
+		}
+	}
+	if inode == "" {
 		return 0
 	}
 
-	pid, err := strconv.Atoi(lines[0])
+	// Walk /proc/<pid>/fd to find which process owns the socket inode.
+	procDir, err := os.Open("/proc")
 	if err != nil {
 		return 0
 	}
+	defer procDir.Close()
 
-	return pid
+	entries, err := procDir.Readdirnames(-1)
+	if err != nil {
+		return 0
+	}
+	socketTarget := fmt.Sprintf("socket:[%s]", inode)
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry)
+		if err != nil {
+			continue
+		}
+		fdDir := fmt.Sprintf("/proc/%d/fd", pid)
+		fds, err := os.ReadDir(fdDir)
+		if err != nil {
+			continue
+		}
+		for _, fd := range fds {
+			target, err := os.Readlink(filepath.Join(fdDir, fd.Name()))
+			if err != nil {
+				continue
+			}
+			if target == socketTarget {
+				return pid
+			}
+		}
+	}
+	return 0
 }
 
 // DoltListener represents a Dolt process listening on a TCP port.
@@ -1508,18 +1614,19 @@ func Start(townRoot string) error {
 	}
 
 	// Wait for the server to be accepting connections, not just alive.
-	// IsRunning only checks PID — we need CheckServerReachable to confirm
-	// the port is listening. Retry with backoff since startup takes time.
+	// We check process liveness directly via signal(0) rather than calling
+	// IsRunning(), which has a side effect: if the process is alive but not
+	// yet listening on the port, IsRunning removes the PID file as "stale"
+	// and returns false — causing the loop to exit prematurely on slow storage
+	// (e.g., Kubernetes CSI block storage where dolt takes >500ms to listen).
+	// (gh-2968)
 	var lastErr error
 	for attempt := 0; attempt < 10; attempt++ {
 		time.Sleep(500 * time.Millisecond)
 
-		running, _, err = IsRunning(townRoot)
-		if err != nil {
-			return fmt.Errorf("verifying server started: %w", err)
-		}
-		if !running {
-			return fmt.Errorf("Dolt server failed to start (check logs with 'gt dolt logs')")
+		// Direct process liveness check — no PID file side effects.
+		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
+			return fmt.Errorf("Dolt server process died during startup: %w", err)
 		}
 
 		if err := CheckServerReachable(townRoot); err == nil {

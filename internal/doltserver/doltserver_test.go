@@ -4141,3 +4141,30 @@ func TestCleanStaleSocket_NoopWhenMissing(t *testing.T) {
 	// Should not panic or error when socket doesn't exist
 	cleanStaleSocket(filepath.Join(t.TempDir(), "nonexistent.sock"))
 }
+
+// TestFindPortViaProcNet_NotFound verifies that findPortViaProcNet returns 0
+// when the port has no listener (or /proc/net/tcp is unavailable on non-Linux).
+func TestFindPortViaProcNet_NotFound(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("findPortViaProcNet is Linux-only")
+	}
+	// Use a port that is very unlikely to be in use.
+	const unusedPort = 29871
+	pid := findPortViaProcNet(unusedPort)
+	if pid != 0 {
+		t.Errorf("expected 0 for unused port, got pid=%d", pid)
+	}
+}
+
+// TestFindPortWithSS_NotFound verifies that findPortWithSS returns 0
+// when the port has no listener (or ss is unavailable).
+func TestFindPortWithSS_NotFound(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("findPortWithSS targets Linux")
+	}
+	const unusedPort = 29872
+	pid := findPortWithSS(unusedPort)
+	if pid != 0 {
+		t.Errorf("expected 0 for unused port, got pid=%d", pid)
+	}
+}
