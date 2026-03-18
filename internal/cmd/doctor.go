@@ -182,7 +182,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewPrefixConflictCheck())
 	d.Register(doctor.NewRigNameMismatchCheck())
 	d.Register(doctor.NewRigConfigSyncCheck()) // Check all registered rigs have config.json
-	d.Register(doctor.NewStaleDoltPortCheck()) // Check for stale Dolt port files
+	d.Register(doctor.NewStaleDoltPortCheck())    // Check for stale Dolt port files
+	d.Register(doctor.NewRemoteDoltHostCheck()) // Check remote host config vs GT_DOLT_HOST
 	d.Register(doctor.NewPrefixMismatchCheck())
 	d.Register(doctor.NewDatabasePrefixCheck())
 	d.Register(doctor.NewIdleTimeoutCheck()) // Verify dolt.idle-timeout: "0" for all rigs

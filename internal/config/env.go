@@ -309,12 +309,28 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["BEADS_DOLT_AUTO_START"] = "0"
 	}
 
-	// Propagate Dolt server host so bd doesn't fall back to 127.0.0.1 when
-	// the server runs on a remote machine (e.g., mini2 over Tailscale).
+	// Inject Dolt server host so agents connect to the correct remote host
+	// when Dolt runs on another machine (GH#2830). Mirrors port injection above.
+	//
+	// Resolution: daemon.json patrols.dolt_server.host first, then process env.
+	if cfg.TownRoot != "" {
+		if host := resolveDoltHost(cfg.TownRoot); host != "" {
+			env["GT_DOLT_HOST"] = host
+			env["BEADS_DOLT_SERVER_HOST"] = host
+		}
+	}
+	// Propagate GT_DOLT_HOST / BEADS_DOLT_SERVER_HOST from process env when not
+	// already resolved from config. Covers sessions where TownRoot is empty.
+	if _, ok := env["GT_DOLT_HOST"]; !ok {
+		if v := os.Getenv("GT_DOLT_HOST"); v != "" {
+			env["GT_DOLT_HOST"] = v
+			if os.Getenv("BEADS_DOLT_SERVER_HOST") == "" {
+				env["BEADS_DOLT_SERVER_HOST"] = v
+			}
+		}
+	}
 	if _, ok := env["BEADS_DOLT_SERVER_HOST"]; !ok {
 		if v := os.Getenv("BEADS_DOLT_SERVER_HOST"); v != "" {
-			env["BEADS_DOLT_SERVER_HOST"] = v
-		} else if v := os.Getenv("GT_DOLT_HOST"); v != "" {
 			env["BEADS_DOLT_SERVER_HOST"] = v
 		}
 	}
@@ -444,6 +460,41 @@ func resolveDoltPort(townRoot string) int {
 	}
 
 	return 0
+}
+
+// resolveDoltHost determines the Dolt server host for the given town root.
+//
+// Resolution order:
+//  1. GT_DOLT_HOST environment variable
+//  2. mayor/daemon.json patrols.dolt_server.host
+//  3. "" (caller should skip injection — 127.0.0.1 is bd's own default)
+//
+// There is no config.yaml host equivalent (only port is stored there),
+// so daemon.json is the canonical config-file source for host.
+func resolveDoltHost(townRoot string) string {
+	// 1. Environment variable takes precedence over config file.
+	if h := os.Getenv("GT_DOLT_HOST"); h != "" {
+		return h
+	}
+
+	// 2. daemon.json patrols.dolt_server.host
+	daemonJSONPath := filepath.Join(townRoot, "mayor", "daemon.json")
+	if data, err := os.ReadFile(daemonJSONPath); err == nil {
+		var dc struct {
+			Patrols struct {
+				DoltServer struct {
+					Host string `json:"host"`
+				} `json:"dolt_server"`
+			} `json:"patrols"`
+		}
+		if err := json.Unmarshal(data, &dc); err == nil {
+			if h := dc.Patrols.DoltServer.Host; h != "" {
+				return h
+			}
+		}
+	}
+
+	return ""
 }
 
 // parsePortFromConfigYAML extracts the listener port from a Dolt config.yaml

@@ -269,6 +269,28 @@ func DefaultConfig(townRoot string) *Config {
 		config.Host = h
 	}
 
+	// Fallback: if GT_DOLT_HOST is not in the shell env, read host from
+	// mayor/daemon.json patrols.dolt_server.host. This mirrors the GT_DOLT_PORT
+	// fallback below and ensures gt CLI commands work without requiring
+	// GT_DOLT_HOST to be exported to the shell (GH#2830).
+	if config.Host == "" && townRoot != "" {
+		daemonJSONPath := filepath.Join(townRoot, "mayor", "daemon.json")
+		if data, err := os.ReadFile(daemonJSONPath); err == nil {
+			var dc struct {
+				Patrols struct {
+					DoltServer struct {
+						Host string `json:"host"`
+					} `json:"dolt_server"`
+				} `json:"patrols"`
+			}
+			if err := json.Unmarshal(data, &dc); err == nil {
+				if h := dc.Patrols.DoltServer.Host; h != "" {
+					config.Host = h
+				}
+			}
+		}
+	}
+
 	// Port precedence: config.yaml > env var > default
 	// config.yaml takes precedence to prevent stale env var pollution
 	if port := readPortFromConfigYAML(townRoot); port > 0 {

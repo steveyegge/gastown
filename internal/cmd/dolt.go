@@ -371,7 +371,7 @@ func runDoltStart(cmd *cobra.Command, args []string) error {
 
 	config := doltserver.DefaultConfig(townRoot)
 	if config.IsRemote() {
-		return fmt.Errorf("Dolt server is remote (%s) — start/stop managed externally", config.HostPort())
+		return fmt.Errorf("Dolt server is remote (%s) — start/stop managed externally.\n  To change: edit mayor/daemon.json and set patrols.dolt_server.host", config.HostPort())
 	}
 
 	// Check for databases before starting — user-facing guard for manual starts.
@@ -457,7 +457,7 @@ func runDoltStop(cmd *cobra.Command, args []string) error {
 
 	config := doltserver.DefaultConfig(townRoot)
 	if config.IsRemote() {
-		return fmt.Errorf("Dolt server is remote (%s) — start/stop managed externally", config.HostPort())
+		return fmt.Errorf("Dolt server is remote (%s) — start/stop managed externally.\n  To change: edit mayor/daemon.json and set patrols.dolt_server.host", config.HostPort())
 	}
 
 	_, pid, _ := doltserver.IsRunning(townRoot)

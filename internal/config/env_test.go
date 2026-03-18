@@ -1221,3 +1221,106 @@ func TestAgentEnv_NoDoltPortWithoutConfig(t *testing.T) {
 	assertNotSet(t, env, "GT_DOLT_PORT")
 	assertNotSet(t, env, "BEADS_DOLT_PORT")
 }
+
+// TestResolveDoltHost verifies the host resolution order: env var > daemon.json > "".
+func TestResolveDoltHost_FromEnvVar(t *testing.T) {
+	t.Setenv("GT_DOLT_HOST", "mini2.local")
+	tmpDir := t.TempDir()
+
+	got := resolveDoltHost(tmpDir)
+	if got != "mini2.local" {
+		t.Errorf("resolveDoltHost() = %q, want %q", got, "mini2.local")
+	}
+}
+
+func TestResolveDoltHost_FromDaemonJSON(t *testing.T) {
+	t.Setenv("GT_DOLT_HOST", "") // ensure env var doesn't interfere
+	tmpDir := t.TempDir()
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	daemonJSON := `{"patrols":{"dolt_server":{"host":"100.64.1.5"}},"type":"daemon-patrol-config"}`
+	if err := os.WriteFile(filepath.Join(mayorDir, "daemon.json"), []byte(daemonJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := resolveDoltHost(tmpDir)
+	if got != "100.64.1.5" {
+		t.Errorf("resolveDoltHost() = %q, want %q", got, "100.64.1.5")
+	}
+}
+
+func TestResolveDoltHost_EnvVarTakesPrecedence(t *testing.T) {
+	t.Setenv("GT_DOLT_HOST", "env-host.local")
+	tmpDir := t.TempDir()
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	daemonJSON := `{"patrols":{"dolt_server":{"host":"config-host.local"}},"type":"daemon-patrol-config"}`
+	if err := os.WriteFile(filepath.Join(mayorDir, "daemon.json"), []byte(daemonJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := resolveDoltHost(tmpDir)
+	if got != "env-host.local" {
+		t.Errorf("resolveDoltHost() = %q, want %q (env var > daemon.json)", got, "env-host.local")
+	}
+}
+
+func TestResolveDoltHost_NoConfig(t *testing.T) {
+	t.Setenv("GT_DOLT_HOST", "")
+	tmpDir := t.TempDir()
+	got := resolveDoltHost(tmpDir)
+	if got != "" {
+		t.Errorf("resolveDoltHost() = %q, want empty string", got)
+	}
+}
+
+// TestAgentEnv_PropagatesDoltHost verifies that GT_DOLT_HOST and BEADS_DOLT_SERVER_HOST
+// are propagated from daemon.json to agent sessions (GH#2830).
+func TestAgentEnv_PropagatesDoltHost(t *testing.T) {
+	// Subtest: GT_DOLT_HOST set in env → both vars propagated
+	t.Run("gt_dolt_host_env", func(t *testing.T) {
+		t.Setenv("GT_DOLT_HOST", "mini2.local")
+		t.Setenv("BEADS_DOLT_SERVER_HOST", "")
+		env := AgentEnv(AgentEnvConfig{Role: "crew", Rig: "myrig", AgentName: "alice"})
+		assertEnv(t, env, "GT_DOLT_HOST", "mini2.local")
+		assertEnv(t, env, "BEADS_DOLT_SERVER_HOST", "mini2.local")
+	})
+
+	// Subtest: daemon.json dolt_server.host → both vars injected when TownRoot set
+	t.Run("from_daemon_json", func(t *testing.T) {
+		t.Setenv("GT_DOLT_HOST", "")
+		t.Setenv("BEADS_DOLT_SERVER_HOST", "")
+		tmpDir := t.TempDir()
+		mayorDir := filepath.Join(tmpDir, "mayor")
+		if err := os.MkdirAll(mayorDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		daemonJSON := `{"patrols":{"dolt_server":{"host":"100.64.1.5"}},"type":"daemon-patrol-config"}`
+		if err := os.WriteFile(filepath.Join(mayorDir, "daemon.json"), []byte(daemonJSON), 0644); err != nil {
+			t.Fatal(err)
+		}
+		env := AgentEnv(AgentEnvConfig{Role: "mayor", TownRoot: tmpDir})
+		assertEnv(t, env, "GT_DOLT_HOST", "100.64.1.5")
+		assertEnv(t, env, "BEADS_DOLT_SERVER_HOST", "100.64.1.5")
+	})
+
+	// Subtest: neither set → neither propagated (local setup)
+	t.Run("neither_set", func(t *testing.T) {
+		t.Setenv("GT_DOLT_HOST", "")
+		t.Setenv("BEADS_DOLT_SERVER_HOST", "")
+		env := AgentEnv(AgentEnvConfig{Role: "mayor"})
+		assertNotSet(t, env, "GT_DOLT_HOST")
+	})
+
+	// Subtest: BEADS_DOLT_SERVER_HOST explicitly set → preserved
+	t.Run("beads_server_host_override", func(t *testing.T) {
+		t.Setenv("GT_DOLT_HOST", "")
+		t.Setenv("BEADS_DOLT_SERVER_HOST", "explicit-beads-host.local")
+		env := AgentEnv(AgentEnvConfig{Role: "crew", Rig: "myrig", AgentName: "alice"})
+		assertEnv(t, env, "BEADS_DOLT_SERVER_HOST", "explicit-beads-host.local")
+	})
+}
