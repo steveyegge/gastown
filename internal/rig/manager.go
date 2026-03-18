@@ -860,19 +860,15 @@ func (m *Manager) verifyRigIdentity(rigPath, rigName string) error {
 
 	// Verify the database name matches what we expect.
 	// The database should be named after the rig (e.g., "gastown") not after
-	// a bd init artifact (e.g., "beads_gt").
+	// a bd init artifact (e.g., "beads_gt") or a stale value from another rig.
 	if metadata.DoltDatabase != "" && metadata.DoltDatabase != rigName {
-		// Check if this is a known prefix-based alias (short prefixes like "be" for "beads_el")
-		// In that case, the mismatch is intentional.
-		if strings.HasPrefix(metadata.DoltDatabase, "beads_") {
-			// This is a bd init artifact — EnsureMetadata should have fixed it.
-			// Force-repair it now.
-			if repairErr := doltserver.EnsureMetadata(m.townRoot, rigName); repairErr != nil {
-				return fmt.Errorf("metadata.json has dolt_database=%q (expected %q) and auto-repair failed: %w",
-					metadata.DoltDatabase, rigName, repairErr)
-			}
-			fmt.Printf("   ✓ Repaired metadata.json identity (was %q, now %q)\n", metadata.DoltDatabase, rigName)
+		fmt.Fprintf(os.Stderr, "   ⚠ metadata.json has dolt_database=%q (expected %q) — attempting repair\n",
+			metadata.DoltDatabase, rigName)
+		if repairErr := doltserver.EnsureMetadata(m.townRoot, rigName); repairErr != nil {
+			return fmt.Errorf("metadata.json has dolt_database=%q (expected %q) and auto-repair failed: %w",
+				metadata.DoltDatabase, rigName, repairErr)
 		}
+		fmt.Printf("   ✓ Repaired metadata.json identity (was %q, now %q)\n", metadata.DoltDatabase, rigName)
 	}
 
 	return nil
