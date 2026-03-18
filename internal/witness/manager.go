@@ -309,17 +309,15 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOver
 		roleConfig = nil
 	}
 	if roleConfig != nil && roleConfig.StartCommand != "" {
-		// Use the TOML start_command for custom (non-Claude) commands that
-		// need template expansion (e.g., "exec run --town {town} --rig {rig}").
-		// For Claude agents, skip the TOML shortcut and fall through to
-		// BuildStartupCommandFromConfig which resolves model flags from
-		// role_agents (e.g., --model sonnet[1m]). The built-in TOML
-		// start_command ("exec claude --dangerously-skip-permissions") strips
-		// these flags, breaking per-role model selection.
 		rc := config.ResolveRoleAgentConfig("witness", townRoot, rigPath)
-		if !config.IsResolvedAgentClaude(rc) || !isBuiltinClaudeStartCommand(roleConfig.StartCommand) {
-			// Non-Claude agent OR custom start_command: use TOML pattern
-			// with template expansion.
+		if !config.IsResolvedAgentClaude(rc) {
+			// Non-Claude agent: skip TOML start_command entirely.
+			// Built-in role TOMLs hardcode "exec claude ..." which is wrong
+			// for non-Claude agents. Fall through to BuildStartupCommandFromConfig
+			// which uses the resolved agent's command and args.
+		} else if !isBuiltinClaudeStartCommand(roleConfig.StartCommand) {
+			// Custom (non-builtin) start_command with Claude agent: use TOML
+			// pattern with template expansion.
 			cmd := beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness", session.PrefixFor(rigName))
 			if strings.HasPrefix(cmd, "exec ") {
 				cmd = "exec env -u CLAUDECODE NODE_OPTIONS='' " + strings.TrimPrefix(cmd, "exec ")
@@ -328,8 +326,9 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOver
 			}
 			return cmd, nil
 		}
-		// Claude agent with built-in start_command: fall through to
-		// BuildStartupCommandFromConfig for proper model flag resolution.
+		// Non-Claude agent OR Claude with built-in start_command: fall
+		// through to BuildStartupCommandFromConfig for proper agent and
+		// model flag resolution.
 	}
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
 		Recipient: session.BeaconRecipient("witness", "", rigName),
