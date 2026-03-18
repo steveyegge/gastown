@@ -1117,7 +1117,16 @@ func loadRigCommandVars(townRoot, rig string) []string {
 	// Merge: repo defaults + local overrides
 	mq := config.MergeSettingsCommand(repoMQ, localMQ)
 	if mq == nil {
-		return vars
+		mq = &config.MergeQueueConfig{}
+	}
+
+	// Per-field fallback: fill empty command fields from CLAUDE.md or AGENTS.md
+	if instrPath := config.FindInstructionsFile(repoRoot); instrPath != "" {
+		if hints := config.ExtractQualityGateHints(instrPath); hints != nil {
+			if config.ApplyHintsPerField(mq, hints) {
+				vars = append(vars, "quality_gates_from_fallback=true")
+			}
+		}
 	}
 
 	if mq.SetupCommand != "" {

@@ -408,5 +408,38 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 			}
 		}
 	}
+
+	// Third-tier fallback: fill empty command fields from CLAUDE.md or AGENTS.md.
+	// Only applies to the five command string fields, not boolean flags.
+	repoRoot := filepath.Join(rigPath, "mayor", "rig")
+	if instrPath := config.FindInstructionsFile(repoRoot); instrPath != "" {
+		if hints := config.ExtractQualityGateHints(instrPath); hints != nil {
+			// Check which command fields are already set in vars
+			varSet := make(map[string]bool, len(vars))
+			for _, v := range vars {
+				if eq := strings.IndexByte(v, '='); eq > 0 {
+					varSet[v[:eq]] = true
+				}
+			}
+			cmdFields := map[string]string{
+				"setup_command":     hints.SetupCommand,
+				"typecheck_command": hints.TypecheckCommand,
+				"lint_command":      hints.LintCommand,
+				"test_command":      hints.TestCommand,
+				"build_command":     hints.BuildCommand,
+			}
+			applied := false
+			for key, val := range cmdFields {
+				if val != "" && !varSet[key] {
+					vars = append(vars, fmt.Sprintf("%s=%s", key, val))
+					applied = true
+				}
+			}
+			if applied {
+				vars = append(vars, "quality_gates_from_fallback=true")
+			}
+		}
+	}
+
 	return vars
 }

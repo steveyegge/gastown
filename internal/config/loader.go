@@ -365,6 +365,187 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 	return result
 }
 
+// FindInstructionsFile probes a repo root directory for CLAUDE.md or AGENTS.md
+// and returns the full path to the first file found. Returns "" if neither exists.
+// CLAUDE.md is tried first since it's the most common in the current ecosystem.
+func FindInstructionsFile(repoRoot string) string {
+	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+		p := filepath.Join(repoRoot, name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// ExtractQualityGateHints reads a markdown instructions file (CLAUDE.md or
+// AGENTS.md) and extracts quality-gate command hints by scanning for recognized
+// section headers and fenced code blocks containing known build/test/lint
+// commands. Returns a MergeQueueConfig with only string command fields
+// populated. Returns nil if the file doesn't exist or no commands are found.
+func ExtractQualityGateHints(instructionsPath string) *MergeQueueConfig {
+	data, err := os.ReadFile(instructionsPath) //nolint:gosec // G304: path is constructed internally
+	if err != nil {
+		return nil
+	}
+
+	lines := strings.Split(string(data), "\n")
+	result := &MergeQueueConfig{}
+	found := false
+
+	inGateSection := false
+	inCodeBlock := false
+	var codeBlockLines []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Detect markdown headers
+		if strings.HasPrefix(trimmed, "#") {
+			inGateSection = isQualityGateHeader(trimmed)
+			continue
+		}
+
+		// Track fenced code blocks
+		if strings.HasPrefix(trimmed, "```") {
+			if inCodeBlock {
+				// End of code block — process if we're in a gate section
+				if inGateSection && len(codeBlockLines) > 0 {
+					cmd := strings.TrimSpace(strings.Join(codeBlockLines, "\n"))
+					if cmd != "" {
+						if classifyAndAssign(result, cmd) {
+							found = true
+						}
+					}
+				}
+				inCodeBlock = false
+				codeBlockLines = nil
+			} else {
+				inCodeBlock = true
+				codeBlockLines = nil
+			}
+			continue
+		}
+
+		if inCodeBlock {
+			codeBlockLines = append(codeBlockLines, line)
+		}
+	}
+
+	if !found {
+		return nil
+	}
+	return result
+}
+
+// isQualityGateHeader returns true if a markdown header line indicates a
+// quality-gate-related section.
+func isQualityGateHeader(header string) bool {
+	// Strip leading # and whitespace
+	h := strings.TrimSpace(strings.TrimLeft(header, "#"))
+	h = strings.ToLower(h)
+
+	gateHeaders := []string{
+		"quality gate", "quality-gate", "qualitygate",
+		"definition of done",
+		"ci", "continuous integration",
+		"testing", "tests",
+		"building", "build",
+		"linting", "lint",
+	}
+	for _, gh := range gateHeaders {
+		if strings.Contains(h, gh) {
+			return true
+		}
+	}
+	return false
+}
+
+// classifyAndAssign classifies a code block command and assigns it to the
+// appropriate field in mq. Returns true if a field was assigned.
+func classifyAndAssign(mq *MergeQueueConfig, cmd string) bool {
+	lower := strings.ToLower(cmd)
+
+	// Test commands
+	testPatterns := []string{"go test", "npm test", "npx jest", "pytest", "cargo test", "make test", "bundle exec rspec", "yarn test", "pnpm test"}
+	for _, p := range testPatterns {
+		if strings.Contains(lower, p) && mq.TestCommand == "" {
+			mq.TestCommand = cmd
+			return true
+		}
+	}
+
+	// Lint commands
+	lintPatterns := []string{"golangci-lint", "eslint", "flake8", "pylint", "clippy", "rubocop", "make lint", "npm run lint", "pnpm lint", "yarn lint"}
+	for _, p := range lintPatterns {
+		if strings.Contains(lower, p) && mq.LintCommand == "" {
+			mq.LintCommand = cmd
+			return true
+		}
+	}
+
+	// Typecheck commands (check before build to avoid "tsc" matching build)
+	typecheckPatterns := []string{"tsc", "mypy", "pyright", "pytype"}
+	for _, p := range typecheckPatterns {
+		if strings.Contains(lower, p) && mq.TypecheckCommand == "" {
+			mq.TypecheckCommand = cmd
+			return true
+		}
+	}
+
+	// Build commands
+	buildPatterns := []string{"go build", "npm run build", "cargo build", "make build", "gradle build", "pnpm build", "yarn build"}
+	for _, p := range buildPatterns {
+		if strings.Contains(lower, p) && mq.BuildCommand == "" {
+			mq.BuildCommand = cmd
+			return true
+		}
+	}
+
+	// Setup commands
+	setupPatterns := []string{"npm install", "pnpm install", "yarn install", "pip install", "go mod download", "bundle install"}
+	for _, p := range setupPatterns {
+		if strings.Contains(lower, p) && mq.SetupCommand == "" {
+			mq.SetupCommand = cmd
+			return true
+		}
+	}
+
+	return false
+}
+
+// ApplyHintsPerField fills empty command fields in dst from hints.
+// Only the five string command fields are considered (test, lint, build, setup,
+// typecheck). Boolean and pointer fields in hints are ignored.
+// Returns true if any field was filled from hints.
+func ApplyHintsPerField(dst, hints *MergeQueueConfig) bool {
+	if dst == nil || hints == nil {
+		return false
+	}
+	applied := false
+	if dst.TestCommand == "" && hints.TestCommand != "" {
+		dst.TestCommand = hints.TestCommand
+		applied = true
+	}
+	if dst.LintCommand == "" && hints.LintCommand != "" {
+		dst.LintCommand = hints.LintCommand
+		applied = true
+	}
+	if dst.BuildCommand == "" && hints.BuildCommand != "" {
+		dst.BuildCommand = hints.BuildCommand
+		applied = true
+	}
+	if dst.SetupCommand == "" && hints.SetupCommand != "" {
+		dst.SetupCommand = hints.SetupCommand
+		applied = true
+	}
+	if dst.TypecheckCommand == "" && hints.TypecheckCommand != "" {
+		dst.TypecheckCommand = hints.TypecheckCommand
+		applied = true
+	}
+	return applied
+}
+
 // LoadRigSettings loads and validates a rig settings file.
 func LoadRigSettings(path string) (*RigSettings, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally, not from user input

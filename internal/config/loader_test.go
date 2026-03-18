@@ -5235,3 +5235,267 @@ func TestBuildStartupCommandWithAgentOverride_ExecWrapper(t *testing.T) {
 		t.Errorf("expected wrapper immediately before claude command, got: %q", cmd)
 	}
 }
+
+// --- Quality-gate fallback tests ---
+
+func TestFindInstructionsFile_ClaudeMd(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("# Instructions\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := FindInstructionsFile(dir)
+	if got != filepath.Join(dir, "CLAUDE.md") {
+		t.Errorf("FindInstructionsFile() = %q, want CLAUDE.md path", got)
+	}
+}
+
+func TestFindInstructionsFile_AgentsMdOnly(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# Agents\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := FindInstructionsFile(dir)
+	if got != filepath.Join(dir, "AGENTS.md") {
+		t.Errorf("FindInstructionsFile() = %q, want AGENTS.md path", got)
+	}
+}
+
+func TestFindInstructionsFile_BothPrefersClaude(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("# Claude\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# Agents\n"), 0644)
+	got := FindInstructionsFile(dir)
+	if got != filepath.Join(dir, "CLAUDE.md") {
+		t.Errorf("FindInstructionsFile() = %q, want CLAUDE.md (preferred)", got)
+	}
+}
+
+func TestFindInstructionsFile_Neither(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	got := FindInstructionsFile(dir)
+	if got != "" {
+		t.Errorf("FindInstructionsFile() = %q, want empty", got)
+	}
+}
+
+func TestExtractQualityGateHints_QualityGatesSection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	content := `# My Project
+
+## Quality Gates
+
+Run tests:
+` + "```bash\ngo test ./...\n```" + `
+
+Run linter:
+` + "```bash\ngolangci-lint run ./...\n```" + `
+
+## Other Section
+
+` + "```bash\necho hello\n```" + `
+`
+	path := filepath.Join(dir, "CLAUDE.md")
+	os.WriteFile(path, []byte(content), 0644)
+
+	hints := ExtractQualityGateHints(path)
+	if hints == nil {
+		t.Fatal("ExtractQualityGateHints returned nil")
+	}
+	if hints.TestCommand != "go test ./..." {
+		t.Errorf("TestCommand = %q, want %q", hints.TestCommand, "go test ./...")
+	}
+	if hints.LintCommand != "golangci-lint run ./..." {
+		t.Errorf("LintCommand = %q, want %q", hints.LintCommand, "golangci-lint run ./...")
+	}
+}
+
+func TestExtractQualityGateHints_DefinitionOfDone(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	content := `# Project
+
+## Definition of Done
+
+` + "```\nnpm test\n```" + `
+
+` + "```\nnpm run build\n```" + `
+`
+	path := filepath.Join(dir, "AGENTS.md")
+	os.WriteFile(path, []byte(content), 0644)
+
+	hints := ExtractQualityGateHints(path)
+	if hints == nil {
+		t.Fatal("ExtractQualityGateHints returned nil")
+	}
+	if hints.TestCommand != "npm test" {
+		t.Errorf("TestCommand = %q, want %q", hints.TestCommand, "npm test")
+	}
+	if hints.BuildCommand != "npm run build" {
+		t.Errorf("BuildCommand = %q, want %q", hints.BuildCommand, "npm run build")
+	}
+}
+
+func TestExtractQualityGateHints_ChainedCommands(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	content := `## CI
+
+` + "```bash\ngo test ./... && golangci-lint run ./...\n```" + `
+`
+	path := filepath.Join(dir, "CLAUDE.md")
+	os.WriteFile(path, []byte(content), 0644)
+
+	hints := ExtractQualityGateHints(path)
+	if hints == nil {
+		t.Fatal("ExtractQualityGateHints returned nil")
+	}
+	// Chained command should be classified by the first recognized pattern (test)
+	expected := "go test ./... && golangci-lint run ./..."
+	if hints.TestCommand != expected {
+		t.Errorf("TestCommand = %q, want %q", hints.TestCommand, expected)
+	}
+}
+
+func TestExtractQualityGateHints_NoGateSection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	content := `# Project
+
+## Getting Started
+
+` + "```bash\nnpm install\n```" + `
+
+## Usage
+
+` + "```bash\nnpm start\n```" + `
+`
+	path := filepath.Join(dir, "CLAUDE.md")
+	os.WriteFile(path, []byte(content), 0644)
+
+	hints := ExtractQualityGateHints(path)
+	if hints != nil {
+		t.Errorf("Expected nil for file with no gate sections, got %+v", hints)
+	}
+}
+
+func TestExtractQualityGateHints_FileNotFound(t *testing.T) {
+	t.Parallel()
+	hints := ExtractQualityGateHints("/nonexistent/path/CLAUDE.md")
+	if hints != nil {
+		t.Errorf("Expected nil for missing file, got %+v", hints)
+	}
+}
+
+func TestExtractQualityGateHints_MultiLineCodeBlock(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	content := `## Testing
+
+` + "```bash\ncd packages/api\nnpm test\n```" + `
+`
+	path := filepath.Join(dir, "CLAUDE.md")
+	os.WriteFile(path, []byte(content), 0644)
+
+	hints := ExtractQualityGateHints(path)
+	if hints == nil {
+		t.Fatal("ExtractQualityGateHints returned nil")
+	}
+	expected := "cd packages/api\nnpm test"
+	if hints.TestCommand != expected {
+		t.Errorf("TestCommand = %q, want %q", hints.TestCommand, expected)
+	}
+}
+
+func TestApplyHintsPerField_FillsEmptyFields(t *testing.T) {
+	t.Parallel()
+	dst := &MergeQueueConfig{}
+	hints := &MergeQueueConfig{
+		TestCommand:      "go test ./...",
+		LintCommand:      "golangci-lint run",
+		BuildCommand:     "go build ./...",
+		SetupCommand:     "go mod download",
+		TypecheckCommand: "tsc --noEmit",
+	}
+	applied := ApplyHintsPerField(dst, hints)
+	if !applied {
+		t.Error("expected applied=true")
+	}
+	if dst.TestCommand != "go test ./..." {
+		t.Errorf("TestCommand = %q", dst.TestCommand)
+	}
+	if dst.LintCommand != "golangci-lint run" {
+		t.Errorf("LintCommand = %q", dst.LintCommand)
+	}
+	if dst.BuildCommand != "go build ./..." {
+		t.Errorf("BuildCommand = %q", dst.BuildCommand)
+	}
+	if dst.SetupCommand != "go mod download" {
+		t.Errorf("SetupCommand = %q", dst.SetupCommand)
+	}
+	if dst.TypecheckCommand != "tsc --noEmit" {
+		t.Errorf("TypecheckCommand = %q", dst.TypecheckCommand)
+	}
+}
+
+func TestApplyHintsPerField_PreservesExisting(t *testing.T) {
+	t.Parallel()
+	dst := &MergeQueueConfig{
+		TestCommand: "existing-test",
+		LintCommand: "existing-lint",
+	}
+	hints := &MergeQueueConfig{
+		TestCommand:  "hint-test",
+		LintCommand:  "hint-lint",
+		BuildCommand: "hint-build",
+	}
+	applied := ApplyHintsPerField(dst, hints)
+	if !applied {
+		t.Error("expected applied=true (BuildCommand should be filled)")
+	}
+	if dst.TestCommand != "existing-test" {
+		t.Errorf("TestCommand should be preserved, got %q", dst.TestCommand)
+	}
+	if dst.LintCommand != "existing-lint" {
+		t.Errorf("LintCommand should be preserved, got %q", dst.LintCommand)
+	}
+	if dst.BuildCommand != "hint-build" {
+		t.Errorf("BuildCommand should be filled from hints, got %q", dst.BuildCommand)
+	}
+}
+
+func TestApplyHintsPerField_AllFieldsSet(t *testing.T) {
+	t.Parallel()
+	dst := &MergeQueueConfig{
+		TestCommand:      "t",
+		LintCommand:      "l",
+		BuildCommand:     "b",
+		SetupCommand:     "s",
+		TypecheckCommand: "tc",
+	}
+	hints := &MergeQueueConfig{
+		TestCommand:      "ht",
+		LintCommand:      "hl",
+		BuildCommand:     "hb",
+		SetupCommand:     "hs",
+		TypecheckCommand: "htc",
+	}
+	applied := ApplyHintsPerField(dst, hints)
+	if applied {
+		t.Error("expected applied=false when all fields already set")
+	}
+}
+
+func TestApplyHintsPerField_NilInputs(t *testing.T) {
+	t.Parallel()
+	if ApplyHintsPerField(nil, &MergeQueueConfig{TestCommand: "t"}) {
+		t.Error("expected false for nil dst")
+	}
+	if ApplyHintsPerField(&MergeQueueConfig{}, nil) {
+		t.Error("expected false for nil hints")
+	}
+}
