@@ -330,28 +330,28 @@ Verify your changes compile and pass basic sanity checks. The Refinery's
 bisecting merge queue runs the full test suite — your job is to catch
 obvious problems fast so you don't waste the MQ's time.
 
-**1. Build (REQUIRED — must pass):**
+**1. Build and typecheck (REQUIRED — ALL must pass):**
 
-If build_command is set:
-```bash
-{{build_command}}
-```
+Run setup, typecheck, and build. Skip any that are empty (not configured).
+Every non-empty command is a HARD BLOCKER — do not proceed if any fails.
 
-If setup_command is set (ensure new deps are installed):
 ```bash
 {{setup_command}}
 ```
 
-If typecheck_command is set:
 ```bash
 {{typecheck_command}}
 ```
 
-If any command is empty (not configured), check CLAUDE.md and AGENTS.md in the
-repo root for project-specific build/test/lint instructions. **Do NOT silently
-skip** — the project may have critical quality gates documented there.
+```bash
+{{build_command}}
+```
 
-**2. If build fails:**
+**A typecheck failure is as serious as a build failure.** Broken types that
+land on release block ALL subsequent PRs from merging. Fix type errors before
+proceeding — do NOT skip typecheck or treat it as optional.
+
+**2. If any gate fails:**
 - Fix it. Return to implement step if needed.
 - Do NOT submit broken code to the merge queue.
 
@@ -528,34 +528,35 @@ If rebase conflicts:
 
 **2. Run the full gate suite on the rebased result:**
 
-Run ALL configured gates (not just targeted tests — this is the full verification):
+Run ALL configured gates. Every configured gate is MANDATORY — you MUST NOT
+create a PR if any gate fails. These are not suggestions — they are hard blockers.
 
-If build_command is set:
 ```bash
-{{build_command}}
+{{setup_command}}
 ```
 
-If typecheck_command is set:
 ```bash
 {{typecheck_command}}
 ```
 
-If lint_command is set:
+```bash
+{{build_command}}
+```
+
 ```bash
 {{lint_command}}
 ```
 
-If test_command is set:
 ```bash
 {{test_command}}
 ```
 
-If any command is empty (not configured), check CLAUDE.md and AGENTS.md in the
-repo root for project-specific instructions. **Do NOT silently skip gates** —
-the project's definition of done may require specific commands.
+Skip any command that is empty (not configured for this project). But every
+non-empty command MUST pass before proceeding. A typecheck failure is just as
+blocking as a test failure — do NOT create a PR with broken types.
 
 **3. If any gate fails after rebase:**
-- Fix the issue, commit, and re-run from step 1
+- Fix the issue, commit, and re-run ALL gates from step 2 (not just the one that failed)
 - Do NOT proceed with --pre-verified if gates failed
 
 **4. If all gates pass:**
