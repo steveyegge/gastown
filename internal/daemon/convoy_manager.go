@@ -88,7 +88,7 @@ type ConvoyManager struct {
 
 	// lastEventIDs tracks per-store high-water marks for event polling.
 	// Key matches stores map keys ("hq", "gastown", etc.).
-	lastEventIDs sync.Map // map[string]int64
+	lastEventIDs sync.Map // map[string]time.Time
 
 	// seeded is true once the first poll cycle has run (warm-up).
 	// The first cycle advances high-water marks without processing events,
@@ -262,9 +262,9 @@ func (m *ConvoyManager) pollStoresSnapshot(stores map[string]beadsdk.Storage) bo
 // Returns an error if the poll failed (used by caller for backoff decisions).
 func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map[string]beadsdk.Storage, seen map[string]bool) error {
 	// Load per-store high-water mark
-	var highWater int64
+	var highWater time.Time
 	if v, ok := m.lastEventIDs.Load(name); ok {
-		highWater = v.(int64)
+		highWater = v.(time.Time)
 	}
 
 	events, err := store.GetAllEventsSince(m.ctx, highWater)
@@ -278,8 +278,8 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map
 
 	// Advance high-water mark from all events
 	for _, e := range events {
-		if e.ID > highWater {
-			highWater = e.ID
+		if e.CreatedAt.After(highWater) {
+			highWater = e.CreatedAt
 		}
 	}
 	m.lastEventIDs.Store(name, highWater)
