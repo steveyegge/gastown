@@ -503,6 +503,13 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		}
 	}
 
+	// Start checkpoint watchdog to periodically auto-commit WIP changes (gas-7d4).
+	// Non-fatal: if the watchdog fails to start, the polecat still works — it just
+	// won't have WIP protection against session death.
+	if err := session.ActivateCheckpointWatchdog(sessionID, workDir, ""); err != nil {
+		debugSession("ActivateCheckpointWatchdog", err)
+	}
+
 	// Record the agent instantiation event (GASTA root span).
 	session.RecordAgentInstantiateFromDir(context.Background(), runID, runtimeConfig.ResolvedAgent,
 		"polecat", polecat, sessionID, m.rig.Name, townRoot, opts.Issue, workDir)
@@ -535,6 +542,9 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 		_ = m.tmux.SendKeysRaw(sessionID, "C-c")
 		session.WaitForSessionExit(m.tmux, sessionID, constants.GracefulShutdownTimeout)
 	}
+
+	// Stop the checkpoint watchdog before killing the session (gas-7d4).
+	session.DeactivateCheckpointWatchdog(sessionID)
 
 	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 	// This prevents orphan bash processes from Claude's Bash tool surviving session termination.

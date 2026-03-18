@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	checkpointPkg "github.com/steveyegge/gastown/internal/checkpoint"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
@@ -572,6 +573,19 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			goto afterPush
 		}
 
+		// Squash WIP checkpoint commits before pushing (gas-7d4).
+		// The checkpoint watchdog creates periodic WIP commits to protect against
+		// session death. Before submitting to the merge queue, squash these into
+		// the real commits so the branch history is clean.
+		if cwdAvailable {
+			wipCount, squashErr := checkpointPkg.SquashWIPCommits(cwd, "origin/"+defaultBranch)
+			if squashErr != nil {
+				style.PrintWarning("could not squash WIP checkpoints: %v (proceeding with WIP commits intact)", squashErr)
+			} else if wipCount > 0 {
+				fmt.Printf("%s Squashed %d WIP checkpoint commit(s)\n", style.Bold.Render("✓"), wipCount)
+			}
+		}
+
 		// CRITICAL: Push branch BEFORE creating MR bead (hq-6dk53, hq-a4ksk)
 		// The MR bead triggers Refinery to process this branch. If the branch
 		// isn't pushed yet, Refinery finds nothing to merge. The worktree gets
@@ -953,6 +967,12 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 notifyWitness:
+	// Stop the checkpoint watchdog (gas-7d4). Must happen before session cleanup
+	// to prevent the watchdog from creating new WIP commits during teardown.
+	if sessionName := os.Getenv("GT_SESSION"); sessionName != "" {
+		session.DeactivateCheckpointWatchdog(sessionName)
+	}
+
 	// Nudge refinery — MR bead is already on main (transaction-based shared main).
 	if mrID != "" {
 		nudgeRefinery(rigName, "MERGE_READY received - check inbox for pending work")
