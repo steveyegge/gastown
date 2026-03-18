@@ -1031,7 +1031,7 @@ func sessionWorkDir(sessionName, townRoot string) (string, error) {
 		case session.RoleDeacon:
 			return townRoot + "/deacon", nil
 		case session.RoleOverseer:
-			return townRoot + "/deacon", nil
+			return townRoot + "/overseer", nil
 		case session.RoleWitness:
 			return fmt.Sprintf("%s/%s/witness", townRoot, identity.Rig), nil
 		case session.RoleRefinery:

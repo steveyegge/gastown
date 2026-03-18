@@ -14,8 +14,9 @@ var townCycleSession string
 // getTownLevelSessions returns the town-level session names for the current workspace.
 func getTownLevelSessions() []string {
 	mayorSession := getMayorSessionName()
+	overseerSession := getOverseerSessionName()
 	deaconSession := getDeaconSessionName()
-	return []string{mayorSession, deaconSession}
+	return []string{mayorSession, overseerSession, deaconSession}
 }
 
 // isTownLevelSession checks if the given session name is a town-level session.
@@ -24,9 +25,10 @@ func getTownLevelSessions() []string {
 // tmux run-shell which may execute from outside the workspace directory.
 func isTownLevelSession(sessionName string) bool {
 	// Town-level sessions are identified by their fixed names
-	mayorSession := getMayorSessionName()  // "hq-mayor"
-	deaconSession := getDeaconSessionName() // "hq-deacon"
-	return sessionName == mayorSession || sessionName == deaconSession
+	mayorSession := getMayorSessionName()      // "hq-mayor"
+	overseerSession := getOverseerSessionName() // "hq-overseer"
+	deaconSession := getDeaconSessionName()     // "hq-deacon"
+	return sessionName == mayorSession || sessionName == overseerSession || sessionName == deaconSession
 }
 
 func init() {
@@ -46,9 +48,9 @@ var townCmd = &cobra.Command{
 
 var townNextCmd = &cobra.Command{
 	Use:   "next",
-	Short: "Switch to next town session (mayor/deacon)",
+	Short: "Switch to next town session (mayor/overseer/deacon)",
 	Long: `Switch to the next town-level session in the cycle order.
-Town sessions cycle between Mayor and Deacon.
+Town sessions cycle between Mayor, Overseer, and Deacon.
 
 This command is typically invoked via the C-b n keybinding when in a
 town-level session (Mayor or Deacon).`,
@@ -59,9 +61,9 @@ town-level session (Mayor or Deacon).`,
 
 var townPrevCmd = &cobra.Command{
 	Use:   "prev",
-	Short: "Switch to previous town session (mayor/deacon)",
+	Short: "Switch to previous town session (mayor/overseer/deacon)",
 	Long: `Switch to the previous town-level session in the cycle order.
-Town sessions cycle between Mayor and Deacon.
+Town sessions cycle between Mayor, Overseer, and Deacon.
 
 This command is typically invoked via the C-b p keybinding when in a
 town-level session (Mayor or Deacon).`,

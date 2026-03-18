@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/overseer"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -34,7 +33,7 @@ var overseerCmd = &cobra.Command{
 The Overseer runs assigned patrol formulas on a schedule:
   - Executes formulas assigned via 'gt patrol add'
   - Runs on a configurable interval (default: 10m)
-  - Can be paused/resumed independently of other agents
+  - Can be stopped/started independently of other agents
 
 Use 'gt patrol list/add/remove' to manage which formulas the Overseer runs.
 
@@ -159,7 +158,7 @@ func startOverseerSession(t *tmux.Tmux, sessionName, agentOverride string) error
 
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
 		Recipient: "overseer",
-		Sender:    "human",
+		Sender:    "daemon",
 		Topic:     "patrol",
 	}, "I am Overseer. Check gt hook. If no hook, create mol-overseer-patrol wisp and execute it.")
 	startupCmd, err := config.BuildStartupCommandFromConfig(config.AgentEnvConfig{
@@ -180,9 +179,10 @@ func startOverseerSession(t *tmux.Tmux, sessionName, agentOverride string) error
 
 	// Set environment (non-fatal)
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "overseer",
-		TownRoot: townRoot,
-		Agent:    agentOverride,
+		Role:        "overseer",
+		TownRoot:    townRoot,
+		Agent:       agentOverride,
+		SessionName: sessionName,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionName, k, v)
@@ -199,6 +199,7 @@ func startOverseerSession(t *tmux.Tmux, sessionName, agentOverride string) error
 
 	// Wait for Claude to start
 	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		_ = t.KillSessionWithProcesses(sessionName)
 		return fmt.Errorf("waiting for overseer to start: %w", err)
 	}
 
@@ -207,8 +208,7 @@ func startOverseerSession(t *tmux.Tmux, sessionName, agentOverride string) error
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	overseerTownRoot, _ := workspace.FindFromCwdOrError()
-	runtimeCfg := config.ResolveRoleAgentConfig("overseer", overseerTownRoot, "")
+	runtimeCfg := config.ResolveRoleAgentConfig("overseer", townRoot, "")
 	_ = runtime.RunStartupFallback(t, sessionName, "overseer", runtimeCfg)
 
 	return nil
@@ -285,30 +285,22 @@ func runOverseerStatus(cmd *cobra.Command, args []string) error {
 }
 
 func runOverseerRestart(cmd *cobra.Command, args []string) error {
-	townRoot, err := workspace.FindFromCwdOrError()
-	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	t := tmux.NewTmux()
+	sessionName := getOverseerSessionName()
+
+	// Stop if running
+	if running, _ := t.HasSession(sessionName); running {
+		fmt.Println("Stopping Overseer session...")
+		_ = t.SendKeysRaw(sessionName, "C-c")
+		time.Sleep(100 * time.Millisecond)
+		if err := t.KillSessionWithProcesses(sessionName); err != nil {
+			return fmt.Errorf("killing session: %w", err)
+		}
+		// Brief pause for cleanup
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	mgr := overseer.NewManager(townRoot)
-
-	// Stop if running (ignore "not running" error)
-	if err := mgr.Stop(); err != nil && !errors.Is(err, overseer.ErrNotRunning) {
-		return fmt.Errorf("stopping overseer: %w", err)
-	}
-
-	// Brief pause for cleanup
-	time.Sleep(500 * time.Millisecond)
-
-	// Start fresh
-	if err := mgr.Start(overseerAgentOverride); err != nil {
-		return fmt.Errorf("starting overseer: %w", err)
-	}
-
-	fmt.Printf("%s Overseer restarted. Attach with: %s\n",
-		style.Bold.Render("✓"),
-		style.Dim.Render("gt overseer attach"))
-
-	return nil
+	// Start fresh using the same code path as runOverseerStart
+	return runOverseerStart(cmd, args)
 }
 

@@ -71,7 +71,7 @@ type TownStatus struct {
 	Dolt     *DoltInfo      `json:"dolt,omitempty"`     // Dolt server status
 	Tmux     *TmuxInfo      `json:"tmux,omitempty"`     // Tmux server status
 	ACP      *ServiceInfo   `json:"acp,omitempty"`      // ACP mayor status
-	Agents   []AgentRuntime `json:"agents"`             // Global agents (Mayor, Deacon)
+	Agents   []AgentRuntime `json:"agents"`             // Global agents (Mayor, Deacon, Overseer)
 	Rigs     []RigStatus    `json:"rigs"`
 	Summary  StatusSum      `json:"summary"`
 }
@@ -1048,7 +1048,7 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 		"health-check": constants.EmojiDeacon,
 	}
 
-	// Global Agents (Mayor, Deacon)
+	// Global Agents (Mayor, Deacon, Overseer)
 	for _, agent := range status.Agents {
 		icon := roleIcons[agent.Role]
 		if icon == "" {

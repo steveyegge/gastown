@@ -56,6 +56,7 @@ Infrastructure agents stopped:
   • Refineries - Per-rig work processors
   • Witnesses  - Per-rig polecat managers
   • Mayor      - Global work coordinator
+  • Overseer   - Town-level formula scheduler
   • Boot       - Deacon's watchdog
   • Deacon     - Health orchestrator
   • Daemon     - Go background process
@@ -428,7 +429,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 
 	if allOK {
 		fmt.Printf("%s All services stopped\n", style.Bold.Render("✓"))
-		stoppedServices := []string{"dolt", "daemon", "deacon", "boot", "mayor"}
+		stoppedServices := []string{"dolt", "daemon", "deacon", "boot", "overseer", "mayor"}
 		for _, rigName := range rigs {
 			stoppedServices = append(stoppedServices, fmt.Sprintf("%s/refinery", rigName))
 			stoppedServices = append(stoppedServices, fmt.Sprintf("%s/witness", rigName))

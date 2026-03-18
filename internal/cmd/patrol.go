@@ -459,6 +459,9 @@ func saveOverseerDuties(townRoot string, cfg *OverseerDutyConfig) error {
 		return fmt.Errorf("marshaling duty config: %w", err)
 	}
 	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
+	}
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("writing duty config: %w", err)
 	}
@@ -553,7 +556,9 @@ func runPatrolUnassign(cmd *cobra.Command, args []string) error {
 	}
 
 	if !found {
-		return fmt.Errorf("formula %q is not assigned to the Overseer", formulaName)
+		fmt.Printf("%s Formula %q is not assigned to the Overseer\n",
+			style.Dim.Render("○"), formulaName)
+		return nil
 	}
 
 	cfg.Formulas = updated
