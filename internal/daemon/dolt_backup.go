@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -32,6 +33,9 @@ func doltBackupInterval(config *DaemonPatrolConfig) time.Duration {
 // syncDoltBackups syncs each production database to its configured backup location.
 // Non-fatal: errors are logged but don't stop the daemon.
 func (d *Daemon) syncDoltBackups() {
+	if runtime.GOOS != "darwin" {
+		return
+	}
 	if !IsPatrolEnabled(d.patrolConfig, "dolt_backup") {
 		return
 	}
