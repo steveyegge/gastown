@@ -537,6 +537,8 @@ func (d *Daemon) surgicalCleanup(db *sql.DB, baseBranch, workBranch string) {
 }
 
 // surgicalAbortAndCleanup aborts an in-progress rebase, then cleans up.
+//
+//nolint:unparam // baseBranch always "compact-base" — API kept flexible for future callers
 func (d *Daemon) surgicalAbortAndCleanup(db *sql.DB, baseBranch, workBranch string) {
 	ctx, cancel := context.WithTimeout(context.Background(), compactorQueryTimeout)
 	defer cancel()
