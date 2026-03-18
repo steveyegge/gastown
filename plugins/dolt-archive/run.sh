@@ -13,9 +13,9 @@ set -euo pipefail
 DOLT_HOST="${DOLT_HOST:-127.0.0.1}"
 DOLT_PORT="${DOLT_PORT:-3307}"
 DOLT_USER="${DOLT_USER:-root}"
-DOLT_DATA_DIR="${DOLT_DATA_DIR:-$HOME/gt/.dolt-data}"
-JSONL_EXPORT_DIR="$HOME/gt/.dolt-archive/jsonl"
-BACKUP_REPO="$HOME/gt/.dolt-archive/git"
+DOLT_DATA_DIR="${DOLT_DATA_DIR:-${GT_ROOT:-$HOME}/.dolt-data}"
+JSONL_EXPORT_DIR="${GT_ROOT:-$HOME}/.dolt-archive/jsonl"
+BACKUP_REPO="${GT_ROOT:-$HOME}/.dolt-archive/git"
 DEFAULT_DBS="hq,bd,gt"
 SKIP_GIT=false
 SKIP_DOLT_PUSH=false

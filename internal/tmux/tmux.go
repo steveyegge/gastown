@@ -2721,9 +2721,6 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	if err := t.ApplyTheme(session, theme); err != nil {
 		return fmt.Errorf("applying theme: %w", err)
 	}
-	if err := t.ApplyWindowStyle(session, theme); err != nil {
-		return fmt.Errorf("applying window style: %w", err)
-	}
 	if err := t.SetStatusFormat(session, rig, worker, role); err != nil {
 		return fmt.Errorf("setting status format: %w", err)
 	}
