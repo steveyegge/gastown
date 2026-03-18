@@ -605,3 +605,18 @@ func EnvToSlice(env map[string]string) []string {
 	}
 	return result
 }
+
+// ClaudeConfigDir resolves the Claude Code configuration directory.
+// Resolution order:
+//  1. CLAUDE_CONFIG_DIR env var (if set and non-empty)
+//  2. $HOME/.claude (fallback)
+func ClaudeConfigDir() (string, error) {
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".claude"), nil
+}
