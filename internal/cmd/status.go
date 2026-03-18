@@ -1042,6 +1042,7 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 		constants.RoleRefinery: constants.EmojiRefinery,
 		constants.RoleCrew:     constants.EmojiCrew,
 		constants.RolePolecat:  constants.EmojiPolecat,
+		constants.RoleOverseer: constants.EmojiOverseer,
 		// Legacy names for backwards compatibility
 		"coordinator":  constants.EmojiMayor,
 		"health-check": constants.EmojiDeacon,
@@ -1543,9 +1544,10 @@ func discoverGlobalAgents(townRoot string, allSessions map[string]bool, allAgent
 	// Get session names dynamically
 	mayorSession := getMayorSessionName()
 	deaconSession := getDeaconSessionName()
+	overseerSession := getOverseerSessionName()
 
 	// Define agents to discover
-	// Note: Mayor and Deacon are town-level agents with hq- prefix bead IDs
+	// Note: Mayor, Deacon, and Overseer are town-level agents with hq- prefix bead IDs
 	agentDefs := []struct {
 		name    string
 		address string
@@ -1555,6 +1557,7 @@ func discoverGlobalAgents(townRoot string, allSessions map[string]bool, allAgent
 	}{
 		{constants.RoleMayor, constants.RoleMayor + "/", mayorSession, "coordinator", beads.MayorBeadIDTown()},
 		{constants.RoleDeacon, constants.RoleDeacon + "/", deaconSession, "health-check", beads.DeaconBeadIDTown()},
+		{constants.RoleOverseer, constants.RoleOverseer + "/", overseerSession, "overseer", beads.OverseerBeadIDTown()},
 	}
 
 	agents := make([]AgentRuntime, len(agentDefs))

@@ -310,6 +310,10 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 		if config.Patrols.Handler != nil {
 			return config.Patrols.Handler.Enabled
 		}
+	case constants.RoleOverseer:
+		if config.Patrols.Overseer != nil {
+			return config.Patrols.Overseer.Enabled
+		}
 	}
 	return true // Default: enabled
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/steveyegge/gastown/internal/feed"
 	gitpkg "github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mayor"
+	"github.com/steveyegge/gastown/internal/overseer"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -651,6 +652,15 @@ func (d *Daemon) heartbeat(state *State) {
 		d.checkDeaconHeartbeat()
 	}
 
+	// 3.5. Ensure Overseer is running (restart if dead)
+	// Check patrol config - can be disabled in mayor/daemon.json
+	if IsPatrolEnabled(d.patrolConfig, "overseer") {
+		d.ensureOverseerRunning()
+	} else {
+		d.logger.Printf("Overseer patrol disabled in config, skipping")
+		d.killOverseerSession()
+	}
+
 	// 4. Ensure Witnesses are running for all rigs (restart if dead)
 	// Check patrol config - can be disabled in mayor/daemon.json
 	if IsPatrolEnabled(d.patrolConfig, "witness") {
@@ -1264,6 +1274,64 @@ func (d *Daemon) killDeaconSessions() {
 			if err := d.tmux.KillSessionWithProcesses(name); err != nil {
 				d.logger.Printf("Error killing %s session: %v", name, err)
 			}
+		}
+	}
+}
+
+// ensureOverseerRunning ensures the Overseer is running.
+// Uses overseer.Manager for consistent startup behavior.
+func (d *Daemon) ensureOverseerRunning() {
+	const agentID = "overseer"
+
+	// Check restart tracker for backoff/crash loop
+	if d.restartTracker != nil {
+		if d.restartTracker.IsInCrashLoop(agentID) {
+			d.logger.Printf("Overseer is in crash loop, skipping restart (use 'gt daemon clear-backoff overseer' to reset)")
+			return
+		}
+		if !d.restartTracker.CanRestart(agentID) {
+			remaining := d.restartTracker.GetBackoffRemaining(agentID)
+			d.logger.Printf("Overseer restart in backoff, %s remaining", remaining.Round(time.Second))
+			return
+		}
+	}
+
+	mgr := overseer.NewManager(d.config.TownRoot)
+
+	if err := mgr.Start(""); err != nil {
+		if err == overseer.ErrAlreadyRunning {
+			// Overseer is running - record success to reset backoff
+			if d.restartTracker != nil {
+				d.restartTracker.RecordSuccess(agentID)
+			}
+			return
+		}
+		d.logger.Printf("Error starting Overseer: %v", err)
+		return
+	}
+
+	// Record this restart attempt for backoff tracking
+	if d.restartTracker != nil {
+		d.restartTracker.RecordRestart(agentID)
+		if err := d.restartTracker.Save(); err != nil {
+			d.logger.Printf("Warning: failed to save restart state: %v", err)
+		}
+	}
+
+	d.metrics.recordRestart(d.ctx, "overseer")
+	telemetry.RecordDaemonRestart(d.ctx, "overseer")
+	d.logger.Println("Overseer started successfully")
+}
+
+// killOverseerSession kills leftover overseer tmux session.
+// Called when the overseer patrol is disabled.
+func (d *Daemon) killOverseerSession() {
+	name := session.OverseerSessionName()
+	exists, _ := d.tmux.HasSession(name)
+	if exists {
+		d.logger.Printf("Killing leftover %s session (patrol disabled)", name)
+		if err := d.tmux.KillSessionWithProcesses(name); err != nil {
+			d.logger.Printf("Error killing %s session: %v", name, err)
 		}
 	}
 }

@@ -1,0 +1,37 @@
+description = "Town-level formula scheduler patrol loop.\n\nThe Overseer is a town-level patrol agent that executes assigned formulas on a\nconfigurable schedule. It reads its duty roster from mayor/overseer-patrol.json\nand creates wisps for each formula, executing them in sequence.\n\n## Design Philosophy\n\n- **Scheduler, not executor**: The Overseer creates wisps and executes formulas.\n  It does NOT do freeform work — only what is in its duty roster.\n- **Discovery over tracking**: Each cycle reads the current roster from disk.\n  Adding/removing formulas takes effect on the next cycle.\n- **Single pass per cycle**: Execute each assigned formula once, then wait.\n- **Configurable interval**: Default 10 minutes between cycles.\n\n## Patrol Shape (Linear)\n\n```\ninbox-check ─► load-duties ─► execute-formulas ─► context-check ─► loop-or-exit\n```"
+formula = 'mol-overseer-patrol'
+version = 1
+
+[vars]
+[vars.patrol_interval]
+description = "How long to wait between patrol cycles"
+default = "10m"
+
+[[steps]]
+description = "Process mail inbox.\n\nCheck for messages from other agents. The Overseer may receive:\n- HANDOFF from predecessor (absorb context, archive)\n- Duty roster changes (informational, archive)\n- Escalations forwarded by other agents (assess and act)\n\n```bash\ngt mail inbox\n```\n\nFor each message:\n- **HANDOFF**: Read predecessor context, continue from where they left off. Archive.\n- **Other**: Assess relevance, act if needed, archive.\n\n**Hygiene**: Archive messages after processing. Inbox should be near-empty."
+id = 'inbox-check'
+title = 'Process overseer mail'
+
+[[steps]]
+description = "Load the overseer duty roster.\n\nRead the current duty roster from the config file:\n```bash\ncat mayor/overseer-patrol.json 2>/dev/null || echo '{\"formulas\":[]}'\n```\n\nParse the JSON to get the list of assigned formulas.\n\nIf the roster is empty, log this and skip to context-check:\n```\nNo formulas assigned to overseer. Use 'gt patrol assign <formula>' to add duties.\n```\n\nFor each formula in the roster, verify it exists:\n```bash\ngt formulas | grep <formula-name>\n```\n\nLog the duty roster for this cycle:\n```\nOverseer duty roster: <N> formula(s)\n  - <formula-1>\n  - <formula-2>\n```"
+id = 'load-duties'
+needs = ['inbox-check']
+title = 'Load duty roster from config'
+
+[[steps]]
+description = "Execute each assigned formula as a wisp.\n\nFor each formula in the duty roster:\n\n1. Check if a wisp for this formula already exists and is still open:\n```bash\nbd mol wisp list --json | jq '.[] | select(.title | startswith(\"<formula-name>\"))'\n```\n\nIf an open wisp exists, skip creation (previous cycle's wisp still running).\n\n2. Create and execute the wisp:\n```bash\nbd mol wisp <formula-name>\n```\n\n3. Execute the formula steps as described in the wisp.\n\n4. After execution, close the wisp with a summary:\n```bash\ngt patrol report --summary \"<formula-name>: <brief result summary>\"\n```\n\n**Error handling**: If a formula fails to execute:\n- Log the error\n- Continue to the next formula (don't abort the cycle)\n- Report the failure in the cycle summary\n\n**Parallelism**: Execute formulas sequentially to avoid resource contention.\nThe overseer is a scheduler, not a parallelism engine."
+id = 'execute-formulas'
+needs = ['load-duties']
+title = 'Execute assigned formulas'
+
+[[steps]]
+description = "Check own context usage.\n\nIf context is HIGH (>80%):\n- Ensure any notes are written to handoff mail\n- Prepare for session restart\n\nIf context is LOW:\n- Can continue patrolling"
+id = 'context-check'
+needs = ['execute-formulas']
+title = 'Check own context limit'
+
+[[steps]]
+description = "End of patrol cycle decision.\n\n**If context LOW** (can continue patrolling):\n\nWait for the configured patrol interval before starting the next cycle:\n```bash\ngt mol step await-signal --agent-bead YOUR_AGENT_BEAD \\\n  --backoff-base {{patrol_interval}} --backoff-mult 1 --backoff-max {{patrol_interval}}\n```\n\nAfter the wait:\n1. Generate a brief summary of this patrol cycle\n2. Close current patrol and start next cycle:\n```bash\ngt patrol report --summary \"<brief summary of cycle observations>\"\n```\n3. Continue executing from the first step of the new patrol cycle\n\n**If context HIGH** (approaching limit):\n1. Write handoff mail with notable observations:\n```bash\ngt handoff -s \"Overseer patrol handoff\" -m \"<observations>\"\n```\n2. Exit cleanly - the daemon will respawn a fresh Overseer session\n\n**IMPORTANT**: You must either report and loop (context LOW) or exit (context HIGH).\nNever leave the session idle without work on your hook."
+id = 'loop-or-exit'
+needs = ['context-check']
+title = 'Loop or exit for respawn'
