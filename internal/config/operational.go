@@ -104,6 +104,11 @@ const (
 	DefaultWebMaxBodyLen        = 100_000
 )
 
+// Followup defaults.
+const (
+	DefaultFollowupDelay = 30 * time.Minute
+)
+
 // Witness defaults.
 const (
 	DefaultWitnessStartupStallThreshold  = 90 * time.Second
@@ -731,4 +736,22 @@ func (wt *WitnessThresholds) DoneIntentRecentGraceD() time.Duration {
 		return ParseDurationOrDefault(wt.DoneIntentRecentGrace, DefaultWitnessDoneIntentRecentGrace)
 	}
 	return DefaultWitnessDoneIntentRecentGrace
+}
+
+// --- Followup accessors ---
+
+// GetFollowupConfig returns the followup thresholds, never nil.
+func (c *OperationalConfig) GetFollowupConfig() *FollowupThresholds {
+	if c != nil && c.Followup != nil {
+		return c.Followup
+	}
+	return &FollowupThresholds{}
+}
+
+// DefaultDelayD returns the configured or default followup delay.
+func (ft *FollowupThresholds) DefaultDelayD() time.Duration {
+	if ft != nil {
+		return ParseDurationOrDefault(ft.DefaultDelay, DefaultFollowupDelay)
+	}
+	return DefaultFollowupDelay
 }

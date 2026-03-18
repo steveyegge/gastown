@@ -221,6 +221,9 @@ type OperationalConfig struct {
 
 	// Witness configures witness patrol thresholds.
 	Witness *WitnessThresholds `json:"witness,omitempty"`
+
+	// Followup configures follow-up reminder thresholds.
+	Followup *FollowupThresholds `json:"followup,omitempty"`
 }
 
 // SessionThresholds configures session management timeouts.
@@ -459,6 +462,13 @@ type WitnessThresholds struct {
 	// DoneIntentRecentGrace is how recently a done-intent must have been created
 	// to be considered still in progress (default "30s").
 	DoneIntentRecentGrace string `json:"done_intent_recent_grace,omitempty"`
+}
+
+// FollowupThresholds configures follow-up reminder thresholds.
+type FollowupThresholds struct {
+	// DefaultDelay is the default time until a followup fires when --in is not
+	// specified (default "30m").
+	DefaultDelay string `json:"default_delay,omitempty"`
 }
 
 // DefaultOperationalConfig returns an OperationalConfig with all defaults.

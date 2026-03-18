@@ -439,6 +439,21 @@ succeeds. **YOU must push — NEVER say "ready to push when you are!"**
 
 **Landing means EVERYTHING is pushed to remote. No exceptions.**
 
+## Waiting for Feedback? Set a Follow-Up
+
+**NEVER say "I'll wait for feedback" and then end your session.** That work will
+stall indefinitely—nobody will re-engage you until a human manually prompts you.
+
+If you need to pause because you're waiting on feedback or a review:
+
+```bash
+# Schedule a reminder to check back (survives session restarts)
+{{ cmd }} followup "Check if Rome has feedback on the auth refactor" --in 30m
+```
+
+The deacon patrol surfaces overdue follow-ups. Without one, paused work is
+invisible to the system.
+
 ## Desire Paths: Improving the Tooling
 
 When a command fails but your guess felt reasonable, file a bead with `desire-path` label:

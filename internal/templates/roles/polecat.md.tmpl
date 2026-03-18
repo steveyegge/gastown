@@ -328,6 +328,30 @@ Your local branch is NOT landed. Run `{{ cmd }} done` to submit to the merge que
 
 **Local branch → `{{ cmd }} done` → MR in queue → Refinery merges → LANDED**
 
+## Waiting for Feedback? Set a Follow-Up
+
+**NEVER say "I'll wait for feedback" and then end your session.** That work will
+stall indefinitely—nobody will re-engage you until a human manually prompts you.
+
+If you're deferring because you need feedback, you MUST schedule a follow-up:
+
+```bash
+# Schedule a reminder to check back (survives session restarts)
+{{ cmd }} followup "Check if Rome has feedback on PR #42" --in 30m
+
+# Then defer
+{{ cmd }} done --status DEFERRED
+```
+
+The deacon patrol surfaces overdue follow-ups. Without one, deferred work is
+invisible to the system. `gt done --status DEFERRED` will warn you if no
+follow-up is set.
+
+**Quick reference:**
+- `{{ cmd }} followup "<topic>" --in <duration>` — Schedule check-back
+- `{{ cmd }} followup list` — See pending follow-ups
+- `{{ cmd }} followup resolve <id>` — Mark resolved
+
 ## If You're Stuck: Escalate and Move On
 
 **CRITICAL**: When blocked, you MUST escalate. Do NOT wait for human input.

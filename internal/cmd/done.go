@@ -950,6 +950,12 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			fmt.Printf("  Issue: %s\n", issueID)
 		}
 		fmt.Printf("  Branch: %s\n", branch)
+
+		// Followup guard: warn agents deferring without a follow-up reminder.
+		// Without a followup, deferred work stalls until someone manually re-engages.
+		if exitType == ExitDeferred {
+			warnNoFollowupOnDefer(townRoot, sender)
+		}
 	}
 
 notifyWitness:
