@@ -21,6 +21,7 @@ import (
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
@@ -323,6 +324,15 @@ func runUp(cmd *cobra.Command, args []string) error {
 		if doltCfg.Host != "" {
 			os.Setenv("BEADS_DOLT_SERVER_HOST", doltCfg.Host)
 		}
+	}
+
+	// Orphaned bead recovery: detect beads stuck in hooked/in_progress status
+	// assigned to polecats that no longer exist (session dead + directory gone).
+	// After a crash, these beads sit orphaned until someone manually resets them.
+	// Running this before witnesses start avoids duplicate recovery. (gas-udp)
+	if !doltSkipped && doltOK {
+		orphanServices := recoverOrphanedBeads(townRoot, rigs, prefetchedRigs)
+		services = append(services, orphanServices...)
 	}
 
 	// 5 & 6. Witnesses and Refineries (using prefetched rigs)
@@ -974,5 +984,55 @@ func waitForDoltReady(townRoot string) {
 	if err := doltserver.WaitForReady(townRoot, doltReadyTimeout); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: %v (agents may see connection errors)\n", err)
 	}
+}
+
+// recoverOrphanedBeads scans each rig for beads stuck in hooked/in_progress
+// status assigned to polecats that no longer exist (tmux session dead AND
+// worktree directory removed). For each orphan, the bead is reset to open
+// and the deacon is notified for re-dispatch.
+//
+// This runs during gt up after Dolt is ready, before witnesses start their
+// own patrol. It catches the crash-recovery case where polecats die and
+// their beads are never re-slung. (gas-udp)
+func recoverOrphanedBeads(townRoot string, rigs []string, prefetchedRigs map[string]*rig.Rig) []ServiceStatus {
+	var services []ServiceStatus
+
+	bd := witness.DefaultBdCli()
+	router := mail.NewRouterWithTownRoot(townRoot, townRoot)
+
+	for _, rigName := range rigs {
+		if _, ok := prefetchedRigs[rigName]; !ok {
+			fmt.Fprintf(os.Stderr, "[orphan-recovery] skipping rig %s (failed to load)\n", rigName)
+			continue // Rig failed to load — skip
+		}
+
+		rigPath := filepath.Join(townRoot, rigName)
+		result := witness.DetectOrphanedBeads(bd, rigPath, rigName, router)
+
+		if len(result.Orphans) == 0 {
+			continue // No orphans in this rig
+		}
+
+		recovered := 0
+		for _, orphan := range result.Orphans {
+			if orphan.BeadRecovered {
+				recovered++
+			}
+		}
+
+		detail := fmt.Sprintf("found %d orphaned, recovered %d", len(result.Orphans), recovered)
+		services = append(services, ServiceStatus{
+			Name:   fmt.Sprintf("Orphan recovery (%s)", rigName),
+			Type:   "recovery",
+			Rig:    rigName,
+			OK:     true,
+			Detail: detail,
+		})
+	}
+
+	// Flush any pending mail notifications before proceeding.
+	router.WaitPendingNotifications()
+
+	return services
 }
 
