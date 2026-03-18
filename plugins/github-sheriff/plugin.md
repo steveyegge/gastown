@@ -42,15 +42,26 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Detect the repo from the rig's git remote. Fall back to explicit config if
-detection fails:
+Detect the repo from the first rig's git remote. Dogs run from the kennel
+(not a rig clone), so scan GT_ROOT for rigs with git clones:
 
 ```bash
-REPO=$(git -C "$GT_RIG_ROOT" remote get-url origin 2>/dev/null \
-  | sed -E 's|.*github\.com[:/]||; s|\.git$||')
+REPO=""
+
+# Find the first rig with a git clone (refinery/rig/ is the canonical clone)
+if [ -n "$GT_ROOT" ]; then
+  for RIG_DIR in "$GT_ROOT"/*/; do
+    CLONE="$RIG_DIR/refinery/rig"
+    if [ -d "$CLONE/.git" ] || git -C "$CLONE" rev-parse --git-dir >/dev/null 2>&1; then
+      REPO=$(git -C "$CLONE" remote get-url origin 2>/dev/null \
+        | sed -E 's|.*github\.com[:/]||; s|\.git$||')
+      [ -n "$REPO" ] && break
+    fi
+  done
+fi
 
 if [ -z "$REPO" ]; then
-  echo "SKIP: could not detect GitHub repo from rig remote"
+  echo "SKIP: could not detect GitHub repo from any rig"
   exit 0
 fi
 ```
@@ -150,13 +161,6 @@ For each failure, check if a bead already exists:
 CREATED=0
 SKIPPED=0
 
-# Only create CI failure beads for repos we own — skip upstream noise
-REPO_OWNER=$(echo "$REPO" | cut -d'/' -f1)
-if [ "$REPO_OWNER" != "athosmartins" ]; then
-  echo "Skipping CI failure beads for upstream repo $REPO (not athosmartins)"
-  SKIPPED=${#FAILURES[@]}
-else
-
 EXISTING=$(bd list --label ci-failure --status open --json 2>/dev/null || echo "[]")
 
 for F in "${FAILURES[@]}"; do
@@ -188,7 +192,6 @@ Check: $CHECK_URL"
       2>/dev/null || true
   fi
 done
-fi # end athosmartins owner check
 ```
 
 ## Record Result
