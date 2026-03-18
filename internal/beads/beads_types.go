@@ -134,7 +134,7 @@ func EnsureCustomTypes(beadsDir string) error {
 	}
 
 	// Configure custom types via bd CLI
-	bdEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
+	bdEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DB=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
 	if dbEnv := DatabaseEnv(beadsDir); dbEnv != "" {
 		bdEnv = append(bdEnv, dbEnv)
 	}
@@ -217,7 +217,7 @@ func EnsureCustomStatuses(beadsDir string) error {
 	// Read current custom statuses and merge with required ones
 	getCmd := exec.Command("bd", "config", "get", "status.custom")
 	getCmd.Dir = beadsDir
-	getEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
+	getEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DB=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
 	if dbEnv := DatabaseEnv(beadsDir); dbEnv != "" {
 		getEnv = append(getEnv, dbEnv)
 	}
@@ -249,7 +249,7 @@ func EnsureCustomStatuses(beadsDir string) error {
 	// Configure custom statuses via bd CLI
 	cmd := exec.Command("bd", "config", "set", "status.custom", mergedStr)
 	cmd.Dir = beadsDir
-	setEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
+	setEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DB=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
 	if dbEnv := DatabaseEnv(beadsDir); dbEnv != "" {
 		setEnv = append(setEnv, dbEnv)
 	}
@@ -335,7 +335,7 @@ func ensureDatabaseInitialized(beadsDir string) error {
 	initArgs = append(initArgs, "--server")
 	cmd := exec.Command("bd", initArgs...)
 	cmd.Dir = parentDir
-	initEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
+	initEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DB=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
 	if dbEnv := DatabaseEnv(beadsDir); dbEnv != "" {
 		initEnv = append(initEnv, dbEnv)
 	}
@@ -356,7 +356,7 @@ func ensureDatabaseInitialized(beadsDir string) error {
 	if prefix != "" {
 		pfxCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
 		pfxCmd.Dir = parentDir
-		pfxEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
+		pfxEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DB=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
 		if dbEnv := DatabaseEnv(beadsDir); dbEnv != "" {
 			pfxEnv = append(pfxEnv, dbEnv)
 		}
@@ -371,7 +371,7 @@ func ensureDatabaseInitialized(beadsDir string) error {
 	// After bd init --server, the Dolt SQL server may need time to register
 	// the new database in its catalog. Retry once after a short delay if the
 	// first migrate attempt fails (GH#1769).
-	migrateEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
+	migrateEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DB=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
 	if dbEnv := DatabaseEnv(beadsDir); dbEnv != "" {
 		migrateEnv = append(migrateEnv, dbEnv)
 	}

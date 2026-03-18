@@ -696,7 +696,7 @@ func withBeadsDirEnv(beadsDir string) []string {
 	env := os.Environ()
 	filtered := make([]string, 0, len(env)+2)
 	for _, e := range env {
-		if !strings.HasPrefix(e, "BEADS_DIR=") && !strings.HasPrefix(e, "BEADS_DOLT_SERVER_DATABASE=") {
+		if !strings.HasPrefix(e, "BEADS_DIR=") && !strings.HasPrefix(e, "BEADS_DB=") && !strings.HasPrefix(e, "BEADS_DOLT_SERVER_DATABASE=") {
 			filtered = append(filtered, e)
 		}
 	}
