@@ -492,7 +492,7 @@ func IsRunning(townRoot string) (bool, int, error) {
 							// Cross-check process args as tiebreaker against PID reuse:
 							// if the OS recycled this PID for a different town's dolt
 							// after the original stopped, its --data-dir flag will differ.
-							if actualDir := getDoltDataDirFromProcess(pid); actualDir != "" {
+							if actualDir := GetDoltDataDirFromProcess(pid); actualDir != "" {
 								expected, _ := filepath.Abs(config.DataDir)
 								actual, _ := filepath.Abs(actualDir)
 								ours = actual == expected
@@ -518,7 +518,7 @@ func IsRunning(townRoot string) (bool, int, error) {
 		serverDataDir := getServerDataDir(townRoot, pid)
 		if serverDataDir == "" || serverDataDir == config.DataDir {
 			// Cross-check process args to guard against PID reuse.
-			actualDir := getDoltDataDirFromProcess(pid)
+			actualDir := GetDoltDataDirFromProcess(pid)
 			if actualDir == "" {
 				return true, pid, nil
 			}
@@ -809,14 +809,14 @@ func getServerDataDir(townRoot string, pid int) string {
 	return ""
 }
 
-// getDoltDataDirFromProcess reads the --data-dir flag value from the running
+// GetDoltDataDirFromProcess reads the --data-dir flag value from the running
 // process's command-line arguments. This is structural (reading a well-defined
 // CLI flag), not heuristic string matching. Used as a tiebreaker when the
 // state-file based check is inconclusive (e.g. PID reuse across towns).
 //
 // Supported on macOS and Linux via POSIX ps. Returns empty string on Windows
 // (not supported) or on any error.
-func getDoltDataDirFromProcess(pid int) string {
+func GetDoltDataDirFromProcess(pid int) string {
 	if runtime.GOOS == "windows" {
 		return "" // ps not available; caller falls back to trusting state file
 	}
