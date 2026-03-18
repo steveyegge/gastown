@@ -301,9 +301,23 @@ type epicChild struct {
 func getEpicChildren(epicID string) ([]epicChild, error) {
 	dir := resolveBeadDir(epicID)
 
+	// bd sql queries the database discovered from cmd.Dir. When the epic lives
+	// in a rig database (not HQ), we must resolve to the rig's directory so
+	// bd sql queries the correct database. resolveBeadDir returns the town root
+	// (for bd CLI routing), but bd sql doesn't use routes.jsonl.
+	sqlDir := dir
+	if prefix := beads.ExtractPrefix(epicID); prefix != "" {
+		townRoot, err := workspace.FindFromCwd()
+		if err == nil {
+			if rigPath := beads.GetRigPathForPrefix(townRoot, prefix); rigPath != "" {
+				sqlDir = rigPath
+			}
+		}
+	}
+
 	// Prefer raw SQL — handles cross-database deps. Falls back to bd dep list
 	// if bd sql is not available (older bd versions).
-	childIDs, err := bdDepListRawIDs(dir, epicID, "down", "depends_on")
+	childIDs, err := bdDepListRawIDs(sqlDir, epicID, "down", "depends_on")
 	if err != nil {
 		// bd sql not supported — fall back to bd dep list.
 		childIDs, err = bdDepListFallback(dir, epicID)
