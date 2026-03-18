@@ -36,8 +36,8 @@ func TestDefaultLifecycleConfig(t *testing.T) {
 	if p.CompactorDog == nil || !p.CompactorDog.Enabled {
 		t.Error("expected compactor_dog to be enabled")
 	}
-	if p.CompactorDog.Threshold != 500 {
-		t.Errorf("expected compactor_dog threshold 500, got %d", p.CompactorDog.Threshold)
+	if p.CompactorDog.Threshold != 2000 {
+		t.Errorf("expected compactor_dog threshold 2000, got %d", p.CompactorDog.Threshold)
 	}
 
 	if p.DoctorDog == nil || !p.DoctorDog.Enabled {
