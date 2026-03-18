@@ -11,9 +11,14 @@ set -euo pipefail
 
 # --- Configuration -----------------------------------------------------------
 
-DOLT_DATA_DIR="${DOLT_DATA_DIR:-$HOME/gt/.dolt-data}"
-BACKUP_DIR="${DOLT_BACKUP_DIR:-$HOME/gt/.dolt-backup}"
-PROD_DBS=("hq" "bd" "gt")
+DOLT_DATA_DIR="${DOLT_DATA_DIR:-${GT_ROOT:-$HOME}/.dolt-data}"
+BACKUP_DIR="${DOLT_BACKUP_DIR:-${GT_ROOT:-$HOME}/.dolt-backup}"
+# Auto-discover databases from data dir if not overridden
+if [[ -z "${DOLT_DATABASES:-}" ]]; then
+  mapfile -t PROD_DBS < <(find "$DOLT_DATA_DIR" -maxdepth 1 -mindepth 1 -type d -not -name '.*' 2>/dev/null | xargs -I{} basename {} | sort)
+else
+  IFS=',' read -ra PROD_DBS <<< "$DOLT_DATABASES"
+fi
 BACKUP_TIMEOUT=60
 
 # --- Argument parsing ---------------------------------------------------------
