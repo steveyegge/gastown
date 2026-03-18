@@ -608,7 +608,40 @@ gh pr view <polecat-branch> --json url,state -q '.url + " " + .state'
 
 If the PR was not created or is in an unexpected state, debug and retry.
 
-⚠️ **STOP HERE - DO NOT PROCEED UNTIL STEPS 1.5 AND 2-3 COMPLETE**
+**Step 1.6 (pr only): WAIT FOR CI CHECKS TO PASS**
+
+⚠️ **DO NOT PROCEED until CI passes. DO NOT send MERGED until the PR is actually merged.**
+
+```bash
+# Get the repo URL for gh commands
+REPO_URL=$(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\.git/\1/')
+
+# Wait for CI checks (timeout 15 minutes)
+gh pr checks <polecat-branch> --repo "$REPO_URL" --watch --fail-fast
+```
+
+**If CI checks FAIL:**
+Do NOT merge. Send FIX_NEEDED back to the polecat:
+```bash
+FAILURE_OUTPUT=$(gh pr checks <polecat-branch> --repo "$REPO_URL" 2>&1)
+gt mail send <rig>/witness -s "FIX_NEEDED <polecat-name>" -m "Branch: <branch>
+Issue: <issue-id>
+PR: ${PR_URL}
+Failure-Type: ci-checks
+Error: $FAILURE_OUTPUT
+Attempt-Number: 1"
+```
+Then skip to Step 4 (archive mail) and continue patrol.
+
+**If CI checks PASS:**
+Merge the PR:
+```bash
+gh pr merge <polecat-branch> --repo "$REPO_URL" --merge --delete-branch
+```
+
+If merge fails (conflict, branch protection), debug and retry.
+
+⚠️ **STOP HERE - DO NOT PROCEED UNTIL THE PR IS ACTUALLY MERGED ON GITHUB**
 
 **Step 2: Send MERGED Notification (REQUIRED - DO THIS IMMEDIATELY)**
 
@@ -629,8 +662,8 @@ PR: ${PR_URL}
 Merged-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
-Note: In PR mode, "MERGED" means "PR created and ready for review/merge".
-The actual merge happens when the PR is merged on GitHub (by maintainer or CI).
+Note: In PR mode, MERGED is only sent AFTER `gh pr merge` succeeds — the PR
+is actually merged on GitHub before the witness is notified.
 
 This signals the Witness to nuke the polecat worktree. WITHOUT THIS NOTIFICATION,
 POLECAT WORKTREES ACCUMULATE INDEFINITELY AND THE LIFECYCLE BREAKS.
