@@ -118,6 +118,7 @@ type PatrolsConfig struct {
 	Refinery       *PatrolConfig          `json:"refinery,omitempty"`
 	Witness        *PatrolConfig          `json:"witness,omitempty"`
 	Deacon         *PatrolConfig          `json:"deacon,omitempty"`
+	Overseer       *PatrolConfig          `json:"overseer,omitempty"`
 	Handler        *PatrolConfig          `json:"handler,omitempty"`
 	DoltServer     *DoltServerConfig      `json:"dolt_server,omitempty"`
 	DoltRemotes    *DoltRemotesConfig     `json:"dolt_remotes,omitempty"`

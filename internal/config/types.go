@@ -29,8 +29,9 @@ type MayorConfig struct {
 	Version         int              `json:"version"`                     // schema version
 	Theme           *TownThemeConfig `json:"theme,omitempty"`             // global theme settings
 	Daemon          *DaemonConfig    `json:"daemon,omitempty"`            // daemon settings
-	Deacon          *DeaconConfig    `json:"deacon,omitempty"`            // deacon settings
-	DefaultCrewName string           `json:"default_crew_name,omitempty"` // default crew name for new rigs
+	Deacon          *DeaconConfig         `json:"deacon,omitempty"`            // deacon settings
+	Overseer        *OverseerAgentConfig  `json:"overseer,omitempty"`          // overseer agent settings
+	DefaultCrewName string                `json:"default_crew_name,omitempty"` // default crew name for new rigs
 }
 
 // CurrentTownSettingsVersion is the current schema version for TownSettings.
@@ -551,6 +552,12 @@ func NewDaemonPatrolConfig() *DaemonPatrolConfig {
 
 // DeaconConfig represents deacon process settings.
 type DeaconConfig struct {
+	PatrolInterval string `json:"patrol_interval,omitempty"` // e.g., "5m"
+}
+
+// OverseerAgentConfig represents overseer patrol agent settings.
+// Mirrors DeaconConfig — contains behavioral tunables for the overseer agent.
+type OverseerAgentConfig struct {
 	PatrolInterval string `json:"patrol_interval,omitempty"` // e.g., "5m"
 }
 
