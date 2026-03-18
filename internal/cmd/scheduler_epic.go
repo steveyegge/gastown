@@ -299,7 +299,7 @@ type epicChild struct {
 // Prefers raw SQL (bdDepListRawIDs) which handles cross-database deps correctly.
 // Falls back to bd dep list for older bd versions (see GH #2624, #2832).
 func getEpicChildren(epicID string) ([]epicChild, error) {
-	dir := resolveBeadDir(epicID)
+	dir := resolveBeadDirForDeps(epicID)
 
 	// Prefer raw SQL — handles cross-database deps. Falls back to bd dep list
 	// if bd sql is not available (older bd versions).

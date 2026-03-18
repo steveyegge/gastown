@@ -43,6 +43,24 @@ func resolveBeadDir(_ string) string {
 	return townRoot
 }
 
+// resolveBeadDirForDeps returns the directory to run bd dep/sql commands for a
+// given bead ID. Unlike resolveBeadDir (which always returns town root for
+// bd show/update routing), dep queries need the actual rig directory because
+// neither bd dep list nor bd sql follows routes.jsonl for cross-database lookups.
+func resolveBeadDirForDeps(beadID string) string {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return "."
+	}
+	prefix := beads.ExtractPrefix(beadID)
+	if prefix != "" {
+		if rigDir := resolveBeadDirFromRigsJSON(townRoot, prefix); rigDir != "" {
+			return rigDir
+		}
+	}
+	return townRoot
+}
+
 // resolveBeadDirFromRigsJSON looks up the rig directory from rigs.json using prefix.
 func resolveBeadDirFromRigsJSON(townRoot, prefix string) string {
 	rigsPath := townRoot + "/mayor/rigs.json"
