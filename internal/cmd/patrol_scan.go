@@ -148,7 +148,10 @@ func runPatrolScan(cmd *cobra.Command, args []string) error {
 
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 
-	// Run all three detection passes
+	// Run all three detection passes.
+	// Note: DetectZombiePolecats takes a router param but does NOT send mail
+	// internally — it only uses the router for workspace context. Notifications
+	// are sent exclusively below via --notify, avoiding double-send.
 	zombieResult := witness.DetectZombiePolecats(bd, workDir, rigName, router)
 	stallResult := witness.DetectStalledPolecats(workDir, rigName)
 	completionResult := witness.DiscoverCompletions(bd, workDir, rigName, router)
@@ -156,7 +159,8 @@ func runPatrolScan(cmd *cobra.Command, args []string) error {
 	// Build patrol receipts for zombies
 	receipts := witness.BuildPatrolReceipts(rigName, zombieResult)
 
-	// Send notifications if requested and active-work zombies found
+	// Send notifications only when explicitly requested via --notify.
+	// The library detection functions do not send mail themselves.
 	if patrolScanNotify && zombieResult != nil {
 		activeZombies := countActiveWorkZombies(zombieResult)
 		if activeZombies > 0 {
