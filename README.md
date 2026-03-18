@@ -366,6 +366,24 @@ gt feed --problems          # Start in problems view (stuck agent detection)
 
 **Built-in agent presets**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`, `opencode`, `copilot`, `pi`, `omp`
 
+### Overseer (Formula Scheduler)
+
+The Overseer is a town-level patrol agent that executes assigned formulas on a configurable schedule. It runs in its own tmux session and is automatically restarted by the daemon if it crashes.
+
+```bash
+gt overseer start              # Start the Overseer session
+gt overseer stop               # Graceful shutdown
+gt overseer status             # Check if running
+gt overseer attach             # Attach to tmux session
+gt overseer restart            # Stop + start fresh
+
+gt patrol duties               # List assigned formulas
+gt patrol assign <formula>     # Add formula to duty roster
+gt patrol unassign <formula>   # Remove formula from roster
+```
+
+See [Overseer Guide](docs/guides/overseer.md) for full documentation.
+
 ### Convoy (Work Tracking)
 
 ```bash
@@ -505,13 +523,14 @@ gt completion fish > ~/.config/fish/completions/gt.fish
 
 ## Project Roles
 
-| Role            | Description        | Primary Interface    |
-| --------------- | ------------------ | -------------------- |
-| **Mayor**       | AI coordinator     | `gt mayor attach`    |
-| **Human (You)** | Crew member        | Your crew directory  |
-| **Polecat**     | Worker agent       | Spawned by Mayor     |
-| **Hook**        | Persistent storage | Git worktree         |
-| **Convoy**      | Work tracker       | `gt convoy` commands |
+| Role            | Description              | Primary Interface      |
+| --------------- | ------------------------ | ---------------------- |
+| **Mayor**       | AI coordinator           | `gt mayor attach`      |
+| **Overseer**    | Formula scheduler agent  | `gt overseer attach`   |
+| **Human (You)** | Crew member              | Your crew directory    |
+| **Polecat**     | Worker agent             | Spawned by Mayor       |
+| **Hook**        | Persistent storage       | Git worktree           |
+| **Convoy**      | Work tracker             | `gt convoy` commands   |
 
 ## Tips
 
