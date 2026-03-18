@@ -296,11 +296,52 @@ type epicChild struct {
 }
 
 // getEpicChildren returns child issues of an epic via dependency lookup.
+// Prefers raw SQL (bdDepListRawIDs) which handles cross-database deps correctly.
+// Falls back to bd dep list for older bd versions (see GH #2624, #2832).
 func getEpicChildren(epicID string) ([]epicChild, error) {
+	dir := resolveBeadDir(epicID)
+
+	// Prefer raw SQL — handles cross-database deps. Falls back to bd dep list
+	// if bd sql is not available (older bd versions).
+	childIDs, err := bdDepListRawIDs(dir, epicID, "down", "depends_on")
+	if err != nil {
+		// bd sql not supported — fall back to bd dep list.
+		childIDs, err = bdDepListFallback(dir, epicID)
+		if err != nil {
+			return nil, fmt.Errorf("querying epic children for %s: %w", epicID, err)
+		}
+	}
+
+	children := make([]epicChild, 0, len(childIDs))
+	for _, id := range childIDs {
+		info, err := getBeadInfo(id)
+		if err != nil {
+			children = append(children, epicChild{
+				ID: id,
+			})
+			continue
+		}
+		children = append(children, epicChild{
+			ID:       id,
+			Title:    info.Title,
+			Status:   info.Status,
+			Assignee: info.Assignee,
+			Labels:   info.Labels,
+		})
+	}
+
+	return children, nil
+}
+
+// bdDepListFallback uses bd dep list to get child dependency IDs.
+// This is the legacy path — it uses a SQL JOIN with the issues table which
+// silently drops cross-database dependencies. Used as fallback when bd sql
+// is not available.
+func bdDepListFallback(dir, epicID string) ([]string, error) {
 	depArgs := beads.MaybePrependAllowStale([]string{"dep", "list", epicID,
 		"--direction=down", "--type=depends_on", "--json"})
 	depCmd := exec.Command("bd", depArgs...)
-	depCmd.Dir = resolveBeadDir(epicID)
+	depCmd.Dir = dir
 	var stdout bytes.Buffer
 	depCmd.Stdout = &stdout
 
@@ -314,33 +355,18 @@ func getEpicChildren(epicID string) ([]epicChild, error) {
 	}
 
 	var deps []struct {
-		ID     string `json:"id"`
-		Title  string `json:"title"`
-		Status string `json:"status"`
+		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
 		return nil, fmt.Errorf("parsing dependency list: %w", err)
 	}
 
-	children := make([]epicChild, 0, len(deps))
+	ids := make([]string, 0, len(deps))
 	for _, dep := range deps {
-		info, err := getBeadInfo(dep.ID)
-		if err != nil {
-			children = append(children, epicChild{
-				ID:     dep.ID,
-				Title:  dep.Title,
-				Status: dep.Status,
-			})
-			continue
+		id := beads.ExtractIssueID(dep.ID)
+		if id != "" {
+			ids = append(ids, id)
 		}
-		children = append(children, epicChild{
-			ID:       dep.ID,
-			Title:    info.Title,
-			Status:   info.Status,
-			Assignee: info.Assignee,
-			Labels:   info.Labels,
-		})
 	}
-
-	return children, nil
+	return ids, nil
 }

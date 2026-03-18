@@ -619,6 +619,29 @@ func setupMultiRigSchedulerTown(t *testing.T) (hqPath, rig1Path, rig2Path, gtBin
 		t.Fatalf("write rig2 redirect: %v", err)
 	}
 
+	// Drop test databases on cleanup to prevent orphaned databases on the Dolt
+	// server. Without this, databases from multi-rig tests persist and can
+	// contaminate subsequent tests sharing the same server (see #2832).
+	t.Cleanup(func() {
+		port := os.Getenv("GT_DOLT_PORT")
+		if port == "" {
+			port = "3307"
+		}
+		dsn := fmt.Sprintf("root@tcp(127.0.0.1:%s)/", port)
+		db, err := sql.Open("mysql", dsn)
+		if err != nil {
+			t.Logf("cleanup: could not connect to drop test databases: %v", err)
+			return
+		}
+		defer db.Close()
+		for _, prefix := range []string{hqPrefix, rig1Prefix, rig2Prefix} {
+			dbName := "beads_" + prefix
+			if _, err := db.Exec("DROP DATABASE IF EXISTS `" + dbName + "`"); err != nil {
+				t.Logf("cleanup: failed to drop %s: %v", dbName, err)
+			}
+		}
+	})
+
 	// --- Environment ---
 	env = cleanSchedulerTestEnv(tmpDir)
 
