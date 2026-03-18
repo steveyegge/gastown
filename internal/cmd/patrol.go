@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var (
@@ -22,18 +25,27 @@ var (
 	patrolDigestVerbose   bool
 )
 
+// OverseerDutyConfig stores the formulas assigned to the Overseer.
+// Persisted at mayor/overseer-patrol.json.
+type OverseerDutyConfig struct {
+	Formulas []string `json:"formulas"`
+}
+
 var patrolCmd = &cobra.Command{
 	Use:     "patrol",
 	GroupID: GroupDiag,
-	Short:   "Patrol digest management",
-	Long: `Manage patrol cycle digests.
+	Short:   "Patrol management (digest + overseer duties)",
+	Long: `Manage patrol cycle digests and overseer duty assignments.
 
 Patrol cycles (Deacon, Witness, Refinery) create ephemeral per-cycle digests.
-This command aggregates them into permanent daily summaries.
+The overseer duty commands manage which formulas the Overseer executes.
 
 Examples:
-  gt patrol digest --yesterday  # Aggregate yesterday's patrol digests
-  gt patrol digest --dry-run    # Preview what would be aggregated`,
+  gt patrol digest --yesterday      # Aggregate yesterday's patrol digests
+  gt patrol digest --dry-run        # Preview what would be aggregated
+  gt patrol duties                  # List formulas assigned to overseer
+  gt patrol assign mol-my-formula   # Assign a formula to overseer
+  gt patrol unassign mol-my-formula # Remove a formula from overseer`,
 }
 
 var patrolDigestCmd = &cobra.Command{
@@ -55,10 +67,42 @@ Examples:
 	RunE: runPatrolDigest,
 }
 
+var patrolDutiesCmd = &cobra.Command{
+	Use:     "duties",
+	Aliases: []string{"list", "ls"},
+	Short:   "List formulas assigned to the Overseer",
+	RunE:    runPatrolDuties,
+}
+
+var patrolAssignCmd = &cobra.Command{
+	Use:   "assign <formula>",
+	Short: "Assign a formula to the Overseer's patrol duties",
+	Long: `Assign a formula to the Overseer's patrol duties.
+
+The formula must exist as an embedded formula (compiled into gt).
+Use 'gt formulas' to see available formulas.
+
+Examples:
+  gt patrol assign mol-my-formula`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPatrolAssign,
+}
+
+var patrolUnassignCmd = &cobra.Command{
+	Use:     "unassign <formula>",
+	Aliases: []string{"remove", "rm"},
+	Short:   "Remove a formula from the Overseer's patrol duties",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runPatrolUnassign,
+}
+
 func init() {
 	patrolCmd.AddCommand(patrolDigestCmd)
 	patrolCmd.AddCommand(patrolNewCmd)
 	patrolCmd.AddCommand(patrolReportCmd)
+	patrolCmd.AddCommand(patrolDutiesCmd)
+	patrolCmd.AddCommand(patrolAssignCmd)
+	patrolCmd.AddCommand(patrolUnassignCmd)
 	rootCmd.AddCommand(patrolCmd)
 
 	// Patrol digest flags
@@ -380,4 +424,144 @@ func deletePatrolDigests(targetDate time.Time) (int, error) {
 	}
 
 	return len(idsToDelete), nil
+}
+
+// --- Overseer duty management ---
+
+// overseerDutyPath returns the path to the overseer duty config file.
+func overseerDutyPath(townRoot string) string {
+	return filepath.Join(townRoot, "mayor", "overseer-patrol.json")
+}
+
+// loadOverseerDuties loads the overseer duty config.
+func loadOverseerDuties(townRoot string) (*OverseerDutyConfig, error) {
+	path := overseerDutyPath(townRoot)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &OverseerDutyConfig{}, nil
+		}
+		return nil, fmt.Errorf("reading duty config: %w", err)
+	}
+
+	var cfg OverseerDutyConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing duty config: %w", err)
+	}
+	return &cfg, nil
+}
+
+// saveOverseerDuties saves the overseer duty config.
+func saveOverseerDuties(townRoot string, cfg *OverseerDutyConfig) error {
+	path := overseerDutyPath(townRoot)
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling duty config: %w", err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("writing duty config: %w", err)
+	}
+	return nil
+}
+
+func runPatrolDuties(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	cfg, err := loadOverseerDuties(townRoot)
+	if err != nil {
+		return err
+	}
+
+	if len(cfg.Formulas) == 0 {
+		fmt.Printf("%s No formulas assigned to the Overseer\n", style.Dim.Render("○"))
+		fmt.Printf("  Add formulas with: %s\n", style.Dim.Render("gt patrol assign <formula>"))
+		return nil
+	}
+
+	fmt.Printf("Overseer patrol formulas (%d):\n", len(cfg.Formulas))
+	for _, f := range cfg.Formulas {
+		fmt.Printf("  %s %s\n", style.Bold.Render("•"), f)
+	}
+	return nil
+}
+
+func runPatrolAssign(cmd *cobra.Command, args []string) error {
+	formulaName := args[0]
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Validate the formula exists
+	if _, err := formula.GetEmbeddedFormulaContent(formulaName); err != nil {
+		return fmt.Errorf("formula %q not found: %w\nUse 'gt formulas' to see available formulas", formulaName, err)
+	}
+
+	cfg, err := loadOverseerDuties(townRoot)
+	if err != nil {
+		return err
+	}
+
+	// Check for duplicates
+	for _, f := range cfg.Formulas {
+		if f == formulaName {
+			fmt.Printf("%s Formula %q is already assigned to the Overseer\n",
+				style.Dim.Render("○"), formulaName)
+			return nil
+		}
+	}
+
+	cfg.Formulas = append(cfg.Formulas, formulaName)
+	sort.Strings(cfg.Formulas)
+
+	if err := saveOverseerDuties(townRoot, cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("%s Assigned formula %q to Overseer patrol\n",
+		style.Bold.Render("✓"), formulaName)
+	return nil
+}
+
+func runPatrolUnassign(cmd *cobra.Command, args []string) error {
+	formulaName := args[0]
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	cfg, err := loadOverseerDuties(townRoot)
+	if err != nil {
+		return err
+	}
+
+	// Find and remove
+	found := false
+	var updated []string
+	for _, f := range cfg.Formulas {
+		if f == formulaName {
+			found = true
+		} else {
+			updated = append(updated, f)
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("formula %q is not assigned to the Overseer", formulaName)
+	}
+
+	cfg.Formulas = updated
+	if err := saveOverseerDuties(townRoot, cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("%s Removed formula %q from Overseer patrol\n",
+		style.Bold.Render("✓"), formulaName)
+	return nil
 }

@@ -40,6 +40,12 @@ func DeaconTheme() Theme {
 	return Theme{Name: "deacon", BG: "#2d1f3d", FG: "#c0b0d0"}
 }
 
+// OverseerTheme returns the special theme for the Overseer session.
+// Dark teal/cyan - vigilant eagle-eye, distinct from Deacon's purple.
+func OverseerTheme() Theme {
+	return Theme{Name: "overseer", BG: "#1a3d3d", FG: "#80d0d0"}
+}
+
 // DogTheme returns the theme for Dog sessions.
 // Brown/tan - earthy, loyal worker aesthetic.
 func DogTheme() Theme {

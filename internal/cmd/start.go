@@ -18,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/doltserver"
+	"github.com/steveyegge/gastown/internal/overseer"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/polecat"
@@ -288,14 +289,15 @@ func runStart(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Printf("%s Gas Town is running\n", style.Bold.Render("✓"))
 	fmt.Println()
-	fmt.Printf("  Attach to Mayor:  %s\n", style.Dim.Render("gt mayor attach"))
-	fmt.Printf("  Attach to Deacon: %s\n", style.Dim.Render("gt deacon attach"))
-	fmt.Printf("  Check status:     %s\n", style.Dim.Render("gt status"))
+	fmt.Printf("  Attach to Mayor:    %s\n", style.Dim.Render("gt mayor attach"))
+	fmt.Printf("  Attach to Deacon:   %s\n", style.Dim.Render("gt deacon attach"))
+	fmt.Printf("  Attach to Overseer: %s\n", style.Dim.Render("gt overseer attach"))
+	fmt.Printf("  Check status:       %s\n", style.Dim.Render("gt status"))
 
 	return nil
 }
 
-// startCoreAgents starts Mayor and Deacon sessions in parallel using the Manager pattern.
+// startCoreAgents starts Mayor, Deacon, and Overseer sessions in parallel using the Manager pattern.
 // The mutex is used to synchronize output with other parallel startup operations.
 func startCoreAgents(townRoot string, agentOverride string, mu *sync.Mutex) error {
 	var wg sync.WaitGroup
@@ -356,6 +358,33 @@ func startCoreAgents(townRoot string, agentOverride string, mu *sync.Mutex) erro
 		} else {
 			mu.Lock()
 			fmt.Printf("  %s Deacon started\n", style.Bold.Render("✓"))
+			mu.Unlock()
+		}
+	}()
+
+	// Start Overseer in goroutine
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		overseerMgr := overseer.NewManager(townRoot)
+		if err := overseerMgr.Start(agentOverride); err != nil {
+			if errors.Is(err, overseer.ErrAlreadyRunning) {
+				mu.Lock()
+				fmt.Printf("  %s Overseer already running\n", style.Dim.Render("○"))
+				mu.Unlock()
+			} else {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("starting Overseer: %w", err)
+				}
+				errMu.Unlock()
+				mu.Lock()
+				fmt.Printf("  %s Overseer failed: %v\n", style.Dim.Render("○"), err)
+				mu.Unlock()
+			}
+		} else {
+			mu.Lock()
+			fmt.Printf("  %s Overseer started\n", style.Bold.Render("✓"))
 			mu.Unlock()
 		}
 	}()
@@ -739,10 +768,11 @@ func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSe
 	}
 
 	// Categorize sessions by type for ordered shutdown.
+	overseerSess := session.OverseerSessionName()
 	var polecats, refineries, witnesses []string
 	for _, sess := range sessions {
 		// Skip town-level sessions (handled explicitly below)
-		if sess == mayorSession || sess == deaconSession || sess == bootSession {
+		if sess == mayorSession || sess == deaconSession || sess == bootSession || sess == overseerSess {
 			continue
 		}
 
@@ -806,9 +836,15 @@ func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSe
 		}
 	}
 
-	// 4. Stop town sessions: Mayor, Boot, Deacon (matching TownSessions() order)
+	// 4. Stop town sessions: Mayor, Overseer, Boot, Deacon
+	overseerSession := session.OverseerSessionName()
 	if sessionSet[mayorSession] {
 		if killAndVerify(mayorSession) {
+			stopped++
+		}
+	}
+	if sessionSet[overseerSession] {
+		if killAndVerify(overseerSession) {
 			stopped++
 		}
 	}
