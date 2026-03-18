@@ -593,13 +593,15 @@ func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.Rol
 
 // applySessionTheme applies tmux theming to the session.
 func (d *Daemon) applySessionTheme(sessionName string, parsed *ParsedIdentity) {
-	if parsed.RoleType == constants.RoleMayor {
-		theme := tmux.MayorTheme()
-		_ = d.tmux.ConfigureGasTownSession(sessionName, theme, "", "Mayor", "coordinator")
-	} else if parsed.RigName != "" {
-		theme := tmux.AssignTheme(parsed.RigName)
-		_ = d.tmux.ConfigureGasTownSession(sessionName, theme, parsed.RigName, parsed.RoleType, parsed.RoleType)
+	rigName := parsed.RigName
+	role := parsed.RoleType
+	worker := parsed.RoleType
+	if role == constants.RoleMayor {
+		rigName = ""
+		worker = "Mayor"
 	}
+	theme := tmux.ResolveSessionTheme(d.config.TownRoot, rigName, role)
+	_ = d.tmux.ConfigureGasTownSession(sessionName, theme, rigName, worker, role)
 }
 
 // syncFailureEscalationThreshold is the default number of consecutive pull failures

@@ -150,7 +150,7 @@ func (m *Manager) StartTMUX(agentOverride string) error {
 	}
 
 	// Use unified session lifecycle for config → settings → command → create → env → theme → wait.
-	theme := tmux.MayorTheme()
+	theme := tmux.ResolveSessionTheme(m.townRoot, "", "mayor")
 	_, err = session.StartSession(t, session.SessionConfig{
 		SessionID: sessionID,
 		WorkDir:   mayorDir,
@@ -163,7 +163,7 @@ func (m *Manager) StartTMUX(agentOverride string) error {
 			Topic:     "cold-start",
 		},
 		AgentOverride: agentOverride,
-		Theme:         &theme,
+		Theme:         theme,
 		WaitForAgent:  true,
 		WaitFatal:     true,
 		AutoRespawn:   true,

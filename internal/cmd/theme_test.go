@@ -107,15 +107,9 @@ func TestSaveRigTheme_PreservesRoleThemes(t *testing.T) {
 		t.Errorf("RoleThemes[refinery] = %q, want %q", got, "plum")
 	}
 
-	// Custom theme should be preserved
-	if reloaded.Theme.Custom == nil {
-		t.Fatal("Custom theme is nil after save")
-	}
-	if reloaded.Theme.Custom.BG != "#112233" {
-		t.Errorf("Custom.BG = %q, want %q", reloaded.Theme.Custom.BG, "#112233")
-	}
-	if reloaded.Theme.Custom.FG != "#eeeeff" {
-		t.Errorf("Custom.FG = %q, want %q", reloaded.Theme.Custom.FG, "#eeeeff")
+	// Custom theme should be cleared when a named theme is selected
+	if reloaded.Theme.Custom != nil {
+		t.Fatalf("Custom theme = %+v, want nil after selecting named theme", reloaded.Theme.Custom)
 	}
 }
 
@@ -207,7 +201,8 @@ func TestSaveRigTheme_PreservesNonThemeSettings(t *testing.T) {
 func TestSaveRigTheme_RoundTripsJSON(t *testing.T) {
 	// Verify that the JSON serialization of ThemeConfig preserves all fields
 	original := &config.ThemeConfig{
-		Name: "ocean",
+		Disabled: true,
+		Name:     "ocean",
 		RoleThemes: map[string]string{
 			"witness":  "rust",
 			"refinery": "plum",
@@ -232,6 +227,9 @@ func TestSaveRigTheme_RoundTripsJSON(t *testing.T) {
 	if roundtripped.Name != original.Name {
 		t.Errorf("Name = %q, want %q", roundtripped.Name, original.Name)
 	}
+	if roundtripped.Disabled != original.Disabled {
+		t.Errorf("Disabled = %v, want %v", roundtripped.Disabled, original.Disabled)
+	}
 	if len(roundtripped.RoleThemes) != len(original.RoleThemes) {
 		t.Errorf("RoleThemes len = %d, want %d", len(roundtripped.RoleThemes), len(original.RoleThemes))
 	}
@@ -245,5 +243,45 @@ func TestSaveRigTheme_RoundTripsJSON(t *testing.T) {
 	}
 	if roundtripped.Custom.BG != original.Custom.BG || roundtripped.Custom.FG != original.Custom.FG {
 		t.Errorf("Custom = %+v, want %+v", roundtripped.Custom, original.Custom)
+	}
+}
+
+func TestSaveRigTheme_DisablesTheming(t *testing.T) {
+	townRoot := setupTestTownForTheme(t)
+	rigName := "testrig"
+
+	settingsDir := filepath.Join(townRoot, rigName, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("mkdir settings: %v", err)
+	}
+
+	origCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer os.Chdir(origCwd)
+
+	if err := saveRigTheme(rigName, "none"); err != nil {
+		t.Fatalf("saveRigTheme: %v", err)
+	}
+
+	reloaded, err := config.LoadRigSettings(filepath.Join(settingsDir, "config.json"))
+	if err != nil {
+		t.Fatalf("reload settings: %v", err)
+	}
+	if reloaded.Theme == nil {
+		t.Fatal("Theme is nil after save")
+	}
+	if !reloaded.Theme.Disabled {
+		t.Fatal("Theme.Disabled = false, want true")
+	}
+	if reloaded.Theme.Name != "" {
+		t.Errorf("Theme.Name = %q, want empty", reloaded.Theme.Name)
+	}
+	if reloaded.Theme.Custom != nil {
+		t.Errorf("Theme.Custom = %+v, want nil", reloaded.Theme.Custom)
 	}
 }
