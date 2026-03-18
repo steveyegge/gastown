@@ -16,7 +16,7 @@ DOLT_USER="${DOLT_USER:-root}"
 DOLT_DATA_DIR="${DOLT_DATA_DIR:-$HOME/gt/.dolt-data}"
 JSONL_EXPORT_DIR="$HOME/gt/.dolt-archive/jsonl"
 BACKUP_REPO="$HOME/gt/.dolt-archive/git"
-DEFAULT_DBS="hq,bd,gt"
+DEFAULT_DBS="hq,gt"
 SKIP_GIT=false
 SKIP_DOLT_PUSH=false
 
@@ -79,8 +79,8 @@ for DB in "${PROD_DBS[@]}"; do
 
   log "Exporting $DB..."
 
-  # Try bd export first (native beads export)
-  if bd export --db "$DB" --format jsonl > "$EXPORT_FILE" 2>/dev/null; then
+  # Try bd export first (native beads export; output is always JSONL)
+  if bd export --db "$DB" > "$EXPORT_FILE" 2>/dev/null && [[ -s "$EXPORT_FILE" ]]; then
     LINE_COUNT=$(wc -l < "$EXPORT_FILE" | tr -d ' ')
     FILE_SIZE=$(du -h "$EXPORT_FILE" | cut -f1)
     log "  $DB: $LINE_COUNT issues exported ($FILE_SIZE) [bd export]"
