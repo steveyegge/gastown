@@ -124,6 +124,12 @@ type MergeQueueConfig struct {
 	// before escalation to Mayor.
 	MaxRetryCount int `json:"max_retry_count"`
 
+	// AutoPush controls whether the refinery pushes to origin after merging.
+	// When false, the refinery merges locally but does not push — the user
+	// or a separate process handles pushing. Useful to avoid triggering
+	// CI/CD builds (e.g. Vercel) on every merge.
+	AutoPush bool `json:"auto_push"`
+
 	// Batch holds configuration for the batch-then-bisect merge queue.
 	// When nil or MaxBatchSize <= 1, batching is disabled and MRs process sequentially.
 	Batch *BatchConfig `json:"batch,omitempty"`
@@ -145,6 +151,7 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 		StaleClaimWarningAfter:  2 * time.Hour,
 		StaleClaimCriticalAfter: 6 * time.Hour,
 		MaxRetryCount:           5,
+		AutoPush:                true,
 	}
 }
 
@@ -298,6 +305,7 @@ func (e *Engineer) LoadConfig() error {
 		StaleClaimTimeout    *string                    `json:"stale_claim_timeout"`
 		Gates                map[string]*gateConfigRaw  `json:"gates"`
 		GatesParallel        *bool                      `json:"gates_parallel"`
+		AutoPush             *bool                      `json:"auto_push"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -364,6 +372,9 @@ func (e *Engineer) LoadConfig() error {
 	}
 	if mqRaw.GatesParallel != nil {
 		e.config.GatesParallel = *mqRaw.GatesParallel
+	}
+	if mqRaw.AutoPush != nil {
+		e.config.AutoPush = *mqRaw.AutoPush
 	}
 
 	return nil
@@ -556,51 +567,55 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		}
 	}
 
-	// Step 7: Acquire merge slot before push to serialize writes to the default branch.
-	// Only serialize pushes to the rig's default branch (typically main).
-	// Integration-branch and feature-branch pushes don't need serialization.
-	var pushHolder string
-	if target == e.rig.DefaultBranch() {
-		var slotErr error
-		pushHolder, slotErr = e.acquireMainPushSlot(ctx)
-		if slotErr != nil {
-			// Reset the checked-out target branch to origin to undo the local squash commit.
-			// ResetHard is required because target is the current branch (checked out in Step 2).
-			if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
-				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after slot failure: %v\n", target, resetErr)
-			}
-			// Only classify as SlotTimeout for actual contention (retries exhausted).
-			// Infrastructure errors (beads down, permission errors) should surface
-			// through the normal failure/notification path for operator visibility.
-			return ProcessResult{
-				Success:     false,
-				SlotTimeout: errors.Is(slotErr, errMergeSlotTimeout),
-				Error:       fmt.Sprintf("failed to acquire merge slot before push: %v", slotErr),
-			}
-		}
-		defer func() {
-			// pushHolder is empty when the self-conflict bypass fires — conflict-resolution
-			// owns the slot, so we must not release it here.
-			if pushHolder != "" {
-				if releaseErr := e.mergeSlotRelease(pushHolder); releaseErr != nil {
-					_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to release merge slot for push (%s): %v\n", pushHolder, releaseErr)
+	// Step 7-8: Push to origin (when auto_push is enabled).
+	if e.config.AutoPush {
+		// Acquire merge slot before push to serialize writes to the default branch.
+		// Only serialize pushes to the rig's default branch (typically main).
+		// Integration-branch and feature-branch pushes don't need serialization.
+		var pushHolder string
+		if target == e.rig.DefaultBranch() {
+			var slotErr error
+			pushHolder, slotErr = e.acquireMainPushSlot(ctx)
+			if slotErr != nil {
+				// Reset the checked-out target branch to origin to undo the local squash commit.
+				// ResetHard is required because target is the current branch (checked out in Step 2).
+				if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
+					_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after slot failure: %v\n", target, resetErr)
+				}
+				// Only classify as SlotTimeout for actual contention (retries exhausted).
+				// Infrastructure errors (beads down, permission errors) should surface
+				// through the normal failure/notification path for operator visibility.
+				return ProcessResult{
+					Success:     false,
+					SlotTimeout: errors.Is(slotErr, errMergeSlotTimeout),
+					Error:       fmt.Sprintf("failed to acquire merge slot before push: %v", slotErr),
 				}
 			}
-		}()
-	}
+			defer func() {
+				// pushHolder is empty when the self-conflict bypass fires — conflict-resolution
+				// owns the slot, so we must not release it here.
+				if pushHolder != "" {
+					if releaseErr := e.mergeSlotRelease(pushHolder); releaseErr != nil {
+						_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to release merge slot for push (%s): %v\n", pushHolder, releaseErr)
+					}
+				}
+			}()
+		}
 
-	// Step 8: Push to origin
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Pushing to origin/%s...\n", target)
-	if err := e.git.Push("origin", target, false); err != nil {
-		// Reset the checked-out target branch to undo the local squash commit.
-		// Without this, the next retry could see stale local state from the failed push.
-		if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after push failure: %v\n", target, resetErr)
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Pushing to origin/%s...\n", target)
+		if err := e.git.Push("origin", target, false); err != nil {
+			// Reset the checked-out target branch to undo the local squash commit.
+			// Without this, the next retry could see stale local state from the failed push.
+			if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after push failure: %v\n", target, resetErr)
+			}
+			return ProcessResult{
+				Success: false,
+				Error:   fmt.Sprintf("failed to push to origin: %v", err),
+			}
 		}
-		return ProcessResult{
-			Success: false,
-			Error:   fmt.Sprintf("failed to push to origin: %v", err),
-		}
+	} else {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Auto-push disabled, skipping push to origin/%s\n", target)
 	}
 
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Successfully merged: %s\n", mergeCommit[:8])
