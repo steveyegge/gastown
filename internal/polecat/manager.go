@@ -89,7 +89,9 @@ func isDoltConfigError(err error) bool {
 		strings.Contains(msg, "no database") ||
 		strings.Contains(msg, "database not found") ||
 		strings.Contains(msg, "connection refused") ||
-		strings.Contains(msg, "configure custom types")
+		strings.Contains(msg, "configure custom types") ||
+		strings.Contains(msg, "identity mismatch") ||
+		strings.Contains(msg, "Unknown database")
 }
 
 // Common errors
@@ -237,9 +239,10 @@ func (m *Manager) CheckDoltHealth() error {
 		if strings.Contains(err.Error(), "does not exist") || errors.Is(err, beads.ErrNotInstalled) {
 			return nil
 		}
-		// Fail fast on config/init errors — retrying won't help (gt-2ra)
+		// Fail fast on config/init errors — retrying won't help (gt-2ra, gas-tc4)
 		if isDoltConfigError(err) {
-			return fmt.Errorf("%w: DB not initialized (not retrying): %v", ErrDoltUnhealthy, err)
+			return fmt.Errorf("%w: %v\n\nRecovery: run 'gt doctor --fix' to repair database configuration.\n"+
+				"If that doesn't help, try: bd init --force --server", ErrDoltUnhealthy, err)
 		}
 		lastErr = err
 		if attempt < doltMaxRetries {
@@ -264,7 +267,7 @@ func (m *Manager) CheckDoltHealth() error {
 		}
 	}
 
-	return fmt.Errorf("%w: %v", ErrDoltUnhealthy, lastErr)
+	return fmt.Errorf("%w: %v\n\nRecovery: run 'gt doctor --fix' to diagnose and repair Dolt configuration", ErrDoltUnhealthy, lastErr)
 }
 
 // CheckDoltServerCapacity verifies the Dolt server has capacity for new connections.
