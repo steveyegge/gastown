@@ -502,6 +502,15 @@ func (g *Git) Add(paths ...string) error {
 	return err
 }
 
+// HasStagedChanges reports whether the index has changes staged for commit.
+func (g *Git) HasStagedChanges() (bool, error) {
+	out, err := g.run("diff", "--cached", "--name-only")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
 // Commit creates a commit with the given message.
 func (g *Git) Commit(message string) error {
 	_, err := g.run("commit", "-m", message)

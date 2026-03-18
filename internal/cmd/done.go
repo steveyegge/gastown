@@ -384,8 +384,16 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			}
 			style.PrintWarning("uncommitted changes detected — auto-committing to prevent work loss")
 			fmt.Printf("  Files: %s\n", workStatus.String())
-			if addErr := g.Add("."); addErr != nil {
-				return fmt.Errorf("auto-commit failed (git add): %w\nCommit your changes manually, or use --status DEFERRED", addErr)
+			// Use git add -u first (only tracked files) to avoid pulling in
+			// untracked output files that aren't gitignored. Fall back to
+			// git add . only if -u staged nothing (e.g. all changes are new files).
+			if addErr := g.Add("-u"); addErr != nil {
+				return fmt.Errorf("auto-commit failed (git add -u): %w\nCommit your changes manually, or use --status DEFERRED", addErr)
+			}
+			if hasStagedChanges, _ := g.HasStagedChanges(); !hasStagedChanges {
+				if addErr := g.Add("."); addErr != nil {
+					return fmt.Errorf("auto-commit failed (git add .): %w\nCommit your changes manually, or use --status DEFERRED", addErr)
+				}
 			}
 			if commitErr := g.Commit(autoMsg); commitErr != nil {
 				return fmt.Errorf("auto-commit failed (git commit): %w\nCommit your changes manually, or use --status DEFERRED", commitErr)
