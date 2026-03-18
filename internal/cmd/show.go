@@ -91,6 +91,8 @@ func extractBeadIDFromArgs(args []string) string {
 }
 
 // stripEnvKey removes all entries matching the given key from an environment slice.
+//
+//nolint:unparam // key always "BEADS_DIR" today — kept as parameter for flexibility
 func stripEnvKey(env []string, key string) []string {
 	prefix := key + "="
 	result := make([]string, 0, len(env))
