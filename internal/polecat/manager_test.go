@@ -1,6 +1,7 @@
 package polecat
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/testutil"
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // installMockBd places a fake bd binary in PATH that handles the commands
@@ -1690,5 +1692,207 @@ func TestAllocateAndAdd_NoDuplicateNames(t *testing.T) {
 		if count > 1 {
 			t.Errorf("name %q allocated %d times — race condition (GH#2215)", name, count)
 		}
+	}
+}
+
+// TestReuseIdlePolecat_KillsLiveSession verifies that ReuseIdlePolecat kills
+// an existing live (non-stale) tmux session instead of returning ErrSessionRunning.
+// This is the regression test for the sling-reuse-stale-session bug: idle polecats
+// with a live Claude session at a dead ❯ prompt must have their session killed so
+// StartSession can create a fresh session with a proper gt prime --hook cycle.
+func TestReuseIdlePolecat_KillsLiveSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("tmux not supported on Windows")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	townRoot := t.TempDir()
+	rigName := "testreuse"
+	rigPath := filepath.Join(townRoot, rigName)
+	polecatName := "toast"
+
+	// Create minimal polecat directory structure
+	polecatDir := filepath.Join(rigPath, "polecats", polecatName)
+	if err := os.MkdirAll(polecatDir, 0755); err != nil {
+		t.Fatalf("mkdir polecat dir: %v", err)
+	}
+
+	// Register a unique prefix for session naming
+	reg := session.NewPrefixRegistry()
+	reg.Register("gt", rigName)
+	old := session.DefaultRegistry()
+	session.SetDefaultRegistry(reg)
+	t.Cleanup(func() { session.SetDefaultRegistry(old) })
+
+	tm := tmux.NewTmux()
+	r := &rig.Rig{Name: rigName, Path: rigPath}
+	mgr := NewManager(r, git.NewGit(rigPath), tm)
+
+	// Create a live tmux session (simulates Claude sitting at ❯ after gt done)
+	sessMgr := NewSessionManager(tm, r)
+	sessionName := sessMgr.SessionName(polecatName)
+	if err := tm.NewSessionWithCommand(sessionName, townRoot, "sleep 300"); err != nil {
+		t.Fatalf("create tmux session: %v", err)
+	}
+	t.Cleanup(func() { _ = tm.KillSessionWithProcesses(sessionName) })
+
+	// Write a fresh heartbeat (simulating a session that just finished gt done
+	// but hasn't gone stale yet — this is the exact scenario that previously
+	// caused ReuseIdlePolecat to return ErrSessionRunning)
+	TouchSessionHeartbeat(townRoot, sessionName)
+
+	// Verify session is alive and heartbeat exists
+	running, err := tm.HasSession(sessionName)
+	if err != nil || !running {
+		t.Fatalf("precondition: session %s should be running", sessionName)
+	}
+	if hb := ReadSessionHeartbeat(townRoot, sessionName); hb == nil {
+		t.Fatal("precondition: heartbeat should exist")
+	}
+
+	// Call ReuseIdlePolecat — it will kill the session, then fail on worktree
+	// operations (no real git repo). The important thing is it does NOT return
+	// ErrSessionRunning.
+	_, reuseErr := mgr.ReuseIdlePolecat(polecatName, AddOptions{})
+
+	// Verify it did NOT return ErrSessionRunning (the old buggy behavior)
+	if errors.Is(reuseErr, ErrSessionRunning) {
+		t.Fatalf("ReuseIdlePolecat returned ErrSessionRunning for live session — "+
+			"this is the sling-reuse-stale-session bug: idle polecats with live "+
+			"sessions must have their session killed, not rejected")
+	}
+
+	// We expect an error from later steps (worktree not found), but not from session handling
+	if reuseErr == nil {
+		t.Fatal("expected error from worktree operations (test has no real git repo)")
+	}
+	if !strings.Contains(reuseErr.Error(), "worktree") {
+		t.Logf("ReuseIdlePolecat error (expected worktree-related): %v", reuseErr)
+	}
+
+	// Verify the session was killed
+	running, _ = tm.HasSession(sessionName)
+	if running {
+		t.Error("session should have been killed by ReuseIdlePolecat")
+	}
+
+	// Verify heartbeat was cleaned up
+	if hb := ReadSessionHeartbeat(townRoot, sessionName); hb != nil {
+		t.Error("heartbeat should have been removed after session kill")
+	}
+}
+
+// TestReuseIdlePolecat_KillsStaleSession verifies that ReuseIdlePolecat also
+// handles the stale-session case correctly (regression: the original code path
+// that worked before the fix should still work after).
+func TestReuseIdlePolecat_KillsStaleSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("tmux not supported on Windows")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	townRoot := t.TempDir()
+	rigName := "teststale"
+	rigPath := filepath.Join(townRoot, rigName)
+	polecatName := "marmalade"
+
+	polecatDir := filepath.Join(rigPath, "polecats", polecatName)
+	if err := os.MkdirAll(polecatDir, 0755); err != nil {
+		t.Fatalf("mkdir polecat dir: %v", err)
+	}
+
+	reg := session.NewPrefixRegistry()
+	reg.Register("gt", rigName)
+	old := session.DefaultRegistry()
+	session.SetDefaultRegistry(reg)
+	t.Cleanup(func() { session.SetDefaultRegistry(old) })
+
+	tm := tmux.NewTmux()
+	r := &rig.Rig{Name: rigName, Path: rigPath}
+	mgr := NewManager(r, git.NewGit(rigPath), tm)
+
+	sessMgr := NewSessionManager(tm, r)
+	sessionName := sessMgr.SessionName(polecatName)
+	if err := tm.NewSessionWithCommand(sessionName, townRoot, "sleep 300"); err != nil {
+		t.Fatalf("create tmux session: %v", err)
+	}
+	t.Cleanup(func() { _ = tm.KillSessionWithProcesses(sessionName) })
+
+	// Write a STALE heartbeat (old timestamp)
+	dir := filepath.Join(townRoot, ".runtime", "heartbeats")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-10 * time.Minute).UTC()
+	data := []byte(`{"timestamp":"` + oldTime.Format(time.RFC3339Nano) + `","state":"exiting"}`)
+	if err := os.WriteFile(filepath.Join(dir, sessionName+".json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, reuseErr := mgr.ReuseIdlePolecat(polecatName, AddOptions{})
+
+	// Should not return ErrSessionRunning
+	if errors.Is(reuseErr, ErrSessionRunning) {
+		t.Fatal("ReuseIdlePolecat should not return ErrSessionRunning for stale session")
+	}
+
+	// Session should be killed
+	running, _ := tm.HasSession(sessionName)
+	if running {
+		t.Error("stale session should have been killed")
+	}
+
+	// Heartbeat should be cleaned up
+	if hb := ReadSessionHeartbeat(townRoot, sessionName); hb != nil {
+		t.Error("heartbeat should have been removed after stale session kill")
+	}
+}
+
+// TestReuseIdlePolecat_NoSessionNoop verifies that ReuseIdlePolecat proceeds
+// normally when there's no existing session (the most common reuse case: session
+// was already killed by the Witness or expired).
+func TestReuseIdlePolecat_NoSessionNoop(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("tmux not supported on Windows")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	townRoot := t.TempDir()
+	rigName := "testnoop"
+	rigPath := filepath.Join(townRoot, rigName)
+	polecatName := "jam"
+
+	polecatDir := filepath.Join(rigPath, "polecats", polecatName)
+	if err := os.MkdirAll(polecatDir, 0755); err != nil {
+		t.Fatalf("mkdir polecat dir: %v", err)
+	}
+
+	reg := session.NewPrefixRegistry()
+	reg.Register("gt", rigName)
+	old := session.DefaultRegistry()
+	session.SetDefaultRegistry(reg)
+	t.Cleanup(func() { session.SetDefaultRegistry(old) })
+
+	tm := tmux.NewTmux()
+	r := &rig.Rig{Name: rigName, Path: rigPath}
+	mgr := NewManager(r, git.NewGit(rigPath), tm)
+
+	// No tmux session, no heartbeat — the common idle case
+	_, reuseErr := mgr.ReuseIdlePolecat(polecatName, AddOptions{})
+
+	// Should not return ErrSessionRunning
+	if errors.Is(reuseErr, ErrSessionRunning) {
+		t.Fatal("ReuseIdlePolecat should not return ErrSessionRunning when no session exists")
+	}
+
+	// Error should be from later steps (worktree ops), not session handling
+	if reuseErr == nil {
+		t.Fatal("expected error from worktree operations")
 	}
 }

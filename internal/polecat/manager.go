@@ -1510,18 +1510,25 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 		return nil, ErrPolecatNotFound
 	}
 
-	// Revalidate session state under the polecat lock. A prior dispatcher may
-	// have observed this polecat as idle, but by the time reuse begins the tmux
-	// session may still be alive or may have revived.
-	if running, stale := m.polecatSessionState(name); running {
-		if stale {
-			sessionName := session.PolecatSessionName(session.PrefixFor(m.rig.Name), name)
-			if err := m.tmux.KillSessionWithProcesses(sessionName); err != nil {
-				return nil, fmt.Errorf("killing stale session %s: %w", sessionName, err)
-			}
-		} else {
-			return nil, ErrSessionRunning
+	// Kill any existing session unconditionally before reuse.
+	// The polecat was found idle (no hooked work), so even a "live" session is
+	// just Claude sitting at a dead ❯ prompt from the previous task. Leaving it
+	// alive prevents StartSession from creating a fresh session with a proper
+	// gt prime --hook cycle to discover the newly hooked bead.
+	//
+	// Previously, non-stale sessions returned ErrSessionRunning here, causing the
+	// caller to allocate a new polecat. But heartbeat freshness can race with
+	// session lifecycle (e.g. a compact/resume hook refreshes the heartbeat while
+	// the session is functionally idle), leaving the old session alive and the
+	// new work undiscovered.
+	if running, _ := m.polecatSessionState(name); running {
+		sessionName := session.PolecatSessionName(session.PrefixFor(m.rig.Name), name)
+		if err := m.tmux.KillSessionWithProcesses(sessionName); err != nil {
+			return nil, fmt.Errorf("killing existing session %s for reuse: %w", sessionName, err)
 		}
+		// Remove stale heartbeat so SessionManager.Start doesn't see leftover data.
+		townRoot := filepath.Dir(m.rig.Path)
+		RemoveSessionHeartbeat(townRoot, sessionName)
 	}
 
 	// Get worktree path (must already exist for reuse)
