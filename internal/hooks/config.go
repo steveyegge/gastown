@@ -206,6 +206,24 @@ func DefaultOverrides() map[string]*HooksConfig {
 	pathSetup := `export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"`
 
 	return map[string]*HooksConfig{
+		// Polecats: auto-run gt done on session Stop (gas-lob).
+		// Catches the "idle polecat" problem: polecats that finish work but
+		// forget to call gt done before the session ends. The polecat-stop-check
+		// command is idempotent — it checks heartbeat state and branch commits
+		// before deciding whether to run gt done.
+		"polecats": {
+			Stop: []HookEntry{
+				{
+					Matcher: "",
+					Hooks: []Hook{
+						{
+							Type:    "command",
+							Command: fmt.Sprintf("%s && gt tap polecat-stop-check", pathSetup),
+						},
+					},
+				},
+			},
+		},
 		// Crew workers: auto-cycle session on context compaction (gt-op78).
 		// Instead of compacting (lossy), replace with fresh session that
 		// inherits hooked work. The --cycle flag does: collect state →
