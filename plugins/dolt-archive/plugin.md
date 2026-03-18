@@ -31,9 +31,9 @@ whether the other layers work.
 ## Config
 
 ```bash
-DOLT_DATA_DIR="$HOME/gt/.dolt-data"
-PROD_DBS=("hq" "bd" "gt")
-JSONL_EXPORT_DIR="$HOME/gt/.dolt-archive/jsonl"
+DOLT_DATA_DIR="$GT_TOWN_ROOT/.dolt-data"
+PROD_DBS=("hq" "beads" "gt")
+JSONL_EXPORT_DIR="$GT_TOWN_ROOT/.dolt-archive/jsonl"
 DOLT_HOST="127.0.0.1"
 DOLT_PORT=3307
 DOLT_USER="root"
