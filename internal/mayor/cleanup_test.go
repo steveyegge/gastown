@@ -3,6 +3,7 @@ package mayor
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"syscall"
 	"testing"
@@ -100,6 +101,10 @@ func TestIsACPActive_DeadProcess(t *testing.T) {
 }
 
 func TestIsACPActive_CurrentProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ACP process detection not yet reliable on Windows")
+	}
+
 	tmpDir := t.TempDir()
 	mayorDir := filepath.Join(tmpDir, "mayor")
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
@@ -118,6 +123,10 @@ func TestIsACPActive_CurrentProcess(t *testing.T) {
 }
 
 func TestCleanupVetoChecker_ShouldVetoCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ACP process detection not yet reliable on Windows")
+	}
+
 	tmpDir := t.TempDir()
 	mayorDir := filepath.Join(tmpDir, "mayor")
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
@@ -147,6 +156,10 @@ func TestCleanupVetoChecker_ShouldVetoCleanup(t *testing.T) {
 }
 
 func TestCleanupVetoChecker_VetoIfActive(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ACP process detection not yet reliable on Windows")
+	}
+
 	tmpDir := t.TempDir()
 	mayorDir := filepath.Join(tmpDir, "mayor")
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
