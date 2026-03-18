@@ -400,6 +400,32 @@ func TestParsePluginMD_GitHubSheriff(t *testing.T) {
 	}
 }
 
+func TestGitHubSheriff_RepoDetectionAndNoOwnerFilter(t *testing.T) {
+	// Verify the sheriff plugin detects repos from GT_ROOT (not GT_RIG_ROOT which
+	// doesn't exist in the dog env), and has no hardcoded repo owner filter.
+	content, err := os.ReadFile(filepath.Join("..", "..", "plugins", "github-sheriff", "plugin.md"))
+	if err != nil {
+		t.Skipf("github-sheriff plugin not found: %v", err)
+	}
+
+	src := string(content)
+
+	// Must NOT reference GT_RIG_ROOT (doesn't exist in dog env)
+	if strings.Contains(src, "GT_RIG_ROOT") {
+		t.Error("plugin must not reference GT_RIG_ROOT — dogs don't have it. Use GT_ROOT to find rigs.")
+	}
+
+	// Must use GT_ROOT to scan for rigs
+	if !strings.Contains(src, "GT_ROOT") {
+		t.Error("plugin must use GT_ROOT to find rig git clones for repo detection")
+	}
+
+	// Must NOT have hardcoded repo owner filter (was 'athosmartins')
+	if strings.Contains(src, "athosmartins") {
+		t.Error("plugin must not have hardcoded repo owner filter")
+	}
+}
+
 func TestParsePluginMD_SessionHygiene(t *testing.T) {
 	// Use a temp dir with a fixture plugin.md and run.sh so the test
 	// doesn't depend on the local filesystem layout (fails in CI).
