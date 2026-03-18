@@ -14,11 +14,11 @@ import (
 	"unicode"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/templates/commands"
 	"github.com/steveyegge/gastown/internal/util"
 )
@@ -155,6 +155,23 @@ func (m *Manager) GetRig(name string) (*Rig, error) {
 func (m *Manager) RigExists(name string) bool {
 	_, ok := m.config.Rigs[name]
 	return ok
+}
+
+// UsedNamepoolThemes returns the namepool themes currently in use by existing rigs.
+// It checks each rig's settings/config.json for an explicit namepool.style.
+// If no setting is configured, calls the fallbackTheme function to get the default theme.
+func (m *Manager) UsedNamepoolThemes(fallbackTheme func(rigName string) string) []string {
+	var themes []string
+	for name := range m.config.Rigs {
+		rigPath := filepath.Join(m.townRoot, name)
+		settingsPath := filepath.Join(rigPath, "settings", "config.json")
+		if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.Namepool != nil && settings.Namepool.Style != "" {
+			themes = append(themes, settings.Namepool.Style)
+		} else {
+			themes = append(themes, fallbackTheme(name))
+		}
+	}
+	return themes
 }
 
 // loadRig loads rig details from the filesystem.

@@ -636,6 +636,9 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Auto-assign a namepool theme that doesn't collide with other rigs (gas-21k).
+	autoAssignNamepoolTheme(townRoot, name, mgr)
+
 	// Sync hooks for the new rig's targets
 	if err := syncRigHooks(townRoot, name); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to sync hooks for new rig: %v\n", err)
@@ -1227,6 +1230,9 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			}
 		}
 	}
+
+	// Auto-assign a namepool theme that doesn't collide with other rigs (gas-21k).
+	autoAssignNamepoolTheme(townRoot, name, mgr)
 
 	// Print results
 	fmt.Printf("\n%s Rig %s adopted\n", style.Success.Render("✓"), name)
@@ -2313,4 +2319,37 @@ func isGitRemoteURL(s string) bool {
 		return true
 	}
 	return false
+}
+
+// autoAssignNamepoolTheme picks a namepool theme for a new rig that doesn't collide
+// with themes already in use by other rigs. This ensures polecat names are unique
+// across rigs (gas-21k). If all built-in themes are taken, falls back to hash-based
+// selection where collisions are possible but unavoidable.
+func autoAssignNamepoolTheme(townRoot, rigName string, mgr *rig.Manager) {
+	usedThemes := mgr.UsedNamepoolThemes(polecat.ThemeForRig)
+	chosenTheme := polecat.ThemeForRigAvoiding(rigName, usedThemes)
+	settingsPath := filepath.Join(townRoot, rigName, "settings", "config.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0755); err != nil {
+		fmt.Printf("  %s Could not create settings directory: %v\n", style.Warning.Render("!"), err)
+		return
+	}
+	rigSettings, err := config.LoadRigSettings(settingsPath)
+	if err != nil {
+		rigSettings = &config.RigSettings{
+			Type:    "rig-settings",
+			Version: 1,
+		}
+	}
+	// Only set namepool theme if not already configured
+	if rigSettings.Namepool != nil && rigSettings.Namepool.Style != "" {
+		return
+	}
+	rigSettings.Namepool = &config.NamepoolConfig{
+		Style: chosenTheme,
+	}
+	if err := config.SaveRigSettings(settingsPath, rigSettings); err != nil {
+		fmt.Printf("  %s Could not save namepool theme: %v\n", style.Warning.Render("!"), err)
+	} else {
+		fmt.Printf("  Namepool theme: %s (auto-assigned for cross-rig uniqueness)\n", chosenTheme)
+	}
 }

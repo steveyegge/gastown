@@ -221,6 +221,41 @@ func TestRemoveRigNotFoundWithOrphanDir(t *testing.T) {
 	}
 }
 
+func TestUsedNamepoolThemes(t *testing.T) {
+	root, rigsConfig := setupTestTown(t)
+
+	// Register two rigs
+	rigsConfig.Rigs["alpha"] = config.RigEntry{}
+	rigsConfig.Rigs["beta"] = config.RigEntry{}
+
+	// Create settings for alpha with explicit theme
+	alphaSettings := filepath.Join(root, "alpha", "settings")
+	if err := os.MkdirAll(alphaSettings, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(alphaSettings, "config.json"), []byte(`{"type":"rig-settings","version":1,"namepool":{"style":"minerals"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// beta has no settings — should use fallback
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+	fallback := func(name string) string { return "fallback-" + name }
+	themes := manager.UsedNamepoolThemes(fallback)
+
+	if len(themes) != 2 {
+		t.Fatalf("expected 2 themes, got %d: %v", len(themes), themes)
+	}
+
+	hasAlpha := slices.Contains(themes, "minerals")
+	hasBeta := slices.Contains(themes, "fallback-beta")
+	if !hasAlpha {
+		t.Errorf("expected 'minerals' for alpha, themes: %v", themes)
+	}
+	if !hasBeta {
+		t.Errorf("expected 'fallback-beta' for beta, themes: %v", themes)
+	}
+}
+
 func TestAddRig_RejectsInvalidNames(t *testing.T) {
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
