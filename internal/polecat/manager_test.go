@@ -678,6 +678,8 @@ func TestIsDoltConfigError(t *testing.T) {
 		{"database not found", fmt.Errorf("database not found"), true},
 		{"connection refused", fmt.Errorf("dial tcp: connection refused"), true},
 		{"configure custom types", fmt.Errorf("configure custom types in /path: exit 1"), true},
+		{"identity mismatch", fmt.Errorf("identity mismatch: local project_id != database project_id"), true},
+		{"Unknown database", fmt.Errorf("Unknown database 'gastown'"), true},
 		{"generic error", fmt.Errorf("something else failed"), false},
 		{"wrapped not initialized", fmt.Errorf("bd create failed: %w", fmt.Errorf("database not initialized")), true},
 	}

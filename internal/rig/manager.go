@@ -844,8 +844,61 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 		},
 	}
 
+	// Post-init identity verification (gas-tc4): verify metadata.json points
+	// to the correct database. This catches identity mismatches caused by bd init
+	// writing the wrong database name, before the rig is considered ready.
+	if err := m.verifyRigIdentity(rigPath, opts.Name); err != nil {
+		// Non-fatal but loud: the rig was created, but identity may be wrong.
+		// gt doctor --fix can repair this.
+		fmt.Fprintf(os.Stderr, "  ⚠ Identity verification warning: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  Run 'gt doctor --fix' to repair if needed.\n")
+	}
+
 	success = true
 	return m.loadRig(opts.Name, m.config.Rigs[opts.Name])
+}
+
+// verifyRigIdentity checks that metadata.json points to the correct Dolt database
+// for this rig. This catches identity mismatches early — before polecats are spawned
+// and get stuck in retry loops. (gas-tc4)
+func (m *Manager) verifyRigIdentity(rigPath, rigName string) error {
+	resolvedBeadsDir := beads.ResolveBeadsDir(rigPath)
+	metadataPath := filepath.Join(resolvedBeadsDir, "metadata.json")
+
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No metadata.json yet — will be created later
+		}
+		return fmt.Errorf("reading metadata.json: %w", err)
+	}
+
+	var metadata struct {
+		DoltDatabase string `json:"dolt_database"`
+		DoltMode     string `json:"dolt_mode"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return fmt.Errorf("parsing metadata.json: %w", err)
+	}
+
+	if metadata.DoltMode != "server" {
+		return nil // Not using server mode, skip check
+	}
+
+	// Verify the database name matches what we expect.
+	// The database should be named after the rig (e.g., "gastown") not after
+	// a bd init artifact (e.g., "beads_gt") or a stale value from another rig.
+	if metadata.DoltDatabase != "" && metadata.DoltDatabase != rigName {
+		fmt.Fprintf(os.Stderr, "   ⚠ metadata.json has dolt_database=%q (expected %q) — attempting repair\n",
+			metadata.DoltDatabase, rigName)
+		if repairErr := doltserver.EnsureMetadata(m.townRoot, rigName); repairErr != nil {
+			return fmt.Errorf("metadata.json has dolt_database=%q (expected %q) and auto-repair failed: %w",
+				metadata.DoltDatabase, rigName, repairErr)
+		}
+		fmt.Printf("   ✓ Repaired metadata.json identity (was %q, now %q)\n", metadata.DoltDatabase, rigName)
+	}
+
+	return nil
 }
 
 // saveRigConfig writes the rig configuration to config.json.

@@ -1684,6 +1684,52 @@ func TestEnsureMetadata_RepairsStalePort(t *testing.T) {
 	}
 }
 
+// TestEnsureMetadata_RepairsWrongDoltDatabase verifies that EnsureMetadata
+// corrects a metadata.json where dolt_database points to the wrong database
+// (e.g., "beads_gt" instead of "gastown"). This is the primary fix for the
+// PROJECT IDENTITY MISMATCH bug (gas-tc4).
+func TestEnsureMetadata_RepairsWrongDoltDatabase(t *testing.T) {
+	townRoot := t.TempDir()
+
+	beadsDir := filepath.Join(townRoot, "gastown", "mayor", "rig", ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate wrong database name (bd init wrote "beads_gt" instead of "gastown")
+	wrong := map[string]interface{}{
+		"backend":          "dolt",
+		"database":         "dolt",
+		"dolt_mode":        "server",
+		"dolt_database":    "beads_gt",
+		"dolt_server_host": "127.0.0.1",
+		"dolt_server_port": float64(DefaultPort),
+	}
+	data, _ := json.Marshal(wrong)
+	metaPath := filepath.Join(beadsDir, "metadata.json")
+	if err := os.WriteFile(metaPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EnsureMetadata(townRoot, "gastown"); err != nil {
+		t.Fatalf("EnsureMetadata failed: %v", err)
+	}
+
+	repaired, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("reading metadata: %v", err)
+	}
+	var meta map[string]interface{}
+	if err := json.Unmarshal(repaired, &meta); err != nil {
+		t.Fatalf("parsing metadata: %v", err)
+	}
+
+	// dolt_database should now be "gastown", not "beads_gt"
+	if meta["dolt_database"] != "gastown" {
+		t.Errorf("dolt_database = %v, want %q", meta["dolt_database"], "gastown")
+	}
+}
+
 // TestEnsureAllMetadata_RepairsAllCorrupt tests that EnsureAllMetadata
 // repairs metadata for all known databases, even if some are corrupt.
 func TestEnsureAllMetadata_RepairsAllCorrupt(t *testing.T) {

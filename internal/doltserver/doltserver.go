@@ -2815,7 +2815,17 @@ func EnsureMetadata(townRoot, rigName string, doltDatabase ...string) error {
 		existing["dolt_mode"] = "server"
 		changed = true
 	}
+	// Fix wrong dolt_database values (not just empty). After a crash or rig
+	// addition, metadata.json can end up pointing to the wrong database name
+	// (e.g., "beads_gt" instead of "gastown"), causing PROJECT IDENTITY MISMATCH
+	// errors that are hard to diagnose and recover from. (gas-tc4)
 	if existing["dolt_database"] == nil || existing["dolt_database"] == "" {
+		existing["dolt_database"] = effectiveDB
+		changed = true
+	} else if dbStr, ok := existing["dolt_database"].(string); ok && dbStr != effectiveDB {
+		// The database name is wrong — fix it. This is the primary repair path
+		// for identity mismatches caused by bd init writing the wrong database name.
+		fmt.Fprintf(os.Stderr, "Warning: metadata.json dolt_database was %q, correcting to %q (identity mismatch repair)\n", dbStr, effectiveDB)
 		existing["dolt_database"] = effectiveDB
 		changed = true
 	}
