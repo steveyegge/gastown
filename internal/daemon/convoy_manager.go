@@ -261,10 +261,10 @@ func (m *ConvoyManager) pollStoresSnapshot(stores map[string]beadsdk.Storage) bo
 // The seen set deduplicates issueIDs across stores within a poll cycle.
 // Returns an error if the poll failed (used by caller for backoff decisions).
 func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map[string]beadsdk.Storage, seen map[string]bool) error {
-	// Load per-store high-water mark
-	var highWater int64
+	// Load per-store high-water mark (time-based, since event IDs are UUIDs)
+	var highWater time.Time
 	if v, ok := m.lastEventIDs.Load(name); ok {
-		highWater = v.(int64)
+		highWater = v.(time.Time)
 	}
 
 	events, err := store.GetAllEventsSince(m.ctx, highWater)
@@ -278,8 +278,8 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map
 
 	// Advance high-water mark from all events
 	for _, e := range events {
-		if e.ID > highWater {
-			highWater = e.ID
+		if e.CreatedAt.After(highWater) {
+			highWater = e.CreatedAt
 		}
 	}
 	m.lastEventIDs.Store(name, highWater)
