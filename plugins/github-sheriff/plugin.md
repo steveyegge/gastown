@@ -5,7 +5,7 @@ version = 1
 
 [gate]
 type = "cooldown"
-duration = "5m"
+duration = "2h"
 
 [tracking]
 labels = ["plugin:github-sheriff", "category:ci-monitoring"]
@@ -63,9 +63,10 @@ Fetch all open PRs in a single GraphQL call via `gh`. This returns additions,
 deletions, mergeable status, and CI check results without per-PR API overhead:
 
 ```bash
+SINCE=$(date -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -v-7d +%Y-%m-%dT%H:%M:%SZ)
 PRS=$(gh pr list --repo "$REPO" --state open \
-  --json number,title,author,additions,deletions,mergeable,statusCheckRollup,url \
-  --limit 100)
+  --json number,title,author,additions,deletions,mergeable,statusCheckRollup,url,updatedAt \
+  --limit 100 | jq --arg since "$SINCE" '[.[] | select(.updatedAt >= $since)]')
 
 PR_COUNT=$(echo "$PRS" | jq length)
 if [ "$PR_COUNT" -eq 0 ]; then
@@ -144,9 +145,15 @@ fi
 
 ### Step 3: Deduplicate CI failures against existing beads
 
-For each failure, check if a bead already exists:
+For each failure, check if a bead already exists. Use `--rig` to ensure we
+query the same rig where beads are created:
 
 ```bash
+# Derive rig name from GT_RIG_ROOT path (e.g., /home/user/gt/gastown → gastown)
+RIG_NAME=$(basename "$(dirname "$(dirname "$GT_RIG_ROOT")")" 2>/dev/null)
+RIG_FLAG=""
+[ -n "$RIG_NAME" ] && RIG_FLAG="--rig $RIG_NAME"
+
 CREATED=0
 SKIPPED=0
 
@@ -157,7 +164,7 @@ if [ "$REPO_OWNER" != "athosmartins" ]; then
   SKIPPED=${#FAILURES[@]}
 else
 
-EXISTING=$(bd list --label ci-failure --status open --json 2>/dev/null || echo "[]")
+EXISTING=$(bd list --label ci-failure --status open $RIG_FLAG --json 2>/dev/null || echo "[]")
 
 for F in "${FAILURES[@]}"; do
   IFS='|' read -r PR_NUM PR_TITLE CHECK_NAME CHECK_URL <<< "$F"
@@ -178,6 +185,7 @@ Check: $CHECK_URL"
   BEAD_ID=$(bd create "$BEAD_TITLE" -t task -p 2 \
     -d "$DESCRIPTION" \
     -l ci-failure \
+    $RIG_FLAG \
     --json 2>/dev/null | jq -r '.id // empty')
 
   if [ -n "$BEAD_ID" ]; then
