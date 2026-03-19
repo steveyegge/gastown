@@ -84,6 +84,12 @@ ZOMBIES=()
 while IFS= read -r SESSION; do
   [ -z "$SESSION" ] && continue
 
+  # Sessions without a dash are user-created, not GT-managed — skip them.
+  # GT sessions always use prefix-name format (hq-mayor, gt-furiosa, cr-crew-charlie).
+  if [[ "$SESSION" != *-* ]]; then
+    continue
+  fi
+
   # Extract prefix (everything before the first dash)
   PREFIX=$(echo "$SESSION" | cut -d'-' -f1)
 
