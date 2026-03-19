@@ -429,6 +429,9 @@ func NewDashboardMux(fetcher ConvoyFetcher, webCfg *config.WebTimeoutsConfig) (h
 	maxRunTimeout := config.ParseDurationOrDefault(webCfg.MaxRunTimeout, 60*time.Second)
 	apiHandler := NewAPIHandler(defaultRunTimeout, maxRunTimeout, csrfToken)
 
+	// RTS game handler (uses same fetcher for real-time state)
+	rtsHandler := NewRTSHandler(fetcher, fetchTimeout)
+
 	// Create static file server from embedded files
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -438,7 +441,12 @@ func NewDashboardMux(fetcher ConvoyFetcher, webCfg *config.WebTimeoutsConfig) (h
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiHandler)
+	mux.HandleFunc("/api/rts-state", rtsHandler.HandleSSE)
 	mux.Handle("/static/", http.StripPrefix("/static/", staticHandler))
+	mux.HandleFunc("/rts", func(w http.ResponseWriter, r *http.Request) {
+		// Serve the RTS game HTML from embedded static files
+		http.Redirect(w, r, "/static/rts/index.html", http.StatusFound)
+	})
 	mux.Handle("/", convoyHandler)
 
 	return mux, nil

@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gas Town RTS</title>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; overflow: hidden; font-family: 'SF Mono', Monaco, 'Consolas', monospace; }
+#game-container { width: 100vw; height: 100vh; }
+#hud {
+  position: fixed; top: 12px; left: 12px; z-index: 100;
+  color: #c0c0c0; font-size: 11px; pointer-events: none;
+}
+#hud .title { color: #ff6b35; font-size: 14px; font-weight: bold; letter-spacing: 2px; }
+#hud .stats { margin-top: 6px; opacity: 0.8; }
+#hud .stat { display: inline-block; margin-right: 14px; }
+#hud .stat .val { color: #ff6b35; font-weight: bold; }
+#hud .alert { color: #ff4444; animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+#connection-status {
+  position: fixed; top: 12px; right: 12px; z-index: 100;
+  font-size: 10px; padding: 4px 8px; border-radius: 3px;
+}
+.connected { background: #1a3a1a; color: #4ade80; }
+.disconnected { background: #3a1a1a; color: #ff4444; }
+#zoom-controls {
+  position: fixed; bottom: 12px; right: 12px; z-index: 100;
+  display: flex; gap: 4px;
+}
+#zoom-controls button {
+  background: #1a1a2e; color: #c0c0c0; border: 1px solid #333;
+  padding: 6px 12px; cursor: pointer; font-family: inherit; font-size: 12px;
+}
+#zoom-controls button:hover { background: #2a2a4e; }
+#legend {
+  position: fixed; bottom: 12px; left: 12px; z-index: 100;
+  color: #888; font-size: 10px;
+}
+#legend .entry { display: inline-block; margin-right: 12px; }
+#legend .swatch { display: inline-block; width: 8px; height: 8px; margin-right: 4px; }
+</style>
+</head>
+<body>
+<div id="game-container"></div>
+<div id="hud">
+  <div class="title">GAS TOWN</div>
+  <div class="stats" id="hud-stats"></div>
+</div>
+<div id="connection-status" class="disconnected">OFFLINE</div>
+<div id="zoom-controls">
+  <button onclick="zoomOut()">-</button>
+  <button onclick="zoomReset()">1:1</button>
+  <button onclick="zoomIn()">+</button>
+</div>
+<div id="legend">
+  <span class="entry"><span class="swatch" style="background:#ff6b35"></span>Polecat</span>
+  <span class="entry"><span class="swatch" style="background:#4ade80"></span>Witness</span>
+  <span class="entry"><span class="swatch" style="background:#818cf8"></span>Refinery</span>
+  <span class="entry"><span class="swatch" style="background:#fbbf24"></span>Mayor</span>
+  <span class="entry"><span class="swatch" style="background:#a78bfa"></span>Dog</span>
+</div>
+
+<script>
+// ─── Game State ───
+let gameState = null;
+let entities = {};  // id -> sprite group
+let rigZones = {};  // rig name -> zone graphics
+let speechBubbles = {}; // id -> text object
+
+// ─── Color Palette ───
+const COLORS = {
+  bg: 0x0a0a0f,
+  grid: 0x1a1a2e,
+  gridLine: 0x222244,
+  polecat: { working: 0xff6b35, idle: 0x666666, stuck: 0xff4444, stale: 0xfbbf24, dead: 0x444444 },
+  witness: 0x4ade80,
+  refinery: 0x818cf8,
+  mayor: 0xfbbf24,
+  dog: 0xa78bfa,
+  deacon: 0x06b6d4,
+  rig: { border: 0x333355, fill: 0x12122a, label: '#666688' },
+  bubble: { bg: 0x1a1a2e, border: 0x333355, text: '#c0c0c0' },
+  escalation: 0xff4444,
+  mergeQueue: { pass: 0x4ade80, fail: 0xff4444, pending: 0xfbbf24 }
+};
+
+// ─── Layout Constants ───
+const TILE_W = 64;
+const TILE_H = 32;
+const MAP_COLS = 24;
+const MAP_ROWS = 24;
+
+// Convert grid coords to isometric screen coords
+function toIso(col, row) {
+  return {
+    x: (col - row) * (TILE_W / 2) + MAP_COLS * TILE_W / 2,
+    y: (col + row) * (TILE_H / 2) + 80
+  };
+}
+
+// ─── Phaser Scenes ───
+class BootScene extends Phaser.Scene {
+  constructor() { super('Boot'); }
+
+  create() {
+    // Generate sprite textures procedurally
+    this.createEntityTexture('polecat-sprite', 12, 16, 0xff6b35);
+    this.createEntityTexture('witness-sprite', 14, 14, 0x4ade80);
+    this.createEntityTexture('refinery-sprite', 24, 20, 0x818cf8);
+    this.createEntityTexture('mayor-sprite', 20, 22, 0xfbbf24);
+    this.createEntityTexture('dog-sprite', 10, 8, 0xa78bfa);
+    this.createEntityTexture('deacon-sprite', 12, 14, 0x06b6d4);
+    this.createBuildingTexture('town-hall', 48, 36, 0xfbbf24);
+    this.createBuildingTexture('forge', 40, 30, 0x818cf8);
+    this.createBuildingTexture('watchtower', 20, 32, 0x4ade80);
+    this.scene.start('Game');
+  }
+
+  createEntityTexture(key, w, h, color) {
+    const g = this.add.graphics();
+    // Body
+    g.fillStyle(color, 1);
+    g.fillRect(0, 0, w, h);
+    // Eyes (2px white dots)
+    g.fillStyle(0xffffff, 1);
+    g.fillRect(Math.floor(w * 0.3), Math.floor(h * 0.25), 2, 2);
+    g.fillRect(Math.floor(w * 0.6), Math.floor(h * 0.25), 2, 2);
+    // Shadow
+    g.fillStyle(0x000000, 0.3);
+    g.fillRect(0, h - 2, w, 2);
+    g.generateTexture(key, w, h);
+    g.destroy();
+  }
+
+  createBuildingTexture(key, w, h, color) {
+    const g = this.add.graphics();
+    // Base
+    g.fillStyle(color, 0.3);
+    g.fillRect(0, h * 0.3, w, h * 0.7);
+    // Roof
+    g.fillStyle(color, 0.6);
+    g.beginPath();
+    g.moveTo(w / 2, 0);
+    g.lineTo(w, h * 0.35);
+    g.lineTo(0, h * 0.35);
+    g.closePath();
+    g.fill();
+    // Border
+    g.lineStyle(1, color, 0.8);
+    g.strokeRect(0, h * 0.3, w, h * 0.7);
+    g.generateTexture(key, w, h);
+    g.destroy();
+  }
+}
+
+class GameScene extends Phaser.Scene {
+  constructor() { super('Game'); }
+
+  create() {
+    this.cameras.main.setBackgroundColor(COLORS.bg);
+
+    // Create isometric grid
+    this.drawGrid();
+
+    // Entity containers
+    this.entityContainer = this.add.container(0, 0);
+    this.bubbleContainer = this.add.container(0, 0);
+    this.rigContainer = this.add.container(0, 0);
+
+    // Camera controls
+    this.setupCamera();
+
+    // Start SSE connection
+    this.connectSSE();
+
+    // Update loop for animations
+    this.time.addEvent({
+      delay: 100,
+      callback: this.updateAnimations,
+      callbackScope: this,
+      loop: true
+    });
+  }
+
+  drawGrid() {
+    const g = this.add.graphics();
+    g.lineStyle(1, COLORS.gridLine, 0.15);
+
+    for (let col = 0; col <= MAP_COLS; col++) {
+      const start = toIso(col, 0);
+      const end = toIso(col, MAP_ROWS);
+      g.lineBetween(start.x, start.y, end.x, end.y);
+    }
+    for (let row = 0; row <= MAP_ROWS; row++) {
+      const start = toIso(0, row);
+      const end = toIso(MAP_COLS, row);
+      g.lineBetween(start.x, start.y, end.x, end.y);
+    }
+  }
+
+  setupCamera() {
+    const cam = this.cameras.main;
+    const centerIso = toIso(MAP_COLS / 2, MAP_ROWS / 2);
+    cam.centerOn(centerIso.x, centerIso.y);
+    cam.setZoom(1);
+
+    // Drag to pan
+    this.input.on('pointermove', (pointer) => {
+      if (pointer.isDown) {
+        cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
+        cam.scrollY -= (pointer.y - pointer.prevPosition.y) / cam.zoom;
+      }
+    });
+
+    // Scroll to zoom
+    this.input.on('wheel', (pointer, gameObjects, dx, dy) => {
+      const newZoom = Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.5, 3);
+      cam.setZoom(newZoom);
+    });
+  }
+
+  connectSSE() {
+    const statusEl = document.getElementById('connection-status');
+    const source = new EventSource('/api/rts-state');
+
+    source.addEventListener('connected', () => {
+      statusEl.textContent = 'LIVE';
+      statusEl.className = 'connected';
+    });
+
+    source.addEventListener('state', (e) => {
+      try {
+        gameState = JSON.parse(e.data);
+        this.updateWorld(gameState);
+        this.updateHUD(gameState);
+      } catch (err) {
+        console.error('Failed to parse state:', err);
+      }
+    });
+
+    source.onerror = () => {
+      statusEl.textContent = 'RECONNECTING...';
+      statusEl.className = 'disconnected';
+    };
+  }
+
+  updateWorld(state) {
+    // Layout rigs as zones on the map
+    this.layoutRigs(state.rigs || []);
+
+    // Update/create/remove entities
+    const seenIds = new Set();
+    for (const entity of (state.entities || [])) {
+      seenIds.add(entity.id);
+      if (entities[entity.id]) {
+        this.updateEntity(entity);
+      } else {
+        this.createEntity(entity);
+      }
+    }
+
+    // Remove entities no longer in state
+    for (const id of Object.keys(entities)) {
+      if (!seenIds.has(id)) {
+        this.removeEntity(id);
+      }
+    }
+
+    // Update merge queue on refinery buildings
+    this.updateMergeQueue(state.mergeQueue || []);
+
+    // Show escalation alerts
+    this.updateEscalations(state.escalations || []);
+  }
+
+  layoutRigs(rigs) {
+    // Pre-defined rig positions on the isometric map
+    const rigPositions = {};
+    const totalRigs = Math.max(rigs.length, 1);
+
+    // Arrange rigs in a semicircle around the mayor (center)
+    rigs.forEach((rig, i) => {
+      const angle = (Math.PI * 0.3) + (Math.PI * 0.4 / Math.max(totalRigs - 1, 1)) * i;
+      const radius = 6;
+      const col = Math.floor(MAP_COLS / 2 + Math.cos(angle) * radius);
+      const row = Math.floor(MAP_ROWS / 2 + Math.sin(angle) * radius);
+      rigPositions[rig.name] = { col, row };
+    });
+
+    // Draw rig zones
+    for (const rig of rigs) {
+      const pos = rigPositions[rig.name];
+      if (!pos) continue;
+
+      if (!rigZones[rig.name]) {
+        const iso = toIso(pos.col, pos.row);
+        const g = this.add.graphics();
+
+        // Draw zone as diamond
+        const zoneSize = 4;
+        g.fillStyle(COLORS.rig.fill, 0.5);
+        g.lineStyle(1, COLORS.rig.border, 0.6);
+
+        const points = [
+          toIso(pos.col, pos.row - zoneSize),
+          toIso(pos.col + zoneSize, pos.row),
+          toIso(pos.col, pos.row + zoneSize),
+          toIso(pos.col - zoneSize, pos.row),
+        ];
+        g.beginPath();
+        g.moveTo(points[0].x, points[0].y);
+        for (let p = 1; p < points.length; p++) {
+          g.lineTo(points[p].x, points[p].y);
+        }
+        g.closePath();
+        g.fillPath();
+        g.strokePath();
+
+        // Rig label
+        const label = this.add.text(iso.x, iso.y - 40, rig.name.toUpperCase(), {
+          fontFamily: '"SF Mono", Monaco, Consolas, monospace',
+          fontSize: '10px',
+          color: COLORS.rig.label,
+          align: 'center'
+        }).setOrigin(0.5);
+
+        // Building sprites
+        if (rig.hasRefinery) {
+          const forgePos = toIso(pos.col + 2, pos.row - 1);
+          this.add.image(forgePos.x, forgePos.y, 'forge').setDepth(forgePos.y);
+        }
+        if (rig.hasWitness) {
+          const towerPos = toIso(pos.col - 2, pos.row - 1);
+          this.add.image(towerPos.x, towerPos.y, 'watchtower').setDepth(towerPos.y);
+        }
+
+        rigZones[rig.name] = { pos, label, graphics: g };
+      }
+    }
+
+    // Mayor town hall at center
+    if (!rigZones['__mayor']) {
+      const centerIso = toIso(MAP_COLS / 2, MAP_ROWS / 2);
+      this.add.image(centerIso.x, centerIso.y, 'town-hall').setDepth(centerIso.y);
+      this.add.text(centerIso.x, centerIso.y - 30, 'TOWN HALL', {
+        fontFamily: '"SF Mono", Monaco, Consolas, monospace',
+        fontSize: '9px',
+        color: '#fbbf24',
+        align: 'center'
+      }).setOrigin(0.5);
+      rigZones['__mayor'] = { pos: { col: MAP_COLS / 2, row: MAP_ROWS / 2 } };
+    }
+  }
+
+  getEntityPosition(entity) {
+    // Place entity within its rig zone, or at center for mayor
+    if (entity.type === 'mayor') {
+      return toIso(MAP_COLS / 2, MAP_ROWS / 2 + 1);
+    }
+
+    const rig = rigZones[entity.rig];
+    if (!rig) {
+      // Unassigned entities go near center
+      return toIso(MAP_COLS / 2 + 3, MAP_ROWS / 2 + 3);
+    }
+
+    // Spread entities within rig zone using hash of ID for consistent positioning
+    let hash = 0;
+    for (let i = 0; i < entity.id.length; i++) {
+      hash = ((hash << 5) - hash) + entity.id.charCodeAt(i);
+    }
+    const offsetCol = ((hash & 0xff) % 5) - 2;
+    const offsetRow = (((hash >> 8) & 0xff) % 5) - 2;
+
+    return toIso(rig.pos.col + offsetCol, rig.pos.row + offsetRow);
+  }
+
+  getSpriteKey(type) {
+    const map = {
+      polecat: 'polecat-sprite',
+      witness: 'witness-sprite',
+      refinery: 'refinery-sprite',
+      mayor: 'mayor-sprite',
+      dog: 'dog-sprite',
+      deacon: 'deacon-sprite'
+    };
+    return map[type] || 'polecat-sprite';
+  }
+
+  getStatusColor(entity) {
+    if (entity.type === 'polecat') {
+      return COLORS.polecat[entity.status] || COLORS.polecat.idle;
+    }
+    return COLORS[entity.type] || 0xcccccc;
+  }
+
+  createEntity(entity) {
+    const pos = this.getEntityPosition(entity);
+    const spriteKey = this.getSpriteKey(entity.type);
+
+    const sprite = this.add.image(pos.x, pos.y, spriteKey);
+    sprite.setDepth(pos.y + 1);
+
+    // Status indicator (small colored circle below sprite)
+    const indicator = this.add.graphics();
+    this.drawStatusIndicator(indicator, pos.x, pos.y + 12, entity);
+    indicator.setDepth(pos.y);
+
+    // Name label
+    const nameLabel = this.add.text(pos.x, pos.y + 18, entity.name || entity.id, {
+      fontFamily: '"SF Mono", Monaco, Consolas, monospace',
+      fontSize: '8px',
+      color: '#888888',
+      align: 'center'
+    }).setOrigin(0.5).setDepth(pos.y + 2);
+
+    // Speech bubble (shows activity)
+    const bubble = this.createSpeechBubble(pos.x, pos.y - 24, entity);
+
+    entities[entity.id] = { sprite, indicator, nameLabel, bubble, data: entity };
+
+    // Tint sprite based on status
+    sprite.setTint(this.getStatusColor(entity));
+
+    // Click to inspect
+    sprite.setInteractive();
+    sprite.on('pointerdown', () => {
+      this.showEntityDetail(entity);
+    });
+  }
+
+  updateEntity(entity) {
+    const e = entities[entity.id];
+    if (!e) return;
+
+    // Update data
+    e.data = entity;
+
+    // Update tint
+    e.sprite.setTint(this.getStatusColor(entity));
+
+    // Update speech bubble text
+    if (e.bubble) {
+      const text = this.getBubbleText(entity);
+      e.bubble.text.setText(text);
+      // Pulse bubble alpha based on activity
+      e.bubble.container.setAlpha(entity.status === 'stuck' ? 1 : 0.85);
+    }
+
+    // Update status indicator
+    const pos = this.getEntityPosition(entity);
+    e.indicator.clear();
+    this.drawStatusIndicator(e.indicator, pos.x, pos.y + 12, entity);
+
+    // Update name label
+    e.nameLabel.setText(entity.name || entity.id);
+  }
+
+  removeEntity(id) {
+    const e = entities[id];
+    if (!e) return;
+    e.sprite.destroy();
+    e.indicator.destroy();
+    e.nameLabel.destroy();
+    if (e.bubble) {
+      e.bubble.container.destroy();
+    }
+    delete entities[id];
+  }
+
+  drawStatusIndicator(g, x, y, entity) {
+    const color = this.getStatusColor(entity);
+    g.fillStyle(color, 0.8);
+    g.fillCircle(x, y, 3);
+
+    // Pulsing ring for stuck/escalated
+    if (entity.status === 'stuck' || entity.status === 'escalated') {
+      g.lineStyle(1, COLORS.escalation, 0.6);
+      g.strokeCircle(x, y, 6);
+    }
+  }
+
+  getBubbleText(entity) {
+    if (entity.activity && entity.activity.length > 0) {
+      // Truncate to 30 chars
+      const text = entity.activity.length > 30
+        ? entity.activity.substring(0, 27) + '...'
+        : entity.activity;
+      return text;
+    }
+    if (entity.hookTitle) {
+      const title = entity.hookTitle.length > 25
+        ? entity.hookTitle.substring(0, 22) + '...'
+        : entity.hookTitle;
+      return title;
+    }
+    return entity.status || '';
+  }
+
+  createSpeechBubble(x, y, entity) {
+    const text = this.getBubbleText(entity);
+    if (!text) return null;
+
+    const textObj = this.add.text(0, 0, text, {
+      fontFamily: '"SF Mono", Monaco, Consolas, monospace',
+      fontSize: '7px',
+      color: COLORS.bubble.text,
+      wordWrap: { width: 120 }
+    }).setOrigin(0.5);
+
+    const padding = 4;
+    const w = Math.max(textObj.width + padding * 2, 30);
+    const h = textObj.height + padding * 2;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(COLORS.bubble.bg, 0.9);
+    bg.fillRoundedRect(-w / 2, -h / 2, w, h, 3);
+    bg.lineStyle(1, COLORS.bubble.border, 0.5);
+    bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 3);
+
+    // Tail
+    bg.fillStyle(COLORS.bubble.bg, 0.9);
+    bg.fillTriangle(0, h / 2, -4, h / 2 + 5, 4, h / 2);
+
+    const container = this.add.container(x, y, [bg, textObj]);
+    container.setDepth(10000);
+    container.setAlpha(0.85);
+
+    return { container, text: textObj, bg };
+  }
+
+  showEntityDetail(entity) {
+    // Create a detail overlay
+    const cam = this.cameras.main;
+    const centerX = cam.scrollX + cam.width / 2 / cam.zoom;
+    const centerY = cam.scrollY + cam.height / 2 / cam.zoom;
+
+    // Remove existing detail if any
+    if (this._detailPanel) {
+      this._detailPanel.destroy();
+    }
+
+    const lines = [
+      `${entity.type.toUpperCase()}: ${entity.name}`,
+      `Status: ${entity.status}`,
+      entity.rig ? `Rig: ${entity.rig}` : '',
+      entity.hookBead ? `Hook: ${entity.hookBead}` : '',
+      entity.hookTitle ? `Task: ${entity.hookTitle}` : '',
+      entity.activity ? `Activity: ${entity.activity}` : '',
+      entity.activityAge ? `Last active: ${entity.activityAge}` : '',
+    ].filter(Boolean).join('\n');
+
+    const detail = this.add.text(centerX, centerY, lines, {
+      fontFamily: '"SF Mono", Monaco, Consolas, monospace',
+      fontSize: '10px',
+      color: '#c0c0c0',
+      backgroundColor: '#1a1a2eee',
+      padding: { x: 12, y: 8 }
+    }).setOrigin(0.5).setDepth(20000);
+
+    this._detailPanel = detail;
+
+    // Auto-dismiss after 4 seconds
+    this.time.delayedCall(4000, () => {
+      if (this._detailPanel === detail) {
+        detail.destroy();
+        this._detailPanel = null;
+      }
+    });
+  }
+
+  updateMergeQueue(queue) {
+    // Show merge queue items near refinery buildings
+    // (simplified: just update HUD for now)
+  }
+
+  updateEscalations(escalations) {
+    // Flash screen border red if there are unacked escalations
+    if (escalations.length > 0 && !this._escBorder) {
+      const cam = this.cameras.main;
+      this._escBorder = true;
+      cam.setBackgroundColor(0x1a0000);
+      this.time.delayedCall(500, () => {
+        cam.setBackgroundColor(COLORS.bg);
+        this._escBorder = false;
+      });
+    }
+  }
+
+  updateHUD(state) {
+    const statsEl = document.getElementById('hud-stats');
+    if (!statsEl) return;
+
+    const entityCount = (state.entities || []).length;
+    const rigCount = (state.rigs || []).length;
+    const polecats = (state.entities || []).filter(e => e.type === 'polecat');
+    const working = polecats.filter(e => e.status === 'working').length;
+    const stuck = polecats.filter(e => e.status === 'stuck').length;
+    const mqCount = (state.mergeQueue || []).length;
+    const escCount = (state.escalations || []).length;
+
+    let html = '';
+    html += `<span class="stat">Agents: <span class="val">${entityCount}</span></span>`;
+    html += `<span class="stat">Rigs: <span class="val">${rigCount}</span></span>`;
+    html += `<span class="stat">Working: <span class="val">${working}</span></span>`;
+    html += `<span class="stat">MQ: <span class="val">${mqCount}</span></span>`;
+
+    if (stuck > 0) {
+      html += `<span class="stat alert">STUCK: ${stuck}</span>`;
+    }
+    if (escCount > 0) {
+      html += `<span class="stat alert">ESCALATIONS: ${escCount}</span>`;
+    }
+
+    if (state.health) {
+      if (state.health.isPaused) {
+        html += `<span class="stat alert">PAUSED</span>`;
+      }
+    }
+
+    statsEl.innerHTML = html;
+  }
+
+  updateAnimations() {
+    // Subtle idle animations
+    const time = this.time.now;
+
+    for (const [id, e] of Object.entries(entities)) {
+      if (!e.data) continue;
+
+      // Bob working entities gently
+      if (e.data.status === 'working') {
+        e.sprite.y += Math.sin(time / 300 + id.charCodeAt(0)) * 0.15;
+      }
+
+      // Pulse stuck entities
+      if (e.data.status === 'stuck') {
+        e.sprite.setAlpha(0.5 + Math.sin(time / 200) * 0.3);
+      }
+
+      // Dogs wander slightly
+      if (e.data.type === 'dog' && e.data.status === 'idle') {
+        e.sprite.x += Math.sin(time / 2000 + id.charCodeAt(0) * 3) * 0.1;
+        e.sprite.y += Math.cos(time / 2500 + id.charCodeAt(0) * 5) * 0.05;
+      }
+    }
+  }
+}
+
+// ─── Phaser Config ───
+const config = {
+  type: Phaser.AUTO,
+  parent: 'game-container',
+  width: window.innerWidth,
+  height: window.innerHeight,
+  backgroundColor: '#0a0a0f',
+  scene: [BootScene, GameScene],
+  render: {
+    pixelArt: true,
+    antialias: false,
+    roundPixels: true
+  },
+  scale: {
+    mode: Phaser.Scale.RESIZE,
+    autoCenter: Phaser.Scale.CENTER_BOTH
+  }
+};
+
+const game = new Phaser.Game(config);
+
+// ─── Zoom Controls ───
+function zoomIn() {
+  const cam = game.scene.scenes[1]?.cameras?.main;
+  if (cam) cam.setZoom(Math.min(cam.zoom + 0.25, 3));
+}
+function zoomOut() {
+  const cam = game.scene.scenes[1]?.cameras?.main;
+  if (cam) cam.setZoom(Math.max(cam.zoom - 0.25, 0.5));
+}
+function zoomReset() {
+  const cam = game.scene.scenes[1]?.cameras?.main;
+  if (cam) cam.setZoom(1);
+}
+</script>
+</body>
+</html>
