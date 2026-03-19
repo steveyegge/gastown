@@ -474,6 +474,18 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("Compactor dog ticker started (interval %v)", interval)
 	}
 
+	// Start checkpoint dog ticker if configured.
+	// Auto-commits WIP changes in active polecat worktrees to prevent data loss.
+	var checkpointDogTicker *time.Ticker
+	var checkpointDogChan <-chan time.Time
+	if IsPatrolEnabled(d.patrolConfig, "checkpoint_dog") {
+		interval := checkpointDogInterval(d.patrolConfig)
+		checkpointDogTicker = time.NewTicker(interval)
+		checkpointDogChan = checkpointDogTicker.C
+		defer checkpointDogTicker.Stop()
+		d.logger.Printf("Checkpoint dog ticker started (interval %v)", interval)
+	}
+
 	// Start scheduled maintenance ticker if configured.
 	// Checks periodically whether we're in the maintenance window and
 	// runs `gt maintain --force` when commit counts exceed threshold.
@@ -578,6 +590,13 @@ func (d *Daemon) Run() error {
 			// Reclaims commit graph storage, then runs gc to reclaim chunks.
 			if !d.isShutdownInProgress() {
 				d.runCompactorDog()
+			}
+
+		case <-checkpointDogChan:
+			// Checkpoint dog — auto-commits WIP changes in active polecat
+			// worktrees to prevent data loss from session crashes.
+			if !d.isShutdownInProgress() {
+				d.runCheckpointDog()
 			}
 
 		case <-scheduledMaintenanceChan:

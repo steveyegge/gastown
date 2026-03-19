@@ -294,6 +294,9 @@ const (
 	// MolDogCompactor is the Dolt compactor dog formula name.
 	MolDogCompactor = "mol-dog-compactor"
 
+	// MolDogCheckpoint is the WIP checkpoint dog formula name.
+	MolDogCheckpoint = "mol-dog-checkpoint"
+
 	// MolDogDoctor is the health anomaly tracking dog formula name.
 	MolDogDoctor = "mol-dog-doctor"
 

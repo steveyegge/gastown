@@ -214,6 +214,8 @@ func (dm *dogMol) discoverSteps() {
 			dm.stepIDs["verify"] = child.ID
 		case strings.Contains(titleLower, "compact"):
 			dm.stepIDs["compact"] = child.ID
+		case strings.Contains(titleLower, "checkpoint"):
+			dm.stepIDs["checkpoint"] = child.ID
 		case strings.Contains(titleLower, "auto-close") || strings.Contains(titleLower, "auto close"):
 			dm.stepIDs["auto-close"] = child.ID
 		case strings.Contains(titleLower, "sync"):
