@@ -9,6 +9,9 @@
 
 set -euo pipefail
 
+# Backup uses iCloud Drive for offsite sync — macOS only
+[[ "$(uname)" == "Darwin" ]] || exit 0
+
 # --- Configuration -----------------------------------------------------------
 
 TOWN_ROOT="${GT_TOWN_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
