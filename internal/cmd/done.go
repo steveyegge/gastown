@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -632,11 +633,21 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 
 		if pushErr != nil {
-			// All push attempts failed
-			pushFailed = true
-			errMsg := fmt.Sprintf("push failed for branch '%s': %v", branch, pushErr)
-			doneErrors = append(doneErrors, errMsg)
-			style.PrintWarning("%s\nCommits exist locally but failed to push. Witness will be notified.", errMsg)
+			// All origin push attempts failed — try fork+PR fallback.
+			// When the authenticated user doesn't have push access to origin
+			// (e.g., working from a fork), push to the "fork" remote and
+			// create a GitHub PR from fork to upstream.
+			forkPushErr := tryForkPRFallback(g, branch, defaultBranch, issueID)
+			if forkPushErr != nil {
+				// Fork fallback also failed or not available
+				pushFailed = true
+				errMsg := fmt.Sprintf("push failed for branch '%s': %v (fork fallback: %v)", branch, pushErr, forkPushErr)
+				doneErrors = append(doneErrors, errMsg)
+				style.PrintWarning("%s\nCommits exist locally but failed to push. Witness will be notified.", errMsg)
+				goto notifyWitness
+			}
+			// Fork+PR succeeded — skip internal MQ (the PR replaces it)
+			fmt.Printf("%s Work submitted via fork+PR (skipping internal merge queue)\n", style.Bold.Render("✓"))
 			goto notifyWitness
 		}
 
@@ -1567,4 +1578,96 @@ func purgeClosedEphemeralBeads(bd *beads.Beads) {
 	if outStr != "" && outStr != "0" {
 		fmt.Fprintf(os.Stderr, "Purged closed ephemeral beads: %s\n", outStr)
 	}
+}
+
+// tryForkPRFallback attempts to push to a "fork" remote and create a GitHub PR
+// from the fork to the upstream (origin) repo. This is the fallback when the
+// authenticated user doesn't have push access to origin.
+//
+// Returns nil on success, or an error if the fallback is not available or fails.
+func tryForkPRFallback(g *git.Git, branch, defaultBranch, issueID string) error {
+	// Check if a "fork" remote exists
+	remotes, err := g.Remotes()
+	if err != nil {
+		return fmt.Errorf("listing remotes: %w", err)
+	}
+	hasFork := false
+	for _, r := range remotes {
+		if strings.TrimSpace(r) == "fork" {
+			hasFork = true
+			break
+		}
+	}
+	if !hasFork {
+		return fmt.Errorf("no 'fork' remote configured")
+	}
+
+	// Get fork and origin URLs to build the PR
+	forkURL, err := g.RemoteURL("fork")
+	if err != nil {
+		return fmt.Errorf("getting fork remote URL: %w", err)
+	}
+	originURL, err := g.RemoteURL("origin")
+	if err != nil {
+		return fmt.Errorf("getting origin remote URL: %w", err)
+	}
+
+	forkOwnerRepo := gitURLToOwnerRepo(strings.TrimSpace(forkURL))
+	originOwnerRepo := gitURLToOwnerRepo(strings.TrimSpace(originURL))
+	if forkOwnerRepo == "" || originOwnerRepo == "" {
+		return fmt.Errorf("could not parse GitHub owner/repo from remotes (fork=%q, origin=%q)", forkURL, originURL)
+	}
+
+	// Extract fork owner (e.g., "quad341" from "quad341/gastown")
+	forkOwner := strings.SplitN(forkOwnerRepo, "/", 2)[0]
+
+	// Push to fork remote
+	fmt.Printf("Origin push denied — pushing to fork remote...\n")
+	refspec := branch + ":" + branch
+	if pushErr := g.Push("fork", refspec, false); pushErr != nil {
+		return fmt.Errorf("push to fork failed: %w", pushErr)
+	}
+	fmt.Printf("%s Branch pushed to fork (%s)\n", style.Bold.Render("✓"), forkOwnerRepo)
+
+	// Create GitHub PR from fork to upstream using gh CLI
+	prTitle := fmt.Sprintf("fix: %s", issueID)
+	prHead := fmt.Sprintf("%s:%s", forkOwner, branch)
+
+	// Check if gh CLI is available
+	if _, err := exec.LookPath("gh"); err != nil {
+		return fmt.Errorf("gh CLI not found: %w (branch pushed to fork but PR not created)", err)
+	}
+
+	cmd := exec.Command("gh", "pr", "create",
+		"--repo", originOwnerRepo,
+		"--head", prHead,
+		"--base", defaultBranch,
+		"--title", prTitle,
+		"--body", fmt.Sprintf("Automated PR from polecat work.\n\nSource issue: %s\nBranch: %s", issueID, branch),
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr create failed: %w\nOutput: %s", err, string(output))
+	}
+	prURL := strings.TrimSpace(string(output))
+	fmt.Printf("%s PR created: %s\n", style.Bold.Render("✓"), prURL)
+
+	return nil
+}
+
+// gitURLToOwnerRepo extracts "owner/repo" from a GitHub URL.
+// Supports HTTPS (https://github.com/owner/repo.git) and
+// SSH (git@github.com:owner/repo.git) formats.
+func gitURLToOwnerRepo(gitURL string) string {
+	if strings.HasPrefix(gitURL, "https://github.com/") {
+		path := strings.TrimPrefix(gitURL, "https://github.com/")
+		path = strings.TrimSuffix(path, ".git")
+		return path
+	}
+	if strings.HasPrefix(gitURL, "git@github.com:") {
+		path := strings.TrimPrefix(gitURL, "git@github.com:")
+		path = strings.TrimSuffix(path, ".git")
+		return path
+	}
+	return ""
 }

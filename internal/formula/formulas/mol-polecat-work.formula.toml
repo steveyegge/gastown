@@ -517,6 +517,10 @@ git push origin HEAD
 gt mq submit {{issue}}
 ```
 
+**Fork fallback:** If `git push origin HEAD` fails with permission denied and a
+`fork` remote exists, `gt done` will automatically push to fork and create a
+GitHub PR from fork to upstream. The internal MQ is skipped in this case.
+
 Track the MR bead ID from the submit output — you need it for resubmission.
 
 **Enter awaiting_verdict state:**
