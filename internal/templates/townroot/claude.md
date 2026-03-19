@@ -68,6 +68,19 @@ creates nothing. **Default to nudge for routine agent-to-agent communication.**
 Only use mail when the message MUST survive the recipient's session death
 (handoffs, structured protocol messages, escalations). See `mail-protocol.md`.
 
+## Agent Memory
+
+**Use `{{cmd}} remember`, not MEMORY.md.** Memories are stored in beads and injected
+at prime time. Do NOT use Claude Code's filesystem auto-memory (`~/.claude/*/memory/`).
+
+```bash
+{{cmd}} remember "insight"                 # Store a memory (auto-key)
+{{cmd}} remember --key my-slug "insight"   # Store with explicit key
+{{cmd}} memories                           # List all memories
+{{cmd}} memories search-term               # Search memories
+{{cmd}} forget my-slug                     # Remove a memory
+```
+
 ### War room
 Active incidents tracked in `mayor/DOLT-WAR-ROOM.md`. Full escalation protocol
 in `gastown/mayor/rig/docs/design/escalation.md`.

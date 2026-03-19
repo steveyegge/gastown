@@ -264,6 +264,34 @@ content, interpret the prose instructions, and execute them.
 
 Note: Beads changes are persisted immediately to Dolt — no sync step needed.
 
+## Memory: Use `{{ cmd }} remember`, Not MEMORY.md
+
+Gas Town has its own memory system that replaces Claude Code's built-in
+filesystem auto-memory. **Do NOT write to `~/.claude/*/memory/`.**
+
+```bash
+{{ cmd }} remember "insight"                       # Store (auto-key)
+{{ cmd }} remember --key my-slug "insight"          # Store with explicit key
+{{ cmd }} remember --type feedback "don't do X"     # Store typed memory
+{{ cmd }} memories                                  # List all
+{{ cmd }} memories search-term                      # Search
+{{ cmd }} forget my-slug                            # Remove
+```
+
+**Why this matters:** `{{ cmd }} remember` stores memories in Dolt, shared across
+all agents in the town, injected at prime time. Claude Code's MEMORY.md files
+are per-project-path, invisible to other agents, and not injected at prime.
+
+**What to save** (types: `feedback`, `project`, `user`, `reference`, `general`):
+- **feedback**: User corrections or confirmed approaches — saves repeat guidance
+- **project**: Ongoing work context, deadlines, decisions not derivable from code
+- **user**: User's role, preferences, expertise level
+- **reference**: Pointers to external resources (dashboards, ticket boards)
+
+**What NOT to save** — anything derivable from the codebase, git history, or
+existing documentation. Code patterns, architecture, file paths, debugging
+solutions — these belong in the code, not in memory.
+
 ## Pull Requests
 
 When creating PRs, default to `--repo` with the origin remote:
