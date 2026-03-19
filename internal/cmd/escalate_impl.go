@@ -330,16 +330,8 @@ func runEscalateClose(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("closing escalation: %w", err)
 	}
 
-	// Close any mail beads tagged with this escalation to prevent wisp accumulation.
-	// When an escalation is sent, mail beads are annotated with "escalation:<id>".
-	// These mail beads stay open even after the escalation itself is closed.
-	mailBeads, _ := bd.List(beads.ListOptions{
-		Label:  fmt.Sprintf("escalation:%s", escalationID),
-		Status: "open",
-	})
-	for _, mb := range mailBeads {
-		_, _ = bd.Run("close", mb.ID, "--reason=escalation closed: "+escalateCloseReason)
-	}
+	// Close any mail wisps tagged with this escalation to prevent wisp accumulation.
+	closeEscalationMailWisps(bd, escalationID, escalateCloseReason)
 
 	// Log to activity feed
 	_ = events.LogFeed(events.TypeEscalationClosed, closedBy, map[string]interface{}{
@@ -785,6 +777,36 @@ func sendEscalationSMS(cfg *config.EscalationConfig, beadID, severity, descripti
 		return fmt.Errorf("sms webhook returned %d: %s", resp.StatusCode, string(respBody))
 	}
 	return nil
+}
+
+// escalationWispCloser abstracts the beads operations needed to close
+// escalation-related mail wisps. Enables unit testing without a real beads store.
+type escalationWispCloser interface {
+	List(opts beads.ListOptions) ([]*beads.Issue, error)
+	Run(args ...string) ([]byte, error)
+}
+
+// closeEscalationMailWisps closes any open mail wisps tagged with the given
+// escalation ID. When an escalation is sent, mail wisps are annotated with
+// "escalation:<id>". These wisps stay open even after the escalation itself
+// is closed, causing wisp count to grow monotonically.
+// Returns the number of wisps closed.
+func closeEscalationMailWisps(bd escalationWispCloser, escalationID, reason string) int {
+	mailWisps, err := bd.List(beads.ListOptions{
+		Label:     fmt.Sprintf("escalation:%s", escalationID),
+		Status:    "open",
+		Ephemeral: true,
+	})
+	if err != nil {
+		return 0
+	}
+	closed := 0
+	for _, mw := range mailWisps {
+		if _, err := bd.Run("close", mw.ID, "--reason=escalation closed: "+reason); err == nil {
+			closed++
+		}
+	}
+	return closed
 }
 
 // writeEscalationLog appends an escalation entry to the log file.

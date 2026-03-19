@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -574,6 +575,95 @@ func TestFormatEscalationMailBodyNeutralSubjectStillCarriesStructuredBody(t *tes
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q: %s", want, body)
 		}
+	}
+}
+
+// mockEscalationBeads implements escalationWispCloser for testing.
+type mockEscalationBeads struct {
+	issues   []*beads.Issue
+	listErr  error
+	closeErr error
+	closed   []string // IDs that were closed
+}
+
+func (m *mockEscalationBeads) List(_ beads.ListOptions) ([]*beads.Issue, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	return m.issues, nil
+}
+
+func (m *mockEscalationBeads) Run(args ...string) ([]byte, error) {
+	if len(args) >= 2 && args[0] == "close" {
+		m.closed = append(m.closed, args[1])
+	}
+	if m.closeErr != nil {
+		return nil, m.closeErr
+	}
+	return nil, nil
+}
+
+func TestCloseEscalationMailWisps(t *testing.T) {
+	tests := []struct {
+		name       string
+		issues     []*beads.Issue
+		listErr    error
+		closeErr   error
+		wantClosed int
+		wantIDs    []string
+	}{
+		{
+			name:       "no mail wisps found",
+			issues:     nil,
+			wantClosed: 0,
+		},
+		{
+			name: "closes matching mail wisps",
+			issues: []*beads.Issue{
+				{ID: "hq-wisp-aaa"},
+				{ID: "hq-wisp-bbb"},
+				{ID: "hq-wisp-ccc"},
+			},
+			wantClosed: 3,
+			wantIDs:    []string{"hq-wisp-aaa", "hq-wisp-bbb", "hq-wisp-ccc"},
+		},
+		{
+			name:       "list error returns zero",
+			listErr:    fmt.Errorf("dolt timeout"),
+			wantClosed: 0,
+		},
+		{
+			name: "close error counts only successes",
+			issues: []*beads.Issue{
+				{ID: "hq-wisp-aaa"},
+			},
+			closeErr:   fmt.Errorf("close failed"),
+			wantClosed: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockEscalationBeads{
+				issues:   tt.issues,
+				listErr:  tt.listErr,
+				closeErr: tt.closeErr,
+			}
+			got := closeEscalationMailWisps(mock, "hq-wisp-test123", "resolved")
+			if got != tt.wantClosed {
+				t.Errorf("closeEscalationMailWisps() = %d, want %d", got, tt.wantClosed)
+			}
+			if tt.wantIDs != nil {
+				if len(mock.closed) != len(tt.wantIDs) {
+					t.Fatalf("closed %d wisps, want %d: %v", len(mock.closed), len(tt.wantIDs), mock.closed)
+				}
+				for i, id := range mock.closed {
+					if id != tt.wantIDs[i] {
+						t.Errorf("closed[%d] = %q, want %q", i, id, tt.wantIDs[i])
+					}
+				}
+			}
+		})
 	}
 }
 
