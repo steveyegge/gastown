@@ -47,12 +47,10 @@ Parse the JSON output and check these fields:
 
 If `safe_to_rebuild` is false, record a skip wisp:
 ```bash
-bd wisp create \
-  --label type:plugin-run \
-  --label plugin:rebuild-gt \
-  --label rig:gastown \
-  --label result:skipped \
-  --body "Skipped: not safe to rebuild (forward=$FORWARD, main=$ON_MAIN)"
+bd create --wisp-type patrol \
+  --labels type:plugin-run,plugin:rebuild-gt,rig:gastown,result:skipped \
+  --description "Skipped: not safe to rebuild (forward=$FORWARD, main=$ON_MAIN)" \
+  "Plugin: rebuild-gt [skipped]"
 ```
 
 ## Pre-flight Checks
@@ -83,22 +81,18 @@ NOT restart the daemon — sessions will pick up the new binary on their next cy
 
 On success:
 ```bash
-bd wisp create \
-  --label type:plugin-run \
-  --label plugin:rebuild-gt \
-  --label rig:gastown \
-  --label result:success \
-  --body "Rebuilt gt: $OLD → $NEW ($N commits)"
+bd create --wisp-type patrol \
+  --labels type:plugin-run,plugin:rebuild-gt,rig:gastown,result:success \
+  --description "Rebuilt gt: $OLD → $NEW ($N commits)" \
+  "Plugin: rebuild-gt [success]"
 ```
 
 On failure:
 ```bash
-bd wisp create \
-  --label type:plugin-run \
-  --label plugin:rebuild-gt \
-  --label rig:gastown \
-  --label result:failure \
-  --body "Build failed: $ERROR"
+bd create --wisp-type patrol \
+  --labels type:plugin-run,plugin:rebuild-gt,rig:gastown,result:failure \
+  --description "Build failed: $ERROR" \
+  "Plugin: rebuild-gt [failure]"
 
 gt escalate --severity=medium \
   --subject="Plugin FAILED: rebuild-gt" \

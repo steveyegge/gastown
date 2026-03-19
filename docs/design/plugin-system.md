@@ -96,19 +96,17 @@ Benefits:
 Each plugin run creates a wisp:
 
 ```bash
-bd wisp create \
-  --label type:plugin-run \
-  --label plugin:rebuild-gt \
-  --label rig:gastown \
-  --label result:success \
-  --body "Rebuilt gt: abc123 → def456 (5 commits)"
+bd create --wisp-type patrol \
+  --labels type:plugin-run,plugin:rebuild-gt,rig:gastown,result:success \
+  --description "Rebuilt gt: abc123 → def456 (5 commits)" \
+  "Plugin: rebuild-gt [success]"
 ```
 
 **Gate evaluation** queries wisps instead of state files:
 
 ```bash
 # Cooldown check: any runs in last hour?
-bd list --type=wisp --label=plugin:rebuild-gt --since=1h --limit=1
+bd list --wisp-type patrol --label plugin:rebuild-gt --created-after 1h -n 1
 ```
 
 **Derived state** (no state.json needed):
