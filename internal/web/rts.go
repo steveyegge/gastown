@@ -80,12 +80,6 @@ func NewRTSHandler(fetcher ConvoyFetcher, fetchTimeout time.Duration) *RTSHandle
 	}
 }
 
-// ServeHTTP serves the RTS game page at /rts.
-func (h *RTSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Serve the static index.html for the game
-	http.ServeFile(w, r, "")
-}
-
 // HandleSSE streams game state via Server-Sent Events at /api/rts-state.
 func (h *RTSHandler) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
