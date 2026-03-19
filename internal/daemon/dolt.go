@@ -917,9 +917,10 @@ func (m *DoltServerManager) stopLocked() {
 	select {
 	case <-done:
 		m.logger("Dolt SQL server stopped gracefully")
-	case <-time.After(5 * time.Second):
-		// Force kill
-		m.logger("Dolt SQL server did not stop gracefully, forcing termination")
+	case <-time.After(30 * time.Second):
+		// Force kill — 30s allows Dolt to flush its append-only journal under load.
+		// A SIGKILL mid-journal-write causes corruption requiring dolt fsck to recover.
+		m.logger("Dolt SQL server did not stop gracefully after 30s, forcing termination")
 		_ = sendKillSignal(process)
 	}
 

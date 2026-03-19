@@ -175,12 +175,16 @@ func New(config *Config) (*Daemon, error) {
 		doltServer = NewDoltServerManager(config.TownRoot, patrolConfig.Patrols.DoltServer, logger.Printf)
 		if doltServer.IsEnabled() {
 			logger.Printf("Dolt server management enabled (port %d)", patrolConfig.Patrols.DoltServer.Port)
-			// Propagate Dolt port to process env so AgentEnv() passes it to
+			// Propagate Dolt connection info to process env so AgentEnv() passes it to
 			// all spawned agent sessions. Without this, bd in agent sessions
-			// auto-starts rogue Dolt instances. (GH#2412)
+			// auto-starts rogue Dolt instances or connects to localhost. (GH#2412)
 			portStr := strconv.Itoa(patrolConfig.Patrols.DoltServer.Port)
 			os.Setenv("GT_DOLT_PORT", portStr)
 			os.Setenv("BEADS_DOLT_PORT", portStr)
+			if patrolConfig.Patrols.DoltServer.Host != "" {
+				os.Setenv("GT_DOLT_HOST", patrolConfig.Patrols.DoltServer.Host)
+				os.Setenv("BEADS_DOLT_SERVER_HOST", patrolConfig.Patrols.DoltServer.Host)
+			}
 		}
 	}
 
@@ -194,6 +198,16 @@ func New(config *Config) (*Daemon, error) {
 			os.Setenv("GT_DOLT_PORT", portStr)
 			os.Setenv("BEADS_DOLT_PORT", portStr)
 			logger.Printf("Set GT_DOLT_PORT=%s from Dolt config (fallback)", portStr)
+		}
+	}
+
+	// Propagate Dolt host to process env so bd doesn't fall back to 127.0.0.1
+	// when the server runs on a remote machine (e.g., mini2 over Tailscale).
+	if os.Getenv("BEADS_DOLT_SERVER_HOST") == "" {
+		doltCfg := doltserver.DefaultConfig(config.TownRoot)
+		if doltCfg.Host != "" {
+			os.Setenv("BEADS_DOLT_SERVER_HOST", doltCfg.Host)
+			logger.Printf("Set BEADS_DOLT_SERVER_HOST=%s from Dolt config", doltCfg.Host)
 		}
 	}
 
@@ -460,6 +474,18 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("Compactor dog ticker started (interval %v)", interval)
 	}
 
+	// Start checkpoint dog ticker if configured.
+	// Auto-commits WIP changes in active polecat worktrees to prevent data loss.
+	var checkpointDogTicker *time.Ticker
+	var checkpointDogChan <-chan time.Time
+	if IsPatrolEnabled(d.patrolConfig, "checkpoint_dog") {
+		interval := checkpointDogInterval(d.patrolConfig)
+		checkpointDogTicker = time.NewTicker(interval)
+		checkpointDogChan = checkpointDogTicker.C
+		defer checkpointDogTicker.Stop()
+		d.logger.Printf("Checkpoint dog ticker started (interval %v)", interval)
+	}
+
 	// Start scheduled maintenance ticker if configured.
 	// Checks periodically whether we're in the maintenance window and
 	// runs `gt maintain --force` when commit counts exceed threshold.
@@ -552,6 +578,13 @@ func (d *Daemon) Run() error {
 			// Reclaims commit graph storage, then runs gc to reclaim chunks.
 			if !d.isShutdownInProgress() {
 				d.runCompactorDog()
+			}
+
+		case <-checkpointDogChan:
+			// Checkpoint dog — auto-commits WIP changes in active polecat
+			// worktrees to prevent data loss from session crashes.
+			if !d.isShutdownInProgress() {
+				d.runCheckpointDog()
 			}
 
 		case <-scheduledMaintenanceChan:

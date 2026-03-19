@@ -61,7 +61,7 @@ Discover databases and count candidates for each operation.
 
 **1. List databases to scan:**
 ```bash
-gt reaper databases --json
+gt reaper databases --port={{dolt_port}} --json
 ```
 Or use configured database list from {{databases}} variable.
 

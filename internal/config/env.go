@@ -309,6 +309,16 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["BEADS_DOLT_AUTO_START"] = "0"
 	}
 
+	// Propagate Dolt server host so bd doesn't fall back to 127.0.0.1 when
+	// the server runs on a remote machine (e.g., mini2 over Tailscale).
+	if _, ok := env["BEADS_DOLT_SERVER_HOST"]; !ok {
+		if v := os.Getenv("BEADS_DOLT_SERVER_HOST"); v != "" {
+			env["BEADS_DOLT_SERVER_HOST"] = v
+		} else if v := os.Getenv("GT_DOLT_HOST"); v != "" {
+			env["BEADS_DOLT_SERVER_HOST"] = v
+		}
+	}
+
 	// Pass through cloud API credentials and provider configuration from the parent shell.
 	// Only variables explicitly listed here are forwarded; all others are blocked for isolation.
 	for _, key := range []string{
@@ -594,4 +604,19 @@ func EnvToSlice(env map[string]string) []string {
 		result = append(result, k+"="+v)
 	}
 	return result
+}
+
+// ClaudeConfigDir resolves the Claude Code configuration directory.
+// Resolution order:
+//  1. CLAUDE_CONFIG_DIR env var (if set and non-empty)
+//  2. $HOME/.claude (fallback)
+func ClaudeConfigDir() (string, error) {
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".claude"), nil
 }

@@ -1463,8 +1463,10 @@ func TestValidateRecipientFilesystemFallback(t *testing.T) {
 		// Crew members found via filesystem (no agent beads needed)
 		{"crew bob", "pata/bob", false},
 		{"crew alice", "pata/alice", false},
+		{"explicit crew bob", "pata/crew/bob", false},
 		// Polecat found via filesystem
 		{"polecat rust", "pata/rust", false},
+		{"explicit polecat rust", "pata/polecats/rust", false},
 		// Singleton roles found via filesystem
 		{"witness", "pata/witness", false},
 		{"refinery", "pata/refinery", false},
@@ -1482,6 +1484,37 @@ func TestValidateRecipientFilesystemFallback(t *testing.T) {
 				t.Errorf("validateRecipient(%q) expected error, got nil", tt.identity)
 			} else if !tt.wantErr && err != nil {
 				t.Errorf("validateRecipient(%q) unexpected error: %v", tt.identity, err)
+			}
+		})
+	}
+}
+
+func TestValidateRecipientFilesystemFallbackWithRouteErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	for _, subpath := range []string{
+		".beads",
+		"mayor",
+		"sfn1_fast/crew/arch",
+	} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, subpath), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "mayor", "town.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	routes := []byte("{\"prefix\":\"sf-\",\"path\":\"missing/mayor/rig\"}\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, ".beads", "routes.jsonl"), routes, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRouterWithTownRoot(tmpDir, tmpDir)
+
+	for _, identity := range []string{"sfn1_fast/arch", "sfn1_fast/crew/arch"} {
+		t.Run(identity, func(t *testing.T) {
+			if err := r.validateRecipient(identity); err != nil {
+				t.Fatalf("validateRecipient(%q) unexpected error: %v", identity, err)
 			}
 		})
 	}

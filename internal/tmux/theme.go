@@ -29,9 +29,10 @@ var DefaultPalette = []Theme{
 }
 
 // MayorTheme returns the special theme for the Mayor session.
-// Gold/dark to distinguish it from rig themes.
+// Uses "default" to inherit the user's terminal colors — the Mayor
+// session is the primary interactive session, so it should blend in.
 func MayorTheme() Theme {
-	return Theme{Name: "mayor", BG: "#3d3200", FG: "#ffd700"}
+	return Theme{Name: "mayor", BG: "default", FG: "default"}
 }
 
 // DeaconTheme returns the special theme for the Deacon session.

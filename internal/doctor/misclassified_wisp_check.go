@@ -26,6 +26,7 @@ type CheckMisclassifiedWisps struct {
 
 type misclassifiedWisp struct {
 	rigName string
+	workDir string
 	id      string
 	title   string
 	reason  string
@@ -61,14 +62,7 @@ func (c *CheckMisclassifiedWisps) Run(ctx *CheckContext) *CheckResult {
 
 	if useDolt {
 		for _, db := range databases {
-			prefix := db + "-"
-			rigDir := beads.GetRigPathForPrefix(ctx.TownRoot, prefix)
-			if rigDir == "" {
-				rigDir = filepath.Join(ctx.TownRoot, db)
-				if db == "hq" {
-					rigDir = ctx.TownRoot
-				}
-			}
+			rigDir := resolveMisclassifiedWispWorkDir(ctx.TownRoot, misclassifiedWisp{rigName: db})
 			found, probeErrors := c.findMisplacedEphemeralsDolt(rigDir, db)
 			totalProbeErrors += probeErrors
 			if len(found) > 0 {
@@ -141,6 +135,7 @@ func (c *CheckMisclassifiedWisps) findMisplacedEphemeralsDolt(rigDir, rigName st
 		}
 		found = append(found, misclassifiedWisp{
 			rigName: rigName,
+			workDir: rigDir,
 			id:      strings.TrimSpace(rec[0]),
 			title:   strings.TrimSpace(rec[1]),
 			reason:  "ephemeral bead in issues table",
@@ -161,18 +156,14 @@ func (c *CheckMisclassifiedWisps) Fix(ctx *CheckContext) error {
 	// Group by rig for batch operations.
 	rigBatches := make(map[string][]misclassifiedWisp)
 	for _, w := range c.misclassified {
-		rigBatches[w.rigName] = append(rigBatches[w.rigName], w)
+		workDir := resolveMisclassifiedWispWorkDir(ctx.TownRoot, w)
+		rigBatches[workDir] = append(rigBatches[workDir], w)
 	}
 
 	var errs []string
 
-	for rigName, batch := range rigBatches {
-		var workDir string
-		if rigName == "town" || rigName == "hq" {
-			workDir = ctx.TownRoot
-		} else {
-			workDir = filepath.Join(ctx.TownRoot, rigName)
-		}
+	for workDir, batch := range rigBatches {
+		rigName := batch[0].rigName
 
 		ids := make([]string, len(batch))
 		for i, w := range batch {
@@ -189,6 +180,22 @@ func (c *CheckMisclassifiedWisps) Fix(ctx *CheckContext) error {
 		return fmt.Errorf("partial fix: %s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func resolveMisclassifiedWispWorkDir(townRoot string, w misclassifiedWisp) string {
+	if w.workDir != "" {
+		return w.workDir
+	}
+
+	if w.rigName == "town" || w.rigName == "hq" {
+		return townRoot
+	}
+
+	if rigDir := beads.GetRigPathForPrefix(townRoot, w.rigName+"-"); rigDir != "" {
+		return rigDir
+	}
+
+	return filepath.Join(townRoot, w.rigName)
 }
 
 // purgeRigBatch migrates a batch of ephemeral beads from issues to wisps:

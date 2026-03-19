@@ -3212,7 +3212,7 @@ func TestFillRuntimeDefaults(t *testing.T) {
 		}
 	})
 
-	t.Run("nil nested structs remain nil except auto-filled Hooks", func(t *testing.T) {
+	t.Run("nil nested structs are auto-filled from preset for known agents", func(t *testing.T) {
 		t.Parallel()
 		input := &RuntimeConfig{
 			Command: "claude",
@@ -3221,20 +3221,26 @@ func TestFillRuntimeDefaults(t *testing.T) {
 
 		result := fillRuntimeDefaults(input)
 
-		// Nil nested structs should remain nil (not get zero-value structs)
-		if result.Session != nil {
-			t.Error("Session should remain nil when input has nil Session")
-		}
 		// Hooks is auto-filled for known agents (claude, opencode) to ensure
-		// EnsureSettingsForRole creates the correct settings files
+		// EnsureSettingsForRole creates the correct settings files.
 		if result.Hooks == nil {
 			t.Error("Hooks should be auto-filled for claude command")
 		} else if result.Hooks.Provider != "claude" {
 			t.Errorf("Hooks.Provider = %q, want %q", result.Hooks.Provider, "claude")
 		}
-		if result.Tmux != nil {
-			t.Error("Tmux should remain nil when input has nil Tmux")
+		// Session is auto-filled from preset so handoffs can propagate GT_SESSION_ID_ENV.
+		if result.Session == nil {
+			t.Error("Session should be auto-filled for claude command")
+		} else if result.Session.SessionIDEnv != "CLAUDE_SESSION_ID" {
+			t.Errorf("Session.SessionIDEnv = %q, want CLAUDE_SESSION_ID", result.Session.SessionIDEnv)
 		}
+		// Tmux is auto-filled from preset so WaitForRuntimeReady uses prompt detection.
+		if result.Tmux == nil {
+			t.Error("Tmux should be auto-filled for claude command")
+		} else if result.Tmux.ReadyPromptPrefix != "❯ " {
+			t.Errorf("Tmux.ReadyPromptPrefix = %q, want \"❯ \"", result.Tmux.ReadyPromptPrefix)
+		}
+		// Instructions still remain nil (no preset fills this).
 		if result.Instructions != nil {
 			t.Error("Instructions should remain nil when input has nil Instructions")
 		}
@@ -3345,6 +3351,75 @@ func TestFillRuntimeDefaults(t *testing.T) {
 		}
 		if result.Tmux.ReadyDelayMs != 5000 {
 			t.Errorf("Tmux.ReadyDelayMs = %d, want 5000 (user-specified)", result.Tmux.ReadyDelayMs)
+		}
+	})
+
+	t.Run("custom claude agent inherits Session and Tmux from preset", func(t *testing.T) {
+		t.Parallel()
+		// Simulates: gt config agent set claude-opus 'claude --model claude-opus-4-6'
+		input := &RuntimeConfig{
+			Command: "claude",
+			Args:    []string{"--dangerously-skip-permissions", "--model", "claude-opus-4-6"},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		if result.Session == nil {
+			t.Fatal("Session should be auto-filled for claude command")
+		}
+		if result.Session.SessionIDEnv != "CLAUDE_SESSION_ID" {
+			t.Errorf("Session.SessionIDEnv = %q, want CLAUDE_SESSION_ID", result.Session.SessionIDEnv)
+		}
+		if result.Tmux == nil {
+			t.Fatal("Tmux should be auto-filled for claude command")
+		}
+		if result.Tmux.ReadyPromptPrefix != "❯ " {
+			t.Errorf("Tmux.ReadyPromptPrefix = %q, want \"❯ \"", result.Tmux.ReadyPromptPrefix)
+		}
+		found := false
+		for _, n := range result.Tmux.ProcessNames {
+			if n == "claude" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Tmux.ProcessNames = %v, want to contain \"claude\"", result.Tmux.ProcessNames)
+		}
+		if len(result.Args) < 2 || result.Args[len(result.Args)-1] != "claude-opus-4-6" {
+			t.Errorf("Args should be preserved: got %v", result.Args)
+		}
+	})
+
+	t.Run("explicit Session config is not overridden by preset", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "claude",
+			Session: &RuntimeSessionConfig{
+				SessionIDEnv: "MY_CUSTOM_SESSION_ID",
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		if result.Session.SessionIDEnv != "MY_CUSTOM_SESSION_ID" {
+			t.Errorf("Session.SessionIDEnv = %q, want MY_CUSTOM_SESSION_ID (user-specified)", result.Session.SessionIDEnv)
+		}
+	})
+
+	t.Run("explicit Tmux config is not overridden by preset", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "claude",
+			Tmux: &RuntimeTmuxConfig{
+				ProcessNames: []string{"my-claude-wrapper"},
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		if len(result.Tmux.ProcessNames) != 1 || result.Tmux.ProcessNames[0] != "my-claude-wrapper" {
+			t.Errorf("Tmux.ProcessNames = %v, want [my-claude-wrapper] (user-specified)", result.Tmux.ProcessNames)
 		}
 	})
 }

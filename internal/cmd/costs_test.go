@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -290,5 +291,36 @@ func TestCostDigestPayload_ExcludesSessions(t *testing.T) {
 	}
 	if len(asDigest.ByRole) != 3 {
 		t.Errorf("by_role should have 3 entries, got %d", len(asDigest.ByRole))
+	}
+}
+
+func TestGetClaudeProjectDir_Default(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("getting home dir: %v", err)
+	}
+
+	got, err := getClaudeProjectDir("/some/work/dir")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := filepath.Join(home, ".claude", "projects", "-some-work-dir")
+	if got != want {
+		t.Errorf("getClaudeProjectDir() = %q, want %q", got, want)
+	}
+}
+
+func TestGetClaudeProjectDir_RespectsEnvVar(t *testing.T) {
+	customDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", customDir)
+
+	got, err := getClaudeProjectDir("/some/work/dir")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := filepath.Join(customDir, "projects", "-some-work-dir")
+	if got != want {
+		t.Errorf("getClaudeProjectDir() = %q, want %q", got, want)
 	}
 }

@@ -126,6 +126,7 @@ type PatrolsConfig struct {
 	WispReaper     *WispReaperConfig      `json:"wisp_reaper,omitempty"`
 	DoctorDog      *DoctorDogConfig       `json:"doctor_dog,omitempty"`
 	CompactorDog           *CompactorDogConfig            `json:"compactor_dog,omitempty"`
+	CheckpointDog          *CheckpointDogConfig           `json:"checkpoint_dog,omitempty"`
 	ScheduledMaintenance   *ScheduledMaintenanceConfig    `json:"scheduled_maintenance,omitempty"`
 	RestartTracker         *RestartTrackerConfig          `json:"restart_tracker,omitempty"`
 }
@@ -280,6 +281,12 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 			return false
 		}
 		return config.Patrols.CompactorDog.Enabled
+	}
+	if patrol == "checkpoint_dog" {
+		if config == nil || config.Patrols == nil || config.Patrols.CheckpointDog == nil {
+			return false
+		}
+		return config.Patrols.CheckpointDog.Enabled
 	}
 	if patrol == "scheduled_maintenance" {
 		if config == nil || config.Patrols == nil || config.Patrols.ScheduledMaintenance == nil {

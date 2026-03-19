@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/checkpoint"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
@@ -570,6 +571,15 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		if checkpoints[CheckpointPushed] != "" {
 			fmt.Printf("%s Branch already pushed (resumed from checkpoint)\n", style.Bold.Render("✓"))
 			goto afterPush
+		}
+
+		// Squash WIP checkpoint commits before pushing. These auto-commits from
+		// checkpoint_dog protect against data loss but should be collapsed before
+		// the branch reaches Refinery. Non-fatal: warn and proceed if squash fails.
+		if wipCount, squashErr := checkpoint.SquashWIPCommits(cwd, "origin/"+defaultBranch); squashErr != nil {
+			style.PrintWarning("WIP squash failed (non-fatal): %v", squashErr)
+		} else if wipCount > 0 {
+			fmt.Printf("%s Squashed %d WIP checkpoint commit(s)\n", style.Bold.Render("✓"), wipCount)
 		}
 
 		// CRITICAL: Push branch BEFORE creating MR bead (hq-6dk53, hq-a4ksk)

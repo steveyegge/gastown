@@ -605,12 +605,10 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 			State:  beads.RigStateActive,
 		}
 		if _, err := bd.CreateRigBead(name, fields); err != nil {
-			// Non-fatal: rig is functional without the identity bead
-			fmt.Printf("  %s Could not create rig identity bead: %v\n", style.Warning.Render("!"), err)
-		} else {
-			rigBeadID := beads.RigBeadIDWithPrefix(newRig.Config.Prefix, name)
-			fmt.Printf("  Created rig identity bead: %s\n", rigBeadID)
+			return fmt.Errorf("creating rig identity bead: %w\n\nRun 'gt upgrade' to repair missing identity beads", err)
 		}
+		rigBeadID := beads.RigBeadIDWithPrefix(newRig.Config.Prefix, name)
+		fmt.Printf("  Created rig identity bead: %s\n", rigBeadID)
 
 		// Create agent beads for the rig (witness, refinery)
 		// This ensures they exist before the daemon tries to start them
@@ -620,21 +618,22 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 			fmt.Sprintf("Witness for %s - monitors polecat health and progress.", name),
 			&beads.AgentFields{RoleType: "witness", Rig: name, AgentState: "idle"},
 		); err != nil {
-			fmt.Printf("  %s Could not create witness agent bead: %v\n", style.Warning.Render("!"), err)
-		} else {
-			fmt.Printf("  Created agent bead: %s\n", witnessID)
+			return fmt.Errorf("creating witness identity bead: %w\n\nRun 'gt upgrade' to repair missing identity beads", err)
 		}
+		fmt.Printf("  Created agent bead: %s\n", witnessID)
 
 		refineryID := beads.RefineryBeadIDWithPrefix(prefix, name)
 		if _, err := bd.CreateAgentBead(refineryID,
 			fmt.Sprintf("Refinery for %s - processes merge queue.", name),
 			&beads.AgentFields{RoleType: "refinery", Rig: name, AgentState: "idle"},
 		); err != nil {
-			fmt.Printf("  %s Could not create refinery agent bead: %v\n", style.Warning.Render("!"), err)
-		} else {
-			fmt.Printf("  Created agent bead: %s\n", refineryID)
+			return fmt.Errorf("creating refinery identity bead: %w\n\nRun 'gt upgrade' to repair missing identity beads", err)
 		}
+		fmt.Printf("  Created agent bead: %s\n", refineryID)
 	}
+
+	// Auto-assign a namepool theme that doesn't collide with other rigs (gas-21k).
+	autoAssignNamepoolTheme(townRoot, name, mgr)
 
 	// Sync hooks for the new rig's targets
 	if err := syncRigHooks(townRoot, name); err != nil {
@@ -1194,10 +1193,9 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 				State:  beads.RigStateActive,
 			}
 			if _, err := bd.CreateRigBead(name, fields); err != nil {
-				fmt.Printf("  %s Could not create rig identity bead: %v\n", style.Warning.Render("!"), err)
-			} else {
-				fmt.Printf("  %s Created rig identity bead: %s\n", style.Success.Render("✓"), rigBeadID)
+				return fmt.Errorf("creating rig identity bead: %w\n\nRun 'gt upgrade' to repair missing identity beads", err)
 			}
+			fmt.Printf("  %s Created rig identity bead: %s\n", style.Success.Render("✓"), rigBeadID)
 		}
 
 		// Create agent beads for the rig (witness, refinery)
@@ -1209,10 +1207,9 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 				fmt.Sprintf("Witness for %s - monitors polecat health and progress.", name),
 				&beads.AgentFields{RoleType: "witness", Rig: name, AgentState: "idle"},
 			); err != nil {
-				fmt.Printf("  %s Could not create witness agent bead: %v\n", style.Warning.Render("!"), err)
-			} else {
-				fmt.Printf("  %s Created agent bead: %s\n", style.Success.Render("✓"), witnessID)
+				return fmt.Errorf("creating witness identity bead: %w\n\nRun 'gt upgrade' to repair missing identity beads", err)
 			}
+			fmt.Printf("  %s Created agent bead: %s\n", style.Success.Render("✓"), witnessID)
 		}
 
 		refineryID := beads.RefineryBeadIDWithPrefix(prefix, name)
@@ -1221,12 +1218,14 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 				fmt.Sprintf("Refinery for %s - processes merge queue.", name),
 				&beads.AgentFields{RoleType: "refinery", Rig: name, AgentState: "idle"},
 			); err != nil {
-				fmt.Printf("  %s Could not create refinery agent bead: %v\n", style.Warning.Render("!"), err)
-			} else {
-				fmt.Printf("  %s Created agent bead: %s\n", style.Success.Render("✓"), refineryID)
+				return fmt.Errorf("creating refinery identity bead: %w\n\nRun 'gt upgrade' to repair missing identity beads", err)
 			}
+			fmt.Printf("  %s Created agent bead: %s\n", style.Success.Render("✓"), refineryID)
 		}
 	}
+
+	// Auto-assign a namepool theme that doesn't collide with other rigs (gas-21k).
+	autoAssignNamepoolTheme(townRoot, name, mgr)
 
 	// Print results
 	fmt.Printf("\n%s Rig %s adopted\n", style.Success.Render("✓"), name)
@@ -2313,4 +2312,37 @@ func isGitRemoteURL(s string) bool {
 		return true
 	}
 	return false
+}
+
+// autoAssignNamepoolTheme picks a namepool theme for a new rig that doesn't collide
+// with themes already in use by other rigs. This ensures polecat names are unique
+// across rigs (gas-21k). If all built-in themes are taken, falls back to hash-based
+// selection where collisions are possible but unavoidable.
+func autoAssignNamepoolTheme(townRoot, rigName string, mgr *rig.Manager) {
+	usedThemes := mgr.UsedNamepoolThemes(polecat.ThemeForRig)
+	chosenTheme := polecat.ThemeForRigAvoiding(rigName, usedThemes)
+	settingsPath := filepath.Join(townRoot, rigName, "settings", "config.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0755); err != nil {
+		fmt.Printf("  %s Could not create settings directory: %v\n", style.Warning.Render("!"), err)
+		return
+	}
+	rigSettings, err := config.LoadRigSettings(settingsPath)
+	if err != nil {
+		rigSettings = &config.RigSettings{
+			Type:    "rig-settings",
+			Version: 1,
+		}
+	}
+	// Only set namepool theme if not already configured
+	if rigSettings.Namepool != nil && rigSettings.Namepool.Style != "" {
+		return
+	}
+	rigSettings.Namepool = &config.NamepoolConfig{
+		Style: chosenTheme,
+	}
+	if err := config.SaveRigSettings(settingsPath, rigSettings); err != nil {
+		fmt.Printf("  %s Could not save namepool theme: %v\n", style.Warning.Render("!"), err)
+	} else {
+		fmt.Printf("  Namepool theme: %s (auto-assigned for cross-rig uniqueness)\n", chosenTheme)
+	}
 }

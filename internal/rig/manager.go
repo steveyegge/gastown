@@ -14,11 +14,11 @@ import (
 	"unicode"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/templates/commands"
 	"github.com/steveyegge/gastown/internal/util"
 )
@@ -155,6 +155,23 @@ func (m *Manager) GetRig(name string) (*Rig, error) {
 func (m *Manager) RigExists(name string) bool {
 	_, ok := m.config.Rigs[name]
 	return ok
+}
+
+// UsedNamepoolThemes returns the namepool themes currently in use by existing rigs.
+// It checks each rig's settings/config.json for an explicit namepool.style.
+// If no setting is configured, calls the fallbackTheme function to get the default theme.
+func (m *Manager) UsedNamepoolThemes(fallbackTheme func(rigName string) string) []string {
+	var themes []string
+	for name := range m.config.Rigs {
+		rigPath := filepath.Join(m.townRoot, name)
+		settingsPath := filepath.Join(rigPath, "settings", "config.json")
+		if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.Namepool != nil && settings.Namepool.Style != "" {
+			themes = append(themes, settings.Namepool.Style)
+		} else {
+			themes = append(themes, fallbackTheme(name))
+		}
+	}
+	return themes
 }
 
 // loadRig loads rig details from the filesystem.
@@ -742,8 +759,18 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	if err := os.MkdirAll(polecatsPath, 0755); err != nil {
 		return nil, fmt.Errorf("creating polecats dir: %w", err)
 	}
-	// Use the default agent preset for scaffolding
-	defaultPreset := config.GetAgentPreset(config.DefaultAgentPreset())
+	// Use the town's default_agent for scaffolding, falling back to claude.
+	// This ensures that when the town is configured with opencode (or another agent),
+	// the polecat directory gets the correct config dir (e.g. .opencode/) instead of .claude/.
+	townSettings, tsErr := config.LoadOrCreateTownSettings(config.TownSettingsPath(m.townRoot))
+	if tsErr != nil {
+		townSettings = config.NewTownSettings()
+	}
+	defaultAgentName := townSettings.DefaultAgent
+	if defaultAgentName == "" {
+		defaultAgentName = string(config.AgentClaude)
+	}
+	defaultPreset := config.GetAgentPresetByName(defaultAgentName)
 	if defaultPreset != nil && defaultPreset.HooksProvider != "" {
 		if err := hooks.InstallForRole(defaultPreset.HooksProvider, polecatsPath, polecatsPath, "polecat",
 			defaultPreset.HooksDir, defaultPreset.HooksSettingsFile, defaultPreset.HooksUseSettingsDir); err != nil {
@@ -751,7 +778,7 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 			fmt.Printf("  %s Could not scaffold polecat settings: %v\n", "!", err)
 		}
 	}
-	if err := commands.ProvisionFor(polecatsPath, "claude"); err != nil {
+	if err := commands.ProvisionFor(polecatsPath, defaultAgentName); err != nil {
 		// Non-fatal: commands are convenience, not critical
 		fmt.Printf("  %s Could not scaffold polecat commands: %v\n", "!", err)
 	}
@@ -817,8 +844,61 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 		},
 	}
 
+	// Post-init identity verification (gas-tc4): verify metadata.json points
+	// to the correct database. This catches identity mismatches caused by bd init
+	// writing the wrong database name, before the rig is considered ready.
+	if err := m.verifyRigIdentity(rigPath, opts.Name); err != nil {
+		// Non-fatal but loud: the rig was created, but identity may be wrong.
+		// gt doctor --fix can repair this.
+		fmt.Fprintf(os.Stderr, "  ⚠ Identity verification warning: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  Run 'gt doctor --fix' to repair if needed.\n")
+	}
+
 	success = true
 	return m.loadRig(opts.Name, m.config.Rigs[opts.Name])
+}
+
+// verifyRigIdentity checks that metadata.json points to the correct Dolt database
+// for this rig. This catches identity mismatches early — before polecats are spawned
+// and get stuck in retry loops. (gas-tc4)
+func (m *Manager) verifyRigIdentity(rigPath, rigName string) error {
+	resolvedBeadsDir := beads.ResolveBeadsDir(rigPath)
+	metadataPath := filepath.Join(resolvedBeadsDir, "metadata.json")
+
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No metadata.json yet — will be created later
+		}
+		return fmt.Errorf("reading metadata.json: %w", err)
+	}
+
+	var metadata struct {
+		DoltDatabase string `json:"dolt_database"`
+		DoltMode     string `json:"dolt_mode"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return fmt.Errorf("parsing metadata.json: %w", err)
+	}
+
+	if metadata.DoltMode != "server" {
+		return nil // Not using server mode, skip check
+	}
+
+	// Verify the database name matches what we expect.
+	// The database should be named after the rig (e.g., "gastown") not after
+	// a bd init artifact (e.g., "beads_gt") or a stale value from another rig.
+	if metadata.DoltDatabase != "" && metadata.DoltDatabase != rigName {
+		fmt.Fprintf(os.Stderr, "   ⚠ metadata.json has dolt_database=%q (expected %q) — attempting repair\n",
+			metadata.DoltDatabase, rigName)
+		if repairErr := doltserver.EnsureMetadata(m.townRoot, rigName); repairErr != nil {
+			return fmt.Errorf("metadata.json has dolt_database=%q (expected %q) and auto-repair failed: %w",
+				metadata.DoltDatabase, rigName, repairErr)
+		}
+		fmt.Printf("   ✓ Repaired metadata.json identity (was %q, now %q)\n", metadata.DoltDatabase, rigName)
+	}
+
+	return nil
 }
 
 // saveRigConfig writes the rig configuration to config.json.
@@ -912,21 +992,30 @@ func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 	}
 	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
 
-	// Ensure BEADS_DOLT_PORT is set when GT_DOLT_PORT is present, so that
-	// bd subprocesses connect to the correct Dolt server (especially in tests
-	// where an ephemeral server runs on a non-default port).
-	var gtDoltPort string
-	hasBDP := false
+	// Ensure BEADS_DOLT_PORT and BEADS_DOLT_SERVER_HOST are set when their GT_
+	// counterparts are present, so that bd subprocesses connect to the correct
+	// Dolt server (especially in tests or when the server is remote).
+	var gtDoltPort, gtDoltHost string
+	hasBDP, hasBDH := false, false
 	for _, e := range filteredEnv {
 		if strings.HasPrefix(e, "GT_DOLT_PORT=") {
 			gtDoltPort = strings.TrimPrefix(e, "GT_DOLT_PORT=")
 		}
+		if strings.HasPrefix(e, "GT_DOLT_HOST=") {
+			gtDoltHost = strings.TrimPrefix(e, "GT_DOLT_HOST=")
+		}
 		if strings.HasPrefix(e, "BEADS_DOLT_PORT=") {
 			hasBDP = true
+		}
+		if strings.HasPrefix(e, "BEADS_DOLT_SERVER_HOST=") {
+			hasBDH = true
 		}
 	}
 	if gtDoltPort != "" && !hasBDP {
 		filteredEnv = append(filteredEnv, "BEADS_DOLT_PORT="+gtDoltPort)
+	}
+	if gtDoltHost != "" && !hasBDH {
+		filteredEnv = append(filteredEnv, "BEADS_DOLT_SERVER_HOST="+gtDoltHost)
 	}
 
 	// Run bd init if available (Dolt is the only backend since bd v0.51.0).

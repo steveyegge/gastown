@@ -1221,3 +1221,33 @@ func TestAgentEnv_NoDoltPortWithoutConfig(t *testing.T) {
 	assertNotSet(t, env, "GT_DOLT_PORT")
 	assertNotSet(t, env, "BEADS_DOLT_PORT")
 }
+
+func TestClaudeConfigDir_Default(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("getting home dir: %v", err)
+	}
+
+	got, err := ClaudeConfigDir()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := filepath.Join(home, ".claude")
+	if got != want {
+		t.Errorf("ClaudeConfigDir() = %q, want %q", got, want)
+	}
+}
+
+func TestClaudeConfigDir_EnvVar(t *testing.T) {
+	customDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", customDir)
+
+	got, err := ClaudeConfigDir()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != customDir {
+		t.Errorf("ClaudeConfigDir() = %q, want %q", got, customDir)
+	}
+}
