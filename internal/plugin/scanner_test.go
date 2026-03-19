@@ -377,8 +377,8 @@ func TestParsePluginMD_GitHubSheriff(t *testing.T) {
 	if plugin.Gate.Type != GateCooldown {
 		t.Errorf("expected gate type 'cooldown', got %q", plugin.Gate.Type)
 	}
-	if plugin.Gate.Duration != "5m" {
-		t.Errorf("expected gate duration '5m', got %q", plugin.Gate.Duration)
+	if plugin.Gate.Duration != "2h" {
+		t.Errorf("expected gate duration '2h', got %q", plugin.Gate.Duration)
 	}
 	if plugin.Tracking == nil {
 		t.Fatal("expected tracking to be non-nil")
