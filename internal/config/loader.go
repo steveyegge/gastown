@@ -1509,9 +1509,10 @@ func tryResolveFromEphemeralTier(role string) (*RuntimeConfig, bool) {
 	return nil, false
 }
 
-// hasExplicitNonClaudeOverride checks if a role has an explicit non-Claude agent
-// assignment in rig or town RoleAgents. This is used to prevent ephemeral cost
-// tiers from silently replacing intentional non-Claude agent selections.
+// hasExplicitNonClaudeOverride checks if there is an explicit non-Claude agent
+// assignment either specifically for the role (in rig or town RoleAgents) or
+// globally (via rig Agent or town DefaultAgent). This prevents fallback logic
+// and cost tiers from silently replacing intentional non-Claude agent selections.
 func hasExplicitNonClaudeOverride(role string, townSettings *TownSettings, rigSettings *RigSettings) bool {
 	// Check rig's RoleAgents
 	if rigSettings != nil && rigSettings.RoleAgents != nil {
@@ -1527,6 +1528,18 @@ func hasExplicitNonClaudeOverride(role string, townSettings *TownSettings, rigSe
 			if rc := lookupAgentConfigIfExists(agentName, townSettings, rigSettings); rc != nil && !isClaudeAgent(rc) {
 				return true
 			}
+		}
+	}
+	// Check rig's global Agent
+	if rigSettings != nil && rigSettings.Agent != "" {
+		if rc := lookupAgentConfigIfExists(rigSettings.Agent, townSettings, rigSettings); rc != nil && !isClaudeAgent(rc) {
+			return true
+		}
+	}
+	// Check town's DefaultAgent
+	if townSettings != nil && townSettings.DefaultAgent != "" {
+		if rc := lookupAgentConfigIfExists(townSettings.DefaultAgent, townSettings, rigSettings); rc != nil && !isClaudeAgent(rc) {
+			return true
 		}
 	}
 	return false
