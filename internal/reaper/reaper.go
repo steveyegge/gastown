@@ -18,8 +18,8 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-// validDBName matches safe database names (alphanumeric + underscore only).
-var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+// validDBName matches safe database names (alphanumeric, underscore, hyphen).
+var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // DefaultDatabases is the static fallback list of known production databases.
 // Used only when SHOW DATABASES fails (server unreachable).
