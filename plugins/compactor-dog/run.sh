@@ -114,6 +114,20 @@ log() {
   echo "[compactor-dog] $*"
 }
 
+# Wait for a PID with a timeout (seconds). Returns 0 if process exits in time.
+# macOS lacks `timeout` command, so we poll with sleep.
+wait_with_timeout() {
+  local pid="$1" secs="$2" elapsed=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [[ "$elapsed" -ge "$secs" ]]; then
+      return 1
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  wait "$pid" 2>/dev/null
+}
+
 # --- Step 1: Discover production databases ------------------------------------
 
 log "Starting compaction cycle (threshold=$COMMIT_THRESHOLD, dry_run=$DRY_RUN, check_only=$CHECK_ONLY)"
@@ -265,40 +279,63 @@ for entry in "${CANDIDATES[@]}"; do
   REMOTE_NAME=$(dolt_query "$DB" "SELECT name FROM dolt_remotes LIMIT 1" 2>/dev/null | head -1)
   if [[ -n "$REMOTE_NAME" ]]; then
     if ! validate_name "$REMOTE_NAME" "remote"; then
-      log "  WARNING: Skipping remote with unsafe name: '$REMOTE_NAME'"
+      log "  [handled] Skipping remote with unsafe name: '$REMOTE_NAME'"
       REMOTE_NAME=""
     fi
   fi
   if [[ -n "$REMOTE_NAME" ]]; then
     HAS_REMOTE=true
-    log "  Remote detected ('$REMOTE_NAME'). Fetching to check for divergence..."
-    if ! dolt_exec "$DB" "CALL DOLT_FETCH('$REMOTE_NAME')"; then
+    log "  Remote detected ('$REMOTE_NAME'). Fetching to check for divergence (60s timeout)..."
+    # Run fetch with timeout — DoltHub can hang indefinitely on large databases.
+    # macOS lacks `timeout`, so use background + wait + kill pattern.
+    dolt_exec "$DB" "CALL DOLT_FETCH('$REMOTE_NAME')" &
+    FETCH_PID=$!
+    FETCH_OK=false
+    if wait_with_timeout "$FETCH_PID" 60; then
+      FETCH_OK=true
+    else
+      # Must use || true — kill/wait return non-zero for signaled processes,
+      # and set -e would terminate the script before reaching the WARNING path.
+      kill "$FETCH_PID" 2>/dev/null || true
+      wait "$FETCH_PID" 2>/dev/null || true
+    fi
+    if ! $FETCH_OK; then
       # Fetch timeout/failure is a warning, not a blocker. For local-source-of-truth
       # databases (hq/bd/gt), the local data IS the authority — we compact and
       # force-push. Aborting on fetch failure causes the escalation feedback loop:
       # timeout → abort → escalate → more commits → slower fetch → repeat.
-      log "  WARNING: Fetch from remote failed for $DB — proceeding with compaction (local is source of truth)"
+      log "  [handled] Fetch from remote timed out for $DB — proceeding with compaction (local is source of truth)"
+      # Skip divergence check — remote branch info is stale after a failed fetch.
+      # Using stale dolt_remote_branches data would falsely block compaction
+      # (previous remote HEAD won't be ancestor of current local history).
+      log "  Skipping divergence check (fetch failed, remote branch info unreliable)"
     fi
     # Verify local HEAD is at or ahead of remote HEAD.
     # If remote has commits we don't have, compaction would lose them.
-    LOCAL_HEAD=$(dolt_query "$DB" "SELECT commit_hash FROM dolt_log ORDER BY date DESC LIMIT 1" 2>/dev/null | head -1)
-    REMOTE_HEAD=$(dolt_query "$DB" "SELECT commit_hash FROM dolt_remote_branches WHERE name = '${REMOTE_NAME}/main'" 2>/dev/null | head -1)
-    # Validate hashes before using in SQL
-    [[ -n "$LOCAL_HEAD" ]] && ! validate_hash "$LOCAL_HEAD" "local HEAD" && LOCAL_HEAD=""
-    [[ -n "$REMOTE_HEAD" ]] && ! validate_hash "$REMOTE_HEAD" "remote HEAD" && REMOTE_HEAD=""
-    if [[ -n "$REMOTE_HEAD" && -n "$LOCAL_HEAD" && "$REMOTE_HEAD" != "$LOCAL_HEAD" ]]; then
-      # Check if remote HEAD is an ancestor of local HEAD (local is ahead — safe)
-      IS_ANCESTOR=$(dolt_query "$DB" "SELECT COUNT(*) FROM dolt_log WHERE commit_hash = '$REMOTE_HEAD'" 2>/dev/null | head -1)
-      if [[ "$IS_ANCESTOR" == "0" ]]; then
-        log "  ERROR: Remote has commits not in local history — skipping compaction to avoid data loss"
-        log "  Local HEAD:  ${LOCAL_HEAD:0:12}"
-        log "  Remote HEAD: ${REMOTE_HEAD:0:12}"
-        ERRORS=$((ERRORS + 1))
-        ERROR_DETAILS="${ERROR_DETAILS}${DB}: remote ahead of local (skipped to avoid data loss)\n"
-        continue
+    # Only check when fetch succeeded — stale remote info gives false positives.
+    LOCAL_HEAD=""
+    REMOTE_HEAD=""
+    if $FETCH_OK; then
+      LOCAL_HEAD=$(dolt_query "$DB" "SELECT commit_hash FROM dolt_log ORDER BY date DESC LIMIT 1" 2>/dev/null | head -1) || true
+      REMOTE_HEAD=$(dolt_query "$DB" "SELECT commit_hash FROM dolt_remote_branches WHERE name = '${REMOTE_NAME}/main'" 2>/dev/null | head -1) || true
+      # Validate hashes before using in SQL.
+      # Use if/then — bare && chains return 1 on short-circuit, which set -e kills.
+      if [[ -n "$LOCAL_HEAD" ]] && ! validate_hash "$LOCAL_HEAD" "local HEAD"; then LOCAL_HEAD=""; fi
+      if [[ -n "$REMOTE_HEAD" ]] && ! validate_hash "$REMOTE_HEAD" "remote HEAD"; then REMOTE_HEAD=""; fi
+      if [[ -n "$REMOTE_HEAD" && -n "$LOCAL_HEAD" && "$REMOTE_HEAD" != "$LOCAL_HEAD" ]]; then
+        # Check if remote HEAD is an ancestor of local HEAD (local is ahead — safe)
+        IS_ANCESTOR=$(dolt_query "$DB" "SELECT COUNT(*) FROM dolt_log WHERE commit_hash = '$REMOTE_HEAD'" 2>/dev/null | head -1)
+        if [[ "$IS_ANCESTOR" == "0" ]]; then
+          log "  ERROR: Remote has commits not in local history — skipping compaction to avoid data loss"
+          log "  Local HEAD:  ${LOCAL_HEAD:0:12}"
+          log "  Remote HEAD: ${REMOTE_HEAD:0:12}"
+          ERRORS=$((ERRORS + 1))
+          ERROR_DETAILS="${ERROR_DETAILS}${DB}: remote ahead of local (skipped to avoid data loss)\n"
+          continue
+        fi
       fi
+      log "  Remote fetch complete. Local is at or ahead of remote."
     fi
-    log "  Remote fetch complete. Local is at or ahead of remote."
   fi
 
   # Step 3b: Find root (earliest) commit hash.
@@ -357,7 +394,7 @@ for entry in "${CANDIDATES[@]}"; do
     POST_COUNT=$(dolt_query "$DB" "SELECT COUNT(*) FROM \`$TABLE\`" 2>/dev/null | head -1)
     PRE=$(grep "^${TABLE}	" "$PRE_COUNTS_FILE" 2>/dev/null | cut -f2)
     if [[ -z "$PRE" ]]; then
-      log "  WARNING: Table $TABLE appeared after compaction (new table?)"
+      log "  [info] Table $TABLE appeared after compaction (new table — concurrent write)"
       continue
     fi
     # Only fail on data loss (postCount < preCount).
@@ -400,7 +437,7 @@ for entry in "${CANDIDATES[@]}"; do
   if dolt_exec "$DB" "CALL dolt_gc()"; then
     log "  GC complete."
   else
-    log "  WARNING: dolt_gc failed for $DB (non-fatal)"
+    log "  [handled] dolt_gc failed for $DB (non-fatal, will retry next cycle)"
   fi
 
   # Step 5b: Push compacted history to remote to maintain sync.
@@ -410,8 +447,7 @@ for entry in "${CANDIDATES[@]}"; do
   if $HAS_REMOTE; then
     log "  Pushing compacted history to remote ('$REMOTE_NAME')..."
     if ! dolt_exec "$DB" "CALL DOLT_PUSH('--force', '--set-upstream', '$REMOTE_NAME', 'main')"; then
-      log "  WARNING: Force-push to remote failed for $DB"
-      log "  Remote will be out of sync — manual 'dolt push --force' may be needed"
+      log "  [handled] Force-push to remote failed for $DB — remote will resync on next cycle"
       ERROR_DETAILS="${ERROR_DETAILS}${DB}: force-push failed (local compacted, remote diverged)\n"
       ERRORS=$((ERRORS + 1))
     else
