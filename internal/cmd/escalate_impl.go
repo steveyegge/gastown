@@ -330,6 +330,17 @@ func runEscalateClose(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("closing escalation: %w", err)
 	}
 
+	// Close any mail beads tagged with this escalation to prevent wisp accumulation.
+	// When an escalation is sent, mail beads are annotated with "escalation:<id>".
+	// These mail beads stay open even after the escalation itself is closed.
+	mailBeads, _ := bd.List(beads.ListOptions{
+		Label:  fmt.Sprintf("escalation:%s", escalationID),
+		Status: "open",
+	})
+	for _, mb := range mailBeads {
+		_, _ = bd.Run("close", mb.ID, "--reason=escalation closed: "+escalateCloseReason)
+	}
+
 	// Log to activity feed
 	_ = events.LogFeed(events.TypeEscalationClosed, closedBy, map[string]interface{}{
 		"escalation_id": escalationID,

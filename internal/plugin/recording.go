@@ -102,6 +102,17 @@ func (r *Recorder) RecordRun(record PluginRunRecord) (string, error) {
 		return "", fmt.Errorf("parsing bd create output: %w", err)
 	}
 
+	// Close the plugin-run bead immediately after recording.
+	// Plugin-run beads are ephemeral records — keeping them open serves no purpose
+	// and causes wisp accumulation that triggers reaper alerts (see hq-im27o).
+	// GetLastRun/GetRunsSince use --all to include closed beads, so queries still work.
+	closeCtx, closeCancel := context.WithTimeout(context.Background(), constants.BdCommandTimeout)
+	defer closeCancel()
+	closeCmd := exec.CommandContext(closeCtx, "bd", "close", result.ID, "--reason=plugin run recorded") //nolint:gosec // G204
+	closeCmd.Dir = r.townRoot
+	closeCmd.Env = append(os.Environ(), "BEADS_DIR="+beads.ResolveBeadsDir(r.townRoot))
+	_ = closeCmd.Run() // Best-effort: don't fail the recording if close fails
+
 	return result.ID, nil
 }
 
