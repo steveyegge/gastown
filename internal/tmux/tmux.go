@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -1208,6 +1209,44 @@ func releaseNudgeLock(session string) {
 	}
 }
 
+// nudgeFlockPath returns the filesystem lock path for cross-process nudge serialization.
+// Lock files live alongside the nudge queue directory for self-documentation and cleanup.
+func nudgeFlockPath(townRoot, session string) string {
+	safe := strings.ReplaceAll(session, "/", "_")
+	return filepath.Join(townRoot, constants.DirRuntime, "nudge_queue", safe, ".lock")
+}
+
+// acquireFlockLock acquires a file-based lock using flock(2) for cross-process
+// serialization. Returns an unlock function that must be called to release the lock.
+// Uses non-blocking flock in a polling loop to respect the timeout.
+func acquireFlockLock(lockPath string, timeout time.Duration) (func(), error) {
+	dir := filepath.Dir(lockPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("creating lock dir: %w", err)
+	}
+
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("opening lock file: %w", err)
+	}
+
+	deadline := time.Now().Add(timeout)
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() {
+				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+				f.Close()
+			}, nil
+		}
+		if time.Now().After(deadline) {
+			f.Close()
+			return nil, fmt.Errorf("timeout after %s waiting for flock", timeout)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // IsSessionAttached returns true if the session has any clients attached.
 func (t *Tmux) IsSessionAttached(target string) bool {
 	attached, err := t.run("display-message", "-t", target, "-p", "#{session_attached}")
@@ -1414,13 +1453,34 @@ type NudgeOpts struct {
 	// Escape cancels in-flight generation (e.g., Gemini CLI) rather than
 	// harmlessly exiting vim INSERT mode.
 	SkipEscape bool
+
+	// TownRoot, if set, enables flock-based cross-process serialization of
+	// nudge delivery. Each `gt nudge` CLI invocation is a separate OS process,
+	// so the in-process channel semaphore alone cannot prevent interleaving.
+	// When TownRoot is provided, a filesystem lock is acquired at
+	// <townRoot>/.runtime/nudge_queue/<session>/.lock before delivery.
+	// When empty, only in-process locking is used (backward-compatible).
+	TownRoot string
 }
 
 // NudgeSessionWithOpts is like NudgeSession but accepts delivery options.
 // See NudgeOpts for available options.
 func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) error {
-	// Serialize nudges to this session to prevent interleaving.
-	// Use a timed lock to avoid permanent blocking if a previous nudge hung.
+	// Cross-process lock: serialize nudges across OS processes via flock(2).
+	// Each `gt nudge` CLI invocation is a separate process, so the in-process
+	// channel semaphore below provides no cross-process protection. Without
+	// this, concurrent nudges interleave send-keys/Enter and produce garbled
+	// or empty input. (GH#gt-ukl8)
+	if opts.TownRoot != "" {
+		lockPath := nudgeFlockPath(opts.TownRoot, session)
+		unlock, err := acquireFlockLock(lockPath, nudgeLockTimeout)
+		if err != nil {
+			return fmt.Errorf("cross-process nudge lock for session %q: %w", session, err)
+		}
+		defer unlock()
+	}
+
+	// In-process lock: serialize nudges within a single process (goroutine fast path).
 	if !acquireNudgeLock(session, nudgeLockTimeout) {
 		return fmt.Errorf("nudge lock timeout for session %q: previous nudge may be hung", session)
 	}
