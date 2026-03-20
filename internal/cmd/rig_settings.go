@@ -66,7 +66,9 @@ Examples:
   gt rig settings set gastown agent claude
   gt rig settings set gastown role_agents.witness gemini
   gt rig settings set gastown merge_queue.max_concurrent 5
-  gt rig settings set gastown theme.background_color "#000000"`,
+  gt rig settings set gastown theme.disabled true
+  gt rig settings set gastown theme.name forest
+  gt rig settings set gastown theme.custom '{"bg":"#111111","fg":"#eeeeee"}'`,
 	Args: cobra.ExactArgs(3),
 	RunE: runRigSettingsSet,
 }
