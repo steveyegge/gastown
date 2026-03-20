@@ -35,6 +35,9 @@ func TestDefaultMergeQueueConfig(t *testing.T) {
 	if cfg.StaleClaimTimeout != DefaultStaleClaimTimeout {
 		t.Errorf("expected StaleClaimTimeout to be %v, got %v", DefaultStaleClaimTimeout, cfg.StaleClaimTimeout)
 	}
+	if !cfg.AutoPush {
+		t.Error("expected AutoPush to be true by default")
+	}
 }
 
 func TestEngineer_LoadConfig_NoFile(t *testing.T) {
@@ -122,6 +125,46 @@ func TestEngineer_LoadConfig_WithMergeQueue(t *testing.T) {
 	// Check that defaults are preserved for unspecified fields
 	if e.config.OnConflict != "assign_back" {
 		t.Errorf("expected OnConflict default 'assign_back', got %q", e.config.OnConflict)
+	}
+	// auto_push not set in config — default (true) should be preserved
+	if !e.config.AutoPush {
+		t.Error("expected AutoPush default true when not in config")
+	}
+}
+
+func TestEngineer_LoadConfig_AutoPushDisabled(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "engineer-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	config := map[string]interface{}{
+		"type":    "rig",
+		"version": 1,
+		"name":    "test-rig",
+		"merge_queue": map[string]interface{}{
+			"auto_push": false,
+		},
+	}
+
+	data, _ := json.MarshalIndent(config, "", "  ")
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{
+		Name: "test-rig",
+		Path: tmpDir,
+	}
+
+	e := NewEngineer(r)
+	if err := e.LoadConfig(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if e.config.AutoPush {
+		t.Error("expected AutoPush to be false when explicitly disabled in config")
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
@@ -618,6 +619,29 @@ func setupMultiRigSchedulerTown(t *testing.T) (hqPath, rig1Path, rig2Path, gtBin
 		t.Fatalf("write rig2 redirect: %v", err)
 	}
 
+	// Drop test databases on cleanup to prevent orphaned databases on the Dolt
+	// server. Without this, databases from multi-rig tests persist and can
+	// contaminate subsequent tests sharing the same server (see #2832).
+	t.Cleanup(func() {
+		port := os.Getenv("GT_DOLT_PORT")
+		if port == "" {
+			port = "3307"
+		}
+		dsn := fmt.Sprintf("root@tcp(127.0.0.1:%s)/", port)
+		db, err := sql.Open("mysql", dsn)
+		if err != nil {
+			t.Logf("cleanup: could not connect to drop test databases: %v", err)
+			return
+		}
+		defer db.Close()
+		for _, prefix := range []string{hqPrefix, rig1Prefix, rig2Prefix} {
+			dbName := "beads_" + prefix
+			if _, err := db.Exec("DROP DATABASE IF EXISTS `" + dbName + "`"); err != nil {
+				t.Logf("cleanup: failed to drop %s: %v", dbName, err)
+			}
+		}
+	})
+
 	// --- Environment ---
 	env = cleanSchedulerTestEnv(tmpDir)
 
@@ -859,6 +883,10 @@ func TestSchedulerMultiRigConvoyAutoResolve(t *testing.T) {
 	// bead1 and bead2 are in different DBs — stored as external refs in HQ.
 	addBeadDependencyOfType(t, convoyID, bead1, "tracks", hqPath)
 	addBeadDependencyOfType(t, convoyID, bead2, "tracks", hqPath)
+
+	// Wait for bd's issues.jsonl timestamp to settle (same race as
+	// TestSchedulerDirectConvoyDispatch — 1-second granularity stale check).
+	time.Sleep(2 * time.Second)
 
 	// Dry-run: verify auto-rig-resolution routes each bead correctly.
 	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", convoyID, "--dry-run")
@@ -1120,6 +1148,12 @@ func TestSchedulerDirectConvoyDispatch(t *testing.T) {
 	bead2 := createTestBead(t, rig2Path, "Rig2 direct tracked")
 	addBeadDependencyOfType(t, convoyID, bead1, "tracks", hqPath)
 	addBeadDependencyOfType(t, convoyID, bead2, "tracks", hqPath)
+
+	// Wait for bd's issues.jsonl timestamp to settle. bd checks that the Dolt
+	// import timestamp >= jsonl mtime (1-second granularity). Without this,
+	// the sling command flakes with "database out of sync" when the jsonl write
+	// and Dolt import straddle a second boundary.
+	time.Sleep(2 * time.Second)
 
 	// gt sling <convoy-id> --dry-run in direct mode
 	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", convoyID, "--dry-run")

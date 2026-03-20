@@ -223,6 +223,33 @@ func (d *Daemon) reapWispsInline(config *WispReaperConfig, maxAge, deleteAge tim
 		mol.closeStep("purge")
 	}
 
+	// Step 3b: Close plugin receipts (fast-track — 1h instead of 7d stale age)
+	pluginReceiptAge := 1 * time.Hour
+	var totalPluginClosed int
+	for _, dbName := range databases {
+		if err := reaper.ValidateDBName(dbName); err != nil {
+			continue
+		}
+		db, err := reaper.OpenDB("127.0.0.1", port, dbName, 10*time.Second, 10*time.Second)
+		if err != nil {
+			continue
+		}
+		if ok, _ := reaper.HasReaperSchema(db); !ok {
+			db.Close()
+			continue
+		}
+		result, err := reaper.ClosePluginReceipts(db, dbName, pluginReceiptAge, dryRun)
+		db.Close()
+		if err != nil {
+			d.logger.Printf("wisp_reaper: %s: plugin receipt close error: %v", dbName, err)
+			continue
+		}
+		totalPluginClosed += result.Closed
+		if result.Closed > 0 {
+			d.logger.Printf("wisp_reaper: %s: closed %d plugin receipts", dbName, result.Closed)
+		}
+	}
+
 	// Step 4: Auto-close
 	autoCloseErrors := 0
 	for _, dbName := range databases {
@@ -260,8 +287,8 @@ func (d *Daemon) reapWispsInline(config *WispReaperConfig, maxAge, deleteAge tim
 		d.logger.Printf("wisp_reaper: WARNING: %d open wisps exceed threshold %d — investigate wisp lifecycle",
 			totalOpen, wispAlertThreshold)
 	}
-	d.logger.Printf("wisp_reaper: cycle complete — reaped=%d purged=%d mail_purged=%d auto_closed=%d open=%d databases=%d dryRun=%v",
-		totalReaped, totalPurged, totalMailPurged, totalAutoClosed, totalOpen, len(databases), dryRun)
+	d.logger.Printf("wisp_reaper: cycle complete — reaped=%d purged=%d mail_purged=%d plugin_closed=%d auto_closed=%d open=%d databases=%d dryRun=%v",
+		totalReaped, totalPurged, totalMailPurged, totalPluginClosed, totalAutoClosed, totalOpen, len(databases), dryRun)
 	mol.closeStep("report")
 }
 

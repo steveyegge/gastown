@@ -229,7 +229,7 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (_ *StartResult, retErr error
 
 	// 7. Apply theme.
 	if cfg.Theme != nil {
-		_ = t.ConfigureGasTownSession(cfg.SessionID, *cfg.Theme, cfg.RigName, cfg.AgentName, cfg.Role)
+		_ = t.ConfigureGasTownSession(cfg.SessionID, cfg.Theme, cfg.RigName, cfg.AgentName, cfg.Role)
 	}
 
 	// 8. Wait for agent to start.

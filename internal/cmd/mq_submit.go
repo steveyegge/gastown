@@ -162,27 +162,44 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 	bd := beads.New(cwd)
 
 	// Determine target branch
+	// Priority: explicit --epic > formula_vars base_branch > integration branch auto-detect > rig default.
 	target := defaultBranch
 	if mqSubmitEpic != "" {
 		// Explicit --epic flag: read stored branch name, fall back to template
 		rigPath := filepath.Join(townRoot, rigName)
 		target = resolveIntegrationBranchName(bd, rigPath, mqSubmitEpic)
 	} else {
-		// Auto-detect: check if source issue has a parent epic with an integration branch
-		// Only if refinery integration branch auto-targeting is enabled
-		refineryEnabled := true
-		rigPath := filepath.Join(townRoot, rigName)
-		settingsPath := filepath.Join(rigPath, "settings", "config.json")
-		if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.MergeQueue != nil {
-			refineryEnabled = settings.MergeQueue.IsRefineryIntegrationEnabled()
+		// Check for explicit --base-branch override in formula vars on the source issue.
+		// When gt sling dispatches with --base-branch, the value is persisted in
+		// the bead's formula_vars field. Without this check, MRs created via
+		// gt mq submit always target the rig's default branch (usually main),
+		// even when the polecat was working against a feature branch.
+		if sourceIssue, showErr := bd.Show(issueID); showErr == nil {
+			if af := beads.ParseAttachmentFields(sourceIssue); af != nil {
+				if bb := extractFormulaVar(af.FormulaVars, "base_branch"); bb != "" && bb != defaultBranch {
+					target = bb
+					fmt.Printf("  Target branch override: %s (from formula_vars)\n", target)
+				}
+			}
 		}
-		if refineryEnabled {
-			autoTarget, err := beads.DetectIntegrationBranch(bd, g, issueID)
-			if err != nil {
-				// Non-fatal: log and continue with default branch as target
-				fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("(note: %v)", err)))
-			} else if autoTarget != "" {
-				target = autoTarget
+
+		// Auto-detect: check if source issue has a parent epic with an integration branch
+		// Only if no explicit base_branch was found above
+		if target == defaultBranch {
+			refineryEnabled := true
+			rigPath := filepath.Join(townRoot, rigName)
+			settingsPath := filepath.Join(rigPath, "settings", "config.json")
+			if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.MergeQueue != nil {
+				refineryEnabled = settings.MergeQueue.IsRefineryIntegrationEnabled()
+			}
+			if refineryEnabled {
+				autoTarget, err := beads.DetectIntegrationBranch(bd, g, issueID)
+				if err != nil {
+					// Non-fatal: log and continue with default branch as target
+					fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("(note: %v)", err)))
+				} else if autoTarget != "" {
+					target = autoTarget
+				}
 			}
 		}
 	}

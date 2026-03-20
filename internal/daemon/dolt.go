@@ -252,9 +252,11 @@ func (m *DoltServerManager) buildDoltSQLCmd(ctx context.Context, args ...string)
 	fullArgs = append(fullArgs, args...)
 	cmd := exec.CommandContext(ctx, "dolt", fullArgs...)
 
-	if !m.isRemote() {
-		cmd.Dir = m.config.DataDir
-	}
+	// Always set cmd.Dir to DataDir — even for remote connections (GH#2537).
+	// Without this, dolt auto-creates .doltcfg/privileges.db in $CWD,
+	// which accumulates stray privilege files that cause "multiple
+	// .doltcfg directories detected" or "Access denied" errors.
+	cmd.Dir = m.config.DataDir
 
 	if m.isRemote() && m.config.Password != "" {
 		cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+m.config.Password)
@@ -915,9 +917,10 @@ func (m *DoltServerManager) stopLocked() {
 	select {
 	case <-done:
 		m.logger("Dolt SQL server stopped gracefully")
-	case <-time.After(5 * time.Second):
-		// Force kill
-		m.logger("Dolt SQL server did not stop gracefully, forcing termination")
+	case <-time.After(30 * time.Second):
+		// Force kill — 30s allows Dolt to flush its append-only journal under load.
+		// A SIGKILL mid-journal-write causes corruption requiring dolt fsck to recover.
+		m.logger("Dolt SQL server did not stop gracefully after 30s, forcing termination")
 		_ = sendKillSignal(process)
 	}
 

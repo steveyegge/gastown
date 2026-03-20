@@ -126,7 +126,9 @@ type PatrolsConfig struct {
 	WispReaper     *WispReaperConfig      `json:"wisp_reaper,omitempty"`
 	DoctorDog      *DoctorDogConfig       `json:"doctor_dog,omitempty"`
 	CompactorDog           *CompactorDogConfig            `json:"compactor_dog,omitempty"`
+	CheckpointDog          *CheckpointDogConfig           `json:"checkpoint_dog,omitempty"`
 	ScheduledMaintenance   *ScheduledMaintenanceConfig    `json:"scheduled_maintenance,omitempty"`
+	MainBranchTest         *MainBranchTestConfig          `json:"main_branch_test,omitempty"`
 	RestartTracker         *RestartTrackerConfig          `json:"restart_tracker,omitempty"`
 }
 
@@ -281,11 +283,23 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 		}
 		return config.Patrols.CompactorDog.Enabled
 	}
+	if patrol == "checkpoint_dog" {
+		if config == nil || config.Patrols == nil || config.Patrols.CheckpointDog == nil {
+			return false
+		}
+		return config.Patrols.CheckpointDog.Enabled
+	}
 	if patrol == "scheduled_maintenance" {
 		if config == nil || config.Patrols == nil || config.Patrols.ScheduledMaintenance == nil {
 			return false
 		}
 		return config.Patrols.ScheduledMaintenance.Enabled
+	}
+	if patrol == "main_branch_test" {
+		if config == nil || config.Patrols == nil || config.Patrols.MainBranchTest == nil {
+			return false
+		}
+		return config.Patrols.MainBranchTest.Enabled
 	}
 
 	if config == nil || config.Patrols == nil {

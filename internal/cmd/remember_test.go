@@ -1,6 +1,8 @@
 package cmd
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestAutoKey(t *testing.T) {
 	tests := []struct {
@@ -95,5 +97,96 @@ func TestSanitizeKey(t *testing.T) {
 				t.Errorf("sanitizeKey(%q) = %q, want %q", tt.key, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseMemoryKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		kvKey    string
+		wantType string
+		wantKey  string
+	}{
+		{
+			name:     "typed feedback key",
+			kvKey:    "memory.feedback.dont-mock-db",
+			wantType: "feedback",
+			wantKey:  "dont-mock-db",
+		},
+		{
+			name:     "typed project key",
+			kvKey:    "memory.project.merge-freeze",
+			wantType: "project",
+			wantKey:  "merge-freeze",
+		},
+		{
+			name:     "typed user key",
+			kvKey:    "memory.user.senior-go-dev",
+			wantType: "user",
+			wantKey:  "senior-go-dev",
+		},
+		{
+			name:     "typed reference key",
+			kvKey:    "memory.reference.grafana-dashboard",
+			wantType: "reference",
+			wantKey:  "grafana-dashboard",
+		},
+		{
+			name:     "typed general key",
+			kvKey:    "memory.general.some-insight",
+			wantType: "general",
+			wantKey:  "some-insight",
+		},
+		{
+			name:     "legacy untyped key",
+			kvKey:    "memory.refinery-worktree",
+			wantType: "general",
+			wantKey:  "refinery-worktree",
+		},
+		{
+			name:     "legacy key with dots in slug",
+			kvKey:    "memory.hooks-package-structure",
+			wantType: "general",
+			wantKey:  "hooks-package-structure",
+		},
+		{
+			name:     "unknown type treated as legacy",
+			kvKey:    "memory.banana.split",
+			wantType: "general",
+			wantKey:  "banana.split",
+		},
+		{
+			name:     "typed key with hyphens in value",
+			kvKey:    "memory.feedback.always-use-race-flag",
+			wantType: "feedback",
+			wantKey:  "always-use-race-flag",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, gotKey := parseMemoryKey(tt.kvKey)
+			if gotType != tt.wantType {
+				t.Errorf("parseMemoryKey(%q) type = %q, want %q", tt.kvKey, gotType, tt.wantType)
+			}
+			if gotKey != tt.wantKey {
+				t.Errorf("parseMemoryKey(%q) key = %q, want %q", tt.kvKey, gotKey, tt.wantKey)
+			}
+		})
+	}
+}
+
+func TestMemTypeRank(t *testing.T) {
+	// feedback should come before general
+	if memTypeRank("feedback") >= memTypeRank("general") {
+		t.Error("feedback should rank before general")
+	}
+	// user should come before project
+	if memTypeRank("user") >= memTypeRank("project") {
+		t.Error("user should rank before project")
+	}
+	// unknown types should sort last
+	if memTypeRank("unknown") <= memTypeRank("general") {
+		t.Error("unknown type should rank after general")
 	}
 }

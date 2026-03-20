@@ -30,6 +30,10 @@ const (
 	shutdownLockFile    = "daemon/shutdown.lock"
 	shutdownLockTimeout = 5 * time.Second
 
+	// ShutdownSentinel is a file written during gt down to prevent agents from
+	// restarting the daemon mid-shutdown. Checked by ensureDaemon.
+	ShutdownSentinel = "daemon/shutting-down"
+
 	// defaultDownOrphanGraceSecs is the grace period for orphan cleanup during gt down.
 	// Short because gt down is meant to be quick - processes already had SIGTERM via
 	// KillSessionWithProcesses.
@@ -111,6 +115,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 			// providing no mutual exclusion against a process that creates a
 			// new file at the same path.
 		}()
+
+		// GH#2656: Write shutdown sentinel to prevent agents from restarting the
+		// daemon while we're tearing down. ensureDaemon checks for this file.
+		sentinelPath := filepath.Join(townRoot, ShutdownSentinel)
+		_ = os.WriteFile(sentinelPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+		defer os.Remove(sentinelPath)
 
 		// Prevent tmux server from exiting when all sessions are killed.
 		// By default, tmux exits when there are no sessions (exit-empty on).

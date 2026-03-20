@@ -44,7 +44,7 @@ func TestIsValidTier(t *testing.T) {
 func TestCostTierRoleAgents(t *testing.T) {
 	t.Parallel()
 
-	t.Run("standard maps all roles to empty (use default)", func(t *testing.T) {
+	t.Run("standard maps roles to defaults, boot/dog to haiku", func(t *testing.T) {
 		t.Parallel()
 		ra := CostTierRoleAgents(TierStandard)
 		if ra == nil {
@@ -53,11 +53,21 @@ func TestCostTierRoleAgents(t *testing.T) {
 		if len(ra) != len(TierManagedRoles) {
 			t.Errorf("standard tier has %d entries, want %d (all managed roles)", len(ra), len(TierManagedRoles))
 		}
-		for _, role := range TierManagedRoles {
+		expected := map[string]string{
+			"mayor":    "",
+			"deacon":   "",
+			"witness":  "",
+			"refinery": "",
+			"polecat":  "",
+			"crew":     "",
+			"boot":     "claude-haiku",
+			"dog":      "claude-haiku",
+		}
+		for role, want := range expected {
 			if val, ok := ra[role]; !ok {
 				t.Errorf("standard tier missing role %q", role)
-			} else if val != "" {
-				t.Errorf("standard tier %q = %q, want empty string", role, val)
+			} else if val != want {
+				t.Errorf("standard tier %q = %q, want %q", role, val, want)
 			}
 		}
 	})
@@ -75,6 +85,8 @@ func TestCostTierRoleAgents(t *testing.T) {
 			"refinery": "claude-sonnet",
 			"polecat":  "", // use default (opus)
 			"crew":     "", // use default (opus)
+			"boot":     "claude-haiku",
+			"dog":      "claude-haiku",
 		}
 		for role, want := range expected {
 			if got := ra[role]; got != want {
@@ -96,6 +108,8 @@ func TestCostTierRoleAgents(t *testing.T) {
 			"refinery": "claude-haiku",
 			"polecat":  "claude-sonnet",
 			"crew":     "claude-sonnet",
+			"boot":     "claude-haiku",
+			"dog":      "claude-haiku",
 		}
 		for role, want := range expected {
 			if got := ra[role]; got != want {
@@ -231,10 +245,16 @@ func TestApplyCostTier(t *testing.T) {
 		if settings.CostTier != "standard" {
 			t.Errorf("CostTier = %q, want %q", settings.CostTier, "standard")
 		}
-		// Tier-managed roles should be removed (empty means use default)
-		for _, role := range TierManagedRoles {
+		// Tier-managed roles with empty standard value should be removed
+		for _, role := range []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew"} {
 			if val, ok := settings.RoleAgents[role]; ok {
 				t.Errorf("RoleAgents[%q] = %q, want deleted (standard tier)", role, val)
+			}
+		}
+		// boot and dog should be set to claude-haiku even on standard tier
+		for _, role := range []string{"boot", "dog"} {
+			if val := settings.RoleAgents[role]; val != "claude-haiku" {
+				t.Errorf("RoleAgents[%q] = %q, want %q (standard tier)", role, val, "claude-haiku")
 			}
 		}
 		if _, ok := settings.Agents["claude-sonnet"]; ok {
@@ -280,7 +300,10 @@ func TestGetCurrentTier(t *testing.T) {
 		t.Parallel()
 		settings := NewTownSettings()
 		settings.CostTier = "standard"
-		settings.RoleAgents = map[string]string{}
+		settings.RoleAgents = map[string]string{
+			"boot": "claude-haiku",
+			"dog":  "claude-haiku",
+		}
 		if got := GetCurrentTier(settings); got != "standard" {
 			t.Errorf("GetCurrentTier = %q, want %q", got, "standard")
 		}
@@ -341,6 +364,8 @@ func TestGetCurrentTier(t *testing.T) {
 			"deacon":   "claude-haiku",
 			"witness":  "claude-sonnet",
 			"refinery": "claude-sonnet",
+			"boot":     "claude-haiku",
+			"dog":      "claude-haiku",
 		}
 		if got := GetCurrentTier(settings); got != "economy" {
 			t.Errorf("GetCurrentTier = %q, want %q (inferred)", got, "economy")
@@ -351,20 +376,32 @@ func TestGetCurrentTier(t *testing.T) {
 func TestTierRolesMatch(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty actual matches standard tier (all empty)", func(t *testing.T) {
+	t.Run("empty actual does not match standard tier (boot/dog need haiku)", func(t *testing.T) {
 		t.Parallel()
 		actual := map[string]string{}
 		expected := CostTierRoleAgents(TierStandard)
-		if !tierRolesMatch(actual, expected) {
-			t.Error("empty map should match standard tier (all empty values)")
+		if tierRolesMatch(actual, expected) {
+			t.Error("empty map should not match standard tier (boot/dog require claude-haiku)")
 		}
 	})
 
-	t.Run("nil actual matches standard tier", func(t *testing.T) {
+	t.Run("nil actual does not match standard tier", func(t *testing.T) {
 		t.Parallel()
 		expected := CostTierRoleAgents(TierStandard)
-		if !tierRolesMatch(nil, expected) {
-			t.Error("nil map should match standard tier")
+		if tierRolesMatch(nil, expected) {
+			t.Error("nil map should not match standard tier (boot/dog require claude-haiku)")
+		}
+	})
+
+	t.Run("standard tier actual matches standard tier", func(t *testing.T) {
+		t.Parallel()
+		actual := map[string]string{
+			"boot": "claude-haiku",
+			"dog":  "claude-haiku",
+		}
+		expected := CostTierRoleAgents(TierStandard)
+		if !tierRolesMatch(actual, expected) {
+			t.Error("standard tier assignments should match")
 		}
 	})
 
@@ -375,6 +412,8 @@ func TestTierRolesMatch(t *testing.T) {
 			"deacon":   "claude-haiku",
 			"witness":  "claude-sonnet",
 			"refinery": "claude-sonnet",
+			"boot":     "claude-haiku",
+			"dog":      "claude-haiku",
 		}
 		expected := CostTierRoleAgents(TierEconomy)
 		if !tierRolesMatch(actual, expected) {
@@ -384,8 +423,10 @@ func TestTierRolesMatch(t *testing.T) {
 
 	t.Run("non-tier custom entries are ignored", func(t *testing.T) {
 		t.Parallel()
-		// Actual has a custom non-tier entry — should still match standard
+		// Actual has standard tier assignments plus a custom non-tier entry
 		actual := map[string]string{
+			"boot":        "claude-haiku",
+			"dog":         "claude-haiku",
 			"custom-role": "custom-agent",
 		}
 		expected := CostTierRoleAgents(TierStandard)
@@ -470,7 +511,7 @@ func TestFormatTierRoleTable(t *testing.T) {
 			t.Error("FormatTierRoleTable returned empty for economy tier")
 		}
 		// Should contain all roles
-		for _, role := range []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew"} {
+		for _, role := range []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew", "boot", "dog"} {
 			if !contains(output, role) {
 				t.Errorf("output missing role %q", role)
 			}

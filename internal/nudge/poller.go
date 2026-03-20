@@ -68,11 +68,7 @@ func StartPoller(townRoot, session string) (int, error) {
 		return 0, fmt.Errorf("finding gt binary: %w", err)
 	}
 
-	cmd := exec.Command(gtBin, "nudge-poller", session)
-	cmd.Dir = townRoot
-	cmd.Stdout = nil // discard
-	cmd.Stderr = nil // discard
-	util.SetProcessGroup(cmd)
+	cmd := buildPollerCommand(gtBin, townRoot, session)
 
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("starting nudge-poller: %w", err)
@@ -91,6 +87,15 @@ func StartPoller(townRoot, session string) (int, error) {
 	_ = cmd.Process.Release()
 
 	return pid, nil
+}
+
+func buildPollerCommand(gtBin, townRoot, session string) *exec.Cmd {
+	cmd := exec.Command(gtBin, "nudge-poller", session)
+	cmd.Dir = townRoot
+	cmd.Stdout = nil // discard
+	cmd.Stderr = nil // discard
+	util.SetDetachedProcessGroup(cmd)
+	return cmd
 }
 
 // StopPoller terminates the nudge-poller for a session, if running.

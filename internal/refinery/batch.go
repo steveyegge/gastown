@@ -292,6 +292,8 @@ func (e *Engineer) processSingleMR(ctx context.Context, mr *MRInfo, target strin
 	if processResult.Success {
 		result.Merged = []*MRInfo{mr}
 		result.MergeCommit = processResult.MergeCommit
+		// GH#2321: Run post-merge cleanup (close beads, delete branch, nudge mayor)
+		e.HandleMRInfoSuccess(mr, processResult)
 	} else if processResult.Conflict {
 		result.Conflicts = []*MRInfo{mr}
 	} else if processResult.TestsFailed {
@@ -301,6 +303,10 @@ func (e *Engineer) processSingleMR(ctx context.Context, mr *MRInfo, target strin
 		// Treat as a skip: log and move on rather than halting the queue.
 		_, _ = fmt.Fprintf(e.output, "[Batch] MR %s: branch %s not found, skipping\n", mr.ID, mr.Branch)
 		result.Conflicts = []*MRInfo{mr}
+	} else if processResult.NoMerge {
+		// Source issue has no_merge flag — intentionally blocked. Dequeue silently.
+		_, _ = fmt.Fprintf(e.output, "[Batch] MR %s: no_merge flag set, dequeuing\n", mr.ID)
+		e.HandleMRInfoFailure(mr, processResult)
 	} else {
 		result.Error = fmt.Errorf("merge failed: %s", processResult.Error)
 	}
@@ -393,6 +399,16 @@ func (e *Engineer) fastForwardBatch(ctx context.Context, stacked []*MRInfo, targ
 
 	result.Merged = stacked
 	result.MergeCommit = tipSHA
+
+	// GH#2321: Run post-merge cleanup for each merged MR — close source beads,
+	// delete branches, nudge mayor, and check convoy completion.
+	// HandleMRInfoSuccess was previously dead code (never called), causing task
+	// beads to remain open after successful merges.
+	for _, mr := range stacked {
+		mergeResult := ProcessResult{Success: true, MergeCommit: tipSHA}
+		e.HandleMRInfoSuccess(mr, mergeResult)
+	}
+
 	return result
 }
 

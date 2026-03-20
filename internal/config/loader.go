@@ -1318,6 +1318,24 @@ func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
 	return withRoleSettingsFlag(rc, role, rigPath)
 }
 
+// tryResolveNamedAgent attempts to resolve a named agent through the custom agent
+// and standard lookup pipelines. Returns the resolved config with ResolvedAgent set,
+// or nil if validation fails. The warnPrefix is used in the fallback warning message
+// (e.g., "worker_agents[denali]" or "crew_agents[denali]").
+func tryResolveNamedAgent(agentName, warnPrefix string, townSettings *TownSettings, rigSettings *RigSettings) *RuntimeConfig {
+	if rc := lookupCustomAgentConfig(agentName, townSettings, rigSettings); rc != nil {
+		rc.ResolvedAgent = agentName
+		return rc
+	}
+	if err := ValidateAgentConfig(agentName, townSettings, rigSettings); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %s=%s - %v, falling back\n", warnPrefix, agentName, err)
+		return nil
+	}
+	rc := lookupAgentConfig(agentName, townSettings, rigSettings)
+	rc.ResolvedAgent = agentName
+	return rc
+}
+
 // ResolveWorkerAgentConfig resolves the agent configuration for a named crew worker.
 // Resolution order:
 //  1. Rig's WorkerAgents[workerName] — per-worker override
@@ -1329,7 +1347,7 @@ func ResolveWorkerAgentConfig(workerName, townRoot, rigPath string) *RuntimeConf
 	resolveConfigMu.Lock()
 	defer resolveConfigMu.Unlock()
 
-	// Check rig's WorkerAgents
+	// Tier 1: rig's per-worker override
 	if workerName != "" && rigPath != "" {
 		if rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath)); err == nil && rigSettings != nil {
 			if agentName, ok := rigSettings.WorkerAgents[workerName]; ok && agentName != "" {
@@ -1339,22 +1357,14 @@ func ResolveWorkerAgentConfig(workerName, townRoot, rigPath string) *RuntimeConf
 				}
 				_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
 				_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
-				if rc := lookupCustomAgentConfig(agentName, townSettings, rigSettings); rc != nil {
-					rc.ResolvedAgent = agentName
-					return withRoleSettingsFlag(rc, "crew", rigPath)
-				}
-				if err := ValidateAgentConfig(agentName, townSettings, rigSettings); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: worker_agents[%s]=%s - %v, falling back\n", workerName, agentName, err)
-				} else {
-					rc := lookupAgentConfig(agentName, townSettings, rigSettings)
-					rc.ResolvedAgent = agentName
+				if rc := tryResolveNamedAgent(agentName, fmt.Sprintf("worker_agents[%s]", workerName), townSettings, rigSettings); rc != nil {
 					return withRoleSettingsFlag(rc, "crew", rigPath)
 				}
 			}
 		}
 	}
 
-	// Check town's CrewAgents
+	// Tier 2: town's per-crew override
 	if workerName != "" && townRoot != "" {
 		townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
 		if err == nil && townSettings != nil {
@@ -1367,22 +1377,14 @@ func ResolveWorkerAgentConfig(workerName, townRoot, rigPath string) *RuntimeConf
 				if rigPath != "" {
 					_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
 				}
-				if rc := lookupCustomAgentConfig(agentName, townSettings, rigSettings); rc != nil {
-					rc.ResolvedAgent = agentName
-					return withRoleSettingsFlag(rc, "crew", rigPath)
-				}
-				if err := ValidateAgentConfig(agentName, townSettings, rigSettings); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: crew_agents[%s]=%s - %v, falling back\n", workerName, agentName, err)
-				} else {
-					rc := lookupAgentConfig(agentName, townSettings, rigSettings)
-					rc.ResolvedAgent = agentName
+				if rc := tryResolveNamedAgent(agentName, fmt.Sprintf("crew_agents[%s]", workerName), townSettings, rigSettings); rc != nil {
 					return withRoleSettingsFlag(rc, "crew", rigPath)
 				}
 			}
 		}
 	}
 
-	// Fall back to crew role resolution (already holds lock; use core function)
+	// Tier 3: fall back to crew role resolution (already holds lock; use core function)
 	rc := resolveRoleAgentConfigCore("crew", townRoot, rigPath)
 	return withRoleSettingsFlag(rc, "crew", rigPath)
 }
@@ -1507,9 +1509,10 @@ func tryResolveFromEphemeralTier(role string) (*RuntimeConfig, bool) {
 	return nil, false
 }
 
-// hasExplicitNonClaudeOverride checks if a role has an explicit non-Claude agent
-// assignment in rig or town RoleAgents. This is used to prevent ephemeral cost
-// tiers from silently replacing intentional non-Claude agent selections.
+// hasExplicitNonClaudeOverride checks if there is an explicit non-Claude agent
+// assignment either specifically for the role (in rig or town RoleAgents) or
+// globally (via rig Agent or town DefaultAgent). This prevents fallback logic
+// and cost tiers from silently replacing intentional non-Claude agent selections.
 func hasExplicitNonClaudeOverride(role string, townSettings *TownSettings, rigSettings *RigSettings) bool {
 	// Check rig's RoleAgents
 	if rigSettings != nil && rigSettings.RoleAgents != nil {
@@ -1525,6 +1528,18 @@ func hasExplicitNonClaudeOverride(role string, townSettings *TownSettings, rigSe
 			if rc := lookupAgentConfigIfExists(agentName, townSettings, rigSettings); rc != nil && !isClaudeAgent(rc) {
 				return true
 			}
+		}
+	}
+	// Check rig's global Agent
+	if rigSettings != nil && rigSettings.Agent != "" {
+		if rc := lookupAgentConfigIfExists(rigSettings.Agent, townSettings, rigSettings); rc != nil && !isClaudeAgent(rc) {
+			return true
+		}
+	}
+	// Check town's DefaultAgent
+	if townSettings != nil && townSettings.DefaultAgent != "" {
+		if rc := lookupAgentConfigIfExists(townSettings.DefaultAgent, townSettings, rigSettings); rc != nil && !isClaudeAgent(rc) {
+			return true
 		}
 	}
 	return false
@@ -1678,27 +1693,11 @@ func ResolveRoleAgentName(role, townRoot, rigPath string) (agentName string, isR
 
 // lookupAgentConfig looks up an agent by name.
 // Checks rig-level custom agents first, then town's custom agents, then built-in presets from agents.go.
+// Falls back to DefaultRuntimeConfig() if no match is found.
 func lookupAgentConfig(name string, townSettings *TownSettings, rigSettings *RigSettings) *RuntimeConfig {
-	// First check rig's custom agents (NEW - fix for rig-level agent support)
-	if rigSettings != nil && rigSettings.Agents != nil {
-		if custom, ok := rigSettings.Agents[name]; ok && custom != nil {
-			return fillRuntimeDefaults(custom)
-		}
+	if rc := lookupAgentConfigIfExists(name, townSettings, rigSettings); rc != nil {
+		return rc
 	}
-
-	// Then check town's custom agents (existing)
-	if townSettings != nil && townSettings.Agents != nil {
-		if custom, ok := townSettings.Agents[name]; ok && custom != nil {
-			return fillRuntimeDefaults(custom)
-		}
-	}
-
-	// Check built-in presets from agents.go
-	if preset := GetAgentPresetByName(name); preset != nil {
-		return RuntimeConfigFromPreset(AgentPreset(name))
-	}
-
-	// Fallback to claude defaults
 	return DefaultRuntimeConfig()
 }
 
@@ -1849,6 +1848,31 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		}
 		if result.PromptMode == "" {
 			result.PromptMode = "arg"
+		}
+	}
+
+	// Auto-fill Session defaults from preset when not explicitly set.
+	// Custom agents (e.g., "claude-opus" with Command:"claude") inherit
+	// SessionIDEnv/ConfigDirEnv from the matched preset, enabling session
+	// resume and GT_SESSION_ID_ENV propagation in handoffs.
+	if result.Session == nil && preset != nil && (preset.SessionIDEnv != "" || preset.ConfigDirEnv != "") {
+		result.Session = &RuntimeSessionConfig{
+			SessionIDEnv: preset.SessionIDEnv,
+			ConfigDirEnv: preset.ConfigDirEnv,
+		}
+	}
+
+	// Auto-fill Tmux defaults from preset for process detection and readiness.
+	// Custom agents matching a known preset by command (e.g., "claude-opus" →
+	// claude preset) get ProcessNames and ReadyPromptPrefix needed for
+	// WaitForRuntimeReady to detect agent startup correctly.
+	if result.Tmux == nil && preset != nil && (len(preset.ProcessNames) > 0 || preset.ReadyPromptPrefix != "" || preset.ReadyDelayMs > 0) {
+		result.Tmux = &RuntimeTmuxConfig{
+			ReadyPromptPrefix: preset.ReadyPromptPrefix,
+			ReadyDelayMs:      preset.ReadyDelayMs,
+		}
+		if len(preset.ProcessNames) > 0 {
+			result.Tmux.ProcessNames = append([]string(nil), preset.ProcessNames...)
 		}
 	}
 

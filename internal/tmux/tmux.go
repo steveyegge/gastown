@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -1208,6 +1209,44 @@ func releaseNudgeLock(session string) {
 	}
 }
 
+// nudgeFlockPath returns the filesystem lock path for cross-process nudge serialization.
+// Lock files live alongside the nudge queue directory for self-documentation and cleanup.
+func nudgeFlockPath(townRoot, session string) string {
+	safe := strings.ReplaceAll(session, "/", "_")
+	return filepath.Join(townRoot, constants.DirRuntime, "nudge_queue", safe, ".lock")
+}
+
+// acquireFlockLock acquires a file-based lock using flock(2) for cross-process
+// serialization. Returns an unlock function that must be called to release the lock.
+// Uses non-blocking flock in a polling loop to respect the timeout.
+func acquireFlockLock(lockPath string, timeout time.Duration) (func(), error) {
+	dir := filepath.Dir(lockPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("creating lock dir: %w", err)
+	}
+
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("opening lock file: %w", err)
+	}
+
+	deadline := time.Now().Add(timeout)
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() {
+				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+				f.Close()
+			}, nil
+		}
+		if time.Now().After(deadline) {
+			f.Close()
+			return nil, fmt.Errorf("timeout after %s waiting for flock", timeout)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // IsSessionAttached returns true if the session has any clients attached.
 func (t *Tmux) IsSessionAttached(target string) bool {
 	attached, err := t.run("display-message", "-t", target, "-p", "#{session_attached}")
@@ -1414,13 +1453,34 @@ type NudgeOpts struct {
 	// Escape cancels in-flight generation (e.g., Gemini CLI) rather than
 	// harmlessly exiting vim INSERT mode.
 	SkipEscape bool
+
+	// TownRoot, if set, enables flock-based cross-process serialization of
+	// nudge delivery. Each `gt nudge` CLI invocation is a separate OS process,
+	// so the in-process channel semaphore alone cannot prevent interleaving.
+	// When TownRoot is provided, a filesystem lock is acquired at
+	// <townRoot>/.runtime/nudge_queue/<session>/.lock before delivery.
+	// When empty, only in-process locking is used (backward-compatible).
+	TownRoot string
 }
 
 // NudgeSessionWithOpts is like NudgeSession but accepts delivery options.
 // See NudgeOpts for available options.
 func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) error {
-	// Serialize nudges to this session to prevent interleaving.
-	// Use a timed lock to avoid permanent blocking if a previous nudge hung.
+	// Cross-process lock: serialize nudges across OS processes via flock(2).
+	// Each `gt nudge` CLI invocation is a separate process, so the in-process
+	// channel semaphore below provides no cross-process protection. Without
+	// this, concurrent nudges interleave send-keys/Enter and produce garbled
+	// or empty input. (GH#gt-ukl8)
+	if opts.TownRoot != "" {
+		lockPath := nudgeFlockPath(opts.TownRoot, session)
+		unlock, err := acquireFlockLock(lockPath, nudgeLockTimeout)
+		if err != nil {
+			return fmt.Errorf("cross-process nudge lock for session %q: %w", session, err)
+		}
+		defer unlock()
+	}
+
+	// In-process lock: serialize nudges within a single process (goroutine fast path).
 	if !acquireNudgeLock(session, nudgeLockTimeout) {
 		return fmt.Errorf("nudge lock timeout for session %q: previous nudge may be hung", session)
 	}
@@ -2420,6 +2480,27 @@ func matchesPromptPrefix(line, readyPromptPrefix string) bool {
 	return strings.HasPrefix(trimmed, normalizedPrefix) || (prefix != "" && trimmed == prefix)
 }
 
+func hasBusyIndicator(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+	return strings.Contains(trimmed, "esc to interrupt")
+}
+
+func readyPromptPrefixForSession(t *Tmux, session string) string {
+	promptPrefix := DefaultReadyPromptPrefix
+	agentName, err := t.GetEnvironment(session, "GT_AGENT")
+	if err != nil || agentName == "" {
+		return promptPrefix
+	}
+	preset := config.GetAgentPresetByName(agentName)
+	if preset == nil || preset.ReadyPromptPrefix == "" {
+		return promptPrefix
+	}
+	return preset.ReadyPromptPrefix
+}
+
 func (t *Tmux) WaitForRuntimeReady(session string, rc *config.RuntimeConfig, timeout time.Duration) error {
 	if rc == nil || rc.Tmux == nil {
 		return nil
@@ -2468,7 +2549,7 @@ const DefaultReadyPromptPrefix = "❯ "
 // Returns nil if the agent becomes idle within the timeout.
 // Returns an error if the timeout expires while the agent is still busy.
 func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
-	promptPrefix := DefaultReadyPromptPrefix
+	promptPrefix := readyPromptPrefixForSession(t, session)
 	prefix := strings.TrimSpace(promptPrefix)
 
 	// Require 2 consecutive idle polls to filter out transient states.
@@ -2493,16 +2574,13 @@ func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 			continue
 		}
 
-		// Check the status bar first: if "esc to interrupt" is visible,
-		// Claude Code is actively running a tool call — NOT idle,
+		// Busy indicator check: if "esc to interrupt" is visible anywhere in
+		// the recent pane output, the agent is actively working — NOT idle,
 		// regardless of whether the prompt prefix is also visible.
 		statusBarBusy := false
 		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.Contains(trimmed, "\u23F5\u23F5") || strings.Contains(trimmed, "⏵⏵") {
-				if strings.Contains(trimmed, "esc to interrupt") {
-					statusBarBusy = true
-				}
+			if hasBusyIndicator(line) {
+				statusBarBusy = true
 				break
 			}
 		}
@@ -2578,14 +2656,21 @@ func (t *Tmux) IsIdle(session string) bool {
 	}
 
 	for _, line := range lines {
+		if hasBusyIndicator(line) {
+			return false
+		}
+	}
+
+	promptPrefix := readyPromptPrefixForSession(t, session)
+	for _, line := range lines {
+		if matchesPromptPrefix(line, promptPrefix) {
+			return true
+		}
+	}
+
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		// The status bar starts with ⏵⏵ (double play symbols).
-		// When the agent is busy: "⏵⏵ bypass permissions on ... · esc to interrupt"
-		// When the agent is idle: "⏵⏵ bypass permissions on (shift+tab to cycle) · 1 file ..."
 		if strings.Contains(trimmed, "⏵⏵") || strings.Contains(trimmed, "\u23F5\u23F5") {
-			if strings.Contains(trimmed, "esc to interrupt") {
-				return false
-			}
 			return true
 		}
 	}
@@ -2642,11 +2727,23 @@ func (t *Tmux) ApplyTheme(session string, theme Theme) error {
 	return err
 }
 
-// ApplyWindowStyle sets the pane background (window-style) for a session.
-// This gives each session a distinct background color matching its theme,
-// complementing the status bar theme set by ApplyTheme.
-func (t *Tmux) ApplyWindowStyle(session string, theme Theme) error {
-	_, err := t.run("set-option", "-t", session, "window-style", theme.Style())
+// ClearTheme removes Gas Town tmux styling from a session.
+func (t *Tmux) ClearTheme(session string) error {
+	if _, err := t.run("set-option", "-t", session, "-u", "status-style"); err != nil {
+		return err
+	}
+	_, err := t.run("set-window-option", "-t", session, "-u", "window-style")
+	return err
+}
+
+// ApplyWindowStyle sets or resets the window background (window-style).
+// If ws is nil, resets to terminal defaults. If non-nil, applies the colors.
+func (t *Tmux) ApplyWindowStyle(session string, ws *WindowStyle) error {
+	style := "bg=default,fg=default"
+	if ws != nil {
+		style = ws.Style()
+	}
+	_, err := t.run("set-option", "-t", session, "window-style", style)
 	return err
 }
 
@@ -2714,15 +2811,24 @@ func (t *Tmux) SetDynamicStatus(session string) error {
 	return err
 }
 
-// ConfigureGasTownSession applies full Gas Town theming to a session.
-// This is a convenience method that applies theme, status format, dynamic status,
-// and pane background (window-style).
-func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker, role string) error {
-	if err := t.ApplyTheme(session, theme); err != nil {
-		return fmt.Errorf("applying theme: %w", err)
-	}
-	if err := t.ApplyWindowStyle(session, theme); err != nil {
-		return fmt.Errorf("applying window style: %w", err)
+// ConfigureGasTownSession applies Gas Town status configuration to a session.
+// A nil theme disables tmux styling while still applying status/bindings.
+//
+// Window background is controlled by theme.Window:
+//   - non-nil: apply Window's colors as the window background
+//   - nil: reset window background to terminal defaults (disabled)
+func (t *Tmux) ConfigureGasTownSession(session string, theme *Theme, rig, worker, role string) error {
+	if theme != nil {
+		if err := t.ApplyTheme(session, *theme); err != nil {
+			return fmt.Errorf("applying theme: %w", err)
+		}
+		if err := t.ApplyWindowStyle(session, theme.Window); err != nil {
+			return fmt.Errorf("applying window style: %w", err)
+		}
+	} else {
+		if err := t.ClearTheme(session); err != nil {
+			return fmt.Errorf("clearing theme: %w", err)
+		}
 	}
 	if err := t.SetStatusFormat(session, rig, worker, role); err != nil {
 		return fmt.Errorf("setting status format: %w", err)

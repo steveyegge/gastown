@@ -125,3 +125,11 @@ func (f *fakeWLCommonsStore) QueryWanted(wantedID string) (*doltserver.WantedIte
 	cp := *item
 	return &cp, nil
 }
+
+func (f *fakeWLCommonsStore) InsertStamp(stamp *doltserver.StampRecord) error {
+	return nil
+}
+
+func (f *fakeWLCommonsStore) QueryLastStampForSubject(subject string) (*doltserver.StampRecord, error) {
+	return nil, nil
+}

@@ -221,7 +221,6 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 			"--description=" + description,
 			"--type=agent",
 			"--labels=gt:agent",
-			"--ephemeral",
 		}
 		if NeedsForceForID(id) {
 			a = append(a, "--force")
@@ -234,8 +233,8 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		return a
 	}
 
-	// Create ephemeral agent bead (wisps table). Agent operational state has
-	// zero git history consumers (gt-bewatn.9).
+	// Create agent bead in the issues table. Agent beads are durable
+	// identities that must survive wisp GC (GH#2768).
 	out, err := b.run(buildArgs()...)
 	if err != nil {
 		out, err = b.run(buildArgs()...)
@@ -343,12 +342,6 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	// Fix type separately — UpdateOptions doesn't support type changes
 	if _, err := target.run("update", id, "--type=agent"); err != nil {
 		return nil, fmt.Errorf("fixing agent bead type: %w", err)
-	}
-	// Ensure agent bead is ephemeral (wisp) — agent operational state has
-	// zero git history consumers (gt-bewatn.9)
-	if _, err := target.run("update", id, "--ephemeral"); err != nil {
-		// Non-fatal: the bead is functional without ephemeral flag
-		_ = err
 	}
 
 	// Note: role slot no longer set - role definitions are config-based
@@ -635,7 +628,7 @@ func (b *Beads) ListAgentBeads() (map[string]*Issue, error) {
 	// doctor checks (for example, validating gt:agent labels).
 	// Agent beads are type=agent (infrastructure), hidden by bd list default filter.
 	// Use --include-infra so they appear in results.
-	out, err := b.run("list", "--label=gt:agent", "--include-infra", "--json", "--no-pager")
+	out, err := b.run("list", "--label=gt:agent", "--include-infra", "--json", "--flat", "--no-pager")
 	if err != nil {
 		return nil, err
 	}

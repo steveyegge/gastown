@@ -18,11 +18,15 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-// validDBName matches safe database names (alphanumeric + underscore only).
-var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+// validDBName matches safe database names (alphanumeric, underscore, hyphen).
+var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // DefaultDatabases is the static fallback list of known production databases.
-var DefaultDatabases = []string{"hq", "bd", "gt"}
+// Used only when SHOW DATABASES fails (server unreachable).
+// GH#2385: Removed legacy "gt" and "bd" names — modern towns use "hq" (town
+// beads) and rig-specific names. Those databases no longer exist in most
+// installations and their presence in the fallback caused phantom DB errors.
+var DefaultDatabases = []string{"hq"}
 
 // testPollutionPrefixes are database name prefixes created by tests.
 var testPollutionPrefixes = []string{"testdb_", "beads_t", "beads_pt", "doctest_"}
@@ -498,11 +502,15 @@ func purgeClosedWisps(db *sql.DB, dbName string, purgeAge time.Duration, dryRun 
 		}
 		commitMsg := fmt.Sprintf("reaper: purge %d closed wisps from %s", totalDeleted, dbName)
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
-			// Non-fatal — log but continue.
-			anomalies = append(anomalies, Anomaly{
-				Type:    "dolt_commit_failed",
-				Message: fmt.Sprintf("dolt commit after purge failed: %v", err),
-			})
+			// "nothing to commit" is expected when wisps are dolt_ignored — deletes
+			// are auto-committed by the SQL layer and Dolt has nothing to version.
+			if !isNothingToCommit(err) {
+				// Non-fatal — log but continue.
+				anomalies = append(anomalies, Anomaly{
+					Type:    "dolt_commit_failed",
+					Message: fmt.Sprintf("dolt commit after purge failed: %v", err),
+				})
+			}
 		}
 	}
 
@@ -657,10 +665,13 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 		}
 		commitMsg := fmt.Sprintf("reaper: auto-close %d stale issues in %s", len(ids), dbName)
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
-			result.Anomalies = append(result.Anomalies, Anomaly{
-				Type:    "dolt_commit_failed",
-				Message: fmt.Sprintf("dolt commit after auto-close failed: %v", err),
-			})
+			// "nothing to commit" is expected when the updated tables are dolt_ignored.
+			if !isNothingToCommit(err) {
+				result.Anomalies = append(result.Anomalies, Anomaly{
+					Type:    "dolt_commit_failed",
+					Message: fmt.Sprintf("dolt commit after auto-close failed: %v", err),
+				})
+			}
 		}
 	}
 
@@ -722,6 +733,98 @@ func batchDeleteRows(ctx context.Context, db *sql.DB, idQuery string, cutoffArg 
 	}
 
 	return totalDeleted, nil
+}
+
+// ClosePluginReceiptResult holds the results of closing plugin run receipts.
+type ClosePluginReceiptResult struct {
+	Database  string    `json:"database"`
+	Closed    int       `json:"closed"`
+	DryRun    bool      `json:"dry_run,omitempty"`
+	Anomalies []Anomaly `json:"anomalies,omitempty"`
+}
+
+// ClosePluginReceipts closes open issues labeled "type:plugin-run" that are
+// older than maxAge. These are transient run receipts created by deacon dog
+// plugins; they should be closed shortly after creation since they exist only
+// for audit/cooldown-gate purposes. The standard AutoClose path requires 7 days
+// of staleness, which lets plugin receipts accumulate into the hundreds.
+func ClosePluginReceipts(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ClosePluginReceiptResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultQueryTimeout)
+	defer cancel()
+
+	cutoff := time.Now().UTC().Add(-maxAge)
+	result := &ClosePluginReceiptResult{Database: dbName, DryRun: dryRun}
+
+	// Find open issues with the "type:plugin-run" label older than maxAge.
+	selectQuery := fmt.Sprintf(`
+		SELECT i.id FROM `+"`%s`"+`.issues i
+		INNER JOIN `+"`%s`"+`.labels l ON i.id = l.issue_id
+		WHERE i.status IN ('open', 'in_progress')
+		AND l.label = 'type:plugin-run'
+		AND i.created_at < ?`, dbName, dbName)
+
+	rows, err := db.QueryContext(ctx, selectQuery, cutoff)
+	if err != nil {
+		if isTableNotFound(err) {
+			return result, nil
+		}
+		return nil, fmt.Errorf("select plugin receipts: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan plugin receipt id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+
+	result.Closed = len(ids)
+	if len(ids) == 0 || dryRun {
+		return result, nil
+	}
+
+	if _, err := db.ExecContext(ctx, "SET @@autocommit = 0"); err != nil {
+		return nil, fmt.Errorf("disable autocommit: %w", err)
+	}
+	defer func() {
+		_, _ = db.ExecContext(context.Background(), "SET @@autocommit = 1")
+	}()
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	updateQuery := fmt.Sprintf(
+		"UPDATE `%s`.issues SET status = 'closed', closed_at = NOW() WHERE id IN (%s)",
+		dbName, strings.Join(placeholders, ","))
+	if _, err := db.ExecContext(ctx, updateQuery, args...); err != nil {
+		return nil, fmt.Errorf("close plugin receipts: %w", err)
+	}
+
+	// Flush and commit.
+	if _, err := db.ExecContext(ctx, "COMMIT"); err != nil {
+		result.Anomalies = append(result.Anomalies, Anomaly{
+			Type:    "sql_commit_failed",
+			Message: fmt.Sprintf("sql commit after plugin receipt close failed: %v", err),
+		})
+		return result, nil
+	}
+	commitMsg := fmt.Sprintf("reaper: close %d plugin receipts in %s", len(ids), dbName)
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
+		if !isNothingToCommit(err) {
+			result.Anomalies = append(result.Anomalies, Anomaly{
+				Type:    "dolt_commit_failed",
+				Message: fmt.Sprintf("dolt commit after plugin receipt close failed: %v", err),
+			})
+		}
+	}
+
+	return result, nil
 }
 
 // FormatJSON marshals any value to indented JSON.

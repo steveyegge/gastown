@@ -45,10 +45,16 @@
     },
 
     "theme": {
+        "disabled": false,
         "name": "ocean",
+        "custom": {
+            "bg": "#111111",
+            "fg": "#eeeeee"
+        },
         "role_themes": {
             "witness": "rust",
-            "refinery": "plum"
+            "refinery": "plum",
+            "crew": "none"
         }
     },
 

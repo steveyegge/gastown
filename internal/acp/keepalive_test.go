@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"io"
 	"os/exec"
+	"runtime"
 	"testing"
 	"time"
 )
 
 func TestProxy_RunKeepAlive_Logic(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ACP keepalive requires Unix process groups and sleep command")
+	}
 	p := NewProxy()
 	p.sessionID = "test-session"
 	p.heartbeatSupported.Store(true)

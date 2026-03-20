@@ -42,8 +42,8 @@ var testPollutionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`-wisp-`),                                       // id: wisp-pattern IDs leaked into issues table
 }
 
-// validDBName matches safe database names (alphanumeric + underscore only).
-var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+// validDBName matches safe database names (alphanumeric, underscore, hyphen).
+var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // scrubQuery is the WHERE clause for filtering ephemeral data.
 // Kept separate from Sprintf to avoid %% confusion.
@@ -306,8 +306,9 @@ func (d *Daemon) exportTableToJsonl(table, query, dir, dataDir string) (int, err
 			"sql", "-r", "json", "-q", query)
 	} else {
 		cmd = exec.CommandContext(ctx, "dolt", "sql", "-r", "json", "-q", query)
-		cmd.Dir = dataDir
 	}
+	// Always set cmd.Dir to prevent stray .doltcfg/ creation (GH#2537).
+	cmd.Dir = dataDir
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

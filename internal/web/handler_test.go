@@ -1106,6 +1106,114 @@ func TestConvoyHandler_TemplateErrorReturns500(t *testing.T) {
 	}
 }
 
+// TestConvoyHandler_CachePreventsDuplicateFetches verifies that rapid requests
+// reuse the cached response instead of spawning fresh fetches (GH#2618).
+func TestConvoyHandler_CachePreventsDuplicateFetches(t *testing.T) {
+	fetchCount := 0
+	mock := &CountingMockFetcher{
+		inner:      &MockConvoyFetcher{Convoys: []ConvoyRow{{ID: "hq-cv-cache", Title: "Cache Test", Status: "open"}}},
+		fetchCount: &fetchCount,
+	}
+
+	handler, err := NewConvoyHandler(mock, 8*time.Second, "test-token")
+	if err != nil {
+		t.Fatalf("NewConvoyHandler() error = %v", err)
+	}
+	handler.cacheTTL = 5 * time.Second // Explicit TTL for test
+
+	// First request — should trigger a fetch
+	req1 := httptest.NewRequest("GET", "/", nil)
+	w1 := httptest.NewRecorder()
+	handler.ServeHTTP(w1, req1)
+
+	if w1.Code != http.StatusOK {
+		t.Fatalf("First request status = %d, want 200", w1.Code)
+	}
+	if fetchCount != 1 {
+		t.Fatalf("After first request, fetchCount = %d, want 1", fetchCount)
+	}
+
+	// Second request — should use cache (within TTL)
+	req2 := httptest.NewRequest("GET", "/", nil)
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("Second request status = %d, want 200", w2.Code)
+	}
+	if fetchCount != 1 {
+		t.Errorf("After second request, fetchCount = %d, want 1 (should use cache)", fetchCount)
+	}
+
+	// Verify both responses contain the same content
+	if w1.Body.String() != w2.Body.String() {
+		t.Error("Cached response should match original response")
+	}
+}
+
+// TestConvoyHandler_CacheBypassOnExpand verifies that ?expand= requests bypass cache.
+func TestConvoyHandler_CacheBypassOnExpand(t *testing.T) {
+	fetchCount := 0
+	mock := &CountingMockFetcher{
+		inner:      &MockConvoyFetcher{Convoys: []ConvoyRow{{ID: "hq-cv-expand", Title: "Expand Test", Status: "open"}}},
+		fetchCount: &fetchCount,
+	}
+
+	handler, err := NewConvoyHandler(mock, 8*time.Second, "test-token")
+	if err != nil {
+		t.Fatalf("NewConvoyHandler() error = %v", err)
+	}
+	handler.cacheTTL = 5 * time.Second
+
+	// Normal request to populate cache
+	req1 := httptest.NewRequest("GET", "/", nil)
+	w1 := httptest.NewRecorder()
+	handler.ServeHTTP(w1, req1)
+
+	if fetchCount != 1 {
+		t.Fatalf("After first request, fetchCount = %d, want 1", fetchCount)
+	}
+
+	// Expand request — should bypass cache
+	req2 := httptest.NewRequest("GET", "/?expand=convoys", nil)
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, req2)
+
+	if fetchCount != 2 {
+		t.Errorf("Expand request fetchCount = %d, want 2 (should bypass cache)", fetchCount)
+	}
+}
+
+// CountingMockFetcher wraps a ConvoyFetcher and counts FetchConvoys calls.
+type CountingMockFetcher struct {
+	inner      ConvoyFetcher
+	fetchCount *int
+}
+
+func (m *CountingMockFetcher) FetchConvoys() ([]ConvoyRow, error) {
+	*m.fetchCount++
+	return m.inner.FetchConvoys()
+}
+func (m *CountingMockFetcher) FetchMergeQueue() ([]MergeQueueRow, error) {
+	return m.inner.FetchMergeQueue()
+}
+func (m *CountingMockFetcher) FetchWorkers() ([]WorkerRow, error)       { return m.inner.FetchWorkers() }
+func (m *CountingMockFetcher) FetchMail() ([]MailRow, error)            { return m.inner.FetchMail() }
+func (m *CountingMockFetcher) FetchRigs() ([]RigRow, error)             { return m.inner.FetchRigs() }
+func (m *CountingMockFetcher) FetchDogs() ([]DogRow, error)             { return m.inner.FetchDogs() }
+func (m *CountingMockFetcher) FetchEscalations() ([]EscalationRow, error) {
+	return m.inner.FetchEscalations()
+}
+func (m *CountingMockFetcher) FetchHealth() (*HealthRow, error)    { return m.inner.FetchHealth() }
+func (m *CountingMockFetcher) FetchQueues() ([]QueueRow, error)    { return m.inner.FetchQueues() }
+func (m *CountingMockFetcher) FetchSessions() ([]SessionRow, error) { return m.inner.FetchSessions() }
+func (m *CountingMockFetcher) FetchHooks() ([]HookRow, error)      { return m.inner.FetchHooks() }
+func (m *CountingMockFetcher) FetchMayor() (*MayorStatus, error)   { return m.inner.FetchMayor() }
+func (m *CountingMockFetcher) FetchIssues() ([]IssueRow, error)    { return m.inner.FetchIssues() }
+func (m *CountingMockFetcher) FetchActivity() ([]ActivityRow, error) {
+	return m.inner.FetchActivity()
+}
+
 func TestConvoyHandler_NonFatalErrors(t *testing.T) {
 	mock := &MockConvoyFetcherWithErrors{
 		Convoys: []ConvoyRow{

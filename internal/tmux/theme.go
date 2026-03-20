@@ -6,11 +6,27 @@ import (
 	"hash/fnv"
 )
 
-// Theme represents a tmux status bar color scheme.
+// WindowStyle represents window background colors (tmux window-style).
+type WindowStyle struct {
+	BG string // Background color (hex or tmux color name)
+	FG string // Foreground color (hex or tmux color name)
+}
+
+// Style returns the tmux window-style string.
+func (w WindowStyle) Style() string {
+	return fmt.Sprintf("bg=%s,fg=%s", w.BG, w.FG)
+}
+
+// Theme represents a tmux color scheme for status bar and optional window background.
 type Theme struct {
 	Name string // Human-readable name
 	BG   string // Background color (hex or tmux color name)
 	FG   string // Foreground color (hex or tmux color name)
+
+	// Window is the optional window background style (tmux window-style).
+	// nil = disabled (window uses terminal defaults).
+	// If set, its BG/FG are applied as the window background.
+	Window *WindowStyle `json:"window,omitempty"`
 }
 
 // DefaultPalette is the curated set of distinct, professional color themes.
@@ -29,9 +45,10 @@ var DefaultPalette = []Theme{
 }
 
 // MayorTheme returns the special theme for the Mayor session.
-// Gold/dark to distinguish it from rig themes.
+// Uses "default" to inherit the user's terminal colors — the Mayor
+// session is the primary interactive session, so it should blend in.
 func MayorTheme() Theme {
-	return Theme{Name: "mayor", BG: "#3d3200", FG: "#ffd700"}
+	return Theme{Name: "mayor", BG: "default", FG: "default"}
 }
 
 // DeaconTheme returns the special theme for the Deacon session.

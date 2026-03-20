@@ -32,8 +32,26 @@ Dolt SQL Server (one per town, port 3307)
 **Data directory**: `~/gt/.dolt-data/` — each subdirectory is a database
 accessible via `USE <name>` in SQL.
 
-**Connection**: `root@tcp(127.0.0.1:3307)/<database>` (no password for
-localhost).
+**Connection**: `root@tcp(<host>:3307)/<database>` (no password).
+
+## Environment Variables
+
+gt and bd use separate env vars for Dolt connection. gt automatically
+translates its variables to bd's equivalents when spawning agents.
+
+| gt (Gas Town) | bd (Beads) | Purpose |
+|---------------|------------|---------|
+| `GT_DOLT_HOST` | `BEADS_DOLT_SERVER_HOST` | Server host (bd defaults to `127.0.0.1` if unset) |
+| `GT_DOLT_PORT` | `BEADS_DOLT_PORT` | Server port (default: `3307`) |
+
+**Remote Dolt servers**: If Dolt runs on a different machine (e.g., over
+Tailscale), set `GT_DOLT_HOST` in the environment. gt propagates this as
+`BEADS_DOLT_SERVER_HOST` to all bd subprocesses, overriding bd's hardcoded
+`127.0.0.1` default. Without this, every new rig/worktree/polecat silently
+connects to localhost and fails.
+
+Per-workspace override: set `dolt.host` in a rig's `.beads/config.yaml`.
+This takes priority over the env var for that specific workspace.
 
 ## Commands
 

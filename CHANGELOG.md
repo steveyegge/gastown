@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-03-15
+
+### Added
+
+- **Agent Client Protocol (ACP)** — New protocol for structured agent
+  communication with propulsion trigger detection and output suppression.
+- **gt mountain** — Stage, label, and launch epic work in one command.
+- **gt assign** — One-shot bead creation + hook for direct agent assignment.
+- **Convoy --from-epic** — `gt convoy create --from-epic` stages epic children
+  into convoy waves with automatic validation bead.
+- **Typed memories** — `gt remember --type feedback/project/user/reference` for
+  categorized agent memory storage.
+- **Repo-sourced rig settings** — `.gastown/settings.json` in repos auto-configures
+  rig behavior (test gates, merge strategy).
+- **exec-wrapper plugin type** — Plugins can now wrap agent execution.
+- **Prior attempt context** — Polecats receive context from previous failed
+  attempts when re-dispatched.
+- **Spider Protocol** — Fraud detection for Wasteland stamp system.
+
+### Changed
+
+- **Reaper plugin receipt cleanup** — Plugin run receipts now fast-tracked for
+  closure (1h) instead of waiting for 7-day stale issue AutoClose.
+- **Dog dispatch handler** — Daemon lifecycle defaults include handler for
+  direct dog dispatch.
+- **Formula v2** — mol-idea-to-plan with iterative review rounds and inline
+  eval/smoke-test bead creation.
+
+### Fixed
+
+- **Idle patrol CPU burn** — Patrol agents no longer burn CPU/tokens in handoff
+  restart loops.
+- **Compactor-dog false positives** — Fixed concurrent write detection and hash
+  validation for Dolt base32 format.
+- **Dolt server stability** — Fixed stale socket cleanup, server ownership
+  detection, rogue process race on restart, idle-monitor orphans on `gt down`.
+- **Cross-rig wisp contamination** — MQ list filtered by rig to prevent leaks.
+- **Polecat lifecycle** — Fixed idle reuse with live sessions, CRASHED_POLECAT
+  alerts for closed beads, spawn storm dedup.
+- **Session prefix parsing** — Fixed hq- prefix collision and rig-level fallback.
+- **Unicode handling** — Fixed parse errors in `gt compact`.
+- **Non-Claude agent support** — Liveness env vars, idle-wait instructions, and
+  nudge startup prompts for Gemini/Codex runtimes.
+- **Test isolation** — 5 tests isolated from live Dolt server; sleep sessions
+  used in cleanup tests to avoid .zshrc interference.
+- **Witness completion notifications** — Mayor now notified on polecat completion.
+- **Shell quoting** — Agent args properly quoted, model flags respected.
+- **Exponential backoff** — Convoy event poller backs off on Dolt errors.
+- **Docker** — Added tini for zombie process reaping in containers.
+
 ## [0.12.0] - 2026-03-11
 
 ### Added

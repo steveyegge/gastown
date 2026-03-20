@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"os/exec"
+	"runtime"
 	"testing"
 )
 
@@ -16,6 +17,10 @@ type mockWriteCloser struct {
 func (m *mockWriteCloser) Close() error { return nil }
 
 func TestWriteToAgent_Parity(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ACP parity test requires Unix process groups and sleep command")
+	}
+
 	tests := []struct {
 		name string
 		msg  *JSONRPCMessage

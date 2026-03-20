@@ -5,11 +5,13 @@ package daemon
 //
 // All patrols are enabled with conservative intervals:
 //   - Wisp Reaper (DECAY): every 30m, delete closed wisps after 7d
-//   - Compactor Dog (COMPACT): every 24h, threshold 500 commits
+//   - Compactor Dog (COMPACT): every 24h, threshold 2000 commits
+//   - Checkpoint Dog: every 10m, auto-commit dirty polecat worktrees
 //   - Doctor Dog (health): every 5m
 //   - JSONL Git Backup: every 15m
 //   - Dolt Filesystem Backup: every 15m
 //   - Scheduled Maintenance (FLATTEN): daily at 03:00, threshold 1000
+//   - Main Branch Test: every 30m, 10m timeout per rig
 func DefaultLifecycleConfig() *DaemonPatrolConfig {
 	threshold := 1000
 	scrub := true
@@ -26,7 +28,11 @@ func DefaultLifecycleConfig() *DaemonPatrolConfig {
 			CompactorDog: &CompactorDogConfig{
 				Enabled:     true,
 				IntervalStr: "24h",
-				Threshold:   500,
+				Threshold:   defaultCompactorCommitThreshold,
+			},
+			CheckpointDog: &CheckpointDogConfig{
+				Enabled:     true,
+				IntervalStr: "10m",
 			},
 			DoctorDog: &DoctorDogConfig{
 				Enabled:     true,
@@ -46,6 +52,11 @@ func DefaultLifecycleConfig() *DaemonPatrolConfig {
 				Window:    "03:00",
 				Interval:  "daily",
 				Threshold: &threshold,
+			},
+			MainBranchTest: &MainBranchTestConfig{
+				Enabled:     true,
+				IntervalStr: "30m",
+				TimeoutStr:  "10m",
 			},
 			Handler: &PatrolConfig{
 				Enabled: true,
@@ -83,6 +94,10 @@ func EnsureLifecycleDefaults(config *DaemonPatrolConfig) bool {
 		p.CompactorDog = d.CompactorDog
 		changed = true
 	}
+	if p.CheckpointDog == nil {
+		p.CheckpointDog = d.CheckpointDog
+		changed = true
+	}
 	if p.DoctorDog == nil {
 		p.DoctorDog = d.DoctorDog
 		changed = true
@@ -97,6 +112,10 @@ func EnsureLifecycleDefaults(config *DaemonPatrolConfig) bool {
 	}
 	if p.ScheduledMaintenance == nil {
 		p.ScheduledMaintenance = d.ScheduledMaintenance
+		changed = true
+	}
+	if p.MainBranchTest == nil {
+		p.MainBranchTest = d.MainBranchTest
 		changed = true
 	}
 	if p.Handler == nil {

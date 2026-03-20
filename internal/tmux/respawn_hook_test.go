@@ -91,21 +91,51 @@ func TestAutoRespawnHook_RespawnWorks(t *testing.T) {
 	socket := requireTestSocket(t)
 	session := "test-respawn"
 
+	t0 := time.Now()
+	logT := func(msg string, args ...any) {
+		t.Logf("[+%6.2fs] %s", time.Since(t0).Seconds(), fmt.Sprintf(msg, args...))
+	}
+
 	testSession(t, socket, session, "sleep 2")
 	defer func() { _ = exec.Command("tmux", "-L", socket, "kill-session", "-t", session).Run() }()
+	logT("session created with 'sleep 2'")
+
+	// Log the initial pane state
+	logT("initial pane_dead=%v, pane_pid=%s", isPaneDead(socket, session), getPanePIDSafe(socket, session))
 
 	tmx := NewTmuxWithSocket(socket)
 	if err := tmx.SetAutoRespawnHook(session); err != nil {
 		t.Fatalf("SetAutoRespawnHook: %v", err)
+	}
+	logT("hook installed")
+
+	// Log the hook configuration (try both session and global hooks)
+	if hookOut, err := exec.Command("tmux", "-L", socket, "show-hooks", "-t", session).CombinedOutput(); err == nil {
+		logT("session hooks: %s", strings.TrimSpace(string(hookOut)))
+	}
+	if hookOut, err := exec.Command("tmux", "-L", socket, "show-hooks", "-g").CombinedOutput(); err == nil {
+		logT("global hooks: %s", strings.TrimSpace(string(hookOut)))
+	}
+	// Log the actual remain-on-exit setting
+	if optOut, err := exec.Command("tmux", "-L", socket, "show-options", "-t", session, "remain-on-exit").CombinedOutput(); err == nil {
+		logT("remain-on-exit: %s", strings.TrimSpace(string(optOut)))
+	}
+	// Log tmux version (hook behavior varies)
+	if verOut, err := exec.Command("tmux", "-V").CombinedOutput(); err == nil {
+		logT("tmux version: %s", strings.TrimSpace(string(verOut)))
 	}
 
 	// Wait for sleep 2 to exit
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if isPaneDead(socket, session) {
+			logT("pane died (sleep 2 exited)")
 			break
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+	if !isPaneDead(socket, session) {
+		logT("WARNING: pane never died within 5s deadline")
 	}
 
 	// Wait for hook to respawn (3s sleep + startup)
@@ -113,14 +143,40 @@ func TestAutoRespawnHook_RespawnWorks(t *testing.T) {
 	deadline = time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		if !isPaneDead(socket, session) {
+			logT("pane respawned (alive again)")
 			alive = true
 			break
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	if !alive {
+		// Dump diagnostics on failure
+		logT("FAILURE: pane was NOT respawned within 8s of death")
+		logT("pane_dead=%v, pane_pid=%s", isPaneDead(socket, session), getPanePIDSafe(socket, session))
+		if paneInfo, err := exec.Command("tmux", "-L", socket, "list-panes", "-t", session,
+			"-F", "dead=#{pane_dead} pid=#{pane_pid} cmd=#{pane_current_command} start=#{pane_start_command}").CombinedOutput(); err == nil {
+			logT("pane info: %s", strings.TrimSpace(string(paneInfo)))
+		} else {
+			logT("list-panes failed: %v", err)
+		}
+		if hookOut, err := exec.Command("tmux", "-L", socket, "show-hooks", "-t", session).CombinedOutput(); err == nil {
+			logT("hooks at failure: %s", strings.TrimSpace(string(hookOut)))
+		}
+		// Check if remain-on-exit is set (needed for hook to fire)
+		if optOut, err := exec.Command("tmux", "-L", socket, "show-options", "-t", session, "remain-on-exit").CombinedOutput(); err == nil {
+			logT("remain-on-exit: %s", strings.TrimSpace(string(optOut)))
+		}
 		t.Error("pane was NOT respawned — hook failed (likely missing -L socket flag)")
 	}
+}
+
+// getPanePIDSafe returns the pane PID or "?" if it can't be read (no t.Fatal).
+func getPanePIDSafe(socket, session string) string {
+	out, err := exec.Command("tmux", "-L", socket, "display-message", "-t", session, "-p", "#{pane_pid}").Output()
+	if err != nil {
+		return "?(err)"
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // TestAutoRespawnHook_SkipsAlreadyAlive verifies the dead-pane guard: if the

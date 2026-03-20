@@ -38,12 +38,20 @@ func TestEffectivePolecatState(t *testing.T) {
 			want: polecat.StateZombie,
 		},
 		{
-			name: "idle-unchanged",
+			name: "idle-session-dead-stays-idle",
 			item: PolecatListItem{
 				State:          polecat.StateIdle,
 				SessionRunning: false,
 			},
 			want: polecat.StateIdle,
+		},
+		{
+			name: "idle-session-running-becomes-working",
+			item: PolecatListItem{
+				State:          polecat.StateIdle,
+				SessionRunning: true,
+			},
+			want: polecat.StateWorking,
 		},
 	}
 

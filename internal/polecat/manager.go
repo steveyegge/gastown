@@ -26,6 +26,7 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
+	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -89,7 +90,9 @@ func isDoltConfigError(err error) bool {
 		strings.Contains(msg, "no database") ||
 		strings.Contains(msg, "database not found") ||
 		strings.Contains(msg, "connection refused") ||
-		strings.Contains(msg, "configure custom types")
+		strings.Contains(msg, "configure custom types") ||
+		strings.Contains(msg, "identity mismatch") ||
+		strings.Contains(msg, "Unknown database")
 }
 
 // Common errors
@@ -237,9 +240,10 @@ func (m *Manager) CheckDoltHealth() error {
 		if strings.Contains(err.Error(), "does not exist") || errors.Is(err, beads.ErrNotInstalled) {
 			return nil
 		}
-		// Fail fast on config/init errors — retrying won't help (gt-2ra)
+		// Fail fast on config/init errors — retrying won't help (gt-2ra, gas-tc4)
 		if isDoltConfigError(err) {
-			return fmt.Errorf("%w: DB not initialized (not retrying): %v", ErrDoltUnhealthy, err)
+			return fmt.Errorf("%w: %v\n\nRecovery: run 'gt doctor --fix' to repair database configuration.\n"+
+				"If that doesn't help, try: bd init --force --server", ErrDoltUnhealthy, err)
 		}
 		lastErr = err
 		if attempt < doltMaxRetries {
@@ -264,7 +268,7 @@ func (m *Manager) CheckDoltHealth() error {
 		}
 	}
 
-	return fmt.Errorf("%w: %v", ErrDoltUnhealthy, lastErr)
+	return fmt.Errorf("%w: %v\n\nRecovery: run 'gt doctor --fix' to diagnose and repair Dolt configuration", ErrDoltUnhealthy, lastErr)
 }
 
 // CheckDoltServerCapacity verifies the Dolt server has capacity for new connections.
@@ -752,6 +756,12 @@ func (m *Manager) addWithOptionsLocked(name string, opts AddOptions, polecatDir 
 	}
 	worktreeCreated = true
 
+	// Provision CLAUDE.md with gt done instructions (same as AddWithOptions path).
+	lockedRigName := filepath.Base(m.rig.Path)
+	if _, err := templates.CreatePolecatCLAUDEmd(clonePath, lockedRigName, name); err != nil {
+		style.PrintWarning("could not provision polecat CLAUDE.md: %v", err)
+	}
+
 	if err := m.setupSharedBeads(clonePath); err != nil {
 		cleanupOnError()
 		return nil, fmt.Errorf("setting up shared beads: %w (polecat cannot submit MRs without shared beads)", err)
@@ -917,9 +927,15 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (_ *Polecat, retE
 	}
 	worktreeCreated = true
 
-	// NOTE: No per-directory CLAUDE.md or AGENTS.md is created here.
-	// Only ~/gt/CLAUDE.md (town-root identity anchor) exists on disk.
-	// Full context is injected ephemerally via SessionStart hook (gt prime).
+	// Provision CLAUDE.md with gt done instructions and lifecycle context.
+	// This is the primary mechanism for polecats to learn about completion —
+	// the file persists across compaction and session restarts (unlike ephemeral
+	// gt prime output which scrolls past and gets lost).
+	rigName := filepath.Base(m.rig.Path)
+	if _, err := templates.CreatePolecatCLAUDEmd(clonePath, rigName, name); err != nil {
+		// Non-fatal — polecat can still learn via gt prime hook
+		style.PrintWarning("could not provision polecat CLAUDE.md: %v", err)
+	}
 
 	// Set up shared beads: polecat uses rig's .beads via redirect file.
 	// This eliminates git sync overhead - all polecats share one database.
@@ -1432,9 +1448,11 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 		return nil, fmt.Errorf("moving repaired worktree to final path: %w", err)
 	}
 
-	// NOTE: No per-directory CLAUDE.md or AGENTS.md is created here.
-	// Only ~/gt/CLAUDE.md (town-root identity anchor) exists on disk.
-	// Full context is injected ephemerally via SessionStart hook (gt prime).
+	// Provision CLAUDE.md (same as spawn path — repair creates a fresh worktree).
+	repairRigName := filepath.Base(m.rig.Path)
+	if _, err := templates.CreatePolecatCLAUDEmd(newClonePath, repairRigName, name); err != nil {
+		style.PrintWarning("could not provision polecat CLAUDE.md during repair: %v", err)
+	}
 
 	// Set up shared beads — fatal during repair too, same reason as spawn.
 	if err := m.setupSharedBeads(newClonePath); err != nil {
@@ -1510,18 +1528,25 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 		return nil, ErrPolecatNotFound
 	}
 
-	// Revalidate session state under the polecat lock. A prior dispatcher may
-	// have observed this polecat as idle, but by the time reuse begins the tmux
-	// session may still be alive or may have revived.
-	if running, stale := m.polecatSessionState(name); running {
-		if stale {
-			sessionName := session.PolecatSessionName(session.PrefixFor(m.rig.Name), name)
-			if err := m.tmux.KillSessionWithProcesses(sessionName); err != nil {
-				return nil, fmt.Errorf("killing stale session %s: %w", sessionName, err)
-			}
-		} else {
-			return nil, ErrSessionRunning
+	// Kill any existing session unconditionally before reuse.
+	// The polecat was found idle (no hooked work), so even a "live" session is
+	// just Claude sitting at a dead ❯ prompt from the previous task. Leaving it
+	// alive prevents StartSession from creating a fresh session with a proper
+	// gt prime --hook cycle to discover the newly hooked bead.
+	//
+	// Previously, non-stale sessions returned ErrSessionRunning here, causing the
+	// caller to allocate a new polecat. But heartbeat freshness can race with
+	// session lifecycle (e.g. a compact/resume hook refreshes the heartbeat while
+	// the session is functionally idle), leaving the old session alive and the
+	// new work undiscovered.
+	if running, _ := m.polecatSessionState(name); running {
+		sessionName := session.PolecatSessionName(session.PrefixFor(m.rig.Name), name)
+		if err := m.tmux.KillSessionWithProcesses(sessionName); err != nil {
+			return nil, fmt.Errorf("killing existing session %s for reuse: %w", sessionName, err)
 		}
+		// Remove stale heartbeat so SessionManager.Start doesn't see leftover data.
+		townRoot := filepath.Dir(m.rig.Path)
+		RemoveSessionHeartbeat(townRoot, sessionName)
 	}
 
 	// Get worktree path (must already exist for reuse)
@@ -1559,16 +1584,28 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 		return nil, fmt.Errorf("start point %s not found — fall back to full repair", startPoint)
 	}
 
-	// Clean worktree state before branch switch — the worktree may have stale
-	// state from a previous dog/pool dispatch (uncommitted changes, detached HEAD,
-	// or checked out on an old dog/alpha-* branch).
-	_ = polecatGit.ResetHard("HEAD")
+	// GH#2536: Clean worktree state before branch switch — the worktree may have
+	// stale state from a previous dog/pool dispatch (uncommitted changes, untracked
+	// files, detached HEAD, or checked out on an old dog/alpha-* branch).
+	// Reset to the start point directly (not HEAD) to avoid "local changes would
+	// be overwritten" errors when the start point has different file content.
+	_ = polecatGit.ResetHard(startPoint)
+	_ = polecatGit.CleanForce()
+
+	// Re-provision CLAUDE.md after reset — git reset --hard restores the tracked
+	// version (which lacks gt done instructions), and git clean -f removes any
+	// untracked CLAUDE.md we previously wrote. Without this, reused polecats
+	// lose all lifecycle instructions and never call gt done.
+	reuseRigName := filepath.Base(m.rig.Path)
+	if _, err := templates.CreatePolecatCLAUDEmd(clonePath, reuseRigName, name); err != nil {
+		style.PrintWarning("could not re-provision polecat CLAUDE.md on reuse: %v", err)
+	}
 
 	// Create fresh branch from start point (branch-only, no worktree add/remove)
 	branchName := m.buildBranchName(name, opts.HookBead)
 	if err := polecatGit.CheckoutNewBranch(branchName, startPoint); err != nil {
-		// checkout -b fails if we're in detached HEAD or branch already exists.
-		// Fall back to: create branch separately, then checkout.
+		// checkout -b fails if branch already exists or other edge case.
+		// Fall back to: checkout start point, then create branch.
 		_ = polecatGit.Checkout(startPoint)
 		if err2 := polecatGit.CheckoutNewBranch(branchName, startPoint); err2 != nil {
 			return nil, fmt.Errorf("creating branch %s from %s (retry after cleanup): %w", branchName, startPoint, err2)
