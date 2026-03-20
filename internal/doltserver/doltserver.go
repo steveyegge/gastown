@@ -288,6 +288,14 @@ func DefaultConfig(townRoot string) *Config {
 	}
 	if ll := os.Getenv("GT_DOLT_LOGLEVEL"); ll != "" {
 		config.LogLevel = ll
+	} else if townRoot != "" {
+		// Fallback: read GT_DOLT_LOGLEVEL from daemon/daemon.env so the log
+		// level survives daemon-triggered Dolt restarts (gt-zb8). The daemon
+		// process may not have GT_DOLT_LOGLEVEL in its own environment when it
+		// was started before the manual env var was applied.
+		if ll := readDaemonEnvVar(filepath.Join(townRoot, "daemon", "daemon.env"), "GT_DOLT_LOGLEVEL"); ll != "" {
+			config.LogLevel = ll
+		}
 	}
 
 	// Fallback: if GT_DOLT_PORT is not in the shell env, read it from
@@ -319,6 +327,26 @@ func DefaultConfig(townRoot string) *Config {
 	}
 
 	return config
+}
+
+// readDaemonEnvVar reads a single key=value variable from a simple env file.
+// Handles blank lines and # comments; returns "" if not found or on error.
+func readDaemonEnvVar(path, key string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	prefix := key + "="
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") || line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimPrefix(line, prefix)
+		}
+	}
+	return ""
 }
 
 // IsRemote returns true when the config points to a non-local Dolt server.

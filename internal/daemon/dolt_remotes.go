@@ -118,14 +118,15 @@ func (d *Daemon) pushDatabase(dataDir, db, remote, branch string) error {
 		d.logger.Printf("dolt_remotes: %s: add (non-fatal): %v", db, err)
 	}
 
-	// Step 2: Commit pending changes (non-fatal if nothing to commit)
-	commitQuery := fmt.Sprintf(
-		"USE `%s`; CALL DOLT_COMMIT('-m', 'daemon: auto-commit pending changes', '--author', 'Gas Town Daemon <daemon@gastown.local>')",
-		db,
-	)
-	if err := d.runDoltSQL(dataDir, commitQuery); err != nil {
-		errStr := err.Error()
-		if !strings.Contains(errStr, "nothing to commit") {
+	// Step 2: Commit staged changes only if dolt_status shows pending work.
+	// Skipping DOLT_COMMIT when nothing is staged avoids "nothing to commit"
+	// warnings in dolt.log, which were causing log bloat at ~3/sec (gt-zb8).
+	if d.hasStagedChanges(dataDir, db) {
+		commitQuery := fmt.Sprintf(
+			"USE `%s`; CALL DOLT_COMMIT('-m', 'daemon: auto-commit pending changes', '--author', 'Gas Town Daemon <daemon@gastown.local>')",
+			db,
+		)
+		if err := d.runDoltSQL(dataDir, commitQuery); err != nil {
 			d.logger.Printf("dolt_remotes: %s: commit (non-fatal): %v", db, err)
 		}
 	}
@@ -160,6 +161,30 @@ func (d *Daemon) runDoltSQL(dataDir, query string) error {
 	}
 
 	return nil
+}
+
+// hasStagedChanges returns true if the database has staged changes in dolt_status.
+// Uses dolt_status WHERE staged=1. Fails open (returns true) on query errors so
+// that a DOLT_COMMIT attempt is still made and the error is surfaced normally.
+func (d *Daemon) hasStagedChanges(dataDir, db string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), doltPushTimeout)
+	defer cancel()
+
+	query := fmt.Sprintf("USE `%s`; SELECT COUNT(*) FROM dolt_status WHERE staged = 1", db)
+	cmd := exec.CommandContext(ctx, "dolt", "sql", "-r", "csv", "-q", query)
+	cmd.Dir = dataDir
+
+	output, err := cmd.Output()
+	if err != nil {
+		// Fail open: if we can't check, attempt the commit and let it fail naturally.
+		return true
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) < 2 {
+		return false
+	}
+	return strings.TrimSpace(lines[1]) != "0"
 }
 
 // discoverDatabasesWithRemotes lists databases in the data directory
