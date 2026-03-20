@@ -561,6 +561,12 @@ func TestMayorConfigRoundTrip(t *testing.T) {
 
 	original := NewMayorConfig()
 	original.Theme = &TownThemeConfig{
+		Disabled: true,
+		Name:     "forest",
+		Custom: &CustomTheme{
+			BG: "#111111",
+			FG: "#eeeeee",
+		},
 		RoleDefaults: map[string]string{
 			"witness": "rust",
 		},
@@ -583,6 +589,15 @@ func TestMayorConfigRoundTrip(t *testing.T) {
 	}
 	if loaded.Theme == nil || loaded.Theme.RoleDefaults["witness"] != "rust" {
 		t.Error("Theme.RoleDefaults not preserved")
+	}
+	if loaded.Theme == nil || !loaded.Theme.Disabled {
+		t.Error("Theme.Disabled not preserved")
+	}
+	if loaded.Theme == nil || loaded.Theme.Name != "forest" {
+		t.Error("Theme.Name not preserved")
+	}
+	if loaded.Theme == nil || loaded.Theme.Custom == nil || loaded.Theme.Custom.BG != "#111111" || loaded.Theme.Custom.FG != "#eeeeee" {
+		t.Error("Theme.Custom not preserved")
 	}
 }
 

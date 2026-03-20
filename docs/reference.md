@@ -50,7 +50,19 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
 
 ```json
 {
-  "theme": "desert",
+  "theme": {
+    "disabled": false,
+    "name": "forest",
+    "custom": {
+      "bg": "#111111",
+      "fg": "#eeeeee"
+    },
+    "role_themes": {
+      "witness": "rust",
+      "refinery": "plum",
+      "crew": "none"
+    }
+  },
   "merge_queue": {
     "enabled": true,
     "run_tests": true,
@@ -71,6 +83,46 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
   }
 }
 ```
+
+**Theme fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `disabled` | `bool` | `false` | Disable tmux status/window theming for the rig |
+| `name` | `string` | auto-assigned by rig name | Use a named built-in palette theme |
+| `custom.bg` | `string` | unset | Custom tmux background color |
+| `custom.fg` | `string` | unset | Custom tmux foreground color |
+| `role_themes` | `map[string]string` | unset | Per-role overrides for `witness`, `refinery`, `crew`, `polecat`; use `"none"` to disable theming for a role |
+
+Theme resolution:
+- No `theme` config: auto-assign a built-in palette theme by rig name
+- `disabled: true`: skip both `status-style` and `window-style`
+- `name`: use that built-in theme
+- `custom`: use exact `{bg, fg}` colors
+- `role_themes`: override role-specific sessions within the rig
+
+Town-level role defaults live in `mayor/config.json` under:
+
+```json
+{
+  "theme": {
+    "disabled": false,
+    "name": "forest",
+    "custom": {
+      "bg": "#111111",
+      "fg": "#eeeeee"
+    },
+    "role_defaults": {
+      "mayor": "forest",
+      "deacon": "plum",
+      "witness": "rust",
+      "crew": "none"
+    }
+  }
+}
+```
+
+`role_defaults` supports `mayor`, `deacon`, `witness`, `refinery`, `crew`, and `polecat`.
 
 **Merge queue fields:**
 

@@ -31,7 +31,6 @@ func debugSession(context string, err error) {
 	}
 }
 
-
 // Session errors
 var (
 	ErrSessionRunning  = errors.New("session already running")
@@ -413,7 +412,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	}
 
 	// Apply theme (non-fatal)
-	theme := tmux.AssignTheme(m.rig.Name)
+	theme := tmux.ResolveSessionTheme(townRoot, m.rig.Name, "polecat")
 	debugSession("ConfigureGasTownSession", m.tmux.ConfigureGasTownSession(sessionID, theme, m.rig.Name, polecat, "polecat"))
 
 	// Set pane-died hook for crash detection (non-fatal)

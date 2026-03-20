@@ -205,7 +205,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 
 		// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
 		// Note: ConfigureGasTownSession includes cycle bindings
-		theme := getThemeForRig(r.Name)
+		theme := tmux.ResolveSessionTheme(townRoot, r.Name, "crew")
 		_ = t.ConfigureGasTownSession(sessionID, theme, r.Name, name, "crew")
 
 		// Wait for shell to be ready after session creation

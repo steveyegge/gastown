@@ -1104,6 +1104,9 @@ func quoteForShell(s string) string {
 
 // ThemeConfig represents tmux theme settings for a rig.
 type ThemeConfig struct {
+	// Disabled skips tmux status/window theming for this rig.
+	Disabled bool `json:"disabled,omitempty"`
+
 	// Name picks from the default palette (e.g., "ocean", "forest").
 	// If empty, a theme is auto-assigned based on rig name.
 	Name string `json:"name,omitempty"`
@@ -1112,7 +1115,8 @@ type ThemeConfig struct {
 	Custom *CustomTheme `json:"custom,omitempty"`
 
 	// RoleThemes overrides themes for specific roles in this rig.
-	// Keys: "witness", "refinery", "crew", "polecat"
+	// Keys: "witness", "refinery", "crew", "polecat".
+	// A value of "none" disables tmux theming for that role.
 	RoleThemes map[string]string `json:"role_themes,omitempty"`
 
 	// WindowTint controls window background (window-style) coloring for this rig.
@@ -1128,8 +1132,20 @@ type CustomTheme struct {
 
 // TownThemeConfig represents global theme settings (mayor/config.json).
 type TownThemeConfig struct {
+	// Disabled skips tmux status/window theming for all sessions unless a rig
+	// theme overrides it.
+	Disabled bool `json:"disabled,omitempty"`
+
+	// Name picks from the default palette when no role-specific override exists.
+	Name string `json:"name,omitempty"`
+
+	// Custom overrides the palette with specific colors when no role-specific
+	// override exists.
+	Custom *CustomTheme `json:"custom,omitempty"`
+
 	// RoleDefaults sets default themes for roles across all rigs.
-	// Keys: "witness", "refinery", "crew", "polecat"
+	// Keys: "mayor", "deacon", "witness", "refinery", "crew", "polecat".
+	// A value of "none" disables tmux theming for that role.
 	RoleDefaults map[string]string `json:"role_defaults,omitempty"`
 
 	// WindowTint controls window background (window-style) coloring globally.
