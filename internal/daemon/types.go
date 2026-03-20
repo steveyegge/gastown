@@ -125,6 +125,7 @@ type PatrolsConfig struct {
 	JsonlGitBackup *JsonlGitBackupConfig  `json:"jsonl_git_backup,omitempty"`
 	WispReaper     *WispReaperConfig      `json:"wisp_reaper,omitempty"`
 	DoctorDog      *DoctorDogConfig       `json:"doctor_dog,omitempty"`
+	Crew                   *PatrolConfig                  `json:"crew,omitempty"`
 	CompactorDog           *CompactorDogConfig            `json:"compactor_dog,omitempty"`
 	CheckpointDog          *CheckpointDogConfig           `json:"checkpoint_dog,omitempty"`
 	ScheduledMaintenance   *ScheduledMaintenanceConfig    `json:"scheduled_maintenance,omitempty"`
@@ -294,6 +295,12 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 		}
 		return config.Patrols.ScheduledMaintenance.Enabled
 	}
+	if patrol == constants.RoleCrew {
+		if config == nil || config.Patrols == nil || config.Patrols.Crew == nil {
+			return false // Opt-in: disabled by default
+		}
+		return config.Patrols.Crew.Enabled
+	}
 
 	if config == nil || config.Patrols == nil {
 		return true // Default: enabled
@@ -334,6 +341,10 @@ func GetPatrolRigs(config *DaemonPatrolConfig, patrol string) []string {
 	case constants.RoleWitness:
 		if config.Patrols.Witness != nil {
 			return config.Patrols.Witness.Rigs
+		}
+	case constants.RoleCrew:
+		if config.Patrols.Crew != nil {
+			return config.Patrols.Crew.Rigs
 		}
 	}
 	return nil // All rigs

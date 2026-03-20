@@ -113,6 +113,7 @@ type HandoffData struct {
 // SupervisorData contains information for rendering supervisor templates.
 type SupervisorData struct {
 	GTPath   string // Path to the gt binary
+	GTDir    string // Directory containing the gt binary (for PATH)
 	TownRoot string // Path to the Gas Town workspace
 }
 
@@ -258,6 +259,7 @@ func ProvisionSupervisor(townRoot string) (string, error) {
 
 	data := SupervisorData{
 		GTPath:   gtPath,
+		GTDir:    filepath.Dir(gtPath),
 		TownRoot: townRoot,
 	}
 
@@ -316,6 +318,72 @@ func provisionLaunchd(data SupervisorData) (string, error) {
 	}
 
 	return "Created and loaded launchd service: com.gastown.daemon", nil
+}
+
+// ProvisionDashboardSupervisor creates and configures the dashboard supervisor service.
+// On macOS: creates and loads a launchd plist for com.gastown.dashboard.
+// On Linux: not yet supported (returns informational message).
+func ProvisionDashboardSupervisor(townRoot string) (string, error) {
+	gtPath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("finding gt executable: %w", err)
+	}
+
+	data := SupervisorData{
+		GTPath:   gtPath,
+		GTDir:    filepath.Dir(gtPath),
+		TownRoot: townRoot,
+	}
+
+	switch runtime.GOOS {
+	case "darwin":
+		return provisionDashboardLaunchd(data)
+	default:
+		return fmt.Sprintf("Dashboard supervisor auto-configuration skipped on %s (not supported yet)", runtime.GOOS), nil
+	}
+}
+
+// provisionDashboardLaunchd creates and loads the dashboard launchd plist on macOS.
+func provisionDashboardLaunchd(data SupervisorData) (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("finding home directory: %w", err)
+	}
+
+	agentsDir := filepath.Join(homeDir, "Library", "LaunchAgents")
+	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		return "", fmt.Errorf("creating LaunchAgents directory: %w", err)
+	}
+
+	plistPath := filepath.Join(agentsDir, "com.gastown.dashboard.plist")
+
+	templateContent, err := supervisorFS.ReadFile("launchd/com.gastown.dashboard.plist")
+	if err != nil {
+		return "", fmt.Errorf("reading dashboard launchd template: %w", err)
+	}
+
+	tmpl, err := template.New("dashboard-launchd").Parse(string(templateContent))
+	if err != nil {
+		return "", fmt.Errorf("parsing dashboard launchd template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("rendering dashboard launchd template: %w", err)
+	}
+
+	if err := os.WriteFile(plistPath, buf.Bytes(), 0644); err != nil {
+		return "", fmt.Errorf("writing dashboard plist file: %w", err)
+	}
+
+	// Unload if already loaded (ignore errors)
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
+
+	if output, err := exec.Command("launchctl", "load", plistPath).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("loading dashboard launchd service: %s", string(output))
+	}
+
+	return "Created and loaded launchd service: com.gastown.dashboard", nil
 }
 
 // provisionSystemd creates and enables a systemd user unit on Linux.
