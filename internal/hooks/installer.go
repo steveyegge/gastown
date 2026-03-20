@@ -8,6 +8,7 @@ package hooks
 import (
 	"bytes"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -165,4 +166,37 @@ func resolveGTBinary() string {
 		return path
 	}
 	return "gt"
+}
+
+// ComputeExpectedTemplate returns the expected file content for a template-based
+// provider (e.g., gemini) with {{GT_BIN}} resolved to the actual gt binary path.
+// This is used by the doctor hooks-sync check to compare installed files against
+// current templates.
+func ComputeExpectedTemplate(provider, hooksFile, role string) ([]byte, error) {
+	content, err := resolveTemplate(provider, hooksFile, role)
+	if err != nil {
+		return nil, err
+	}
+
+	if bytes.Contains(content, []byte("{{GT_BIN}}")) {
+		gtBin := resolveGTBinary()
+		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBin))
+	}
+
+	return content, nil
+}
+
+// TemplateContentEqual compares two JSON byte slices for structural equality
+// by normalizing whitespace. Returns true if they represent the same JSON.
+func TemplateContentEqual(expected, actual []byte) bool {
+	var e, a interface{}
+	if err := json.Unmarshal(expected, &e); err != nil {
+		return false
+	}
+	if err := json.Unmarshal(actual, &a); err != nil {
+		return false
+	}
+	ej, _ := json.Marshal(e)
+	aj, _ := json.Marshal(a)
+	return string(ej) == string(aj)
 }

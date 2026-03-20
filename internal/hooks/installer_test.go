@@ -255,3 +255,68 @@ func TestInstallForRole_CopilotRoleAware(t *testing.T) {
 		t.Error("copilot interactive: content mismatch")
 	}
 }
+
+func TestComputeExpectedTemplate_Gemini(t *testing.T) {
+	// Autonomous role should get settings-autonomous.json template
+	content, err := ComputeExpectedTemplate("gemini", "settings.json", "witness")
+	if err != nil {
+		t.Fatalf("ComputeExpectedTemplate: %v", err)
+	}
+
+	// Should contain resolved gt binary path, not {{GT_BIN}}
+	if strings.Contains(string(content), "{{GT_BIN}}") {
+		t.Error("expected {{GT_BIN}} to be resolved")
+	}
+
+	// Should contain GT_HOOK_SOURCE=compact (from autonomous template)
+	if !strings.Contains(string(content), "GT_HOOK_SOURCE=compact") {
+		t.Error("expected GT_HOOK_SOURCE=compact in autonomous template")
+	}
+
+	// Interactive role should get settings-interactive.json template
+	interactiveContent, err := ComputeExpectedTemplate("gemini", "settings.json", "crew")
+	if err != nil {
+		t.Fatalf("ComputeExpectedTemplate(crew): %v", err)
+	}
+
+	// Interactive template should NOT contain GT_HOOK_SOURCE=compact
+	if strings.Contains(string(interactiveContent), "GT_HOOK_SOURCE=compact") {
+		t.Error("interactive template should not contain GT_HOOK_SOURCE=compact")
+	}
+}
+
+func TestTemplateContentEqual(t *testing.T) {
+	// Same JSON, different formatting
+	a := []byte(`{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"test"}]}]}}`)
+	b := []byte(`{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test"
+          }
+        ]
+      }
+    ]
+  }
+}`)
+
+	if !TemplateContentEqual(a, b) {
+		t.Error("expected structurally equal JSON to match")
+	}
+
+	// Different content
+	c := []byte(`{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"different"}]}]}}`)
+	if TemplateContentEqual(a, c) {
+		t.Error("expected different JSON to not match")
+	}
+
+	// Invalid JSON
+	invalid := []byte(`not json`)
+	if TemplateContentEqual(a, invalid) {
+		t.Error("expected invalid JSON to not match")
+	}
+}
