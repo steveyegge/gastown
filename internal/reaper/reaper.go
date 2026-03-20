@@ -502,11 +502,15 @@ func purgeClosedWisps(db *sql.DB, dbName string, purgeAge time.Duration, dryRun 
 		}
 		commitMsg := fmt.Sprintf("reaper: purge %d closed wisps from %s", totalDeleted, dbName)
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
-			// Non-fatal — log but continue.
-			anomalies = append(anomalies, Anomaly{
-				Type:    "dolt_commit_failed",
-				Message: fmt.Sprintf("dolt commit after purge failed: %v", err),
-			})
+			// "nothing to commit" is expected when wisps are dolt_ignored — deletes
+			// are auto-committed by the SQL layer and Dolt has nothing to version.
+			if !isNothingToCommit(err) {
+				// Non-fatal — log but continue.
+				anomalies = append(anomalies, Anomaly{
+					Type:    "dolt_commit_failed",
+					Message: fmt.Sprintf("dolt commit after purge failed: %v", err),
+				})
+			}
 		}
 	}
 
@@ -661,10 +665,13 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 		}
 		commitMsg := fmt.Sprintf("reaper: auto-close %d stale issues in %s", len(ids), dbName)
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
-			result.Anomalies = append(result.Anomalies, Anomaly{
-				Type:    "dolt_commit_failed",
-				Message: fmt.Sprintf("dolt commit after auto-close failed: %v", err),
-			})
+			// "nothing to commit" is expected when the updated tables are dolt_ignored.
+			if !isNothingToCommit(err) {
+				result.Anomalies = append(result.Anomalies, Anomaly{
+					Type:    "dolt_commit_failed",
+					Message: fmt.Sprintf("dolt commit after auto-close failed: %v", err),
+				})
+			}
 		}
 	}
 
