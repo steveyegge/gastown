@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/util"
 )
@@ -244,6 +245,17 @@ func NewDoltServerReachableCheck() *DoltServerReachableCheck {
 
 // Run checks if any rig has server-mode metadata but the server is unreachable.
 func (c *DoltServerReachableCheck) Run(ctx *CheckContext) *CheckResult {
+	// If the daemon is not running, Dolt may not be up yet — skip rather than
+	// false-alarm with SPLIT-BRAIN RISK on every fresh session start.
+	if running, _, err := daemon.IsRunning(ctx.TownRoot); err != nil || !running {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  "Skipped: daemon not running (Dolt may not be up yet)",
+			Category: c.CheckCategory,
+		}
+	}
+
 	// Find rigs configured for server mode, grouped by server address
 	rigsByAddr := c.findServerModeRigsByAddr(ctx.TownRoot)
 	if len(rigsByAddr) == 0 {
