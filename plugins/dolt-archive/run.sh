@@ -16,7 +16,7 @@ DOLT_USER="${DOLT_USER:-root}"
 DOLT_DATA_DIR="${DOLT_DATA_DIR:-$HOME/gt/.dolt-data}"
 JSONL_EXPORT_DIR="$HOME/gt/.dolt-archive/jsonl"
 BACKUP_REPO="$HOME/gt/.dolt-archive/git"
-DEFAULT_DBS="hq,ne,st,commercialhub"
+DEFAULT_DBS="auto"
 SKIP_GIT=false
 SKIP_DOLT_PUSH=false
 
@@ -64,7 +64,20 @@ dolt_query_json() {
 
 # --- Step 1: JSONL export ----------------------------------------------------
 
-IFS=',' read -ra PROD_DBS <<< "$DEFAULT_DBS"
+# Auto-discover production databases or use the explicit list.
+if [[ "$DEFAULT_DBS" == "auto" ]]; then
+  mapfile -t PROD_DBS < <(
+    dolt_query "" "SHOW DATABASES" \
+      | grep -v -E '^(information_schema|mysql|dolt_cluster)$' \
+      | grep -v -E '^(testdb_|beads_t|beads_pt|doctest_)'
+  )
+  if [[ ${#PROD_DBS[@]} -eq 0 ]]; then
+    log "ERROR: No production databases found via auto-discovery"
+    exit 1
+  fi
+else
+  IFS=',' read -ra PROD_DBS <<< "$DEFAULT_DBS"
+fi
 
 log "Starting archive cycle (databases: ${PROD_DBS[*]})"
 mkdir -p "$JSONL_EXPORT_DIR"
