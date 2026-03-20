@@ -1416,6 +1416,105 @@ func TestAddRig_UpstreamURL(t *testing.T) {
 	_ = rig
 }
 
+// TestAddRig_BranchFlag verifies that --branch is passed to the bare clone so
+// the bare repo's HEAD and origin tracking ref both point to the specified branch.
+func TestAddRig_BranchFlag(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-based bd shim not reliable on Windows CI")
+	}
+
+	fakeBDForAddRig(t)
+
+	// Create a remote with two branches: main (default) and develop.
+	repoDir := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init", "--initial-branch=main", repoDir},
+		{"git", "-C", repoDir, "config", "user.email", "test@test.com"},
+		{"git", "-C", repoDir, "config", "user.name", "Test User"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# test\n"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	for _, args := range [][]string{
+		{"git", "-C", repoDir, "add", "."},
+		{"git", "-C", repoDir, "commit", "-m", "Initial commit"},
+		{"git", "-C", repoDir, "checkout", "-b", "develop"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "develop.txt"), []byte("develop branch\n"), 0644); err != nil {
+		t.Fatalf("write develop.txt: %v", err)
+	}
+	for _, args := range [][]string{
+		{"git", "-C", repoDir, "add", "."},
+		{"git", "-C", repoDir, "commit", "-m", "develop commit"},
+		// Switch back to main so remote HEAD points to main (the default branch).
+		{"git", "-C", repoDir, "checkout", "main"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	_, err := manager.AddRig(AddRigOptions{
+		Name:          "testrig",
+		GitURL:        repoDir,
+		BeadsPrefix:   "tr",
+		DefaultBranch: "develop",
+		SkipDoltCheck: true,
+	})
+	if err != nil {
+		t.Fatalf("AddRig: %v", err)
+	}
+
+	rigPath := filepath.Join(root, "testrig")
+	bareRepoPath := filepath.Join(rigPath, ".repo.git")
+	bareGit := git.NewGitWithDir(bareRepoPath, "")
+
+	t.Run("bare repo HEAD points to develop", func(t *testing.T) {
+		got := bareGit.DefaultBranch()
+		if got != "develop" {
+			t.Errorf("bare repo DefaultBranch() = %q, want %q", got, "develop")
+		}
+	})
+
+	t.Run("origin/develop tracking ref exists in bare repo", func(t *testing.T) {
+		exists, err := bareGit.RefExists("refs/remotes/origin/develop")
+		if err != nil {
+			t.Fatalf("RefExists: %v", err)
+		}
+		if !exists {
+			t.Error("refs/remotes/origin/develop does not exist in bare repo")
+		}
+	})
+
+	t.Run("config.json DefaultBranch is develop", func(t *testing.T) {
+		data, err := os.ReadFile(filepath.Join(rigPath, "config.json"))
+		if err != nil {
+			t.Fatalf("reading config.json: %v", err)
+		}
+		var cfg RigConfig
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			t.Fatalf("parsing config.json: %v", err)
+		}
+		if cfg.DefaultBranch != "develop" {
+			t.Errorf("config.json DefaultBranch = %q, want %q", cfg.DefaultBranch, "develop")
+		}
+	})
+}
+
 // TestBareCloneDefaultBranch verifies that DefaultBranch() returns the correct
 // branch for a bare clone whose remote uses a non-"main" default branch.
 func TestBareCloneDefaultBranch(t *testing.T) {

@@ -388,30 +388,32 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Mayor remains a separate clone (doesn't need branch visibility).
 	fmt.Printf("  Cloning repository (this may take a moment)...\n")
 	bareRepoPath := filepath.Join(rigPath, ".repo.git")
-	if opts.CloneFilter != "" && localRepo != "" {
-		if err := m.git.CloneBarePartialWithReference(opts.GitURL, bareRepoPath, opts.CloneFilter, localRepo); err != nil {
-			fmt.Printf("  Warning: could not use local repo reference with filter: %v\n", err)
-			_ = os.RemoveAll(bareRepoPath)
-			if err := m.git.CloneBarePartial(opts.GitURL, bareRepoPath, opts.CloneFilter); err != nil {
-				return nil, wrapCloneError(err, opts.GitURL)
+	// cloneBareWith selects the right CloneBare variant based on filter/reference/branch.
+	// When branch is non-empty, git clone --branch is passed so HEAD and the initial
+	// single-branch fetch both target the user-specified branch instead of the remote HEAD.
+	cloneBareWith := func(branch string) error {
+		if opts.CloneFilter != "" && localRepo != "" {
+			if err := m.git.CloneBarePartialWithReferenceAndBranch(opts.GitURL, bareRepoPath, opts.CloneFilter, localRepo, branch); err != nil {
+				fmt.Printf("  Warning: could not use local repo reference with filter: %v\n", err)
+				_ = os.RemoveAll(bareRepoPath)
+				return m.git.CloneBarePartialWithBranch(opts.GitURL, bareRepoPath, opts.CloneFilter, branch)
 			}
-		}
-	} else if opts.CloneFilter != "" {
-		if err := m.git.CloneBarePartial(opts.GitURL, bareRepoPath, opts.CloneFilter); err != nil {
-			return nil, wrapCloneError(err, opts.GitURL)
-		}
-	} else if localRepo != "" {
-		if err := m.git.CloneBareWithReference(opts.GitURL, bareRepoPath, localRepo); err != nil {
-			fmt.Printf("  Warning: could not use local repo reference: %v\n", err)
-			_ = os.RemoveAll(bareRepoPath)
-			if err := m.git.CloneBare(opts.GitURL, bareRepoPath); err != nil {
-				return nil, wrapCloneError(err, opts.GitURL)
+			return nil
+		} else if opts.CloneFilter != "" {
+			return m.git.CloneBarePartialWithBranch(opts.GitURL, bareRepoPath, opts.CloneFilter, branch)
+		} else if localRepo != "" {
+			if err := m.git.CloneBareWithReferenceAndBranch(opts.GitURL, bareRepoPath, localRepo, branch); err != nil {
+				fmt.Printf("  Warning: could not use local repo reference: %v\n", err)
+				_ = os.RemoveAll(bareRepoPath)
+				return m.git.CloneBareWithBranch(opts.GitURL, bareRepoPath, branch)
 			}
+			return nil
 		}
-	} else {
-		if err := m.git.CloneBare(opts.GitURL, bareRepoPath); err != nil {
-			return nil, wrapCloneError(err, opts.GitURL)
-		}
+		return m.git.CloneBareWithBranch(opts.GitURL, bareRepoPath, branch)
+	}
+
+	if err := cloneBareWith(opts.DefaultBranch); err != nil {
+		return nil, wrapCloneError(err, opts.GitURL)
 	}
 	if opts.CloneFilter != "" {
 		fmt.Printf("   ✓ Created shared bare repo (partial: --filter=%s)\n", opts.CloneFilter)
