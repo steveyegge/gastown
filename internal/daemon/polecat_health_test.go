@@ -46,6 +46,28 @@ func writeFakeTestBD(t *testing.T, dir, descState, dbState, hookBead, updatedAt 
 	return path
 }
 
+// writeFakeBDWithHookBead creates a shell script in dir named "bd" that returns
+// different JSON based on the bead ID: the agent bead in one state, and the hook
+// bead (work bead) in a separate state. Used to test cases where the agent and hook
+// beads have independent lifecycles (e.g., agent done/nuked while hook_bead open).
+func writeFakeBDWithHookBead(t *testing.T, dir, agentState, hookBeadID, hookBeadStatus, updatedAt string) string {
+	t.Helper()
+	agentJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent"],"description":"agent_state: %s","hook_bead":"%s","agent_state":"%s","updated_at":"%s"}]`,
+		agentState, hookBeadID, agentState, updatedAt)
+	hookJSON := fmt.Sprintf(`[{"id":"%s","status":"%s"}]`, hookBeadID, hookBeadStatus)
+	script := fmt.Sprintf("#!/bin/sh\n"+
+		"case \"$2\" in\n"+
+		"  gt-myr-polecat-mycat) echo '%s';;\n"+
+		"  %s) echo '%s';;\n"+
+		"  *) echo '[]'; exit 1;;\n"+
+		"esac\n", agentJSON, hookBeadID, hookJSON)
+	bdPath := filepath.Join(dir, "bd")
+	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
+		t.Fatalf("writing fake bd: %v", err)
+	}
+	return bdPath
+}
+
 // TestCheckPolecatHealth_SkipsSpawning verifies that checkPolecatHealth does NOT
 // attempt to restart a polecat in agent_state=spawning when recently updated.
 // This is the regression test for the double-spawn bug (issue #1752): the daemon
@@ -197,22 +219,7 @@ func TestCheckPolecatHealth_SkipsClosedHookBead(t *testing.T) {
 	binDir := t.TempDir()
 	writeFakeTestTmux(t, binDir)
 	recentTime := time.Now().UTC().Format(time.RFC3339)
-
-	// Create a bd script that returns different JSON based on the bead ID:
-	// - Agent bead: working state with hook_bead set
-	// - Hook bead: status=closed (work completed normally)
-	agentJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent"],"description":"agent_state: working","hook_bead":"fe-xyz","agent_state":"working","updated_at":"%s"}]`, recentTime)
-	hookJSON := `[{"id":"fe-xyz","status":"closed"}]`
-	script := fmt.Sprintf("#!/bin/sh\n"+
-		"case \"$2\" in\n"+
-		"  gt-myr-polecat-mycat) echo '%s';;\n"+
-		"  fe-xyz) echo '%s';;\n"+
-		"  *) echo '[]'; exit 1;;\n"+
-		"esac\n", agentJSON, hookJSON)
-	bdPath := filepath.Join(binDir, "bd")
-	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
-		t.Fatalf("writing fake bd: %v", err)
-	}
+	bdPath := writeFakeBDWithHookBead(t, binDir, "working", "fe-xyz", "closed", recentTime)
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
@@ -293,9 +300,11 @@ func TestCheckPolecatHealth_NotifiesWitnessOnCrash(t *testing.T) {
 }
 
 // TestCheckPolecatHealth_SkipsDonePolecat verifies that checkPolecatHealth does
-// NOT fire CRASHED_POLECAT when the agent_state is "done". This is the fix for
-// the duplicate RECOVERY_NEEDED flood (GH#2795): polecats that completed
-// normally should not trigger crash alerts just because the session is dead.
+// NOT fire CRASH DETECTED when a polecat has agent_state=done (completed normally)
+// even if its hook_bead is still open. This is the race-window regression test for
+// bug #2795 part 2: between gt done setting agent_state=done and the hook_bead
+// being closed, the daemon heartbeat fires on the dead session + open hook_bead
+// combination, causing repeated false CRASHED_POLECAT alerts to the witness.
 func TestCheckPolecatHealth_SkipsDonePolecat(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test uses Unix shell script mocks for tmux and bd")
@@ -303,7 +312,7 @@ func TestCheckPolecatHealth_SkipsDonePolecat(t *testing.T) {
 	binDir := t.TempDir()
 	writeFakeTestTmux(t, binDir)
 	recentTime := time.Now().UTC().Format(time.RFC3339)
-	bdPath := writeFakeTestBD(t, binDir, "done", "done", "gt-xyz", recentTime)
+	bdPath := writeFakeBDWithHookBead(t, binDir, "done", "gt-xyz", "open", recentTime)
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
@@ -318,17 +327,23 @@ func TestCheckPolecatHealth_SkipsDonePolecat(t *testing.T) {
 	d.checkPolecatHealth("myr", "mycat")
 
 	got := logBuf.String()
+	if !strings.Contains(got, "Skipping crash detection") {
+		t.Errorf("expected skip log message, got: %q", got)
+	}
 	if !strings.Contains(got, "agent_state=done") {
-		t.Errorf("expected log to mention agent_state=done, got: %q", got)
+		t.Errorf("expected agent_state=done in skip log, got: %q", got)
 	}
 	if strings.Contains(got, "CRASH DETECTED") {
-		t.Errorf("done polecat must not trigger CRASH DETECTED, got: %q", got)
+		t.Errorf("done polecat with open hook_bead must not trigger CRASH DETECTED, got: %q", got)
 	}
 }
 
-// TestCheckPolecatHealth_SkipsNukedPolecat verifies that checkPolecatHealth
-// does NOT fire CRASHED_POLECAT when the agent_state is "nuked". Polecats
-// killed with `gt polecat nuke --force` are intentionally stopped (GH#2795).
+// TestCheckPolecatHealth_SkipsNukedPolecat verifies that checkPolecatHealth does
+// NOT fire CRASH DETECTED when a polecat has been nuked (agent_state=nuked) even
+// if its hook_bead (work bead) is still open. This is the regression test for
+// bug #2795: `gt polecat nuke --force` sets agent_state=nuked on the agent bead
+// but leaves the work bead open, causing repeated false RECOVERY_NEEDED alerts
+// on every heartbeat cycle.
 func TestCheckPolecatHealth_SkipsNukedPolecat(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test uses Unix shell script mocks for tmux and bd")
@@ -336,7 +351,7 @@ func TestCheckPolecatHealth_SkipsNukedPolecat(t *testing.T) {
 	binDir := t.TempDir()
 	writeFakeTestTmux(t, binDir)
 	recentTime := time.Now().UTC().Format(time.RFC3339)
-	bdPath := writeFakeTestBD(t, binDir, "nuked", "nuked", "gt-xyz", recentTime)
+	bdPath := writeFakeBDWithHookBead(t, binDir, "nuked", "gt-xyz", "open", recentTime)
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
@@ -351,8 +366,11 @@ func TestCheckPolecatHealth_SkipsNukedPolecat(t *testing.T) {
 	d.checkPolecatHealth("myr", "mycat")
 
 	got := logBuf.String()
+	if !strings.Contains(got, "Skipping crash detection") {
+		t.Errorf("expected skip log message, got: %q", got)
+	}
 	if !strings.Contains(got, "agent_state=nuked") {
-		t.Errorf("expected log to mention agent_state=nuked, got: %q", got)
+		t.Errorf("expected agent_state=nuked in skip log, got: %q", got)
 	}
 	if strings.Contains(got, "CRASH DETECTED") {
 		t.Errorf("nuked polecat must not trigger CRASH DETECTED, got: %q", got)

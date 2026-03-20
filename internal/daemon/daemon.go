@@ -1969,6 +1969,20 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 		return
 	}
 
+	// Terminal state guard: skip polecats in intentional shutdown states.
+	// agent_state='done' means normal completion; agent_state='nuked' means forced shutdown.
+	// Their sessions being dead is expected, not a crash. Without this check,
+	// the dead session + open hook_bead combination can fire false CRASHED_POLECAT
+	// alerts during the race window before the hook_bead is closed.
+	// This check is pure in-memory (info.State is already populated), so it runs before
+	// the more expensive isBeadClosed subprocess call.
+	agentState := beads.AgentState(info.State)
+	if agentState == beads.AgentStateDone || agentState == beads.AgentStateNuked {
+		d.logger.Printf("Skipping crash detection for %s/%s: agent_state=%s (intentional shutdown, not a crash)",
+			rigName, polecatName, info.State)
+		return
+	}
+
 	// Stale hook guard: skip polecats whose hook_bead is already closed.
 	// When a polecat completes work normally (gt done), the hook_bead gets closed
 	// but may not be cleared from the agent bead before the session stops.
@@ -2005,18 +2019,6 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 				rigName, polecatName)
 			return
 		}
-	}
-
-	// Terminal state guard: skip polecats that have completed or been nuked (GH#2795).
-	// A polecat in agent_state=done or agent_state=nuked has shut down intentionally.
-	// The session being dead is expected — the daemon should NOT fire CRASHED_POLECAT.
-	// Without this, every heartbeat cycle floods the witness with duplicate
-	// RECOVERY_NEEDED alerts for completed/nuked polecats.
-	agentState := beads.AgentState(info.State)
-	if agentState == beads.AgentStateDone || agentState == beads.AgentStateNuked {
-		d.logger.Printf("Skipping crash detection for %s/%s: agent_state=%s (session shutdown expected)",
-			rigName, polecatName, info.State)
-		return
 	}
 
 	// TOCTOU guard: re-verify session is still dead before restarting.
