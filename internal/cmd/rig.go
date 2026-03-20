@@ -690,20 +690,23 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 //   - 🅿️ = parked (intentionally paused)
 //   - 🛑 = docked (global shutdown)
 func GetRigLED(hasWitness, hasRefinery bool, opState string) string {
+	// Check operational state FIRST — parked/docked overrides session state.
+	// Sessions may still be running during the race window after park/dock
+	// but before sessions are killed (GH#2555).
+	switch opState {
+	case "PARKED":
+		return "🅿️"
+	case "DOCKED":
+		return "🛑"
+	}
+
 	if hasWitness && hasRefinery {
 		return "🟢"
 	}
 	if hasWitness || hasRefinery {
 		return "🟡"
 	}
-	switch opState {
-	case "PARKED":
-		return "🅿️"
-	case "DOCKED":
-		return "🛑"
-	default:
-		return "⚫"
-	}
+	return "⚫"
 }
 
 // rigStatePriority returns a sort priority for a rig's state.
