@@ -48,6 +48,8 @@ Exit statuses:
 Examples:
   gt done                              # Submit branch, notify COMPLETED, transition to IDLE
   gt done --pre-verified               # Submit with pre-verification fast-path
+  gt done --target feat/my-branch      # Explicit MR target branch
+  gt done --pre-verified --target feat/contract-review  # Pre-verified with explicit target
   gt done --issue gt-abc               # Explicit issue ID
   gt done --status ESCALATED           # Signal blocker, skip MR
   gt done --status DEFERRED            # Pause work, skip MR`,
@@ -62,6 +64,7 @@ var (
 	doneCleanupStatus string
 	doneResume        bool
 	donePreVerified   bool
+	doneTarget        string
 )
 
 // Valid exit types for gt done
@@ -78,6 +81,7 @@ func init() {
 	doneCmd.Flags().StringVar(&doneCleanupStatus, "cleanup-status", "", "Git cleanup status: clean, uncommitted, unpushed, stash, unknown (ZFC: agent-observed)")
 	doneCmd.Flags().BoolVar(&doneResume, "resume", false, "Resume from last checkpoint (auto-detected, for Witness recovery)")
 	doneCmd.Flags().BoolVar(&donePreVerified, "pre-verified", false, "Mark MR as pre-verified (polecat ran gates after rebasing onto target)")
+	doneCmd.Flags().StringVar(&doneTarget, "target", "", "Explicit MR target branch (overrides formula_vars and auto-detection)")
 
 	rootCmd.AddCommand(doneCmd)
 }
@@ -761,24 +765,36 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 
 		// Determine target branch for the MR.
-		// Priority: explicit --base-branch > integration branch auto-detect > rig default.
+		// Priority: explicit --target flag > formula_vars base_branch > integration branch auto-detect > rig default.
 		target := defaultBranch
 
-		// Check for explicit --base-branch override (stored in formula vars at sling time).
-		// When gt sling is called with --base-branch, the value is persisted in the bead's
-		// formula_vars field. If it differs from the rig's default branch, use it as the
-		// MR target so the refinery merges into the correct branch (GH#2357).
-		if sourceIssueForNoMerge != nil {
+		// 1. Explicit --target flag (highest priority — polecat knows its base branch).
+		// This is the most reliable path: the formula passes {{base_branch}} directly,
+		// avoiding any dependency on bd.Show() or Dolt availability.
+		if doneTarget != "" && doneTarget != defaultBranch {
+			target = doneTarget
+			fmt.Printf("  Target branch: %s (from --target flag)\n", target)
+		}
+
+		// 2. Check for --base-branch override in formula vars (stored on bead at sling time).
+		// Fallback for polecats dispatched before --target flag existed, or when
+		// the formula doesn't pass --target explicitly.
+		if target == defaultBranch && sourceIssueForNoMerge != nil {
 			if af := beads.ParseAttachmentFields(sourceIssueForNoMerge); af != nil {
 				if bb := extractFormulaVar(af.FormulaVars, "base_branch"); bb != "" && bb != defaultBranch {
 					target = bb
-					fmt.Printf("  Target branch override: %s (from --base-branch)\n", target)
+					fmt.Printf("  Target branch override: %s (from formula_vars)\n", target)
 				}
 			}
+		} else if target == defaultBranch && sourceIssueForNoMerge == nil && issueID != "" {
+			// sourceIssueForNoMerge is nil — bd.Show(issueID) failed earlier.
+			// This is the silent failure path that caused 150+ procedure beads to
+			// target main instead of feat/contract-review-procedure.
+			style.PrintWarning("could not load source issue %s for target branch detection (Dolt/beads lookup failed) — using default branch %s", issueID, defaultBranch)
 		}
 
-		// Auto-detect integration branch from epic hierarchy (if enabled).
-		// Only overrides if no explicit --base-branch was set (target == defaultBranch).
+		// 3. Auto-detect integration branch from epic hierarchy (if enabled).
+		// Only overrides if no explicit target was set above.
 		if target == defaultBranch {
 			refineryEnabled := true
 			settingsPath := filepath.Join(townRoot, rigName, "settings", "config.json")
