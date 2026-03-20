@@ -1528,8 +1528,18 @@ func Start(townRoot string) error {
 	// On systems with slow storage (CSI/NFS), dolt can take 1-2s to bind its
 	// port, well past the first 500ms check. By using cmd.Process.Signal(0)
 	// we detect true process death without the PID-file side effect.
+	//
+	// The number of attempts scales with the database count: each database
+	// adds ~1s of startup overhead (LevelDB compaction, stats loading, etc.).
+	// We allow 5s per database so that workspaces with many rigs don't time
+	// out before Dolt finishes initializing.
+	dbCount := len(databases)
+	if dbCount < 1 {
+		dbCount = 1
+	}
+	maxAttempts := dbCount * 10 // 10 × 500ms = 5s per database
 	var lastErr error
-	for attempt := 0; attempt < 10; attempt++ {
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		time.Sleep(500 * time.Millisecond)
 
 		// Check if the process we started is still alive.
@@ -1544,7 +1554,8 @@ func Start(townRoot string) error {
 		}
 	}
 
-	return fmt.Errorf("Dolt server process started (PID %d) but not accepting connections after 5s: %w\nCheck logs with: gt dolt logs", cmd.Process.Pid, lastErr)
+	totalTimeout := time.Duration(dbCount) * 5 * time.Second
+	return fmt.Errorf("Dolt server process started (PID %d) but not accepting connections after %v (%d databases × 5s): %w\nCheck logs with: gt dolt logs", cmd.Process.Pid, totalTimeout, dbCount, lastErr)
 }
 
 // cleanupStaleDoltLock removes a stale Dolt LOCK file if no process holds it.
