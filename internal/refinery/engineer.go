@@ -401,6 +401,7 @@ type ProcessResult struct {
 	TestsFailed    bool
 	SlotTimeout    bool // Merge slot contention timeout (distinct from build/test failure)
 	BranchNotFound bool // Source branch no longer exists (e.g. cleaned up after cherry-pick)
+	NoMerge        bool // Source issue has no_merge flag — intentionally blocked, not a failure
 }
 
 // doMerge performs the actual git merge operation.
@@ -412,7 +413,7 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		if si, err := e.beads.Show(sourceIssue); err == nil && si != nil {
 			if af := beads.ParseAttachmentFields(si); af != nil && af.NoMerge {
 				_, _ = fmt.Fprintf(e.output, "[Engineer] Source issue %s has no_merge=true — skipping merge\n", sourceIssue)
-				return ProcessResult{Error: "no_merge flag set on source issue"}
+				return ProcessResult{NoMerge: true, Error: "no_merge flag set on source issue"}
 			}
 		}
 	}
@@ -1048,6 +1049,13 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 	if result.SlotTimeout {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] ✗ Slot timeout: %s - %s\n", mr.ID, result.Error)
 		_, _ = fmt.Fprintln(e.output, "[Engineer] MR remains in queue for automatic retry (slot contention)")
+		return
+	}
+
+	// No-merge is intentional — the source issue has no_merge=true. Not a failure.
+	// No polecat or mayor notification needed; the MR is simply dequeued.
+	if result.NoMerge {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] MR %s: no_merge flag set on source issue, dequeued\n", mr.ID)
 		return
 	}
 
