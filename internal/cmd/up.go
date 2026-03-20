@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -493,9 +495,25 @@ func disableCurrentAgentDND(townRoot string) (bool, error) {
 // ensureDaemon starts the daemon if not running.
 func ensureDaemon(townRoot string) error {
 	// GH#2656: Don't restart the daemon while gt down is running.
+	// GH#2907: If the sentinel's PID is dead, remove stale sentinel.
 	sentinelPath := filepath.Join(townRoot, ShutdownSentinel)
-	if _, err := os.Stat(sentinelPath); err == nil {
-		return fmt.Errorf("shutdown in progress (sentinel exists: %s)", sentinelPath)
+	if data, err := os.ReadFile(sentinelPath); err == nil {
+		stale := false
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+			if process, err := os.FindProcess(pid); err != nil {
+				stale = true
+			} else if err := process.Signal(syscall.Signal(0)); err != nil {
+				stale = true
+			}
+		} else {
+			// Sentinel exists but has no valid PID — treat as stale.
+			stale = true
+		}
+		if stale {
+			os.Remove(sentinelPath)
+		} else {
+			return fmt.Errorf("shutdown in progress (sentinel exists: %s)", sentinelPath)
+		}
 	}
 
 	running, _, err := daemon.IsRunning(townRoot)
