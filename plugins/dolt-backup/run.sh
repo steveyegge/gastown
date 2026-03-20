@@ -11,8 +11,9 @@ set -euo pipefail
 
 # --- Configuration -----------------------------------------------------------
 
-DOLT_DATA_DIR="${DOLT_DATA_DIR:-${GT_ROOT:-$HOME/gt}/.dolt-data}"
-BACKUP_DIR="${DOLT_BACKUP_DIR:-${GT_ROOT:-$HOME/gt}/.dolt-backup}"
+TOWN_ROOT="${GT_TOWN_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+DOLT_DATA_DIR="${DOLT_DATA_DIR:-$TOWN_ROOT/.dolt-data}"
+BACKUP_DIR="${DOLT_BACKUP_DIR:-$TOWN_ROOT/.dolt-backup}"
 # Auto-discover databases from data dir if not overridden
 if [[ -z "${DOLT_DATABASES:-}" ]]; then
   PROD_DBS=()

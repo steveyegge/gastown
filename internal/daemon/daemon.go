@@ -500,6 +500,18 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("Scheduled maintenance ticker started (check interval %v, window %s)", interval, window)
 	}
 
+	// Start main-branch test runner ticker if configured.
+	// Periodically runs quality gates on each rig's main branch to catch regressions.
+	var mainBranchTestTicker *time.Ticker
+	var mainBranchTestChan <-chan time.Time
+	if IsPatrolEnabled(d.patrolConfig, "main_branch_test") {
+		interval := mainBranchTestInterval(d.patrolConfig)
+		mainBranchTestTicker = time.NewTicker(interval)
+		mainBranchTestChan = mainBranchTestTicker.C
+		defer mainBranchTestTicker.Stop()
+		d.logger.Printf("Main branch test ticker started (interval %v)", interval)
+	}
+
 	// Note: PATCH-010 uses per-session hooks in deacon/manager.go (SetAutoRespawnHook).
 	// Global pane-died hooks don't fire reliably in tmux 3.2a, so we rely on the
 	// per-session approach which has been tested to work for continuous recovery.
@@ -592,6 +604,13 @@ func (d *Daemon) Run() error {
 			// and runs `gt maintain --force` when commit counts exceed threshold.
 			if !d.isShutdownInProgress() {
 				d.runScheduledMaintenance()
+			}
+
+		case <-mainBranchTestChan:
+			// Main branch test runner — periodically runs quality gates on each
+			// rig's main branch to catch regressions from merges or direct pushes.
+			if !d.isShutdownInProgress() {
+				d.runMainBranchTests()
 			}
 
 		case <-timer.C:

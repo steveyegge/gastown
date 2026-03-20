@@ -128,6 +128,7 @@ type PatrolsConfig struct {
 	CompactorDog           *CompactorDogConfig            `json:"compactor_dog,omitempty"`
 	CheckpointDog          *CheckpointDogConfig           `json:"checkpoint_dog,omitempty"`
 	ScheduledMaintenance   *ScheduledMaintenanceConfig    `json:"scheduled_maintenance,omitempty"`
+	MainBranchTest         *MainBranchTestConfig          `json:"main_branch_test,omitempty"`
 	RestartTracker         *RestartTrackerConfig          `json:"restart_tracker,omitempty"`
 }
 
@@ -293,6 +294,12 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 			return false
 		}
 		return config.Patrols.ScheduledMaintenance.Enabled
+	}
+	if patrol == "main_branch_test" {
+		if config == nil || config.Patrols == nil || config.Patrols.MainBranchTest == nil {
+			return false
+		}
+		return config.Patrols.MainBranchTest.Enabled
 	}
 
 	if config == nil || config.Patrols == nil {
