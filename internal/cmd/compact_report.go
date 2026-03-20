@@ -561,6 +561,7 @@ func findExistingCompactReport(dateStr string) (string, error) {
 
 	listCmd := exec.Command("bd", "list",
 		"--type=event",
+		"--status=closed",
 		"--json",
 		"--limit=50",
 	)
