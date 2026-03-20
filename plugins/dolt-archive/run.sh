@@ -16,7 +16,7 @@ DOLT_USER="${DOLT_USER:-root}"
 DOLT_DATA_DIR="${DOLT_DATA_DIR:-$HOME/gt/.dolt-data}"
 JSONL_EXPORT_DIR="$HOME/gt/.dolt-archive/jsonl"
 BACKUP_REPO="$HOME/gt/.dolt-archive/git"
-DEFAULT_DBS="hq,beads,gt"
+DEFAULT_DBS="auto"
 SKIP_GIT=false
 SKIP_DOLT_PUSH=false
 
@@ -62,9 +62,22 @@ dolt_query_json() {
     --use-db "$db" sql -q "$query" --result-format json 2>>"$LOGFILE"
 }
 
-# --- Step 1: JSONL export ----------------------------------------------------
+# --- Step 1: Discover databases ----------------------------------------------
 
-IFS=',' read -ra PROD_DBS <<< "$DEFAULT_DBS"
+if [[ "$DEFAULT_DBS" == "auto" ]]; then
+  log "Auto-discovering databases from Dolt server..."
+  DISCOVERED=$(dolt_query "" "SHOW DATABASES" | grep -vE '^(information_schema|mysql|dolt)$')
+  if [[ -z "$DISCOVERED" ]]; then
+    log "ERROR: No user databases found on Dolt server at $DOLT_HOST:$DOLT_PORT"
+    exit 1
+  fi
+  IFS=$'\n' read -ra PROD_DBS <<< "$DISCOVERED"
+  log "Discovered ${#PROD_DBS[@]} databases: ${PROD_DBS[*]}"
+else
+  IFS=',' read -ra PROD_DBS <<< "$DEFAULT_DBS"
+fi
+
+# --- Step 2: JSONL export ----------------------------------------------------
 
 log "Starting archive cycle (databases: ${PROD_DBS[*]})"
 mkdir -p "$JSONL_EXPORT_DIR"
@@ -104,16 +117,16 @@ done
 
 # Prune old exports (keep last 24 snapshots per DB)
 for DB in "${PROD_DBS[@]}"; do
-  SNAPSHOTS=$(ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null | tail -n +25)
-  if [[ -n "$SNAPSHOTS" ]]; then
-    echo "$SNAPSHOTS" | xargs rm -f
+  mapfile -t ALL_SNAPS < <(ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null || true)
+  if (( ${#ALL_SNAPS[@]} > 24 )); then
+    printf '%s\n' "${ALL_SNAPS[@]:24}" | xargs rm -f
     log "Pruned old $DB snapshots"
   fi
 done
 
 log "JSONL export: $EXPORTED succeeded, $EXPORT_FAILED failed"
 
-# --- Step 2: Git commit and push ---------------------------------------------
+# --- Step 3: Git commit and push ---------------------------------------------
 
 GIT_PUSHED=false
 
@@ -158,7 +171,7 @@ elif ! $SKIP_GIT; then
   log "No git backup repo at $BACKUP_REPO — skipping git push"
 fi
 
-# --- Step 3: Dolt native push ------------------------------------------------
+# --- Step 4: Dolt native push ------------------------------------------------
 
 DOLT_PUSHED=0
 DOLT_PUSH_FAILED=0
@@ -198,7 +211,7 @@ if ! $SKIP_DOLT_PUSH; then
   log "Dolt push: $DOLT_PUSHED succeeded, $DOLT_PUSH_FAILED failed"
 fi
 
-# --- Step 4: Report results --------------------------------------------------
+# --- Step 5: Report results --------------------------------------------------
 
 log ""
 log "=== Archive Cycle Complete ==="
