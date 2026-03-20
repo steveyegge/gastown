@@ -1621,10 +1621,11 @@ func tryForkPRFallback(g *git.Git, branch, defaultBranch, issueID string) error 
 	// Extract fork owner (e.g., "quad341" from "quad341/gastown")
 	forkOwner := strings.SplitN(forkOwnerRepo, "/", 2)[0]
 
-	// Push to fork remote
+	// Push to fork remote (force in case branch already exists from a prior attempt —
+	// the fork is the polecat's own, so force push is safe)
 	fmt.Printf("Origin push denied — pushing to fork remote...\n")
 	refspec := branch + ":" + branch
-	if pushErr := g.Push("fork", refspec, false); pushErr != nil {
+	if pushErr := g.Push("fork", refspec, true); pushErr != nil {
 		return fmt.Errorf("push to fork failed: %w", pushErr)
 	}
 	fmt.Printf("%s Branch pushed to fork (%s)\n", style.Bold.Render("✓"), forkOwnerRepo)
@@ -1645,6 +1646,7 @@ func tryForkPRFallback(g *git.Git, branch, defaultBranch, issueID string) error 
 		"--title", prTitle,
 		"--body", fmt.Sprintf("Automated PR from polecat work.\n\nSource issue: %s\nBranch: %s", issueID, branch),
 	)
+	cmd.Dir = g.WorkDir()
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("gh pr create failed: %w\nOutput: %s", err, string(output))
@@ -1659,15 +1661,20 @@ func tryForkPRFallback(g *git.Git, branch, defaultBranch, issueID string) error 
 // Supports HTTPS (https://github.com/owner/repo.git) and
 // SSH (git@github.com:owner/repo.git) formats.
 func gitURLToOwnerRepo(gitURL string) string {
-	if strings.HasPrefix(gitURL, "https://github.com/") {
-		path := strings.TrimPrefix(gitURL, "https://github.com/")
-		path = strings.TrimSuffix(path, ".git")
-		return path
+	var path string
+	switch {
+	case strings.HasPrefix(gitURL, "https://github.com/"):
+		path = strings.TrimPrefix(gitURL, "https://github.com/")
+	case strings.HasPrefix(gitURL, "git@github.com:"):
+		path = strings.TrimPrefix(gitURL, "git@github.com:")
+	default:
+		return ""
 	}
-	if strings.HasPrefix(gitURL, "git@github.com:") {
-		path := strings.TrimPrefix(gitURL, "git@github.com:")
-		path = strings.TrimSuffix(path, ".git")
-		return path
+	path = strings.TrimSuffix(path, ".git")
+	// Validate exactly "owner/repo" (2 components)
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return ""
 	}
-	return ""
+	return path
 }

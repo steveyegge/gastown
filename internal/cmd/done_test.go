@@ -1359,6 +1359,8 @@ func TestGitURLToOwnerRepo(t *testing.T) {
 		{"https://github.com/owner/repo", "owner/repo"},
 		{"git@github.com:steveyegge/gastown.git", "steveyegge/gastown"},
 		{"git@github.com:owner/repo.git", "owner/repo"},
+		{"https://github.com/owner/repo/tree/main", ""},
+		{"git@github.com:owner/repo/extra.git", ""},
 		{"https://gitlab.com/owner/repo.git", ""},
 		{"", ""},
 	}
