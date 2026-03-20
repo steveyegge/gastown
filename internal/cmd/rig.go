@@ -1826,12 +1826,15 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 			// Reconcile display state with tmux session liveness.
 			// Per gt-zecmc design: tmux is ground truth for observable states.
 			// If session is running but beads says done, the polecat is still alive.
-			// If session is dead but beads says working, the polecat is actually done.
+			// If session is dead but beads says working, show "stalled" so the
+			// witness can detect unsubmitted work (gt-3071b). Previously this
+			// showed "done" which masked failures where polecats died before
+			// running gt done, leaving work stranded in worktrees.
 			displayState := p.State
 			if hasSession && displayState == polecat.StateDone {
 				displayState = polecat.StateWorking
 			} else if !hasSession && displayState == polecat.StateWorking {
-				displayState = polecat.StateDone
+				displayState = polecat.State("stalled")
 			}
 
 			stateStr := string(displayState)
