@@ -204,6 +204,10 @@ func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error)
 		return nil, fmt.Errorf("creating crew dir: %w", err)
 	}
 
+	if m.rig.GitURL == "" {
+		return nil, fmt.Errorf("rig %q has no git URL configured — crew workspaces require a clonable repository (set git_url in rigs.json or re-add the rig with a remote URL)", m.rig.Name)
+	}
+
 	// Clone the rig repo on the configured default branch.
 	// CloneBranch ensures the crew lands on the rig's default_branch even when
 	// it differs from the remote's HEAD. Falls back gracefully for new/empty repos.
