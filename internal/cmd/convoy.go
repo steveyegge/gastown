@@ -440,6 +440,16 @@ func getTownBeadsDir() (string, error) {
 // "exit status 1". BEADS_DIR is stripped from the subprocess environment to
 // prevent stale overrides from interfering with bd's workspace detection.
 func runBdJSON(dir string, args ...string) ([]byte, error) {
+	// Strip --allow-stale if bd doesn't support it (version mismatch).
+	if !beads.BdSupportsAllowStale() {
+		filtered := make([]string, 0, len(args))
+		for _, a := range args {
+			if a != "--allow-stale" {
+				filtered = append(filtered, a)
+			}
+		}
+		args = filtered
+	}
 	cmd := exec.Command("bd", args...)
 	cmd.Dir = dir
 	// Strip BEADS_DIR so bd discovers the correct database from cmd.Dir
