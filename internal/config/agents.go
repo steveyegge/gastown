@@ -277,9 +277,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			OutputFlag: "--json",
 		},
 		// Runtime defaults
-		PromptMode:       "none",
-		ReadyDelayMs:     3000,
-		InstructionsFile: "AGENTS.md",
+		PromptMode:         "none",
+		ReadyPromptPrefix:  "› ",
+		ReadyDelayMs:       3000,
+		InstructionsFile:   "AGENTS.md",
 	},
 	AgentCursor: {
 		Name:                AgentCursor,

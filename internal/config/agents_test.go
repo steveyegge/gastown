@@ -1192,6 +1192,21 @@ func TestCopilotRuntimeConfigFromPreset(t *testing.T) {
 	}
 }
 
+func TestCodexRuntimeConfigHasPromptDetection(t *testing.T) {
+	t.Parallel()
+
+	rc := RuntimeConfigFromPreset(AgentCodex)
+	if rc == nil {
+		t.Fatal("RuntimeConfigFromPreset(codex) returned nil")
+	}
+	if rc.Tmux == nil {
+		t.Fatal("RuntimeConfigFromPreset(codex).Tmux returned nil")
+	}
+	if rc.Tmux.ReadyPromptPrefix != "› " {
+		t.Errorf("RuntimeConfigFromPreset(codex).Tmux.ReadyPromptPrefix = %q, want %q", rc.Tmux.ReadyPromptPrefix, "› ")
+	}
+}
+
 func TestPiProviderDefaults(t *testing.T) {
 	t.Parallel()
 

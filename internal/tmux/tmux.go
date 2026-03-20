@@ -2480,6 +2480,27 @@ func matchesPromptPrefix(line, readyPromptPrefix string) bool {
 	return strings.HasPrefix(trimmed, normalizedPrefix) || (prefix != "" && trimmed == prefix)
 }
 
+func hasBusyIndicator(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+	return strings.Contains(trimmed, "esc to interrupt")
+}
+
+func readyPromptPrefixForSession(t *Tmux, session string) string {
+	promptPrefix := DefaultReadyPromptPrefix
+	agentName, err := t.GetEnvironment(session, "GT_AGENT")
+	if err != nil || agentName == "" {
+		return promptPrefix
+	}
+	preset := config.GetAgentPresetByName(agentName)
+	if preset == nil || preset.ReadyPromptPrefix == "" {
+		return promptPrefix
+	}
+	return preset.ReadyPromptPrefix
+}
+
 func (t *Tmux) WaitForRuntimeReady(session string, rc *config.RuntimeConfig, timeout time.Duration) error {
 	if rc == nil || rc.Tmux == nil {
 		return nil
@@ -2528,7 +2549,7 @@ const DefaultReadyPromptPrefix = "❯ "
 // Returns nil if the agent becomes idle within the timeout.
 // Returns an error if the timeout expires while the agent is still busy.
 func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
-	promptPrefix := DefaultReadyPromptPrefix
+	promptPrefix := readyPromptPrefixForSession(t, session)
 	prefix := strings.TrimSpace(promptPrefix)
 
 	// Require 2 consecutive idle polls to filter out transient states.
@@ -2553,16 +2574,13 @@ func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 			continue
 		}
 
-		// Check the status bar first: if "esc to interrupt" is visible,
-		// Claude Code is actively running a tool call — NOT idle,
+		// Busy indicator check: if "esc to interrupt" is visible anywhere in
+		// the recent pane output, the agent is actively working — NOT idle,
 		// regardless of whether the prompt prefix is also visible.
 		statusBarBusy := false
 		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.Contains(trimmed, "\u23F5\u23F5") || strings.Contains(trimmed, "⏵⏵") {
-				if strings.Contains(trimmed, "esc to interrupt") {
-					statusBarBusy = true
-				}
+			if hasBusyIndicator(line) {
+				statusBarBusy = true
 				break
 			}
 		}
@@ -2638,14 +2656,21 @@ func (t *Tmux) IsIdle(session string) bool {
 	}
 
 	for _, line := range lines {
+		if hasBusyIndicator(line) {
+			return false
+		}
+	}
+
+	promptPrefix := readyPromptPrefixForSession(t, session)
+	for _, line := range lines {
+		if matchesPromptPrefix(line, promptPrefix) {
+			return true
+		}
+	}
+
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		// The status bar starts with ⏵⏵ (double play symbols).
-		// When the agent is busy: "⏵⏵ bypass permissions on ... · esc to interrupt"
-		// When the agent is idle: "⏵⏵ bypass permissions on (shift+tab to cycle) · 1 file ..."
 		if strings.Contains(trimmed, "⏵⏵") || strings.Contains(trimmed, "\u23F5\u23F5") {
-			if strings.Contains(trimmed, "esc to interrupt") {
-				return false
-			}
 			return true
 		}
 	}
