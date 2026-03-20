@@ -27,6 +27,8 @@ type WLCommonsStore interface {
 	ClaimWanted(wantedID, rigHandle string) error
 	SubmitCompletion(completionID, wantedID, rigHandle, evidence string) error
 	QueryWanted(wantedID string) (*WantedItem, error)
+	InsertStamp(stamp *StampRecord) error
+	QueryLastStampForSubject(subject string) (*StampRecord, error)
 }
 
 // WLCommons implements WLCommonsStore using the real Dolt server.
@@ -46,6 +48,12 @@ func (w *WLCommons) SubmitCompletion(completionID, wantedID, rigHandle, evidence
 }
 func (w *WLCommons) QueryWanted(wantedID string) (*WantedItem, error) {
 	return QueryWanted(w.townRoot, wantedID)
+}
+func (w *WLCommons) InsertStamp(stamp *StampRecord) error {
+	return InsertStamp(w.townRoot, stamp)
+}
+func (w *WLCommons) QueryLastStampForSubject(subject string) (*StampRecord, error) {
+	return QueryLastStampForSubject(w.townRoot, subject)
 }
 
 // WantedItem represents a row in the wanted table.
@@ -184,9 +192,11 @@ CREATE TABLE IF NOT EXISTS stamps (
     severity VARCHAR(16) DEFAULT 'leaf',
     context_id VARCHAR(64),
     context_type VARCHAR(32),
+    stamp_type VARCHAR(32),
     skill_tags JSON,
     message TEXT,
     prev_stamp_hash VARCHAR(64),
+    stamp_index INT,
     block_hash VARCHAR(64),
     hop_uri VARCHAR(512),
     created_at TIMESTAMP,
@@ -442,4 +452,117 @@ func parseCSVLine(line string) []string {
 	}
 	fields = append(fields, field.String())
 	return fields
+}
+
+// StampRecord represents a row in the stamps table.
+type StampRecord struct {
+	ID            string
+	Author        string
+	Subject       string
+	Valence       string // JSON string
+	Confidence    float64
+	Severity      string
+	ContextID     string
+	ContextType   string
+	StampType     string
+	SkillTags     string // JSON array string
+	Message       string
+	PrevStampHash string
+	StampIndex    int
+	CreatedAt     string
+}
+
+// InsertStamp inserts a new stamp record into the wl-commons stamps table.
+func InsertStamp(townRoot string, s *StampRecord) error {
+	if s.ID == "" {
+		return fmt.Errorf("stamp ID cannot be empty")
+	}
+	if s.Author == "" || s.Subject == "" {
+		return fmt.Errorf("stamp author and subject are required")
+	}
+	if s.Author == s.Subject {
+		return fmt.Errorf("stamp author cannot equal subject")
+	}
+
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	if s.CreatedAt != "" {
+		now = s.CreatedAt
+	}
+
+	contextID := "NULL"
+	if s.ContextID != "" {
+		contextID = fmt.Sprintf("'%s'", EscapeSQL(s.ContextID))
+	}
+	contextType := "NULL"
+	if s.ContextType != "" {
+		contextType = fmt.Sprintf("'%s'", EscapeSQL(s.ContextType))
+	}
+	stampType := "NULL"
+	if s.StampType != "" {
+		stampType = fmt.Sprintf("'%s'", EscapeSQL(s.StampType))
+	}
+	skillTags := "NULL"
+	if s.SkillTags != "" {
+		skillTags = fmt.Sprintf("'%s'", EscapeSQL(s.SkillTags))
+	}
+	message := "NULL"
+	if s.Message != "" {
+		message = fmt.Sprintf("'%s'", EscapeSQL(s.Message))
+	}
+	prevHash := "NULL"
+	if s.PrevStampHash != "" {
+		prevHash = fmt.Sprintf("'%s'", EscapeSQL(s.PrevStampHash))
+	}
+	stampIdx := "NULL"
+	if s.StampIndex >= 0 {
+		stampIdx = fmt.Sprintf("%d", s.StampIndex)
+	}
+
+	script := fmt.Sprintf(`USE %s;
+
+INSERT INTO stamps (id, author, subject, valence, confidence, severity, context_id, context_type, stamp_type, skill_tags, message, prev_stamp_hash, stamp_index, created_at)
+VALUES ('%s', '%s', '%s', '%s', %f, '%s', %s, %s, %s, %s, %s, %s, %s, '%s');
+
+CALL DOLT_ADD('-A');
+CALL DOLT_COMMIT('-m', 'wl stamp: %s stamps %s');
+`,
+		WLCommonsDB,
+		EscapeSQL(s.ID), EscapeSQL(s.Author), EscapeSQL(s.Subject),
+		EscapeSQL(s.Valence), s.Confidence, EscapeSQL(s.Severity),
+		contextID, contextType, stampType, skillTags, message,
+		prevHash, stampIdx, now,
+		EscapeSQL(s.Author), EscapeSQL(s.Subject))
+
+	return doltSQLScriptWithRetry(townRoot, script)
+}
+
+// QueryLastStampForSubject fetches the most recent stamp for a subject rig,
+// used to compute passbook chain linkage (prev_stamp_hash and stamp_index).
+// Returns nil (not an error) if no stamps exist for the subject.
+func QueryLastStampForSubject(townRoot, subject string) (*StampRecord, error) {
+	query := fmt.Sprintf(`USE %s; SELECT id, COALESCE(stamp_index, -1) as stamp_index FROM stamps WHERE subject='%s' ORDER BY stamp_index DESC, created_at DESC LIMIT 1;`,
+		WLCommonsDB, EscapeSQL(subject))
+
+	output, err := doltSQLQuery(townRoot, query)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := parseSimpleCSV(output)
+	if len(rows) == 0 {
+		return nil, nil
+	}
+
+	row := rows[0]
+	idx := 0
+	if v, ok := row["stamp_index"]; ok && v != "-1" && v != "" {
+		fmt.Sscanf(v, "%d", &idx)
+	} else {
+		idx = -1
+	}
+
+	return &StampRecord{
+		ID:         row["id"],
+		StampIndex: idx,
+	}, nil
 }
