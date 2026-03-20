@@ -605,10 +605,12 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 			State:  beads.RigStateActive,
 		}
 		if _, err := bd.CreateRigBead(name, fields); err != nil {
-			return fmt.Errorf("creating rig identity bead: %w\n\nRun 'gt upgrade' to repair missing identity beads", err)
+			// Non-fatal: rig is functional without the identity bead
+			fmt.Printf("  %s Could not create rig identity bead: %v\n", style.Warning.Render("!"), err)
+		} else {
+			rigBeadID := beads.RigBeadIDWithPrefix(newRig.Config.Prefix, name)
+			fmt.Printf("  Created rig identity bead: %s\n", rigBeadID)
 		}
-		rigBeadID := beads.RigBeadIDWithPrefix(newRig.Config.Prefix, name)
-		fmt.Printf("  Created rig identity bead: %s\n", rigBeadID)
 
 		// Create agent beads for the rig (witness, refinery)
 		// This ensures they exist before the daemon tries to start them
@@ -618,18 +620,20 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 			fmt.Sprintf("Witness for %s - monitors polecat health and progress.", name),
 			&beads.AgentFields{RoleType: "witness", Rig: name, AgentState: "idle"},
 		); err != nil {
-			return fmt.Errorf("creating witness identity bead: %w\n\nRun 'gt upgrade' to repair missing identity beads", err)
+			fmt.Printf("  %s Could not create witness agent bead: %v\n", style.Warning.Render("!"), err)
+		} else {
+			fmt.Printf("  Created agent bead: %s\n", witnessID)
 		}
-		fmt.Printf("  Created agent bead: %s\n", witnessID)
 
 		refineryID := beads.RefineryBeadIDWithPrefix(prefix, name)
 		if _, err := bd.CreateAgentBead(refineryID,
 			fmt.Sprintf("Refinery for %s - processes merge queue.", name),
 			&beads.AgentFields{RoleType: "refinery", Rig: name, AgentState: "idle"},
 		); err != nil {
-			return fmt.Errorf("creating refinery identity bead: %w\n\nRun 'gt upgrade' to repair missing identity beads", err)
+			fmt.Printf("  %s Could not create refinery agent bead: %v\n", style.Warning.Render("!"), err)
+		} else {
+			fmt.Printf("  Created agent bead: %s\n", refineryID)
 		}
-		fmt.Printf("  Created agent bead: %s\n", refineryID)
 	}
 
 	// Auto-assign a namepool theme that doesn't collide with other rigs (gas-21k).
@@ -1193,9 +1197,10 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 				State:  beads.RigStateActive,
 			}
 			if _, err := bd.CreateRigBead(name, fields); err != nil {
-				return fmt.Errorf("creating rig identity bead: %w\n\nRun 'gt upgrade' to repair missing identity beads", err)
+				fmt.Printf("  %s Could not create rig identity bead: %v\n", style.Warning.Render("!"), err)
+			} else {
+				fmt.Printf("  %s Created rig identity bead: %s\n", style.Success.Render("✓"), rigBeadID)
 			}
-			fmt.Printf("  %s Created rig identity bead: %s\n", style.Success.Render("✓"), rigBeadID)
 		}
 
 		// Create agent beads for the rig (witness, refinery)
@@ -1207,9 +1212,10 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 				fmt.Sprintf("Witness for %s - monitors polecat health and progress.", name),
 				&beads.AgentFields{RoleType: "witness", Rig: name, AgentState: "idle"},
 			); err != nil {
-				return fmt.Errorf("creating witness identity bead: %w\n\nRun 'gt upgrade' to repair missing identity beads", err)
+				fmt.Printf("  %s Could not create witness agent bead: %v\n", style.Warning.Render("!"), err)
+			} else {
+				fmt.Printf("  %s Created agent bead: %s\n", style.Success.Render("✓"), witnessID)
 			}
-			fmt.Printf("  %s Created agent bead: %s\n", style.Success.Render("✓"), witnessID)
 		}
 
 		refineryID := beads.RefineryBeadIDWithPrefix(prefix, name)
@@ -1218,9 +1224,10 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 				fmt.Sprintf("Refinery for %s - processes merge queue.", name),
 				&beads.AgentFields{RoleType: "refinery", Rig: name, AgentState: "idle"},
 			); err != nil {
-				return fmt.Errorf("creating refinery identity bead: %w\n\nRun 'gt upgrade' to repair missing identity beads", err)
+				fmt.Printf("  %s Could not create refinery agent bead: %v\n", style.Warning.Render("!"), err)
+			} else {
+				fmt.Printf("  %s Created agent bead: %s\n", style.Success.Render("✓"), refineryID)
 			}
-			fmt.Printf("  %s Created agent bead: %s\n", style.Success.Render("✓"), refineryID)
 		}
 	}
 
@@ -1819,12 +1826,15 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 			// Reconcile display state with tmux session liveness.
 			// Per gt-zecmc design: tmux is ground truth for observable states.
 			// If session is running but beads says done, the polecat is still alive.
-			// If session is dead but beads says working, the polecat is actually done.
+			// If session is dead but beads says working, show "stalled" so the
+			// witness can detect unsubmitted work (gt-3071b). Previously this
+			// showed "done" which masked failures where polecats died before
+			// running gt done, leaving work stranded in worktrees.
 			displayState := p.State
 			if hasSession && displayState == polecat.StateDone {
 				displayState = polecat.StateWorking
 			} else if !hasSession && displayState == polecat.StateWorking {
-				displayState = polecat.StateDone
+				displayState = polecat.State("stalled")
 			}
 
 			stateStr := string(displayState)

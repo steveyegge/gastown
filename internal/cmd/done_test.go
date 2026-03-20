@@ -1349,25 +1349,3 @@ func testRunGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-func TestGitURLToOwnerRepo(t *testing.T) {
-	tests := []struct {
-		url  string
-		want string
-	}{
-		{"https://github.com/steveyegge/gastown.git", "steveyegge/gastown"},
-		{"https://github.com/quad341/gastown.git", "quad341/gastown"},
-		{"https://github.com/owner/repo", "owner/repo"},
-		{"git@github.com:steveyegge/gastown.git", "steveyegge/gastown"},
-		{"git@github.com:owner/repo.git", "owner/repo"},
-		{"https://github.com/owner/repo/tree/main", ""},
-		{"git@github.com:owner/repo/extra.git", ""},
-		{"https://gitlab.com/owner/repo.git", ""},
-		{"", ""},
-	}
-	for _, tt := range tests {
-		got := gitURLToOwnerRepo(tt.url)
-		if got != tt.want {
-			t.Errorf("gitURLToOwnerRepo(%q) = %q, want %q", tt.url, got, tt.want)
-		}
-	}
-}

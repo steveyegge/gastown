@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/checkpoint"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
@@ -50,6 +48,8 @@ Exit statuses:
 Examples:
   gt done                              # Submit branch, notify COMPLETED, transition to IDLE
   gt done --pre-verified               # Submit with pre-verification fast-path
+  gt done --target feat/my-branch      # Explicit MR target branch
+  gt done --pre-verified --target feat/contract-review  # Pre-verified with explicit target
   gt done --issue gt-abc               # Explicit issue ID
   gt done --status ESCALATED           # Signal blocker, skip MR
   gt done --status DEFERRED            # Pause work, skip MR`,
@@ -64,6 +64,7 @@ var (
 	doneCleanupStatus string
 	doneResume        bool
 	donePreVerified   bool
+	doneTarget        string
 )
 
 // Valid exit types for gt done
@@ -80,6 +81,7 @@ func init() {
 	doneCmd.Flags().StringVar(&doneCleanupStatus, "cleanup-status", "", "Git cleanup status: clean, uncommitted, unpushed, stash, unknown (ZFC: agent-observed)")
 	doneCmd.Flags().BoolVar(&doneResume, "resume", false, "Resume from last checkpoint (auto-detected, for Witness recovery)")
 	doneCmd.Flags().BoolVar(&donePreVerified, "pre-verified", false, "Mark MR as pre-verified (polecat ran gates after rebasing onto target)")
+	doneCmd.Flags().StringVar(&doneTarget, "target", "", "Explicit MR target branch (overrides formula_vars and auto-detection)")
 
 	rootCmd.AddCommand(doneCmd)
 }
@@ -574,15 +576,6 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			goto afterPush
 		}
 
-		// Squash WIP checkpoint commits before pushing. These auto-commits from
-		// checkpoint_dog protect against data loss but should be collapsed before
-		// the branch reaches Refinery. Non-fatal: warn and proceed if squash fails.
-		if wipCount, squashErr := checkpoint.SquashWIPCommits(cwd, "origin/"+defaultBranch); squashErr != nil {
-			style.PrintWarning("WIP squash failed (non-fatal): %v", squashErr)
-		} else if wipCount > 0 {
-			fmt.Printf("%s Squashed %d WIP checkpoint commit(s)\n", style.Bold.Render("✓"), wipCount)
-		}
-
 		// CRITICAL: Push branch BEFORE creating MR bead (hq-6dk53, hq-a4ksk)
 		// The MR bead triggers Refinery to process this branch. If the branch
 		// isn't pushed yet, Refinery finds nothing to merge. The worktree gets
@@ -633,21 +626,11 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 
 		if pushErr != nil {
-			// All origin push attempts failed — try fork+PR fallback.
-			// When the authenticated user doesn't have push access to origin
-			// (e.g., working from a fork), push to the "fork" remote and
-			// create a GitHub PR from fork to upstream.
-			forkPushErr := tryForkPRFallback(g, branch, defaultBranch, issueID)
-			if forkPushErr != nil {
-				// Fork fallback also failed or not available
-				pushFailed = true
-				errMsg := fmt.Sprintf("push failed for branch '%s': %v (fork fallback: %v)", branch, pushErr, forkPushErr)
-				doneErrors = append(doneErrors, errMsg)
-				style.PrintWarning("%s\nCommits exist locally but failed to push. Witness will be notified.", errMsg)
-				goto notifyWitness
-			}
-			// Fork+PR succeeded — skip internal MQ (the PR replaces it)
-			fmt.Printf("%s Work submitted via fork+PR (skipping internal merge queue)\n", style.Bold.Render("✓"))
+			// All push attempts failed
+			pushFailed = true
+			errMsg := fmt.Sprintf("push failed for branch '%s': %v", branch, pushErr)
+			doneErrors = append(doneErrors, errMsg)
+			style.PrintWarning("%s\nCommits exist locally but failed to push. Witness will be notified.", errMsg)
 			goto notifyWitness
 		}
 
@@ -782,24 +765,36 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 
 		// Determine target branch for the MR.
-		// Priority: explicit --base-branch > integration branch auto-detect > rig default.
+		// Priority: explicit --target flag > formula_vars base_branch > integration branch auto-detect > rig default.
 		target := defaultBranch
 
-		// Check for explicit --base-branch override (stored in formula vars at sling time).
-		// When gt sling is called with --base-branch, the value is persisted in the bead's
-		// formula_vars field. If it differs from the rig's default branch, use it as the
-		// MR target so the refinery merges into the correct branch (GH#2357).
-		if sourceIssueForNoMerge != nil {
+		// 1. Explicit --target flag (highest priority — polecat knows its base branch).
+		// This is the most reliable path: the formula passes {{base_branch}} directly,
+		// avoiding any dependency on bd.Show() or Dolt availability.
+		if doneTarget != "" && doneTarget != defaultBranch {
+			target = doneTarget
+			fmt.Printf("  Target branch: %s (from --target flag)\n", target)
+		}
+
+		// 2. Check for --base-branch override in formula vars (stored on bead at sling time).
+		// Fallback for polecats dispatched before --target flag existed, or when
+		// the formula doesn't pass --target explicitly.
+		if target == defaultBranch && sourceIssueForNoMerge != nil {
 			if af := beads.ParseAttachmentFields(sourceIssueForNoMerge); af != nil {
 				if bb := extractFormulaVar(af.FormulaVars, "base_branch"); bb != "" && bb != defaultBranch {
 					target = bb
-					fmt.Printf("  Target branch override: %s (from --base-branch)\n", target)
+					fmt.Printf("  Target branch override: %s (from formula_vars)\n", target)
 				}
 			}
+		} else if target == defaultBranch && sourceIssueForNoMerge == nil && issueID != "" {
+			// sourceIssueForNoMerge is nil — bd.Show(issueID) failed earlier.
+			// This is the silent failure path that caused 150+ procedure beads to
+			// target main instead of feat/contract-review-procedure.
+			style.PrintWarning("could not load source issue %s for target branch detection (Dolt/beads lookup failed) — using default branch %s", issueID, defaultBranch)
 		}
 
-		// Auto-detect integration branch from epic hierarchy (if enabled).
-		// Only overrides if no explicit --base-branch was set (target == defaultBranch).
+		// 3. Auto-detect integration branch from epic hierarchy (if enabled).
+		// Only overrides if no explicit target was set above.
 		if target == defaultBranch {
 			refineryEnabled := true
 			settingsPath := filepath.Join(townRoot, rigName, "settings", "config.json")
@@ -1578,103 +1573,4 @@ func purgeClosedEphemeralBeads(bd *beads.Beads) {
 	if outStr != "" && outStr != "0" {
 		fmt.Fprintf(os.Stderr, "Purged closed ephemeral beads: %s\n", outStr)
 	}
-}
-
-// tryForkPRFallback attempts to push to a "fork" remote and create a GitHub PR
-// from the fork to the upstream (origin) repo. This is the fallback when the
-// authenticated user doesn't have push access to origin.
-//
-// Returns nil on success, or an error if the fallback is not available or fails.
-func tryForkPRFallback(g *git.Git, branch, defaultBranch, issueID string) error {
-	// Check if a "fork" remote exists
-	remotes, err := g.Remotes()
-	if err != nil {
-		return fmt.Errorf("listing remotes: %w", err)
-	}
-	hasFork := false
-	for _, r := range remotes {
-		if strings.TrimSpace(r) == "fork" {
-			hasFork = true
-			break
-		}
-	}
-	if !hasFork {
-		return fmt.Errorf("no 'fork' remote configured")
-	}
-
-	// Get fork and origin URLs to build the PR
-	forkURL, err := g.RemoteURL("fork")
-	if err != nil {
-		return fmt.Errorf("getting fork remote URL: %w", err)
-	}
-	originURL, err := g.RemoteURL("origin")
-	if err != nil {
-		return fmt.Errorf("getting origin remote URL: %w", err)
-	}
-
-	forkOwnerRepo := gitURLToOwnerRepo(strings.TrimSpace(forkURL))
-	originOwnerRepo := gitURLToOwnerRepo(strings.TrimSpace(originURL))
-	if forkOwnerRepo == "" || originOwnerRepo == "" {
-		return fmt.Errorf("could not parse GitHub owner/repo from remotes (fork=%q, origin=%q)", forkURL, originURL)
-	}
-
-	// Extract fork owner (e.g., "quad341" from "quad341/gastown")
-	forkOwner := strings.SplitN(forkOwnerRepo, "/", 2)[0]
-
-	// Push to fork remote (force in case branch already exists from a prior attempt —
-	// the fork is the polecat's own, so force push is safe)
-	fmt.Printf("Origin push denied — pushing to fork remote...\n")
-	refspec := branch + ":" + branch
-	if pushErr := g.Push("fork", refspec, true); pushErr != nil {
-		return fmt.Errorf("push to fork failed: %w", pushErr)
-	}
-	fmt.Printf("%s Branch pushed to fork (%s)\n", style.Bold.Render("✓"), forkOwnerRepo)
-
-	// Create GitHub PR from fork to upstream using gh CLI
-	prTitle := fmt.Sprintf("fix: %s", issueID)
-	prHead := fmt.Sprintf("%s:%s", forkOwner, branch)
-
-	// Check if gh CLI is available
-	if _, err := exec.LookPath("gh"); err != nil {
-		return fmt.Errorf("gh CLI not found: %w (branch pushed to fork but PR not created)", err)
-	}
-
-	cmd := exec.Command("gh", "pr", "create",
-		"--repo", originOwnerRepo,
-		"--head", prHead,
-		"--base", defaultBranch,
-		"--title", prTitle,
-		"--body", fmt.Sprintf("Automated PR from polecat work.\n\nSource issue: %s\nBranch: %s", issueID, branch),
-	)
-	cmd.Dir = g.WorkDir()
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("gh pr create failed: %w\nOutput: %s", err, string(output))
-	}
-	prURL := strings.TrimSpace(string(output))
-	fmt.Printf("%s PR created: %s\n", style.Bold.Render("✓"), prURL)
-
-	return nil
-}
-
-// gitURLToOwnerRepo extracts "owner/repo" from a GitHub URL.
-// Supports HTTPS (https://github.com/owner/repo.git) and
-// SSH (git@github.com:owner/repo.git) formats.
-func gitURLToOwnerRepo(gitURL string) string {
-	var path string
-	switch {
-	case strings.HasPrefix(gitURL, "https://github.com/"):
-		path = strings.TrimPrefix(gitURL, "https://github.com/")
-	case strings.HasPrefix(gitURL, "git@github.com:"):
-		path = strings.TrimPrefix(gitURL, "git@github.com:")
-	default:
-		return ""
-	}
-	path = strings.TrimSuffix(path, ".git")
-	// Validate exactly "owner/repo" (2 components)
-	parts := strings.Split(path, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return ""
-	}
-	return path
 }
