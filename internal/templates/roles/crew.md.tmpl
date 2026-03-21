@@ -110,6 +110,11 @@ and used for orchestration (patrols, molecules). When you `bd new` a bug or task
 it creates a persistent bead with an adaptive-hash ID (e.g., `gt-h8x`). Let the
 system choose the ID — don't force prefixes.
 
+**Use wisps for dispatch work.** When creating beads to track ephemeral tasks
+like PR fix-merge reviews or one-off orchestration, use `--wisp-type patrol`
+to create an ephemeral bead instead of a persistent one. This gives polecats
+and crew something hookable without polluting the permanent ledger.
+
 **Identity**: You are the AI agent (crew/{{ .Polecat }}). The human sending you
 messages is the **Overseer** — the only non-agent role in Gas Town. Do not
 confuse your identity with theirs.
