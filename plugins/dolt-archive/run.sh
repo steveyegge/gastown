@@ -72,7 +72,12 @@ if [[ "$DEFAULT_DBS" == "auto" ]]; then
     log "ERROR: No user databases found on Dolt server at $DOLT_HOST:$DOLT_PORT"
     exit 1
   fi
-  IFS=$'\n' read -ra PROD_DBS <<< "$DISCOVERED"
+  # Portable: read -ra with IFS=$'\n' only reads first line on bash 3.2 (macOS).
+  # Use a while+read loop into an array instead.
+  PROD_DBS=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && PROD_DBS+=("$line")
+  done <<< "$DISCOVERED"
   log "Discovered ${#PROD_DBS[@]} databases: ${PROD_DBS[*]}"
 else
   IFS=',' read -ra PROD_DBS <<< "$DEFAULT_DBS"
@@ -117,10 +122,11 @@ for DB in "${PROD_DBS[@]}"; do
 done
 
 # Prune old exports (keep last 24 snapshots per DB)
+# Portable: use ls + tail instead of mapfile (bash 4+ only)
 for DB in "${PROD_DBS[@]}"; do
-  mapfile -t ALL_SNAPS < <(ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null || true)
-  if (( ${#ALL_SNAPS[@]} > 24 )); then
-    printf '%s\n' "${ALL_SNAPS[@]:24}" | xargs rm -f
+  SNAP_COUNT=$(ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null | wc -l | tr -d ' ')
+  if (( SNAP_COUNT > 24 )); then
+    ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null | tail -n +"$((24 + 1))" | xargs rm -f
     log "Pruned old $DB snapshots"
   fi
 done
