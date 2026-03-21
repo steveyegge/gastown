@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -227,9 +228,15 @@ func buildSkillTagsJSON(skills []string) string {
 	return "[" + strings.Join(quoted, ",") + "]"
 }
 
+// stampCounter provides a monotonically-incrementing component for generateStampID.
+// On Windows, time.Now() has ~100ns–15ms resolution, making back-to-back calls
+// return identical timestamps and therefore identical IDs (GH#3104).
+var stampCounter atomic.Uint64
+
 func generateStampID(author, subject, valence, contextID string) string {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	input := fmt.Sprintf("%s|%s|%s|%s|%s", author, subject, valence, contextID, now)
+	seq := stampCounter.Add(1)
+	input := fmt.Sprintf("%s|%s|%s|%s|%s|%d", author, subject, valence, contextID, now, seq)
 	hash := sha256.Sum256([]byte(input))
 	return fmt.Sprintf("s-%s", hex.EncodeToString(hash[:])[:12])
 }
