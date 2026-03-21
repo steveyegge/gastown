@@ -383,6 +383,13 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("saving rig config: %w", err)
 	}
 
+	// Check for empty remote before cloning to surface a clear error message.
+	// git clone --branch <branch> fails with an opaque "couldn't find remote ref"
+	// error on empty repos; this check catches it first.
+	if empty, err := m.git.IsRemoteEmpty(opts.GitURL); err == nil && empty {
+		return nil, fmt.Errorf("repository %s is empty (no commits). Push at least one commit before adding it as a rig", opts.GitURL)
+	}
+
 	// Create shared bare repo as source of truth for refinery and polecats.
 	// This allows refinery to see polecat branches without pushing to remote.
 	// Mayor remains a separate clone (doesn't need branch visibility).
