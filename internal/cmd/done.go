@@ -824,6 +824,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 		// Pre-declare for checkpoint goto (gt-aufru)
 		var existingMR *beads.Issue
+		var headSHA string // GH#3032: pre-declare to avoid goto-over-declaration
 
 		// Resume: skip MR creation if already completed in a previous run (gt-aufru).
 		// Mirrors the push checkpoint pattern above. Without this, every retry
@@ -841,16 +842,49 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			// Continue with creation attempt - Create will fail if duplicate
 		}
 
+		// Get current HEAD SHA for new-commit detection (GH#3032).
+		// Non-fatal: if we can't resolve it, head_sha is omitted from description.
+		headSHA, _ = g.Rev(branch)
+
 		if existingMR != nil {
-			// MR already exists - use it instead of creating a new one
-			mrID = existingMR.ID
-			fmt.Printf("%s MR already exists (idempotent)\n", style.Bold.Render("✓"))
-			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
-		} else {
+			// MR exists for this branch. Check if the polecat pushed new commits since
+			// the MR was opened (same branch name, different HEAD SHA). If so, supersede
+			// the stale MR so the Refinery processes the fresh commits (GH#3032).
+			existingFields := beads.ParseMRFields(existingMR)
+			if headSHA != "" && existingFields != nil && existingFields.HeadSHA != "" && existingFields.HeadSHA != headSHA {
+				short := func(s string) string {
+					if len(s) >= 8 {
+						return s[:8]
+					}
+					return s
+				}
+				style.PrintWarning("MR %s has stale HEAD (%s → %s) — superseding with fresh submission (GH#3032)",
+					existingMR.ID, short(existingFields.HeadSHA), short(headSHA))
+				if closeErr := bd.CloseWithReason(fmt.Sprintf("superseded: new commits on %s", branch), existingMR.ID); closeErr != nil {
+					// Close failed — keep existing MR to avoid two open MRs for the same branch.
+					style.PrintWarning("could not supersede stale MR %s (reusing it): %v", existingMR.ID, closeErr)
+					mrID = existingMR.ID
+					fmt.Printf("%s Reusing existing MR (supersede failed)\n", style.Bold.Render("✓"))
+					fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
+				} else {
+					existingMR = nil // fall through to create a fresh MR below
+				}
+			} else {
+				// Truly idempotent — same commits, reuse existing MR
+				mrID = existingMR.ID
+				fmt.Printf("%s MR already exists (idempotent)\n", style.Bold.Render("✓"))
+				fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
+			}
+		}
+
+		if existingMR == nil && mrID == "" {
 			// Build MR bead title and description
 			title := fmt.Sprintf("Merge: %s", issueID)
 			description := fmt.Sprintf("branch: %s\ntarget: %s\nsource_issue: %s\nrig: %s",
 				branch, target, issueID, rigName)
+			if headSHA != "" {
+				description += fmt.Sprintf("\nhead_sha: %s", headSHA)
+			}
 			if worker != "" {
 				description += fmt.Sprintf("\nworker: %s", worker)
 			}
