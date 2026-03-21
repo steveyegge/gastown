@@ -27,6 +27,15 @@
             "command": "{{GT_BIN}} tap guard pr-workflow"
           }
         ]
+      },
+      {
+        "matcher": "Bash\\(git push.*main.*\\)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{GT_BIN}} tap guard dangerous-command"
+          }
+        ]
       }
     ],
     "SessionStart": [
