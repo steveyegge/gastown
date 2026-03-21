@@ -169,13 +169,22 @@ exit 0
 		t.Fatalf("reading bd.log: %v", err)
 	}
 
-	// The first line should be the list command
+	// Find the list command line — bd may emit a version probe first.
 	lines := strings.Split(strings.TrimSpace(string(logData)), "\n")
 	if len(lines) == 0 {
 		t.Fatal("bd was never called")
 	}
 
-	listLine := lines[0]
+	var listLine string
+	for _, line := range lines {
+		if strings.Contains(line, "list") {
+			listLine = line
+			break
+		}
+	}
+	if listLine == "" {
+		t.Fatalf("bd was never called with a 'list' subcommand; log: %q", string(logData))
+	}
 
 	requiredFlags := []string{"list", "--type=convoy", "--status=open", "--json"}
 	for _, flag := range requiredFlags {

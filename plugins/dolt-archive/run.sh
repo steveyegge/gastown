@@ -118,7 +118,7 @@ done
 
 # Prune old exports (keep last 24 snapshots per DB)
 for DB in "${PROD_DBS[@]}"; do
-  mapfile -t ALL_SNAPS < <(ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null || true)
+  ALL_SNAPS=(); while IFS= read -r _s; do ALL_SNAPS+=("$_s"); done < <(ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null || true)
   if (( ${#ALL_SNAPS[@]} > 24 )); then
     printf '%s\n' "${ALL_SNAPS[@]:24}" | xargs rm -f
     log "Pruned old $DB snapshots"

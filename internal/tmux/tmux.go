@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -1216,36 +1215,6 @@ func nudgeFlockPath(townRoot, session string) string {
 	return filepath.Join(townRoot, constants.DirRuntime, "nudge_queue", safe, ".lock")
 }
 
-// acquireFlockLock acquires a file-based lock using flock(2) for cross-process
-// serialization. Returns an unlock function that must be called to release the lock.
-// Uses non-blocking flock in a polling loop to respect the timeout.
-func acquireFlockLock(lockPath string, timeout time.Duration) (func(), error) {
-	dir := filepath.Dir(lockPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("creating lock dir: %w", err)
-	}
-
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		return nil, fmt.Errorf("opening lock file: %w", err)
-	}
-
-	deadline := time.Now().Add(timeout)
-	for {
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			return func() {
-				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-				f.Close()
-			}, nil
-		}
-		if time.Now().After(deadline) {
-			f.Close()
-			return nil, fmt.Errorf("timeout after %s waiting for flock", timeout)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-}
 
 // IsSessionAttached returns true if the session has any clients attached.
 func (t *Tmux) IsSessionAttached(target string) bool {
@@ -1405,9 +1374,9 @@ func (t *Tmux) dismissRewindMode(target string) {
 // raw stdin (like Claude Code's TUI) are not affected.
 const sendKeysChunkSize = 512
 
-func (t *Tmux) sendMessageToTarget(target, text string, timeout time.Duration) error {
+func (t *Tmux) sendMessageToTarget(target, text string) error {
 	if len(text) <= sendKeysChunkSize {
-		return t.sendKeysLiteralWithRetry(target, text, timeout)
+		return t.sendKeysLiteralWithRetry(target, text, constants.NudgeReadyTimeout)
 	}
 	// Send in chunks to avoid tmux send-keys argument length limits.
 	// Each chunk is sent with a small delay to let the terminal process it.
@@ -1419,7 +1388,7 @@ func (t *Tmux) sendMessageToTarget(target, text string, timeout time.Duration) e
 		chunk := text[i:end]
 		if i == 0 {
 			// First chunk uses retry logic for startup race
-			if err := t.sendKeysLiteralWithRetry(target, chunk, timeout); err != nil {
+			if err := t.sendKeysLiteralWithRetry(target, chunk, constants.NudgeReadyTimeout); err != nil {
 				return err
 			}
 		} else {
@@ -1566,7 +1535,7 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 
 	// 3. Send text via send-keys -l. Messages > 512 bytes are chunked
 	//    with 10ms inter-chunk delays to avoid argument length limits.
-	if err := t.sendMessageToTarget(target, sanitized, constants.NudgeReadyTimeout); err != nil {
+	if err := t.sendMessageToTarget(target, sanitized); err != nil {
 		return err
 	}
 
@@ -1593,7 +1562,7 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 		if t.isInRewindMode(target) {
 			t.dismissRewindMode(target)
 			// Re-send message text — Rewind consumed the original input.
-			_ = t.sendMessageToTarget(target, sanitized, constants.NudgeReadyTimeout)
+			_ = t.sendMessageToTarget(target, sanitized)
 			time.Sleep(500 * time.Millisecond)
 		}
 	}
@@ -1644,7 +1613,7 @@ func (t *Tmux) NudgePane(pane, message string) error {
 
 	// 3. Send text via send-keys -l. Messages > 512 bytes are chunked
 	//    with 10ms inter-chunk delays to avoid argument length limits.
-	if err := t.sendMessageToTarget(pane, sanitized, constants.NudgeReadyTimeout); err != nil {
+	if err := t.sendMessageToTarget(pane, sanitized); err != nil {
 		return err
 	}
 
@@ -1661,7 +1630,7 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	// 6.5. Post-Escape: check if our Escape triggered Rewind mode. (GH#gt-8el)
 	if t.isInRewindMode(pane) {
 		t.dismissRewindMode(pane)
-		_ = t.sendMessageToTarget(pane, sanitized, constants.NudgeReadyTimeout)
+		_ = t.sendMessageToTarget(pane, sanitized)
 		time.Sleep(500 * time.Millisecond)
 	}
 
