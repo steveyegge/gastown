@@ -1341,6 +1341,59 @@ func sanitizeNudgeMessage(msg string) string {
 	return b.String()
 }
 
+// isInRewindMode checks if a tmux target is displaying Claude Code's Rewind
+// conversation history browser. When Rewind is active, the session ignores
+// typed text and only responds to Enter (accept rewind) or Escape (cancel).
+// This can happen when a stray or deliberate Escape keystroke combines with
+// a previous Escape to form the double-Escape sequence that activates Rewind.
+//
+// Detection is based on pane content analysis. Returns false on any error
+// (defensive — don't block nudge delivery on detection failure).
+func (t *Tmux) isInRewindMode(target string) bool {
+	content, err := t.CapturePane(target, 15)
+	if err != nil {
+		return false
+	}
+	return containsRewindIndicators(content)
+}
+
+// containsRewindIndicators checks pane content for Claude Code Rewind menu
+// patterns. The Rewind UI takes over the terminal and shows distinctive
+// action prompts (Enter to act, Esc to cancel/exit). We require multiple
+// co-occurring indicators to avoid false positives from conversation text.
+func containsRewindIndicators(content string) bool {
+	lower := strings.ToLower(content)
+
+	// Primary: "rewind" appears alongside both Enter and Esc action prompts.
+	if strings.Contains(lower, "rewind") {
+		if strings.Contains(lower, "enter") && strings.Contains(lower, "esc") {
+			return true
+		}
+	}
+
+	// Secondary: specific action prompt pairs characteristic of the Rewind UI.
+	rewindActionPairs := [][2]string{
+		{"enter to continue", "esc to exit"},
+		{"enter to accept", "esc to cancel"},
+		{"enter to select", "esc to go back"},
+		{"enter to select", "esc to cancel"},
+	}
+	for _, pair := range rewindActionPairs {
+		if strings.Contains(lower, pair[0]) && strings.Contains(lower, pair[1]) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// dismissRewindMode sends Escape to cancel Claude Code's Rewind menu,
+// then waits briefly for the UI to return to normal.
+func (t *Tmux) dismissRewindMode(target string) {
+	_, _ = t.run("send-keys", "-t", target, "Escape")
+	time.Sleep(300 * time.Millisecond)
+}
+
 // sendMessageToTarget sends a sanitized message to a tmux target. For small
 // messages (< sendKeysChunkSize), uses send-keys -l. For larger messages,
 // sends in chunks with delays to avoid overwhelming the TTY input buffer.
@@ -1493,6 +1546,14 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 		target = agentPane
 	}
 
+	// 0. Pre-delivery: dismiss Rewind menu if the session is stuck in it.
+	// A previous nudge or user action may have triggered Claude Code's
+	// double-Escape Rewind UI, which captures all input. Dismiss it first
+	// so the nudge can be delivered normally. (GH#gt-8el)
+	if t.isInRewindMode(target) {
+		t.dismissRewindMode(target)
+	}
+
 	// 1. Exit copy/scroll mode if active — copy mode intercepts input,
 	//    preventing delivery to the underlying process.
 	if inMode, _ := t.run("display-message", "-p", "-t", target, "#{pane_in_mode}"); strings.TrimSpace(inMode) == "1" {
@@ -1522,6 +1583,19 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 		// Without this, ESC+Enter within 500ms becomes M-Enter (meta-return) which
 		// does NOT submit the line.
 		time.Sleep(600 * time.Millisecond)
+
+		// 6.5. Post-Escape: check if our Escape triggered Rewind mode.
+		// This happens when a previous Escape was still in the input buffer,
+		// combining with ours to form the double-Escape that activates Rewind.
+		// If triggered, dismiss Rewind and re-send the message (Rewind
+		// consumed the original input). Skip the second Escape to avoid
+		// re-triggering. (GH#gt-8el)
+		if t.isInRewindMode(target) {
+			t.dismissRewindMode(target)
+			// Re-send message text — Rewind consumed the original input.
+			_ = t.sendMessageToTarget(target, sanitized, constants.NudgeReadyTimeout)
+			time.Sleep(500 * time.Millisecond)
+		}
 	}
 
 	// 7. Send Enter with retry (critical for message submission)
@@ -1553,6 +1627,11 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	}
 	defer releaseNudgeLock(pane)
 
+	// 0. Pre-delivery: dismiss Rewind menu if active. (GH#gt-8el)
+	if t.isInRewindMode(pane) {
+		t.dismissRewindMode(pane)
+	}
+
 	// 1. Exit copy/scroll mode if active — copy mode intercepts input,
 	//    preventing delivery to the underlying process.
 	if inMode, _ := t.run("display-message", "-p", "-t", pane, "#{pane_in_mode}"); strings.TrimSpace(inMode) == "1" {
@@ -1578,6 +1657,13 @@ func (t *Tmux) NudgePane(pane, message string) error {
 
 	// 6. Wait 600ms — must exceed bash readline's keyseq-timeout (500ms default)
 	time.Sleep(600 * time.Millisecond)
+
+	// 6.5. Post-Escape: check if our Escape triggered Rewind mode. (GH#gt-8el)
+	if t.isInRewindMode(pane) {
+		t.dismissRewindMode(pane)
+		_ = t.sendMessageToTarget(pane, sanitized, constants.NudgeReadyTimeout)
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	// 7. Send Enter with retry (critical for message submission)
 	var lastErr error
