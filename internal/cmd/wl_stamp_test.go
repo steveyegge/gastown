@@ -3,6 +3,7 @@ package cmd
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/doltserver"
 )
@@ -144,6 +145,7 @@ func TestGenerateStampID_Format(t *testing.T) {
 func TestGenerateStampID_Unique(t *testing.T) {
 	t.Parallel()
 	id1 := generateStampID("alice", "bob", `{"quality":4}`, "c-abc")
+	time.Sleep(time.Millisecond) // ensure clock advances on Windows (coarse timer resolution)
 	id2 := generateStampID("alice", "bob", `{"quality":4}`, "c-abc")
 	if id1 == id2 {
 		t.Error("sequential stamp IDs should be unique (includes nanosecond timestamp)")
