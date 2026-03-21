@@ -46,7 +46,7 @@ func TestWlCommandGroup(t *testing.T) {
 }
 
 func TestWlSubcommands(t *testing.T) {
-	expected := []string{"join", "post", "claim", "done", "browse", "sync"}
+	expected := []string{"join", "post", "claim", "done", "browse", "sync", "show"}
 	for _, name := range expected {
 		found := false
 		for _, c := range wlCmd.Commands() {
@@ -76,6 +76,15 @@ func TestWlDoneRequiresArg(t *testing.T) {
 	}
 	if err := wlDoneCmd.Args(wlDoneCmd, []string{"w-abc123"}); err != nil {
 		t.Errorf("done should accept 1 argument: %v", err)
+	}
+}
+
+func TestWlShowRequiresArg(t *testing.T) {
+	if err := wlShowCmd.Args(wlShowCmd, []string{}); err == nil {
+		t.Error("show should require exactly 1 argument")
+	}
+	if err := wlShowCmd.Args(wlShowCmd, []string{"w-abc123"}); err != nil {
+		t.Errorf("show should accept 1 argument: %v", err)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ type WLCommonsStore interface {
 	ClaimWanted(wantedID, rigHandle string) error
 	SubmitCompletion(completionID, wantedID, rigHandle, evidence string) error
 	QueryWanted(wantedID string) (*WantedItem, error)
+	QueryWantedFull(wantedID string) (*WantedItem, error)
 	InsertStamp(stamp *StampRecord) error
 	QueryLastStampForSubject(subject string) (*StampRecord, error)
 	QueryStampsForSubject(subject string) ([]StampRecord, error)
@@ -53,6 +55,9 @@ func (w *WLCommons) SubmitCompletion(completionID, wantedID, rigHandle, evidence
 func (w *WLCommons) QueryWanted(wantedID string) (*WantedItem, error) {
 	return QueryWanted(w.townRoot, wantedID)
 }
+func (w *WLCommons) QueryWantedFull(wantedID string) (*WantedItem, error) {
+	return QueryWantedFull(w.townRoot, wantedID)
+}
 func (w *WLCommons) InsertStamp(stamp *StampRecord) error {
 	return InsertStamp(w.townRoot, stamp)
 }
@@ -74,18 +79,21 @@ func (w *WLCommons) UpsertLeaderboard(entry *LeaderboardEntry) error {
 
 // WantedItem represents a row in the wanted table.
 type WantedItem struct {
-	ID              string
-	Title           string
-	Description     string
-	Project         string
-	Type            string
-	Priority        int
-	Tags            []string
-	PostedBy        string
-	ClaimedBy       string
-	Status          string
-	EffortLevel     string
-	SandboxRequired bool
+	ID              string   `json:"id"`
+	Title           string   `json:"title"`
+	Description     string   `json:"description,omitempty"`
+	Project         string   `json:"project,omitempty"`
+	Type            string   `json:"type,omitempty"`
+	Priority        int      `json:"priority"`
+	Tags            []string `json:"tags,omitempty"`
+	PostedBy        string   `json:"posted_by,omitempty"`
+	ClaimedBy       string   `json:"claimed_by,omitempty"`
+	Status          string   `json:"status"`
+	EffortLevel     string   `json:"effort_level,omitempty"`
+	EvidenceURL     string   `json:"evidence_url,omitempty"`
+	SandboxRequired bool     `json:"sandbox_required,omitempty"`
+	CreatedAt       string   `json:"created_at,omitempty"`
+	UpdatedAt       string   `json:"updated_at,omitempty"`
 }
 
 // isNothingToCommit returns true if the error indicates DOLT_COMMIT found no
@@ -413,6 +421,48 @@ func QueryWanted(townRoot, wantedID string) (*WantedItem, error) {
 		Title:     row["title"],
 		Status:    row["status"],
 		ClaimedBy: row["claimed_by"],
+	}
+	return item, nil
+}
+
+// QueryWantedFull fetches all fields of a wanted item by ID. Returns nil if not found.
+func QueryWantedFull(townRoot, wantedID string) (*WantedItem, error) {
+	query := fmt.Sprintf(`USE %s; SELECT id, title, COALESCE(description, '') as description, COALESCE(project, '') as project, COALESCE(type, '') as type, priority, COALESCE(tags, JSON_ARRAY()) as tags, COALESCE(posted_by, '') as posted_by, COALESCE(claimed_by, '') as claimed_by, status, COALESCE(effort_level, '') as effort_level, COALESCE(evidence_url, '') as evidence_url, COALESCE(sandbox_required, 0) as sandbox_required, COALESCE(CAST(created_at AS CHAR), '') as created_at, COALESCE(CAST(updated_at AS CHAR), '') as updated_at FROM wanted WHERE id='%s';`,
+		WLCommonsDB, EscapeSQL(wantedID))
+
+	output, err := doltSQLQuery(townRoot, query)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := parseSimpleCSV(output)
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("wanted item %q not found", wantedID)
+	}
+
+	row := rows[0]
+	item := &WantedItem{
+		ID:          row["id"],
+		Title:       row["title"],
+		Description: row["description"],
+		Project:     row["project"],
+		Type:        row["type"],
+		PostedBy:    row["posted_by"],
+		ClaimedBy:   row["claimed_by"],
+		Status:      row["status"],
+		EffortLevel: row["effort_level"],
+		EvidenceURL: row["evidence_url"],
+		CreatedAt:   row["created_at"],
+		UpdatedAt:   row["updated_at"],
+	}
+	if p := row["priority"]; p != "" {
+		_, _ = fmt.Sscanf(p, "%d", &item.Priority)
+	}
+	if row["sandbox_required"] == "1" {
+		item.SandboxRequired = true
+	}
+	if tagsJSON := row["tags"]; tagsJSON != "" && tagsJSON != "[]" {
+		_ = json.Unmarshal([]byte(tagsJSON), &item.Tags)
 	}
 	return item, nil
 }

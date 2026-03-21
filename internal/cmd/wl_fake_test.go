@@ -128,6 +128,10 @@ func (f *fakeWLCommonsStore) QueryWanted(wantedID string) (*doltserver.WantedIte
 	return &cp, nil
 }
 
+func (f *fakeWLCommonsStore) QueryWantedFull(wantedID string) (*doltserver.WantedItem, error) {
+	return f.QueryWanted(wantedID)
+}
+
 func (f *fakeWLCommonsStore) InsertStamp(stamp *doltserver.StampRecord) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

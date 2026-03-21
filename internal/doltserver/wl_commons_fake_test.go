@@ -125,6 +125,10 @@ func (f *fakeWLCommonsStore) QueryWanted(wantedID string) (*WantedItem, error) {
 	return &cp, nil
 }
 
+func (f *fakeWLCommonsStore) QueryWantedFull(wantedID string) (*WantedItem, error) {
+	return f.QueryWanted(wantedID)
+}
+
 func (f *fakeWLCommonsStore) InsertStamp(stamp *StampRecord) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
