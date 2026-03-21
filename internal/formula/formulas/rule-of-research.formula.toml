@@ -1,0 +1,73 @@
+description = """
+Phase-specific iterative refinement for research documents.
+
+Research benefits from structured refinement because first drafts tend to
+have unsupported claims, missing alternatives, and vague recommendations.
+Each pass focuses on a different quality dimension specific to research work.
+
+Based on Jeffrey Emanuel's discovery that LLM agents produce best work
+through iterative refinement, adapted for research-specific concerns.
+
+Unlike the generic rule-of-five (correctness → clarity → edge cases → excellence),
+this expansion uses research-appropriate dimensions:
+survey → verify claims → challenge conclusions → sharpen recommendations.
+"""
+formula = "rule-of-research"
+type = "expansion"
+version = 1
+
+[[template]]
+id = "{target}.survey"
+title = "Survey: broad exploration"
+description = """
+Cast a wide net. Gather sources, data points, examples, existing solutions.
+
+Breadth over depth. Don't conclude yet — collect evidence first.
+Read source code, docs, external references. Note everything relevant.
+It's OK to be messy here — subsequent passes will refine."""
+
+[[template]]
+id = "{target}.verify"
+needs = ["{target}.survey"]
+title = "Verify: fact-check claims"
+description = """
+For every factual claim in your survey: verify it.
+
+- API exists? Check docs or source code.
+- Library works as described? Check version, read the actual API.
+- Codebase claim accurate? Read the actual code, don't trust memory.
+- Performance claim? Check methodology, verify numbers are plausible.
+
+Remove or explicitly flag anything you cannot verify.
+Change 'X supports Y' to 'X appears to support Y (unverified)' if unsure."""
+
+[[template]]
+id = "{target}.challenge"
+needs = ["{target}.verify"]
+title = "Challenge: devil's advocate"
+description = """
+Actively argue against your own conclusions.
+
+- Could the evidence support a different conclusion?
+- Are you favoring an option because it's familiar, not because it's best?
+- What would someone who disagrees say? Steel-man their position.
+- Are dismissed alternatives actually viable? Re-check them.
+- Are you confusing 'first option I found' with 'best option'?
+
+If the challenge reveals a real weakness, update your conclusions.
+If your conclusions survive the challenge, they're stronger for it."""
+
+[[template]]
+id = "{target}.sharpen"
+needs = ["{target}.challenge"]
+title = "Sharpen: make it actionable"
+description = """
+Someone reading this should know exactly what to do next.
+
+- Clear recommendation (not 'it depends' without saying on what)
+- Explicit next steps (numbered, actionable)
+- Acknowledged risks (what could go wrong if someone acts on this)
+- Stated limitations (what this research does NOT cover)
+- Shelf life (will this be stale in a month? flag time-sensitive aspects)
+
+Cut hedging language. 'We should probably consider X' → 'Do X because Y.'"""

@@ -1,0 +1,396 @@
+description = """
+Peer review gate for design documents and implementation plans.
+
+Spawned when a crew member or polecat produces a design doc, spec, or plan.
+Reviews the document against four dimensions — feasibility, completeness,
+consistency, and scope — then produces a PASS/FAIL verdict with findings.
+
+Unlike mol-prd-review (6-leg convoy for PRD brainstorming), this is a
+focused gate formula: one reviewer, structured verdict, pass/fail signal.
+Use mol-prd-review for exploratory review of ideas. Use this for gating
+designs before they drive implementation.
+
+## Contract
+
+You are a design reviewer, NOT a designer. You:
+1. Read the design document
+2. Read the source bead (why this design exists)
+3. Check the codebase for consistency and feasibility
+4. Produce a PASS or FAIL verdict with **verifiable evidence**
+5. Signal the requester and exit
+
+**You do NOT:**
+- Rewrite the design (file findings, let the author fix)
+- Rubber-stamp (if the design has critical gaps, fail it)
+- Block on polish (fail on substance, not presentation)
+- Propose alternative architectures (flag problems, don't redesign)
+
+## Evidence Standard
+
+Every finding MUST include verifiable evidence. A finding without evidence is
+invalid and cannot contribute to a FAIL verdict.
+
+**Required per finding:**
+- **What I checked**: specific codebase location, API doc, or design section
+- **What I found**: concrete observation
+- **Why it's an issue**: impact on implementation or correctness
+- **Confidence**: CERTAIN (verified against codebase) or UNCERTAIN (plausible concern, couldn't fully verify)
+
+**CERTAIN findings** can trigger FAIL.
+**UNCERTAIN findings** are informational only — they CANNOT trigger FAIL.
+
+**Example of a valid finding:**
+```
+[CERTAIN] [FEASIBILITY] Design proposes extending MeshAccessor interface
+Checked: rg 'interface MeshAccessor' simflow/core/ — found at MeshAccessor.java:15
+Found: MeshAccessor has 23 implementations across 8 modules. Adding a method breaks all of them.
+Impact: Design underestimates scope — needs default method or adapter pattern.
+```
+
+**Example of an INVALID finding:**
+```
+[CERTAIN] This design seems overly complex.
+```
+No codebase check, no specific concern, no evidence. Opinion, not a finding.
+
+## Dispute Protocol
+
+The author has the right to DISPUTE any finding by providing counter-evidence.
+On dispute: Witness routes to Mayor for arbitration.
+
+## Verdict Criteria
+
+PASS when ALL of:
+- Design is buildable with the existing codebase (no CERTAIN feasibility blockers)
+- Key concerns addressed or explicitly deferred with TODOs
+- No CERTAIN conflicts with existing architecture
+- Scope proportional to the problem
+
+FAIL when ANY CERTAIN finding shows:
+- Design requires capabilities the codebase doesn't have (verified)
+- Critical concern missing with no acknowledgment
+- Direct conflict with existing architecture (with codebase evidence)
+- Massively over/under-engineered (with specific evidence)
+
+DO NOT FAIL for:
+- Presentation quality or formatting
+- UNCERTAIN concerns (informational only)
+- Designs that acknowledge gaps with explicit TODOs
+- Reasonable technical bets that could go either way
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| design_path | hook_bead | Path to the design document |
+| source_issue | hook_bead | The bead that motivated this design |
+| rig | hook | The rig this review is for |
+
+## Failure Modes
+
+| Situation | Action |
+|-----------|--------|
+| Design doc doesn't exist at path | FAIL (nothing to review) |
+| Can't assess feasibility (unfamiliar domain) | PASS with caveat |
+| Design is exploratory/research, not prescriptive | PASS (don't gate exploration) |
+| Suspicious but can't verify against codebase | Mark UNCERTAIN, PASS with notes |"""
+formula = "mol-peer-review-design"
+version = 2
+
+[[steps]]
+id = "load-context"
+title = "Load design document and source bead"
+description = """
+Gather all context needed for the review.
+
+**1. Prime environment:**
+```bash
+gt prime
+```
+
+**2. Read the source bead (why this design exists):**
+```bash
+bd show {{source_issue}}
+```
+Understand:
+- What problem is being solved
+- Any constraints or requirements stated
+- Any acceptance criteria
+
+**3. Read the design document:**
+```bash
+cat {{design_path}}
+```
+
+**4. Understand the scope:**
+- Is this a full design spec or an early draft?
+- Is it prescriptive (do this) or exploratory (options analysis)?
+- What files/modules does it propose changing?
+
+**5. Get codebase context for areas the design touches:**
+```bash
+# List the files/directories the design proposes to modify
+# Read key interfaces and types the design references
+```
+
+**Exit criteria:** You have the design, the source bead requirements, and
+relevant codebase context loaded."""
+
+[[steps]]
+id = "review-feasibility"
+title = "Assess technical feasibility"
+needs = ["load-context"]
+description = """
+Can this design actually be built with the existing codebase?
+
+**For each proposed change, verify against the codebase:**
+
+1. **Interfaces and types exist?**
+   ```bash
+   rg "class|interface|object <TypeName>" <relevant-dirs> --type kotlin --type java
+   ```
+   Build evidence: "Design references X. Checked: <command>. Found: <result>."
+
+2. **Dependencies available?**
+   - Does the design require libraries not in the project?
+   - Verify: check build.gradle.kts for the dependency
+
+3. **Threading/concurrency model compatible?**
+   - Does the design assume a threading model the codebase supports?
+
+4. **Migration path realistic?**
+   - If changing existing behavior, is the migration plausible?
+
+**For each issue, build evidence:**
+```
+[CERTAIN/UNCERTAIN] [FEASIBILITY] — description
+Checked: <specific command or file read>
+Found: <concrete observation>
+Impact: <what this means for implementation>
+```
+
+**Record findings:**
+```bash
+bd update {{source_issue}} --notes "DESIGN REVIEW: Feasibility
+CERTAIN blockers: <list with evidence>
+UNCERTAIN concerns: <list>
+Assessment: <feasible / blockers found>"
+```
+
+**Exit criteria:** Every proposed change verified against codebase reality."""
+
+[[steps]]
+id = "review-completeness"
+title = "Check design completeness"
+needs = ["load-context"]
+parallel = true
+description = """
+Does the design address the key concerns for production-quality software?
+
+**Completeness checklist:**
+
+| Concern | Required? |
+|---------|-----------|
+| Failure modes | Yes |
+| Error handling | Yes |
+| Edge cases | Yes for data designs |
+| Migration | Yes if changing existing |
+| Rollback | Yes for risky changes |
+| Testing strategy | Yes |
+| Performance impact | Yes for hot paths |
+| API boundaries | Yes for public APIs |
+
+**For each missing concern, evaluate:**
+- Is it genuinely needed? (Not everything needs a rollback plan)
+- Is it explicitly deferred with a TODO? (Acknowledged gaps are OK → not a finding)
+- Would its absence cause a production incident? (→ CERTAIN finding)
+- Could it go either way? (→ UNCERTAIN observation)
+
+**Build evidence for each gap:**
+```
+[CERTAIN/UNCERTAIN] [COMPLETENESS] — description
+Checked: <searched design doc for section/mention of concern>
+Found: <no mention of failure modes for X>
+Impact: <production incident scenario if unaddressed>
+```
+
+**Record findings:**
+```bash
+bd update {{source_issue}} --notes "DESIGN REVIEW: Completeness
+Concerns addressed: <N>/<total>
+CERTAIN gaps: <list with evidence>
+UNCERTAIN gaps: <list>
+Acknowledged TODOs: <list>"
+```
+
+**Exit criteria:** All key concerns checked against the design."""
+
+[[steps]]
+id = "review-consistency"
+title = "Check consistency with existing architecture"
+needs = ["load-context"]
+parallel = true
+description = """
+Does this design fit with the existing system or conflict with it?
+
+**1. Pattern consistency:**
+Does the design follow existing patterns or introduce new ones?
+```bash
+# Check how similar problems are solved elsewhere
+rg "<key-pattern>" --type kotlin --type java
+```
+
+**2. Module boundary respect:**
+Does it create circular dependencies or depend on implementation details?
+
+**3. In-flight conflict:**
+```bash
+git log --oneline -20 -- <directories-design-touches>
+bd list --status=open | grep -i "<related-area>"
+```
+
+**Build evidence for each conflict:**
+```
+[CERTAIN/UNCERTAIN] [CONSISTENCY] — description
+Checked: <rg command showing existing pattern, or bd list showing conflicting work>
+Found: <existing code uses pattern X, design proposes pattern Y>
+Impact: <two ways to do the same thing, maintenance burden>
+```
+
+**Record findings:**
+```bash
+bd update {{source_issue}} --notes "DESIGN REVIEW: Consistency
+CERTAIN conflicts: <list with evidence>
+UNCERTAIN observations: <list>
+Assessment: <consistent / conflicts found>"
+```
+
+**Exit criteria:** Design checked against existing architecture."""
+
+[[steps]]
+id = "review-scope"
+title = "Assess scope proportionality"
+needs = ["load-context"]
+parallel = true
+description = """
+Is the design proportional to the problem?
+
+**Over-engineering signals (provide evidence):**
+- Abstractions for one use case — cite the abstraction and its single usage
+- Plugin systems for fixed requirements — cite the extension point that has one implementation
+- Generic framework when specific solution would do — cite the generic interface
+
+**Under-engineering signals (provide evidence):**
+- Hard-coded values that will obviously change — cite the constant
+- Missing error paths that will cause incidents — cite the unguarded call
+- Skipping migration for breaking changes — cite the breaking API change
+
+**Build evidence:**
+```
+[CERTAIN/UNCERTAIN] [SCOPE] — description
+Checked: <what you looked at>
+Found: <concrete evidence of over/under-engineering>
+Impact: <wasted effort or production risk>
+```
+
+**Record findings:**
+```bash
+bd update {{source_issue}} --notes "DESIGN REVIEW: Scope
+CERTAIN issues: <list with evidence>
+UNCERTAIN observations: <list>
+Assessment: <proportional / over-engineered / under-engineered>"
+```
+
+**Exit criteria:** Scope assessed with evidence."""
+
+[[steps]]
+id = "verdict"
+title = "Produce design review verdict"
+needs = ["review-feasibility", "review-completeness", "review-consistency", "review-scope"]
+description = """
+Synthesize all findings into a PASS or FAIL verdict.
+
+**Pre-verdict checklist (MANDATORY):**
+Before issuing a FAIL, for each CERTAIN finding:
+1. Re-read your evidence — is the codebase check still valid?
+2. Did you check the right branch/version of the code?
+3. Could the design author know something you don't (domain context, planned changes)?
+If any doubt, downgrade to UNCERTAIN.
+
+**Decision rules:**
+- Zero CERTAIN findings → **PASS** (UNCERTAIN findings included as notes)
+- One or more CERTAIN findings → **FAIL**
+- Only UNCERTAIN findings → **PASS with notes**
+- Can't assess (unfamiliar domain) → **PASS with caveat**
+
+**On PASS:**
+```bash
+bd update {{source_issue}} --notes "DESIGN REVIEW VERDICT: PASS
+
+Feasibility: <summary>
+Completeness: <summary>
+Consistency: <summary>
+Scope: <summary>
+
+UNCERTAIN observations (informational):
+<list if any>"
+
+gt mail send {{rig}}/witness -s "DESIGN_REVIEW_PASSED: {{source_issue}}" -m "Design review passed for {{source_issue}}.
+Document: {{design_path}}
+Verdict: PASS
+Summary: <one-line summary>"
+```
+
+**On FAIL:**
+```bash
+bd update {{source_issue}} --notes "DESIGN REVIEW: FAIL (disputable)
+
+Each CERTAIN finding includes evidence. The author may DISPUTE any
+finding by providing counter-evidence. Disputes routed to Mayor.
+
+CERTAIN findings (must address or dispute):
+<numbered list with full evidence per finding>
+
+Format:
+N. [CATEGORY] — description
+   Checked: <what I checked>
+   Found: <what I observed>
+   Impact: <why it matters>
+
+UNCERTAIN observations (informational):
+<list if any>"
+
+gt mail send {{rig}}/witness -s "DESIGN_REVIEW_FAILED: {{source_issue}}" -m "Design review failed for {{source_issue}}.
+Document: {{design_path}}
+Verdict: FAIL
+CERTAIN findings: <count> (disputable)
+Summary: <one-line summary>"
+```
+
+**Exit criteria:** Verdict delivered to Witness via mail."""
+
+[[steps]]
+id = "complete"
+title = "Exit review"
+needs = ["verdict"]
+description = """
+Review complete. Self-clean.
+
+```bash
+gt done --cleanup-status clean
+```
+
+**Exit criteria:** Session exited."""
+
+[vars]
+[vars.design_path]
+description = "Path to the design document (relative to repo root)"
+required = true
+
+[vars.source_issue]
+description = "The bead/issue that motivated this design"
+required = true
+
+[vars.rig]
+description = "The rig this review is for"
+required = true

@@ -1,0 +1,369 @@
+description = """
+Peer review gate for research documents, feasibility studies, and technical analyses.
+
+Research is uniquely dangerous to leave unreviewed: wrong conclusions become
+design assumptions, which become architecture, which become production code.
+A bad research doc is a time bomb with a long fuse.
+
+## Contract
+
+You are a research reviewer, NOT a researcher. You:
+1. Read the research document
+2. Check whether claims are supported by evidence
+3. Verify cited sources, APIs, and capabilities actually exist
+4. Test whether conclusions follow from the evidence
+5. Produce a PASS or FAIL verdict with **verifiable evidence**
+
+**You do NOT:**
+- Redo the research (flag unsupported claims, let the author verify)
+- Expand scope (review what's there, not what's missing)
+- Argue preferences (flag factual errors, not opinion differences)
+
+## Evidence Standard
+
+Every finding MUST include verifiable evidence. A finding without evidence is
+invalid and cannot contribute to a FAIL verdict.
+
+**Required per finding:**
+- **Claim reviewed**: quote or paraphrase the specific claim from the document
+- **What I checked**: how I verified (command, API doc, codebase search)
+- **What I found**: concrete observation that contradicts or undermines the claim
+- **Confidence**: CERTAIN (verified with evidence) or UNCERTAIN (suspicious, couldn't fully verify)
+
+**CERTAIN findings** can trigger FAIL.
+**UNCERTAIN findings** are informational only — they CANNOT trigger FAIL.
+
+**Example of a valid finding:**
+```
+[CERTAIN] [CLAIM] "VTK supports zero-copy mesh transfer via vtkMappedDataArray"
+Checked: VTK 9.3 docs + vtk source grep for vtkMappedDataArray
+Found: vtkMappedDataArray exists but requires contiguous memory layout.
+  Research doc claims it works with strided/interleaved data — this is incorrect.
+  VTK source (vtkMappedDataArray.h:42) explicitly requires AOS layout.
+Impact: Design built on this claim would fail at runtime with interleaved mesh data.
+```
+
+**Example of an INVALID finding:**
+```
+[CERTAIN] I don't think this library is mature enough.
+```
+No specific check, no factual claim challenged, no evidence. Opinion.
+
+## Dispute Protocol
+
+The author has the right to DISPUTE any finding by providing counter-evidence
+(e.g., a different version of the API docs, a working code sample). On dispute:
+Witness routes to Mayor for arbitration.
+
+## Verdict Criteria
+
+PASS when ALL of:
+- Claims are supported by evidence (code, docs, benchmarks, citations)
+- Cited APIs/libraries actually exist and work as described
+- Conclusions follow logically from the evidence
+- Limitations and caveats are acknowledged
+
+FAIL when ANY CERTAIN finding shows:
+- Key claim is factually wrong (with evidence)
+- Cited API/library doesn't exist or doesn't work as described (with evidence)
+- Conclusion contradicts the evidence presented (with specific contradiction)
+- Obvious alternative not considered that would change the recommendation (with evidence it exists)
+
+DO NOT FAIL for:
+- Incomplete coverage of a broad topic
+- Missing tangential alternatives
+- Presentation quality
+- UNCERTAIN concerns
+- Research that honestly concludes "we don't know yet"
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| research_path | hook_bead | Path to the research document |
+| source_issue | hook_bead | The bead that requested this research |
+| rig | hook | The rig this review is for |
+
+## Failure Modes
+
+| Situation | Action |
+|-----------|--------|
+| Can't verify claims (no access to tool/API) | Mark UNCERTAIN, PASS with caveat |
+| Research is exploratory brainstorm, not conclusions | PASS (don't gate ideation) |
+| Domain too unfamiliar to evaluate | PASS with caveat, recommend domain expert |"""
+formula = "mol-peer-review-research"
+version = 2
+
+[[steps]]
+id = "load-context"
+title = "Load research document and source bead"
+description = """
+Gather all context needed for the review.
+
+**1. Prime environment:**
+```bash
+gt prime
+```
+
+**2. Read the source bead (why this research was requested):**
+```bash
+bd show {{source_issue}}
+```
+Understand:
+- What question was the research trying to answer?
+- What decision does it inform?
+- Any constraints on the research scope?
+
+**3. Read the research document:**
+```bash
+cat {{research_path}}
+```
+
+**4. Identify the key claims:**
+List every factual claim, recommendation, or conclusion in the document.
+These are what you'll verify in subsequent steps. Write them down explicitly —
+this is your review checklist.
+
+**Exit criteria:** You have the document loaded and key claims explicitly listed."""
+
+[[steps]]
+id = "verify-claims"
+title = "Verify factual claims and cited sources"
+needs = ["load-context"]
+description = """
+Are the factual claims in the research actually true?
+
+**For each factual claim, build evidence:**
+
+1. **API/library claims:**
+   ```bash
+   # Check if cited dependencies exist in the project
+   rg "<library-name>" --glob "*.gradle.kts" --glob "*.toml"
+   # Check actual API behavior
+   rg "<cited-function-or-class>" --type kotlin --type java
+   ```
+
+2. **Codebase claims ("the system currently does X"):**
+   ```bash
+   rg "<claimed-behavior>" --type kotlin --type java
+   # Read the actual implementation, don't trust the claim
+   ```
+
+3. **Performance/measurement claims:**
+   - Is the methodology described?
+   - Are comparisons fair (same conditions)?
+   - Are numbers plausible?
+
+4. **External claims:**
+   - Can you verify the cited capability?
+   - Is the source authoritative and current?
+
+**Format per claim checked:**
+```
+Claim: "<quote from research doc>"
+Checked: <command run or source consulted>
+Result: VERIFIED / INCORRECT / UNVERIFIABLE
+Details: <what I found>
+Confidence: CERTAIN / UNCERTAIN
+```
+
+**Record findings:**
+```bash
+bd update {{source_issue}} --notes "RESEARCH REVIEW: Claim verification
+Total claims checked: <N>
+Verified (CERTAIN correct): <N>
+Incorrect (CERTAIN wrong): <N>
+Unverifiable: <N>
+Details: <list of CERTAIN incorrect claims with evidence>"
+```
+
+**Exit criteria:** Every significant factual claim checked with evidence."""
+
+[[steps]]
+id = "check-reasoning"
+title = "Evaluate reasoning and conclusions"
+needs = ["load-context"]
+parallel = true
+description = """
+Do the conclusions follow from the evidence?
+
+**1. Evidence → Conclusion alignment:**
+- Does the recommendation follow from the findings?
+- Could the same evidence support a different conclusion?
+- Are there unstated assumptions bridging evidence to conclusion?
+
+**2. Alternatives analysis:**
+- Were alternatives genuinely evaluated or dismissed as strawmen?
+- Is there an obvious alternative NOT considered?
+  ```bash
+  # Check if dismissed alternatives actually exist and work
+  rg "<dismissed-alternative>" --type kotlin --type java
+  ```
+  If you find a viable alternative the research ignored, build evidence:
+  ```
+  [CERTAIN] [REASONING] Research dismisses X but it's viable
+  Checked: <command showing X exists/works>
+  Found: <evidence X is a real option>
+  Impact: Conclusion may change if X is considered
+  ```
+
+**3. Bias detection:**
+- Does the research favor a predetermined conclusion?
+- Are limitations of the recommended approach acknowledged?
+
+**Format per reasoning issue:**
+```
+[CERTAIN/UNCERTAIN] [REASONING] — description
+Checked: <what I verified>
+Found: <specific logical gap or missed alternative>
+Impact: <how this affects the recommendation>
+```
+
+**Record findings:**
+```bash
+bd update {{source_issue}} --notes "RESEARCH REVIEW: Reasoning check
+CERTAIN reasoning issues: <list with evidence>
+UNCERTAIN observations: <list>
+Assessment: <sound / issues found>"
+```
+
+**Exit criteria:** Reasoning chain evaluated with evidence."""
+
+[[steps]]
+id = "check-actionability"
+title = "Assess actionability and decision-readiness"
+needs = ["load-context"]
+parallel = true
+description = """
+Can someone make a decision based on this research?
+
+**1. Clear recommendation:**
+- Does the research end with a clear recommendation?
+- If multiple options, is there a recommended one with rationale?
+
+**2. Next steps defined:**
+- Does it say what should happen next?
+- Are unknowns explicitly listed?
+
+**3. Risks and caveats:**
+- Are risks of the recommended approach stated?
+- What could go wrong if someone acts on this?
+
+**4. Shelf life:**
+- Will this research be stale soon?
+- Are there time-sensitive aspects?
+
+**These are informational observations, not findings that trigger FAIL.**
+Actionability issues are always UNCERTAIN — a research doc that says "we don't
+know yet, here's what we'd need to find out" is honest and valid. Only factual
+errors and flawed reasoning trigger CERTAIN findings.
+
+**Record findings:**
+```bash
+bd update {{source_issue}} --notes "RESEARCH REVIEW: Actionability
+Clear recommendation: <yes/no>
+Next steps defined: <yes/no>
+Risks acknowledged: <yes/partially/no>
+Decision-ready: <yes/needs-work>"
+```
+
+**Exit criteria:** Actionability assessed."""
+
+[[steps]]
+id = "verdict"
+title = "Produce research review verdict"
+needs = ["verify-claims", "check-reasoning", "check-actionability"]
+description = """
+Synthesize all findings into a PASS or FAIL verdict.
+
+**Pre-verdict checklist (MANDATORY):**
+Before issuing a FAIL, for each CERTAIN finding:
+1. Re-read the research claim — did you misinterpret it?
+2. Re-check your evidence — did you search the right thing?
+3. Could the author have access to information you don't (newer docs, private API)?
+If any doubt, downgrade to UNCERTAIN.
+
+**Decision rules:**
+- Zero CERTAIN findings → **PASS** (UNCERTAIN observations as notes)
+- CERTAIN incorrect claims → **FAIL** (factual errors)
+- CERTAIN flawed reasoning → **FAIL** (conclusions don't follow)
+- Only UNCERTAIN concerns → **PASS with notes**
+- Unverifiable claims (no access) → **PASS with caveat**
+- Actionability issues alone → **PASS with notes** (never FAIL for this)
+
+**On PASS:**
+```bash
+bd update {{source_issue}} --notes "RESEARCH REVIEW VERDICT: PASS
+
+Claims: <N> checked, <N> verified, <N> unverifiable
+Reasoning: <summary>
+Actionability: <summary>
+
+UNCERTAIN observations (informational):
+<list if any>
+
+Unverifiable claims (author should double-check):
+<list if any>"
+
+gt mail send {{rig}}/witness -s "RESEARCH_REVIEW_PASSED: {{source_issue}}" -m "Research review passed for {{source_issue}}.
+Document: {{research_path}}
+Verdict: PASS
+Claims verified: <N>/<total>
+Summary: <one-line summary>"
+```
+
+**On FAIL:**
+```bash
+bd update {{source_issue}} --notes "RESEARCH REVIEW: FAIL (disputable)
+
+Each CERTAIN finding includes evidence. The author may DISPUTE any
+finding by providing counter-evidence (e.g., newer docs, working code sample).
+Disputes routed to Mayor.
+
+CERTAIN findings (must correct or dispute):
+<numbered list with full evidence>
+
+Format:
+N. [CLAIM|REASONING] — description
+   Original claim: '<quote from research>'
+   Checked: <what I checked>
+   Found: <what contradicts the claim>
+   Impact: <what goes wrong if someone acts on this uncorrected>
+
+UNCERTAIN observations (informational):
+<list if any>"
+
+gt mail send {{rig}}/witness -s "RESEARCH_REVIEW_FAILED: {{source_issue}}" -m "Research review failed for {{source_issue}}.
+Document: {{research_path}}
+Verdict: FAIL
+CERTAIN findings: <count> (disputable)
+Summary: <one-line summary>"
+```
+
+**Exit criteria:** Verdict delivered to Witness via mail."""
+
+[[steps]]
+id = "complete"
+title = "Exit review"
+needs = ["verdict"]
+description = """
+Review complete. Self-clean.
+
+```bash
+gt done --cleanup-status clean
+```
+
+**Exit criteria:** Session exited."""
+
+[vars]
+[vars.research_path]
+description = "Path to the research document (relative to repo root)"
+required = true
+
+[vars.source_issue]
+description = "The bead/issue that requested this research"
+required = true
+
+[vars.rig]
+description = "The rig this review is for"
+required = true

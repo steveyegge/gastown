@@ -186,7 +186,7 @@ Based on your completeness and correctness findings, decide PASS or FAIL.
 ```bash
 bd update {{mr_bead}} --notes "PEER_REVIEW_VERDICT: <PASS|FAIL>
 
-Reviewer: {{polecat_name}}
+Reviewer: {{polecat}}
 Issue: {{issue}}
 Branch: {{branch}}
 

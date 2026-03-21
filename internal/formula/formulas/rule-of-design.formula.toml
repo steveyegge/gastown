@@ -1,0 +1,98 @@
+description = """
+Phase-specific iterative refinement for design documents.
+
+Design benefits from structured refinement because first drafts tend to
+assume capabilities the codebase doesn't have, ignore failure modes, and
+over-engineer for hypothetical requirements.
+
+Based on Jeffrey Emanuel's discovery that LLM agents produce best work
+through iterative refinement, adapted for design-specific concerns.
+
+Unlike the generic rule-of-five (correctness → clarity → edge cases → excellence),
+this expansion uses design-appropriate dimensions:
+sketch → validate feasibility → harden failure modes → simplify.
+"""
+formula = "rule-of-design"
+type = "expansion"
+version = 1
+
+[[template]]
+id = "{target}.sketch"
+title = "Sketch: architecture draft"
+description = """
+Get the structure right. Don't optimize, don't detail — sketch.
+
+- Module boundaries: what goes where?
+- Key interfaces: what are the contracts between components?
+- Data flow: how does information move through the system?
+- Dependencies: what depends on what?
+
+Use diagrams, pseudocode, bullet points. This is a napkin sketch,
+not a specification. The goal is structural clarity."""
+
+[[template]]
+id = "{target}.validate"
+needs = ["{target}.sketch"]
+title = "Validate: check against codebase"
+description = """
+Does this design work with what actually exists?
+
+For every type, interface, or module referenced in the sketch:
+- Does it exist in the codebase? (grep for it)
+- Does it work the way you assumed? (read the actual code)
+- Can it be extended as proposed? (check for sealed/final, impl count)
+
+For every dependency assumed:
+- Is it in the build files? (check gradle/maven/package.json)
+- Is the version compatible?
+
+Fix anything that assumes capabilities the codebase doesn't have.
+If the design requires something that doesn't exist, acknowledge it
+explicitly as a prerequisite, don't quietly assume it."""
+
+[[template]]
+id = "{target}.harden"
+needs = ["{target}.validate"]
+title = "Harden: failure modes and migration"
+description = """
+What happens when things go wrong?
+
+For each component in the design:
+- What errors can occur? How are they surfaced?
+- What happens on partial failure? (one component fails, others running)
+- What's the degraded operation mode?
+- Can it be rolled back if the whole thing goes wrong?
+
+If changing existing behavior:
+- How does existing data/state migrate?
+- What breaks during the transition window?
+- Is there a backwards-compatible path or is it big-bang?
+- What happens to in-flight operations during migration?
+
+Add these to the design, don't just note them. A design without
+failure modes is a design that will fail in production."""
+
+[[template]]
+id = "{target}.simplify"
+needs = ["{target}.harden"]
+title = "Simplify: cut what isn't needed"
+description = """
+The best design is the smallest one that solves the problem.
+
+For each abstraction:
+- Does it have more than one implementation? If not, inline it.
+- Is it a generic framework? Could a specific solution work instead?
+- Is it configurable? Could it be a constant?
+
+For each component:
+- Is it solving a current problem or a hypothetical future one?
+- Could this be done in a later phase without blocking current value?
+- Is there a simpler approach that trades elegance for clarity?
+
+For the design as a whole:
+- What's the minimum that delivers the core value?
+- What could be cut without losing the essential capability?
+- Are there natural seams for phasing?
+
+Remove anything that exists 'just in case.' If it's needed later,
+it can be added later — with the benefit of knowing more."""
