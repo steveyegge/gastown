@@ -36,6 +36,7 @@ type SlingParams struct {
 	HookRawBead bool    // --hook-raw-bead
 	NoBoot     bool     // --no-boot
 	Mode       string   // --ralph: "" (normal) or "ralph"
+	ReviewOnly bool     // --review-only: review and report back only, no merge/commit/push
 
 	// Execution behavior (set by caller, not serialized to queue)
 	SkipCook         bool   // Batch optimization: formula already cooked
@@ -343,6 +344,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		AttachedMolecule: attachedMoleculeID,
 		AttachedFormula:  params.FormulaName,
 		NoMerge:          params.NoMerge,
+		ReviewOnly:       params.ReviewOnly,
 		Mode:             params.Mode,
 		FormulaVars:      strings.Join(allVars, "\n"),
 	}

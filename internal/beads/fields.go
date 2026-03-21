@@ -20,6 +20,7 @@ type AttachmentFields struct {
 	AttachedVars     []string // Formula variables passed via gt sling --var
 	DispatchedBy     string // Agent ID that dispatched this work (for completion notification)
 	NoMerge          bool   // If true, gt done skips merge queue (for upstream PRs/human review)
+	ReviewOnly       bool   // If true, assignee must evaluate and report back — no merge/commit/push
 	Mode             string // Execution mode: "" (normal) or "ralph" (Ralph Wiggum loop)
 	ConvoyID         string // Convoy bead ID tracking this issue (e.g., "hq-cv-abc")
 	MergeStrategy    string // Convoy merge strategy: "direct", "mr", "local", or "" (default = mr)
@@ -78,6 +79,9 @@ func ParseAttachmentFields(issue *Issue) *AttachmentFields {
 		case "no_merge", "no-merge", "nomerge":
 			fields.NoMerge = strings.ToLower(value) == "true"
 			hasFields = true
+		case "review_only", "review-only", "reviewonly":
+			fields.ReviewOnly = strings.ToLower(value) == "true"
+			hasFields = true
 		case "mode":
 			fields.Mode = value
 			hasFields = true
@@ -132,6 +136,9 @@ func FormatAttachmentFields(fields *AttachmentFields) string {
 	if fields.NoMerge {
 		lines = append(lines, "no_merge: true")
 	}
+	if fields.ReviewOnly {
+		lines = append(lines, "review_only: true")
+	}
 	if fields.Mode != "" {
 		lines = append(lines, "mode: "+fields.Mode)
 	}
@@ -178,6 +185,9 @@ func SetAttachmentFields(issue *Issue, fields *AttachmentFields) string {
 		"no_merge":          true,
 		"no-merge":          true,
 		"nomerge":           true,
+		"review_only":       true,
+		"review-only":       true,
+		"reviewonly":         true,
 		"mode":              true,
 		"convoy_id":         true,
 		"convoy-id":         true,

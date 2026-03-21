@@ -257,6 +257,7 @@ type beadFieldUpdates struct {
 	AttachedMolecule string // Wisp root ID
 	AttachedFormula  string // Formula name (e.g., "mol-polecat-work") for inline step display
 	NoMerge          bool   // Skip merge queue on completion
+	ReviewOnly       bool   // Review-only mode: assignee must not merge/commit/push
 	Mode             string // Execution mode: "" (normal) or "ralph"
 	ConvoyID         string // Convoy bead ID (e.g., "hq-cv-abc")
 	MergeStrategy    string // Convoy merge strategy: "direct", "mr", "local"
@@ -323,6 +324,9 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 	}
 	if updates.NoMerge {
 		fields.NoMerge = true
+	}
+	if updates.ReviewOnly {
+		fields.ReviewOnly = true
 	}
 	if updates.Mode != "" {
 		fields.Mode = updates.Mode
