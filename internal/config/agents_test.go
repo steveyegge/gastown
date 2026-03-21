@@ -1229,8 +1229,8 @@ func TestPiProviderDefaults(t *testing.T) {
 	if result.Tmux == nil {
 		t.Fatal("fillRuntimeDefaults(pi) should auto-fill Tmux")
 	}
-	if result.Tmux.ReadyDelayMs != 3000 {
-		t.Errorf("Tmux.ReadyDelayMs = %d, want 3000", result.Tmux.ReadyDelayMs)
+	if result.Tmux.ReadyDelayMs != 8000 {
+		t.Errorf("Tmux.ReadyDelayMs = %d, want 8000", result.Tmux.ReadyDelayMs)
 	}
 	wantNames := []string{"pi", "node", "bun"}
 	if len(result.Tmux.ProcessNames) != len(wantNames) {

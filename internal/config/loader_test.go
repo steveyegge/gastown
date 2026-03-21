@@ -3255,9 +3255,11 @@ func TestFillRuntimeDefaults(t *testing.T) {
 		} else if result.Tmux.ReadyPromptPrefix != "❯ " {
 			t.Errorf("Tmux.ReadyPromptPrefix = %q, want \"❯ \"", result.Tmux.ReadyPromptPrefix)
 		}
-		// Instructions still remain nil (no preset fills this).
-		if result.Instructions != nil {
-			t.Error("Instructions should remain nil when input has nil Instructions")
+		// Instructions is auto-filled from preset when nil.
+		if result.Instructions == nil {
+			t.Error("Instructions should be auto-filled for claude command")
+		} else if result.Instructions.File != "CLAUDE.md" {
+			t.Errorf("Instructions.File = %q, want CLAUDE.md", result.Instructions.File)
 		}
 	})
 
@@ -3319,11 +3321,11 @@ func TestFillRuntimeDefaults(t *testing.T) {
 				t.Errorf("Tmux.ProcessNames[%d] = %q, want %q", i, result.Tmux.ProcessNames[i], want)
 			}
 		}
-		if result.Tmux.ReadyDelayMs != 3000 {
-			t.Errorf("Tmux.ReadyDelayMs = %d, want 3000", result.Tmux.ReadyDelayMs)
+		if result.Tmux.ReadyDelayMs != 8000 {
+			t.Errorf("Tmux.ReadyDelayMs = %d, want 8000", result.Tmux.ReadyDelayMs)
 		}
 
-		// PromptMode should default to "arg" for pi
+		// PromptMode should be "arg" for pi (from preset)
 		if result.PromptMode != "arg" {
 			t.Errorf("PromptMode = %q, want arg", result.PromptMode)
 		}
@@ -3435,6 +3437,108 @@ func TestFillRuntimeDefaults(t *testing.T) {
 
 		if len(result.Tmux.ProcessNames) != 1 || result.Tmux.ProcessNames[0] != "my-claude-wrapper" {
 			t.Errorf("Tmux.ProcessNames = %v, want [my-claude-wrapper] (user-specified)", result.Tmux.ProcessNames)
+		}
+	})
+}
+
+// TestFillRuntimeDefaultsPresetMerging verifies preset defaults are merged
+// into custom agent configs based on the Provider field or inferred command name.
+func TestFillRuntimeDefaultsPresetMerging(t *testing.T) {
+	t.Parallel()
+
+	t.Run("custom agent with provider=gemini gets session defaults", func(t *testing.T) {
+		t.Parallel()
+		// Custom agent using a different binary but declaring gemini as provider
+		input := &RuntimeConfig{
+			Provider: "gemini",
+			Command:  "gemini-custom",
+			Args:     []string{"--fast-mode"},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Session should be auto-filled from gemini preset
+		if result.Session == nil {
+			t.Fatal("Session should be auto-filled from gemini preset")
+		}
+		if result.Session.SessionIDEnv != "GEMINI_SESSION_ID" {
+			t.Errorf("Session.SessionIDEnv = %q, want GEMINI_SESSION_ID", result.Session.SessionIDEnv)
+		}
+		// Tmux should be auto-filled from gemini preset
+		if result.Tmux == nil {
+			t.Fatal("Tmux should be auto-filled from gemini preset")
+		}
+		found := false
+		for _, name := range result.Tmux.ProcessNames {
+			if name == "gemini" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Tmux.ProcessNames should contain 'gemini', got %v", result.Tmux.ProcessNames)
+		}
+		// User-specified Args should be preserved
+		if len(result.Args) != 1 || result.Args[0] != "--fast-mode" {
+			t.Errorf("Args should be preserved: got %v", result.Args)
+		}
+	})
+
+	t.Run("custom agent infers preset from command name", func(t *testing.T) {
+		t.Parallel()
+		// No provider set, but command matches a known preset
+		input := &RuntimeConfig{
+			Command: "gemini",
+			Args:    []string{"--approval-mode", "custom"},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Should get gemini preset defaults
+		if result.Session == nil {
+			t.Fatal("Session should be auto-filled from gemini preset (inferred from command)")
+		}
+		if result.Session.SessionIDEnv != "GEMINI_SESSION_ID" {
+			t.Errorf("Session.SessionIDEnv = %q, want GEMINI_SESSION_ID", result.Session.SessionIDEnv)
+		}
+		// Args should be preserved (user override)
+		if len(result.Args) != 2 || result.Args[0] != "--approval-mode" {
+			t.Errorf("Args should be preserved: got %v", result.Args)
+		}
+	})
+
+	t.Run("preset defaults not applied when fields already set", func(t *testing.T) {
+		t.Parallel()
+		// All fields explicitly set — preset should not override
+		input := &RuntimeConfig{
+			Provider: "claude",
+			Command:  "custom-claude",
+			Session: &RuntimeSessionConfig{
+				SessionIDEnv: "MY_SESSION_ID",
+			},
+			Tmux: &RuntimeTmuxConfig{
+				ProcessNames: []string{"my-process"},
+			},
+			Instructions: &RuntimeInstructionsConfig{
+				File: "MY.md",
+			},
+			PromptMode: "none",
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// User-set fields should not be overridden by preset
+		if result.Session.SessionIDEnv != "MY_SESSION_ID" {
+			t.Errorf("Session.SessionIDEnv overridden: got %q, want MY_SESSION_ID", result.Session.SessionIDEnv)
+		}
+		if len(result.Tmux.ProcessNames) != 1 || result.Tmux.ProcessNames[0] != "my-process" {
+			t.Errorf("Tmux.ProcessNames overridden: got %v, want [my-process]", result.Tmux.ProcessNames)
+		}
+		if result.Instructions.File != "MY.md" {
+			t.Errorf("Instructions.File overridden: got %q, want MY.md", result.Instructions.File)
+		}
+		if result.PromptMode != "none" {
+			t.Errorf("PromptMode overridden: got %q, want none", result.PromptMode)
 		}
 	})
 }

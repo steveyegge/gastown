@@ -79,10 +79,16 @@ to all rigs in the town.
 The command can include arguments. Use quotes if the command or
 arguments contain spaces.
 
+The provider preset is inferred from the command binary name when it
+matches a known preset (e.g., "gemini", "claude"). Use --provider to
+set it explicitly for custom binary names. The provider controls
+session handling, tmux detection, hooks, and other runtime defaults.
+
 Examples:
   gt config agent set claude-glm \"claude-glm --model glm-4\"
   gt config agent set gemini-custom gemini --approval-mode yolo
-  gt config agent set claude \"claude-glm\"  # Override built-in claude`,
+  gt config agent set claude \"claude-glm\"  # Override built-in claude
+  gt config agent set my-bot my-bot-cli --provider claude  # Use Claude defaults`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigAgentSet,
 }
@@ -225,7 +231,8 @@ Examples:
 
 // Flags
 var (
-	configAgentListJSON bool
+	configAgentListJSON  bool
+	configAgentSetProvider string
 )
 
 // AgentListItem represents an agent in list output.
@@ -420,10 +427,24 @@ func runConfigAgentSet(cmd *cobra.Command, args []string) error {
 		townSettings.Agents = make(map[string]*config.RuntimeConfig)
 	}
 
+	// Determine the provider: use --provider flag if given, otherwise infer
+	// from the command binary name if it matches a known preset.
+	provider := configAgentSetProvider
+	if provider == "" {
+		cmdBase := parts[0]
+		if idx := strings.LastIndexByte(cmdBase, '/'); idx >= 0 {
+			cmdBase = cmdBase[idx+1:]
+		}
+		if config.IsKnownPreset(cmdBase) {
+			provider = cmdBase
+		}
+	}
+
 	// Create or update the agent
 	townSettings.Agents[name] = &config.RuntimeConfig{
-		Command: parts[0],
-		Args:    parts[1:],
+		Provider: provider,
+		Command:  parts[0],
+		Args:     parts[1:],
 	}
 
 	// Save settings
@@ -1214,6 +1235,7 @@ func parseBool(s string) (bool, error) {
 func init() {
 	// Add flags
 	configAgentListCmd.Flags().BoolVar(&configAgentListJSON, "json", false, "Output as JSON")
+	configAgentSetCmd.Flags().StringVar(&configAgentSetProvider, "provider", "", "Agent provider preset (e.g. claude, gemini, codex); inferred from command name if not set")
 
 	// Add agent subcommands
 	configAgentCmd := &cobra.Command{
