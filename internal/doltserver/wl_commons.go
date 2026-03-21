@@ -193,6 +193,7 @@ CREATE TABLE IF NOT EXISTS stamps (
     context_id VARCHAR(64),
     context_type VARCHAR(32),
     stamp_type VARCHAR(32),
+    pilot_cohort VARCHAR(64),
     skill_tags JSON,
     message TEXT,
     prev_stamp_hash VARCHAR(64),
@@ -200,8 +201,12 @@ CREATE TABLE IF NOT EXISTS stamps (
     block_hash VARCHAR(64),
     hop_uri VARCHAR(512),
     created_at TIMESTAMP,
-    CHECK (NOT(author = subject))
+    CHECK (NOT(author = subject)),
+    CHECK (stamp_type IS NULL OR stamp_type IN ('work', 'mentoring', 'peer_review', 'endorsement', 'boot_block'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_stamps_stamp_type ON stamps (stamp_type);
+CREATE INDEX IF NOT EXISTS idx_stamps_pilot_cohort ON stamps (pilot_cohort);
 
 CREATE TABLE IF NOT EXISTS badges (
     id VARCHAR(64) PRIMARY KEY,
@@ -465,6 +470,7 @@ type StampRecord struct {
 	ContextID     string
 	ContextType   string
 	StampType     string
+	PilotCohort   string
 	SkillTags     string // JSON array string
 	Message       string
 	PrevStampHash string
@@ -501,6 +507,10 @@ func InsertStamp(townRoot string, s *StampRecord) error {
 	if s.StampType != "" {
 		stampType = fmt.Sprintf("'%s'", EscapeSQL(s.StampType))
 	}
+	pilotCohort := "NULL"
+	if s.PilotCohort != "" {
+		pilotCohort = fmt.Sprintf("'%s'", EscapeSQL(s.PilotCohort))
+	}
 	skillTags := "NULL"
 	if s.SkillTags != "" {
 		skillTags = fmt.Sprintf("'%s'", EscapeSQL(s.SkillTags))
@@ -520,8 +530,8 @@ func InsertStamp(townRoot string, s *StampRecord) error {
 
 	script := fmt.Sprintf(`USE %s;
 
-INSERT INTO stamps (id, author, subject, valence, confidence, severity, context_id, context_type, stamp_type, skill_tags, message, prev_stamp_hash, stamp_index, created_at)
-VALUES ('%s', '%s', '%s', '%s', %f, '%s', %s, %s, %s, %s, %s, %s, %s, '%s');
+INSERT INTO stamps (id, author, subject, valence, confidence, severity, context_id, context_type, stamp_type, pilot_cohort, skill_tags, message, prev_stamp_hash, stamp_index, created_at)
+VALUES ('%s', '%s', '%s', '%s', %f, '%s', %s, %s, %s, %s, %s, %s, %s, %s, '%s');
 
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl stamp: %s stamps %s');
@@ -529,7 +539,7 @@ CALL DOLT_COMMIT('-m', 'wl stamp: %s stamps %s');
 		WLCommonsDB,
 		EscapeSQL(s.ID), EscapeSQL(s.Author), EscapeSQL(s.Subject),
 		EscapeSQL(s.Valence), s.Confidence, EscapeSQL(s.Severity),
-		contextID, contextType, stampType, skillTags, message,
+		contextID, contextType, stampType, pilotCohort, skillTags, message,
 		prevHash, stampIdx, now,
 		EscapeSQL(s.Author), EscapeSQL(s.Subject))
 

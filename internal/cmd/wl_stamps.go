@@ -19,6 +19,8 @@ var (
 	wlStampsAuthor      string
 	wlStampsSkill       string
 	wlStampsContextType string
+	wlStampsStampType   string
+	wlStampsCohort      string
 	wlStampsSeverity    string
 	wlStampsLimit       int
 	wlStampsJSON        bool
@@ -49,6 +51,8 @@ func init() {
 	wlStampsCmd.Flags().StringVar(&wlStampsAuthor, "author", "", "Filter by stamper rig handle")
 	wlStampsCmd.Flags().StringVar(&wlStampsSkill, "skill", "", "Filter by skill tag (searches JSON array)")
 	wlStampsCmd.Flags().StringVar(&wlStampsContextType, "type", "", "Filter by context_type (completion, endorsement, boot_block, validation_received, sandboxed_completion)")
+	wlStampsCmd.Flags().StringVar(&wlStampsStampType, "stamp-type", "", "Filter by stamp_type (work, mentoring, peer_review, endorsement, boot_block)")
+	wlStampsCmd.Flags().StringVar(&wlStampsCohort, "cohort", "", "Filter by pilot_cohort (andela-pilot, commbank-pilot, indie)")
 	wlStampsCmd.Flags().StringVar(&wlStampsSeverity, "severity", "", "Filter by severity (leaf, branch, root)")
 	wlStampsCmd.Flags().IntVar(&wlStampsLimit, "limit", 50, "Maximum stamps to display")
 	wlStampsCmd.Flags().BoolVar(&wlStampsJSON, "json", false, "Output as JSON")
@@ -62,6 +66,8 @@ type StampsFilter struct {
 	Author      string
 	Skill       string
 	ContextType string
+	StampType   string
+	PilotCohort string
 	Severity    string
 	Limit       int
 }
@@ -76,6 +82,12 @@ func buildStampsQuery(f StampsFilter) string {
 	}
 	if f.ContextType != "" {
 		conditions = append(conditions, fmt.Sprintf("context_type = '%s'", doltserver.EscapeSQL(f.ContextType)))
+	}
+	if f.StampType != "" {
+		conditions = append(conditions, fmt.Sprintf("stamp_type = '%s'", doltserver.EscapeSQL(f.StampType)))
+	}
+	if f.PilotCohort != "" {
+		conditions = append(conditions, fmt.Sprintf("pilot_cohort = '%s'", doltserver.EscapeSQL(f.PilotCohort)))
 	}
 	if f.Severity != "" {
 		conditions = append(conditions, fmt.Sprintf("severity = '%s'", doltserver.EscapeSQL(f.Severity)))
@@ -146,6 +158,8 @@ func runWLStamps(cmd *cobra.Command, args []string) error {
 		Author:      wlStampsAuthor,
 		Skill:       wlStampsSkill,
 		ContextType: wlStampsContextType,
+		StampType:   wlStampsStampType,
+		PilotCohort: wlStampsCohort,
 		Severity:    wlStampsSeverity,
 		Limit:       wlStampsLimit,
 	})

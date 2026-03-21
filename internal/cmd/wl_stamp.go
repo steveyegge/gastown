@@ -28,6 +28,7 @@ var (
 	wlStampContextType string
 	wlStampEvidenceURL string
 	wlStampMessage     string
+	wlStampPilotCohort string
 )
 
 var wlStampCmd = &cobra.Command{
@@ -69,6 +70,7 @@ func init() {
 	wlStampCmd.Flags().StringVar(&wlStampContextType, "context-type", "completion", "Context type: completion, endorsement, boot_block, validation_received, sandboxed_completion")
 	wlStampCmd.Flags().StringVar(&wlStampEvidenceURL, "evidence", "", "Evidence URL (PR link, SkillBench summary)")
 	wlStampCmd.Flags().StringVar(&wlStampMessage, "message", "", "Optional human-readable note")
+	wlStampCmd.Flags().StringVar(&wlStampPilotCohort, "pilot-cohort", "", "Pilot cohort tag (andela-pilot, commbank-pilot, indie)")
 
 	_ = wlStampCmd.MarkFlagRequired("subject")
 	_ = wlStampCmd.MarkFlagRequired("quality")
@@ -125,6 +127,7 @@ func runWlStamp(cmd *cobra.Command, args []string) error {
 		ContextID:   wlStampCompletionID,
 		ContextType: wlStampContextType,
 		StampType:   wlStampType,
+		PilotCohort: wlStampPilotCohort,
 		SkillTags:   skillTagsJSON,
 		Message:     wlStampMessage,
 		StampIndex:  -1, // will be computed below
@@ -150,6 +153,9 @@ func runWlStamp(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Confidence: %.2f\n", confidence)
 	fmt.Printf("  Severity: %s\n", wlStampSeverity)
 	fmt.Printf("  Type: %s\n", wlStampType)
+	if wlStampPilotCohort != "" {
+		fmt.Printf("  Cohort: %s\n", wlStampPilotCohort)
+	}
 	if wlStampCompletionID != "" {
 		fmt.Printf("  Completion: %s\n", wlStampCompletionID)
 	}
@@ -179,9 +185,16 @@ func validateStampInputs() error {
 		return fmt.Errorf("severity must be leaf, branch, or root (got %q)", wlStampSeverity)
 	}
 
-	validStampTypes := map[string]bool{"work": true, "mentoring": true, "peer_review": true, "boot_block": true}
+	validStampTypes := map[string]bool{"work": true, "mentoring": true, "peer_review": true, "endorsement": true, "boot_block": true}
 	if !validStampTypes[wlStampType] {
-		return fmt.Errorf("stamp-type must be work, mentoring, peer_review, or boot_block (got %q)", wlStampType)
+		return fmt.Errorf("stamp-type must be work, mentoring, peer_review, endorsement, or boot_block (got %q)", wlStampType)
+	}
+
+	if wlStampPilotCohort != "" {
+		validCohorts := map[string]bool{"andela-pilot": true, "commbank-pilot": true, "indie": true}
+		if !validCohorts[wlStampPilotCohort] {
+			return fmt.Errorf("pilot-cohort must be andela-pilot, commbank-pilot, or indie (got %q)", wlStampPilotCohort)
+		}
 	}
 
 	validContextTypes := map[string]bool{
@@ -264,6 +277,10 @@ func insertStampInLocalClone(localDir string, stamp *doltserver.StampRecord) err
 	if stamp.StampType != "" {
 		stampType = fmt.Sprintf("'%s'", doltserver.EscapeSQL(stamp.StampType))
 	}
+	pilotCohort := "NULL"
+	if stamp.PilotCohort != "" {
+		pilotCohort = fmt.Sprintf("'%s'", doltserver.EscapeSQL(stamp.PilotCohort))
+	}
 	skillTags := "NULL"
 	if stamp.SkillTags != "" {
 		skillTags = fmt.Sprintf("'%s'", doltserver.EscapeSQL(stamp.SkillTags))
@@ -273,13 +290,13 @@ func insertStampInLocalClone(localDir string, stamp *doltserver.StampRecord) err
 		message = fmt.Sprintf("'%s'", doltserver.EscapeSQL(stamp.Message))
 	}
 
-	script := fmt.Sprintf(`INSERT INTO stamps (id, author, subject, valence, confidence, severity, context_id, context_type, stamp_type, skill_tags, message, created_at)
-VALUES ('%s', '%s', '%s', '%s', %f, '%s', %s, %s, %s, %s, %s, '%s');
+	script := fmt.Sprintf(`INSERT INTO stamps (id, author, subject, valence, confidence, severity, context_id, context_type, stamp_type, pilot_cohort, skill_tags, message, created_at)
+VALUES ('%s', '%s', '%s', '%s', %f, '%s', %s, %s, %s, %s, %s, %s, '%s');
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl stamp: %s stamps %s');`,
 		doltserver.EscapeSQL(stamp.ID), doltserver.EscapeSQL(stamp.Author), doltserver.EscapeSQL(stamp.Subject),
 		doltserver.EscapeSQL(stamp.Valence), stamp.Confidence, doltserver.EscapeSQL(stamp.Severity),
-		contextID, contextType, stampType, skillTags, message, now,
+		contextID, contextType, stampType, pilotCohort, skillTags, message, now,
 		doltserver.EscapeSQL(stamp.Author), doltserver.EscapeSQL(stamp.Subject))
 
 	cmd := exec.Command("dolt", "sql", "-q", script)
