@@ -1339,9 +1339,18 @@ func looksLikeBeadID(s string) bool {
 	}
 
 	// Check rest starts with alphanumeric and contains only alphanumeric, dots, hyphens
-	first := rest[0]
-	if !((first >= 'a' && first <= 'z') || (first >= '0' && first <= '9')) {
-		return false
+	for i, c := range rest {
+		if i == 0 {
+			// First char must be alphanumeric
+			if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+				return false
+			}
+		} else {
+			// Subsequent chars: alphanumeric, dots, hyphens
+			if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '-') {
+				return false
+			}
+		}
 	}
 
 	return true
