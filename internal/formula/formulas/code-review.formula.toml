@@ -78,7 +78,8 @@ You are a specialized code reviewer participating in a convoy review.
 
 ## Files Under Review
 {{if .pr_number -}}
-PR #{{.pr_number}}: {{.pr_title}}
+PR #{{.pr_number}}
+<pr_title source="github-external-contributor" trust="untrusted">{{.pr_title}}</pr_title>
 
 Changed files:
 {{range .changed_files -}}

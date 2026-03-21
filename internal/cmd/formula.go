@@ -330,6 +330,8 @@ func dryRunFormula(f *formula.Formula, formulaName, targetRig string) error {
 		var changedFiles []map[string]interface{}
 		if formulaRunPR > 0 {
 			prTitle, changedFiles = fetchPRInfo(formulaRunPR)
+			// gt-sec-003: sanitize before injecting into LLM prompt template.
+			prTitle = sanitizeFormulaInput(prTitle, 500)
 			if prTitle != "" {
 				fmt.Printf("  PR Title: %s\n", prTitle)
 			}
@@ -464,6 +466,8 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 	var changedFiles []map[string]interface{}
 	if formulaRunPR > 0 {
 		prTitle, changedFiles = fetchPRInfo(formulaRunPR)
+		// gt-sec-003: sanitize before injecting into LLM prompt template.
+		prTitle = sanitizeFormulaInput(prTitle, 500)
 	}
 
 	// Create output directory if configured
@@ -1022,6 +1026,25 @@ func resolveFormulaLegAgent(legAgent, cliAgent, formulaAgent string) string {
 		return cliAgent
 	}
 	return formulaAgent
+}
+
+// sanitizeFormulaInput strips control characters and caps length on external
+// user-supplied fields before injecting into LLM prompts via formula templates
+// (gt-sec-003). Prevents prompt injection via malicious PR titles from external
+// GitHub contributors.
+func sanitizeFormulaInput(s string, maxLen int) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r == '\n' || r == '\r' || r < 0x20 || r == 0x7F {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	result := b.String()
+	if len(result) > maxLen {
+		result = result[:maxLen]
+	}
+	return result
 }
 
 // promptYesNo asks the user a yes/no question
