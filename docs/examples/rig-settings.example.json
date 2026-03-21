@@ -37,6 +37,11 @@
         "lint_command": "golangci-lint run",
         "setup_command": "",
         "typecheck_command": "",
+        "gates": {
+            "lint": {"cmd": "golangci-lint run ./...", "timeout": "2m"},
+            "test": {"cmd": "go test ./...", "timeout": "5m"},
+            "build-check": {"cmd": "go build ./...", "timeout": "2m", "phase": "post-squash"}
+        },
         "delete_merged_branches": true,
         "retry_flaky_tests": 1,
         "poll_interval": "30s",
