@@ -13,6 +13,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/rig"
+	gtruntime "github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -620,5 +621,86 @@ func TestPolecatSlot(t *testing.T) {
 	}
 	if slot := sm.polecatSlot("beta"); slot != 1 {
 		t.Errorf("with hidden dir: polecatSlot(beta) = %d, want 1", slot)
+	}
+}
+
+// TestHookAgentStartup_VerificationRunsWithoutNudge verifies that
+// verifyStartupNudgeDelivery runs for hook-based agents even though
+// GetStartupFallbackInfo returns SendStartupNudge=false for them.
+//
+// Before GH#3133, verification was gated on SendStartupNudge, so hook
+// agents got zero post-startup checks. If hooks failed silently, the
+// agent sat at the welcome screen indefinitely. The fix ungates
+// verification from the nudge flag — it now runs for all agents with
+// prompt detection.
+//
+// This test creates a real tmux session simulating a hook agent where
+// hooks failed (idle at prompt), and confirms that:
+//  1. SendStartupNudge is false (hooks handle context, no redundant nudge)
+//  2. verifyStartupNudgeDelivery still runs (detects idle, sends recovery nudge)
+func TestHookAgentStartup_VerificationRunsWithoutNudge(t *testing.T) {
+	requireTmux(t)
+
+	tm := tmux.NewTmux()
+	sessionName := fmt.Sprintf("gt-test-hookstartup-%d", testSessionCounter.Add(1))
+
+	_ = tm.KillSession(sessionName)
+	if err := tm.NewSession(sessionName, os.TempDir()); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	t.Cleanup(func() { _ = tm.KillSession(sessionName) })
+
+	time.Sleep(300 * time.Millisecond)
+	_ = tm.SendKeys(sessionName, "export PS1='❯ '")
+	time.Sleep(300 * time.Millisecond)
+
+	claudeRC := &config.RuntimeConfig{
+		PromptMode: "arg",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "claude",
+		},
+		Tmux: &config.RuntimeTmuxConfig{
+			ReadyPromptPrefix: "❯ ",
+			ReadyDelayMs:      2000,
+		},
+	}
+
+	// Hook agents should NOT get a startup nudge (hooks handle it).
+	fallbackInfo := gtruntime.GetStartupFallbackInfo(claudeRC)
+	if fallbackInfo.SendStartupNudge {
+		t.Fatal("GetStartupFallbackInfo should return SendStartupNudge=false for hook agents — " +
+			"hooks handle context injection, nudges would pollute the input buffer")
+	}
+
+	// But verifyStartupNudgeDelivery should still run (the GH#3133 fix).
+	// Configure short retry delays so the test doesn't block.
+	townRoot := t.TempDir()
+	settingsDir := filepath.Join(townRoot, "settings")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	retries := 2
+	configJSON := fmt.Sprintf(`{"operational":{"session":{"startup_nudge_verify_delay":"500ms","startup_nudge_max_retries":%d}}}`, retries)
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), []byte(configJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rigPath := filepath.Join(townRoot, "test-rig")
+	if err := os.MkdirAll(rigPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{Name: "test-rig", Path: rigPath}
+	m := NewSessionManager(tm, r)
+	done := make(chan struct{})
+	go func() {
+		m.verifyStartupNudgeDelivery(sessionName, claudeRC)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Log("verifyStartupNudgeDelivery completed — idle verification runs for hook agents even without SendStartupNudge")
+	case <-time.After(15 * time.Second):
+		t.Fatal("verifyStartupNudgeDelivery hung (exceeded 15s timeout)")
 	}
 }

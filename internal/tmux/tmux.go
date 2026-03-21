@@ -1785,8 +1785,9 @@ func containsWorkspaceTrustDialog(content string) bool {
 }
 
 // promptSuffixes are strings that indicate a shell or agent prompt is visible.
-// Claude prompt ends with ">", shell prompts end with "$", "%", "#", or "❯".
-var promptSuffixes = []string{">", "$", "%", "#", "❯"}
+// The ">" suffix is handled separately in containsPromptIndicator to avoid
+// false positives from HTML tags, progress arrows, and error messages.
+var promptSuffixes = []string{"$", "%", "#", "❯"}
 
 // containsPromptIndicator checks if pane content contains a prompt indicator
 // that signals a shell or agent is ready (no dialog blocking it).
@@ -1795,6 +1796,12 @@ func containsPromptIndicator(content string) bool {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
+		}
+		// Match ">" only when it's a bare prompt (entire line) or preceded by
+		// a space (e.g. "user> "). Rejects HTML close tags (</div>), progress
+		// arrows (=====>), version strings (v4.0.1>), and error messages.
+		if trimmed == ">" || strings.HasSuffix(trimmed, " >") {
+			return true
 		}
 		for _, suffix := range promptSuffixes {
 			if strings.HasSuffix(trimmed, suffix) {

@@ -194,7 +194,9 @@ func GetStartupFallbackInfo(rc *config.RuntimeConfig) *StartupFallbackInfo {
 		info.SendStartupNudge = true
 		info.StartupNudgeDelayMs = 0
 	}
-	// else: hooks + prompt - nothing needed, all in CLI prompt + hook
+	// else: hooks + prompt — hooks handle context injection, no nudge needed.
+	// Idle verification still runs (gated on prompt detection in session_manager.go)
+	// as a safety net if hooks fail silently. See GH#3133.
 
 	return info
 }

@@ -455,12 +455,12 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		}
 	}
 
-	// Verify startup nudge was delivered: poll for idle prompt and retry if lost.
-	// This fixes the Mode B race where the nudge arrives before Claude Code is ready,
-	// causing the polecat to sit idle at an empty prompt. See GH#1379.
-	if fallbackInfo.SendStartupNudge {
-		m.verifyStartupNudgeDelivery(sessionID, runtimeConfig)
-	}
+	// Verify the agent isn't stuck at the idle prompt after startup.
+	// For nudge-based agents, this catches lost nudges (GH#1379).
+	// For hook-based agents, this catches silent hook failures (GH#3133).
+	// verifyStartupNudgeDelivery self-guards: returns immediately if
+	// the runtime has no ReadyPromptPrefix (can't detect idle state).
+	m.verifyStartupNudgeDelivery(sessionID, runtimeConfig)
 
 	// Legacy fallback for other startup paths (non-fatal)
 	_ = runtime.RunStartupFallback(m.tmux, sessionID, "polecat", runtimeConfig)

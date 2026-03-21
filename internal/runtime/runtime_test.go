@@ -305,7 +305,10 @@ func TestEnsureSettingsForRole_ClaudeUsesSettingsDir(t *testing.T) {
 }
 
 func TestGetStartupFallbackInfo_HooksWithPrompt(t *testing.T) {
-	// Claude: hooks enabled, prompt mode "arg"
+	// Claude: hooks enabled, prompt mode "arg".
+	// Hooks+prompt agents don't need a startup nudge — hooks handle context injection.
+	// Idle verification runs separately (gated on prompt detection in session_manager.go,
+	// not on SendStartupNudge). See GH#3133.
 	rc := &config.RuntimeConfig{
 		PromptMode: "arg",
 		Hooks: &config.RuntimeHooksConfig{
@@ -318,7 +321,10 @@ func TestGetStartupFallbackInfo_HooksWithPrompt(t *testing.T) {
 		t.Error("Hooks+Prompt should NOT include prime instruction in beacon")
 	}
 	if info.SendStartupNudge {
-		t.Error("Hooks+Prompt should NOT need startup nudge (beacon has it)")
+		t.Error("Hooks+Prompt should NOT send startup nudge (hooks handle it)")
+	}
+	if info.SendBeaconNudge {
+		t.Error("Hooks+Prompt should NOT need beacon nudge (has prompt support)")
 	}
 }
 

@@ -951,36 +951,104 @@ func TestBeadRecoveredField_DefaultFalse(t *testing.T) {
 
 func TestStalledResult_Types(t *testing.T) {
 	t.Parallel()
-	// Verify the StalledResult type has all expected fields
+
 	s := StalledResult{
-		PolecatName: "alpha",
-		StallType:   "startup-stall",
-		Action:      "auto-dismissed",
-		Error:       nil,
+		PolecatName:   "alpha",
+		StallType:     "dialog-stall",
+		Action:        "auto-dismissed",
+		PaneSnapshot:  "Quick safety check\n❯ 1. Yes, I trust this folder",
+		AgentState:    "spawning",
+		HasHookedWork: true,
+		Error:         nil,
 	}
 
 	if s.PolecatName != "alpha" {
 		t.Errorf("PolecatName = %q, want %q", s.PolecatName, "alpha")
 	}
-	if s.StallType != "startup-stall" {
-		t.Errorf("StallType = %q, want %q", s.StallType, "startup-stall")
+	if s.StallType != "dialog-stall" {
+		t.Errorf("StallType = %q, want %q", s.StallType, "dialog-stall")
 	}
 	if s.Action != "auto-dismissed" {
 		t.Errorf("Action = %q, want %q", s.Action, "auto-dismissed")
+	}
+	if s.PaneSnapshot == "" {
+		t.Error("PaneSnapshot should be populated for agent-level reasoning")
+	}
+	if s.AgentState != "spawning" {
+		t.Errorf("AgentState = %q, want %q", s.AgentState, "spawning")
+	}
+	if !s.HasHookedWork {
+		t.Error("HasHookedWork = false, want true")
 	}
 	if s.Error != nil {
 		t.Errorf("Error = %v, want nil", s.Error)
 	}
 
-	// Verify error field works
 	s2 := StalledResult{
-		PolecatName: "bravo",
-		StallType:   "startup-stall",
-		Action:      "escalated",
-		Error:       fmt.Errorf("auto-dismiss failed"),
+		PolecatName:   "bravo",
+		StallType:     "idle-stall",
+		Action:        "escalated",
+		PaneSnapshot:  "Welcome to Claude Code\n❯",
+		AgentState:    "spawning",
+		HasHookedWork: true,
+		Error:         fmt.Errorf("auto-dismiss failed"),
 	}
 	if s2.Error == nil {
 		t.Error("Error = nil, want non-nil")
+	}
+	if s2.StallType != "idle-stall" {
+		t.Errorf("StallType = %q, want %q", s2.StallType, "idle-stall")
+	}
+}
+
+func TestStalledResult_StallTypeClassification(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		paneContent   string
+		wantStallType string
+	}{
+		{
+			name:          "trust dialog visible",
+			paneContent:   "Quick safety check\n❯ 1. Yes, I trust this folder\n   2. No, exit",
+			wantStallType: "dialog-stall",
+		},
+		{
+			name:          "codex trust dialog",
+			paneContent:   "Do you trust the contents of this directory?\n[Y/n]",
+			wantStallType: "dialog-stall",
+		},
+		{
+			name:          "bypass permissions dialog",
+			paneContent:   "Bypass Permissions mode\nAre you sure?",
+			wantStallType: "dialog-stall",
+		},
+		{
+			name:          "idle at claude prompt",
+			paneContent:   "Welcome to Claude Code\n❯",
+			wantStallType: "idle-stall",
+		},
+		{
+			name:          "idle at generic prompt",
+			paneContent:   "Some output\nuser> ",
+			wantStallType: "idle-stall",
+		},
+		{
+			name:          "unknown content",
+			paneContent:   "Loading...\nPlease wait",
+			wantStallType: "startup-stall",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stallType := classifyStallType(tt.paneContent)
+			if stallType != tt.wantStallType {
+				t.Errorf("classifyStallType(%q) = %q, want %q",
+					tt.paneContent, stallType, tt.wantStallType)
+			}
+		})
 	}
 }
 

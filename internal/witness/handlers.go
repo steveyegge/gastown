@@ -1479,10 +1479,30 @@ const SpawnGracePeriod = 5 * time.Minute
 
 // StalledResult represents a single stalled polecat detection.
 type StalledResult struct {
-	PolecatName string // e.g., "alpha"
-	StallType   string // "startup-stall", "unknown-prompt"
-	Action      string // "auto-dismissed", "escalated"
-	Error       error
+	PolecatName  string // e.g., "alpha"
+	StallType    string // "dialog-stall" (trust/bypass dialog visible), "idle-stall" (at prompt, no work), "startup-stall" (legacy/unknown)
+	Action       string // "auto-dismissed", "escalated"
+	PaneSnapshot string // Last N lines of pane content for agent-level reasoning
+	AgentState   string // Agent state from beads (e.g., "spawning", "running")
+	HasHookedWork bool  // Whether this polecat has hooked work assigned
+	Error        error
+}
+
+// classifyStallType categorizes a startup stall based on pane content.
+// Returns "dialog-stall" if a trust or permissions dialog is visible,
+// "idle-stall" if the agent is at an idle prompt, or "startup-stall" (default)
+// if the content doesn't match either pattern.
+func classifyStallType(paneContent string) string {
+	if strings.Contains(paneContent, "trust this folder") ||
+		strings.Contains(paneContent, "Quick safety check") ||
+		strings.Contains(paneContent, "Do you trust the contents of this directory?") ||
+		strings.Contains(paneContent, "Bypass Permissions mode") {
+		return "dialog-stall"
+	}
+	if strings.Contains(paneContent, "❯") || strings.Contains(paneContent, "> ") {
+		return "idle-stall"
+	}
+	return "startup-stall"
 }
 
 // DetectStalledPolecatsResult holds aggregate results.
@@ -1588,12 +1608,28 @@ func DetectStalledPolecats(workDir, rigName string) *DetectStalledPolecatsResult
 		}
 
 		// Session is old enough and has no recent activity: startup stall.
-		// Send blind key sequences to dismiss any startup dialogs without
-		// screen-scraping pane content (avoids coupling to third-party TUI strings).
+		// Capture observable context so the Witness agent can reason about
+		// the stall type and choose the right recovery action.
 		stalled := StalledResult{
 			PolecatName: polecatName,
 			StallType:   "startup-stall",
 		}
+
+		// Snapshot pane content for agent-level reasoning.
+		if paneContent, captureErr := t.CapturePane(sessionName, 15); captureErr == nil {
+			stalled.PaneSnapshot = paneContent
+			stalled.StallType = classifyStallType(paneContent)
+		}
+
+		// Fetch agent bead state for context.
+		prefix := beads.GetPrefixForRig(townRoot, rigName)
+		agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+		if snap := fetchAgentBeadSnapshot(DefaultBdCli(), workDir, agentBeadID); snap != nil {
+			stalled.AgentState = snap.AgentState
+			stalled.HasHookedWork = snap.HookBead != ""
+		}
+
+		// Send blind key sequences to dismiss any startup dialogs.
 		if err := t.DismissStartupDialogsBlind(sessionName); err != nil {
 			stalled.Action = "escalated"
 			stalled.Error = fmt.Errorf("blind dismiss failed: %w", err)
