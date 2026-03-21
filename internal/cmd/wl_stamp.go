@@ -79,8 +79,17 @@ func init() {
 }
 
 func runWlStamp(cmd *cobra.Command, args []string) error {
-	// Validate inputs
-	if err := validateStampInputs(); err != nil {
+	in := stampInputs{
+		Quality:     wlStampQuality,
+		Reliability: wlStampReliability,
+		Creativity:  wlStampCreativity,
+		Confidence:  wlStampConfidence,
+		Severity:    wlStampSeverity,
+		Type:        wlStampType,
+		ContextType: wlStampContextType,
+		PilotCohort: wlStampPilotCohort,
+	}
+	if err := validateStampInputs(in); err != nil {
 		return err
 	}
 
@@ -166,34 +175,45 @@ func runWlStamp(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func validateStampInputs() error {
-	if wlStampQuality < 0 || wlStampQuality > 5 {
-		return fmt.Errorf("quality must be 0-5 (got %.1f)", wlStampQuality)
+type stampInputs struct {
+	Quality     float64
+	Reliability float64
+	Creativity  float64
+	Confidence  float64
+	Severity    string
+	Type        string
+	ContextType string
+	PilotCohort string
+}
+
+func validateStampInputs(in stampInputs) error {
+	if in.Quality < 0 || in.Quality > 5 {
+		return fmt.Errorf("quality must be 0-5 (got %.1f)", in.Quality)
 	}
-	if wlStampReliability >= 0 && wlStampReliability > 5 {
-		return fmt.Errorf("reliability must be 0-5 (got %.1f)", wlStampReliability)
+	if in.Reliability >= 0 && in.Reliability > 5 {
+		return fmt.Errorf("reliability must be 0-5 (got %.1f)", in.Reliability)
 	}
-	if wlStampCreativity >= 0 && wlStampCreativity > 5 {
-		return fmt.Errorf("creativity must be 0-5 (got %.1f)", wlStampCreativity)
+	if in.Creativity >= 0 && in.Creativity > 5 {
+		return fmt.Errorf("creativity must be 0-5 (got %.1f)", in.Creativity)
 	}
-	if wlStampConfidence >= 0 && (wlStampConfidence < 0 || wlStampConfidence > 1) {
-		return fmt.Errorf("confidence must be 0.0-1.0 (got %.2f)", wlStampConfidence)
+	if in.Confidence >= 0 && (in.Confidence < 0 || in.Confidence > 1) {
+		return fmt.Errorf("confidence must be 0.0-1.0 (got %.2f)", in.Confidence)
 	}
 
 	validSeverities := map[string]bool{"leaf": true, "branch": true, "root": true}
-	if !validSeverities[wlStampSeverity] {
-		return fmt.Errorf("severity must be leaf, branch, or root (got %q)", wlStampSeverity)
+	if !validSeverities[in.Severity] {
+		return fmt.Errorf("severity must be leaf, branch, or root (got %q)", in.Severity)
 	}
 
 	validStampTypes := map[string]bool{"work": true, "mentoring": true, "peer_review": true, "endorsement": true, "boot_block": true}
-	if !validStampTypes[wlStampType] {
-		return fmt.Errorf("stamp-type must be work, mentoring, peer_review, endorsement, or boot_block (got %q)", wlStampType)
+	if !validStampTypes[in.Type] {
+		return fmt.Errorf("stamp-type must be work, mentoring, peer_review, endorsement, or boot_block (got %q)", in.Type)
 	}
 
-	if wlStampPilotCohort != "" {
+	if in.PilotCohort != "" {
 		validCohorts := map[string]bool{"andela-pilot": true, "commbank-pilot": true, "indie": true}
-		if !validCohorts[wlStampPilotCohort] {
-			return fmt.Errorf("pilot-cohort must be andela-pilot, commbank-pilot, or indie (got %q)", wlStampPilotCohort)
+		if !validCohorts[in.PilotCohort] {
+			return fmt.Errorf("pilot-cohort must be andela-pilot, commbank-pilot, or indie (got %q)", in.PilotCohort)
 		}
 	}
 
@@ -201,8 +221,8 @@ func validateStampInputs() error {
 		"completion": true, "endorsement": true, "boot_block": true,
 		"validation_received": true, "sandboxed_completion": true,
 	}
-	if !validContextTypes[wlStampContextType] {
-		return fmt.Errorf("context-type must be completion, endorsement, boot_block, validation_received, or sandboxed_completion (got %q)", wlStampContextType)
+	if !validContextTypes[in.ContextType] {
+		return fmt.Errorf("context-type must be completion, endorsement, boot_block, validation_received, or sandboxed_completion (got %q)", in.ContextType)
 	}
 
 	return nil
