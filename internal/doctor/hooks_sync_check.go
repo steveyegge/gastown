@@ -44,6 +44,14 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 
 	var details []string
 	for _, target := range targets {
+		if target.Provider == "gemini" {
+			if detail := c.checkGeminiTarget(target); detail != "" {
+				details = append(details, detail)
+			}
+			continue
+		}
+
+		// Claude targets: use base+override merge system
 		expected, err := hooks.ComputeExpected(target.Key)
 		if err != nil {
 			details = append(details, fmt.Sprintf("%s: error computing expected: %v", target.DisplayKey(), err))
@@ -84,9 +92,32 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 		Status:   StatusWarning,
 		Message:  fmt.Sprintf("%d target(s) out of sync", len(c.outOfSync)),
 		Details:  details,
-		FixHint:  "Run 'gt hooks sync' to regenerate settings.json files",
+		FixHint:  "Run 'gt doctor --fix hooks-sync' to regenerate settings files",
 		Category: c.Category(),
 	}
+}
+
+// checkGeminiTarget compares an installed gemini settings file against the
+// current template (with {{GT_BIN}} resolved). Returns a detail string if
+// out of sync, or empty string if in sync.
+func (c *HooksSyncCheck) checkGeminiTarget(target hooks.Target) string {
+	expected, err := hooks.ComputeExpectedTemplate("gemini", "settings.json", target.Role)
+	if err != nil {
+		return fmt.Sprintf("%s: error computing expected template: %v", target.DisplayKey(), err)
+	}
+
+	actual, err := os.ReadFile(target.Path)
+	if err != nil {
+		c.outOfSync = append(c.outOfSync, target)
+		return fmt.Sprintf("%s: cannot read: %v", target.DisplayKey(), err)
+	}
+
+	if !hooks.TemplateContentEqual(expected, actual) {
+		c.outOfSync = append(c.outOfSync, target)
+		return fmt.Sprintf("%s: out of sync", target.DisplayKey())
+	}
+
+	return ""
 }
 
 // Fix runs gt hooks sync to bring all targets into sync.
@@ -97,6 +128,14 @@ func (c *HooksSyncCheck) Fix(ctx *CheckContext) error {
 
 	var errs []string
 	for _, target := range c.outOfSync {
+		if target.Provider == "gemini" {
+			if err := c.fixGeminiTarget(target); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", target.DisplayKey(), err))
+			}
+			continue
+		}
+
+		// Claude targets: use base+override merge system
 		expected, err := hooks.ComputeExpected(target.Key)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", target.DisplayKey(), err))
@@ -138,5 +177,24 @@ func (c *HooksSyncCheck) Fix(ctx *CheckContext) error {
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
+	return nil
+}
+
+// fixGeminiTarget re-installs a gemini settings file from the current template.
+func (c *HooksSyncCheck) fixGeminiTarget(target hooks.Target) error {
+	content, err := hooks.ComputeExpectedTemplate("gemini", "settings.json", target.Role)
+	if err != nil {
+		return fmt.Errorf("computing template: %w", err)
+	}
+
+	dir := filepath.Dir(target.Path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("creating dir: %w", err)
+	}
+
+	if err := os.WriteFile(target.Path, content, 0600); err != nil {
+		return fmt.Errorf("writing: %w", err)
+	}
+
 	return nil
 }

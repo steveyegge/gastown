@@ -47,6 +47,21 @@ func isClaimStale(updatedAt string, timeout time.Duration) (stale bool, parseErr
 }
 
 // GateConfig defines a single quality gate command.
+// GatePhase controls when a gate runs in the merge pipeline.
+type GatePhase string
+
+const (
+	// GatePhasePreMerge runs the gate before the squash merge (default).
+	// The gate validates the source branch on the target baseline.
+	GatePhasePreMerge GatePhase = "pre-merge"
+
+	// GatePhasePostSquash runs the gate after the squash merge but before push.
+	// The gate validates the actual combined code, catching issues that only
+	// manifest in the merged result (broken imports, boot failures, missing
+	// templates). On failure, the merge is reset.
+	GatePhasePostSquash GatePhase = "post-squash"
+)
+
 type GateConfig struct {
 	// Cmd is the shell command to execute.
 	Cmd string `json:"cmd"`
@@ -54,6 +69,12 @@ type GateConfig struct {
 	// Timeout is the maximum time the gate command may run.
 	// Zero means no timeout (inherits context deadline).
 	Timeout time.Duration `json:"timeout"`
+
+	// Phase controls when this gate runs: "pre-merge" (default) or "post-squash".
+	// Pre-merge gates run before the squash merge on the source branch.
+	// Post-squash gates run after the squash merge on the combined result,
+	// before pushing. On post-squash failure, the merge is reset.
+	Phase GatePhase `json:"phase"`
 }
 
 // GateResult holds the outcome of a single gate execution.
@@ -367,6 +388,14 @@ func (e *Engineer) LoadConfig() error {
 				}
 				gc.Timeout = dur
 			}
+			switch raw.Phase {
+			case "", "pre-merge":
+				gc.Phase = GatePhasePreMerge
+			case "post-squash":
+				gc.Phase = GatePhasePostSquash
+			default:
+				return fmt.Errorf("gate %q has invalid phase %q: must be \"pre-merge\" or \"post-squash\"", name, raw.Phase)
+			}
 			e.config.Gates[name] = gc
 		}
 	}
@@ -385,6 +414,7 @@ func (e *Engineer) LoadConfig() error {
 type gateConfigRaw struct {
 	Cmd     string `json:"cmd"`
 	Timeout string `json:"timeout"`
+	Phase   string `json:"phase"`
 }
 
 // Config returns the current merge queue configuration.
@@ -401,6 +431,7 @@ type ProcessResult struct {
 	TestsFailed    bool
 	SlotTimeout    bool // Merge slot contention timeout (distinct from build/test failure)
 	BranchNotFound bool // Source branch no longer exists (e.g. cleaned up after cherry-pick)
+	NoMerge        bool // Source issue has no_merge flag — intentionally blocked, not a failure
 }
 
 // doMerge performs the actual git merge operation.
@@ -412,7 +443,7 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		if si, err := e.beads.Show(sourceIssue); err == nil && si != nil {
 			if af := beads.ParseAttachmentFields(si); af != nil && af.NoMerge {
 				_, _ = fmt.Fprintf(e.output, "[Engineer] Source issue %s has no_merge=true — skipping merge\n", sourceIssue)
-				return ProcessResult{Error: "no_merge flag set on source issue"}
+				return ProcessResult{NoMerge: true, Error: "no_merge flag set on source issue"}
 			}
 		}
 	}
@@ -555,6 +586,19 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		return ProcessResult{
 			Success: false,
 			Error:   fmt.Sprintf("merge failed: %v", err),
+		}
+	}
+
+	// Step 5.5: Run post-squash gates on the merged result.
+	// These validate the actual combined code before it goes anywhere.
+	// On failure, reset the merge to undo the local squash commit.
+	if !shouldSkipGates {
+		postResult := e.runGatesForPhase(ctx, GatePhasePostSquash)
+		if !postResult.Success {
+			if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after post-squash gate failure: %v\n", target, resetErr)
+			}
+			return postResult
 		}
 	}
 
@@ -798,11 +842,26 @@ func (e *Engineer) runGate(ctx context.Context, name string, gate *GateConfig) G
 	}
 }
 
-// runGates executes all configured quality gates and returns a ProcessResult.
+// runGates executes all pre-merge gates (backward-compatible entry point).
+func (e *Engineer) runGates(ctx context.Context) ProcessResult {
+	return e.runGatesForPhase(ctx, GatePhasePreMerge)
+}
+
+// runGatesForPhase executes gates matching the given phase.
 // Gates run in parallel if GatesParallel is true; otherwise sequentially.
 // Any single gate failure means overall failure.
-func (e *Engineer) runGates(ctx context.Context) ProcessResult {
-	gates := e.config.Gates
+func (e *Engineer) runGatesForPhase(ctx context.Context, phase GatePhase) ProcessResult {
+	// Filter gates for this phase. Empty phase is treated as pre-merge (default).
+	gates := make(map[string]*GateConfig)
+	for name, gc := range e.config.Gates {
+		gatePhase := gc.Phase
+		if gatePhase == "" {
+			gatePhase = GatePhasePreMerge
+		}
+		if gatePhase == phase {
+			gates[name] = gc
+		}
+	}
 	if len(gates) == 0 {
 		return ProcessResult{Success: true}
 	}
@@ -814,11 +873,12 @@ func (e *Engineer) runGates(ctx context.Context) ProcessResult {
 	}
 	sort.Strings(names)
 
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Running %d quality gate(s) (parallel=%v)\n", len(names), e.config.GatesParallel)
+	parallel := e.config.GatesParallel && phase == GatePhasePreMerge // post-squash always sequential
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Running %d %s gate(s) (parallel=%v)\n", len(names), phase, parallel)
 
 	var results []GateResult
 
-	if e.config.GatesParallel {
+	if parallel {
 		results = make([]GateResult, len(names))
 		var wg sync.WaitGroup
 		for i, name := range names {
@@ -1048,6 +1108,13 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 	if result.SlotTimeout {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] ✗ Slot timeout: %s - %s\n", mr.ID, result.Error)
 		_, _ = fmt.Fprintln(e.output, "[Engineer] MR remains in queue for automatic retry (slot contention)")
+		return
+	}
+
+	// No-merge is intentional — the source issue has no_merge=true. Not a failure.
+	// No polecat or mayor notification needed; the MR is simply dequeued.
+	if result.NoMerge {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] MR %s: no_merge flag set on source issue, dequeued\n", mr.ID)
 		return
 	}
 

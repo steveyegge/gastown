@@ -303,6 +303,10 @@ func (e *Engineer) processSingleMR(ctx context.Context, mr *MRInfo, target strin
 		// Treat as a skip: log and move on rather than halting the queue.
 		_, _ = fmt.Fprintf(e.output, "[Batch] MR %s: branch %s not found, skipping\n", mr.ID, mr.Branch)
 		result.Conflicts = []*MRInfo{mr}
+	} else if processResult.NoMerge {
+		// Source issue has no_merge flag — intentionally blocked. Dequeue silently.
+		_, _ = fmt.Fprintf(e.output, "[Batch] MR %s: no_merge flag set, dequeuing\n", mr.ID)
+		e.HandleMRInfoFailure(mr, processResult)
 	} else {
 		result.Error = fmt.Errorf("merge failed: %s", processResult.Error)
 	}

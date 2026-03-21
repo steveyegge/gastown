@@ -122,3 +122,11 @@ func (f *fakeWLCommonsStore) QueryWanted(wantedID string) (*WantedItem, error) {
 	cp := *item
 	return &cp, nil
 }
+
+func (f *fakeWLCommonsStore) InsertStamp(stamp *StampRecord) error {
+	return nil
+}
+
+func (f *fakeWLCommonsStore) QueryLastStampForSubject(subject string) (*StampRecord, error) {
+	return nil, nil
+}

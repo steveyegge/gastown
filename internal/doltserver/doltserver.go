@@ -48,6 +48,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/util"
 	"gopkg.in/yaml.v3"
@@ -287,6 +288,14 @@ func DefaultConfig(townRoot string) *Config {
 	}
 	if ll := os.Getenv("GT_DOLT_LOGLEVEL"); ll != "" {
 		config.LogLevel = ll
+	} else if townRoot != "" {
+		// Fallback: read GT_DOLT_LOGLEVEL from daemon/daemon.env so the log
+		// level survives daemon-triggered Dolt restarts (gt-zb8). The daemon
+		// process may not have GT_DOLT_LOGLEVEL in its own environment when it
+		// was started before the manual env var was applied.
+		if ll := readDaemonEnvVar(filepath.Join(townRoot, "daemon", "daemon.env"), "GT_DOLT_LOGLEVEL"); ll != "" {
+			config.LogLevel = ll
+		}
 	}
 
 	// Fallback: if GT_DOLT_PORT is not in the shell env, read it from
@@ -318,6 +327,26 @@ func DefaultConfig(townRoot string) *Config {
 	}
 
 	return config
+}
+
+// readDaemonEnvVar reads a single key=value variable from a simple env file.
+// Handles blank lines and # comments; returns "" if not found or on error.
+func readDaemonEnvVar(path, key string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	prefix := key + "="
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") || line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimPrefix(line, prefix)
+		}
+	}
+	return ""
 }
 
 // IsRemote returns true when the config points to a non-local Dolt server.
@@ -853,14 +882,14 @@ func resolveProcessPath(pid int, path string) string {
 	return filepath.Clean(path)
 }
 
-// getDoltDataDirFromProcess reads the --data-dir flag value from the running
+// GetDoltDataDirFromProcess reads the --data-dir flag value from the running
 // process's command-line arguments. This is structural (reading a well-defined
 // CLI flag), not heuristic string matching. Used as a tiebreaker when the
 // state-file based check is inconclusive (e.g. PID reuse across towns).
 //
 // Supported on macOS and Linux via POSIX ps. Returns empty string on Windows
 // (not supported) or on any error.
-func getDoltDataDirFromProcess(pid int) string {
+func GetDoltDataDirFromProcess(pid int) string {
 	return resolveProcessPath(pid, getDoltFlagFromArgs(getProcessArgs(pid), "--data-dir"))
 }
 
@@ -896,7 +925,7 @@ func doltProcessMatchesTownPaths(expectedDataDir, actualDataDir, actualConfigPat
 func doltProcessMatchesTown(townRoot string, pid int, config *Config) bool {
 	return doltProcessMatchesTownPaths(
 		config.DataDir,
-		getDoltDataDirFromProcess(pid),
+		GetDoltDataDirFromProcess(pid),
 		getDoltConfigPathFromProcess(pid),
 		getProcessCWD(pid),
 		getServerDataDir(townRoot, pid),
@@ -918,7 +947,7 @@ func doltProcessOwnerPathFromEvidence(actualDataDir, actualConfigPath, actualCWD
 
 func doltProcessOwnerPath(townRoot string, pid int) string {
 	return doltProcessOwnerPathFromEvidence(
-		getDoltDataDirFromProcess(pid),
+		GetDoltDataDirFromProcess(pid),
 		getDoltConfigPathFromProcess(pid),
 		getProcessCWD(pid),
 		getServerDataDir(townRoot, pid),
@@ -1527,8 +1556,18 @@ func Start(townRoot string) error {
 	// On systems with slow storage (CSI/NFS), dolt can take 1-2s to bind its
 	// port, well past the first 500ms check. By using cmd.Process.Signal(0)
 	// we detect true process death without the PID-file side effect.
+	//
+	// The number of attempts scales with the database count: each database
+	// adds ~1s of startup overhead (LevelDB compaction, stats loading, etc.).
+	// We allow 5s per database so that workspaces with many rigs don't time
+	// out before Dolt finishes initializing.
+	dbCount := len(databases)
+	if dbCount < 1 {
+		dbCount = 1
+	}
+	maxAttempts := dbCount * 10 // 10 × 500ms = 5s per database
 	var lastErr error
-	for attempt := 0; attempt < 10; attempt++ {
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		time.Sleep(500 * time.Millisecond)
 
 		// Check if the process we started is still alive.
@@ -1543,7 +1582,8 @@ func Start(townRoot string) error {
 		}
 	}
 
-	return fmt.Errorf("Dolt server process started (PID %d) but not accepting connections after 5s: %w\nCheck logs with: gt dolt logs", cmd.Process.Pid, lastErr)
+	totalTimeout := time.Duration(dbCount) * 5 * time.Second
+	return fmt.Errorf("Dolt server process started (PID %d) but not accepting connections after %v (%d databases × 5s): %w\nCheck logs with: gt dolt logs", cmd.Process.Pid, totalTimeout, dbCount, lastErr)
 }
 
 // cleanupStaleDoltLock removes a stale Dolt LOCK file if no process holds it.
@@ -2458,6 +2498,14 @@ func collectReferencedDatabases(townRoot string) map[string]bool {
 				referenced[db] = true
 			}
 		}
+	}
+
+	// Safety net: also mark all rig prefixes from rigs.json as referenced.
+	// Some rigs use their prefix as the database name (e.g., "lc" for laneassist,
+	// "gt" for gastown). If metadata.json is missing or corrupted, the prefix-named
+	// DB would appear orphaned without this fallback. (gt-85w7)
+	for _, prefix := range config.AllRigPrefixes(townRoot) {
+		referenced[prefix] = true
 	}
 
 	return referenced

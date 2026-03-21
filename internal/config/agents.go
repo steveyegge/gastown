@@ -277,9 +277,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			OutputFlag: "--json",
 		},
 		// Runtime defaults
-		PromptMode:       "none",
-		ReadyDelayMs:     3000,
-		InstructionsFile: "AGENTS.md",
+		PromptMode:         "none",
+		ReadyPromptPrefix:  "› ",
+		ReadyDelayMs:       3000,
+		InstructionsFile:   "AGENTS.md",
 	},
 	AgentCursor: {
 		Name:                AgentCursor,
@@ -367,8 +368,9 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Command:             "copilot",
 		Args:                []string{"--yolo"},
 		ProcessNames:        []string{"copilot"}, // Copilot CLI binary (Node.js but reports as "copilot")
-		SessionIDEnv:        "",                  // Session IDs stored on disk, not in env
+		SessionIDEnv:        "",                  // Session IDs stored on disk (~/.copilot/session-state/), not in env
 		ResumeFlag:          "--resume",
+		ContinueFlag:        "--continue", // GA: resumes most recent session without picker
 		ResumeStyle:         "flag",
 		SupportsHooks:       true,  // Copilot CLI supports .github/hooks/*.json lifecycle hooks
 		SupportsForkSession: false,
@@ -377,13 +379,14 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		},
 		// Runtime defaults
 		PromptMode:         "arg",
+		ConfigDirEnv:       "COPILOT_HOME", // GA: overrides ~/.copilot/ config directory
 		ConfigDir:          ".copilot",
 		HooksProvider:      "copilot",
 		HooksDir:           ".github/hooks",
 		HooksSettingsFile:  "gastown.json",
 		HooksInformational: false,
-		ReadyPromptPrefix:  "❯ ",
-		ReadyDelayMs:       5000,
+		ReadyPromptPrefix:  "",   // GA: no ❯ prompt; Copilot uses hint text, not a detectable prefix
+		ReadyDelayMs:       5000, // Delay-based readiness detection (no prompt prefix)
 		InstructionsFile:   "AGENTS.md",
 	},
 	AgentPi: {
@@ -406,6 +409,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		// Pi's Node.js TUI takes several seconds to initialize before it can
 		// receive tmux input. Without a readiness delay, the startup nudge
 		// arrives before the TUI is ready and gets dropped silently.
+		PromptMode:   "arg",
 		ReadyDelayMs: 8000,
 	},
 	AgentOmp: {

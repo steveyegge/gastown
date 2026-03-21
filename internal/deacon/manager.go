@@ -29,7 +29,7 @@ type tmuxOps interface {
 	SetRemainOnExit(pane string, on bool) error
 	SetEnvironment(session, key, value string) error
 	GetPaneID(session string) (string, error)
-	ConfigureGasTownSession(session string, theme tmux.Theme, rig, worker, role string) error
+	ConfigureGasTownSession(session string, theme *tmux.Theme, rig, worker, role string) error
 	WaitForCommand(session string, excludeCommands []string, timeout time.Duration) error
 	SetAutoRespawnHook(session string) error
 	AcceptStartupDialogs(session string) error
@@ -151,7 +151,7 @@ func (m *Manager) Start(agentOverride string) error {
 	}
 
 	// Apply Deacon theming (non-fatal: theming failure doesn't affect operation)
-	theme := tmux.DeaconTheme()
+	theme := tmux.ResolveSessionTheme(m.townRoot, "", "deacon")
 	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Deacon", "health-check")
 
 	// Wait for Claude to start - fatal if Claude fails to launch

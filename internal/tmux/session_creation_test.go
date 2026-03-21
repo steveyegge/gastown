@@ -188,6 +188,38 @@ func TestSanitizeNudgeMessage(t *testing.T) {
 	}
 }
 
+// TestContainsRewindIndicators verifies detection of Claude Code's Rewind menu.
+func TestContainsRewindIndicators(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"empty", "", false},
+		{"normal prompt", "❯ hello world", false},
+		{"busy indicator", "⏵⏵ Running tool... esc to interrupt", false},
+		{"rewind with enter and esc", "Rewind\nPress Enter to select, Esc to go back", true},
+		{"rewind case insensitive", "rewind history\nenter to continue\nesc to exit", true},
+		{"enter to continue + esc to exit", "Some UI\nEnter to continue\nEsc to exit", true},
+		{"enter to accept + esc to cancel", "Enter to accept changes\nEsc to cancel", true},
+		{"enter to select + esc to cancel", "Choose a checkpoint:\nEnter to select\nEsc to cancel", true},
+		{"only rewind no actions", "Rewind history shown here", false},
+		{"only enter no esc", "Enter to continue", false},
+		{"only esc no enter", "Esc to exit", false},
+		{"conversation mentioning rewind", "User said: please rewind the video\n❯ ", false},
+		{"partial match no pair", "Enter to continue\nSome other text", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := containsRewindIndicators(tt.content)
+			if got != tt.want {
+				t.Errorf("containsRewindIndicators(%q) = %v, want %v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestSendMessageToTarget_Chunking verifies that long messages are chunked.
 func TestSendMessageToTarget_Chunking(t *testing.T) {
 	tm := newTestTmux(t)

@@ -160,6 +160,36 @@ func TestPurgeBatchQueryNoDatabaseNameInjection(t *testing.T) {
 	}
 }
 
+// TestIsNothingToCommit verifies that "nothing to commit" errors are recognized
+// correctly. This prevents false-positive dolt_commit_failed anomalies when the
+// reaper operates on dolt_ignored tables (wisps, wisp_*), where Dolt has nothing
+// to version after a successful SQL DELETE.
+func TestIsNothingToCommit(t *testing.T) {
+	cases := []struct {
+		msg  string
+		want bool
+	}{
+		{"nothing to commit", true},
+		{"NOTHING TO COMMIT", true},
+		{"Error 1105 (HY000): nothing to commit", true},
+		{"no changes to commit", false}, // must also contain "commit" — see isNothingToCommit
+		{"no changes", false},
+		{"connection refused", false},
+		{"table not found: wisps", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		var err error
+		if c.msg != "" {
+			err = fmt.Errorf("%s", c.msg)
+		}
+		got := isNothingToCommit(err)
+		if got != c.want {
+			t.Errorf("isNothingToCommit(%q) = %v, want %v", c.msg, got, c.want)
+		}
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }

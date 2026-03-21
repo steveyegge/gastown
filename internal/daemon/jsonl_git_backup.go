@@ -42,8 +42,8 @@ var testPollutionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`-wisp-`),                                       // id: wisp-pattern IDs leaked into issues table
 }
 
-// validDBName matches safe database names (alphanumeric + underscore only).
-var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+// validDBName matches safe database names (alphanumeric, underscore, hyphen).
+var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // scrubQuery is the WHERE clause for filtering ephemeral data.
 // Kept separate from Sprintf to avoid %% confusion.

@@ -404,6 +404,110 @@ func TestEngineer_LoadConfig_GateInvalidTimeout(t *testing.T) {
 	}
 }
 
+func TestEngineer_LoadConfig_GatePhase(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	config := map[string]interface{}{
+		"merge_queue": map[string]interface{}{
+			"gates": map[string]interface{}{
+				"lint": map[string]interface{}{
+					"cmd": "golangci-lint run",
+				},
+				"test": map[string]interface{}{
+					"cmd":   "go test ./...",
+					"phase": "pre-merge",
+				},
+				"build-check": map[string]interface{}{
+					"cmd":   "go build ./...",
+					"phase": "post-squash",
+				},
+			},
+		},
+	}
+
+	data, _ := json.MarshalIndent(config, "", "  ")
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{Name: "test-rig", Path: tmpDir}
+	e := NewEngineer(r)
+
+	if err := e.LoadConfig(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// lint has no phase — should default to pre-merge
+	if e.config.Gates["lint"].Phase != GatePhasePreMerge {
+		t.Errorf("lint phase = %q, want %q", e.config.Gates["lint"].Phase, GatePhasePreMerge)
+	}
+	if e.config.Gates["test"].Phase != GatePhasePreMerge {
+		t.Errorf("test phase = %q, want %q", e.config.Gates["test"].Phase, GatePhasePreMerge)
+	}
+	if e.config.Gates["build-check"].Phase != GatePhasePostSquash {
+		t.Errorf("build-check phase = %q, want %q", e.config.Gates["build-check"].Phase, GatePhasePostSquash)
+	}
+}
+
+func TestEngineer_LoadConfig_GateInvalidPhase(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	config := map[string]interface{}{
+		"merge_queue": map[string]interface{}{
+			"gates": map[string]interface{}{
+				"bad": map[string]interface{}{
+					"cmd":   "echo test",
+					"phase": "during-lunch",
+				},
+			},
+		},
+	}
+
+	data, _ := json.MarshalIndent(config, "", "  ")
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{Name: "test-rig", Path: tmpDir}
+	e := NewEngineer(r)
+
+	err := e.LoadConfig()
+	if err == nil {
+		t.Fatal("expected error for invalid phase")
+	}
+	if !strings.Contains(err.Error(), "invalid phase") {
+		t.Errorf("error = %q, want substring 'invalid phase'", err.Error())
+	}
+}
+
+func TestRunGatesForPhase_FiltersCorrectly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell commands")
+	}
+
+	r := &rig.Rig{Name: "test-rig", Path: t.TempDir()}
+	e := NewEngineer(r)
+	e.workDir = t.TempDir()
+	e.output = io.Discard
+	e.config.Gates = map[string]*GateConfig{
+		"pre-lint":    {Cmd: "true", Phase: GatePhasePreMerge},
+		"pre-test":    {Cmd: "true", Phase: GatePhasePreMerge},
+		"post-build":  {Cmd: "true", Phase: GatePhasePostSquash},
+	}
+
+	// Pre-merge phase should only run pre-lint and pre-test
+	preResult := e.runGatesForPhase(context.Background(), GatePhasePreMerge)
+	if !preResult.Success {
+		t.Errorf("pre-merge gates failed: %s", preResult.Error)
+	}
+
+	// Post-squash phase should only run post-build
+	postResult := e.runGatesForPhase(context.Background(), GatePhasePostSquash)
+	if !postResult.Success {
+		t.Errorf("post-squash gates failed: %s", postResult.Error)
+	}
+}
+
 func TestRunGate_Success(t *testing.T) {
 	r := &rig.Rig{Name: "test-rig", Path: t.TempDir()}
 	e := NewEngineer(r)

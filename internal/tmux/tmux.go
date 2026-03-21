@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -1208,6 +1209,44 @@ func releaseNudgeLock(session string) {
 	}
 }
 
+// nudgeFlockPath returns the filesystem lock path for cross-process nudge serialization.
+// Lock files live alongside the nudge queue directory for self-documentation and cleanup.
+func nudgeFlockPath(townRoot, session string) string {
+	safe := strings.ReplaceAll(session, "/", "_")
+	return filepath.Join(townRoot, constants.DirRuntime, "nudge_queue", safe, ".lock")
+}
+
+// acquireFlockLock acquires a file-based lock using flock(2) for cross-process
+// serialization. Returns an unlock function that must be called to release the lock.
+// Uses non-blocking flock in a polling loop to respect the timeout.
+func acquireFlockLock(lockPath string, timeout time.Duration) (func(), error) {
+	dir := filepath.Dir(lockPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("creating lock dir: %w", err)
+	}
+
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("opening lock file: %w", err)
+	}
+
+	deadline := time.Now().Add(timeout)
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() {
+				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+				f.Close()
+			}, nil
+		}
+		if time.Now().After(deadline) {
+			f.Close()
+			return nil, fmt.Errorf("timeout after %s waiting for flock", timeout)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // IsSessionAttached returns true if the session has any clients attached.
 func (t *Tmux) IsSessionAttached(target string) bool {
 	attached, err := t.run("display-message", "-t", target, "-p", "#{session_attached}")
@@ -1300,6 +1339,59 @@ func sanitizeNudgeMessage(msg string) string {
 		}
 	}
 	return b.String()
+}
+
+// isInRewindMode checks if a tmux target is displaying Claude Code's Rewind
+// conversation history browser. When Rewind is active, the session ignores
+// typed text and only responds to Enter (accept rewind) or Escape (cancel).
+// This can happen when a stray or deliberate Escape keystroke combines with
+// a previous Escape to form the double-Escape sequence that activates Rewind.
+//
+// Detection is based on pane content analysis. Returns false on any error
+// (defensive — don't block nudge delivery on detection failure).
+func (t *Tmux) isInRewindMode(target string) bool {
+	content, err := t.CapturePane(target, 15)
+	if err != nil {
+		return false
+	}
+	return containsRewindIndicators(content)
+}
+
+// containsRewindIndicators checks pane content for Claude Code Rewind menu
+// patterns. The Rewind UI takes over the terminal and shows distinctive
+// action prompts (Enter to act, Esc to cancel/exit). We require multiple
+// co-occurring indicators to avoid false positives from conversation text.
+func containsRewindIndicators(content string) bool {
+	lower := strings.ToLower(content)
+
+	// Primary: "rewind" appears alongside both Enter and Esc action prompts.
+	if strings.Contains(lower, "rewind") {
+		if strings.Contains(lower, "enter") && strings.Contains(lower, "esc") {
+			return true
+		}
+	}
+
+	// Secondary: specific action prompt pairs characteristic of the Rewind UI.
+	rewindActionPairs := [][2]string{
+		{"enter to continue", "esc to exit"},
+		{"enter to accept", "esc to cancel"},
+		{"enter to select", "esc to go back"},
+		{"enter to select", "esc to cancel"},
+	}
+	for _, pair := range rewindActionPairs {
+		if strings.Contains(lower, pair[0]) && strings.Contains(lower, pair[1]) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// dismissRewindMode sends Escape to cancel Claude Code's Rewind menu,
+// then waits briefly for the UI to return to normal.
+func (t *Tmux) dismissRewindMode(target string) {
+	_, _ = t.run("send-keys", "-t", target, "Escape")
+	time.Sleep(300 * time.Millisecond)
 }
 
 // sendMessageToTarget sends a sanitized message to a tmux target. For small
@@ -1414,13 +1506,34 @@ type NudgeOpts struct {
 	// Escape cancels in-flight generation (e.g., Gemini CLI) rather than
 	// harmlessly exiting vim INSERT mode.
 	SkipEscape bool
+
+	// TownRoot, if set, enables flock-based cross-process serialization of
+	// nudge delivery. Each `gt nudge` CLI invocation is a separate OS process,
+	// so the in-process channel semaphore alone cannot prevent interleaving.
+	// When TownRoot is provided, a filesystem lock is acquired at
+	// <townRoot>/.runtime/nudge_queue/<session>/.lock before delivery.
+	// When empty, only in-process locking is used (backward-compatible).
+	TownRoot string
 }
 
 // NudgeSessionWithOpts is like NudgeSession but accepts delivery options.
 // See NudgeOpts for available options.
 func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) error {
-	// Serialize nudges to this session to prevent interleaving.
-	// Use a timed lock to avoid permanent blocking if a previous nudge hung.
+	// Cross-process lock: serialize nudges across OS processes via flock(2).
+	// Each `gt nudge` CLI invocation is a separate process, so the in-process
+	// channel semaphore below provides no cross-process protection. Without
+	// this, concurrent nudges interleave send-keys/Enter and produce garbled
+	// or empty input. (GH#gt-ukl8)
+	if opts.TownRoot != "" {
+		lockPath := nudgeFlockPath(opts.TownRoot, session)
+		unlock, err := acquireFlockLock(lockPath, nudgeLockTimeout)
+		if err != nil {
+			return fmt.Errorf("cross-process nudge lock for session %q: %w", session, err)
+		}
+		defer unlock()
+	}
+
+	// In-process lock: serialize nudges within a single process (goroutine fast path).
 	if !acquireNudgeLock(session, nudgeLockTimeout) {
 		return fmt.Errorf("nudge lock timeout for session %q: previous nudge may be hung", session)
 	}
@@ -1431,6 +1544,14 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 	target := session
 	if agentPane, err := t.FindAgentPane(session); err == nil && agentPane != "" {
 		target = agentPane
+	}
+
+	// 0. Pre-delivery: dismiss Rewind menu if the session is stuck in it.
+	// A previous nudge or user action may have triggered Claude Code's
+	// double-Escape Rewind UI, which captures all input. Dismiss it first
+	// so the nudge can be delivered normally. (GH#gt-8el)
+	if t.isInRewindMode(target) {
+		t.dismissRewindMode(target)
 	}
 
 	// 1. Exit copy/scroll mode if active — copy mode intercepts input,
@@ -1462,6 +1583,19 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 		// Without this, ESC+Enter within 500ms becomes M-Enter (meta-return) which
 		// does NOT submit the line.
 		time.Sleep(600 * time.Millisecond)
+
+		// 6.5. Post-Escape: check if our Escape triggered Rewind mode.
+		// This happens when a previous Escape was still in the input buffer,
+		// combining with ours to form the double-Escape that activates Rewind.
+		// If triggered, dismiss Rewind and re-send the message (Rewind
+		// consumed the original input). Skip the second Escape to avoid
+		// re-triggering. (GH#gt-8el)
+		if t.isInRewindMode(target) {
+			t.dismissRewindMode(target)
+			// Re-send message text — Rewind consumed the original input.
+			_ = t.sendMessageToTarget(target, sanitized, constants.NudgeReadyTimeout)
+			time.Sleep(500 * time.Millisecond)
+		}
 	}
 
 	// 7. Send Enter with retry (critical for message submission)
@@ -1493,6 +1627,11 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	}
 	defer releaseNudgeLock(pane)
 
+	// 0. Pre-delivery: dismiss Rewind menu if active. (GH#gt-8el)
+	if t.isInRewindMode(pane) {
+		t.dismissRewindMode(pane)
+	}
+
 	// 1. Exit copy/scroll mode if active — copy mode intercepts input,
 	//    preventing delivery to the underlying process.
 	if inMode, _ := t.run("display-message", "-p", "-t", pane, "#{pane_in_mode}"); strings.TrimSpace(inMode) == "1" {
@@ -1518,6 +1657,13 @@ func (t *Tmux) NudgePane(pane, message string) error {
 
 	// 6. Wait 600ms — must exceed bash readline's keyseq-timeout (500ms default)
 	time.Sleep(600 * time.Millisecond)
+
+	// 6.5. Post-Escape: check if our Escape triggered Rewind mode. (GH#gt-8el)
+	if t.isInRewindMode(pane) {
+		t.dismissRewindMode(pane)
+		_ = t.sendMessageToTarget(pane, sanitized, constants.NudgeReadyTimeout)
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	// 7. Send Enter with retry (critical for message submission)
 	var lastErr error
@@ -2420,6 +2566,27 @@ func matchesPromptPrefix(line, readyPromptPrefix string) bool {
 	return strings.HasPrefix(trimmed, normalizedPrefix) || (prefix != "" && trimmed == prefix)
 }
 
+func hasBusyIndicator(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+	return strings.Contains(trimmed, "esc to interrupt")
+}
+
+func readyPromptPrefixForSession(t *Tmux, session string) string {
+	promptPrefix := DefaultReadyPromptPrefix
+	agentName, err := t.GetEnvironment(session, "GT_AGENT")
+	if err != nil || agentName == "" {
+		return promptPrefix
+	}
+	preset := config.GetAgentPresetByName(agentName)
+	if preset == nil || preset.ReadyPromptPrefix == "" {
+		return promptPrefix
+	}
+	return preset.ReadyPromptPrefix
+}
+
 func (t *Tmux) WaitForRuntimeReady(session string, rc *config.RuntimeConfig, timeout time.Duration) error {
 	if rc == nil || rc.Tmux == nil {
 		return nil
@@ -2468,7 +2635,7 @@ const DefaultReadyPromptPrefix = "❯ "
 // Returns nil if the agent becomes idle within the timeout.
 // Returns an error if the timeout expires while the agent is still busy.
 func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
-	promptPrefix := DefaultReadyPromptPrefix
+	promptPrefix := readyPromptPrefixForSession(t, session)
 	prefix := strings.TrimSpace(promptPrefix)
 
 	// Require 2 consecutive idle polls to filter out transient states.
@@ -2493,16 +2660,13 @@ func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 			continue
 		}
 
-		// Check the status bar first: if "esc to interrupt" is visible,
-		// Claude Code is actively running a tool call — NOT idle,
+		// Busy indicator check: if "esc to interrupt" is visible anywhere in
+		// the recent pane output, the agent is actively working — NOT idle,
 		// regardless of whether the prompt prefix is also visible.
 		statusBarBusy := false
 		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.Contains(trimmed, "\u23F5\u23F5") || strings.Contains(trimmed, "⏵⏵") {
-				if strings.Contains(trimmed, "esc to interrupt") {
-					statusBarBusy = true
-				}
+			if hasBusyIndicator(line) {
+				statusBarBusy = true
 				break
 			}
 		}
@@ -2578,14 +2742,21 @@ func (t *Tmux) IsIdle(session string) bool {
 	}
 
 	for _, line := range lines {
+		if hasBusyIndicator(line) {
+			return false
+		}
+	}
+
+	promptPrefix := readyPromptPrefixForSession(t, session)
+	for _, line := range lines {
+		if matchesPromptPrefix(line, promptPrefix) {
+			return true
+		}
+	}
+
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		// The status bar starts with ⏵⏵ (double play symbols).
-		// When the agent is busy: "⏵⏵ bypass permissions on ... · esc to interrupt"
-		// When the agent is idle: "⏵⏵ bypass permissions on (shift+tab to cycle) · 1 file ..."
 		if strings.Contains(trimmed, "⏵⏵") || strings.Contains(trimmed, "\u23F5\u23F5") {
-			if strings.Contains(trimmed, "esc to interrupt") {
-				return false
-			}
 			return true
 		}
 	}
@@ -2642,11 +2813,23 @@ func (t *Tmux) ApplyTheme(session string, theme Theme) error {
 	return err
 }
 
-// ApplyWindowStyle sets the pane background (window-style) for a session.
-// This gives each session a distinct background color matching its theme,
-// complementing the status bar theme set by ApplyTheme.
-func (t *Tmux) ApplyWindowStyle(session string, theme Theme) error {
-	_, err := t.run("set-option", "-t", session, "window-style", theme.Style())
+// ClearTheme removes Gas Town tmux styling from a session.
+func (t *Tmux) ClearTheme(session string) error {
+	if _, err := t.run("set-option", "-t", session, "-u", "status-style"); err != nil {
+		return err
+	}
+	_, err := t.run("set-window-option", "-t", session, "-u", "window-style")
+	return err
+}
+
+// ApplyWindowStyle sets or resets the window background (window-style).
+// If ws is nil, resets to terminal defaults. If non-nil, applies the colors.
+func (t *Tmux) ApplyWindowStyle(session string, ws *WindowStyle) error {
+	style := "bg=default,fg=default"
+	if ws != nil {
+		style = ws.Style()
+	}
+	_, err := t.run("set-option", "-t", session, "window-style", style)
 	return err
 }
 
@@ -2714,15 +2897,24 @@ func (t *Tmux) SetDynamicStatus(session string) error {
 	return err
 }
 
-// ConfigureGasTownSession applies full Gas Town theming to a session.
-// This is a convenience method that applies theme, status format, dynamic status,
-// and pane background (window-style).
-func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker, role string) error {
-	if err := t.ApplyTheme(session, theme); err != nil {
-		return fmt.Errorf("applying theme: %w", err)
-	}
-	if err := t.ApplyWindowStyle(session, theme); err != nil {
-		return fmt.Errorf("applying window style: %w", err)
+// ConfigureGasTownSession applies Gas Town status configuration to a session.
+// A nil theme disables tmux styling while still applying status/bindings.
+//
+// Window background is controlled by theme.Window:
+//   - non-nil: apply Window's colors as the window background
+//   - nil: reset window background to terminal defaults (disabled)
+func (t *Tmux) ConfigureGasTownSession(session string, theme *Theme, rig, worker, role string) error {
+	if theme != nil {
+		if err := t.ApplyTheme(session, *theme); err != nil {
+			return fmt.Errorf("applying theme: %w", err)
+		}
+		if err := t.ApplyWindowStyle(session, theme.Window); err != nil {
+			return fmt.Errorf("applying window style: %w", err)
+		}
+	} else {
+		if err := t.ClearTheme(session); err != nil {
+			return fmt.Errorf("clearing theme: %w", err)
+		}
 	}
 	if err := t.SetStatusFormat(session, rig, worker, role); err != nil {
 		return fmt.Errorf("setting status format: %w", err)

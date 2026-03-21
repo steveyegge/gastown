@@ -1787,6 +1787,29 @@ func TestWaitForIdle_Timeout(t *testing.T) {
 	}
 }
 
+func TestHasBusyIndicator(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{"claude status busy", "⏵⏵ bypass permissions on ... · esc to interrupt", true},
+		{"codex status busy", "• Working (2m 18s • esc to interrupt)", true},
+		{"idle line", "› Review ready notification", false},
+		{"blank", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasBusyIndicator(tt.line); got != tt.want {
+				t.Errorf("hasBusyIndicator(%q) = %v, want %v", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDefaultReadyPromptPrefix(t *testing.T) {
 	t.Parallel()
 	// Verify the constant is set correctly

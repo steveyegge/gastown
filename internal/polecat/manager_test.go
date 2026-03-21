@@ -1123,6 +1123,10 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 		if strings.Contains(line, ".beads") {
 			continue
 		}
+		// CLAUDE.md is expected - provisioned by CreatePolecatCLAUDEmd for gt done instructions
+		if strings.Contains(line, "CLAUDE.md") {
+			continue
+		}
 		unexpected = append(unexpected, line)
 	}
 	if len(unexpected) > 0 {

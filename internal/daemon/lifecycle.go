@@ -593,13 +593,15 @@ func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.Rol
 
 // applySessionTheme applies tmux theming to the session.
 func (d *Daemon) applySessionTheme(sessionName string, parsed *ParsedIdentity) {
-	if parsed.RoleType == constants.RoleMayor {
-		theme := tmux.MayorTheme()
-		_ = d.tmux.ConfigureGasTownSession(sessionName, theme, "", "Mayor", "coordinator")
-	} else if parsed.RigName != "" {
-		theme := tmux.AssignTheme(parsed.RigName)
-		_ = d.tmux.ConfigureGasTownSession(sessionName, theme, parsed.RigName, parsed.RoleType, parsed.RoleType)
+	rigName := parsed.RigName
+	role := parsed.RoleType
+	worker := parsed.RoleType
+	if role == constants.RoleMayor {
+		rigName = ""
+		worker = "Mayor"
 	}
+	theme := tmux.ResolveSessionTheme(d.config.TownRoot, rigName, role)
+	_ = d.tmux.ConfigureGasTownSession(sessionName, theme, rigName, worker, role)
 }
 
 // syncFailureEscalationThreshold is the default number of consecutive pull failures
@@ -950,7 +952,7 @@ const GUPPViolationTimeout = constants.GUPPViolationTimeout
 // The wisps query is best-effort (gracefully ignored if table doesn't exist).
 func (d *Daemon) listAgentBeadsJSON(dest interface{}) error {
 	// Query issues table (backward compat during migration)
-	cmd := exec.Command(d.bdPath, "list", "--label=gt:agent", "--json") //nolint:gosec // G204: bd is a trusted internal tool
+	cmd := exec.Command(d.bdPath, "list", "--label=gt:agent", "--json", "--flat") //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ()
 

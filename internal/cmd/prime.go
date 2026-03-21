@@ -746,6 +746,15 @@ func outputAutonomousDirective(ctx RoleContext, hookedBead *beads.Issue, hasMole
 		fmt.Printf("2. Then IMMEDIATELY run: `bd show %s`\n", hookedBead.ID)
 		fmt.Println("3. Begin execution - no waiting for user input")
 	}
+
+	// Polecats MUST call gt done — this is the single most important instruction.
+	// Without it, work lands but sessions accumulate and the merge queue stalls.
+	if ctx.Role == RolePolecat {
+		fmt.Println()
+		fmt.Printf("**⚠️ MANDATORY: When all work is committed, run `%s done` to submit and exit.**\n", cli.Name())
+		fmt.Printf("Do NOT stop at the prompt. Do NOT push to main directly. `%s done` is your final action.\n", cli.Name())
+	}
+
 	fmt.Println()
 	fmt.Println("**DO NOT:**")
 	fmt.Println("- Wait for user response after announcing")
@@ -754,6 +763,10 @@ func outputAutonomousDirective(ctx RoleContext, hookedBead *beads.Issue, hasMole
 	fmt.Println("- Check mail first (hook takes priority)")
 	if hasMolecule {
 		fmt.Println("- Skip molecule steps or work on the base bead directly")
+	}
+	if ctx.Role == RolePolecat {
+		fmt.Printf("- Sit idle after committing (run `%s done`)\n", cli.Name())
+		fmt.Println("- Push directly to main (use the merge queue)")
 	}
 	fmt.Println()
 }

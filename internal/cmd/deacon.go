@@ -555,7 +555,7 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 
 	// Apply Deacon theme (non-fatal: theming failure doesn't affect operation)
 	// Note: ConfigureGasTownSession includes cycle bindings
-	theme := tmux.DeaconTheme()
+	theme := tmux.ResolveSessionTheme(townRoot, "", "deacon")
 	_ = t.ConfigureGasTownSession(sessionName, theme, "", "Deacon", "health-check")
 
 	// Wait for Claude to start

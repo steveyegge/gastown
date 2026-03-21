@@ -24,7 +24,7 @@ Executed via `run.sh` — no AI interpretation.
 
 ## What it does
 
-1. For each production DB (hq, bd, gt): compare HEAD hash against last backup
+1. For each production DB (hq, beads, gt): compare HEAD hash against last backup
 2. Skip unchanged databases
 3. Run `dolt backup sync` for changed databases
 4. Only escalate when actual backup operations fail (FAILED > 0)
@@ -34,5 +34,5 @@ Executed via `run.sh` — no AI interpretation.
 ```bash
 ./run.sh                          # Normal execution
 ./run.sh --dry-run                # Report without syncing
-./run.sh --databases hq,bd       # Specific databases only
+./run.sh --databases hq,beads    # Specific databases only
 ```

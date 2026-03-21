@@ -1838,16 +1838,32 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		}
 	}
 
-	// Auto-fill Tmux defaults for pi (process detection).
-	if result.Command == "pi" {
-		if result.Tmux == nil {
-			result.Tmux = &RuntimeTmuxConfig{
-				ProcessNames: []string{"pi", "node", "bun"},
-				ReadyDelayMs: 3000,
-			}
+	// Auto-fill Session defaults from preset.
+	if result.Session == nil && preset != nil && (preset.SessionIDEnv != "" || preset.ConfigDirEnv != "") {
+		result.Session = &RuntimeSessionConfig{
+			SessionIDEnv: preset.SessionIDEnv,
+			ConfigDirEnv: preset.ConfigDirEnv,
 		}
-		if result.PromptMode == "" {
-			result.PromptMode = "arg"
+	}
+
+	// Auto-fill Tmux defaults from preset (process detection, readiness).
+	if result.Tmux == nil && preset != nil && (len(preset.ProcessNames) > 0 || preset.ReadyPromptPrefix != "" || preset.ReadyDelayMs > 0) {
+		result.Tmux = &RuntimeTmuxConfig{
+			ProcessNames:      append([]string(nil), preset.ProcessNames...),
+			ReadyPromptPrefix: preset.ReadyPromptPrefix,
+			ReadyDelayMs:      preset.ReadyDelayMs,
+		}
+	}
+
+	// Auto-fill PromptMode from preset.
+	if result.PromptMode == "" && preset != nil && preset.PromptMode != "" {
+		result.PromptMode = preset.PromptMode
+	}
+
+	// Auto-fill Instructions defaults from preset.
+	if result.Instructions == nil && preset != nil && preset.InstructionsFile != "" {
+		result.Instructions = &RuntimeInstructionsConfig{
+			File: preset.InstructionsFile,
 		}
 	}
 

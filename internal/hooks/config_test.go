@@ -884,6 +884,70 @@ func TestDiscoverTargets_RoleNames(t *testing.T) {
 	}
 }
 
+func TestDiscoverTargets_GeminiTargets(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "deacon"), 0755)
+
+	// Create a rig with gemini crew members and witness
+	os.MkdirAll(filepath.Join(tmpDir, "rig1", "crew", "alice"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "rig1", "witness"), 0755)
+
+	// Install gemini settings for alice (crew member)
+	geminiDir := filepath.Join(tmpDir, "rig1", "crew", "alice", ".gemini")
+	os.MkdirAll(geminiDir, 0755)
+	os.WriteFile(filepath.Join(geminiDir, "settings.json"), []byte(`{"hooks":{}}`), 0644)
+
+	// Install gemini settings for witness
+	witnessGemini := filepath.Join(tmpDir, "rig1", "witness", ".gemini")
+	os.MkdirAll(witnessGemini, 0755)
+	os.WriteFile(filepath.Join(witnessGemini, "settings.json"), []byte(`{"hooks":{}}`), 0644)
+
+	targets, err := DiscoverTargets(tmpDir)
+	if err != nil {
+		t.Fatalf("DiscoverTargets failed: %v", err)
+	}
+
+	// Find gemini targets
+	var geminiTargets []Target
+	for _, tgt := range targets {
+		if tgt.Provider == "gemini" {
+			geminiTargets = append(geminiTargets, tgt)
+		}
+	}
+
+	if len(geminiTargets) != 2 {
+		t.Errorf("expected 2 gemini targets, got %d", len(geminiTargets))
+		for _, tgt := range targets {
+			t.Logf("  target: %s (provider=%s)", tgt.DisplayKey(), tgt.Provider)
+		}
+	}
+
+	found := make(map[string]bool)
+	for _, tgt := range geminiTargets {
+		found[tgt.Key] = true
+	}
+
+	for _, expected := range []string{"rig1/crew/alice[gemini]", "rig1/witness[gemini]"} {
+		if !found[expected] {
+			t.Errorf("expected gemini target %q not found", expected)
+		}
+	}
+
+	// Verify role assignment
+	roleByKey := make(map[string]string)
+	for _, tgt := range geminiTargets {
+		roleByKey[tgt.Key] = tgt.Role
+	}
+	if roleByKey["rig1/crew/alice[gemini]"] != "crew" {
+		t.Errorf("alice gemini target: Role = %q, want %q", roleByKey["rig1/crew/alice[gemini]"], "crew")
+	}
+	if roleByKey["rig1/witness[gemini]"] != "witness" {
+		t.Errorf("witness gemini target: Role = %q, want %q", roleByKey["rig1/witness[gemini]"], "witness")
+	}
+}
+
 func TestTargetDisplayKey(t *testing.T) {
 	tests := []struct {
 		target   Target

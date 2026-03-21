@@ -58,21 +58,51 @@ func printVitalsDoltServers(townRoot string) {
 	}
 
 	// Zombie dolt processes (test servers not cleaned up)
-	for _, z := range findVitalsZombies(config.Port) {
-		fmt.Printf("  %s :%s test zombie PID %s\n", style.Warning.Render("○"), z.port, z.pid)
+	for _, z := range findVitalsZombies(townRoot, config.Port) {
+		if z.foreign {
+			fmt.Printf("  %s :%s foreign workspace PID %s\n", style.Dim.Render("○"), z.port, z.pid)
+		} else {
+			fmt.Printf("  %s :%s test zombie PID %s\n", style.Warning.Render("○"), z.port, z.pid)
+		}
 	}
 }
 
-type vitalsZombie struct{ pid, port string }
+type vitalsZombie struct {
+	pid, port string
+	foreign   bool // true if process belongs to another Gas Town workspace
+}
 
 // findVitalsZombies finds Dolt servers not on the production port.
 // Uses lsof-based port discovery instead of pgrep/ps string matching (ZFC fix: gt-fj87).
-func findVitalsZombies(prodPort int) []vitalsZombie {
+// Checks workspace ownership to avoid flagging sibling Gas Town instances as zombies.
+func findVitalsZombies(townRoot string, prodPort int) []vitalsZombie {
 	listeners := doltserver.FindAllDoltListeners()
+	expectedDataDir, _ := filepath.Abs(filepath.Join(townRoot, ".dolt-data"))
 	var zombies []vitalsZombie
 	for _, l := range listeners {
 		if l.Port == prodPort {
 			continue
+		}
+		// Check if this Dolt process belongs to a Gas Town workspace.
+		// If its --data-dir is a .dolt-data directory under a valid workspace,
+		// it's a sibling instance, not a test zombie.
+		dataDir := doltserver.GetDoltDataDirFromProcess(l.PID)
+		if dataDir != "" {
+			absDataDir, _ := filepath.Abs(dataDir)
+			if absDataDir == expectedDataDir {
+				// Our own workspace on a different port — still a zombie
+			} else if filepath.Base(absDataDir) == ".dolt-data" {
+				parentDir := filepath.Dir(absDataDir)
+				if isWs, _ := workspace.IsWorkspace(parentDir); isWs {
+					// Legitimate sibling Gas Town workspace
+					zombies = append(zombies, vitalsZombie{
+						pid:     strconv.Itoa(l.PID),
+						port:    strconv.Itoa(l.Port),
+						foreign: true,
+					})
+					continue
+				}
+			}
 		}
 		zombies = append(zombies, vitalsZombie{
 			pid:  strconv.Itoa(l.PID),
