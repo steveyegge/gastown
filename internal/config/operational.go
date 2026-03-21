@@ -18,8 +18,8 @@ const (
 	DefaultBdSubprocessTimeout     = 5 * time.Second
 	DefaultGUPPViolationTimeout    = 30 * time.Minute
 	DefaultHungSessionThreshold    = 30 * time.Minute
-	DefaultStartupNudgeVerifyDelay = 5 * time.Second
-	DefaultStartupNudgeMaxRetries  = 3
+	DefaultStartupNudgeVerifyDelay = 25 * time.Second
+	DefaultStartupNudgeMaxRetries  = 2
 )
 
 // Nudge defaults.
