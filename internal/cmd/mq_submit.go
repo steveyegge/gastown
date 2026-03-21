@@ -219,20 +219,34 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// GH#3032: Resolve HEAD commit SHA for MR dedup.
+	commitSHA, shaErr := g.Rev("HEAD")
+	if shaErr != nil {
+		style.PrintWarning("could not resolve HEAD SHA: %v (falling back to branch-only dedup)", shaErr)
+	}
+
 	// Build MR bead title and description
 	title := fmt.Sprintf("Merge: %s", issueID)
 	description := fmt.Sprintf("branch: %s\ntarget: %s\nsource_issue: %s\nrig: %s",
 		branch, target, issueID, rigName)
+	if commitSHA != "" {
+		description += fmt.Sprintf("\ncommit_sha: %s", commitSHA)
+	}
 	if worker != "" {
 		description += fmt.Sprintf("\nworker: %s", worker)
 	}
 
-	// Check if MR bead already exists for this branch (idempotency)
+	// Check if MR bead already exists for this branch+SHA (idempotency)
 	var mrIssue *beads.Issue
-	existingMR, err := bd.FindMRForBranch(branch)
+	var existingMR *beads.Issue
+	if commitSHA != "" {
+		existingMR, err = bd.FindMRForBranchAndSHA(branch, commitSHA)
+	} else {
+		existingMR, err = bd.FindMRForBranch(branch)
+	}
 	if err != nil {
 		style.PrintWarning("could not check for existing MR: %v", err)
-		// FindMRForBranch failed — fall through to create a new MR
+		// Dedup check failed — fall through to create a new MR
 	}
 
 	if existingMR != nil {

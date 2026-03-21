@@ -453,6 +453,7 @@ type MRFields struct {
 	SourceIssue string // The work item being merged (e.g., "gt-xyz")
 	Worker      string // Who did the work
 	Rig         string // Which rig
+	CommitSHA   string // HEAD commit SHA at submission time (GH#3032: dedup key)
 	MergeCommit string // SHA of merge commit (set on close)
 	CloseReason string // Reason for closing: merged, rejected, conflict, superseded
 	AgentBead   string // Agent bead ID that created this MR (for traceability)
@@ -519,6 +520,9 @@ func ParseMRFields(issue *Issue) *MRFields {
 			hasFields = true
 		case "rig":
 			fields.Rig = value
+			hasFields = true
+		case "commit_sha", "commit-sha", "commitsha":
+			fields.CommitSHA = value
 			hasFields = true
 		case "merge_commit", "merge-commit", "mergecommit":
 			fields.MergeCommit = value
@@ -594,6 +598,9 @@ func FormatMRFields(fields *MRFields) string {
 	}
 	if fields.Rig != "" {
 		lines = append(lines, "rig: "+fields.Rig)
+	}
+	if fields.CommitSHA != "" {
+		lines = append(lines, "commit_sha: "+fields.CommitSHA)
 	}
 	if fields.MergeCommit != "" {
 		lines = append(lines, "merge_commit: "+fields.MergeCommit)
