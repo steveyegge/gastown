@@ -116,11 +116,15 @@ while IFS='|' read -r RIG PREFIX; do
         | jq -r '.hook_bead // empty' 2>/dev/null)
 
       if [ -n "$HOOK_BEAD" ]; then
-        # Check agent_state to avoid interfering with active spawning
+        # Check agent_state to avoid false alerts for intentional shutdowns
         AGENT_STATE=$(bd show "$RIG/polecats/$PCAT_NAME" --json 2>/dev/null \
           | jq -r '.agent_state // empty' 2>/dev/null)
         if [ "$AGENT_STATE" = "spawning" ]; then
           echo "  SKIP $SESSION_NAME: agent_state=spawning (sling in progress)"
+          continue
+        fi
+        if [ "$AGENT_STATE" = "done" ] || [ "$AGENT_STATE" = "nuked" ]; then
+          echo "  SKIP $SESSION_NAME: agent_state=$AGENT_STATE (intentional shutdown, not a crash)"
           continue
         fi
         CRASHED+=("$SESSION_NAME|$RIG|$PCAT_NAME|$HOOK_BEAD")
