@@ -99,6 +99,12 @@ type Daemon struct {
 	// lastMaintenanceRun tracks when scheduled maintenance last ran.
 	// Only accessed from heartbeat loop goroutine - no sync needed.
 	lastMaintenanceRun time.Time
+
+	// crashNotified tracks polecats that have already been notified as crashed.
+	// Prevents flooding the witness with duplicate CRASHED_POLECAT alerts on
+	// every heartbeat cycle (GH#2795). Cleared when the session comes back alive.
+	// Only accessed from heartbeat loop goroutine - no sync needed.
+	crashNotified map[string]time.Time
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -1966,7 +1972,11 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 	}
 
 	if sessionAlive {
-		// Session is alive - nothing to do
+		// Session is alive - clear any previous crash notification (GH#2795).
+		crashKey := rigName + "/" + polecatName
+		if d.crashNotified != nil {
+			delete(d.crashNotified, crashKey)
+		}
 		return
 	}
 
@@ -2058,6 +2068,19 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 	// Emit session_death event for audit trail / feed visibility
 	_ = events.LogFeed(events.TypeSessionDeath, sessionName,
 		events.SessionDeathPayload(sessionName, rigName+"/polecats/"+polecatName, "crash detected by daemon health check", "daemon"))
+
+	// Dedup guard: only notify witness once per crashed polecat (GH#2795).
+	// Without this, every heartbeat cycle (3 min) sends a duplicate CRASHED_POLECAT
+	// mail, flooding the witness inbox unboundedly.
+	crashKey := rigName + "/" + polecatName
+	if d.crashNotified == nil {
+		d.crashNotified = make(map[string]time.Time)
+	}
+	if _, already := d.crashNotified[crashKey]; already {
+		d.logger.Printf("Skipping duplicate CRASHED_POLECAT notification for %s (already notified)", crashKey)
+		return
+	}
+	d.crashNotified[crashKey] = time.Now()
 
 	// Notify witness — stuck-agent-dog plugin handles context-aware restart
 	d.notifyWitnessOfCrashedPolecat(rigName, polecatName, info.HookBead)
