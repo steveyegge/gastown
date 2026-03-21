@@ -255,11 +255,13 @@ func SetAttachmentFields(issue *Issue, fields *AttachmentFields) string {
 // ConvoyFields holds the structured fields for a convoy bead.
 // These fields are stored as key: value lines in the issue description.
 type ConvoyFields struct {
-	Owner      string // Convoy owner address (e.g., "mayor/")
-	Notify     string // Additional notification address
-	Molecule   string // Associated molecule/swarm ID
-	Merge      string // Merge strategy
-	BaseBranch string // Target branch for polecats (e.g., "feat/extraction-review")
+	Owner         string // Convoy owner address (e.g., "mayor/")
+	Notify        string // Additional notification address
+	Molecule      string // Associated molecule/swarm ID
+	Merge         string // Merge strategy
+	BaseBranch    string // Target branch for polecats (e.g., "feat/extraction-review")
+	Watchers      string // Comma-separated mail notification addresses (added via gt convoy watch)
+	NudgeWatchers string // Comma-separated nudge notification addresses (added via gt convoy watch --nudge)
 }
 
 // ParseConvoyFields extracts convoy fields from an issue's description.
@@ -305,6 +307,12 @@ func ParseConvoyFields(issue *Issue) *ConvoyFields {
 		case "base_branch", "base-branch", "basebranch":
 			fields.BaseBranch = value
 			hasFields = true
+		case "watchers":
+			fields.Watchers = value
+			hasFields = true
+		case "nudge_watchers", "nudge-watchers", "nudgewatchers":
+			fields.NudgeWatchers = value
+			hasFields = true
 		}
 	}
 
@@ -314,7 +322,8 @@ func ParseConvoyFields(issue *Issue) *ConvoyFields {
 	return fields
 }
 
-// NotificationAddresses returns deduplicated notification addresses from convoy fields.
+// NotificationAddresses returns deduplicated mail notification addresses from convoy fields.
+// Includes Owner, Notify, and all Watchers addresses.
 func (f *ConvoyFields) NotificationAddresses() []string {
 	if f == nil {
 		return nil
@@ -327,7 +336,109 @@ func (f *ConvoyFields) NotificationAddresses() []string {
 			seen[addr] = true
 		}
 	}
+	for _, addr := range splitWatchers(f.Watchers) {
+		if addr != "" && !seen[addr] {
+			addrs = append(addrs, addr)
+			seen[addr] = true
+		}
+	}
 	return addrs
+}
+
+// NudgeNotificationAddresses returns deduplicated nudge addresses from convoy fields.
+func (f *ConvoyFields) NudgeNotificationAddresses() []string {
+	if f == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var addrs []string
+	for _, addr := range splitWatchers(f.NudgeWatchers) {
+		if addr != "" && !seen[addr] {
+			addrs = append(addrs, addr)
+			seen[addr] = true
+		}
+	}
+	return addrs
+}
+
+// AddWatcher adds a mail watcher address to the comma-separated Watchers field.
+// Returns true if the address was added (false if already present).
+func (f *ConvoyFields) AddWatcher(addr string) bool {
+	existing := splitWatchers(f.Watchers)
+	for _, w := range existing {
+		if w == addr {
+			return false
+		}
+	}
+	existing = append(existing, addr)
+	f.Watchers = strings.Join(existing, ",")
+	return true
+}
+
+// AddNudgeWatcher adds a nudge watcher address to the comma-separated NudgeWatchers field.
+// Returns true if the address was added (false if already present).
+func (f *ConvoyFields) AddNudgeWatcher(addr string) bool {
+	existing := splitWatchers(f.NudgeWatchers)
+	for _, w := range existing {
+		if w == addr {
+			return false
+		}
+	}
+	existing = append(existing, addr)
+	f.NudgeWatchers = strings.Join(existing, ",")
+	return true
+}
+
+// RemoveWatcher removes a mail watcher address. Returns true if it was present.
+func (f *ConvoyFields) RemoveWatcher(addr string) bool {
+	existing := splitWatchers(f.Watchers)
+	var remaining []string
+	found := false
+	for _, w := range existing {
+		if w == addr {
+			found = true
+		} else {
+			remaining = append(remaining, w)
+		}
+	}
+	if found {
+		f.Watchers = strings.Join(remaining, ",")
+	}
+	return found
+}
+
+// RemoveNudgeWatcher removes a nudge watcher address. Returns true if it was present.
+func (f *ConvoyFields) RemoveNudgeWatcher(addr string) bool {
+	existing := splitWatchers(f.NudgeWatchers)
+	var remaining []string
+	found := false
+	for _, w := range existing {
+		if w == addr {
+			found = true
+		} else {
+			remaining = append(remaining, w)
+		}
+	}
+	if found {
+		f.NudgeWatchers = strings.Join(remaining, ",")
+	}
+	return found
+}
+
+// splitWatchers splits a comma-separated watcher string into trimmed, non-empty addresses.
+func splitWatchers(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 // FormatConvoyFields formats ConvoyFields as a string suitable for an issue description.
@@ -352,6 +463,12 @@ func FormatConvoyFields(fields *ConvoyFields) string {
 	}
 	if fields.BaseBranch != "" {
 		lines = append(lines, "base_branch: "+fields.BaseBranch)
+	}
+	if fields.Watchers != "" {
+		lines = append(lines, "Watchers: "+fields.Watchers)
+	}
+	if fields.NudgeWatchers != "" {
+		lines = append(lines, "nudge_watchers: "+fields.NudgeWatchers)
 	}
 
 	return strings.Join(lines, "\n")
@@ -391,13 +508,17 @@ func SetConvoyFields(issue *Issue, fields *ConvoyFields) string {
 
 	// Known convoy field keys (lowercase)
 	convoyKeys := map[string]bool{
-		"owner":       true,
-		"notify":      true,
-		"merge":       true,
-		"molecule":    true,
-		"base_branch": true,
-		"base-branch": true,
-		"basebranch":  true,
+		"owner":           true,
+		"notify":          true,
+		"merge":           true,
+		"molecule":        true,
+		"base_branch":     true,
+		"base-branch":     true,
+		"basebranch":      true,
+		"watchers":        true,
+		"nudge_watchers":  true,
+		"nudge-watchers":  true,
+		"nudgewatchers":   true,
 	}
 
 	// Collect non-convoy lines from existing description
