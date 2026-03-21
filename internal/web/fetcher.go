@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/activity"
@@ -80,6 +81,51 @@ func (f *LiveConvoyFetcher) runBdCmd(beadsDir string, args ...string) (*bytes.Bu
 	return &stdout, nil
 }
 
+// fetchCircuitBreaker tracks consecutive failures for a fetch operation
+// and applies exponential backoff to prevent process storms.
+type fetchCircuitBreaker struct {
+	mu          sync.Mutex
+	failures    int
+	lastAttempt time.Time
+	backoff     time.Duration
+}
+
+// maxBackoff is the maximum backoff duration for the circuit breaker.
+const maxBackoff = 5 * time.Minute
+
+// allow returns true if enough time has passed since the last failure to permit
+// a new attempt. Always allows the first attempt (zero failures).
+func (cb *fetchCircuitBreaker) allow() bool {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	if cb.failures == 0 {
+		return true
+	}
+	return time.Since(cb.lastAttempt) >= cb.backoff
+}
+
+// recordFailure increments the failure count and sets exponential backoff.
+// Backoff doubles from 10s up to maxBackoff.
+func (cb *fetchCircuitBreaker) recordFailure() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.failures++
+	cb.lastAttempt = time.Now()
+	// Exponential backoff: 10s, 20s, 40s, 80s, 160s, capped at maxBackoff
+	cb.backoff = time.Duration(1<<min(cb.failures, 10)) * 5 * time.Second
+	if cb.backoff > maxBackoff {
+		cb.backoff = maxBackoff
+	}
+}
+
+// recordSuccess resets the circuit breaker on a successful fetch.
+func (cb *fetchCircuitBreaker) recordSuccess() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.failures = 0
+	cb.backoff = 0
+}
+
 // LiveConvoyFetcher fetches convoy data from beads.
 type LiveConvoyFetcher struct {
 	townRoot  string
@@ -98,6 +144,10 @@ type LiveConvoyFetcher struct {
 	stuckThreshold          time.Duration
 	heartbeatFreshThreshold time.Duration
 	mayorActiveThreshold    time.Duration
+
+	// Circuit breaker for FetchConvoys — prevents process storms when
+	// bd list --type=convoy fails persistently (e.g., schema mismatch).
+	convoyBreaker fetchCircuitBreaker
 }
 
 // NewLiveConvoyFetcher creates a fetcher for the current workspace.
@@ -135,10 +185,17 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 }
 
 // FetchConvoys fetches all open convoys with their activity data.
+// Uses a circuit breaker to avoid hammering bd/dolt when listing fails
+// persistently (e.g., "invalid issue type: convoy" schema mismatch).
 func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
+	if !f.convoyBreaker.allow() {
+		return nil, nil // Backed off — return empty result silently
+	}
+
 	// List all open convoy issues
 	stdout, err := f.runBdCmd(f.townRoot, "list", "--type=convoy", "--status=open", "--json")
 	if err != nil {
+		f.convoyBreaker.recordFailure()
 		return nil, fmt.Errorf("listing convoys: %w", err)
 	}
 
@@ -254,6 +311,7 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 		rows = append(rows, row)
 	}
 
+	f.convoyBreaker.recordSuccess()
 	return rows, nil
 }
 
