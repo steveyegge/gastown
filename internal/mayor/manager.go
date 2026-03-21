@@ -115,12 +115,18 @@ func (m *Manager) mayorDir() string {
 func (m *Manager) Start(agentOverride string) error {
 	status, err := m.CombinedStatus()
 	if err == nil && status.Active {
-		// If ACP is active, return ErrACPActive so callers can distinguish
-		// ACP mode from a regular tmux session already running.
-		// If only TMUX is active, we fall through to StartTMUX which handles
-		// the healthy vs zombie check.
-		if status.Mode == ModeACP || status.Mode == ModeBoth {
+		switch status.Mode {
+		case ModeACP, ModeBoth:
 			return ErrACPActive
+		case ModeTMUX:
+			// Return immediately if a TMUX session already exists.
+			// Previously this fell through to StartTMUX which would kill
+			// "zombie" sessions (tmux alive, agent dead) and replace them.
+			// But during handoffs the agent is briefly undetectable, causing
+			// StartTMUX to kill a healthy session and spawn a duplicate.
+			// Callers that need zombie restart should use Stop() + Start()
+			// explicitly (e.g., gt mayor restart).
+			return ErrAlreadyRunning
 		}
 	}
 	return m.StartTMUX(agentOverride)
