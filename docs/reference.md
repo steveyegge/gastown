@@ -456,7 +456,13 @@ gt config agent remove <name>     # Remove custom agent (built-ins protected)
 gt config default-agent [name]    # Get or set town default agent
 ```
 
-**Built-in agents**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`
+**Built-in agents**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`, `opencode`, `copilot`
+
+> **Note on GitHub Copilot**: The `copilot` preset uses executable lifecycle hooks in
+> `.github/hooks/gastown.json` (`sessionStart`, `userPromptSubmitted`, `preToolUse`,
+> `sessionEnd`) — the same lifecycle events as Claude Code, in Copilot's JSON format.
+> Copilot uses a 5-second ready delay instead of prompt-based detection. Requires a
+> Copilot seat and org-level CLI policy enabled.
 
 **Custom agents**: Define per-town via CLI or JSON:
 ```bash

@@ -1,10 +1,10 @@
 # Gas Town
 
-**Multi-agent orchestration system for Claude Code with persistent work tracking**
+**Multi-agent orchestration system for Claude Code, GitHub Copilot, and other AI agents with persistent work tracking**
 
 ## Overview
 
-Gas Town is a workspace manager that lets you coordinate multiple Claude Code agents working on different tasks. Instead of losing context when agents restart, Gas Town persists work state in git-backed hooks, enabling reliable multi-agent workflows.
+Gas Town is a workspace manager that lets you coordinate multiple AI coding agents (Claude Code, GitHub Copilot, Codex, Gemini, and others) working on different tasks. Instead of losing context when agents restart, Gas Town persists work state in git-backed hooks, enabling reliable multi-agent workflows.
 
 ### What Problem Does This Solve?
 
@@ -130,6 +130,7 @@ Federated work coordination network linking Gas Towns through DoltHub. Rigs post
 - **tmux 3.0+** - recommended for full experience
 - **Claude Code CLI** (default runtime) - [claude.ai/code](https://claude.ai/code)
 - **Codex CLI** (optional runtime) - [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli)
+- **GitHub Copilot CLI** (optional runtime) - [cli.github.com](https://cli.github.com) (requires Copilot seat)
 
 ### Setup (Docker-Compose below)
 
@@ -376,6 +377,11 @@ Gas Town supports multiple AI coding runtimes. Per-rig runtime settings are in `
 - For runtimes without hooks (e.g., Codex), Gas Town sends a startup fallback
   after the session is ready: `gt prime`, optional `gt mail check --inject`
   for autonomous roles, and `gt nudge deacon session-started`.
+- **GitHub Copilot** (`copilot`) is a built-in preset using `--yolo` for autonomous
+  mode. It uses executable lifecycle hooks in `.github/hooks/gastown.json` (same events
+  as Claude: `sessionStart`, `userPromptSubmitted`, `preToolUse`, `sessionEnd`). Uses a
+  5-second ready delay instead of prompt detection. Requires a Copilot seat and org-level
+  CLI policy. See [docs/INSTALLING.md](docs/INSTALLING.md).
 
 ## Key Commands
 
