@@ -1758,3 +1758,44 @@ func TestCheckBranchContamination(t *testing.T) {
 		t.Errorf("Ahead (from main) = %d, want 5", contam.Ahead)
 	}
 }
+
+func TestRemoteURLHasRefs(t *testing.T) {
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+
+	t.Run("empty repo returns false", func(t *testing.T) {
+		dir := t.TempDir()
+		run("git", "init", "--initial-branch=main", dir)
+		run("git", "-C", dir, "config", "user.email", "t@t.com")
+		run("git", "-C", dir, "config", "user.name", "T")
+
+		got, err := RemoteURLHasRefs(dir)
+		if err != nil {
+			t.Fatalf("RemoteURLHasRefs: %v", err)
+		}
+		if got {
+			t.Error("want false for empty repo, got true")
+		}
+	})
+
+	t.Run("repo with commits returns true", func(t *testing.T) {
+		dir := t.TempDir()
+		run("git", "init", "--initial-branch=main", dir)
+		run("git", "-C", dir, "config", "user.email", "t@t.com")
+		run("git", "-C", dir, "config", "user.name", "T")
+		run("git", "-C", dir, "commit", "--allow-empty", "-m", "init")
+
+		got, err := RemoteURLHasRefs(dir)
+		if err != nil {
+			t.Fatalf("RemoteURLHasRefs: %v", err)
+		}
+		if !got {
+			t.Error("want true for repo with commits, got false")
+		}
+	})
+}

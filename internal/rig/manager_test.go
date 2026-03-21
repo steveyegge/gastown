@@ -1553,3 +1553,47 @@ func TestBareCloneDefaultBranch(t *testing.T) {
 		t.Errorf("DefaultBranch() = %q, want %q", got, "master")
 	}
 }
+
+// TestAddRig_EmptyRepo verifies that AddRig returns a clear, user-friendly error
+// when the target repository has no commits (GH#3054).
+// Without the fix, the error is a cryptic "couldn't find remote ref main" from
+// the configureRefspec fetch step inside cloneInternal.
+func TestAddRig_EmptyRepo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-based bd shim not reliable on Windows CI")
+	}
+
+	fakeBDForAddRig(t)
+
+	// Create a git repo with no commits.
+	emptyRepo := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init", "--initial-branch=main", emptyRepo},
+		{"git", "-C", emptyRepo, "config", "user.email", "test@test.com"},
+		{"git", "-C", emptyRepo, "config", "user.name", "Test User"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	_, err := manager.AddRig(AddRigOptions{
+		Name:          "emptyrig",
+		GitURL:        emptyRepo,
+		BeadsPrefix:   "er",
+		SkipDoltCheck: true,
+	})
+	if err == nil {
+		t.Fatal("AddRig: expected error for empty repo, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("AddRig error = %q; want message containing 'empty'", err.Error())
+	}
+	if strings.Contains(err.Error(), "couldn't find remote ref") {
+		t.Errorf("AddRig error = %q; should not leak cryptic git error", err.Error())
+	}
+}

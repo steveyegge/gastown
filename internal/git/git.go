@@ -991,6 +991,26 @@ func (g *Git) IsEmpty() (bool, error) {
 	return strings.TrimSpace(out) == "", nil
 }
 
+// RemoteURLHasRefs returns true if the remote at url has any heads (branches).
+// Used to detect empty repositories before attempting a clone.
+// Returns (false, nil) for an empty repo, (true, nil) if refs exist,
+// or (false, err) if the remote is unreachable.
+func RemoteURLHasRefs(url string) (bool, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command("git", "ls-remote", "--heads", "--exit-code", url)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	// exit code 2 from --exit-code means no matching refs (empty repo)
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {
+		return false, nil
+	}
+	return false, fmt.Errorf("checking remote refs: %s", strings.TrimSpace(stderr.String()))
+}
+
 // RemoteBranchExists checks if a branch exists on the remote.
 func (g *Git) RemoteBranchExists(remote, branch string) (bool, error) {
 	out, err := g.run("ls-remote", "--heads", remote, branch)
