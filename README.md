@@ -71,7 +71,7 @@ Git worktree-based persistent storage for agent work. Survives crashes and resta
 
 ### Convoys 🚚
 
-Work tracking units. Bundle multiple beads that get assigned to agents.
+Work tracking units. Bundle multiple beads that get assigned to agents. Convoys labeled `mountain` get autonomous stall detection and smart skip logic for epic-scale execution.
 
 ### Beads Integration 📿
 
@@ -79,13 +79,50 @@ Git-backed issue tracking system that stores work state as structured data.
 
 **Bead IDs** (also called **issue IDs**) use a prefix + 5-character alphanumeric format (e.g., `gt-abc12`, `hq-x7k2m`). The prefix indicates the item's origin or rig. Commands like `gt sling` and `gt convoy` accept these IDs to reference specific work items. The terms "bead" and "issue" are used interchangeably—beads are the underlying data format, while issues are the work items stored as beads.
 
+### Molecules 🧬
+
+Workflow templates that coordinate multi-step work. Formulas (TOML definitions) are instantiated as molecules with tracked steps. Two modes: root-only wisps (steps materialized at runtime, lightweight) and poured wisps (steps materialized as sub-wisps with checkpoint recovery). See [Molecules](docs/concepts/molecules.md).
+
+### Monitoring: Witness, Deacon, Dogs 🐕
+
+A three-tier watchdog system keeps agents healthy:
+
+- **Witness** - Per-rig lifecycle manager. Monitors polecats, detects stuck agents, triggers recovery, manages session cleanup.
+- **Deacon** - Background supervisor running continuous patrol cycles across all rigs.
+- **Dogs** - Infrastructure workers dispatched by the Deacon for maintenance tasks (e.g., Boot for triage).
+
+### Refinery 🏭
+
+Per-rig merge queue processor. When polecats complete work via `gt done`, the Refinery batches merge requests, runs verification gates, and merges to main using a Bors-style bisecting queue. Failed MRs are isolated and either fixed inline or re-dispatched.
+
+### Escalation 🚨
+
+Severity-routed issue escalation. Agents that hit blockers escalate via `gt escalate`, which creates tracked beads routed through the Deacon, Mayor, and (if needed) Overseer. Severity levels: CRITICAL (P0), HIGH (P1), MEDIUM (P2). See [Escalation](docs/design/escalation.md).
+
+### Scheduler ⏱️
+
+Config-driven capacity governor for polecat dispatch. Prevents API rate limit exhaustion by batching dispatch under configurable concurrency limits. Default is direct dispatch; set `scheduler.max_polecats` to enable deferred dispatch with the daemon. See [Scheduler](docs/design/scheduler.md).
+
+### Seance 👻
+
+Session discovery and continuation. Discovers previous agent sessions via `.events.jsonl` logs, enabling agents to query their predecessors for context and decisions from earlier work.
+
+```bash
+gt seance                       # List discoverable predecessor sessions
+gt seance --talk <id> -p "What did you find?"  # One-shot question
+```
+
+### Wasteland 🏜️
+
+Federated work coordination network linking Gas Towns through DoltHub. Rigs post wanted items, claim work from other towns, submit completion evidence, and earn portable reputation via multi-dimensional stamps. See [Wasteland](docs/WASTELAND.md).
+
 > **New to Gas Town?** See the [Glossary](docs/glossary.md) for a complete guide to terminology and concepts.
 
 ## Installation
 
 ### Prerequisites
 
-- **Go 1.23+** - [go.dev/dl](https://go.dev/dl/)
+- **Go 1.25+** - [go.dev/dl](https://go.dev/dl/)
 - **Git 2.25+** - for worktree support
 - **Dolt 1.82.4+** - [github.com/dolthub/dolt](https://github.com/dolthub/dolt)
 - **beads (bd) 0.55.4+** - [github.com/steveyegge/beads](https://github.com/steveyegge/beads)
@@ -386,6 +423,16 @@ gt config agent set codex-low "codex --thinking low"
 gt config default-agent claude-glm
 ```
 
+### Monitoring & Health
+
+```bash
+gt escalate -s HIGH "description"  # Escalate a blocker
+gt escalate list               # List open escalations
+gt scheduler status            # Show scheduler state
+gt seance                      # Discover previous sessions
+gt seance --talk <id>          # Query a predecessor session
+```
+
 ### Beads Integration
 
 ```bash
@@ -393,6 +440,15 @@ bd formula list             # List formulas
 bd cook <formula>           # Execute formula
 bd mol pour <formula>       # Create trackable instance
 bd mol list                 # List active instances
+```
+
+### Wasteland Federation
+
+```bash
+gt wl join <remote>            # Join a wasteland
+gt wl browse                   # View wanted board
+gt wl claim <id>               # Claim work
+gt wl done <id> --evidence <url>  # Submit completion
 ```
 
 ## Cooking Formulas
@@ -454,6 +510,104 @@ workspace: agents, convoys, hooks, queues, issues, and escalations. It
 auto-refreshes via htmx and includes a command palette for running gt commands
 directly from the browser.
 
+## Monitoring & Health
+
+Gas Town uses a three-tier watchdog chain to keep agents healthy at scale:
+
+```
+Daemon (Go process) ← heartbeat every 3 min
+    └── Boot (AI agent) ← intelligent triage
+        └── Deacon (AI agent) ← continuous patrol
+            └── Witnesses & Refineries ← per-rig agents
+```
+
+### Witness (Per-Rig)
+
+Each rig has a Witness that monitors its polecats. The Witness detects stuck agents, triggers recovery (nudge or handoff), manages session cleanup, and tracks completion. Witnesses delegate work rather than implementing it directly.
+
+### Deacon (Cross-Rig)
+
+The Deacon runs continuous patrol cycles across all rigs, checking agent health, dispatching Dogs for maintenance tasks, and escalating issues that individual Witnesses can't resolve.
+
+### Escalation
+
+When agents hit blockers, they escalate rather than waiting:
+
+```bash
+gt escalate -s HIGH "Description of blocker"
+gt escalate list                    # List open escalations
+gt escalate ack <bead-id>           # Acknowledge an escalation
+```
+
+Escalations route through Deacon -> Mayor -> Overseer based on severity. See [Escalation design](docs/design/escalation.md).
+
+## Merge Queue (Refinery)
+
+The Refinery processes completed polecat work through a bisecting merge queue:
+
+1. Polecat runs `gt done` -> branch pushed, MR bead created
+2. Refinery batches pending MRs
+3. Runs verification gates on the merged stack
+4. If green: all MRs in batch merge to main
+5. If red: bisects to isolate the failing MR, merges the good ones
+
+This is a Bors-style merge queue — polecats never push directly to main.
+
+## Scheduler
+
+The scheduler controls polecat dispatch capacity to prevent API rate limit exhaustion:
+
+```bash
+gt config set scheduler.max_polecats 5   # Enable deferred dispatch (max 5 concurrent)
+gt scheduler status                      # Show scheduler state
+gt scheduler pause                       # Pause dispatch
+gt scheduler resume                      # Resume dispatch
+```
+
+Default mode (`max_polecats = -1`) dispatches immediately via `gt sling`. When a limit is set, the daemon dispatches incrementally, respecting capacity. See [Scheduler design](docs/design/scheduler.md).
+
+## Seance
+
+Discover and query previous agent sessions:
+
+```bash
+gt seance                              # List discoverable predecessor sessions
+gt seance --talk <id>                  # Full context conversation with predecessor
+gt seance --talk <id> -p "Question?"   # One-shot question to predecessor
+```
+
+Seance discovers sessions via `.events.jsonl` logs, enabling agents to recover context and decisions from earlier work without re-reading entire codebases.
+
+## Wasteland Federation
+
+The Wasteland is a federated work coordination network linking multiple Gas Towns through DoltHub:
+
+```bash
+gt wl join hop/wl-commons              # Join a wasteland
+gt wl browse                           # View wanted board
+gt wl claim <id>                       # Claim a wanted item
+gt wl done <id> --evidence <url>       # Submit completion with evidence
+gt wl post --title "Need X"            # Post new wanted item
+```
+
+Completions earn portable reputation via multi-dimensional stamps (quality, speed, complexity). See [Wasteland guide](docs/WASTELAND.md).
+
+## Telemetry (OpenTelemetry)
+
+Gas Town emits all agent operations as structured logs and metrics to any OTLP-compatible backend (VictoriaMetrics/VictoriaLogs by default):
+
+```bash
+# Configure OTLP endpoints
+export GT_OTEL_LOGS_URL="http://localhost:9428/insert/jsonline"
+export GT_OTEL_METRICS_URL="http://localhost:8428/api/v1/write"
+```
+
+**Events emitted:** session lifecycle, agent state changes, bd calls with duration, mail operations, sling/nudge/done workflows, polecat spawn/remove, formula instantiation, convoy creation, daemon restarts, and more.
+
+**Metrics include:** `gastown.session.starts.total`, `gastown.bd.calls.total`, `gastown.polecat.spawns.total`, `gastown.done.total`, `gastown.convoy.creates.total`, and others.
+
+See [OTEL data model](docs/otel-data-model.md) and [OTEL architecture](docs/design/otel/) for the complete event schema.
+
 ## Advanced Concepts
 
 ### The Propulsion Principle
@@ -505,13 +659,16 @@ gt completion fish > ~/.config/fish/completions/gt.fish
 
 ## Project Roles
 
-| Role            | Description        | Primary Interface    |
-| --------------- | ------------------ | -------------------- |
-| **Mayor**       | AI coordinator     | `gt mayor attach`    |
-| **Human (You)** | Crew member        | Your crew directory  |
-| **Polecat**     | Worker agent       | Spawned by Mayor     |
-| **Hook**        | Persistent storage | Git worktree         |
-| **Convoy**      | Work tracker       | `gt convoy` commands |
+| Role            | Description                          | Primary Interface    |
+| --------------- | ------------------------------------ | -------------------- |
+| **Mayor**       | AI coordinator                       | `gt mayor attach`    |
+| **Human (You)** | Crew member                          | Your crew directory  |
+| **Polecat**     | Worker agent                         | Spawned by Mayor     |
+| **Witness**     | Per-rig agent health monitor         | Automatic patrol     |
+| **Deacon**      | Cross-rig supervisor daemon          | `gt patrol`          |
+| **Refinery**    | Merge queue processor                | Automatic            |
+| **Hook**        | Persistent storage                   | Git worktree         |
+| **Convoy**      | Work tracker                         | `gt convoy` commands |
 
 ## Tips
 
@@ -522,6 +679,27 @@ gt completion fish > ~/.config/fish/completions/gt.fish
 - **Use `gt feed` for live monitoring** - Watch agent activity and catch stuck agents early
 - **Monitor the dashboard** - Get real-time visibility in the browser
 - **Let the Mayor orchestrate** - It knows how to manage agents
+
+## Design Documentation
+
+For deeper technical details, see the design docs in `docs/`:
+
+| Topic | Document |
+|-------|----------|
+| Architecture | [docs/design/architecture.md](docs/design/architecture.md) |
+| Glossary | [docs/glossary.md](docs/glossary.md) |
+| Molecules | [docs/concepts/molecules.md](docs/concepts/molecules.md) |
+| Escalation | [docs/design/escalation.md](docs/design/escalation.md) |
+| Scheduler | [docs/design/scheduler.md](docs/design/scheduler.md) |
+| Wasteland | [docs/WASTELAND.md](docs/WASTELAND.md) |
+| OTEL data model | [docs/otel-data-model.md](docs/otel-data-model.md) |
+| Witness design | [docs/design/witness-at-team-lead.md](docs/design/witness-at-team-lead.md) |
+| Convoy lifecycle | [docs/design/convoy/](docs/design/convoy/) |
+| Polecat lifecycle | [docs/design/polecat-lifecycle-patrol.md](docs/design/polecat-lifecycle-patrol.md) |
+| Plugin system | [docs/design/plugin-system.md](docs/design/plugin-system.md) |
+| Agent providers | [docs/agent-provider-integration.md](docs/agent-provider-integration.md) |
+| Hooks | [docs/HOOKS.md](docs/HOOKS.md) |
+| Installation guide | [docs/INSTALLING.md](docs/INSTALLING.md) |
 
 ## Troubleshooting
 
