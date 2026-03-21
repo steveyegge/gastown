@@ -357,6 +357,25 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 	return nil
 }
 
+// sanitizeNudgeField strips control characters and newlines from user-supplied
+// fields injected into tmux panes via NudgePane (gt-sec-002). Caps at maxLen
+// to prevent excessively long prompt injections.
+func sanitizeNudgeField(s string, maxLen int) string {
+	var b strings.Builder
+	for _, r := range s {
+		// Strip newlines, carriage returns, and control characters (U+0000–U+001F, U+007F)
+		if r == '\n' || r == '\r' || (r < 0x20) || r == 0x7F {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	result := b.String()
+	if len(result) > maxLen {
+		result = result[:maxLen]
+	}
+	return result
+}
+
 // injectStartPrompt sends a prompt to the target pane to start working.
 // Uses the reliable nudge pattern: literal mode + 500ms debounce + separate Enter.
 func injectStartPrompt(pane, beadID, subject, args string) error {
@@ -368,6 +387,12 @@ func injectStartPrompt(pane, beadID, subject, args string) error {
 	if os.Getenv("GT_TEST_NO_NUDGE") != "" {
 		return nil
 	}
+
+	// gt-sec-002: sanitize user-controlled fields before injecting into NudgePane.
+	// Strip control chars/newlines and cap length to prevent prompt injection.
+	const nudgeFieldMaxLen = 200
+	subject = sanitizeNudgeField(subject, nudgeFieldMaxLen)
+	args = sanitizeNudgeField(args, nudgeFieldMaxLen)
 
 	// Build the prompt to inject
 	var prompt string
