@@ -185,10 +185,25 @@ func (r *Router) expandAnnounce(announceName string) (*config.AnnounceConfig, er
 	}, ErrUnknownAnnounce)
 }
 
-// detectTownRoot finds the town root using workspace.Find.
-// This ensures consistent detection with the rest of the codebase,
-// supporting both primary (mayor/town.json) and secondary (mayor/) markers.
+// detectTownRoot finds the town root directory.
+//
+// Prefers the GT_TOWN_ROOT environment variable when set (always set by the
+// Gas Town session manager to the actual outer town root). This prevents
+// nested-workspace misdetection where workspace.Find stops at a rig-level
+// mayor/town.json instead of continuing to the outer town root.
 func detectTownRoot(startDir string) string {
+	// Prefer GT_TOWN_ROOT when set by the session manager.
+	// workspace.Find stops at the first primary marker when !inWorktree,
+	// so running from a rig directory (which has its own mayor/town.json)
+	// would return the rig instead of the actual town root.
+	for _, envName := range []string{"GT_TOWN_ROOT", "GT_ROOT"} {
+		if townRoot := os.Getenv(envName); townRoot != "" {
+			if ok, _ := workspace.IsWorkspace(townRoot); ok {
+				return townRoot
+			}
+		}
+	}
+	// Fallback to workspace detection for environments without env vars
 	townRoot, err := workspace.Find(startDir)
 	if err != nil {
 		return ""

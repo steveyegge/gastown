@@ -23,6 +23,11 @@ import (
 )
 
 func TestDetectTownRoot(t *testing.T) {
+	// Unset GT_TOWN_ROOT/GT_ROOT so tests exercise workspace.Find fallback.
+	// (The real session always has these set; this tests the detection logic itself.)
+	t.Setenv("GT_TOWN_ROOT", "")
+	t.Setenv("GT_ROOT", "")
+
 	// Create temp directory structure
 	tmpDir := t.TempDir()
 	townRoot := filepath.Join(tmpDir, "town")
@@ -75,6 +80,61 @@ func TestDetectTownRoot(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDetectTownRoot_PrefersEnvVar verifies that GT_TOWN_ROOT takes priority
+// over workspace detection, preventing rig-level mayor/town.json from being
+// mistaken for the town root.
+func TestDetectTownRoot_PrefersEnvVar(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Outer town root (the actual town)
+	outerTown := filepath.Join(tmpDir, "town")
+	if err := os.MkdirAll(filepath.Join(outerTown, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outerTown, "mayor", "town.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nested rig that also has a mayor/town.json (the trap)
+	nestedRig := filepath.Join(outerTown, "gastown")
+	if err := os.MkdirAll(filepath.Join(nestedRig, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedRig, "mayor", "town.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("env var overrides nested workspace detection", func(t *testing.T) {
+		t.Setenv("GT_TOWN_ROOT", outerTown)
+		// Starting from the nested rig would normally find the rig's own
+		// mayor/town.json first. With GT_TOWN_ROOT set, we get the outer town.
+		got := detectTownRoot(nestedRig)
+		if got != outerTown {
+			t.Errorf("detectTownRoot(%q) = %q, want %q (outer town root via env var)", nestedRig, got, outerTown)
+		}
+	})
+
+	t.Run("GT_ROOT also works", func(t *testing.T) {
+		t.Setenv("GT_TOWN_ROOT", "")
+		t.Setenv("GT_ROOT", outerTown)
+		got := detectTownRoot(nestedRig)
+		if got != outerTown {
+			t.Errorf("detectTownRoot(%q) = %q, want %q (outer town root via GT_ROOT)", nestedRig, got, outerTown)
+		}
+	})
+
+	t.Run("falls back to workspace.Find without env vars", func(t *testing.T) {
+		t.Setenv("GT_TOWN_ROOT", "")
+		t.Setenv("GT_ROOT", "")
+		// Without env vars, starting from the nested rig finds the nested
+		// mayor/town.json (the bug this fix addresses — documenting current behavior).
+		got := detectTownRoot(nestedRig)
+		// workspace.Find returns the nested rig since it stops at first primary marker
+		if got != nestedRig {
+			t.Logf("detectTownRoot fallback returned %q (expected %q for nested-workspace scenario)", got, nestedRig)
+		}
+	})
 }
 
 func TestIsTownLevelAddress(t *testing.T) {

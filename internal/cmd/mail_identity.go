@@ -19,7 +19,19 @@ import (
 //
 // Mail ALWAYS uses town beads, regardless of sender or recipient address.
 // This ensures messages are visible to all agents in the town.
+//
+// GT_TOWN_ROOT is preferred over workspace detection because workspace.Find
+// stops at the first mayor/town.json when not in a worktree path. Rigs that
+// have their own mayor/town.json (e.g., gastown/) would be misidentified as
+// the town root when running from the rig directory.
 func findMailWorkDir() (string, error) {
+	for _, envName := range []string{"GT_TOWN_ROOT", "GT_ROOT"} {
+		if townRoot := os.Getenv(envName); townRoot != "" {
+			if ok, _ := workspace.IsWorkspace(townRoot); ok {
+				return townRoot, nil
+			}
+		}
+	}
 	return workspace.FindFromCwdOrError()
 }
 
