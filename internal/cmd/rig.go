@@ -1107,7 +1107,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 					}
 				}
 				// Fallback: extract prefix from dolt_database name in metadata.json.
-				// Format: "beads_<prefix>" (e.g. "beads_my-project" → "my-project").
+				// Format: "beads_<prefix>" (e.g. "beads_my_project" → "my_project").
 				// This survives clone because metadata.json is tracked by git.
 				if !prefixDetected {
 					var fullMeta struct {
