@@ -991,6 +991,17 @@ func (g *Git) IsEmpty() (bool, error) {
 	return strings.TrimSpace(out) == "", nil
 }
 
+// RemoteIsEmpty checks if a remote repository URL has no refs (no commits).
+// Uses git ls-remote --refs which lists all remote refs without cloning.
+// Returns true if the remote exists but has no refs.
+func (g *Git) RemoteIsEmpty(url string) (bool, error) {
+	out, err := g.run("ls-remote", "--refs", url)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) == "", nil
+}
+
 // RemoteBranchExists checks if a branch exists on the remote.
 func (g *Git) RemoteBranchExists(remote, branch string) (bool, error) {
 	out, err := g.run("ls-remote", "--heads", remote, branch)

@@ -412,6 +412,13 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return m.git.CloneBareWithBranch(opts.GitURL, bareRepoPath, branch)
 	}
 
+	// Pre-check: detect empty repos before cloning to surface a clear error.
+	// git clone succeeds on empty repos, but configureRefspec then fails with
+	// "fatal: couldn't find remote ref main" which is confusing. (GH#3054)
+	if empty, err := m.git.RemoteIsEmpty(opts.GitURL); err == nil && empty {
+		return nil, fmt.Errorf("repository %s is empty (no commits). Push at least one commit before adding it as a rig", opts.GitURL)
+	}
+
 	if err := cloneBareWith(opts.DefaultBranch); err != nil {
 		return nil, wrapCloneError(err, opts.GitURL)
 	}
