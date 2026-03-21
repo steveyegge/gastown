@@ -882,14 +882,14 @@ func resolveProcessPath(pid int, path string) string {
 	return filepath.Clean(path)
 }
 
-// getDoltDataDirFromProcess reads the --data-dir flag value from the running
+// GetDoltDataDirFromProcess reads the --data-dir flag value from the running
 // process's command-line arguments. This is structural (reading a well-defined
 // CLI flag), not heuristic string matching. Used as a tiebreaker when the
 // state-file based check is inconclusive (e.g. PID reuse across towns).
 //
 // Supported on macOS and Linux via POSIX ps. Returns empty string on Windows
 // (not supported) or on any error.
-func getDoltDataDirFromProcess(pid int) string {
+func GetDoltDataDirFromProcess(pid int) string {
 	return resolveProcessPath(pid, getDoltFlagFromArgs(getProcessArgs(pid), "--data-dir"))
 }
 
@@ -925,7 +925,7 @@ func doltProcessMatchesTownPaths(expectedDataDir, actualDataDir, actualConfigPat
 func doltProcessMatchesTown(townRoot string, pid int, config *Config) bool {
 	return doltProcessMatchesTownPaths(
 		config.DataDir,
-		getDoltDataDirFromProcess(pid),
+		GetDoltDataDirFromProcess(pid),
 		getDoltConfigPathFromProcess(pid),
 		getProcessCWD(pid),
 		getServerDataDir(townRoot, pid),
@@ -947,7 +947,7 @@ func doltProcessOwnerPathFromEvidence(actualDataDir, actualConfigPath, actualCWD
 
 func doltProcessOwnerPath(townRoot string, pid int) string {
 	return doltProcessOwnerPathFromEvidence(
-		getDoltDataDirFromProcess(pid),
+		GetDoltDataDirFromProcess(pid),
 		getDoltConfigPathFromProcess(pid),
 		getProcessCWD(pid),
 		getServerDataDir(townRoot, pid),
