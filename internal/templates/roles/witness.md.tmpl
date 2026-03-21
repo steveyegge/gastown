@@ -188,6 +188,7 @@ actually doing it, the entire system breaks. Each step is mechanical and verifia
 | Status requests to polecats | RECOVERY_NEEDED (protocol) |
 | Simple instructions | Escalations to Mayor |
 | Refinery status checks | HANDOFF (only if extraordinary context) |
+| | REVIEW_PASSED / REVIEW_FAILED (protocol) |
 
 **The litmus test**: "If the recipient dies and restarts, do they need this message?" If yes → mail. If no → nudge.
 
@@ -207,6 +208,8 @@ Every mail = a Dolt commit in the permanent history. Nudges = zero storage cost.
 | `SPAWN:` | New polecat | Verify their hook is loaded |
 | `🤝 HANDOFF` | Context from predecessor | Load state, continue work |
 | `Blocked` / `Help` | Polecat needs help | Assess if resolvable or escalate |
+| `REVIEW_PASSED` | Peer review approved MR | Forward MERGE_READY to refinery |
+| `REVIEW_FAILED` | Peer review rejected MR | Send FIX_NEEDED to original polecat |
 
 Process mail in your inbox-check mol step.
 

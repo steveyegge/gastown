@@ -553,6 +553,8 @@ func TestWrapWitnessHandlers_InvalidPayload(t *testing.T) {
 		{"MERGED empty body", "MERGED nux"},
 		{"MERGE_FAILED empty body", "MERGE_FAILED nux"},
 		{"REWORK_REQUEST empty body", "REWORK_REQUEST nux"},
+		{"REVIEW_PASSED empty body", "REVIEW_PASSED nux"},
+		{"REVIEW_FAILED empty body", "REVIEW_FAILED nux"},
 	}
 
 	for _, tt := range tests {
@@ -566,7 +568,8 @@ func TestWrapWitnessHandlers_InvalidPayload(t *testing.T) {
 	}
 
 	// Handlers should NOT have been called
-	if handler.mergedCalled || handler.failedCalled || handler.reworkCalled {
+	if handler.mergedCalled || handler.failedCalled || handler.reworkCalled ||
+		handler.reviewPassedCalled || handler.reviewFailedCalled {
 		t.Error("handlers should not be called when parse fails")
 	}
 }
@@ -648,9 +651,11 @@ func TestDefaultWitnessHandler(t *testing.T) {
 // Mock handlers for testing
 
 type mockWitnessHandler struct {
-	mergedCalled bool
-	failedCalled bool
-	reworkCalled bool
+	mergedCalled        bool
+	failedCalled        bool
+	reworkCalled        bool
+	reviewPassedCalled  bool
+	reviewFailedCalled  bool
 }
 
 func (m *mockWitnessHandler) HandleMerged(payload *MergedPayload) error {
@@ -665,6 +670,16 @@ func (m *mockWitnessHandler) HandleMergeFailed(payload *MergeFailedPayload) erro
 
 func (m *mockWitnessHandler) HandleReworkRequest(payload *ReworkRequestPayload) error {
 	m.reworkCalled = true
+	return nil
+}
+
+func (m *mockWitnessHandler) HandleReviewPassed(payload *ReviewPassedPayload) error {
+	m.reviewPassedCalled = true
+	return nil
+}
+
+func (m *mockWitnessHandler) HandleReviewFailed(payload *ReviewFailedPayload) error {
+	m.reviewFailedCalled = true
 	return nil
 }
 

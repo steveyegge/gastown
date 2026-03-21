@@ -69,6 +69,8 @@ var drainableSubjects = []string{
 	"MERGED",
 	"MERGE_READY",
 	"MERGE_FAILED",
+	"REVIEW_PASSED",
+	"REVIEW_FAILED",
 	"SWARM_START",
 }
 

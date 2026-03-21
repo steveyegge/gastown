@@ -231,7 +231,8 @@ func TransitionPolecatToIdle(workDir, agentBeadID string) error {
 }
 
 // handlePolecatDonePendingMR handles a POLECAT_DONE when there's a pending MR.
-// Creates a cleanup wisp, sends MERGE_READY to the Refinery, and nudges it.
+// Creates a cleanup wisp and either sends MERGE_READY to the Refinery directly
+// or emits REVIEW_REQUESTED if peer review is enabled in rig settings.
 func handlePolecatDonePendingMR(bd *BdCli, workDir, rigName string, payload *PolecatDonePayload, result *HandlerResult) *HandlerResult {
 	wispID, err := createCleanupWisp(bd, workDir, payload.PolecatName, payload.IssueID, payload.Branch)
 	if err != nil {
@@ -244,12 +245,56 @@ func handlePolecatDonePendingMR(bd *BdCli, workDir, rigName string, payload *Pol
 		return result
 	}
 
+	// Check if peer review gate is enabled for this rig.
+	if isPeerReviewEnabled(workDir, rigName) {
+		emitReviewRequested(workDir, rigName, payload, result)
+		result.Handled = true
+		result.WispCreated = wispID
+		result.Action = fmt.Sprintf("deferred cleanup for %s (pending MR=%s, peer review requested)", payload.PolecatName, payload.MRID)
+		return result
+	}
+
 	notifyRefineryMergeReady(workDir, rigName, result)
 
 	result.Handled = true
 	result.WispCreated = wispID
 	result.Action = fmt.Sprintf("deferred cleanup for %s (pending MR=%s, nudged refinery)", payload.PolecatName, payload.MRID)
 	return result
+}
+
+// isPeerReviewEnabled checks if the rig has peer_review enabled in its merge queue settings.
+func isPeerReviewEnabled(workDir, rigName string) bool {
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		return false
+	}
+	settingsPath := filepath.Join(townRoot, rigName, "settings", "config.json")
+	settings, err := config.LoadRigSettings(settingsPath)
+	if err != nil {
+		return false
+	}
+	if settings.MergeQueue == nil {
+		return false
+	}
+	return settings.MergeQueue.IsPeerReviewEnabled()
+}
+
+// emitReviewRequested emits a REVIEW_REQUESTED channel event so the witness
+// patrol can spawn a review polecat instead of sending MERGE_READY directly.
+// The witness agent reads this event and spawns a review polecat using the
+// configured peer_review_formula (default: mol-peer-review-gate).
+func emitReviewRequested(workDir, rigName string, payload *PolecatDonePayload, result *HandlerResult) {
+	townRoot, _ := workspace.Find(workDir)
+	if townRoot != "" {
+		_, _ = channelevents.EmitToTown(townRoot, "witness", "REVIEW_REQUESTED", []string{
+			"source=polecat",
+			"rig=" + rigName,
+			"polecat=" + payload.PolecatName,
+			"issue=" + payload.IssueID,
+			"branch=" + payload.Branch,
+			"mr=" + payload.MRID,
+		})
+	}
 }
 
 // notifyRefineryMergeReady emits a MERGE_READY channel event and nudges the

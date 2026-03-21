@@ -258,5 +258,62 @@ Then run 'gt done' to resubmit for merge.`,
 	return h.Router.Send(msg)
 }
 
+// HandleReviewPassed handles a REVIEW_PASSED message from a review polecat.
+// When a peer review passes, the Witness forwards MERGE_READY to the Refinery.
+func (h *DefaultWitnessHandler) HandleReviewPassed(payload *ReviewPassedPayload) error {
+	_, _ = fmt.Fprintf(h.Output, "[Witness] REVIEW_PASSED received for polecat %s\n", payload.Polecat)
+	_, _ = fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
+	_, _ = fmt.Fprintf(h.Output, "  Branch: %s\n", payload.Branch)
+	_, _ = fmt.Fprintf(h.Output, "  MR Bead: %s\n", payload.MRBeadID)
+
+	// Forward MERGE_READY to refinery
+	mergeReadyMsg := NewMergeReadyMessage(payload.Rig, payload.Polecat, payload.Branch, payload.Issue)
+	if err := h.Router.Send(mergeReadyMsg); err != nil {
+		_, _ = fmt.Fprintf(h.Output, "[Witness] ✗ Failed to send MERGE_READY: %v\n", err)
+		return fmt.Errorf("failed to send MERGE_READY after review passed: %w", err)
+	}
+
+	_, _ = fmt.Fprintf(h.Output, "[Witness] ✓ Peer review passed — MERGE_READY sent to refinery\n")
+	return nil
+}
+
+// HandleReviewFailed handles a REVIEW_FAILED message from a review polecat.
+// When a peer review fails, the Witness sends FIX_NEEDED to the original polecat.
+func (h *DefaultWitnessHandler) HandleReviewFailed(payload *ReviewFailedPayload) error {
+	_, _ = fmt.Fprintf(h.Output, "[Witness] REVIEW_FAILED received for polecat %s\n", payload.Polecat)
+	_, _ = fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
+	_, _ = fmt.Fprintf(h.Output, "  Branch: %s\n", payload.Branch)
+	_, _ = fmt.Fprintf(h.Output, "  Findings: %s\n", payload.Findings)
+
+	// Send FIX_NEEDED to the original polecat with review findings
+	msg := mail.NewMessage(
+		fmt.Sprintf("%s/witness", h.Rig),
+		fmt.Sprintf("%s/%s", h.Rig, payload.Polecat),
+		fmt.Sprintf("FIX_NEEDED %s", payload.Polecat),
+		fmt.Sprintf(`Peer review failed for your merge request.
+
+Branch: %s
+Issue: %s
+Failure-Type: peer_review
+Error: %s
+
+Please address the review findings and resubmit your work with 'gt done'.`,
+			payload.Branch,
+			payload.Issue,
+			payload.Findings,
+		),
+	)
+	msg.Priority = mail.PriorityHigh
+	msg.Type = mail.TypeTask
+
+	if err := h.Router.Send(msg); err != nil {
+		_, _ = fmt.Fprintf(h.Output, "[Witness] ✗ Failed to send FIX_NEEDED: %v\n", err)
+		return fmt.Errorf("failed to send FIX_NEEDED after review failed: %w", err)
+	}
+
+	_, _ = fmt.Fprintf(h.Output, "[Witness] ✗ Peer review failed — FIX_NEEDED sent to polecat %s\n", payload.Polecat)
+	return nil
+}
+
 // Ensure DefaultWitnessHandler implements WitnessHandler.
 var _ WitnessHandler = (*DefaultWitnessHandler)(nil)

@@ -53,6 +53,18 @@ const (
 	// feeding instead of waiting for the next deacon patrol cycle.
 	// Subject format: "CONVOY_NEEDS_FEEDING <convoy-id>"
 	TypeConvoyNeedsFeeding MessageType = "CONVOY_NEEDS_FEEDING"
+
+	// TypeReviewPassed is sent from a review polecat to the Witness when
+	// the peer review gate passes. The Witness then forwards MERGE_READY
+	// to the Refinery.
+	// Subject format: "REVIEW_PASSED <polecat-name>"
+	TypeReviewPassed MessageType = "REVIEW_PASSED"
+
+	// TypeReviewFailed is sent from a review polecat to the Witness when
+	// the peer review gate fails. The Witness then sends FIX_NEEDED to
+	// the original polecat with the review findings.
+	// Subject format: "REVIEW_FAILED <polecat-name>"
+	TypeReviewFailed MessageType = "REVIEW_FAILED"
 )
 
 // ParseMessageType extracts the protocol message type from a mail subject.
@@ -68,6 +80,8 @@ func ParseMessageType(subject string) MessageType {
 		TypeFixNeeded,
 		TypeReworkRequest,
 		TypeConvoyNeedsFeeding,
+		TypeReviewPassed,
+		TypeReviewFailed,
 	}
 
 	for _, prefix := range prefixes {
@@ -270,6 +284,47 @@ type ConvoyNeedsFeedingPayload struct {
 
 	// MergedAt is when the merge completed.
 	MergedAt time.Time `json:"merged_at"`
+}
+
+// ReviewPassedPayload contains the data for a REVIEW_PASSED message.
+// Sent by a review polecat to the Witness after the peer review gate passes.
+type ReviewPassedPayload struct {
+	// Issue is the original bead issue ID that was reviewed.
+	Issue string `json:"issue"`
+
+	// Branch is the polecat's work branch.
+	Branch string `json:"branch"`
+
+	// Polecat is the original polecat's name (not the reviewer).
+	Polecat string `json:"polecat"`
+
+	// MRBeadID is the merge-request bead ID.
+	MRBeadID string `json:"mr_bead"`
+
+	// Rig is the rig name.
+	Rig string `json:"rig"`
+}
+
+// ReviewFailedPayload contains the data for a REVIEW_FAILED message.
+// Sent by a review polecat to the Witness after the peer review gate fails.
+type ReviewFailedPayload struct {
+	// Issue is the original bead issue ID that was reviewed.
+	Issue string `json:"issue"`
+
+	// Branch is the polecat's work branch.
+	Branch string `json:"branch"`
+
+	// Polecat is the original polecat's name (not the reviewer).
+	Polecat string `json:"polecat"`
+
+	// MRBeadID is the merge-request bead ID.
+	MRBeadID string `json:"mr_bead"`
+
+	// Rig is the rig name.
+	Rig string `json:"rig"`
+
+	// Findings is a brief summary of the blocking issues found.
+	Findings string `json:"findings"`
 }
 
 // IsProtocolMessage returns true if the subject matches a known protocol type.

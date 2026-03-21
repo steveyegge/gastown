@@ -1,0 +1,263 @@
+description = """
+Review a polecat's MR against bead requirements and produce a PASS/FAIL verdict.
+
+This molecule is used by a review polecat spawned by the witness when the rig has
+peer_review enabled. The review polecat reads the original bead requirements,
+examines the branch diff, and decides whether the implementation satisfies the
+requirements sufficiently to proceed to merge.
+
+## Polecat Contract (Self-Cleaning Model)
+
+You are a self-cleaning worker. You:
+1. Receive work via your hook (pinned molecule + MR context)
+2. Work through molecule steps using `bd mol current` / `bd close <step>`
+3. Emit a REVIEW_PASSED or REVIEW_FAILED event
+4. Complete and self-clean via `gt done` (submit verdict + nuke yourself)
+5. You are GONE — your verdict is recorded
+
+**Self-cleaning:** When you run `gt done`, you emit your verdict, nuke your
+sandbox, and exit. There is no idle state. Done means gone.
+
+**Important:** This formula defines the template. Your molecule already has step
+beads created from it. Use `bd mol current` to find them — do NOT read this file directly.
+
+**You do NOT:**
+- Fix the issues yourself (emit REVIEW_FAILED, let the original polecat fix)
+- Scope creep into unrelated areas
+- Evaluate style, test coverage, or subjective quality
+- Fail a review for vague requirements (that's not the polecat's fault)
+
+## Verdict Criteria
+
+**PASS when:** Implementation addresses bead requirements, no obvious correctness
+bugs, no security vulnerabilities.
+
+**FAIL when:** Implementation doesn't match requirements, obvious logic errors,
+security vulnerability, explicit acceptance criteria unmet.
+
+**DO NOT FAIL for:** Style, missing tests, code that 'could be better', vague
+bead requirements.
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| issue | hook_bead | The original bead issue ID being reviewed |
+| branch | hook_bead | The polecat's work branch |
+| polecat | hook_bead | The original polecat's name |
+| mr_bead | hook_bead | The merge-request bead ID |
+| rig | hook_bead | The rig name |
+
+## Failure Modes
+
+| Situation | Action |
+|-----------|--------|
+| Can't understand requirements | PASS (benefit of the doubt for vague specs) |
+| Can't access branch | Mail Witness, escalate |
+| Critical security issue | FAIL with detailed explanation |"""
+formula = "mol-peer-review-gate"
+version = 1
+
+[[steps]]
+id = "load-context"
+title = "Load context and understand the review"
+description = """
+Initialize your session and understand what you're reviewing.
+
+**1. Prime your environment:**
+```bash
+gt prime                    # Load role context
+bd prime                    # Load beads context
+```
+
+**2. Check your hook:**
+```bash
+gt hook               # Shows your pinned molecule and hook_bead
+```
+
+The hook_bead describes the review task. Read the tracking bead:
+```bash
+bd show {{issue}}           # Full issue details (the original bead)
+```
+
+**3. Fetch the branch diff:**
+```bash
+git fetch origin
+git log origin/main..origin/{{branch}} --oneline
+git diff origin/main...origin/{{branch}}
+```
+
+**4. Understand the scope:**
+- What does the bead require?
+- What files were changed?
+- What is the stated acceptance criteria?
+
+**Exit criteria:** You understand the bead requirements and have the diff loaded."""
+
+[[steps]]
+id = "review-completeness"
+title = "Review whether implementation addresses requirements"
+needs = ["load-context"]
+description = """
+Check if the diff addresses what the bead asked for.
+
+**1. Re-read the bead requirements:**
+```bash
+bd show {{issue}}
+```
+
+**2. Map requirements to changes:**
+For each requirement or acceptance criterion in the bead:
+- Is there corresponding code in the diff?
+- Does the code plausibly implement the requirement?
+- Are there requirements with no corresponding changes?
+
+**3. Check for missing deliverables:**
+If the bead specifies files to create/modify, verify they appear in the diff.
+
+**4. Note completeness findings:**
+- Which requirements are addressed
+- Which requirements are missing (if any)
+- Whether omissions are blocking or acceptable
+
+**Exit criteria:** You have a completeness assessment."""
+
+[[steps]]
+id = "review-correctness"
+title = "Review code correctness and security"
+needs = ["load-context"]
+description = """
+Check the diff for correctness bugs and security issues.
+
+**1. Review the diff for correctness:**
+```bash
+git diff origin/main...origin/{{branch}}
+```
+
+Focus on:
+- Logic errors (off-by-one, wrong condition, nil dereference)
+- Missing error handling on critical paths
+- Race conditions or data corruption risks
+- Obvious functional bugs
+
+**2. Check for security issues:**
+- Injection vulnerabilities (SQL, command, template)
+- Authentication/authorization bypasses
+- Exposed secrets or credentials
+- Unsafe deserialization
+
+**3. Note correctness findings:**
+For each issue found:
+- File and approximate location
+- Severity: CRITICAL (blocks merge) or MINOR (note but don't block)
+- Brief description
+
+**DO NOT flag:**
+- Style issues (naming, formatting)
+- Missing tests
+- Code that could be "better" but works correctly
+- Performance concerns unless severe
+
+**Exit criteria:** You have a correctness assessment."""
+
+[[steps]]
+id = "verdict"
+title = "Produce PASS or FAIL verdict"
+needs = ["review-completeness", "review-correctness"]
+description = """
+Combine completeness and correctness findings into a verdict.
+
+**Decision matrix:**
+
+| Completeness | Correctness | Verdict |
+|-------------|-------------|---------|
+| Requirements addressed | No critical bugs | PASS |
+| Requirements addressed | Minor issues only | PASS (note issues) |
+| Requirements mostly addressed | No critical bugs | PASS (note gaps) |
+| Missing key requirements | Any | FAIL |
+| Any | Critical bugs | FAIL |
+| Any | Security vulnerability | FAIL |
+| Vague requirements | No critical bugs | PASS (benefit of doubt) |
+
+**1. Determine verdict:**
+Based on your completeness and correctness findings, decide PASS or FAIL.
+
+**2. Write your verdict to the bead:**
+```bash
+bd update {{mr_bead}} --notes "PEER_REVIEW_VERDICT: <PASS|FAIL>
+
+Reviewer: {{polecat_name}}
+Issue: {{issue}}
+Branch: {{branch}}
+
+## Completeness
+<summary of completeness findings>
+
+## Correctness
+<summary of correctness findings>
+
+## Verdict
+<PASS|FAIL>: <one-line rationale>"
+```
+
+**3. Emit the verdict event:**
+```bash
+# If PASS:
+gt mol step emit-event --event REVIEW_PASSED --data '{"issue":"{{issue}}","branch":"{{branch}}","polecat":"{{polecat}}","mr_bead":"{{mr_bead}}","rig":"{{rig}}"}'
+
+# If FAIL:
+gt mol step emit-event --event REVIEW_FAILED --data '{"issue":"{{issue}}","branch":"{{branch}}","polecat":"{{polecat}}","mr_bead":"{{mr_bead}}","rig":"{{rig}}","findings":"<brief summary of blocking issues>"}'
+```
+
+**Exit criteria:** Verdict emitted as event."""
+
+[[steps]]
+id = "complete"
+title = "Complete review and self-clean"
+needs = ["verdict"]
+description = """
+Signal completion and clean up. You cease to exist after this step.
+
+**Self-Cleaning Model:**
+Once you run `gt done`, you're gone. The command:
+1. Syncs beads (final sync)
+2. Nukes your sandbox
+3. Exits your session immediately
+
+**Run gt done:**
+```bash
+gt done --cleanup-status clean
+```
+
+This is a report-only task — there are no code changes to submit.
+Your verdict was persisted to the bead and emitted as an event.
+
+**What happens next (not your concern):**
+- Witness receives your REVIEW_PASSED/REVIEW_FAILED event
+- On PASS: Witness sends MERGE_READY to refinery
+- On FAIL: Witness sends FIX_NEEDED to original polecat
+
+You are NOT involved in any of that. You're gone. Done means gone.
+
+**Exit criteria:** Beads synced, sandbox nuked, session exited."""
+
+[vars]
+[vars.issue]
+description = "The original bead issue ID being reviewed"
+required = true
+
+[vars.branch]
+description = "The polecat's work branch to review"
+required = true
+
+[vars.polecat]
+description = "The original polecat's name"
+required = true
+
+[vars.mr_bead]
+description = "The merge-request bead ID"
+required = true
+
+[vars.rig]
+description = "The rig name"
+required = true

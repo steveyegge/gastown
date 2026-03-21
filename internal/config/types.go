@@ -1250,6 +1250,16 @@ type MergeQueueConfig struct {
 	// StaleClaimTimeout is how long a claimed MR can go without updates before
 	// being considered abandoned and eligible for re-claim (e.g., "30m").
 	StaleClaimTimeout string `json:"stale_claim_timeout,omitempty"`
+
+	// PeerReview controls whether a peer review gate runs between polecat MR
+	// submission and refinery merge. When enabled, the witness spawns a review
+	// polecat that evaluates the diff against bead requirements before allowing
+	// merge. Nil defaults to false (no peer review).
+	PeerReview *bool `json:"peer_review,omitempty"`
+
+	// PeerReviewFormula is the formula to use for the review polecat.
+	// Default: "mol-peer-review-gate"
+	PeerReviewFormula string `json:"peer_review_formula,omitempty"`
 }
 
 // OnConflict strategy constants.
@@ -1302,6 +1312,24 @@ func (c *MergeQueueConfig) IsDeleteMergedBranchesEnabled() bool {
 		return true
 	}
 	return *c.DeleteMergedBranches
+}
+
+// IsPeerReviewEnabled returns whether peer review gate is enabled.
+// Nil-safe, defaults to false.
+func (c *MergeQueueConfig) IsPeerReviewEnabled() bool {
+	if c.PeerReview == nil {
+		return false
+	}
+	return *c.PeerReview
+}
+
+// GetPeerReviewFormula returns the formula to use for peer review.
+// Returns the default formula if not configured.
+func (c *MergeQueueConfig) GetPeerReviewFormula() string {
+	if c.PeerReviewFormula != "" {
+		return c.PeerReviewFormula
+	}
+	return "mol-peer-review-gate"
 }
 
 // boolPtr returns a pointer to a bool value.

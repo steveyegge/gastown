@@ -527,3 +527,103 @@ func parseField(body, key string) string {
 
 	return ""
 }
+
+// NewReviewPassedMessage creates a REVIEW_PASSED protocol message.
+// Sent by a review polecat to the Witness when the peer review passes.
+func NewReviewPassedMessage(rig, reviewerPolecat string, payload *ReviewPassedPayload) *mail.Message {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Issue: %s\n", payload.Issue))
+	sb.WriteString(fmt.Sprintf("Branch: %s\n", payload.Branch))
+	sb.WriteString(fmt.Sprintf("Polecat: %s\n", payload.Polecat))
+	sb.WriteString(fmt.Sprintf("MR-Bead: %s\n", payload.MRBeadID))
+	sb.WriteString(fmt.Sprintf("Rig: %s\n", payload.Rig))
+
+	msg := mail.NewMessage(
+		fmt.Sprintf("%s/%s", rig, reviewerPolecat),
+		fmt.Sprintf("%s/witness", rig),
+		fmt.Sprintf("REVIEW_PASSED %s", payload.Polecat),
+		sb.String(),
+	)
+	msg.Priority = mail.PriorityHigh
+	msg.Type = mail.TypeTask
+
+	return msg
+}
+
+// NewReviewFailedMessage creates a REVIEW_FAILED protocol message.
+// Sent by a review polecat to the Witness when the peer review fails.
+func NewReviewFailedMessage(rig, reviewerPolecat string, payload *ReviewFailedPayload) *mail.Message {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Issue: %s\n", payload.Issue))
+	sb.WriteString(fmt.Sprintf("Branch: %s\n", payload.Branch))
+	sb.WriteString(fmt.Sprintf("Polecat: %s\n", payload.Polecat))
+	sb.WriteString(fmt.Sprintf("MR-Bead: %s\n", payload.MRBeadID))
+	sb.WriteString(fmt.Sprintf("Rig: %s\n", payload.Rig))
+	sb.WriteString(fmt.Sprintf("Findings: %s\n", payload.Findings))
+
+	msg := mail.NewMessage(
+		fmt.Sprintf("%s/%s", rig, reviewerPolecat),
+		fmt.Sprintf("%s/witness", rig),
+		fmt.Sprintf("REVIEW_FAILED %s", payload.Polecat),
+		sb.String(),
+	)
+	msg.Priority = mail.PriorityHigh
+	msg.Type = mail.TypeTask
+
+	return msg
+}
+
+// ParseReviewPassedPayload parses a REVIEW_PASSED protocol message body.
+func ParseReviewPassedPayload(body string) (*ReviewPassedPayload, error) {
+	payload := &ReviewPassedPayload{
+		Issue:    parseField(body, "Issue"),
+		Branch:   parseField(body, "Branch"),
+		Polecat:  parseField(body, "Polecat"),
+		MRBeadID: parseField(body, "MR-Bead"),
+		Rig:      parseField(body, "Rig"),
+	}
+
+	var errs []string
+	if payload.Issue == "" {
+		errs = append(errs, "Issue")
+	}
+	if payload.Polecat == "" {
+		errs = append(errs, "Polecat")
+	}
+	if payload.Rig == "" {
+		errs = append(errs, "Rig")
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("REVIEW_PASSED missing required fields: %s", strings.Join(errs, ", "))
+	}
+
+	return payload, nil
+}
+
+// ParseReviewFailedPayload parses a REVIEW_FAILED protocol message body.
+func ParseReviewFailedPayload(body string) (*ReviewFailedPayload, error) {
+	payload := &ReviewFailedPayload{
+		Issue:    parseField(body, "Issue"),
+		Branch:   parseField(body, "Branch"),
+		Polecat:  parseField(body, "Polecat"),
+		MRBeadID: parseField(body, "MR-Bead"),
+		Rig:      parseField(body, "Rig"),
+		Findings: parseField(body, "Findings"),
+	}
+
+	var errs []string
+	if payload.Issue == "" {
+		errs = append(errs, "Issue")
+	}
+	if payload.Polecat == "" {
+		errs = append(errs, "Polecat")
+	}
+	if payload.Rig == "" {
+		errs = append(errs, "Rig")
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("REVIEW_FAILED missing required fields: %s", strings.Join(errs, ", "))
+	}
+
+	return payload, nil
+}
