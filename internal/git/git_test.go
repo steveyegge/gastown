@@ -1284,6 +1284,92 @@ func TestPushSubmoduleCommit(t *testing.T) {
 	}
 }
 
+func TestPushSubmoduleCommit_ShortSHA(t *testing.T) {
+	// Verify that PushSubmoduleCommit doesn't panic when given a short SHA
+	// that triggers an error path. The error message formats sha[:8] which
+	// panics if len(sha) < 8. (gt-dg7)
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// Use a 7-char SHA (shorter than the [:8] slice). This will fail to push
+	// (no such submodule), but must not panic — it should return an error.
+	shortSHA := "09bcf16"
+	err := g.PushSubmoduleCommit("nonexistent/sub", shortSHA, "origin")
+	if err == nil {
+		t.Fatal("expected error for nonexistent submodule, got nil")
+	}
+	// The key assertion: we got here without panicking
+}
+
+func TestSubmoduleChanges_SkipsClaudeWorktrees(t *testing.T) {
+	// Verify that SubmoduleChanges filters out .claude/ paths.
+	// Claude Code creates worktrees under .claude/worktrees/ which have .git
+	// files that git may report as gitlinks (mode 160000). These are not
+	// real submodules and should be skipped. (gt-dg7)
+	tmp := t.TempDir()
+
+	// Create a bare remote for the .claude submodule
+	claudeRemote := filepath.Join(tmp, "claude-remote.git")
+	runGit(t, tmp, "init", "--bare", "--initial-branch", "main", claudeRemote)
+
+	// Populate the claude submodule remote
+	claudeWork := filepath.Join(tmp, "claude-work")
+	runGit(t, tmp, "clone", claudeRemote, claudeWork)
+	runGit(t, claudeWork, "config", "user.email", "test@test.com")
+	runGit(t, claudeWork, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(claudeWork, "init.go"), []byte("package x\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGit(t, claudeWork, "add", ".")
+	runGit(t, claudeWork, "commit", "-m", "init")
+	runGit(t, claudeWork, "push", "origin", "main")
+
+	// Start from the standard parent with libs/sub submodule
+	parent, _ := initTestRepoWithSubmodule(t)
+
+	// Add the .claude/worktrees submodule
+	runGit(t, parent, "submodule", "add", claudeRemote, ".claude/worktrees/codebase-friction")
+	runGit(t, parent, "commit", "-m", "add claude worktree submodule")
+
+	// Create a branch and update both submodules
+	runGit(t, parent, "checkout", "-b", "feature")
+
+	// Update the real submodule
+	subPath := filepath.Join(parent, "libs", "sub")
+	if err := os.WriteFile(filepath.Join(subPath, "change.go"), []byte("package lib\n// change\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGit(t, subPath, "add", ".")
+	runGit(t, subPath, "commit", "-m", "real sub change")
+	runGit(t, subPath, "push", "origin", "HEAD:main")
+
+	// Update the .claude worktree submodule
+	claudePath := filepath.Join(parent, ".claude", "worktrees", "codebase-friction")
+	if err := os.WriteFile(filepath.Join(claudePath, "change.go"), []byte("package x\n// change\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGit(t, claudePath, "add", ".")
+	runGit(t, claudePath, "commit", "-m", "claude worktree change")
+	runGit(t, claudePath, "push", "origin", "HEAD:main")
+
+	runGit(t, parent, "add", ".")
+	runGit(t, parent, "commit", "-m", "update both submodules")
+
+	// SubmoduleChanges should return only the real submodule, not the .claude/ one
+	g := NewGit(parent)
+	changes, err := g.SubmoduleChanges("main", "feature")
+	if err != nil {
+		t.Fatalf("SubmoduleChanges: %v", err)
+	}
+
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 submodule change (filtered .claude/), got %d", len(changes))
+	}
+	if changes[0].Path != "libs/sub" {
+		t.Errorf("expected path libs/sub, got %s", changes[0].Path)
+	}
+}
+
 func TestConfigurePushURL(t *testing.T) {
 	dir := initTestRepo(t)
 	g := NewGit(dir)

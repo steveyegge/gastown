@@ -1861,6 +1861,12 @@ func (g *Git) SubmoduleChanges(base, head string) ([]SubmoduleChange, error) {
 			continue
 		}
 		path := strings.TrimSpace(parts[1])
+		// Skip .claude/ paths — Claude Code creates worktrees under
+		// .claude/worktrees/ with .git files (worktree pointers) that git
+		// reports as gitlinks. These are not real submodules. (gt-dg7)
+		if strings.HasPrefix(path, ".claude/") {
+			continue
+		}
 		fields := strings.Fields(parts[0])
 		if len(fields) < 5 {
 			continue
@@ -1967,7 +1973,11 @@ func (g *Git) PushSubmoduleCommit(submodulePath, sha, remote string) error {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("pushing submodule %s commit %s: %s", submodulePath, sha[:8], strings.TrimSpace(stderr.String()))
+		abbrev := sha
+		if len(abbrev) > 8 {
+			abbrev = abbrev[:8]
+		}
+		return fmt.Errorf("pushing submodule %s commit %s: %s", submodulePath, abbrev, strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }
