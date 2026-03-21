@@ -362,14 +362,18 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	// Fix agents for each rig
+	// Fix agents for each rig.
+	// Use beads.New(ctx.TownRoot) so bd runs with BEADS_DIR=<townRoot>/.beads, which
+	// contains routes.jsonl with all prefix→database mappings. This allows bd to
+	// correctly route Dolt-backed rig prefixes (e.g., "ap-" → remote Dolt server).
+	// Without this, bd uses only the rig-local .beads dir which may lack the routing
+	// config needed to reach the remote database (fixes #3087).
+	routingBd := beads.New(ctx.TownRoot)
 	for prefix, info := range prefixToRig {
-		rigBeadsPath := filepath.Join(ctx.TownRoot, info.beadsPath)
-		bd := beads.New(rigBeadsPath)
 		rigName := info.name
 
 		witnessID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
-		if err := fixAgentBead(bd, rigBeadsPath, witnessID,
+		if err := fixAgentBead(routingBd, ctx.TownRoot, witnessID,
 			fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName),
 			&beads.AgentFields{RoleType: "witness", Rig: rigName, AgentState: "idle"},
 		); err != nil {
@@ -377,7 +381,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		}
 
 		refineryID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
-		if err := fixAgentBead(bd, rigBeadsPath, refineryID,
+		if err := fixAgentBead(routingBd, ctx.TownRoot, refineryID,
 			fmt.Sprintf("Refinery for %s - processes merge queue.", rigName),
 			&beads.AgentFields{RoleType: "refinery", Rig: rigName, AgentState: "idle"},
 		); err != nil {
@@ -387,7 +391,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		crewWorkers := listCrewWorkers(ctx.TownRoot, rigName)
 		for _, workerName := range crewWorkers {
 			crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, workerName)
-			if err := fixAgentBead(bd, rigBeadsPath, crewID,
+			if err := fixAgentBead(routingBd, ctx.TownRoot, crewID,
 				fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", workerName, rigName),
 				&beads.AgentFields{RoleType: "crew", Rig: rigName, AgentState: "idle"},
 			); err != nil {
@@ -398,7 +402,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		polecatWorkers := listPolecats(ctx.TownRoot, rigName)
 		for _, polecatName := range polecatWorkers {
 			polecatID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
-			if err := fixAgentBead(bd, rigBeadsPath, polecatID,
+			if err := fixAgentBead(routingBd, ctx.TownRoot, polecatID,
 				fmt.Sprintf("Polecat worker %s in %s - autonomous worker with persistent identity.", polecatName, rigName),
 				&beads.AgentFields{RoleType: "polecat", Rig: rigName, AgentState: "idle"},
 			); err != nil {
