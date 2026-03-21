@@ -18,7 +18,7 @@
     "preToolUse": [
       {
         "type": "command",
-        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && INPUT=$(cat) && TOOL=$(echo \"$INPUT\" | jq -r '.toolName // empty') && if [ \"$TOOL\" = \"bash\" ]; then CMD=$(echo \"$INPUT\" | jq -r '.toolArgs // empty' | jq -r '.command // empty'); if echo \"$CMD\" | grep -qE 'gh\\s+pr\\s+create|git\\s+checkout\\s+-b|git\\s+switch\\s+-c'; then gt tap guard pr-workflow 2>/dev/null || echo '{\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Gas Town PR workflow guard: use gt done to submit work\"}'; fi; fi",
+        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && INPUT=$(cat) && TOOL=$(echo \"$INPUT\" | jq -r '.toolName // empty') && if [ \"$TOOL\" = \"bash\" ]; then CMD=$(echo \"$INPUT\" | jq -r '.toolArgs // empty' | jq -r '.command // empty'); if echo \"$CMD\" | grep -qE 'gh\\s+pr\\s+create|git\\s+checkout\\s+-b|git\\s+switch\\s+-c'; then gt tap guard pr-workflow 2>/dev/null || echo '{\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Gas Town PR workflow guard: use gt done to submit work\"}'; fi; if echo \"$CMD\" | grep -qE 'git\\s+push.*main'; then echo \"$INPUT\" | gt tap guard dangerous-command 2>/dev/null; fi; fi",
         "timeoutSec": 10
       }
     ],

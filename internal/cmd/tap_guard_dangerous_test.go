@@ -154,3 +154,39 @@ func TestDangerousGuard_Integration(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchesPolecatDirectPushToMain(t *testing.T) {
+	const polecatID = "polecat/furiosa-abc123"
+
+	tests := []struct {
+		name      string
+		command   string
+		polecatID string
+		blocked   bool
+	}{
+		// Should block in polecat context
+		{"refspec to main", "git push origin branch:main", polecatID, true},
+		{"HEAD to main", "git push origin head:main", polecatID, true},
+		{"bare main arg", "git push origin main", polecatID, true},
+		{"fork refspec to main", "git push fork polecat/foo:main", polecatID, true},
+
+		// Should allow in polecat context (targeting polecat branch, not main)
+		{"push polecat branch", "git push origin polecat/furiosa-abc123:polecat/furiosa-abc123", polecatID, false},
+		{"push feature branch", "git push origin fix/my-bug:fix/my-bug", polecatID, false},
+		{"branch with main in name", "git push origin fix/main-thing:fix/main-thing", polecatID, false},
+
+		// Should allow when NOT in polecat context (crew pushes to main legitimately)
+		{"crew push to main", "git push origin main", "", false},
+		{"crew refspec to main", "git push origin branch:main", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lower := strings.ToLower(tt.command)
+			got := matchesPolecatDirectPushToMain(lower, tt.polecatID) != ""
+			if got != tt.blocked {
+				t.Errorf("matchesPolecatDirectPushToMain(%q, %q) blocked=%v, want %v",
+					tt.command, tt.polecatID, got, tt.blocked)
+			}
+		})
+	}
+}

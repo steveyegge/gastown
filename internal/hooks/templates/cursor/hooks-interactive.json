@@ -13,6 +13,10 @@
       {
         "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow",
         "matcher": "Shell(git switch -c*)"
+      },
+      {
+        "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command",
+        "matcher": "Shell(git push*main*)"
       }
     ],
     "sessionStart": [
