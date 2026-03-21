@@ -719,6 +719,12 @@ func (d *Daemon) heartbeat(state *State) {
 		d.dispatchQueuedWork()
 	}
 
+	// 14.5. Wake idle polecats that have hooked beads waiting.
+	// Covers the case where a pipeline revert re-hooks a bead to an idle polecat.
+	// The Stop hook should catch this at turn boundaries, but the daemon provides
+	// a safety net for polecats whose sessions are alive but not hitting turn boundaries.
+	d.wakeIdlePolecatsWithHooks()
+
 	// 15. Rotate oversized Dolt logs (copytruncate for child process fds).
 	// daemon.log uses lumberjack for automatic rotation; this handles Dolt server logs.
 	d.rotateOversizedLogs()
@@ -2289,5 +2295,67 @@ func (d *Daemon) dispatchQueuedWork() {
 		d.logger.Printf("Scheduler dispatch failed: %v (output: %s)", err, string(out))
 	} else if len(out) > 0 {
 		d.logger.Printf("Scheduler dispatch: %s", string(out))
+	}
+}
+
+// wakeIdlePolecatsWithHooks finds idle polecats that have hooked beads waiting
+// and nudges them to pick up the work. This is a safety net for polecats whose
+// Stop hook didn't fire (e.g., session alive but not hitting turn boundaries).
+// Shells out to gt commands to avoid importing beads/cmd packages.
+func (d *Daemon) wakeIdlePolecatsWithHooks() {
+	// For each rig, find idle polecats with hooked beads
+	for _, rigName := range d.getKnownRigs() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Find agent beads with state=idle
+		cmd := exec.CommandContext(ctx, "gt", "polecat", "list", rigName, "--state=idle", "--json")
+		cmd.Dir = d.config.TownRoot
+		cmd.Env = append(os.Environ(), "GT_DAEMON=1")
+		out, err := cmd.CombinedOutput()
+		cancel()
+		if err != nil || len(out) == 0 {
+			continue
+		}
+
+		// Parse polecat names from JSON output
+		type polecatInfo struct {
+			Name     string `json:"name"`
+			Identity string `json:"identity"`
+		}
+		var polecats []polecatInfo
+		if jsonErr := json.Unmarshal(out, &polecats); jsonErr != nil {
+			continue
+		}
+
+		for _, p := range polecats {
+			identity := p.Identity
+			if identity == "" {
+				identity = rigName + "/polecats/" + p.Name
+			}
+
+			// Check for hooked beads assigned to this polecat
+			ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+			bdCmd := exec.CommandContext(ctx2, "bd", "list", "--status=hooked",
+				"--assignee="+identity, "--limit=1", "--json")
+			bdCmd.Dir = d.config.TownRoot
+			bdCmd.Env = append(os.Environ(), "GT_DAEMON=1")
+			bdOut, bdErr := bdCmd.CombinedOutput()
+			cancel2()
+			if bdErr != nil || len(bdOut) == 0 || string(bdOut) == "[]" || string(bdOut) == "[]\n" {
+				continue
+			}
+
+			// Hooked bead found — nudge the polecat
+			d.logger.Printf("Idle polecat %s/%s has hooked bead — nudging", rigName, p.Name)
+			nudgeCtx, nudgeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			nudgeCmd := exec.CommandContext(nudgeCtx, "gt", "nudge",
+				rigName+"/polecats/"+p.Name,
+				"You have hooked work waiting. Run gt hook to see it.")
+			nudgeCmd.Dir = d.config.TownRoot
+			nudgeCmd.Env = append(os.Environ(), "GT_DAEMON=1")
+			if nudgeOut, nudgeErr := nudgeCmd.CombinedOutput(); nudgeErr != nil {
+				d.logger.Printf("Failed to nudge %s/%s: %v (%s)", rigName, p.Name, nudgeErr, string(nudgeOut))
+			}
+			nudgeCancel()
+		}
 	}
 }
