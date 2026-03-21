@@ -1967,7 +1967,11 @@ func (g *Git) PushSubmoduleCommit(submodulePath, sha, remote string) error {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("pushing submodule %s commit %s: %s", submodulePath, sha[:8], strings.TrimSpace(stderr.String()))
+		abbrev := sha
+		if len(abbrev) > 8 {
+			abbrev = abbrev[:8]
+		}
+		return fmt.Errorf("pushing submodule %s commit %s: %s", submodulePath, abbrev, strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }
