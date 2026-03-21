@@ -29,6 +29,10 @@ type WLCommonsStore interface {
 	QueryWanted(wantedID string) (*WantedItem, error)
 	InsertStamp(stamp *StampRecord) error
 	QueryLastStampForSubject(subject string) (*StampRecord, error)
+	QueryStampsForSubject(subject string) ([]StampRecord, error)
+	QueryBadges(handle string) ([]BadgeRecord, error)
+	QueryAllSubjects() ([]string, error)
+	UpsertLeaderboard(entry *LeaderboardEntry) error
 }
 
 // WLCommons implements WLCommonsStore using the real Dolt server.
@@ -54,6 +58,18 @@ func (w *WLCommons) InsertStamp(stamp *StampRecord) error {
 }
 func (w *WLCommons) QueryLastStampForSubject(subject string) (*StampRecord, error) {
 	return QueryLastStampForSubject(w.townRoot, subject)
+}
+func (w *WLCommons) QueryStampsForSubject(subject string) ([]StampRecord, error) {
+	return QueryStampsForSubject(w.townRoot, subject)
+}
+func (w *WLCommons) QueryBadges(handle string) ([]BadgeRecord, error) {
+	return QueryBadges(w.townRoot, handle)
+}
+func (w *WLCommons) QueryAllSubjects() ([]string, error) {
+	return QueryAllSubjects(w.townRoot)
+}
+func (w *WLCommons) UpsertLeaderboard(entry *LeaderboardEntry) error {
+	return UpsertLeaderboard(w.townRoot, entry)
 }
 
 // WantedItem represents a row in the wanted table.
@@ -214,6 +230,18 @@ CREATE TABLE IF NOT EXISTS badges (
     badge_type VARCHAR(64),
     awarded_at TIMESTAMP,
     evidence TEXT
+);
+
+CREATE TABLE IF NOT EXISTS leaderboard (
+    handle VARCHAR(255) PRIMARY KEY,
+    display_name VARCHAR(255),
+    tier VARCHAR(32),
+    stamp_count INT DEFAULT 0,
+    avg_quality FLOAT DEFAULT 0,
+    cluster_breadth INT DEFAULT 0,
+    top_skills JSON,
+    badges JSON,
+    computed_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS chain_meta (
