@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
@@ -53,6 +54,7 @@ Shutdown levels (progressively more aggressive):
   gt down --nuke             Also kill the shared tmux server
 
 Infrastructure agents stopped:
+  • Crew       - Per-rig crew member sessions
   • Refineries - Per-rig work processors
   • Witnesses  - Per-rig polecat managers
   • Mayor      - Global work coordinator
@@ -159,6 +161,19 @@ func runDown(cmd *cobra.Command, args []string) error {
 			}
 		}
 		fmt.Println()
+	}
+
+	// Phase 0.6: Stop crew member sessions.
+	// Crew sessions consume tokens and must be stopped during any shutdown.
+	crewStopped := stopAllCrew(t, townRoot, rigs, downForce, downDryRun)
+	if downDryRun {
+		if crewStopped > 0 {
+			printDownStatus("Crew", true, fmt.Sprintf("%d would stop", crewStopped))
+		}
+	} else {
+		if crewStopped > 0 {
+			printDownStatus("Crew", true, fmt.Sprintf("%d stopped", crewStopped))
+		}
 	}
 
 	// Phase 1: Stop refineries
@@ -433,6 +448,9 @@ func runDown(cmd *cobra.Command, args []string) error {
 			stoppedServices = append(stoppedServices, fmt.Sprintf("%s/refinery", rigName))
 			stoppedServices = append(stoppedServices, fmt.Sprintf("%s/witness", rigName))
 		}
+		if crewStopped > 0 {
+			stoppedServices = append(stoppedServices, "crew")
+		}
 		if downPolecats {
 			stoppedServices = append(stoppedServices, "polecats")
 		}
@@ -490,6 +508,58 @@ func stopAllPolecats(t *tmux.Tmux, townRoot string, rigNames []string, force boo
 				fmt.Printf("  %s [%s] %s stopped\n", style.SuccessPrefix, rigName, info.Polecat)
 			} else {
 				fmt.Printf("  %s [%s] %s: %s\n", style.ErrorPrefix, rigName, info.Polecat, err.Error())
+			}
+		}
+	}
+
+	return stopped
+}
+
+// stopAllCrew stops all crew member sessions across all rigs.
+// Returns the number of crew sessions stopped (or would be stopped in dry-run).
+func stopAllCrew(t *tmux.Tmux, townRoot string, rigNames []string, force bool, dryRun bool) int {
+	stopped := 0
+
+	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
+	}
+
+	g := git.NewGit(townRoot)
+	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+
+	for _, rigName := range rigNames {
+		r, err := rigMgr.GetRig(rigName)
+		if err != nil {
+			continue
+		}
+
+		crewMgr := crew.NewManager(r, g)
+		workers, err := crewMgr.List()
+		if err != nil {
+			continue
+		}
+
+		for _, worker := range workers {
+			sessionID := crewMgr.SessionName(worker.Name)
+			running, err := t.HasSession(sessionID)
+			if err != nil || !running {
+				continue
+			}
+
+			if dryRun {
+				stopped++
+				fmt.Printf("  %s [%s] crew/%s would stop\n", style.Dim.Render("○"), rigName, worker.Name)
+				continue
+			}
+
+			_, err = stopSession(t, sessionID)
+			if err == nil {
+				stopped++
+				fmt.Printf("  %s [%s] crew/%s stopped\n", style.SuccessPrefix, rigName, worker.Name)
+			} else {
+				fmt.Printf("  %s [%s] crew/%s: %s\n", style.ErrorPrefix, rigName, worker.Name, err.Error())
 			}
 		}
 	}
