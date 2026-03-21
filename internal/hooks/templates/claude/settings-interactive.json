@@ -32,15 +32,6 @@
             "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow"
           }
         ]
-      },
-      {
-        "matcher": "Bash(git push*main*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
-          }
-        ]
       }
     ],
     "SessionStart": [

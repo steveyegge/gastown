@@ -462,12 +462,6 @@ type MRFields struct {
 	PreVerified     bool   // Polecat ran full gates after rebasing onto target
 	PreVerifiedAt   string // ISO 8601 timestamp when verification completed
 	PreVerifiedBase string // Target branch SHA at verification time
-
-	// HeadSHA is the git commit SHA at the tip of the source branch when this MR
-	// was submitted. Used to detect re-submissions with new commits on the same
-	// branch name (GH#3032): if the current HEAD differs from HeadSHA, the old MR
-	// is superseded rather than treated as an idempotent duplicate.
-	HeadSHA string
 }
 
 // ParseMRFields extracts structured merge-request fields from an issue's description.
@@ -550,9 +544,6 @@ func ParseMRFields(issue *Issue) *MRFields {
 			hasFields = true
 		case "pre_verified_base", "pre-verified-base", "preverifiedbase":
 			fields.PreVerifiedBase = value
-			hasFields = true
-		case "head_sha", "head-sha", "headsha":
-			fields.HeadSHA = value
 			hasFields = true
 		}
 	}

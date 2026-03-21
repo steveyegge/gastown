@@ -863,15 +863,6 @@ func DefaultBase() *HooksConfig {
 					Command: fmt.Sprintf("%s && gt tap guard dangerous-command", pathSetup),
 				}},
 			},
-			{
-				// Block polecats from pushing directly to main, bypassing Refinery (gt-38xf).
-				// The guard is a no-op when GT_POLECAT is not set (crew pushes to main legitimately).
-				Matcher: "Bash(git push*main*)",
-				Hooks: []Hook{{
-					Type:    "command",
-					Command: fmt.Sprintf("%s && gt tap guard dangerous-command", pathSetup),
-				}},
-			},
 		},
 		SessionStart: []HookEntry{
 			{

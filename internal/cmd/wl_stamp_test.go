@@ -8,8 +8,7 @@ import (
 )
 
 func TestValidateStampInputs_Valid(t *testing.T) {
-	// Not parallel: tests share package-level globals (wlStampQuality etc.) and
-	// save/restore is incompatible with t.Parallel() — causes data races under -race.
+	t.Parallel()
 	// Save and restore globals
 	origQ, origR, origC := wlStampQuality, wlStampReliability, wlStampCreativity
 	origSev, origType, origCtx := wlStampSeverity, wlStampType, wlStampContextType
@@ -34,6 +33,7 @@ func TestValidateStampInputs_Valid(t *testing.T) {
 }
 
 func TestValidateStampInputs_QualityOutOfRange(t *testing.T) {
+	t.Parallel()
 	origQ, origR, origC := wlStampQuality, wlStampReliability, wlStampCreativity
 	origSev, origType, origCtx := wlStampSeverity, wlStampType, wlStampContextType
 	defer func() {
@@ -55,6 +55,7 @@ func TestValidateStampInputs_QualityOutOfRange(t *testing.T) {
 }
 
 func TestValidateStampInputs_BadSeverity(t *testing.T) {
+	t.Parallel()
 	origQ, origR, origC := wlStampQuality, wlStampReliability, wlStampCreativity
 	origSev, origType, origCtx := wlStampSeverity, wlStampType, wlStampContextType
 	defer func() {
@@ -76,6 +77,7 @@ func TestValidateStampInputs_BadSeverity(t *testing.T) {
 }
 
 func TestValidateStampInputs_BadStampType(t *testing.T) {
+	t.Parallel()
 	origQ, origR, origC := wlStampQuality, wlStampReliability, wlStampCreativity
 	origSev, origType, origCtx := wlStampSeverity, wlStampType, wlStampContextType
 	defer func() {

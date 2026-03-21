@@ -46,10 +46,7 @@ var reaperDatabasesCmd = &cobra.Command{
 	Use:   "databases",
 	Short: "List databases available for reaping",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dbs, err := reaper.DiscoverDatabases(reaperHost, reaperPort)
-		if err != nil {
-			return fmt.Errorf("database discovery failed: %w", err)
-		}
+		dbs := reaper.DiscoverDatabases(reaperHost, reaperPort)
 		if reaperJSON {
 			fmt.Println(reaper.FormatJSON(dbs))
 		} else {
@@ -277,15 +274,9 @@ var reaperRunCmd = &cobra.Command{
 This is the inline fallback for when Dog dispatch is unavailable.
 Normally the daemon dispatches a Dog to execute the mol-dog-reaper formula.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var databases []string
+		databases := reaper.DiscoverDatabases(reaperHost, reaperPort)
 		if reaperDB != "" {
 			databases = strings.Split(reaperDB, ",")
-		} else {
-			var err error
-			databases, err = reaper.DiscoverDatabases(reaperHost, reaperPort)
-			if err != nil {
-				return fmt.Errorf("database discovery failed: %w", err)
-			}
 		}
 
 		maxAge, err := time.ParseDuration(reaperMaxAge)

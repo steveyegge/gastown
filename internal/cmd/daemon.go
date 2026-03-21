@@ -343,15 +343,6 @@ func runDaemonRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Clear agent identity env vars inherited from the launch environment.
-	// When the daemon is started from an agent session, GT_ROLE/GT_CREW are
-	// set to that agent's identity. Any subprocess (e.g. gt mail send) that
-	// derives sender identity from ambient env vars would then be misattributed
-	// to the launching agent instead of the daemon. GH#3006.
-	os.Unsetenv("GT_ROLE")  //nolint:errcheck
-	os.Unsetenv("GT_CREW")  //nolint:errcheck
-	os.Setenv("BD_ACTOR", "daemon") //nolint:errcheck
-
 	config := daemon.DefaultConfig(townRoot)
 	d, err := daemon.New(config)
 	if err != nil {

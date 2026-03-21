@@ -899,19 +899,9 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 
 	// Hook the bead with retry and verification.
 	// See: https://github.com/steveyegge/gastown/issues/148
-	//
-	// Acquire a per-assignee lock before writing hook_bead to serialize concurrent slings
-	// targeting the same polecat. Without this, multiple concurrent slings race on the
-	// same assignee's row in Dolt, causing silent rollbacks (issue #3114).
-	assigneeUnlock, assigneeLockErr := tryAcquireSlingAssigneeLock(townRoot, targetAgent)
-	if assigneeLockErr != nil {
-		return fmt.Errorf("serializing hook write for %s: %w", targetAgent, assigneeLockErr)
-	}
 	hookDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
-	hookErr := hookBeadWithRetry(beadID, targetAgent, hookDir)
-	assigneeUnlock()
-	if hookErr != nil {
-		return hookErr
+	if err := hookBeadWithRetry(beadID, targetAgent, hookDir); err != nil {
+		return err
 	}
 
 	// Emit a propulsion signal if the target is the mayor.
@@ -1096,27 +1086,6 @@ func tryAcquireSlingBeadLock(townRoot, beadID string) (func(), error) {
 	}
 	if !locked {
 		return nil, fmt.Errorf("bead %s is already being slung; retry after the current assignment completes", beadID)
-	}
-
-	return release, nil
-}
-
-// tryAcquireSlingAssigneeLock acquires a per-assignee file lock to serialize concurrent
-// hook writes to the same polecat. The per-bead lock (tryAcquireSlingBeadLock) prevents
-// double-sling of the same bead, but does not prevent concurrent slings from racing on
-// the same assignee's hook_bead field. This lock is held only during hookBeadWithRetry.
-// See: https://github.com/steveyegge/gastown/issues/3114
-func tryAcquireSlingAssigneeLock(townRoot, targetAgent string) (func(), error) {
-	lockDir := filepath.Join(townRoot, ".runtime", "locks", "sling")
-	if err := os.MkdirAll(lockDir, 0755); err != nil {
-		return nil, fmt.Errorf("creating sling lock dir: %w", err)
-	}
-
-	safeAgent := strings.NewReplacer("/", "_", ":", "_").Replace(targetAgent)
-	lockPath := filepath.Join(lockDir, "assignee_"+safeAgent+".flock")
-	release, err := lock.FlockAcquire(lockPath)
-	if err != nil {
-		return nil, fmt.Errorf("acquiring assignee sling lock for %s: %w", targetAgent, err)
 	}
 
 	return release, nil

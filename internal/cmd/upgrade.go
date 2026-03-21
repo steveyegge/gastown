@@ -143,7 +143,6 @@ func upgradeDoctor(townRoot string) upgradeResult {
 	d.Register(doctor.NewStaleTaskDispatchCheck())
 	d.Register(doctor.NewHooksSyncCheck())
 	d.Register(doctor.NewStaleDoltPortCheck())
-	d.Register(doctor.NewStaleSQLServerInfoCheck())
 	d.Register(doctor.NewSparseCheckoutCheck())
 	d.Register(doctor.NewPrimingCheck())
 	d.Register(doctor.NewLifecycleHygieneCheck())

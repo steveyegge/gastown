@@ -78,16 +78,6 @@ type DoltServerConfig struct {
 	// detection of Dolt server crashes without changing the overall
 	// heartbeat frequency. Default 30s.
 	HealthCheckInterval time.Duration `json:"health_check_interval,omitempty"`
-
-	// FallbackHosts is an ordered list of host:port pairs to try when the
-	// primary host becomes unreachable. The daemon cycles through them on
-	// health check failure and fails back to the primary when it recovers.
-	// Example: ["100.111.197.110:3307", "100.86.9.58:3307", "127.0.0.1:3307"]
-	FallbackHosts []string `json:"fallback_hosts,omitempty"`
-
-	// FailbackProbeInterval is how often to probe the primary host when
-	// running on a fallback, to detect recovery and fail back. Default 60s.
-	FailbackProbeInterval time.Duration `json:"failback_probe_interval,omitempty"`
 }
 
 // DefaultDoltServerConfig returns sensible defaults for Dolt server config.
@@ -152,13 +142,6 @@ type DoltServerManager struct {
 	// Protected by mu.
 	onRecoveryFn func()
 
-	// Failover state: tracks which host we're actively connected to.
-	// allHosts is [primary, fallback1, fallback2, ...] built at init.
-	// activeHostIdx indexes into allHosts; 0 = primary.
-	allHosts       []string // primary + fallback hosts as "host:port"
-	activeHostIdx  int      // index into allHosts; 0 = primary
-	lastFailback   time.Time // last time we probed primary for failback
-
 	// Test hooks (nil = use real implementations; set only in tests)
 	healthCheckFn      func() error
 	writeProbeCheckFn  func() error
@@ -180,13 +163,11 @@ func NewDoltServerManager(townRoot string, config *DoltServerConfig, logger func
 	if config == nil {
 		config = DefaultDoltServerConfig(townRoot)
 	}
-	m := &DoltServerManager{
+	return &DoltServerManager{
 		config:   config,
 		townRoot: townRoot,
 		logger:   logger,
 	}
-	m.initFailoverHosts()
-	return m
 }
 
 // SetRecoveryCallback registers fn to be called (in a goroutine) whenever Dolt
@@ -245,157 +226,6 @@ func (m *DoltServerManager) isRemote() bool {
 	return true
 }
 
-// initFailoverHosts builds the allHosts list from primary config + fallback_hosts.
-// Called once at construction.
-func (m *DoltServerManager) initFailoverHosts() {
-	primaryHost := m.config.Host
-	if primaryHost == "" {
-		primaryHost = "127.0.0.1"
-	}
-	primaryPort := m.config.Port
-	if primaryPort == 0 {
-		primaryPort = 3307
-	}
-	primary := net.JoinHostPort(primaryHost, strconv.Itoa(primaryPort))
-	m.allHosts = []string{primary}
-
-	for _, fb := range m.config.FallbackHosts {
-		// Normalize: ensure host:port format
-		if _, _, err := net.SplitHostPort(fb); err != nil {
-			// Bare host — add default port
-			fb = net.JoinHostPort(fb, strconv.Itoa(primaryPort))
-		}
-		// Skip duplicates of primary
-		if fb != primary {
-			m.allHosts = append(m.allHosts, fb)
-		}
-	}
-}
-
-// ActiveHost returns the currently active host:port being used for Dolt connections.
-func (m *DoltServerManager) ActiveHost() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if len(m.allHosts) == 0 {
-		return ""
-	}
-	return m.allHosts[m.activeHostIdx]
-}
-
-// IsOnFallback returns true if we're currently connected to a fallback host
-// rather than the primary.
-func (m *DoltServerManager) IsOnFallback() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.activeHostIdx > 0
-}
-
-// activeHostAndPort returns the host and port for the currently active connection.
-// Must be called with m.mu held.
-func (m *DoltServerManager) activeHostAndPort() (string, int) {
-	if len(m.allHosts) == 0 {
-		return m.config.Host, m.config.Port
-	}
-	hp := m.allHosts[m.activeHostIdx]
-	host, portStr, err := net.SplitHostPort(hp)
-	if err != nil {
-		return m.config.Host, m.config.Port
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return host, m.config.Port
-	}
-	return host, port
-}
-
-// tryFailover attempts to connect to the next fallback host in the list.
-// Returns true if a healthy fallback was found and activated.
-// Must be called with m.mu held.
-func (m *DoltServerManager) tryFailover() bool {
-	if len(m.allHosts) <= 1 {
-		return false // No fallbacks configured
-	}
-
-	origIdx := m.activeHostIdx
-	for i := 1; i < len(m.allHosts); i++ {
-		candidate := (origIdx + i) % len(m.allHosts)
-		if candidate == 0 {
-			continue // Skip primary — we already know it's down
-		}
-		host, port := m.hostPortAt(candidate)
-		if m.probeHost(host, port) == nil {
-			m.activeHostIdx = candidate
-			m.propagateActiveHost()
-			m.logger("Dolt failover: switched to %s (fallback %d/%d)",
-				m.allHosts[candidate], candidate, len(m.allHosts)-1)
-			return true
-		}
-	}
-	return false
-}
-
-// tryFailback probes the primary host and switches back if it's healthy.
-// Must be called with m.mu held.
-func (m *DoltServerManager) tryFailback() bool {
-	if m.activeHostIdx == 0 {
-		return false // Already on primary
-	}
-
-	interval := m.config.FailbackProbeInterval
-	if interval == 0 {
-		interval = 60 * time.Second
-	}
-	now := m.now()
-	if now.Sub(m.lastFailback) < interval {
-		return false // Too soon since last probe
-	}
-	m.lastFailback = now
-
-	host, port := m.hostPortAt(0)
-	if m.probeHost(host, port) == nil {
-		oldHost := m.allHosts[m.activeHostIdx]
-		m.activeHostIdx = 0
-		m.propagateActiveHost()
-		m.logger("Dolt failback: primary %s recovered, switching back from %s",
-			m.allHosts[0], oldHost)
-		return true
-	}
-	return false
-}
-
-// hostPortAt returns host and port for the given index in allHosts.
-func (m *DoltServerManager) hostPortAt(idx int) (string, int) {
-	hp := m.allHosts[idx]
-	host, portStr, err := net.SplitHostPort(hp)
-	if err != nil {
-		return m.config.Host, m.config.Port
-	}
-	port, _ := strconv.Atoi(portStr)
-	return host, port
-}
-
-// probeHost checks if a dolt server at host:port is responsive.
-func (m *DoltServerManager) probeHost(host string, port int) error {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 5*time.Second)
-	if err != nil {
-		return err
-	}
-	conn.Close()
-	return nil
-}
-
-// propagateActiveHost updates the process environment to reflect the current
-// active Dolt host, so that all subsequently spawned agents connect to the
-// correct server. Must be called with m.mu held.
-func (m *DoltServerManager) propagateActiveHost() {
-	host, port := m.activeHostAndPort()
-	portStr := strconv.Itoa(port)
-	os.Setenv("GT_DOLT_HOST", host)
-	os.Setenv("GT_DOLT_PORT", portStr)
-	os.Setenv("BEADS_DOLT_SERVER_HOST", host)
-	os.Setenv("BEADS_DOLT_PORT", portStr)
-}
-
 // buildDoltSQLCmd constructs a dolt sql command using daemon config, mirroring
 // the doltserver.buildDoltSQLCmd pattern for local-vs-remote command construction.
 func (m *DoltServerManager) buildDoltSQLCmd(ctx context.Context, args ...string) *exec.Cmd {
@@ -403,15 +233,17 @@ func (m *DoltServerManager) buildDoltSQLCmd(ctx context.Context, args ...string)
 	fullArgs = append(fullArgs, "sql")
 
 	if m.isRemote() {
-		// Use active host (may be a fallback) instead of config host.
-		host, port := m.activeHostAndPort()
+		host := m.config.Host
+		if host == "" {
+			host = "127.0.0.1"
+		}
 		user := m.config.User
 		if user == "" {
 			user = "root"
 		}
 		fullArgs = append(fullArgs,
 			"--host", host,
-			"--port", strconv.Itoa(port),
+			"--port", strconv.Itoa(m.config.Port),
 			"--user", user,
 			"--no-tls",
 		)
@@ -1130,18 +962,7 @@ func (m *DoltServerManager) checkHealthLocked() error {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		// Primary/current host is down — try failover to a fallback host.
-		if len(m.allHosts) > 1 && m.tryFailover() {
-			w := fmt.Sprintf("Dolt failover activated: primary unreachable, using %s", m.allHosts[m.activeHostIdx])
-			m.lastWarnings = append(m.lastWarnings, w)
-			return nil // Failover succeeded — report healthy
-		}
 		return fmt.Errorf("health check failed: %w (%s)", err, strings.TrimSpace(stderr.String()))
-	}
-
-	// If on a fallback host, periodically probe the primary for fail-back.
-	if m.activeHostIdx > 0 {
-		m.tryFailback()
 	}
 
 	latency := time.Since(start)

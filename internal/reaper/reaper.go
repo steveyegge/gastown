@@ -21,10 +21,11 @@ import (
 // validDBName matches safe database names (alphanumeric, underscore, hyphen).
 var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
-// DefaultDatabases is kept for reference and backward compatibility.
-// It is no longer used as a fallback inside DiscoverDatabases — callers
-// should fail explicitly on discovery errors rather than silently operating
-// on a stale hardcoded list. See GH#3013.
+// DefaultDatabases is the static fallback list of known production databases.
+// Used only when SHOW DATABASES fails (server unreachable).
+// GH#2385: Removed legacy "gt" and "bd" names — modern towns use "hq" (town
+// beads) and rig-specific names. Those databases no longer exist in most
+// installations and their presence in the fallback caused phantom DB errors.
 var DefaultDatabases = []string{"hq"}
 
 // testPollutionPrefixes are database name prefixes created by tests.
@@ -49,13 +50,12 @@ func isTableNotFound(err error) bool {
 
 // DiscoverDatabases queries SHOW DATABASES on the Dolt server and returns
 // all production databases, filtering out system databases and test pollution.
-// Returns an error on any failure so callers can decide whether to abort the
-// reaper cycle rather than silently operating on a stale hardcoded list (GH#3013).
-func DiscoverDatabases(host string, port int) ([]string, error) {
+// Falls back to DefaultDatabases on any error.
+func DiscoverDatabases(host string, port int) []string {
 	dsn := fmt.Sprintf("root@tcp(%s:%d)/?parseTime=true&timeout=5s", host, port)
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("opening dolt connection: %w", err)
+		return DefaultDatabases
 	}
 	defer db.Close()
 
@@ -64,7 +64,7 @@ func DiscoverDatabases(host string, port int) ([]string, error) {
 
 	rows, err := db.QueryContext(ctx, "SHOW DATABASES")
 	if err != nil {
-		return nil, fmt.Errorf("SHOW DATABASES: %w", err)
+		return DefaultDatabases
 	}
 	defer rows.Close()
 
@@ -92,9 +92,9 @@ func DiscoverDatabases(host string, port int) ([]string, error) {
 	}
 
 	if len(databases) == 0 {
-		return nil, fmt.Errorf("SHOW DATABASES returned no production databases")
+		return DefaultDatabases
 	}
-	return databases, nil
+	return databases
 }
 
 // ScanResult holds the results of scanning a database for reaper candidates.

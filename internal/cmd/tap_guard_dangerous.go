@@ -80,10 +80,6 @@ func runTapGuardDangerous(cmd *cobra.Command, args []string) error {
 		printDangerousBlock(reason, command)
 		return NewSilentExit(2)
 	}
-	if reason := matchesPolecatDirectPushToMain(lower, os.Getenv("GT_POLECAT")); reason != "" {
-		printDangerousBlock(reason, command)
-		return NewSilentExit(2)
-	}
 
 	// Check simple fragment patterns
 	for _, pattern := range fragmentPatterns {
@@ -184,38 +180,6 @@ func matchesDangerousGitPush(command string) string {
 			if f == safe {
 				break
 			}
-		}
-	}
-	return ""
-}
-
-// matchesPolecatDirectPushToMain blocks polecats from pushing directly to main,
-// bypassing the Refinery merge queue. Polecats must use "gt done" to submit work.
-// polecatID is the value of GT_POLECAT (empty string means not a polecat).
-func matchesPolecatDirectPushToMain(command, polecatID string) string {
-	if polecatID == "" {
-		return "" // Only enforce in polecat context
-	}
-	if !strings.Contains(command, "git") || !strings.Contains(command, "push") {
-		return ""
-	}
-	fields := strings.Fields(command)
-	hasPush := false
-	for i, f := range fields {
-		if f == "push" && i > 0 && fields[i-1] == "git" {
-			hasPush = true
-			continue
-		}
-		if !hasPush {
-			continue
-		}
-		// Block refspec targeting main: branch:main
-		if strings.HasSuffix(f, ":main") {
-			return "Polecats must use 'gt done', not push directly to main (bypasses Refinery)"
-		}
-		// Block bare 'main' argument: git push origin main
-		if f == "main" {
-			return "Polecats must use 'gt done', not push directly to main (bypasses Refinery)"
 		}
 	}
 	return ""

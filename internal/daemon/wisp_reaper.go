@@ -139,13 +139,7 @@ func (d *Daemon) dispatchReaperDog(vars map[string]string) error {
 func (d *Daemon) reapWispsInline(config *WispReaperConfig, maxAge, deleteAge time.Duration, mol *dogMol) {
 	databases := config.Databases
 	if len(databases) == 0 {
-		var err error
-		databases, err = reaper.DiscoverDatabases("127.0.0.1", d.doltServerPort())
-		if err != nil {
-			d.logger.Printf("wisp_reaper: database discovery failed: %v", err)
-			mol.failStep("scan", fmt.Sprintf("database discovery failed: %v", err))
-			return
-		}
+		databases = reaper.DiscoverDatabases("127.0.0.1", d.doltServerPort())
 	}
 	if len(databases) == 0 {
 		d.logger.Printf("wisp_reaper: no databases to reap")

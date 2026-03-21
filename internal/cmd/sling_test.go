@@ -1190,16 +1190,6 @@ func TestLooksLikeBeadID(t *testing.T) {
 		{"123-abc", false},      // numeric prefix
 		{"a-", false},           // nothing after hyphen
 		{"aaaaaa-b", false},     // prefix too long (6 chars)
-
-		// Shell metacharacters must be rejected (defense-in-depth, GH#3110)
-		{"gt-a$(cmd)", false},
-		{"gt-a;evil", false},
-		{"gt-a|pipe", false},
-		{"gt-a&bg", false},
-		{"gt-a>redir", false},
-		{"gt-a`bt`", false},
-		{"gt-.dot", false},    // leading dot in suffix
-		{"gt--hyphen", false}, // leading hyphen in suffix
 	}
 
 	for _, tt := range tests {

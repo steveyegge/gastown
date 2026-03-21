@@ -3,13 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/git"
-	"github.com/steveyegge/gastown/internal/polecat"
-	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -206,11 +201,6 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 			}
 		}
 		if opts.DryRun {
-			// Check what would actually happen: reuse idle polecat or spawn fresh.
-			// This catches tmux session collisions that the real path would hit. (GH#2647)
-			if collision := dryRunCheckPolecatCollision(townRoot, rigName); collision != "" {
-				return nil, fmt.Errorf("dry-run: %s\nThe real sling would fail at session start.\nFix: kill the stale session first, or use --force", collision)
-			}
 			fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
 			result.Agent = fmt.Sprintf("%s/polecats/<new>", rigName)
 			result.Pane = "<new-pane>"
@@ -282,50 +272,4 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 	result.Pane = pane
 	result.WorkDir = workDir
 	return result, nil
-}
-
-// dryRunCheckPolecatCollision checks whether slinging to a rig would hit a
-// tmux session collision. It mirrors the idle-polecat reuse logic in
-// SpawnPolecatForSling without causing side effects. Returns a non-empty
-// error description if a collision would occur. (GH#2647)
-func dryRunCheckPolecatCollision(townRoot, rigName string) string {
-	if townRoot == "" {
-		var err error
-		townRoot, err = workspace.FindFromCwdOrError()
-		if err != nil {
-			return ""
-		}
-	}
-
-	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
-	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
-	if err != nil {
-		return ""
-	}
-
-	g := git.NewGit(townRoot)
-	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
-	r, err := rigMgr.GetRig(rigName)
-	if err != nil {
-		return ""
-	}
-
-	polecatGit := git.NewGit(r.Path)
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewManager(r, polecatGit, t)
-
-	idlePolecat, err := polecatMgr.FindIdlePolecat()
-	if err != nil || idlePolecat == nil {
-		return "" // No idle polecat — would allocate fresh, no collision risk
-	}
-
-	// An idle polecat would be reused. Check if it has a live tmux session.
-	polecatSessMgr := polecat.NewSessionManager(t, r)
-	sessionName := polecatSessMgr.SessionName(idlePolecat.Name)
-	running, err := t.HasSession(sessionName)
-	if err != nil || !running {
-		return "" // No session collision
-	}
-
-	return fmt.Sprintf("idle polecat %s would be reused, but tmux session %s is already running", idlePolecat.Name, sessionName)
 }

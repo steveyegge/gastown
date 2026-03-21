@@ -236,37 +236,3 @@ func TestIsSlingConfigError(t *testing.T) {
 		})
 	}
 }
-
-// TestSanitizeNudgeField verifies gt-sec-002: user-controlled fields are stripped
-// of control characters and capped before injection into NudgePane.
-func TestSanitizeNudgeField(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		input  string
-		maxLen int
-		want   string
-	}{
-		{"plain text unchanged", "hello world", 200, "hello world"},
-		{"newline stripped", "hello\nworld", 200, "helloworld"},
-		{"CR stripped", "hello\rworld", 200, "helloworld"},
-		{"CRLF stripped", "hello\r\nworld", 200, "helloworld"},
-		{"null byte stripped", "hello\x00world", 200, "helloworld"},
-		{"tab stripped", "hello\tworld", 200, "helloworld"},
-		{"ESC stripped", "hello\x1bworld", 200, "helloworld"},
-		{"DEL stripped", "hello\x7fworld", 200, "helloworld"},
-		{"multi control stripped", "\x01\x02\x03abc\x04\x05", 200, "abc"},
-		{"capped at maxLen", "abcde", 3, "abc"},
-		{"empty string", "", 200, ""},
-		{"injection attempt newline", "legit\nGT_ROLE=mayor gt session start", 200, "legitGT_ROLE=mayor gt session start"},
-		{"injection attempt null", "legit\x00evil", 200, "legitevil"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := sanitizeNudgeField(tt.input, tt.maxLen)
-			if got != tt.want {
-				t.Errorf("sanitizeNudgeField(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
-			}
-		})
-	}
-}
