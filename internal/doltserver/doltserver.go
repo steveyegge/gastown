@@ -1434,9 +1434,13 @@ func Start(townRoot string) error {
 	// Quarantine corrupted/phantom database dirs before server launch.
 	// Dolt auto-discovers ALL dirs in --data-dir. A phantom dir with a broken
 	// noms store (missing manifest) crashes the ENTIRE server. (gt-hs1i2)
+	//
+	// Move (not delete) corrupted dirs to .quarantine/ so data can be recovered
+	// if the manifest was temporarily missing due to a crash or incomplete write.
+	quarantineDir := filepath.Join(config.DataDir, ".quarantine")
 	if entries, readErr := os.ReadDir(config.DataDir); readErr == nil {
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			if !entry.IsDir() || entry.Name() == ".quarantine" {
 				continue
 			}
 			doltDir := filepath.Join(config.DataDir, entry.Name(), ".dolt")
@@ -1445,9 +1449,20 @@ func Start(townRoot string) error {
 			}
 			manifest := filepath.Join(doltDir, "noms", "manifest")
 			if _, statErr := os.Stat(manifest); statErr != nil {
-				// Corrupted phantom — remove it so Dolt won't try to load it
-				fmt.Fprintf(os.Stderr, "Quarantine: removing corrupted database dir %q (missing noms/manifest)\n", entry.Name())
-				_ = os.RemoveAll(filepath.Join(config.DataDir, entry.Name()))
+				// Corrupted phantom — move to quarantine so Dolt won't load it,
+				// but data is preserved for recovery. (gt-0hqx)
+				if mkErr := os.MkdirAll(quarantineDir, 0755); mkErr == nil {
+					dest := filepath.Join(quarantineDir, entry.Name())
+					if renameErr := os.Rename(filepath.Join(config.DataDir, entry.Name()), dest); renameErr == nil {
+						fmt.Fprintf(os.Stderr, "Quarantine: moved corrupted database dir %q to .quarantine/ (missing noms/manifest)\n", entry.Name())
+					} else {
+						fmt.Fprintf(os.Stderr, "Quarantine: could not move %q to .quarantine/ (%v) — removing instead\n", entry.Name(), renameErr)
+						_ = os.RemoveAll(filepath.Join(config.DataDir, entry.Name()))
+					}
+				} else {
+					fmt.Fprintf(os.Stderr, "Quarantine: could not create .quarantine/ dir (%v) — removing %q instead\n", mkErr, entry.Name())
+					_ = os.RemoveAll(filepath.Join(config.DataDir, entry.Name()))
+				}
 			}
 		}
 	}
