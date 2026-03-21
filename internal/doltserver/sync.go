@@ -247,6 +247,13 @@ func SyncDatabases(townRoot string, opts SyncOptions) []SyncResult {
 		dbDir := RigDatabaseDir(townRoot, db)
 		result := SyncResult{Database: db}
 
+		// Skip databases with a .no-sync marker file (local-only databases).
+		if _, err := os.Stat(filepath.Join(dbDir, ".no-sync")); err == nil {
+			result.Skipped = true
+			results = append(results, result)
+			continue
+		}
+
 		// Check for remote (any name — "origin", "github", etc.)
 		remoteName, remoteURL, err := FindRemote(dbDir)
 		if err != nil {
@@ -330,6 +337,14 @@ func SyncDatabasesSQL(townRoot string, opts SyncOptions) []SyncResult {
 
 		result := SyncResult{Database: db}
 
+		// Skip databases with a .no-sync marker file (local-only databases).
+		dbDir := RigDatabaseDir(townRoot, db)
+		if _, err := os.Stat(filepath.Join(dbDir, ".no-sync")); err == nil {
+			result.Skipped = true
+			results = append(results, result)
+			continue
+		}
+
 		// Check for remote via SQL
 		remoteName, remoteURL, err := FindRemoteSQL(townRoot, db)
 		if err != nil {
@@ -341,7 +356,6 @@ func SyncDatabasesSQL(townRoot string, opts SyncOptions) []SyncResult {
 
 		if remoteURL == "" {
 			// Try auto-setup if credentials are available
-			dbDir := RigDatabaseDir(townRoot, db)
 			token := DoltHubToken()
 			org := DoltHubOrg()
 			if token != "" && org != "" {
