@@ -35,6 +35,7 @@ type SpawnedPolecatInfo struct {
 	// Internal fields for deferred session start
 	account string
 	agent   string
+	model   string
 }
 
 // AgentID returns the agent identifier (e.g., "gastown/polecats/Toast")
@@ -54,6 +55,7 @@ type SlingSpawnOptions struct {
 	Create     bool   // Create polecat if it doesn't exist (currently always true for sling)
 	HookBead   string // Bead ID to set as hook_bead at spawn time (atomic assignment)
 	Agent      string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
+	Model      string // Model override for this spawn (e.g., "sonnet", "claude-opus-4-6")
 	BaseBranch string // Override base branch for polecat worktree (e.g., "develop", "release/v2")
 }
 
@@ -227,6 +229,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 				Branch:      polecatObj.Branch,
 				account:     opts.Account,
 				agent:       opts.Agent,
+				model:       opts.Model,
 			}, nil
 		}
 	}
@@ -311,6 +314,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		Branch:      polecatObj.Branch,
 		account:     opts.Account,
 		agent:       opts.Agent,
+		model:       opts.Model,
 	}, nil
 }
 
@@ -358,10 +362,13 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 		RuntimeConfigDir: claudeConfigDir,
 		Agent:            s.agent,
 	}
-	if s.agent != "" {
+	if s.agent != "" || s.model != "" {
 		cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(s.RigName, s.PolecatName, r.Path, "", s.agent)
 		if err != nil {
 			return "", err
+		}
+		if s.model != "" {
+			cmd += " --model " + config.ShellQuote(s.model)
 		}
 		startOpts.Command = cmd
 	}

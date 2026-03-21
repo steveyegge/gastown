@@ -29,6 +29,7 @@ type SlingContextFields struct {
 	NoMerge          bool   `json:"no_merge,omitempty"`
 	Account          string `json:"account,omitempty"`
 	Agent            string `json:"agent,omitempty"`
+	Model            string `json:"model,omitempty"`
 	HookRawBead      bool   `json:"hook_raw_bead,omitempty"`
 	Owned            bool   `json:"owned,omitempty"`
 	Mode             string `json:"mode,omitempty"`
@@ -166,6 +167,7 @@ type DispatchParams struct {
 	BaseBranch  string
 	Account     string
 	Agent       string
+	Model       string
 	Mode        string
 	NoMerge     bool
 	HookRawBead bool
@@ -182,6 +184,7 @@ func ReconstructFromContext(ctx *SlingContextFields) DispatchParams {
 		BaseBranch:  ctx.BaseBranch,
 		Account:     ctx.Account,
 		Agent:       ctx.Agent,
+		Model:       ctx.Model,
 		Mode:        ctx.Mode,
 		NoMerge:     ctx.NoMerge,
 		HookRawBead: ctx.HookRawBead,

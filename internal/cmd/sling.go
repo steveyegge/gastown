@@ -133,6 +133,7 @@ var (
 	slingRalph         bool   // --ralph: enable Ralph Wiggum loop mode for multi-step workflows
 	slingFormula       string // --formula: override formula for dispatch (default: mol-polecat-work)
 	slingCrew          string // --crew: target a crew member in the specified rig
+	slingModel         string // --model: model override for this sling (e.g., "sonnet", "claude-opus-4-6")
 )
 
 func init() {
@@ -160,6 +161,7 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingRalph, "ralph", false, "Enable Ralph Wiggum loop mode (fresh context per step, for multi-step workflows)")
 	slingCmd.Flags().StringVar(&slingFormula, "formula", "", "Formula to apply (default: mol-polecat-work for polecat targets)")
 	slingCmd.Flags().StringVar(&slingCrew, "crew", "", "Target a crew member in the specified rig (e.g., --crew mel with target gastown → gastown/crew/mel)")
+	slingCmd.Flags().StringVar(&slingModel, "model", "", "Override Claude model for this spawn (e.g., claude-opus-4-6, sonnet, haiku)")
 
 	slingCmd.AddCommand(slingRespawnResetCmd)
 	rootCmd.AddCommand(slingCmd)
@@ -360,6 +362,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 				NoMerge:     slingNoMerge,
 				Account:     slingAccount,
 				Agent:       slingAgent,
+				Model:       slingModel,
 				HookRawBead: slingHookRawBead,
 				Ralph:       slingRalph,
 			})
@@ -399,6 +402,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 			NoMerge:     slingNoMerge,
 			Account:     slingAccount,
 			Agent:       slingAgent,
+			Model:       slingModel,
 			HookRawBead: slingHookRawBead,
 			Ralph:       slingRalph,
 		})
@@ -435,6 +439,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 				NoMerge:     slingNoMerge,
 				Account:     slingAccount,
 				Agent:       slingAgent,
+				Model:       slingModel,
 				HookRawBead: slingHookRawBead,
 				Ralph:       slingRalph,
 			})
@@ -663,6 +668,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		Create:     slingCreate,
 		Account:    slingAccount,
 		Agent:      slingAgent,
+		Model:      slingModel,
 		NoBoot:     slingNoBoot,
 		HookBead:   beadID,
 		BeadID:     beadID,

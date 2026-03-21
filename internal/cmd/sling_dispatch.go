@@ -29,6 +29,7 @@ type SlingParams struct {
 	BaseBranch string   // --base-branch
 	Account    string   // --account
 	Agent      string   // --agent
+	Model      string   // --model
 	NoConvoy   bool     // --no-convoy
 	Owned      bool     // --owned
 	NoMerge    bool     // --no-merge
@@ -225,6 +226,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		Account:    params.Account,
 		HookBead:   params.BeadID,
 		Agent:      params.Agent,
+		Model:      params.Model,
 		BaseBranch: params.BaseBranch,
 		// Create is always true for rig targets: executeSling only handles
 		// rig-targeted dispatch (batch sling + queue dispatch), where a fresh

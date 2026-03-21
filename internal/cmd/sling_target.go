@@ -104,6 +104,7 @@ type ResolveTargetOptions struct {
 	Create   bool
 	Account  string
 	Agent    string
+	Model    string
 	NoBoot   bool
 	HookBead   string // Bead ID to set atomically during polecat spawn (empty = skip)
 	BeadID     string // For cross-rig guard checks (empty = skip guard)
@@ -213,6 +214,7 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 			Create:     opts.Create,
 			HookBead:   opts.HookBead,
 			Agent:      opts.Agent,
+			Model:      opts.Model,
 			BaseBranch: opts.BaseBranch,
 		}
 		spawnInfo, err := spawnPolecatForSling(rigName, spawnOpts)
@@ -250,6 +252,7 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 					Create:     opts.Create,
 					HookBead:   opts.HookBead,
 					Agent:      opts.Agent,
+					Model:      opts.Model,
 					BaseBranch: opts.BaseBranch,
 				}
 				spawnInfo, spawnErr := spawnPolecatForSling(rigName, spawnOpts)
