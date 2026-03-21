@@ -32,7 +32,7 @@
         "integration_branch_auto_land": false,
         "on_conflict": "assign_back",
         "run_tests": true,
-        "test_command": "go test ./...",
+        "test_command": "",
         "build_command": "go build ./...",
         "lint_command": "golangci-lint run",
         "setup_command": "",
