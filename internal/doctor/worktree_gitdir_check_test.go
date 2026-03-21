@@ -367,8 +367,9 @@ func TestWorktreeGitdirCheck_DeaconDogs(t *testing.T) {
 	if len(result.Details) == 0 {
 		t.Fatal("expected details about broken deacon dog worktree")
 	}
-	// Should mention deacon/dogs path
-	if !strings.Contains(result.Details[0], "deacon/dogs/alpha") {
+	// Should mention deacon/dogs path (normalize separators for Windows compatibility)
+	normalizedDetail := filepath.ToSlash(result.Details[0])
+	if !strings.Contains(normalizedDetail, "deacon/dogs/alpha") {
 		t.Errorf("expected deacon/dogs/alpha in detail, got %q", result.Details[0])
 	}
 	// Should identify as relocated (since .repo.git exists at correct location)

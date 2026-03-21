@@ -292,8 +292,13 @@ func TestFetchClosedBeads_FiltersInternalBeads(t *testing.T) {
 func writeFakeBD(t *testing.T, binDir, output string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
+		// Write JSON to a data file; use `type` to print it (echo can't handle multi-line JSON)
+		dataPath := filepath.Join(binDir, "bd_output.json")
+		if err := os.WriteFile(dataPath, []byte(output), 0644); err != nil {
+			t.Fatalf("write fake bd data: %v", err)
+		}
 		path := filepath.Join(binDir, "bd.cmd")
-		script := fmt.Sprintf("@echo off\necho %s\n", output)
+		script := fmt.Sprintf("@echo off\ntype \"%s\"\n", dataPath)
 		if err := os.WriteFile(path, []byte(script), 0644); err != nil {
 			t.Fatalf("write fake bd: %v", err)
 		}
