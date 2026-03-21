@@ -792,11 +792,24 @@ func (m *SessionManager) verifyStartupNudgeDelivery(sessionID string, rc *config
 		return
 	}
 
+	// Use the configurable delay from operational config so operators can tune
+	// this via settings/config.json without rebuilding. Falls back to the
+	// constant default (5s) when no config is present.
+	// Use configurable thresholds from operational config so operators can tune
+	// via settings/config.json without rebuilding. Both fall back to compiled-in
+	// defaults when no config is present. This fixes GH#3031 where the config
+	// override had no effect because the code used hardcoded constants directly.
+	townRoot := filepath.Dir(m.rig.Path)
+	opCfg := config.LoadOperationalConfig(townRoot)
+	sessionCfg := opCfg.GetSessionConfig()
+	verifyDelay := sessionCfg.StartupNudgeVerifyDelayD()
+	maxRetries := sessionCfg.StartupNudgeMaxRetriesV()
+
 	nudgeContent := runtime.StartupNudgeContent()
 
-	for attempt := 1; attempt <= constants.StartupNudgeMaxRetries; attempt++ {
+	for attempt := 1; attempt <= maxRetries; attempt++ {
 		// Wait for the agent to process the nudge before checking.
-		time.Sleep(constants.StartupNudgeVerifyDelay)
+		time.Sleep(verifyDelay)
 
 		// Check if session is still alive
 		running, err := m.tmux.HasSession(sessionID)
@@ -811,7 +824,7 @@ func (m *SessionManager) verifyStartupNudgeDelivery(sessionID string, rc *config
 
 		// Agent is at the idle prompt — nudge was likely lost. Retry.
 		fmt.Fprintf(os.Stderr, "[startup-nudge] attempt %d/%d: agent %s idle at prompt, retrying nudge\n",
-			attempt, constants.StartupNudgeMaxRetries, sessionID)
+			attempt, maxRetries, sessionID)
 		if err := m.tmux.NudgeSession(sessionID, nudgeContent); err != nil {
 			fmt.Fprintf(os.Stderr, "[startup-nudge] retry nudge failed for %s: %v\n", sessionID, err)
 			return
@@ -822,7 +835,7 @@ func (m *SessionManager) verifyStartupNudgeDelivery(sessionID string, rc *config
 	// The witness zombie patrol will handle this case.
 	if m.tmux.IsAtPrompt(sessionID, rc) {
 		fmt.Fprintf(os.Stderr, "[startup-nudge] WARNING: agent %s still idle after %d nudge retries\n",
-			sessionID, constants.StartupNudgeMaxRetries)
+			sessionID, maxRetries)
 	}
 }
 

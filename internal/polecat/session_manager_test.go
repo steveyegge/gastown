@@ -492,6 +492,40 @@ func TestVerifyStartupNudgeDelivery_IdleAgent(t *testing.T) {
 	}
 }
 
+// TestVerifyStartupNudgeDelivery_ReadsOperationalConfig verifies that
+// verifyStartupNudgeDelivery reads the startup_nudge_verify_delay from
+// operational config rather than using the hardcoded constant. This is a
+// regression test for GH#3031 where the config override had no effect.
+func TestVerifyStartupNudgeDelivery_ReadsOperationalConfig(t *testing.T) {
+	t.Parallel()
+	// Write a town settings file with a custom startup_nudge_verify_delay.
+	// The rig path is a subdir of townRoot, so filepath.Dir(rig.Path) == townRoot.
+	townRoot := t.TempDir()
+	settingsDir := filepath.Join(townRoot, "settings")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 25s delay — the user-requested override from GH#3031.
+	const configJSON = `{"operational":{"session":{"startup_nudge_verify_delay":"25s"}}}`
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), []byte(configJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Construct a rig whose Path is inside townRoot so filepath.Dir gives townRoot.
+	rigPath := filepath.Join(townRoot, "test-rig")
+	if err := os.MkdirAll(rigPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the config loads and returns the expected delay.
+	opCfg := config.LoadOperationalConfig(townRoot)
+	got := opCfg.GetSessionConfig().StartupNudgeVerifyDelayD()
+	want := 25 * time.Second
+	if got != want {
+		t.Errorf("StartupNudgeVerifyDelayD() = %v, want %v — config not wired into verifyStartupNudgeDelivery", got, want)
+	}
+}
+
 // TestVerifyStartupNudgeDelivery_NilConfig verifies that verifyStartupNudgeDelivery
 // exits immediately when runtime config has no prompt detection.
 func TestVerifyStartupNudgeDelivery_NilConfig(t *testing.T) {
