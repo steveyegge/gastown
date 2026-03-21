@@ -4,6 +4,7 @@ import (
 	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,7 +97,11 @@ func outputPrimeContext(ctx RoleContext) (string, error) {
 // outputRoleDirectives loads and emits operator-provided role directives.
 // These come from the directive file layout (town-level and/or rig-level)
 // and override formula defaults where they conflict.
-func outputRoleDirectives(ctx RoleContext) {
+//
+// w and explainEnabled are injected so tests can capture output without
+// mutating os.Stdout or the primeExplain global (avoiding data races
+// under t.Parallel).
+func outputRoleDirectives(ctx RoleContext, w io.Writer, explainEnabled bool) {
 	role := string(ctx.Role)
 	townRoot := ctx.TownRoot
 	rigName := ctx.Rig
@@ -107,11 +112,17 @@ func outputRoleDirectives(ctx RoleContext) {
 		rigPath = filepath.Join(townRoot, rigName, "directives", role+".md")
 	}
 
+	explainf := func(format string, args ...any) {
+		if explainEnabled {
+			fmt.Fprintf(w, "\n[EXPLAIN] "+format+"\n", args...)
+		}
+	}
+
 	content := config.LoadRoleDirective(role, townRoot, rigName)
 	if content == "" {
-		explain(true, fmt.Sprintf("Role directives: no directive files found (checked %s", townPath))
+		explainf("Role directives: no directive files found (checked %s", townPath)
 		if rigPath != "" {
-			explain(true, fmt.Sprintf("Role directives: also checked %s", rigPath))
+			explainf("Role directives: also checked %s", rigPath)
 		}
 		return
 	}
@@ -132,18 +143,18 @@ func outputRoleDirectives(ctx RoleContext) {
 		}
 	}
 
-	explain(true, fmt.Sprintf("Role directives: town=%v rig=%v (town=%s, rig=%s)", hasTown, hasRig, townPath, rigPath))
+	explainf("Role directives: town=%v rig=%v (town=%s, rig=%s)", hasTown, hasRig, townPath, rigPath)
 
-	fmt.Println()
+	fmt.Fprintln(w)
 	if hasTown && hasRig {
-		fmt.Println("## Town & Rig Directives (operator policy — overrides formula where they conflict)")
+		fmt.Fprintln(w, "## Town & Rig Directives (operator policy — overrides formula where they conflict)")
 	} else if hasRig {
-		fmt.Println("## Rig Directives (operator policy — overrides formula where they conflict)")
+		fmt.Fprintln(w, "## Rig Directives (operator policy — overrides formula where they conflict)")
 	} else {
-		fmt.Println("## Town Directives (operator policy — overrides formula where they conflict)")
+		fmt.Fprintln(w, "## Town Directives (operator policy — overrides formula where they conflict)")
 	}
-	fmt.Println()
-	fmt.Println(content)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, content)
 }
 
 func outputPrimeContextFallback(ctx RoleContext) {

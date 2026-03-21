@@ -408,7 +408,7 @@ func outputRoleContext(ctx RoleContext) (string, error) {
 		return "", err
 	}
 
-	outputRoleDirectives(ctx)
+	outputRoleDirectives(ctx, os.Stdout, primeExplain)
 	outputContextFile(ctx)
 	outputHandoffContent(ctx)
 	outputAttachmentStatus(ctx)
