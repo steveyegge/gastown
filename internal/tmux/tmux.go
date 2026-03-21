@@ -3359,7 +3359,7 @@ func (t *Tmux) SetAgentsBinding(session string) error {
 // specific tmux socket. This is used during gt up to ensure the bindings work
 // even when the user is on a different socket than the town socket.
 //
-// townSocket is the socket name where GT agents live (e.g. "gt"). When
+// townSocket is the socket name where GT agents live (e.g. "gt-a1b2c3"). When
 // non-empty it is embedded in the binding command as GT_TOWN_SOCKET=<name>
 // so that gt agents menu can locate agent sessions even when invoked from a
 // directory outside the town root (e.g. a personal tmux session where

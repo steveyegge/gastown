@@ -8,13 +8,25 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
+// socketSessionLister is the minimal interface needed to list and kill sessions
+// on a specific tmux socket. Allows injecting mocks in tests.
+type socketSessionLister interface {
+	ListSessions() ([]string, error)
+	KillSessionWithProcesses(name string) error
+}
+
 // SocketSplitBrainCheck detects tmux sessions that exist on both the town
-// socket (e.g., "gt") and the "default" socket. This split-brain causes
+// socket (e.g., "gt-a1b2c3") and the "default" socket. This split-brain causes
 // gt nudge and other session-discovery commands to fail because they only
 // search the town socket.
 type SocketSplitBrainCheck struct {
 	FixableCheck
 	staleSessions []string // Sessions on "default" that also exist on town socket
+
+	townListerForTest    socketSessionLister // nil → real tmux on town socket
+	defaultListerForTest socketSessionLister // nil → real tmux on "default" socket
+	socketForTest        string              // override for tmux.GetDefaultSocket()
+	useSocketForTest     bool                // distinguishes empty override from unset
 }
 
 // NewSocketSplitBrainCheck creates a new socket split-brain check.
@@ -34,6 +46,9 @@ func NewSocketSplitBrainCheck() *SocketSplitBrainCheck {
 // sessions on the town socket.
 func (c *SocketSplitBrainCheck) Run(ctx *CheckContext) *CheckResult {
 	townSocket := tmux.GetDefaultSocket()
+	if c.useSocketForTest {
+		townSocket = c.socketForTest
+	}
 	if townSocket == "" || townSocket == "default" {
 		return &CheckResult{
 			Name:    c.Name(),
@@ -42,11 +57,17 @@ func (c *SocketSplitBrainCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// List sessions on both sockets
-	townTmux := tmux.NewTmux()
-	defaultTmux := tmux.NewTmuxWithSocket("default")
+	var townLister socketSessionLister = tmux.NewTmux()
+	if c.townListerForTest != nil {
+		townLister = c.townListerForTest
+	}
 
-	townSessions, err := townTmux.ListSessions()
+	var defaultLister socketSessionLister = tmux.NewTmuxWithSocket("default")
+	if c.defaultListerForTest != nil {
+		defaultLister = c.defaultListerForTest
+	}
+
+	townSessions, err := townLister.ListSessions()
 	if err != nil {
 		return &CheckResult{
 			Name:    c.Name(),
@@ -55,7 +76,7 @@ func (c *SocketSplitBrainCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	defaultSessions, err := defaultTmux.ListSessions()
+	defaultSessions, err := defaultLister.ListSessions()
 	if err != nil {
 		return &CheckResult{
 			Name:    c.Name(),
@@ -119,11 +140,14 @@ func (c *SocketSplitBrainCheck) Fix(ctx *CheckContext) error {
 		return nil
 	}
 
-	defaultTmux := tmux.NewTmuxWithSocket("default")
+	var defaultLister socketSessionLister = tmux.NewTmuxWithSocket("default")
+	if c.defaultListerForTest != nil {
+		defaultLister = c.defaultListerForTest
+	}
 	var lastErr error
 
 	for _, s := range c.staleSessions {
-		if err := defaultTmux.KillSessionWithProcesses(s); err != nil {
+		if err := defaultLister.KillSessionWithProcesses(s); err != nil {
 			lastErr = err
 		}
 	}

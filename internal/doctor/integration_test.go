@@ -20,6 +20,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // TestIntegrationTownSetup verifies that a fresh town setup passes all doctor checks.
@@ -604,7 +605,120 @@ func TestIntegrationSessionNaming(t *testing.T) {
 	}
 }
 
+// TestIntegrationMultiTownSocketIsolation verifies that two towns get distinct
+// tmux sockets and that sessions on one socket are invisible from the other.
+func TestIntegrationMultiTownSocketIsolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	origSocket := tmux.GetDefaultSocket()
+	origRegistry := session.DefaultRegistry()
+	t.Cleanup(func() {
+		tmux.SetDefaultSocket(origSocket)
+		session.SetDefaultRegistry(origRegistry)
+	})
+
+	townA := setupIntegrationTown(t)
+	townB := setupIntegrationTown(t)
+
+	createTestRig(t, townA, "gastown")
+	createTestRig(t, townB, "gastown")
+
+	// Init townA and capture its socket
+	if err := session.InitRegistry(townA); err != nil {
+		t.Fatalf("InitRegistry(townA): %v", err)
+	}
+	socketA := tmux.GetDefaultSocket()
+
+	// Reset and init townB
+	tmux.SetDefaultSocket("")
+	if err := session.InitRegistry(townB); err != nil {
+		t.Fatalf("InitRegistry(townB): %v", err)
+	}
+	socketB := tmux.GetDefaultSocket()
+
+	if socketA == socketB {
+		t.Fatalf("two towns produced the same socket %q; expected distinct sockets", socketA)
+	}
+	if socketA == "" {
+		t.Fatal("socketA is empty after InitRegistry")
+	}
+	if socketB == "" {
+		t.Fatal("socketB is empty after InitRegistry")
+	}
+	t.Logf("socketA=%s  socketB=%s", socketA, socketB)
+
+	// Real tmux isolation (requires tmux binary)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Log("tmux not found, skipping live isolation subtests")
+	} else {
+		tmA := tmux.NewTmuxWithSocket(socketA)
+		tmB := tmux.NewTmuxWithSocket(socketB)
+		t.Cleanup(func() {
+			tmA.KillServer()
+			tmB.KillServer()
+		})
+
+		if err := tmA.NewSessionWithCommand("ga-witness", ".", "sleep 300"); err != nil {
+			t.Fatalf("create session on socketA: %v", err)
+		}
+
+		// socketB must NOT see ga-witness
+		sessionsB, err := tmB.ListSessions()
+		if err == nil {
+			for _, s := range sessionsB {
+				if s == "ga-witness" {
+					t.Errorf("socketB sees ga-witness — isolation broken")
+				}
+			}
+		}
+
+		// socketA must see it
+		has, err := tmA.HasSession("ga-witness")
+		if err != nil {
+			t.Errorf("HasSession on socketA: %v", err)
+		}
+		if !has {
+			t.Errorf("socketA does not see ga-witness")
+		}
+	}
+
+	// Verify the split-brain check passes when the "default" socket has no
+	// Gas Town sessions.  We mock the default lister to avoid interacting with
+	// the user's real default tmux socket.
+	tmux.SetDefaultSocket(socketA)
+	checkA := NewSocketSplitBrainCheck()
+	checkA.defaultListerForTest = &emptySessionLister{}
+	result := checkA.Run(&CheckContext{TownRoot: townA})
+	if result.Status != StatusOK {
+		t.Errorf("split-brain check: want StatusOK, got %v: %s", result.Status, result.Message)
+		for _, d := range result.Details {
+			t.Logf("  detail: %s", d)
+		}
+	}
+
+	// Cross-socket isolation via split-brain check: set default to socketB and
+	// ensure sessions created on socketA don't cause a warning for townB.
+	tmux.SetDefaultSocket(socketB)
+	checkB := NewSocketSplitBrainCheck()
+	checkB.defaultListerForTest = &emptySessionLister{}
+	resultB := checkB.Run(&CheckContext{TownRoot: townB})
+	if resultB.Status != StatusOK {
+		t.Errorf("split-brain check for townB: want StatusOK, got %v: %s",
+			resultB.Status, resultB.Message)
+	}
+
+}
+
 // Helper functions
+
+// emptySessionLister is a socketSessionLister that reports no sessions,
+// used to isolate split-brain tests from the real "default" tmux socket.
+type emptySessionLister struct{}
+
+func (e *emptySessionLister) ListSessions() ([]string, error) { return nil, nil }
+func (e *emptySessionLister) KillSessionWithProcesses(string) error { return nil }
 
 // mockEnvReaderIntegration implements SessionEnvReader for integration tests.
 type mockEnvReaderIntegration struct {

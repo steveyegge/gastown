@@ -724,15 +724,42 @@ func findOrphanedClaudeProcesses(townRoot string) []int {
 	return orphaned
 }
 
+// legacySocketTmux is the subset of tmux.Tmux used by the legacy socket
+// cleanup functions, extracted to allow test injection.
+type legacySocketTmux interface {
+	ListSessions() ([]string, error)
+	KillSessionWithProcesses(name string) error
+}
+
+// Test hooks — nil in production, set by tests to avoid real tmux calls.
+var (
+	legacyTmuxForTest   func(socket string) legacySocketTmux
+	legacySocketForTest func() string // overrides tmux.GetDefaultSocket()
+)
+
+func getDefaultSocket() string {
+	if legacySocketForTest != nil {
+		return legacySocketForTest()
+	}
+	return tmux.GetDefaultSocket()
+}
+
+func newLegacyTmux(socket string) legacySocketTmux {
+	if legacyTmuxForTest != nil {
+		return legacyTmuxForTest(socket)
+	}
+	return tmux.NewTmuxWithSocket(socket)
+}
+
 // cleanupLegacyDefaultSocket removes Gas Town sessions left on the "default"
 // tmux socket by old binaries. Returns the number of sessions cleaned.
 func cleanupLegacyDefaultSocket() int {
-	currentSocket := tmux.GetDefaultSocket()
+	currentSocket := getDefaultSocket()
 	if currentSocket == "" || currentSocket == "default" {
 		return 0 // Already on the default socket, nothing to clean up
 	}
 
-	legacyTmux := tmux.NewTmuxWithSocket("default")
+	legacyTmux := newLegacyTmux("default")
 	sessions, err := legacyTmux.ListSessions()
 	if err != nil {
 		return 0 // No server on default socket
@@ -752,12 +779,12 @@ func cleanupLegacyDefaultSocket() int {
 // countLegacyDefaultSocketSessions counts Gas Town sessions on the "default"
 // tmux socket (for dry-run output).
 func countLegacyDefaultSocketSessions() int {
-	currentSocket := tmux.GetDefaultSocket()
+	currentSocket := getDefaultSocket()
 	if currentSocket == "" || currentSocket == "default" {
 		return 0
 	}
 
-	legacyTmux := tmux.NewTmuxWithSocket("default")
+	legacyTmux := newLegacyTmux("default")
 	sessions, err := legacyTmux.ListSessions()
 	if err != nil {
 		return 0
@@ -776,13 +803,13 @@ func countLegacyDefaultSocketSessions() int {
 // tmux socket (e.g., "gt") by binaries from before path-hashed socket names were
 // introduced (e.g., "gt-a1b2c3"). Returns the number of sessions cleaned.
 func cleanupLegacyBaseSocket(townRoot string) int {
-	currentSocket := tmux.GetDefaultSocket()
+	currentSocket := getDefaultSocket()
 	legacySocket := session.LegacySocketName(townRoot)
 	if currentSocket == legacySocket {
 		return 0 // Same socket, no migration needed
 	}
 
-	legacyTmux := tmux.NewTmuxWithSocket(legacySocket)
+	legacyTmux := newLegacyTmux(legacySocket)
 	sessions, err := legacyTmux.ListSessions()
 	if err != nil {
 		return 0 // No server on legacy socket
@@ -802,13 +829,13 @@ func cleanupLegacyBaseSocket(townRoot string) int {
 // countLegacyBaseSocketSessions counts Gas Town sessions on the old basename-only
 // tmux socket (for dry-run output).
 func countLegacyBaseSocketSessions(townRoot string) int {
-	currentSocket := tmux.GetDefaultSocket()
+	currentSocket := getDefaultSocket()
 	legacySocket := session.LegacySocketName(townRoot)
 	if currentSocket == legacySocket {
 		return 0
 	}
 
-	legacyTmux := tmux.NewTmuxWithSocket(legacySocket)
+	legacyTmux := newLegacyTmux(legacySocket)
 	sessions, err := legacyTmux.ListSessions()
 	if err != nil {
 		return 0
