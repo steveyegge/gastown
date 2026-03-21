@@ -1035,6 +1035,9 @@ func TestCopilotAgentPreset(t *testing.T) {
 	if info.ResumeFlag != "--resume" {
 		t.Errorf("copilot ResumeFlag = %q, want --resume", info.ResumeFlag)
 	}
+	if info.ContinueFlag != "--continue" {
+		t.Errorf("copilot ContinueFlag = %q, want --continue", info.ContinueFlag)
+	}
 	if info.ResumeStyle != "flag" {
 		t.Errorf("copilot ResumeStyle = %q, want flag", info.ResumeStyle)
 	}
@@ -1045,6 +1048,16 @@ func TestCopilotAgentPreset(t *testing.T) {
 
 	if info.SupportsForkSession {
 		t.Error("copilot should not support fork session")
+	}
+
+	// GA: COPILOT_HOME overrides config directory
+	if info.ConfigDirEnv != "COPILOT_HOME" {
+		t.Errorf("copilot ConfigDirEnv = %q, want COPILOT_HOME", info.ConfigDirEnv)
+	}
+
+	// GA: no detectable prompt prefix — uses delay-based readiness
+	if info.ReadyPromptPrefix != "" {
+		t.Errorf("copilot ReadyPromptPrefix = %q, want empty (GA has no ❯ prompt)", info.ReadyPromptPrefix)
 	}
 
 	if info.NonInteractive == nil {
@@ -1125,8 +1138,8 @@ func TestCopilotProviderDefaults(t *testing.T) {
 	}
 
 	configEnv := defaultConfigDirEnv("copilot")
-	if configEnv != "" {
-		t.Errorf("defaultConfigDirEnv(copilot) = %q, want empty", configEnv)
+	if configEnv != "COPILOT_HOME" {
+		t.Errorf("defaultConfigDirEnv(copilot) = %q, want COPILOT_HOME", configEnv)
 	}
 
 	provider := defaultHooksProvider("copilot")
@@ -1157,8 +1170,8 @@ func TestCopilotProviderDefaults(t *testing.T) {
 	}
 
 	prefix := defaultReadyPromptPrefix("copilot")
-	if prefix != "❯ " {
-		t.Errorf("defaultReadyPromptPrefix(copilot) = %q, want \"❯ \"", prefix)
+	if prefix != "" {
+		t.Errorf("defaultReadyPromptPrefix(copilot) = %q, want empty (GA has no ❯ prompt)", prefix)
 	}
 
 	delay := defaultReadyDelayMs("copilot")
