@@ -10,9 +10,11 @@ import (
 )
 
 var memoriesTypeFilter string
+var memoriesScope string
 
 func init() {
 	memoriesCmd.Flags().StringVar(&memoriesTypeFilter, "type", "", "Filter by memory type: feedback, project, user, reference, general")
+	memoriesCmd.Flags().StringVar(&memoriesScope, "scope", "all", "Which memories to show: local, city, or all (default: all)")
 	memoriesCmd.GroupID = GroupWork
 	rootCmd.AddCommand(memoriesCmd)
 }
@@ -32,8 +34,14 @@ Use --type to filter by memory category:
   reference  Pointers to external resources
   general    Uncategorized memories
 
+Use --scope to filter by memory scope:
+  local  Only memories stored in this rig's beads store
+  city   Only town-wide memories (visible to all agents in the town)
+  all    Both local and city memories (default)
+
 Examples:
-  gt memories                    # List all memories
+  gt memories                    # List all memories (local + city)
+  gt memories --scope city       # Show only town-wide memories
   gt memories --type feedback    # Show only behavioral corrections
   gt memories refinery           # Search for memories about refinery`,
 	Args: cobra.MaximumNArgs(1),
@@ -41,9 +49,12 @@ Examples:
 }
 
 func runMemories(cmd *cobra.Command, args []string) error {
-	kvs, err := bdKvListJSON()
-	if err != nil {
-		return fmt.Errorf("listing memories: %w", err)
+	scope := strings.ToLower(strings.TrimSpace(memoriesScope))
+	if scope == "" {
+		scope = "all"
+	}
+	if scope != "local" && scope != "city" && scope != "all" {
+		return fmt.Errorf("invalid scope %q — valid scopes: local, city, all", scope)
 	}
 
 	var search string
@@ -58,37 +69,58 @@ func runMemories(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Filter for memory.* keys and optional search/type
 	type memory struct {
 		memType  string
 		shortKey string
 		value    string
+		isCity   bool
 	}
 	var memories []memory
 
-	for k, v := range kvs {
-		if !strings.HasPrefix(k, memoryKeyPrefix) {
-			continue
-		}
-
-		memType, shortKey := parseMemoryKey(k)
-
-		if typeFilter != "" && memType != typeFilter {
-			continue
-		}
-
-		if search != "" {
-			if !strings.Contains(strings.ToLower(shortKey), search) &&
-				!strings.Contains(strings.ToLower(v), search) &&
-				!strings.Contains(strings.ToLower(memType), search) {
+	collectFrom := func(kvs map[string]string, isCity bool) {
+		for k, v := range kvs {
+			if !strings.HasPrefix(k, memoryKeyPrefix) {
 				continue
 			}
+			memType, shortKey := parseMemoryKey(k)
+			if typeFilter != "" && memType != typeFilter {
+				continue
+			}
+			if search != "" {
+				if !strings.Contains(strings.ToLower(shortKey), search) &&
+					!strings.Contains(strings.ToLower(v), search) &&
+					!strings.Contains(strings.ToLower(memType), search) {
+					continue
+				}
+			}
+			memories = append(memories, memory{memType: memType, shortKey: shortKey, value: v, isCity: isCity})
 		}
+	}
 
-		memories = append(memories, memory{memType: memType, shortKey: shortKey, value: v})
+	if scope == memoryScopeLocal || scope == "all" {
+		kvs, err := bdKvListJSON()
+		if err != nil {
+			return fmt.Errorf("listing local memories: %w", err)
+		}
+		collectFrom(kvs, false)
+	}
+
+	if scope == memoryScopeCity || scope == "all" {
+		cityDB := cityBeadsPath()
+		if cityDB != "" {
+			kvs, err := bdKvListJSONDB(cityDB)
+			if err == nil {
+				collectFrom(kvs, true)
+			}
+			// Silently skip city memories if city beads are unreachable
+		}
 	}
 
 	sort.Slice(memories, func(i, j int) bool {
+		// City memories sort after local memories of the same type
+		if memories[i].isCity != memories[j].isCity {
+			return !memories[i].isCity
+		}
 		if memories[i].memType != memories[j].memType {
 			return memTypeRank(memories[i].memType) < memTypeRank(memories[j].memType)
 		}
@@ -107,8 +139,11 @@ func runMemories(cmd *cobra.Command, args []string) error {
 	}
 
 	header := "Memories"
+	if scope != "all" {
+		header = fmt.Sprintf("Memories [%s]", scope)
+	}
 	if typeFilter != "" {
-		header = fmt.Sprintf("Memories [%s]", typeFilter)
+		header = fmt.Sprintf("%s [%s]", header, typeFilter)
 	}
 	if search != "" {
 		header = fmt.Sprintf("%s matching %q", header, search)
@@ -116,13 +151,22 @@ func runMemories(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s (%d):\n\n", style.Bold.Render(header), len(memories))
 
 	lastType := ""
-	for _, m := range memories {
-		if m.memType != lastType {
+	lastCity := false
+	for i, m := range memories {
+		typeChanged := m.memType != lastType
+		scopeChanged := i > 0 && m.isCity != lastCity
+
+		if typeChanged || scopeChanged {
 			if lastType != "" {
 				fmt.Println()
 			}
-			fmt.Printf("  %s\n", style.Dim.Render("["+m.memType+"]"))
+			label := m.memType
+			if m.isCity {
+				label += " · city"
+			}
+			fmt.Printf("  %s\n", style.Dim.Render("["+label+"]"))
 			lastType = m.memType
+			lastCity = m.isCity
 		}
 		fmt.Printf("  %s\n", style.Bold.Render(m.shortKey))
 		fmt.Printf("    %s\n\n", m.value)

@@ -466,53 +466,58 @@ var memoryTypeLabels = map[string]string{
 
 // runMemoryInject loads memories from beads kv and outputs them during prime.
 // Memories are grouped by type and ordered by priority (feedback first).
+// City-wide memories (from $GT_ROOT/.beads) are appended after rig-local memories.
 func runMemoryInject() {
-	kvs, err := bdKvListJSON()
-	if err != nil {
-		return // Silently skip if kv list fails
-	}
-
-	// Group memories by type
 	type mem struct {
 		shortKey string
 		value    string
 	}
-	grouped := make(map[string][]mem)
 
-	for k, v := range kvs {
-		if !strings.HasPrefix(k, memoryKeyPrefix) {
-			continue
+	injectSection := func(kvs map[string]string, title string) {
+		grouped := make(map[string][]mem)
+		for k, v := range kvs {
+			if !strings.HasPrefix(k, memoryKeyPrefix) {
+				continue
+			}
+			memType, shortKey := parseMemoryKey(k)
+			grouped[memType] = append(grouped[memType], mem{shortKey: shortKey, value: v})
 		}
-		memType, shortKey := parseMemoryKey(k)
-		grouped[memType] = append(grouped[memType], mem{shortKey: shortKey, value: v})
+		if len(grouped) == 0 {
+			return
+		}
+		for t := range grouped {
+			sort.Slice(grouped[t], func(i, j int) bool {
+				return grouped[t][i].shortKey < grouped[t][j].shortKey
+			})
+		}
+		fmt.Println()
+		fmt.Printf("# %s\n", title)
+		for _, t := range memoryTypeOrder {
+			mems, ok := grouped[t]
+			if !ok || len(mems) == 0 {
+				continue
+			}
+			label := memoryTypeLabels[t]
+			if label == "" {
+				label = t
+			}
+			fmt.Printf("\n## %s\n\n", label)
+			for _, m := range mems {
+				fmt.Printf("- **%s**: %s\n", m.shortKey, m.value)
+			}
+		}
 	}
 
-	if len(grouped) == 0 {
-		return
+	// Inject rig-local memories first.
+	if kvs, err := bdKvListJSON(); err == nil {
+		injectSection(kvs, "Agent Memories")
 	}
 
-	// Sort each group by key
-	for t := range grouped {
-		sort.Slice(grouped[t], func(i, j int) bool {
-			return grouped[t][i].shortKey < grouped[t][j].shortKey
-		})
-	}
-
-	fmt.Println()
-	fmt.Println("# Agent Memories")
-
-	for _, t := range memoryTypeOrder {
-		mems, ok := grouped[t]
-		if !ok || len(mems) == 0 {
-			continue
-		}
-		label := memoryTypeLabels[t]
-		if label == "" {
-			label = t
-		}
-		fmt.Printf("\n## %s\n\n", label)
-		for _, m := range mems {
-			fmt.Printf("- **%s**: %s\n", m.shortKey, m.value)
+	// Inject city-wide memories. Silently skip if GT_ROOT is not set or
+	// city beads are unreachable (not every session has a city context).
+	if cityDB := cityBeadsPath(); cityDB != "" {
+		if kvs, err := bdKvListJSONDB(cityDB); err == nil {
+			injectSection(kvs, "Town Memories (shared city-wide)")
 		}
 	}
 }

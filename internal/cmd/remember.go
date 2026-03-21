@@ -15,6 +15,13 @@ import (
 
 const memoryKeyPrefix = "memory."
 
+// memoryScopeLocal stores the memory in the current rig's beads store (default).
+const memoryScopeLocal = "local"
+
+// memoryScopeCity stores the memory city-wide in $GT_ROOT/.beads.
+// City memories are visible to all agents in the town during gt prime.
+const memoryScopeCity = "city"
+
 // validMemoryTypes are the recognized memory type categories.
 // Typed memories are stored as memory.<type>.<key> in the kv store.
 // Legacy untyped memories (memory.<key>) are treated as "general".
@@ -32,10 +39,12 @@ var memoryTypeOrder = []string{"feedback", "user", "project", "reference", "gene
 
 var rememberKey string
 var rememberType string
+var rememberScope string
 
 func init() {
 	rememberCmd.Flags().StringVar(&rememberKey, "key", "", "Explicit key slug (default: auto-generated from content)")
 	rememberCmd.Flags().StringVar(&rememberType, "type", "", "Memory type: feedback, project, user, reference (default: general)")
+	rememberCmd.Flags().StringVar(&rememberScope, "scope", memoryScopeLocal, "Storage scope: local (this rig) or city (all agents in town)")
 	rememberCmd.GroupID = GroupWork
 	rootCmd.AddCommand(rememberCmd)
 }
@@ -57,11 +66,16 @@ Memory types help organize memories and prioritize injection:
   user       Info about the user's role and preferences
   reference  Pointers to external resources
 
+Memory scopes control who can read the memory:
+  local  (default) Stored in this rig's beads — visible only to agents in this rig
+  city   Stored in town-level beads ($GT_ROOT/.beads) — visible to all agents in the town
+
 Examples:
   gt remember "Refinery uses worktree, cannot checkout main"
   gt remember --type feedback "Don't mock the database in integration tests"
   gt remember --type user --key senior-go-dev "User has 10 years Go experience"
-  gt remember --key refinery-worktree "Refinery uses worktree, cannot checkout main"`,
+  gt remember --scope city "Town-wide convention: always use --rebase on pull"
+  gt remember --scope city --type feedback "Dogs must not delete shared state"`,
 	Args: cobra.ExactArgs(1),
 	RunE: runRemember,
 }
@@ -70,6 +84,15 @@ func runRemember(cmd *cobra.Command, args []string) error {
 	content := args[0]
 	if strings.TrimSpace(content) == "" {
 		return fmt.Errorf("memory content cannot be empty")
+	}
+
+	// Validate --scope
+	scope := strings.ToLower(strings.TrimSpace(rememberScope))
+	if scope == "" {
+		scope = memoryScopeLocal
+	}
+	if scope != memoryScopeLocal && scope != memoryScopeCity {
+		return fmt.Errorf("invalid scope %q — valid scopes: local, city", scope)
 	}
 
 	// Validate --type if provided
@@ -93,14 +116,28 @@ func runRemember(cmd *cobra.Command, args []string) error {
 
 	fullKey := memoryKeyPrefix + memType + "." + key
 
+	var setFn func(string, string) error
+	var getFn func(string) (string, error)
+	if scope == memoryScopeCity {
+		cityDB := cityBeadsPath()
+		if cityDB == "" {
+			return fmt.Errorf("--scope city requires $GT_ROOT or $GT_TOWN_ROOT to be set")
+		}
+		setFn = func(k, v string) error { return bdKvSetDB(cityDB, k, v) }
+		getFn = func(k string) (string, error) { return bdKvGetDB(cityDB, k) }
+	} else {
+		setFn = bdKvSet
+		getFn = bdKvGet
+	}
+
 	// Check if key already exists
-	existing, _ := bdKvGet(fullKey)
+	existing, _ := getFn(fullKey)
 	verb := "Stored"
 	if existing != "" {
 		verb = "Updated"
 	}
 
-	if err := bdKvSet(fullKey, content); err != nil {
+	if err := setFn(fullKey, content); err != nil {
 		return fmt.Errorf("storing memory: %w", err)
 	}
 
@@ -108,7 +145,11 @@ func runRemember(cmd *cobra.Command, args []string) error {
 	if memType != "general" {
 		displayKey = memType + "/" + key
 	}
-	fmt.Printf("%s %s memory: %s\n", style.Success.Render("✓"), verb, style.Bold.Render(displayKey))
+	scopeLabel := ""
+	if scope == memoryScopeCity {
+		scopeLabel = " [city]"
+	}
+	fmt.Printf("%s %s memory%s: %s\n", style.Success.Render("✓"), verb, scopeLabel, style.Bold.Render(displayKey))
 	return nil
 }
 
@@ -218,6 +259,56 @@ func bdKvClear(key string) error {
 // bdKvListJSON calls bd kv list --json and returns the parsed map.
 func bdKvListJSON() (map[string]string, error) {
 	cmd := exec.Command("bd", "kv", "list", "--json")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var kvs map[string]string
+	if err := json.Unmarshal(out, &kvs); err != nil {
+		return nil, fmt.Errorf("parsing kv list: %w", err)
+	}
+	return kvs, nil
+}
+
+// cityBeadsPath returns the path to the city-level beads directory by reading
+// $GT_ROOT or $GT_TOWN_ROOT. Returns empty string if neither is set.
+func cityBeadsPath() string {
+	for _, envName := range []string{"GT_ROOT", "GT_TOWN_ROOT"} {
+		if root := os.Getenv(envName); root != "" {
+			return root + "/.beads"
+		}
+	}
+	return ""
+}
+
+// bdKvSetDB calls bd --db <dbPath> kv set <key> <value>.
+func bdKvSetDB(dbPath, key, value string) error {
+	cmd := exec.Command("bd", "--db", dbPath, "kv", "set", key, value)
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// bdKvGetDB calls bd --db <dbPath> kv get <key>.
+func bdKvGetDB(dbPath, key string) (string, error) {
+	cmd := exec.Command("bd", "--db", dbPath, "kv", "get", key)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// bdKvClearDB calls bd --db <dbPath> kv clear <key>.
+func bdKvClearDB(dbPath, key string) error {
+	cmd := exec.Command("bd", "--db", dbPath, "kv", "clear", key)
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// bdKvListJSONDB calls bd --db <dbPath> kv list --json and returns the parsed map.
+func bdKvListJSONDB(dbPath string) (map[string]string, error) {
+	cmd := exec.Command("bd", "--db", dbPath, "kv", "list", "--json")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
