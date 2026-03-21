@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 func captureConvoyStdoutErr(t *testing.T, fn func() error) (string, error) {
@@ -91,6 +93,13 @@ func TestRunConvoyList_UsesTownRootAndStripsBeadsDir(t *testing.T) {
 	t.Setenv("BEADS_DIR", "/wrong/.beads")
 
 	scriptBody := fmt.Sprintf(`
+case "$*" in
+  "--allow-stale version")
+    echo "bd version stub"
+    exit 0
+    ;;
+esac
+
 if [ -n "$BEADS_DIR" ]; then
   echo "BEADS_DIR leaked: $BEADS_DIR" >&2
   exit 1
@@ -103,6 +112,9 @@ case "$*" in
       exit 1
     fi
     echo '[{"id":"hq-cv-town","title":"Town convoy","status":"open","created_at":"2026-03-09T00:00:00Z"}]'
+    ;;
+  "sql SELECT depends_on_id FROM dependencies WHERE issue_id = '"'"'hq-cv-town'"'"' AND type = '"'"'tracks'"'"' --json")
+    echo '[]'
     ;;
   "dep list hq-cv-town --direction=down --type=tracks --allow-stale --json")
     if [ "$PWD" != "%s" ]; then
@@ -125,6 +137,8 @@ case "$*" in
 esac
 `, expectedWD, expectedWD, expectedWD)
 	writeRoutingBdStub(t, scriptBody)
+	beads.ResetBdAllowStaleCacheForTest()
+	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
 
 	oldJSON, oldAll, oldStatus, oldTree := convoyListJSON, convoyListAll, convoyListStatus, convoyListTree
 	convoyListJSON = true
@@ -159,6 +173,13 @@ func TestRunConvoyStatus_UsesTownRootAndStripsBeadsDir(t *testing.T) {
 	t.Setenv("BEADS_DIR", "/wrong/.beads")
 
 	scriptBody := fmt.Sprintf(`
+case "$*" in
+  "--allow-stale version")
+    echo "bd version stub"
+    exit 0
+    ;;
+esac
+
 if [ -n "$BEADS_DIR" ]; then
   echo "BEADS_DIR leaked: $BEADS_DIR" >&2
   exit 1
@@ -171,6 +192,9 @@ case "$*" in
       exit 1
     fi
     echo '[{"id":"hq-cv-status","title":"Status convoy","status":"open","issue_type":"convoy","created_at":"2026-03-09T00:00:00Z","labels":[],"dependencies":[]}]'
+    ;;
+  "sql SELECT depends_on_id FROM dependencies WHERE issue_id = '"'"'hq-cv-status'"'"' AND type = '"'"'tracks'"'"' --json")
+    echo '[]'
     ;;
   "dep list hq-cv-status --direction=down --type=tracks --allow-stale --json")
     if [ "$PWD" != "%s" ]; then
@@ -186,6 +210,8 @@ case "$*" in
 esac
 `, expectedWD, expectedWD)
 	writeRoutingBdStub(t, scriptBody)
+	beads.ResetBdAllowStaleCacheForTest()
+	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
 
 	oldJSON := convoyStatusJSON
 	convoyStatusJSON = false

@@ -235,7 +235,7 @@ func TestSendMessageToTarget_Chunking(t *testing.T) {
 
 	// Send a message longer than typical chunk size
 	msg := strings.Repeat("A", 600)
-	err := tm.sendMessageToTarget(session, msg, 5*time.Second)
+	err := tm.sendMessageToTarget(session, msg)
 	if err != nil {
 		t.Fatalf("sendMessageToTarget: %v", err)
 	}

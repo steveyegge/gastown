@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // TestStrandedScanExcludesStagedConvoys verifies that findStrandedConvoys
@@ -75,6 +77,8 @@ exit 0
 		t.Fatalf("write mock bd: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	beads.ResetBdAllowStaleCacheForTest()
+	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
 
 	// Call findStrandedConvoys — it should query bd list --status=open
 	stranded, err := findStrandedConvoys(townBeads)
@@ -158,6 +162,8 @@ exit 0
 		t.Fatalf("write mock bd: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	beads.ResetBdAllowStaleCacheForTest()
+	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
 
 	_, err := findStrandedConvoys(townBeads)
 	if err != nil {
@@ -169,13 +175,18 @@ exit 0
 		t.Fatalf("reading bd.log: %v", err)
 	}
 
-	// The first line should be the list command
+	// Find the list command line, skipping any --allow-stale version probe.
 	lines := strings.Split(strings.TrimSpace(string(logData)), "\n")
-	if len(lines) == 0 {
-		t.Fatal("bd was never called")
+	var listLine string
+	for _, line := range lines {
+		if strings.Contains(line, "list") {
+			listLine = line
+			break
+		}
 	}
-
-	listLine := lines[0]
+	if listLine == "" {
+		t.Fatal("bd was never called with a 'list' subcommand")
+	}
 
 	requiredFlags := []string{"list", "--type=convoy", "--status=open", "--json"}
 	for _, flag := range requiredFlags {

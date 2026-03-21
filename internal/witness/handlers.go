@@ -247,7 +247,7 @@ func handlePolecatDonePendingMR(bd *BdCli, workDir, rigName string, payload *Pol
 
 	// Check if peer review gate is enabled for this rig.
 	if isPeerReviewEnabled(workDir, rigName) {
-		emitReviewRequested(workDir, rigName, payload, result)
+		emitReviewRequested(workDir, rigName, payload)
 		result.Handled = true
 		result.WispCreated = wispID
 		result.Action = fmt.Sprintf("deferred cleanup for %s (pending MR=%s, peer review requested)", payload.PolecatName, payload.MRID)
@@ -283,7 +283,7 @@ func isPeerReviewEnabled(workDir, rigName string) bool {
 // patrol can spawn a review polecat instead of sending MERGE_READY directly.
 // The witness agent reads this event and spawns a review polecat using the
 // configured peer_review_formula (default: mol-peer-review-gate).
-func emitReviewRequested(workDir, rigName string, payload *PolecatDonePayload, result *HandlerResult) {
+func emitReviewRequested(workDir, rigName string, payload *PolecatDonePayload) {
 	townRoot, _ := workspace.Find(workDir)
 	if townRoot != "" {
 		_, _ = channelevents.EmitToTown(townRoot, "witness", "REVIEW_REQUESTED", []string{

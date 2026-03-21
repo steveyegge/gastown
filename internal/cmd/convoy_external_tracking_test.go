@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"sort"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 func writeExternalTrackingBdStub(t *testing.T, scriptBody string) {
@@ -66,6 +68,12 @@ func TestGetTrackedIssues_FallsBackToShowTrackedDependencies(t *testing.T) {
 
 	scriptBody := fmt.Sprintf(`
 case "$*" in
+  "--allow-stale version")
+    echo "bd version stub"
+    ;;
+  "sql SELECT depends_on_id FROM dependencies WHERE issue_id = '"'"'hq-cv-ext'"'"' AND type = '"'"'tracks'"'"' --json")
+    echo '[]'
+    ;;
   "dep list hq-cv-ext --direction=down --type=tracks --allow-stale --json")
     echo '[]'
     ;;
@@ -88,6 +96,8 @@ case "$*" in
 esac
 `)
 	writeExternalTrackingBdStub(t, scriptBody)
+	beads.ResetBdAllowStaleCacheForTest()
+	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
 
 	tracked, err := getTrackedIssues(townBeads, "hq-cv-ext")
 	if err != nil {

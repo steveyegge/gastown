@@ -203,10 +203,14 @@ Branch: {{branch}}
 **3. Emit the verdict event:**
 ```bash
 # If PASS:
-gt mol step emit-event --event REVIEW_PASSED --data '{"issue":"{{issue}}","branch":"{{branch}}","polecat":"{{polecat}}","mr_bead":"{{mr_bead}}","rig":"{{rig}}"}'
+gt mol step emit-event --channel witness --type REVIEW_PASSED \
+  --payload issue={{issue}} --payload branch={{branch}} --payload polecat={{polecat}} \
+  --payload mr_bead={{mr_bead}} --payload rig={{rig}}
 
 # If FAIL:
-gt mol step emit-event --event REVIEW_FAILED --data '{"issue":"{{issue}}","branch":"{{branch}}","polecat":"{{polecat}}","mr_bead":"{{mr_bead}}","rig":"{{rig}}","findings":"<brief summary of blocking issues>"}'
+gt mol step emit-event --channel witness --type REVIEW_FAILED \
+  --payload issue={{issue}} --payload branch={{branch}} --payload polecat={{polecat}} \
+  --payload mr_bead={{mr_bead}} --payload rig={{rig}} --payload findings="<brief summary of blocking issues>"
 ```
 
 **Exit criteria:** Verdict emitted as event."""
