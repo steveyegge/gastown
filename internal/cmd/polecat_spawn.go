@@ -318,6 +318,15 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 // This is called after the molecule/bead is attached, so the polecat
 // sees its work when gt prime runs on session start.
 // Returns the pane ID after session start.
+//
+// Dispatch Security Standard (enforced here and at all callers):
+//   - Any flag value that reaches the startup command string MUST be validated
+//     against a character allowlist before this call (e.g. [a-zA-Z0-9-.] for
+//     --model). ShellQuote provides a second layer but is not sufficient alone.
+//   - Bead IDs used in branch names or paths must pass looksLikeBeadID, which
+//     enforces [a-z][a-z0-9.-]* for the suffix (GH#3110).
+//   - If an HTTP dispatch path is ever added, claim-rate limiting and the
+//     allowlist standard are pre-conditions — flag to security before that PR.
 func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	if s.SessionStarted() {
 		return s.Pane, nil
