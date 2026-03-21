@@ -517,7 +517,7 @@ func stopAllPolecats(t *tmux.Tmux, townRoot string, rigNames []string, force boo
 
 // stopAllCrew stops all crew member sessions across all rigs.
 // Returns the number of crew sessions stopped (or would be stopped in dry-run).
-func stopAllCrew(t *tmux.Tmux, townRoot string, rigNames []string, force bool, dryRun bool) int {
+func stopAllCrew(t *tmux.Tmux, townRoot string, rigNames []string, _ bool, dryRun bool) int {
 	stopped := 0
 
 	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")

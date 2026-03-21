@@ -57,7 +57,7 @@ func runWlScorekeeper(cmd *cobra.Command, args []string) error {
 	return runScorekeeperWithStore(store, townRoot)
 }
 
-func runScorekeeperWithStore(store doltserver.WLCommonsStore, townRoot string) error {
+func runScorekeeperWithStore(store doltserver.WLCommonsStore, _ string) error {
 	if !wlScorekeeperJSON {
 		fmt.Printf("%s Running scorekeeper...\n", style.Bold.Render("⚡"))
 	}
