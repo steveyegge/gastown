@@ -1377,7 +1377,8 @@ func (t *Tmux) dismissRewindMode(target string) {
 // raw stdin (like Claude Code's TUI) are not affected.
 const sendKeysChunkSize = 512
 
-func (t *Tmux) sendMessageToTarget(target, text string, timeout time.Duration) error {
+func (t *Tmux) sendMessageToTarget(target, text string) error {
+	timeout := constants.NudgeReadyTimeout
 	if len(text) <= sendKeysChunkSize {
 		return t.sendKeysLiteralWithRetry(target, text, timeout)
 	}
@@ -1538,7 +1539,7 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 
 	// 3. Send text via send-keys -l. Messages > 512 bytes are chunked
 	//    with 10ms inter-chunk delays to avoid argument length limits.
-	if err := t.sendMessageToTarget(target, sanitized, constants.NudgeReadyTimeout); err != nil {
+	if err := t.sendMessageToTarget(target, sanitized); err != nil {
 		return err
 	}
 
@@ -1565,7 +1566,7 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 		if t.isInRewindMode(target) {
 			t.dismissRewindMode(target)
 			// Re-send message text — Rewind consumed the original input.
-			_ = t.sendMessageToTarget(target, sanitized, constants.NudgeReadyTimeout)
+			_ = t.sendMessageToTarget(target, sanitized)
 			time.Sleep(500 * time.Millisecond)
 		}
 	}
@@ -1616,7 +1617,7 @@ func (t *Tmux) NudgePane(pane, message string) error {
 
 	// 3. Send text via send-keys -l. Messages > 512 bytes are chunked
 	//    with 10ms inter-chunk delays to avoid argument length limits.
-	if err := t.sendMessageToTarget(pane, sanitized, constants.NudgeReadyTimeout); err != nil {
+	if err := t.sendMessageToTarget(pane, sanitized); err != nil {
 		return err
 	}
 
@@ -1633,7 +1634,7 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	// 6.5. Post-Escape: check if our Escape triggered Rewind mode. (GH#gt-8el)
 	if t.isInRewindMode(pane) {
 		t.dismissRewindMode(pane)
-		_ = t.sendMessageToTarget(pane, sanitized, constants.NudgeReadyTimeout)
+		_ = t.sendMessageToTarget(pane, sanitized)
 		time.Sleep(500 * time.Millisecond)
 	}
 
