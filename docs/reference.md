@@ -69,7 +69,7 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
     "setup_command": "",
     "typecheck_command": "",
     "lint_command": "",
-    "test_command": "go test ./...",
+    "test_command": "",
     "build_command": "",
     "on_conflict": "assign_back",
     "delete_merged_branches": true,
@@ -133,7 +133,7 @@ Town-level role defaults live in `mayor/config.json` under:
 | `setup_command` | `string` | `""` | Setup/install command (e.g., `pnpm install`) |
 | `typecheck_command` | `string` | `""` | Type check command (e.g., `tsc --noEmit`) |
 | `lint_command` | `string` | `""` | Lint command (e.g., `eslint .`) |
-| `test_command` | `string` | `"go test ./..."` | Test command to run |
+| `test_command` | `string` | `""` | Test command to run. Empty = skip. |
 | `build_command` | `string` | `""` | Build command (e.g., `go build ./...`) |
 | `on_conflict` | `string` | `"assign_back"` | Conflict strategy: `assign_back` or `auto_rebase` |
 | `delete_merged_branches` | `bool` | `true` | Delete source branches after merging |

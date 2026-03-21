@@ -60,7 +60,7 @@ source of truth.
 | setup_command | (empty) | Setup/install command (e.g., `pnpm install`). Empty = skip. |
 | typecheck_command | (empty) | Type check command (e.g., `tsc --noEmit`). Empty = skip. |
 | lint_command | (empty) | Lint command (e.g., `eslint .`). Empty = skip. |
-| test_command | go test ./... | Test command to run (if run_tests is true) |
+| test_command | (empty) | Test command to run (if run_tests is true). Empty = skip. |
 | build_command | (empty) | Build command (e.g., `go build ./...`). Empty = skip. |
 | target_branch | main | Default target branch for merges |
 | delete_merged_branches | true | Whether to delete source branches after merge |
@@ -119,8 +119,8 @@ description = "Lint command (e.g., eslint .). Empty = skip."
 default = ""
 
 [vars.test_command]
-description = "Test command to run (if run_tests is true)"
-default = "go test ./..."
+description = "Test command to run (if run_tests is true). Empty = skip."
+default = ""
 
 [vars.build_command]
 description = "Build command (e.g., go build ./...). Empty = skip."
