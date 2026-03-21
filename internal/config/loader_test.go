@@ -4028,6 +4028,48 @@ func TestResolveRoleAgentConfig(t *testing.T) {
 	})
 }
 
+// TestResolveRoleAgentConfig_DogInheritsBaseEnv verifies that dog sessions inherit
+// env vars from the base "claude" agent in agents.json (fixes #3012: claudeHaikuPreset
+// bypasses agents.json env vars so dogs miss Bedrock config).
+func TestResolveRoleAgentConfig_DogInheritsBaseEnv(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	// Town has a "claude" agent with Bedrock env vars in agents.json
+	townSettings := NewTownSettings()
+	townSettings.Agents = map[string]*RuntimeConfig{
+		"claude": {
+			Command: "claude",
+			Args:    []string{"--dangerously-skip-permissions"},
+			Env: map[string]string{
+				"CLAUDE_CODE_USE_BEDROCK": "1",
+				"AWS_PROFILE":            "bedrock-prod",
+			},
+		},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rc := ResolveRoleAgentConfig("dog", townRoot, "")
+
+	// Dog should use haiku preset (cost efficiency)
+	if !isClaudeCommand(rc.Command) {
+		t.Errorf("Command = %q, want claude", rc.Command)
+	}
+
+	// Dog must inherit Bedrock env vars from the base claude agent
+	if rc.Env == nil {
+		t.Fatal("dog RuntimeConfig.Env is nil — Bedrock env vars not inherited")
+	}
+	if got := rc.Env["CLAUDE_CODE_USE_BEDROCK"]; got != "1" {
+		t.Errorf("Env[CLAUDE_CODE_USE_BEDROCK] = %q, want %q", got, "1")
+	}
+	if got := rc.Env["AWS_PROFILE"]; got != "bedrock-prod" {
+		t.Errorf("Env[AWS_PROFILE] = %q, want %q", got, "bedrock-prod")
+	}
+}
+
 func TestResolveRoleAgentName(t *testing.T) {
 	t.Parallel()
 	townRoot := t.TempDir()

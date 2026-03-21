@@ -1574,7 +1574,23 @@ func resolveRoleAgentConfigCore(role, townRoot, rigPath string) *RuntimeConfig {
 		if hasExplicitNonClaudeOverride(role, townSettings, rigSettings) {
 			// Fall through to normal resolution below
 		} else {
-			return claudeHaikuPreset()
+			preset := claudeHaikuPreset()
+			// Inherit env vars from the base "claude" agent config in agents.json.
+			// claudeHaikuPreset() returns only Command+Args for cost efficiency,
+			// but dogs must still pick up env vars like CLAUDE_CODE_USE_BEDROCK
+			// and AWS_PROFILE that Bedrock deployments require. The preset's own
+			// Env values (if any) take precedence over the base agent's values.
+			if baseRC := lookupAgentConfig("claude", townSettings, rigSettings); len(baseRC.Env) > 0 {
+				if preset.Env == nil {
+					preset.Env = make(map[string]string)
+				}
+				for k, v := range baseRC.Env {
+					if _, exists := preset.Env[k]; !exists {
+						preset.Env[k] = v
+					}
+				}
+			}
+			return preset
 		}
 	}
 
