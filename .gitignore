@@ -22,6 +22,7 @@ Thumbs.db
 # Claude Code local state (but track commands/skills)
 .claude/
 !.claude/commands/
+!.claude/skills/
 
 # Test
 coverage.out
