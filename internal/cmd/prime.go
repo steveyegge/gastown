@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/lock"
+	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
@@ -306,6 +307,15 @@ func handlePrimeHookMode(townRoot, cwd string) {
 	// remains "bash" even though the agent is running as a descendant.
 	signalAgentReady()
 
+	// Write ready marker so the SessionManager can verify hooks succeeded
+	// without screen-scraping. See GH#3133.
+	// Prefer tmux session name from GT_SESSION env var (set by SessionManager
+	// via tmux set-environment) since $TMUX may not be inherited by hook
+	// subprocesses in all agent runtimes.
+	if markerSession := resolveMarkerSessionName(); markerSession != "" {
+		_ = polecat.WriteReadyMarker(townRoot, markerSession)
+	}
+
 	// Store source for compact/resume detection in runPrime
 	primeHookSource = source
 
@@ -328,6 +338,18 @@ func hookSessionBeaconLines(sessionID, source string) []string {
 		lines = append(lines, fmt.Sprintf("[source:%s]", source))
 	}
 	return lines
+}
+
+// resolveMarkerSessionName returns the tmux session name for writing the ready
+// marker. Uses ResolveCurrentSession which matches our TTY against tmux panes
+// on the town socket — works even when Claude Code strips $TMUX from hooks.
+func resolveMarkerSessionName() string {
+	t := tmux.NewTmux()
+	name, err := t.ResolveCurrentSession()
+	if err != nil {
+		return ""
+	}
+	return name
 }
 
 // signalAgentReady sets GT_AGENT_READY=1 in the current tmux session environment.

@@ -1544,9 +1544,10 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 		if err := m.tmux.KillSessionWithProcesses(sessionName); err != nil {
 			return nil, fmt.Errorf("killing existing session %s for reuse: %w", sessionName, err)
 		}
-		// Remove stale heartbeat so SessionManager.Start doesn't see leftover data.
+		// Remove stale heartbeat and ready marker so SessionManager.Start doesn't see leftover data.
 		townRoot := filepath.Dir(m.rig.Path)
 		RemoveSessionHeartbeat(townRoot, sessionName)
+		RemoveReadyMarker(townRoot, sessionName)
 	}
 
 	// Get worktree path (must already exist for reuse)
@@ -1746,10 +1747,12 @@ func (m *Manager) ReconcilePoolWith(namesWithDirs, namesWithSessions []string) {
 				// Orphan: session exists but no directory
 				_ = m.tmux.KillSessionWithProcesses(sessionName)
 				RemoveSessionHeartbeat(townRoot, sessionName)
+				RemoveReadyMarker(townRoot, sessionName)
 			} else if isSessionProcessDead(m.tmux, sessionName, townRoot) {
 				// Stale: directory exists but session's process has died
 				_ = m.tmux.KillSessionWithProcesses(sessionName)
 				RemoveSessionHeartbeat(townRoot, sessionName)
+				RemoveReadyMarker(townRoot, sessionName)
 			}
 		}
 	}

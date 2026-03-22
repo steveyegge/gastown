@@ -455,11 +455,26 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		}
 	}
 
-	// Verify startup nudge was delivered: poll for idle prompt and retry if lost.
-	// This fixes the Mode B race where the nudge arrives before Claude Code is ready,
-	// causing the polecat to sit idle at an empty prompt. See GH#1379.
-	if fallbackInfo.SendStartupNudge {
-		m.verifyStartupNudgeDelivery(sessionID, runtimeConfig)
+	// Verify hook health: poll for the ready marker file written by the
+	// SessionStart hook (gt prime --hook). If the marker doesn't appear,
+	// hooks failed silently — send a recovery nudge. Only for agents with
+	// executable hooks (not Informational ones which are just instructions
+	// files). See GH#3133.
+	if runtimeConfig != nil && runtimeConfig.Hooks != nil && !runtimeConfig.Hooks.Informational {
+		townRoot := filepath.Dir(m.rig.Path)
+		opCfg := config.LoadOperationalConfig(townRoot)
+		sessionCfg := opCfg.GetSessionConfig()
+		nudgeContent := runtime.StartupNudgeContent()
+
+		verifyHookHealth(hookHealthOpts{
+			TownRoot:   townRoot,
+			SessionID:  sessionID,
+			PollDelay:  sessionCfg.StartupNudgeVerifyDelayD(),
+			MaxRetries: sessionCfg.StartupNudgeMaxRetriesV(),
+			SendNudge: func() error {
+				return m.tmux.NudgeSession(sessionID, nudgeContent)
+			},
+		})
 	}
 
 	// Legacy fallback for other startup paths (non-fatal)
@@ -838,6 +853,44 @@ func (m *SessionManager) verifyStartupNudgeDelivery(sessionID string, rc *config
 	if m.tmux.IsIdle(sessionID) {
 		fmt.Fprintf(os.Stderr, "[startup-nudge] WARNING: agent %s still idle after %d nudge retries\n",
 			sessionID, maxRetries)
+	}
+}
+
+// hookHealthOpts configures the file-based hook health verification.
+type hookHealthOpts struct {
+	TownRoot   string
+	SessionID  string
+	PollDelay  time.Duration
+	MaxRetries int
+	SendNudge  func() error
+}
+
+// verifyHookHealth polls for a ready marker file written by the SessionStart
+// hook (gt prime --hook). If the marker appears within the timeout, hooks
+// succeeded and no action is taken. If the marker is still missing after all
+// retries, a recovery nudge is sent.
+//
+// This replaces the screen-scraping approach (IsIdle) with a structural signal:
+// the hook itself reports success by writing a file. See GH#3133.
+func verifyHookHealth(opts hookHealthOpts) {
+	for attempt := 1; attempt <= opts.MaxRetries; attempt++ {
+		time.Sleep(opts.PollDelay)
+
+		if ReadyMarkerExists(opts.TownRoot, opts.SessionID) {
+			return
+		}
+
+		fmt.Fprintf(os.Stderr, "[hook-health] attempt %d/%d: no ready marker for %s, sending recovery nudge\n",
+			attempt, opts.MaxRetries, opts.SessionID)
+		if err := opts.SendNudge(); err != nil {
+			fmt.Fprintf(os.Stderr, "[hook-health] recovery nudge failed for %s: %v\n", opts.SessionID, err)
+			return
+		}
+	}
+
+	if !ReadyMarkerExists(opts.TownRoot, opts.SessionID) {
+		fmt.Fprintf(os.Stderr, "[hook-health] WARNING: no ready marker for %s after %d retries\n",
+			opts.SessionID, opts.MaxRetries)
 	}
 }
 

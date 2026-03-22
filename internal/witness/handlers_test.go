@@ -984,6 +984,33 @@ func TestStalledResult_Types(t *testing.T) {
 	}
 }
 
+func TestStalledResult_StructuralFields(t *testing.T) {
+	t.Parallel()
+	s := StalledResult{
+		PolecatName:  "alpha",
+		StallType:    "startup-stall",
+		Action:       "auto-dismissed",
+		AgentState:   "idle",
+		HasHookedWork: true,
+	}
+
+	if s.AgentState != "idle" {
+		t.Errorf("AgentState = %q, want %q", s.AgentState, "idle")
+	}
+	if !s.HasHookedWork {
+		t.Error("HasHookedWork = false, want true")
+	}
+
+	// Zero value: no agent state, no hooked work
+	s2 := StalledResult{PolecatName: "bravo"}
+	if s2.AgentState != "" {
+		t.Errorf("AgentState zero value = %q, want empty", s2.AgentState)
+	}
+	if s2.HasHookedWork {
+		t.Error("HasHookedWork zero value = true, want false")
+	}
+}
+
 func TestDetectStalledPolecatsResult_Empty(t *testing.T) {
 	t.Parallel()
 	result := &DetectStalledPolecatsResult{}

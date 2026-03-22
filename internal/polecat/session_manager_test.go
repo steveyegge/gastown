@@ -622,3 +622,168 @@ func TestPolecatSlot(t *testing.T) {
 		t.Errorf("with hidden dir: polecatSlot(beta) = %d, want 1", slot)
 	}
 }
+
+func TestVerifyHookHealth_MarkerPresent(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	session := "rig001-polecat-alpha"
+
+	// Write a ready marker before verification starts
+	if err := WriteReadyMarker(townRoot, session); err != nil {
+		t.Fatalf("WriteReadyMarker() error = %v", err)
+	}
+
+	nudgeSent := false
+	sendNudge := func() error {
+		nudgeSent = true
+		return nil
+	}
+
+	// Verification should return quickly since marker exists
+	opts := hookHealthOpts{
+		TownRoot:   townRoot,
+		SessionID:  session,
+		PollDelay:  100 * time.Millisecond,
+		MaxRetries: 2,
+		SendNudge:  sendNudge,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		verifyHookHealth(opts)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Completed
+	case <-time.After(5 * time.Second):
+		t.Fatal("verifyHookHealth did not return within 5s when marker was present")
+	}
+
+	if nudgeSent {
+		t.Error("nudge was sent even though ready marker was present")
+	}
+}
+
+func TestVerifyHookHealth_MarkerMissing(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	session := "rig001-polecat-bravo"
+
+	nudgeCount := 0
+	sendNudge := func() error {
+		nudgeCount++
+		return nil
+	}
+
+	opts := hookHealthOpts{
+		TownRoot:   townRoot,
+		SessionID:  session,
+		PollDelay:  100 * time.Millisecond,
+		MaxRetries: 2,
+		SendNudge:  sendNudge,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		verifyHookHealth(opts)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Completed
+	case <-time.After(5 * time.Second):
+		t.Fatal("verifyHookHealth did not return within 5s")
+	}
+
+	if nudgeCount == 0 {
+		t.Error("no nudge sent when ready marker was missing — expected recovery nudge")
+	}
+}
+
+func TestVerifyHookHealth_MarkerAppearsMidPoll(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	session := "rig001-polecat-charlie"
+
+	nudgeCount := 0
+	sendNudge := func() error {
+		nudgeCount++
+		return nil
+	}
+
+	opts := hookHealthOpts{
+		TownRoot:   townRoot,
+		SessionID:  session,
+		PollDelay:  150 * time.Millisecond,
+		MaxRetries: 5,
+		SendNudge:  sendNudge,
+	}
+
+	// Write the marker after a short delay (simulates hook finishing mid-poll)
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		_ = WriteReadyMarker(townRoot, session)
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		verifyHookHealth(opts)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Completed
+	case <-time.After(5 * time.Second):
+		t.Fatal("verifyHookHealth did not return within 5s")
+	}
+
+	// Should have sent at least 1 nudge (before marker appeared) but not all 5
+	if nudgeCount == 0 {
+		t.Error("expected at least 1 nudge before marker appeared")
+	}
+	if nudgeCount >= 5 {
+		t.Errorf("sent %d nudges — marker should have stopped polling early", nudgeCount)
+	}
+}
+
+func TestVerifyHookHealth_NudgeError(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	session := "rig001-polecat-delta"
+
+	nudgeCount := 0
+	sendNudge := func() error {
+		nudgeCount++
+		return fmt.Errorf("tmux send-keys failed")
+	}
+
+	opts := hookHealthOpts{
+		TownRoot:   townRoot,
+		SessionID:  session,
+		PollDelay:  100 * time.Millisecond,
+		MaxRetries: 3,
+		SendNudge:  sendNudge,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		verifyHookHealth(opts)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Completed
+	case <-time.After(5 * time.Second):
+		t.Fatal("verifyHookHealth did not return within 5s")
+	}
+
+	// Should bail after first nudge error, not retry all 3
+	if nudgeCount != 1 {
+		t.Errorf("nudgeCount = %d, want 1 (should bail on first error)", nudgeCount)
+	}
+}

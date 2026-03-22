@@ -2316,8 +2316,9 @@ func (d *Daemon) killIdlePolecat(rigName, polecatName, sessionName string, idleD
 		return
 	}
 
-	// Clean up heartbeat file
+	// Clean up heartbeat and ready marker files
 	polecat.RemoveSessionHeartbeat(d.config.TownRoot, sessionName)
+	polecat.RemoveReadyMarker(d.config.TownRoot, sessionName)
 
 	d.logger.Printf("Reaped idle polecat %s/%s — session killed, API slot freed", rigName, polecatName)
 
