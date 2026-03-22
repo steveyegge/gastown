@@ -1428,6 +1428,13 @@ func withRoleSettingsFlag(rc *RuntimeConfig, role, rigPath string) *RuntimeConfi
 		return rc
 	}
 
+	// Guard against double-adding (ResolveRoleAgentConfig already calls this)
+	for _, arg := range rc.Args {
+		if arg == "--settings" {
+			return rc
+		}
+	}
+
 	settingsDir := RoleSettingsDir(role, rigPath)
 	if settingsDir == "" {
 		return rc
@@ -2311,6 +2318,13 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 			}
 		}
 	}
+
+	// Ensure Claude agents get --settings when their settings directory
+	// differs from the session working directory. This must run for ALL
+	// resolution paths (including agent overrides) — previously only the
+	// non-override ResolveRoleAgentConfig path included it, causing hooks
+	// to silently not fire for polecats launched with --agent.
+	rc = withRoleSettingsFlag(rc, role, rigPath)
 
 	// Apply exec wrapper from rig/town settings if not already set on the resolved config.
 	if len(rc.ExecWrapper) == 0 {
