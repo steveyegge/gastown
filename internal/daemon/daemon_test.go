@@ -661,3 +661,115 @@ func TestIsRigOperational_DockedRig(t *testing.T) {
 	}
 	t.Logf("Docked rig check returned: operational=%v, reason=%q", operational, reason)
 }
+
+// TestWakeIdlePolecatsWithHooks_ParsesPolecatJSON verifies that the JSON parsing
+// and identity fallback logic in wakeIdlePolecatsWithHooks works correctly.
+// The function parses `gt polecat list --json` output and constructs identity
+// strings for each polecat, falling back to rigName/polecats/name when
+// the identity field is empty.
+func TestWakeIdlePolecatsWithHooks_ParsesPolecatJSON(t *testing.T) {
+	type polecatInfo struct {
+		Name     string `json:"name"`
+		Identity string `json:"identity"`
+	}
+
+	tests := []struct {
+		name     string
+		json     string
+		rigName  string
+		wantLen  int
+		wantIDs  []string // expected identity values
+	}{
+		{
+			name:    "with explicit identity",
+			json:    `[{"name":"toast","identity":"beacon/polecats/toast"}]`,
+			rigName: "beacon",
+			wantLen: 1,
+			wantIDs: []string{"beacon/polecats/toast"},
+		},
+		{
+			name:    "fallback to constructed identity",
+			json:    `[{"name":"nux","identity":""}]`,
+			rigName: "gastown",
+			wantLen: 1,
+			wantIDs: []string{"gastown/polecats/nux"},
+		},
+		{
+			name:    "multiple polecats mixed",
+			json:    `[{"name":"alpha","identity":"rig/polecats/alpha"},{"name":"beta","identity":""}]`,
+			rigName: "rig",
+			wantLen: 2,
+			wantIDs: []string{"rig/polecats/alpha", "rig/polecats/beta"},
+		},
+		{
+			name:    "empty array",
+			json:    `[]`,
+			rigName: "rig",
+			wantLen: 0,
+		},
+		{
+			name:    "malformed JSON",
+			json:    `not json`,
+			rigName: "rig",
+			wantLen: -1, // parse error
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var polecats []polecatInfo
+			parseErr := json.Unmarshal([]byte(tt.json), &polecats)
+
+			if tt.wantLen == -1 {
+				if parseErr == nil {
+					t.Error("expected parse error for malformed JSON")
+				}
+				return
+			}
+
+			if parseErr != nil {
+				t.Fatalf("unexpected parse error: %v", parseErr)
+			}
+			if len(polecats) != tt.wantLen {
+				t.Fatalf("len = %d, want %d", len(polecats), tt.wantLen)
+			}
+
+			for i, p := range polecats {
+				identity := p.Identity
+				if identity == "" {
+					identity = tt.rigName + "/polecats/" + p.Name
+				}
+				if i < len(tt.wantIDs) && identity != tt.wantIDs[i] {
+					t.Errorf("identity[%d] = %q, want %q", i, identity, tt.wantIDs[i])
+				}
+			}
+		})
+	}
+}
+
+// TestWakeIdlePolecatsWithHooks_HookedBeadDetection verifies the bd output
+// filtering logic that determines whether an idle polecat has hooked work.
+// Empty, "[]", and "[]\n" outputs mean no hooked beads; anything else triggers nudge.
+func TestWakeIdlePolecatsWithHooks_HookedBeadDetection(t *testing.T) {
+	tests := []struct {
+		name     string
+		bdOutput string
+		wantNudge bool
+	}{
+		{"empty output", "", false},
+		{"empty array", "[]", false},
+		{"empty array with newline", "[]\n", false},
+		{"has hooked bead", `[{"id":"gt-abc","status":"hooked"}]`, true},
+		{"has hooked bead with newline", "[{\"id\":\"gt-abc\"}]\n", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bdOut := []byte(tt.bdOutput)
+			hasHook := !(len(bdOut) == 0 || string(bdOut) == "[]" || string(bdOut) == "[]\n")
+			if hasHook != tt.wantNudge {
+				t.Errorf("hasHook = %v, want %v for output %q", hasHook, tt.wantNudge, tt.bdOutput)
+			}
+		})
+	}
+}

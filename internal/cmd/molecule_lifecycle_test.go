@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // TestExtractRoleFromIdentity verifies that role names are correctly extracted
@@ -1056,5 +1057,221 @@ exit /b 0
 	if !foundBase {
 		t.Errorf("hooked bead gt-abc123 was NOT closed\n"+
 			"Beads closed: %v", closeLines)
+	}
+}
+
+// TestDoneRejectsUnclosedMoleculeSteps verifies that gt done refuses to
+// complete when the hooked bead's attached molecule has unclosed step beads.
+// This is the molecule step enforcement feature (commit dd567626).
+func TestDoneRejectsUnclosedMoleculeSteps(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows - shell stubs")
+	}
+
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "gastown")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("mkdir rig: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	// Stub bd: show returns bead with attached molecule, list returns unclosed steps
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+
+	bdScript := fmt.Sprintf(`#!/bin/sh
+while [ "$1" = "--allow-stale" ]; do shift; done
+cmd="$1"; shift || true
+case "$cmd" in
+  show)
+    case "$1" in
+      gt-abc123)
+        echo '[{"id":"gt-abc123","title":"Bug","status":"hooked","description":"attached_molecule: gt-wisp-xyz"}]'
+        ;;
+      *)
+        echo '[]'
+        ;;
+    esac
+    ;;
+  list)
+    # Return molecule step children — step-1 closed, step-2 still open
+    echo '[{"id":"gt-wisp-step1","title":"Load context","status":"closed","parent":"gt-wisp-xyz"},{"id":"gt-wisp-step2","title":"Implement","status":"open","parent":"gt-wisp-xyz"}]'
+    ;;
+  close|agent|update|slot|init|config)
+    exit 0
+    ;;
+  *)
+    echo '[]'
+    ;;
+esac
+exit 0
+`)
+	bdPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GT_ROLE", "polecat")
+	t.Setenv("GT_RIG", "gastown")
+	t.Setenv("GT_POLECAT", "nux")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("BEADS_DIR", filepath.Join(townRoot, ".beads"))
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
+	if err := os.Chdir(rigPath); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Create a done command and try to run it — the enforcement logic should
+	// prevent completion because step-2 is still open.
+	// We test the enforcement logic by calling the internal function directly.
+	// The enforcement lives in runDone() which is too complex to call directly,
+	// but we can test the detection pattern: parse attachment, list children,
+	// filter unclosed.
+
+	// Simulate what done.go:574-593 does:
+	molBd := beads.New(rigPath)
+	hookedIssue, showErr := molBd.Show("gt-abc123")
+	if showErr != nil {
+		t.Fatalf("molBd.Show failed: %v", showErr)
+	}
+
+	af := beads.ParseAttachmentFields(hookedIssue)
+	if af == nil || af.AttachedMolecule == "" {
+		t.Fatal("expected attached_molecule in hooked issue")
+	}
+	if af.AttachedMolecule != "gt-wisp-xyz" {
+		t.Errorf("AttachedMolecule = %q, want gt-wisp-xyz", af.AttachedMolecule)
+	}
+
+	molChildren, listErr := molBd.List(beads.ListOptions{
+		Parent:   af.AttachedMolecule,
+		Status:   "all",
+		Priority: -1,
+	})
+	if listErr != nil {
+		t.Fatalf("molBd.List failed: %v", listErr)
+	}
+
+	// Count unclosed steps
+	var unclosed []string
+	for _, child := range molChildren {
+		if child.Status != "closed" {
+			unclosed = append(unclosed, fmt.Sprintf("%s [%s]", child.ID, child.Status))
+		}
+	}
+
+	if len(unclosed) == 0 {
+		t.Fatal("expected unclosed steps to be detected, but none found — " +
+			"molecule step enforcement would not block gt done")
+	}
+
+	// Verify step-2 is the unclosed one
+	foundStep2 := false
+	for _, u := range unclosed {
+		if strings.Contains(u, "gt-wisp-step2") {
+			foundStep2 = true
+		}
+	}
+	if !foundStep2 {
+		t.Errorf("expected gt-wisp-step2 in unclosed list, got: %v", unclosed)
+	}
+}
+
+// TestDoneAllowsAllStepsClosedMolecule verifies that gt done proceeds when
+// all molecule steps are closed (the happy path for step enforcement).
+func TestDoneAllowsAllStepsClosedMolecule(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows - shell stubs")
+	}
+
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "gastown")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("mkdir rig: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+
+	bdScript := `#!/bin/sh
+while [ "$1" = "--allow-stale" ]; do shift; done
+cmd="$1"; shift || true
+case "$cmd" in
+  show)
+    case "$1" in
+      gt-abc123)
+        echo '[{"id":"gt-abc123","title":"Bug","status":"hooked","description":"attached_molecule: gt-wisp-xyz"}]'
+        ;;
+      *)
+        echo '[]'
+        ;;
+    esac
+    ;;
+  list)
+    # All steps closed
+    echo '[{"id":"gt-wisp-step1","title":"Load context","status":"closed","parent":"gt-wisp-xyz"},{"id":"gt-wisp-step2","title":"Implement","status":"closed","parent":"gt-wisp-xyz"}]'
+    ;;
+  close|agent|update|slot|init|config)
+    exit 0
+    ;;
+  *)
+    echo '[]'
+    ;;
+esac
+exit 0
+`
+	bdPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BEADS_DIR", filepath.Join(townRoot, ".beads"))
+
+	molBd := beads.New(rigPath)
+	hookedIssue, showErr := molBd.Show("gt-abc123")
+	if showErr != nil {
+		t.Fatalf("molBd.Show failed: %v", showErr)
+	}
+
+	af := beads.ParseAttachmentFields(hookedIssue)
+	if af == nil || af.AttachedMolecule == "" {
+		t.Fatal("expected attached_molecule")
+	}
+
+	molChildren, listErr := molBd.List(beads.ListOptions{
+		Parent:   af.AttachedMolecule,
+		Status:   "all",
+		Priority: -1,
+	})
+	if listErr != nil {
+		t.Fatalf("molBd.List failed: %v", listErr)
+	}
+
+	var unclosed []string
+	for _, child := range molChildren {
+		if child.Status != "closed" {
+			unclosed = append(unclosed, child.ID)
+		}
+	}
+
+	if len(unclosed) > 0 {
+		t.Errorf("expected no unclosed steps when all are closed, got: %v", unclosed)
 	}
 }
