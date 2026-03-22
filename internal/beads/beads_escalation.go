@@ -2,12 +2,14 @@
 package beads
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	beadsdk "github.com/steveyegge/beads"
 )
 
 // EscalationFields holds structured fields for escalation beads.
@@ -168,37 +170,33 @@ func (b *Beads) CreateEscalationBead(title string, fields *EscalationFields) (*I
 
 	description := FormatEscalationDescription(title, fields)
 
-	args := []string{"create", "--json",
-		"--title=" + title,
-		"--description=" + description,
-		"--type=task",
-		"--ephemeral",
-		"--wisp-type=escalation",
-		"--labels=gt:escalation",
-	}
-
+	labels := []string{"gt:escalation"}
 	// Add severity as a label for easy filtering
 	if fields != nil && fields.Severity != "" {
-		args = append(args, fmt.Sprintf("--labels=severity:%s", fields.Severity))
+		labels = append(labels, fmt.Sprintf("severity:%s", fields.Severity))
 	}
 
-	// Default actor from BD_ACTOR env var for provenance tracking
-	// Uses getActor() to respect isolated mode (tests)
-	if actor := b.getActor(); actor != "" {
-		args = append(args, "--actor="+actor)
-	}
-
-	out, err := b.run(args...)
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var issue Issue
-	if err := json.Unmarshal(out, &issue); err != nil {
-		return nil, fmt.Errorf("parsing bd create output: %w", err)
+	actor := b.getActor()
+	mi := &beadsdk.Issue{
+		Title:       title,
+		Description: description,
+		IssueType:   "task",
+		Labels:      labels,
+		Ephemeral:   true,
+		WispType:    "escalation",
+		CreatedBy:   actor,
+	}
+	if err := store.CreateIssue(ctx, mi, actor); err != nil {
+		return nil, err
 	}
 
-	return &issue, nil
+	return issueFromModule(mi), nil
 }
 
 // AckEscalation acknowledges an escalation bead.
@@ -260,8 +258,7 @@ func (b *Beads) CloseEscalation(id, closedBy, reason string) error {
 	}
 
 	// Close the issue
-	_, err = b.run("close", id, "--reason="+reason)
-	return err
+	return b.CloseWithReason(reason, id)
 }
 
 // GetEscalationBead retrieves an escalation bead by ID.
@@ -285,37 +282,28 @@ func (b *Beads) GetEscalationBead(id string) (*Issue, *EscalationFields, error) 
 
 // ListEscalations returns all open escalation beads.
 func (b *Beads) ListEscalations() ([]*Issue, error) {
-	out, err := b.run("list", "--label=gt:escalation", "--status=open", "--json")
-	if err != nil {
-		return nil, err
-	}
-
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
-	}
-
-	return issues, nil
+	return b.List(ListOptions{
+		Label:    "gt:escalation",
+		Priority: -1,
+	})
 }
 
 // ListEscalationsBySeverity returns open escalation beads filtered by severity.
 func (b *Beads) ListEscalationsBySeverity(severity string) ([]*Issue, error) {
-	out, err := b.run("list",
-		"--label=gt:escalation",
-		"--label=severity:"+severity,
-		"--status=open",
-		"--json",
-	)
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
+	openStatus := beadsdk.StatusOpen
+	mis, err := store.SearchIssues(ctx, "", beadsdk.IssueFilter{
+		Labels: []string{"gt:escalation", "severity:" + severity},
+		Status: &openStatus,
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	return issues, nil
+	return issuesFromModule(mis), nil
 }
 
 // ListStaleEscalations returns escalations older than the given threshold.

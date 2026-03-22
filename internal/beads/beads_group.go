@@ -3,7 +3,6 @@
 package beads
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -156,32 +155,12 @@ func (b *Beads) CreateGroupBead(name string, fields *GroupFields) (*Issue, error
 
 	description := FormatGroupDescription(title, fields)
 
-	args := []string{"create", "--json",
-		"--id=" + id,
-		"--title=" + title,
-		"--description=" + description,
-		"--type=task", // Groups use task type with gt:group label
-		"--labels=gt:group",
-		"--force", // Override prefix check (town beads may have mixed prefixes)
-	}
-
-	// Default actor from BD_ACTOR env var for provenance tracking
-	// Uses getActor() to respect isolated mode (tests)
-	if actor := b.getActor(); actor != "" {
-		args = append(args, "--actor="+actor)
-	}
-
-	out, err := b.run(args...)
-	if err != nil {
-		return nil, err
-	}
-
-	var issue Issue
-	if err := json.Unmarshal(out, &issue); err != nil {
-		return nil, fmt.Errorf("parsing bd create output: %w", err)
-	}
-
-	return &issue, nil
+	return b.CreateWithID(id, CreateOptions{
+		Title:       title,
+		Description: description,
+		Type:        "task",
+		Labels:      []string{"gt:group"},
+	})
 }
 
 // GetGroupByName retrieves a group bead by name.
@@ -313,20 +292,17 @@ func (b *Beads) RemoveGroupMember(name string, member string) (*Issue, error) {
 // DeleteGroupBead permanently deletes a group bead.
 func (b *Beads) DeleteGroupBead(name string) error {
 	id := GroupBeadID(name)
-	_, err := b.run("delete", id, "--hard", "--force")
-	return err
+	return b.Delete(id)
 }
 
 // ListGroupBeads returns all group beads.
 func (b *Beads) ListGroupBeads() (map[string]*GroupFields, error) {
-	out, err := b.run("list", "--label=gt:group", "--json")
+	issues, err := b.List(ListOptions{
+		Label:    "gt:group",
+		Priority: -1,
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
 	}
 
 	result := make(map[string]*GroupFields, len(issues))

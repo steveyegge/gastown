@@ -214,40 +214,16 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 
 	description := FormatAgentDescription(title, fields)
 
-	buildArgs := func() []string {
-		a := []string{"create", "--json",
-			"--id=" + id,
-			"--title=" + title,
-			"--description=" + description,
-			"--type=agent",
-			"--labels=gt:agent",
-		}
-		if NeedsForceForID(id) {
-			a = append(a, "--force")
-		}
-		// Default actor from BD_ACTOR env var for provenance tracking
-		// Uses getActor() to respect isolated mode (tests)
-		if actor := b.getActor(); actor != "" {
-			a = append(a, "--actor="+actor)
-		}
-		return a
-	}
-
 	// Create agent bead in the issues table. Agent beads are durable
 	// identities that must survive wisp GC (GH#2768).
-	out, err := b.run(buildArgs()...)
+	result, err := b.CreateWithID(id, CreateOptions{
+		Title:       title,
+		Description: description,
+		Type:        "agent",
+		Labels:      []string{"gt:agent"},
+	})
 	if err != nil {
-		out, err = b.run(buildArgs()...)
-		if err != nil {
-			// Both bd create attempts failed. Dolt server is required —
-			// no JSONL fallback. Surface the error directly.
-			return nil, fmt.Errorf("creating %s: bd create failed: %w", id, err)
-		}
-	}
-
-	var issue Issue
-	if err := json.Unmarshal(out, &issue); err != nil {
-		return nil, fmt.Errorf("parsing bd create output: %w", err)
+		return nil, fmt.Errorf("creating %s: %w", id, err)
 	}
 
 	// Note: role slot no longer set - role definitions are config-based
@@ -262,7 +238,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		}
 	}
 
-	return &issue, nil
+	return result, nil
 }
 
 // CreateOrReopenAgentBead creates an agent bead or reopens an existing one.
@@ -626,17 +602,16 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 func (b *Beads) ListAgentBeads() (map[string]*Issue, error) {
 	// Query issues table first. Issues include labels and type metadata used by
 	// doctor checks (for example, validating gt:agent labels).
-	// Agent beads are type=agent (infrastructure), hidden by bd list default filter.
-	// Use --include-infra so they appear in results.
-	out, err := b.run("list", "--label=gt:agent", "--include-infra", "--json", "--flat", "--no-pager")
+	// Agent beads are type=agent (infrastructure); the storage API returns them
+	// without any infra-hiding filter.
+	issues, err := b.List(ListOptions{
+		Label:    "gt:agent",
+		Priority: -1,
+	})
 	if err != nil {
 		return nil, err
 	}
-	issuesByID := make(map[string]*Issue)
-	var issues []*Issue
-	if jsonErr := json.Unmarshal(out, &issues); jsonErr != nil {
-		return nil, fmt.Errorf("parsing bd list --json output: %w (raw output %d bytes)", jsonErr, len(out))
-	}
+	issuesByID := make(map[string]*Issue, len(issues))
 	for _, issue := range issues {
 		issuesByID[issue.ID] = issue
 	}

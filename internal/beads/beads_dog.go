@@ -2,7 +2,6 @@
 package beads
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -22,32 +21,12 @@ func (b *Beads) CreateDogAgentBead(name, location string) (*Issue, error) {
 
 	description := formatDogDescription(name, location)
 
-	args := []string{
-		"create", "--json",
-		"--id=" + beadID,
-		"--type=agent",
-		"--title=" + title,
-		"--description=" + description,
-		"--labels=" + strings.Join(labels, ","),
-	}
-
-	// Default actor from BD_ACTOR env var for provenance tracking
-	// Uses getActor() to respect isolated mode (tests)
-	if actor := b.getActor(); actor != "" {
-		args = append(args, "--actor="+actor)
-	}
-
-	out, err := b.run(args...)
-	if err != nil {
-		return nil, err
-	}
-
-	var issue Issue
-	if err := json.Unmarshal(out, &issue); err != nil {
-		return nil, fmt.Errorf("parsing bd create output: %w", err)
-	}
-
-	return &issue, nil
+	return b.CreateWithID(beadID, CreateOptions{
+		Title:       title,
+		Description: description,
+		Type:        "agent",
+		Labels:      labels,
+	})
 }
 
 // FindDogAgentBead finds the agent bead for a dog by name.

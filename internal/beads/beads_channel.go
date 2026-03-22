@@ -3,12 +3,14 @@
 package beads
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	beadsdk "github.com/steveyegge/beads"
 )
 
 // ChannelFields holds structured fields for channel beads.
@@ -151,32 +153,12 @@ func (b *Beads) CreateChannelBead(name string, subscribers []string, createdBy s
 
 	description := FormatChannelDescription(title, fields)
 
-	args := []string{"create", "--json",
-		"--id=" + id,
-		"--title=" + title,
-		"--description=" + description,
-		"--type=task", // Channels use task type with gt:channel label
-		"--labels=gt:channel",
-		"--force", // Override prefix check (town beads may have mixed prefixes)
-	}
-
-	// Default actor from BD_ACTOR env var for provenance tracking
-	// Uses getActor() to respect isolated mode (tests)
-	if actor := b.getActor(); actor != "" {
-		args = append(args, "--actor="+actor)
-	}
-
-	out, err := b.run(args...)
-	if err != nil {
-		return nil, err
-	}
-
-	var issue Issue
-	if err := json.Unmarshal(out, &issue); err != nil {
-		return nil, fmt.Errorf("parsing bd create output: %w", err)
-	}
-
-	return &issue, nil
+	return b.CreateWithID(id, CreateOptions{
+		Title:       title,
+		Description: description,
+		Type:        "task",
+		Labels:      []string{"gt:channel"},
+	})
 }
 
 // GetChannelBead retrieves a channel bead by name.
@@ -322,20 +304,17 @@ func (b *Beads) UpdateChannelStatus(name, status string) error {
 // DeleteChannelBead permanently deletes a channel bead.
 func (b *Beads) DeleteChannelBead(name string) error {
 	id := ChannelBeadID(name)
-	_, err := b.run("delete", id, "--hard", "--force")
-	return err
+	return b.Delete(id)
 }
 
 // ListChannelBeads returns all channel beads.
 func (b *Beads) ListChannelBeads() (map[string]*ChannelFields, error) {
-	out, err := b.run("list", "--label=gt:channel", "--json")
+	issues, err := b.List(ListOptions{
+		Label:    "gt:channel",
+		Priority: -1,
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
 	}
 
 	result := make(map[string]*ChannelFields, len(issues))
@@ -399,23 +378,28 @@ func (b *Beads) EnforceChannelRetention(name string) error {
 	}
 
 	// Query messages in this channel (oldest first)
-	out, err := b.run("list",
-		"--label=gt:message",
-		"--label=channel:"+name,
-		"--json",
-		"--limit=0",
-		"--sort=created",
-	)
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
 		return fmt.Errorf("listing channel messages: %w", err)
 	}
 
-	var messages []struct {
-		ID        string `json:"id"`
-		CreatedAt string `json:"created_at"`
+	openStatus := beadsdk.StatusOpen
+	mis, err := store.SearchIssues(ctx, "", beadsdk.IssueFilter{
+		Labels: []string{"gt:message", "channel:" + name},
+		Status: &openStatus,
+	})
+	if err != nil {
+		return fmt.Errorf("listing channel messages: %w", err)
 	}
-	if err := json.Unmarshal(out, &messages); err != nil {
-		return fmt.Errorf("parsing channel messages: %w", err)
+
+	type msgEntry struct {
+		ID        string
+		CreatedAt time.Time
+	}
+	messages := make([]msgEntry, 0, len(mis))
+	for _, mi := range mis {
+		messages = append(messages, msgEntry{ID: mi.ID, CreatedAt: mi.CreatedAt})
 	}
 
 	// Track which messages to delete (use map to avoid duplicates)
@@ -425,11 +409,7 @@ func (b *Beads) EnforceChannelRetention(name string) error {
 	if fields.RetentionHours > 0 {
 		cutoff := time.Now().Add(-time.Duration(fields.RetentionHours) * time.Hour)
 		for _, msg := range messages {
-			createdAt, err := time.Parse(time.RFC3339, msg.CreatedAt)
-			if err != nil {
-				continue // Skip messages with unparseable timestamps
-			}
-			if createdAt.Before(cutoff) {
+			if msg.CreatedAt.Before(cutoff) {
 				toDeleteIDs[msg.ID] = true
 			}
 		}
@@ -444,9 +424,10 @@ func (b *Beads) EnforceChannelRetention(name string) error {
 	}
 
 	// Delete marked messages (best-effort)
+	actor := b.getActor()
 	for id := range toDeleteIDs {
 		// Use close instead of delete for audit trail
-		_, _ = b.run("close", id, "--reason=channel retention pruning")
+		_ = store.CloseIssue(ctx, id, "channel retention pruning", actor, "")
 	}
 
 	return nil
@@ -462,6 +443,14 @@ func (b *Beads) PruneAllChannels() (int, error) {
 		return 0, err
 	}
 
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
+	if err != nil {
+		return 0, err
+	}
+	actor := b.getActor()
+	openStatus := beadsdk.StatusOpen
+
 	pruned := 0
 	for name, fields := range channels {
 		// Skip if no retention limits configured
@@ -470,23 +459,21 @@ func (b *Beads) PruneAllChannels() (int, error) {
 		}
 
 		// Get messages with timestamps
-		out, err := b.run("list",
-			"--label=gt:message",
-			"--label=channel:"+name,
-			"--json",
-			"--limit=0",
-			"--sort=created",
-		)
+		mis, err := store.SearchIssues(ctx, "", beadsdk.IssueFilter{
+			Labels: []string{"gt:message", "channel:" + name},
+			Status: &openStatus,
+		})
 		if err != nil {
 			continue // Skip on error
 		}
 
-		var messages []struct {
-			ID        string `json:"id"`
-			CreatedAt string `json:"created_at"`
+		type msgEntry struct {
+			ID        string
+			CreatedAt time.Time
 		}
-		if err := json.Unmarshal(out, &messages); err != nil {
-			continue
+		messages := make([]msgEntry, 0, len(mis))
+		for _, mi := range mis {
+			messages = append(messages, msgEntry{ID: mi.ID, CreatedAt: mi.CreatedAt})
 		}
 
 		// Track which messages to delete (use map to avoid duplicates)
@@ -496,11 +483,7 @@ func (b *Beads) PruneAllChannels() (int, error) {
 		if fields.RetentionHours > 0 {
 			cutoff := time.Now().Add(-time.Duration(fields.RetentionHours) * time.Hour)
 			for _, msg := range messages {
-				createdAt, err := time.Parse(time.RFC3339, msg.CreatedAt)
-				if err != nil {
-					continue // Skip messages with unparseable timestamps
-				}
-				if createdAt.Before(cutoff) {
+				if msg.CreatedAt.Before(cutoff) {
 					toDeleteIDs[msg.ID] = true
 				}
 			}
@@ -519,7 +502,7 @@ func (b *Beads) PruneAllChannels() (int, error) {
 
 		// Delete marked messages
 		for id := range toDeleteIDs {
-			if _, err := b.run("close", id, "--reason=patrol retention pruning"); err == nil {
+			if err := store.CloseIssue(ctx, id, "patrol retention pruning", actor, ""); err == nil {
 				pruned++
 			}
 		}

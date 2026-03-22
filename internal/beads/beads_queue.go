@@ -2,7 +2,6 @@
 package beads
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -175,31 +174,12 @@ func (b *Beads) CreateQueueBead(id, title string, fields *QueueFields) (*Issue, 
 
 	description := FormatQueueDescription(title, fields)
 
-	args := []string{"create", "--json",
-		"--id=" + id,
-		"--title=" + title,
-		"--description=" + description,
-		"--type=queue",
-		"--labels=gt:queue",
-	}
-
-	// Default actor from BD_ACTOR env var for provenance tracking
-	// Uses getActor() to respect isolated mode (tests)
-	if actor := b.getActor(); actor != "" {
-		args = append(args, "--actor="+actor)
-	}
-
-	out, err := b.run(args...)
-	if err != nil {
-		return nil, err
-	}
-
-	var issue Issue
-	if err := json.Unmarshal(out, &issue); err != nil {
-		return nil, fmt.Errorf("parsing bd create output: %w", err)
-	}
-
-	return &issue, nil
+	return b.CreateWithID(id, CreateOptions{
+		Title:       title,
+		Description: description,
+		Type:        "queue",
+		Labels:      []string{"gt:queue"},
+	})
 }
 
 // GetQueueBead retrieves a queue bead by ID.
@@ -272,14 +252,12 @@ func (b *Beads) UpdateQueueStatus(id, status string) error {
 
 // ListQueueBeads returns all queue beads.
 func (b *Beads) ListQueueBeads() (map[string]*Issue, error) {
-	out, err := b.run("list", "--label=gt:queue", "--json")
+	issues, err := b.List(ListOptions{
+		Label:    "gt:queue",
+		Priority: -1,
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
 	}
 
 	result := make(map[string]*Issue, len(issues))
@@ -293,8 +271,7 @@ func (b *Beads) ListQueueBeads() (map[string]*Issue, error) {
 // DeleteQueueBead permanently deletes a queue bead.
 // Uses --hard --force for immediate permanent deletion (no tombstone).
 func (b *Beads) DeleteQueueBead(id string) error {
-	_, err := b.run("delete", id, "--hard", "--force")
-	return err
+	return b.Delete(id)
 }
 
 // LookupQueueByName finds a queue by its name field (not by ID).

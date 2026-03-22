@@ -2,7 +2,6 @@
 package beads
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -144,33 +143,11 @@ func (b *Beads) CreateRigBead(name string, fields *RigFields) (*Issue, error) {
 	id := RigBeadIDWithPrefix(prefix, name)
 	description := FormatRigDescription(name, fields)
 
-	args := []string{"create", "--json",
-		"--id=" + id,
-		"--title=" + name,
-		"--description=" + description,
-		"--labels=gt:rig",
-	}
-	if NeedsForceForID(id) {
-		args = append(args, "--force")
-	}
-
-	// Default actor from BD_ACTOR env var for provenance tracking
-	// Uses getActor() to respect isolated mode (tests)
-	if actor := b.getActor(); actor != "" {
-		args = append(args, "--actor="+actor)
-	}
-
-	out, err := b.run(args...)
-	if err != nil {
-		return nil, err
-	}
-
-	var issue Issue
-	if err := json.Unmarshal(out, &issue); err != nil {
-		return nil, fmt.Errorf("parsing bd create output: %w", err)
-	}
-
-	return &issue, nil
+	return b.CreateWithID(id, CreateOptions{
+		Title:       name,
+		Description: description,
+		Labels:      []string{"gt:rig"},
+	})
 }
 
 // GetRigBead retrieves a rig bead by name.
@@ -238,23 +215,17 @@ func (b *Beads) UpdateRigBead(name string, fields *RigFields) (*Issue, error) {
 // DeleteRigBead permanently deletes a rig bead.
 func (b *Beads) DeleteRigBead(name string) error {
 	id := RigBeadID(name)
-	_, err := b.run("delete", id, "--hard", "--force")
-	return err
+	return b.Delete(id)
 }
 
 // ListRigBeads returns all rig beads.
 func (b *Beads) ListRigBeads() (map[string]*RigFields, error) {
-	out, err := b.run("list", "--label=gt:rig", "--json")
+	issues, err := b.List(ListOptions{
+		Label:    "gt:rig",
+		Priority: -1,
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	if !isJSONBytes(out) {
-		return nil, nil
-	}
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
 	}
 
 	result := make(map[string]*RigFields, len(issues))
