@@ -52,18 +52,53 @@ func TestWitnessPatrolHasReconcileStep(t *testing.T) {
 		t.Error("reconcile-idle description must reference ReconcileIdlePolecats function")
 	}
 
-	// check-timer-gates must now depend on reconcile-idle (not survey-workers)
+	// detect-reverts step must exist and depend on reconcile-idle
+	var detectRevertsStep *Step
+	for i := range f.Steps {
+		if f.Steps[i].ID == "detect-reverts" {
+			detectRevertsStep = &f.Steps[i]
+			break
+		}
+	}
+	if detectRevertsStep == nil {
+		t.Fatal("witness patrol formula missing 'detect-reverts' step")
+	}
+
+	hasReconcileDep := false
+	for _, dep := range detectRevertsStep.Needs {
+		if dep == "reconcile-idle" {
+			hasReconcileDep = true
+			break
+		}
+	}
+	if !hasReconcileDep {
+		t.Error("detect-reverts step must depend on 'reconcile-idle'")
+	}
+
+	// Description must mention key concepts
+	revertDesc := detectRevertsStep.Description
+	if !strings.Contains(revertDesc, "Revert") {
+		t.Error("detect-reverts description must mention Revert commits")
+	}
+	if !strings.Contains(revertDesc, "reopen") || !strings.Contains(revertDesc, "bead") {
+		t.Error("detect-reverts description must mention reopening beads")
+	}
+	if !strings.Contains(revertDesc, "thrash") {
+		t.Error("detect-reverts description must mention thrash detection")
+	}
+
+	// check-timer-gates must now depend on detect-reverts (not directly on reconcile-idle)
 	for i := range f.Steps {
 		if f.Steps[i].ID == "check-timer-gates" {
-			hasReconcileDep := false
+			hasDetectRevertsDep := false
 			for _, dep := range f.Steps[i].Needs {
-				if dep == "reconcile-idle" {
-					hasReconcileDep = true
+				if dep == "detect-reverts" {
+					hasDetectRevertsDep = true
 					break
 				}
 			}
-			if !hasReconcileDep {
-				t.Error("check-timer-gates must depend on 'reconcile-idle' (not directly on survey-workers)")
+			if !hasDetectRevertsDep {
+				t.Error("check-timer-gates must depend on 'detect-reverts' (not directly on reconcile-idle)")
 			}
 			break
 		}
