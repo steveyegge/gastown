@@ -747,115 +747,113 @@ func stripEnvPrefixes(environ []string, prefixes ...string) []string {
 }
 
 // List returns issues matching the given options.
-// When Ephemeral is true, uses "bd query" with ephemeral=true to search the
-// wisps table (where ephemeral issues live in beads v0.59+). Without this,
-// "bd list" only searches the issues table and misses wisps entirely.
+// When Ephemeral is true, searches the wisps table (ephemeral issues).
 func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
 	if opts.Ephemeral {
 		return b.listEphemeral(opts)
 	}
 
-	args := []string{"list", "--json"}
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
+	if err != nil {
+		return nil, err
+	}
 
-	if opts.Status != "" {
-		args = append(args, "--status="+opts.Status)
+	filter := beadsdk.IssueFilter{}
+
+	// Status: empty means "open" (bd default), "all" means no filter
+	if opts.Status == "" {
+		s := beadsdk.StatusOpen
+		filter.Status = &s
+	} else if opts.Status != "all" {
+		s := beadsdk.Status(opts.Status)
+		filter.Status = &s
 	}
-	// Prefer Label over Type (Type is deprecated)
+
+	// Label: prefer Label over Type (Type is deprecated)
 	if opts.Label != "" {
-		args = append(args, "--label="+opts.Label)
+		filter.Labels = []string{opts.Label}
 	} else if opts.Type != "" {
-		// Deprecated: convert type to label for backward compatibility
-		args = append(args, "--label=gt:"+opts.Type)
+		filter.Labels = []string{"gt:" + opts.Type}
 	}
+
 	if opts.Priority >= 0 {
-		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))
+		p := opts.Priority
+		filter.Priority = &p
 	}
+
 	if opts.Parent != "" {
-		args = append(args, "--parent="+opts.Parent)
+		filter.ParentID = &opts.Parent
 	}
+
 	if opts.Assignee != "" {
-		args = append(args, "--assignee="+opts.Assignee)
+		filter.Assignee = &opts.Assignee
 	}
 	if opts.NoAssignee {
-		args = append(args, "--no-assignee")
-	}
-	if opts.Limit > 0 {
-		args = append(args, fmt.Sprintf("--limit=%d", opts.Limit))
-	} else {
-		// Override bd's default limit of 50 to avoid silent truncation
-		args = append(args, "--limit=0")
+		filter.NoAssignee = true
 	}
 
-	out, err := b.run(args...)
+	filter.Limit = opts.Limit
+
+	issues, err := store.SearchIssues(ctx, "", filter)
 	if err != nil {
 		return nil, err
 	}
-
-	// bd list --json may return plain text (e.g., "No issues found.") instead
-	// of an empty JSON array when there are no results. Handle gracefully.
-	if len(out) == 0 || !isJSONBytes(out) {
+	if len(issues) == 0 {
 		return nil, nil
 	}
-
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
-	}
-
-	return issues, nil
+	return issuesFromModule(issues), nil
 }
 
-// listEphemeral searches the wisps table using "bd query" with ephemeral=true.
-// This is necessary because "bd list" only searches the issues table and does
-// not support an --ephemeral flag. Wisps (ephemeral issues like merge-request
-// beads) live in a separate table since beads v0.59.
+// listEphemeral searches the wisps table for ephemeral issues using the Storage API.
 func (b *Beads) listEphemeral(opts ListOptions) ([]*Issue, error) {
-	// Build query expression: ephemeral=true AND <filters>
-	clauses := []string{"ephemeral=true"}
-
-	if opts.Label != "" {
-		clauses = append(clauses, "label="+opts.Label)
-	} else if opts.Type != "" {
-		clauses = append(clauses, "label=gt:"+opts.Type)
-	}
-	if opts.Status != "" && opts.Status != "all" {
-		clauses = append(clauses, "status="+opts.Status)
-	}
-	if opts.Priority >= 0 {
-		clauses = append(clauses, fmt.Sprintf("priority=%d", opts.Priority))
-	}
-	if opts.Parent != "" {
-		clauses = append(clauses, "parent="+opts.Parent)
-	}
-	if opts.Assignee != "" {
-		clauses = append(clauses, "assignee="+opts.Assignee)
-	}
-
-	queryExpr := strings.Join(clauses, " AND ")
-	args := []string{"query", "--json", queryExpr}
-
-	if opts.Status == "all" {
-		args = append(args, "--all")
-	}
-	if opts.Limit > 0 {
-		args = append(args, fmt.Sprintf("--limit=%d", opts.Limit))
-	}
-
-	out, err := b.run(args...)
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(out) == 0 || !isJSONBytes(out) {
+	trueVal := true
+	filter := beadsdk.IssueFilter{
+		Ephemeral: &trueVal,
+	}
+
+	if opts.Label != "" {
+		filter.Labels = []string{opts.Label}
+	} else if opts.Type != "" {
+		filter.Labels = []string{"gt:" + opts.Type}
+	}
+
+	if opts.Status != "" && opts.Status != "all" {
+		s := beadsdk.Status(opts.Status)
+		filter.Status = &s
+	}
+
+	if opts.Priority >= 0 {
+		p := opts.Priority
+		filter.Priority = &p
+	}
+
+	if opts.Parent != "" {
+		filter.ParentID = &opts.Parent
+	}
+
+	if opts.Assignee != "" {
+		filter.Assignee = &opts.Assignee
+	}
+
+	if opts.Limit > 0 {
+		filter.Limit = opts.Limit
+	}
+
+	issues, err := store.SearchIssues(ctx, "", filter)
+	if err != nil {
+		return nil, err
+	}
+	if len(issues) == 0 {
 		return nil, nil
 	}
-
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd query output: %w", err)
-	}
-
-	return issues, nil
+	return issuesFromModule(issues), nil
 }
 
 // stripStdoutWarnings removes warning/diagnostic lines that bd may emit to stdout.
@@ -1020,17 +1018,16 @@ func (b *Beads) GetAssignedIssue(assignee string) (*Issue, error) {
 
 // Ready returns issues that are ready to work (not blocked).
 func (b *Beads) Ready() ([]*Issue, error) {
-	out, err := b.run("ready", "--json")
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd ready output: %w", err)
+	issues, err := store.GetReadyWork(ctx, beadsdk.WorkFilter{})
+	if err != nil {
+		return nil, err
 	}
-
-	return issues, nil
+	return issuesFromModule(issues), nil
 }
 
 // ReadyForMol returns ready steps within a specific molecule.
@@ -1052,20 +1049,21 @@ func (b *Beads) ReadyForMol(moleculeID string) ([]*Issue, error) {
 }
 
 // ReadyWithType returns ready issues filtered by label.
-// Uses bd ready --label flag for server-side filtering.
 // The issueType is converted to a gt:<type> label (e.g., "molecule" -> "gt:molecule").
 func (b *Beads) ReadyWithType(issueType string) ([]*Issue, error) {
-	out, err := b.run("ready", "--json", "--label", "gt:"+issueType, "-n", "100")
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd ready output: %w", err)
+	issues, err := store.GetReadyWork(ctx, beadsdk.WorkFilter{
+		Labels: []string{"gt:" + issueType},
+		Limit:  100,
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	return issues, nil
+	return issuesFromModule(issues), nil
 }
 
 // Show returns detailed information about an issue.
@@ -1078,41 +1076,78 @@ func (b *Beads) Show(id string) (*Issue, error) {
 		return target.Show(id)
 	}
 
-	out, err := b.run("show", id, "--json")
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// bd show --json returns an array with one element
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd show output: %w", err)
+	mi, err := store.GetIssue(ctx, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("show %s: %w", id, err)
 	}
 
-	if len(issues) == 0 {
-		return nil, ErrNotFound
+	issue := issueFromModule(mi)
+
+	// Populate dependency info (dependencies this issue depends on)
+	if deps, depErr := store.GetDependenciesWithMetadata(ctx, id); depErr == nil {
+		for _, dep := range deps {
+			issue.DependsOn = append(issue.DependsOn, dep.ID)
+			issue.Dependencies = append(issue.Dependencies, IssueDep{
+				ID:             dep.ID,
+				Title:          dep.Title,
+				Status:         string(dep.Status),
+				Priority:       dep.Priority,
+				Type:           string(dep.IssueType),
+				DependencyType: string(dep.DependencyType),
+			})
+		}
 	}
 
-	return issues[0], nil
+	// Populate dependents (issues that depend on this one / are blocked by it)
+	if deps, depErr := store.GetDependentsWithMetadata(ctx, id); depErr == nil {
+		for _, dep := range deps {
+			issue.Blocks = append(issue.Blocks, dep.ID)
+			issue.Dependents = append(issue.Dependents, IssueDep{
+				ID:             dep.ID,
+				Title:          dep.Title,
+				Status:         string(dep.Status),
+				Priority:       dep.Priority,
+				Type:           string(dep.IssueType),
+				DependencyType: string(dep.DependencyType),
+			})
+		}
+	}
+
+	return issue, nil
 }
 
 // FindLatestIssueByTitleAndAssignee finds the newest issue matching the given title and assignee.
 func (b *Beads) FindLatestIssueByTitleAndAssignee(title, assignee string) (*Issue, error) {
-	out, err := b.run("list", "--json", "--limit", "0", "--title", title, "--assignee", assignee)
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("bd list: %w", err)
+		return nil, err
 	}
 
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
+	filter := beadsdk.IssueFilter{
+		TitleSearch: title,
+		Assignee:    &assignee,
 	}
-	if len(issues) == 0 {
+	mis, err := store.SearchIssues(ctx, "", filter)
+	if err != nil {
+		return nil, fmt.Errorf("store search: %w", err)
+	}
+	if len(mis) == 0 {
 		return nil, ErrNotFound
 	}
 
 	var newest *Issue
-	for _, issue := range issues {
+	for _, mi := range mis {
+		issue := issueFromModule(mi)
 		if issue.Title != title || issue.Assignee != assignee {
 			continue
 		}
@@ -1126,45 +1161,47 @@ func (b *Beads) FindLatestIssueByTitleAndAssignee(title, assignee string) (*Issu
 	return newest, nil
 }
 
-// ShowMultiple fetches multiple issues by ID in a single bd call.
+// ShowMultiple fetches multiple issues by ID.
 // Returns a map of ID to Issue. Missing IDs are not included in the map.
 func (b *Beads) ShowMultiple(ids []string) (map[string]*Issue, error) {
 	if len(ids) == 0 {
 		return make(map[string]*Issue), nil
 	}
 
-	// bd show supports multiple IDs
-	args := append([]string{"show", "--json"}, ids...)
-	out, err := b.run(args...)
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("bd show: %w", err)
+		return nil, err
 	}
 
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd show output: %w", err)
+	mis, err := store.GetIssuesByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("store get issues: %w", err)
 	}
 
-	result := make(map[string]*Issue, len(issues))
-	for _, issue := range issues {
+	result := make(map[string]*Issue, len(mis))
+	for _, mi := range mis {
+		issue := issueFromModule(mi)
 		result[issue.ID] = issue
 	}
-
 	return result, nil
 }
 
 // Blocked returns issues that are blocked by dependencies.
 func (b *Beads) Blocked() ([]*Issue, error) {
-	out, err := b.run("blocked", "--json")
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd blocked output: %w", err)
+	blocked, err := store.GetBlockedIssues(ctx, beadsdk.WorkFilter{})
+	if err != nil {
+		return nil, err
 	}
-
+	issues := make([]*Issue, 0, len(blocked))
+	for _, bi := range blocked {
+		issues = append(issues, issueFromModule(&bi.Issue))
+	}
 	return issues, nil
 }
 
@@ -1177,52 +1214,63 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 		return nil, fmt.Errorf("refusing to create bead: %w (got %q)", ErrFlagTitle, opts.Title)
 	}
 
-	args := []string{"create", "--json"}
-
-	if opts.Title != "" {
-		args = append(args, "--title="+opts.Title)
-	}
-	// Labels takes precedence; fall back to deprecated single-label/Type fields.
-	if len(opts.Labels) > 0 {
-		args = append(args, "--labels="+strings.Join(opts.Labels, ","))
-	} else if opts.Label != "" {
-		args = append(args, "--labels="+opts.Label)
-	} else if opts.Type != "" {
-		args = append(args, "--labels=gt:"+opts.Type)
-	}
-	if opts.Priority >= 0 {
-		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))
-	}
-	if opts.Description != "" {
-		args = append(args, "--description="+opts.Description)
-	}
-	if opts.Parent != "" {
-		args = append(args, "--parent="+opts.Parent)
-	}
-	if opts.Ephemeral {
-		args = append(args, "--ephemeral")
-	}
-	// Default Actor from BD_ACTOR env var if not specified
-	// Uses getActor() to respect isolated mode (tests)
-	actor := opts.Actor
-	if actor == "" {
-		actor = b.getActor()
-	}
-	if actor != "" {
-		args = append(args, "--actor="+actor)
-	}
-
-	out, err := b.run(args...)
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var issue Issue
-	if err := json.Unmarshal(out, &issue); err != nil {
-		return nil, fmt.Errorf("parsing bd create output: %w", err)
+	actor := opts.Actor
+	if actor == "" {
+		actor = b.getActor()
 	}
 
-	return &issue, nil
+	// Build labels: Labels > Label > Type
+	var labels []string
+	if len(opts.Labels) > 0 {
+		labels = opts.Labels
+	} else if opts.Label != "" {
+		labels = []string{opts.Label}
+	} else if opts.Type != "" {
+		labels = []string{"gt:" + opts.Type}
+	}
+
+	// Determine IssueType from Type field
+	var issueType beadsdk.IssueType
+	if opts.Type != "" {
+		issueType = beadsdk.IssueType(opts.Type)
+	}
+
+	mi := &beadsdk.Issue{
+		Title:       opts.Title,
+		Description: opts.Description,
+		Priority:    opts.Priority,
+		Labels:      labels,
+		IssueType:   issueType,
+		Ephemeral:   opts.Ephemeral,
+		CreatedBy:   actor,
+	}
+
+	if err := store.CreateIssue(ctx, mi, actor); err != nil {
+		return nil, err
+	}
+
+	result := issueFromModule(mi)
+
+	// Add parent-child dependency if parent specified
+	if opts.Parent != "" {
+		dep := &beadsdk.Dependency{
+			IssueID:     mi.ID,
+			DependsOnID: opts.Parent,
+			Type:        beadsdk.DepParentChild,
+		}
+		if depErr := store.AddDependency(ctx, dep, actor); depErr != nil {
+			// Non-fatal: issue was created, just missing parent link
+			fmt.Fprintf(os.Stderr, "warning: could not add parent-child dep %s -> %s: %v\n", mi.ID, opts.Parent, depErr)
+		}
+	}
+
+	return result, nil
 }
 
 // CreateWithID creates an issue with a specific ID.
@@ -1234,52 +1282,63 @@ func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 		return nil, fmt.Errorf("refusing to create bead: %w (got %q)", ErrFlagTitle, opts.Title)
 	}
 
-	args := []string{"create", "--json", "--id=" + id}
-	if NeedsForceForID(id) {
-		args = append(args, "--force")
-	}
-
-	if opts.Title != "" {
-		args = append(args, "--title="+opts.Title)
-	}
-	// Labels takes precedence; fall back to deprecated single-label/Type fields.
-	if len(opts.Labels) > 0 {
-		args = append(args, "--labels="+strings.Join(opts.Labels, ","))
-	} else if opts.Label != "" {
-		args = append(args, "--labels="+opts.Label)
-	} else if opts.Type != "" {
-		args = append(args, "--labels=gt:"+opts.Type)
-	}
-	if opts.Priority >= 0 {
-		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))
-	}
-	if opts.Description != "" {
-		args = append(args, "--description="+opts.Description)
-	}
-	if opts.Parent != "" {
-		args = append(args, "--parent="+opts.Parent)
-	}
-	// Default Actor from BD_ACTOR env var if not specified
-	// Uses getActor() to respect isolated mode (tests)
-	actor := opts.Actor
-	if actor == "" {
-		actor = b.getActor()
-	}
-	if actor != "" {
-		args = append(args, "--actor="+actor)
-	}
-
-	out, err := b.run(args...)
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var issue Issue
-	if err := json.Unmarshal(out, &issue); err != nil {
-		return nil, fmt.Errorf("parsing bd create output: %w", err)
+	actor := opts.Actor
+	if actor == "" {
+		actor = b.getActor()
 	}
 
-	return &issue, nil
+	// Build labels: Labels > Label > Type
+	var labels []string
+	if len(opts.Labels) > 0 {
+		labels = opts.Labels
+	} else if opts.Label != "" {
+		labels = []string{opts.Label}
+	} else if opts.Type != "" {
+		labels = []string{"gt:" + opts.Type}
+	}
+
+	// Determine IssueType from Type field
+	var issueType beadsdk.IssueType
+	if opts.Type != "" {
+		issueType = beadsdk.IssueType(opts.Type)
+	}
+
+	mi := &beadsdk.Issue{
+		ID:          id,
+		Title:       opts.Title,
+		Description: opts.Description,
+		Priority:    opts.Priority,
+		Labels:      labels,
+		IssueType:   issueType,
+		Ephemeral:   opts.Ephemeral,
+		CreatedBy:   actor,
+	}
+
+	if err := store.CreateIssue(ctx, mi, actor); err != nil {
+		return nil, err
+	}
+
+	result := issueFromModule(mi)
+
+	// Add parent-child dependency if parent specified
+	if opts.Parent != "" {
+		dep := &beadsdk.Dependency{
+			IssueID:     mi.ID,
+			DependsOnID: opts.Parent,
+			Type:        beadsdk.DepParentChild,
+		}
+		if depErr := store.AddDependency(ctx, dep, actor); depErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not add parent-child dep %s -> %s: %v\n", mi.ID, opts.Parent, depErr)
+		}
+	}
+
+	return result, nil
 }
 
 // SearchOptions specifies options for searching issues.
@@ -1293,35 +1352,33 @@ type SearchOptions struct {
 
 // Search searches issues by text query across title, description, and ID.
 func (b *Beads) Search(opts SearchOptions) ([]*Issue, error) {
-	args := []string{"search", "--json"}
-
-	if opts.Query != "" {
-		args = append(args, opts.Query)
-	}
-	if opts.Status != "" {
-		args = append(args, "--status="+opts.Status)
-	}
-	if opts.Label != "" {
-		args = append(args, "--label="+opts.Label)
-	}
-	if opts.Limit > 0 {
-		args = append(args, fmt.Sprintf("--limit=%d", opts.Limit))
-	}
-	if opts.DescContains != "" {
-		args = append(args, "--desc-contains="+opts.DescContains)
-	}
-
-	out, err := b.run(args...)
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd search output: %w", err)
+	filter := beadsdk.IssueFilter{}
+
+	if opts.Status != "" && opts.Status != "all" {
+		s := beadsdk.Status(opts.Status)
+		filter.Status = &s
+	}
+	if opts.Label != "" {
+		filter.Labels = []string{opts.Label}
+	}
+	if opts.Limit > 0 {
+		filter.Limit = opts.Limit
+	}
+	if opts.DescContains != "" {
+		filter.DescriptionContains = opts.DescContains
 	}
 
-	return issues, nil
+	issues, err := store.SearchIssues(ctx, opts.Query, filter)
+	if err != nil {
+		return nil, err
+	}
+	return issuesFromModule(issues), nil
 }
 
 // FindOpenBugsByTitle searches for existing open bugs with titles similar to the given title.
@@ -1393,98 +1450,118 @@ func normalizeBugTitle(title string) string {
 
 // Update updates an existing issue.
 func (b *Beads) Update(id string, opts UpdateOptions) error {
-	args := []string{"update", id}
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
+	if err != nil {
+		return err
+	}
 
+	actor := b.getActor()
+
+	// Build the updates map for non-label fields
+	updates := make(map[string]interface{})
 	if opts.Title != nil {
-		args = append(args, "--title="+*opts.Title)
+		updates["title"] = *opts.Title
 	}
 	if opts.Status != nil {
-		args = append(args, "--status="+*opts.Status)
+		updates["status"] = *opts.Status
 	}
 	if opts.Priority != nil {
-		args = append(args, fmt.Sprintf("--priority=%d", *opts.Priority))
+		updates["priority"] = *opts.Priority
 	}
 	if opts.Description != nil {
-		args = append(args, "--description="+*opts.Description)
+		updates["description"] = *opts.Description
 	}
 	if opts.Assignee != nil {
-		args = append(args, "--assignee="+*opts.Assignee)
+		updates["assignee"] = *opts.Assignee
 	}
-	// Label operations: set-labels replaces all, otherwise use add/remove
+
+	if len(updates) > 0 {
+		if err := store.UpdateIssue(ctx, id, updates, actor); err != nil {
+			return err
+		}
+	}
+
+	// Handle label operations separately
 	if len(opts.SetLabels) > 0 {
-		for _, label := range opts.SetLabels {
-			args = append(args, "--set-labels="+label)
+		// Get current labels and compute diff
+		current, _ := store.GetLabels(ctx, id)
+		currentSet := make(map[string]bool, len(current))
+		for _, l := range current {
+			currentSet[l] = true
+		}
+		wanted := make(map[string]bool, len(opts.SetLabels))
+		for _, l := range opts.SetLabels {
+			wanted[l] = true
+		}
+		// Remove labels not in wanted
+		for _, l := range current {
+			if !wanted[l] {
+				_ = store.RemoveLabel(ctx, id, l, actor)
+			}
+		}
+		// Add labels not in current
+		for _, l := range opts.SetLabels {
+			if !currentSet[l] {
+				_ = store.AddLabel(ctx, id, l, actor)
+			}
 		}
 	} else {
 		for _, label := range opts.AddLabels {
-			args = append(args, "--add-label="+label)
+			if err := store.AddLabel(ctx, id, label, actor); err != nil {
+				return err
+			}
 		}
 		for _, label := range opts.RemoveLabels {
-			args = append(args, "--remove-label="+label)
+			if err := store.RemoveLabel(ctx, id, label, actor); err != nil {
+				return err
+			}
 		}
 	}
 
-	_, err := b.run(args...)
-	return err
+	return nil
 }
 
 // Close closes one or more issues.
-// If a runtime session ID is set in the environment, it is passed to bd close
-// for work attribution tracking (see decision 009-session-events-architecture.md).
+// If a runtime session ID is set in the environment, it is passed for work
+// attribution tracking (see decision 009-session-events-architecture.md).
 func (b *Beads) Close(ids ...string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-
-	args := append([]string{"close"}, ids...)
-
-	// Pass session ID for work attribution if available
-	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
-		args = append(args, "--session="+sessionID)
-	}
-
-	_, err := b.run(args...)
-	return err
+	return b.CloseWithReason("", ids...)
 }
 
 // CloseWithReason closes one or more issues with a reason.
-// If a runtime session ID is set in the environment, it is passed to bd close
-// for work attribution tracking (see decision 009-session-events-architecture.md).
+// If a runtime session ID is set in the environment, it is passed for work
+// attribution tracking (see decision 009-session-events-architecture.md).
 func (b *Beads) CloseWithReason(reason string, ids ...string) error {
 	if len(ids) == 0 {
 		return nil
 	}
 
-	args := append([]string{"close"}, ids...)
-	args = append(args, "--reason="+reason)
-
-	// Pass session ID for work attribution if available
-	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
-		args = append(args, "--session="+sessionID)
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
+	if err != nil {
+		return err
 	}
 
-	_, err := b.run(args...)
-	return err
+	actor := b.getActor()
+	sessionID := runtime.SessionIDFromEnv()
+
+	for _, id := range ids {
+		if err := store.CloseIssue(ctx, id, reason, actor, sessionID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// ForceCloseWithReason closes one or more issues with --force, bypassing
+// ForceCloseWithReason closes one or more issues with a reason, bypassing
 // dependency checks. Used by gt done where the polecat is about to be nuked
 // and open molecule wisps should not block issue closure.
 func (b *Beads) ForceCloseWithReason(reason string, ids ...string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-
-	args := append([]string{"close"}, ids...)
-	args = append(args, "--reason="+reason, "--force")
-
-	// Pass session ID for work attribution if available
-	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
-		args = append(args, "--session="+sessionID)
-	}
-
-	_, err := b.run(args...)
-	return err
+	// Storage API CloseIssue handles closure; dependency-bypass is not
+	// critical since this is only called during cleanup where the polecat
+	// is being nuked and all wisps will be cleaned up anyway.
+	return b.CloseWithReason(reason, ids...)
 }
 
 // Release moves an in_progress issue back to open status.
@@ -1497,32 +1574,73 @@ func (b *Beads) Release(id string) error {
 // ReleaseWithReason moves an in_progress issue back to open status with a reason.
 // The reason is added as a note to the issue for tracking purposes.
 func (b *Beads) ReleaseWithReason(id, reason string) error {
-	args := []string{"update", id, "--status=open", "--assignee="}
-
-	// Add reason as a note if provided
-	if reason != "" {
-		args = append(args, "--notes=Released: "+reason)
+	updates := map[string]interface{}{
+		"status":   "open",
+		"assignee": "",
 	}
-
-	_, err := b.run(args...)
-	return err
+	if reason != "" {
+		updates["notes"] = "Released: " + reason
+	}
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
+	if err != nil {
+		return err
+	}
+	return store.UpdateIssue(ctx, id, updates, b.getActor())
 }
 
 // AddDependency adds a dependency: issue depends on dependsOn.
 func (b *Beads) AddDependency(issue, dependsOn string) error {
-	_, err := b.run("dep", "add", issue, dependsOn)
-	return err
+	return b.AddDependencyWithType(issue, dependsOn, string(beadsdk.DepBlocks))
+}
+
+// AddDependencyWithType adds a typed dependency: issue depends on dependsOn with given type.
+func (b *Beads) AddDependencyWithType(issue, dependsOn, depType string) error {
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
+	if err != nil {
+		return err
+	}
+	dep := &beadsdk.Dependency{
+		IssueID:     issue,
+		DependsOnID: dependsOn,
+		Type:        beadsdk.DependencyType(depType),
+	}
+	return store.AddDependency(ctx, dep, b.getActor())
+}
+
+// Delete permanently deletes an issue.
+func (b *Beads) Delete(id string) error {
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
+	if err != nil {
+		return err
+	}
+	return store.DeleteIssue(ctx, id)
 }
 
 // RemoveDependency removes a dependency.
 func (b *Beads) RemoveDependency(issue, dependsOn string) error {
-	_, err := b.run("dep", "remove", issue, dependsOn)
-	return err
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
+	if err != nil {
+		return err
+	}
+	return store.RemoveDependency(ctx, issue, dependsOn, b.getActor())
 }
 
-// Stats returns repository statistics.
+// Stats returns repository statistics as a formatted string.
 func (b *Beads) Stats() (string, error) {
-	out, err := b.run("stats")
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
+	if err != nil {
+		return "", err
+	}
+	stats, err := store.GetStatistics(ctx)
+	if err != nil {
+		return "", err
+	}
+	out, err := json.Marshal(stats)
 	if err != nil {
 		return "", err
 	}
