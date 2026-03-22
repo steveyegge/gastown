@@ -135,6 +135,7 @@ var (
 	slingFormula       string // --formula: override formula for dispatch (default: mol-polecat-work)
 	slingCrew          string // --crew: target a crew member in the specified rig
 	slingReviewOnly    bool   // --review-only: mark work as review-only (no merge/commit/push)
+	slingDirect        bool   // --direct: bypass scheduler, force immediate dispatch
 )
 
 func init() {
@@ -163,6 +164,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingFormula, "formula", "", "Formula to apply (default: mol-polecat-work for polecat targets)")
 	slingCmd.Flags().StringVar(&slingCrew, "crew", "", "Target a crew member in the specified rig (e.g., --crew mel with target gastown → gastown/crew/mel)")
 	slingCmd.Flags().BoolVar(&slingReviewOnly, "review-only", false, "Mark work as review-only: assignee evaluates and reports back, must NOT merge/commit/push")
+	slingCmd.Flags().BoolVar(&slingDirect, "direct", false, "Bypass scheduler, force immediate dispatch (used by convoy/mountain dispatch)")
 
 	slingCmd.AddCommand(slingRespawnResetCmd)
 	rootCmd.AddCommand(slingCmd)
@@ -300,9 +302,15 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 	// Config-driven dispatch mode: check scheduler.max_polecats
-	deferred, deferErr := shouldDeferDispatch()
-	if deferErr != nil {
-		return deferErr
+	// --direct bypasses the scheduler entirely (used by convoy/mountain dispatch
+	// which already controls concurrency via waves).
+	deferred := false
+	if !slingDirect {
+		var deferErr error
+		deferred, deferErr = shouldDeferDispatch()
+		if deferErr != nil {
+			return deferErr
+		}
 	}
 
 	// Batch mode detection: multiple beads with optional rig target

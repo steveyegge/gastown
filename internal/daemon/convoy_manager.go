@@ -460,7 +460,7 @@ func (m *ConvoyManager) feedFirstReady(c strandedConvoyInfo) {
 
 		m.logger("Convoy %s: feeding %s to %s", c.ID, issueID, rig)
 
-		slingArgs := []string{"sling", issueID, rig, "--no-boot"}
+		slingArgs := []string{"sling", issueID, rig, "--no-boot", "--direct"}
 		if c.BaseBranch != "" {
 			slingArgs = append(slingArgs, "--base-branch="+c.BaseBranch)
 		}

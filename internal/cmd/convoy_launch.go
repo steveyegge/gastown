@@ -26,12 +26,12 @@ type DispatchResult struct {
 // In production, this delegates to gt sling. Tests override this variable
 // with a stub to avoid spawning real processes.
 var dispatchTaskDirect = func(townRoot, beadID, rig string) error {
-	cmd := exec.Command("gt", "sling", beadID, rig)
+	cmd := exec.Command("gt", "sling", beadID, rig, "--direct")
 	cmd.Dir = townRoot
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("gt sling %s %s: %w\nstderr: %s", beadID, rig, err, strings.TrimSpace(stderr.String()))
+		return fmt.Errorf("gt sling %s %s --direct: %w\nstderr: %s", beadID, rig, err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }
