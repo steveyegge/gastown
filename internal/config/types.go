@@ -102,6 +102,16 @@ type TownSettings struct {
 	// These were previously hardcoded as Go constants throughout the codebase.
 	// All values are optional — omitted values use compiled-in defaults.
 	Operational *OperationalConfig `json:"operational,omitempty"`
+
+	// DisabledPatrols lists patrol names to disable at the town level.
+	// This provides a simple way to turn off individual daemon patrol dogs
+	// without editing mayor/daemon.json. Patrol names match the keys used
+	// in daemon.json patrols section (e.g., "deacon", "witness", "refinery",
+	// "doctor_dog", "compactor_dog", "checkpoint_dog", "wisp_reaper",
+	// "dolt_remotes", "dolt_backup", "jsonl_git_backup", "scheduled_maintenance",
+	// "main_branch_test", "handler").
+	// Example: ["doctor_dog", "compactor_dog"]
+	DisabledPatrols []string `json:"disabled_patrols,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.

@@ -346,6 +346,38 @@ func GetPatrolRigs(config *DaemonPatrolConfig, patrol string) []string {
 	return nil // All rigs
 }
 
+// loadDisabledPatrolsFromTownSettings loads the disabled_patrols list from
+// town settings (settings/config.json) as a set for O(1) lookup.
+func loadDisabledPatrolsFromTownSettings(townRoot string) map[string]bool {
+	settingsPath := filepath.Join(townRoot, "settings", "config.json")
+	data, err := os.ReadFile(settingsPath) //nolint:gosec // G304: path constructed internally
+	if err != nil {
+		return nil
+	}
+	var raw struct {
+		DisabledPatrols []string `json:"disabled_patrols"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil || len(raw.DisabledPatrols) == 0 {
+		return nil
+	}
+	disabled := make(map[string]bool, len(raw.DisabledPatrols))
+	for _, p := range raw.DisabledPatrols {
+		disabled[p] = true
+	}
+	return disabled
+}
+
+// isPatrolActive checks whether a patrol should run, combining the
+// daemon patrol config (mayor/daemon.json) with the town-level
+// disabled_patrols list (settings/config.json). A patrol is active
+// only if it is enabled in daemon config AND not in the disabled list.
+func (d *Daemon) isPatrolActive(patrol string) bool {
+	if d.disabledPatrols[patrol] {
+		return false
+	}
+	return IsPatrolEnabled(d.patrolConfig, patrol)
+}
+
 // LifecycleAction represents a lifecycle request action.
 type LifecycleAction string
 

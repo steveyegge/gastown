@@ -54,7 +54,7 @@ var runtimeExcludeDirs = []string{
 // compactor_dog's SQL operations). The daemon pours a molecule for
 // observability, then runs git commands via exec.Command.
 func (d *Daemon) runCheckpointDog() {
-	if !IsPatrolEnabled(d.patrolConfig, "checkpoint_dog") {
+	if !d.isPatrolActive("checkpoint_dog") {
 		return
 	}
 
