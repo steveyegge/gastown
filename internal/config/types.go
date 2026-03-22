@@ -1250,6 +1250,14 @@ type MergeQueueConfig struct {
 	// StaleClaimTimeout is how long a claimed MR can go without updates before
 	// being considered abandoned and eligible for re-claim (e.g., "30m").
 	StaleClaimTimeout string `json:"stale_claim_timeout,omitempty"`
+
+	// PeerReviewEnabled controls whether peer review is required before merge.
+	// Set to "true" to enable. Empty or any other value means disabled.
+	PeerReviewEnabled string `json:"peer_review_enabled,omitempty"`
+
+	// PeerReviewFormula is the formula used for peer review.
+	// Defaults to "mol-peer-review-gate" when peer review is enabled.
+	PeerReviewFormula string `json:"peer_review_formula,omitempty"`
 }
 
 // OnConflict strategy constants.

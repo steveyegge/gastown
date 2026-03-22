@@ -361,6 +361,12 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 		if local.StaleClaimTimeout != "" {
 			result.StaleClaimTimeout = local.StaleClaimTimeout
 		}
+		if local.PeerReviewEnabled != "" {
+			result.PeerReviewEnabled = local.PeerReviewEnabled
+		}
+		if local.PeerReviewFormula != "" {
+			result.PeerReviewFormula = local.PeerReviewFormula
+		}
 	}
 	return result
 }

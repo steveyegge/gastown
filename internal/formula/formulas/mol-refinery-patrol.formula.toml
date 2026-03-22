@@ -67,6 +67,9 @@ source of truth.
 | judgment_enabled | false | Enable quality review for merges (true/false) |
 | review_depth | standard | Review depth: quick, standard, or deep |
 | merge_strategy | direct | Merge strategy: 'direct' (ff-only merge+push) or 'pr' (GitHub PR) |
+| peer_review_enabled | false | Require peer review before merge (true/false) |
+| peer_review_formula | mol-peer-review-gate | Formula for peer review |
+| peer_review_fail_mode | open | Behavior on review timeout: 'open' or 'closed' |
 
 ## Target Resolution Rule
 
@@ -87,7 +90,7 @@ resolve that placeholder with this rule:
 You MUST process steps in strict DAG order. Walk through each step sequentially,
 unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 12
+version = 13
 
 [vars]
 [vars.wisp_type]
@@ -145,6 +148,18 @@ default = "standard"
 [vars.merge_strategy]
 description = "Merge strategy: 'direct' (ff-only merge + push) or 'pr' (create GitHub PR). Default: direct."
 default = "direct"
+
+[vars.peer_review_enabled]
+description = "Require peer review before merge (true/false)"
+default = "false"
+
+[vars.peer_review_formula]
+description = "Formula for peer review (default: mol-peer-review-gate)"
+default = "mol-peer-review-gate"
+
+[vars.peer_review_fail_mode]
+description = "Behavior on review timeout: 'open' (proceed to merge) or 'closed' (treat as failure)"
+default = "open"
 
 [[steps]]
 id = "inbox-check"
@@ -388,16 +403,56 @@ needs = ["run-tests"]
 description = """
 **Config: judgment_enabled = {{judgment_enabled}}**
 **Config: review_depth = {{review_depth}}**
+**Config: peer_review_enabled = {{peer_review_enabled}}**
+**Config: peer_review_formula = {{peer_review_formula}}**
+**Config: peer_review_fail_mode = {{peer_review_fail_mode}}**
 
-Review the merge diff for quality issues. This step is measurement-only (Phase 1):
-reviews are recorded but do NOT gate merges.
+This step handles two modes:
+1. **Self-review** (judgment_enabled=true): Refinery reviews the diff itself (measurement-only)
+2. **Peer review** (peer_review_enabled=true): Spawn a review polecat and gate on verdict
 
-**Step 1: Check if quality review is enabled**
+Both modes can be active simultaneously (self-review records metrics, peer review gates).
 
-If judgment_enabled is not "true", skip this step entirely and proceed to
-handle-failures. Log: "Quality review skipped (judgment_enabled=false)"
+## Peer Review Gate
 
-**Step 2: Get the merge diff**
+If peer_review_enabled is not "true", skip peer review entirely.
+
+**Step 1: Spawn review polecat**
+
+```bash
+gt sling {{peer_review_formula}} <rig> \\
+  --var issue=<source-issue-id> \\
+  --var branch=<polecat-branch> \\
+  --var polecat=<original-polecat-name> \\
+  --var mr_bead=<mr-bead-id> \\
+  --var rig=<rig-name>
+```
+
+**Step 2: Wait for verdict**
+
+```bash
+gt mol step await-event --channel review-<mr-bead-id> \\
+  --timeout 15m --cleanup
+```
+
+**Step 3: Process verdict**
+
+Parse the REVIEW_VERDICT event payload:
+- If verdict=PASS: Log "Peer review passed" and proceed to handle-failures
+- If verdict=FAIL: Record failure, proceed to handle-failures (which sends FIX_NEEDED)
+- If timeout: Check peer_review_fail_mode
+  - "open" (default): Log warning, proceed to merge
+  - "closed": Treat as failure, send FIX_NEEDED
+
+**Dispute handling**: If bead notes contain "DISPUTE:", this is a re-review.
+Spawn a fresh review polecat (different agent for independent perspective).
+Max 2 review rounds (original + dispute). After that, auto-PASS to prevent loops.
+
+## Self-Review (existing measurement mode)
+
+If judgment_enabled is not "true", skip self-review.
+
+**Step 1: Get the merge diff**
 
 ```bash
 git diff origin/main...temp
@@ -405,7 +460,7 @@ git diff origin/main...temp
 
 If the diff is empty, skip with: "No diff to review"
 
-**Step 3: Review the diff**
+**Step 2: Review the diff**
 
 Review the diff yourself using your judgment. Assess:
 
@@ -419,7 +474,7 @@ Depth is controlled by review_depth:
 - `standard`: All four categories. Moderate detail.
 - `deep`: Thorough line-by-line review. Flag even minor style issues.
 
-**Step 4: Score and recommend**
+**Step 3: Score and recommend**
 
 Assign a score from 0.0 to 1.0:
 - 0.9-1.0: Excellent — no issues or only trivial nits
@@ -431,7 +486,7 @@ Recommendation:
 - `approve`: Score >= 0.45
 - `request_changes`: Score < 0.45
 
-**Step 5: Record the result as a wisp**
+**Step 4: Record the result as a wisp**
 
 Record the quality review result. This is fail-open: if the command fails,
 log the error and continue — never block the merge.
@@ -443,12 +498,12 @@ bd create "quality-review: Score <score>, <recommendation>" -t chore --ephemeral
   --silent 2>/dev/null || true
 ```
 
-**Step 6: Handle breach scores (measurement-only)**
+**Step 5: Handle breach scores (measurement-only)**
 
 If score < 0.45 (breach threshold):
 - Add a note to your merge summary: "Warning: Quality review breach (score: X.XX)"
 - List the critical/major issues found
-- Do NOT block the merge — Phase 1 is measurement-only
+- Do NOT block the merge — Phase 1 self-review is measurement-only
 - Proceed to handle-failures normally
 
 Track: review score, recommendation, issue count, duration."""

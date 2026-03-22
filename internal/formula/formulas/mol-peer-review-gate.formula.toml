@@ -1,0 +1,199 @@
+description = """
+Peer review gate for merge queue.
+
+This formula is spawned by the refinery's quality-review step when peer_review_enabled=true.
+The review polecat examines a merge diff, assesses correctness and completeness against the
+original issue requirements, and emits a REVIEW_VERDICT event back to the refinery.
+
+## Polecat Contract (Self-Cleaning Model)
+
+You are a self-cleaning worker. You:
+1. Receive work via your hook (review assignment with branch/issue context)
+2. Review the diff against the original issue requirements
+3. Write verdict to the MR bead notes (durable audit trail)
+4. Emit verdict event to the refinery (fast path)
+5. Self-clean via `gt done --cleanup-status clean`
+
+**Self-cleaning:** When you run `gt done`, you nuke your sandbox and exit.
+There is no idle state. Done means gone.
+
+**You do NOT:**
+- Fix the code yourself (emit FAIL and let the original polecat fix)
+- Scope creep into unrelated issues
+- Block indefinitely (the refinery has a timeout)
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| issue | sling | Source issue being reviewed |
+| branch | sling | Polecat branch under review |
+| polecat | sling | Name of the original polecat |
+| mr_bead | sling | MR bead ID (used for event channel and notes) |
+| rig | sling | Rig name |
+| dispute | sling | "true" if this is a re-review after dispute |
+
+## Failure Modes
+
+| Situation | Action |
+|-----------|--------|
+| Branch doesn't exist | Emit PASS (nothing to review), close with note |
+| Can't understand code | Emit PASS with caveat, note limitations |
+| Critical security issue | Emit FAIL immediately, note severity |
+| Session dying | Persist findings to bead notes FIRST, then emit |"""
+formula = "mol-peer-review-gate"
+version = 1
+
+[vars]
+[vars.issue]
+description = "Source issue being reviewed"
+default = ""
+
+[vars.branch]
+description = "Polecat branch under review"
+default = ""
+
+[vars.polecat]
+description = "Name of the original polecat"
+default = ""
+
+[vars.mr_bead]
+description = "MR bead ID (event channel: review-<mr_bead>)"
+default = ""
+
+[vars.rig]
+description = "Rig name"
+default = ""
+
+[vars.dispute]
+description = "Set to 'true' if this is a re-review after dispute"
+default = "false"
+
+[[steps]]
+id = "load-review-context"
+title = "Load context and review assignment"
+description = """
+Initialize your session and understand the review assignment.
+
+**1. Prime your environment:**
+```bash
+gt prime
+bd prime
+```
+
+**2. Read the review variables:**
+- issue: {{issue}} — the original issue being reviewed
+- branch: {{branch}} — the polecat's branch to review
+- polecat: {{polecat}} — who wrote the code
+- mr_bead: {{mr_bead}} — the MR bead (for notes and event channel)
+- rig: {{rig}} — which rig
+- dispute: {{dispute}} — is this a re-review?
+
+**3. Load the original issue requirements:**
+```bash
+bd show {{issue}}
+```
+
+Read the issue title, description, and any design notes. You need to understand
+what the code was SUPPOSED to do to assess completeness.
+
+**4. If this is a dispute re-review (dispute=true):**
+Read the MR bead notes for the original review findings and the counter-evidence:
+```bash
+bd show {{mr_bead}}
+```
+Look for "PEER_REVIEW_VERDICT:" (original findings) and "DISPUTE:" (counter-evidence).
+You must consider BOTH when forming your verdict.
+
+**Exit criteria:** You understand the requirements and are ready to review the diff."""
+
+[[steps]]
+id = "review-diff"
+title = "Review the merge diff"
+description = """
+Fetch and review the code changes.
+
+**1. Fetch the branch:**
+```bash
+git fetch origin {{branch}}
+```
+
+If the branch doesn't exist, emit PASS with note "Branch not found" and skip to verdict.
+
+**2. Get the diff:**
+```bash
+git diff origin/main...origin/{{branch}}
+```
+
+**3. Review the diff against the original requirements.**
+
+Assess the following:
+
+1. **Completeness**: Does the code address all requirements in the issue?
+2. **Correctness**: Logic errors, off-by-one, nil/null handling, edge cases
+3. **Security**: Injection, auth bypass, secrets in code, unsafe deserialization
+4. **Regression risk**: Could these changes break existing functionality?
+
+**4. Classify findings:**
+
+- **CRITICAL**: Security vulnerabilities, data loss risk, correctness bugs that would cause failures
+- **MAJOR**: Missing requirements, significant logic issues, test gaps for critical paths
+- **MINOR**: Style issues, naming, non-blocking suggestions (do NOT fail for these)
+
+**5. Form verdict:**
+
+- **PASS**: No CRITICAL or MAJOR findings. Minor issues can be noted but don't block.
+- **FAIL**: One or more CRITICAL or MAJOR findings. Must include specific, actionable feedback.
+
+**Exit criteria:** Verdict formed with supporting evidence."""
+
+[[steps]]
+id = "emit-verdict"
+title = "Write verdict and emit event"
+description = """
+Record the verdict durably and notify the refinery.
+
+**1. Write verdict to MR bead notes (durable audit trail):**
+
+```bash
+bd update {{mr_bead}} --notes "PEER_REVIEW_VERDICT: <PASS|FAIL>
+Reviewer: $(hostname)-reviewer
+Issue: {{issue}}
+Branch: {{branch}}
+Polecat: {{polecat}}
+Dispute: {{dispute}}
+
+Findings:
+<list of findings with severity>
+
+Summary: <one-line summary>"
+```
+
+**CRITICAL:** Write bead notes BEFORE emitting the event. If your session dies
+between these two steps, the findings survive in the bead. The refinery can
+read bead notes as a fallback if the event is lost.
+
+**2. Emit verdict event to refinery:**
+
+For PASS:
+```bash
+gt mol step emit-event --channel review-{{mr_bead}} --type REVIEW_VERDICT \
+  --payload verdict=PASS --payload issue={{issue}} --payload branch={{branch}}
+```
+
+For FAIL:
+```bash
+gt mol step emit-event --channel review-{{mr_bead}} --type REVIEW_VERDICT \
+  --payload verdict=FAIL --payload issue={{issue}} --payload branch={{branch}} \
+  --payload findings="<summary of blocking issues>"
+```
+
+**3. Self-clean:**
+
+```bash
+gt done --cleanup-status clean
+```
+
+You are done. The refinery will process the verdict.
+
+**Exit criteria:** Verdict written to bead, event emitted, session exiting."""

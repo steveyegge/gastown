@@ -1139,6 +1139,12 @@ func loadRigCommandVars(townRoot, rig string) []string {
 	if mq.BuildCommand != "" {
 		vars = append(vars, fmt.Sprintf("build_command=%s", mq.BuildCommand))
 	}
+	if mq.PeerReviewEnabled != "" {
+		vars = append(vars, fmt.Sprintf("peer_review_enabled=%s", mq.PeerReviewEnabled))
+	}
+	if mq.PeerReviewFormula != "" {
+		vars = append(vars, fmt.Sprintf("peer_review_formula=%s", mq.PeerReviewFormula))
+	}
 	return vars
 }
 
