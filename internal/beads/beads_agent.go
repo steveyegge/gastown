@@ -416,18 +416,30 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 }
 
 // UpdateAgentState updates the agent_state field in an agent bead.
-// Uses `bd agent state` command for the database column directly.
+// Uses description field update since bd 0.62 removed the `bd agent state` command
+// and the agent_state DB column (commit 0bd598ce). The read path in GetAgentBead
+// already falls back to parsing agent_state from the description text.
 func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, nil, retErr) }()
-	// Update agent state using bd agent state command
-	// Use runWithRouting so bd can resolve cross-prefix agent beads (e.g., wa-*
-	// agent beads from hq context) via routes.jsonl instead of BEADS_DIR.
-	_, err := b.runWithRouting("agent", "state", id, state)
-	if err != nil {
-		return fmt.Errorf("updating agent state: %w", err)
+
+	// Resolve routing for cross-rig agent beads (e.g., wa-* from hq context).
+	targetDir := ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
+	target := b
+	if targetDir != b.getResolvedBeadsDir() {
+		target = NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
 	}
 
-	// Hook slot no longer maintained (hq-l6mm5) — removed hook_bead parameter.
+	issue, err := target.Show(id)
+	if err != nil {
+		return fmt.Errorf("updating agent state: show %s: %w", id, err)
+	}
+
+	fields := ParseAgentFields(issue.Description)
+	fields.AgentState = state
+	description := FormatAgentDescription(issue.Title, fields)
+	if err := target.Update(id, UpdateOptions{Description: &description}); err != nil {
+		return fmt.Errorf("updating agent state: %w", err)
+	}
 
 	return nil
 }
@@ -608,9 +620,9 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 	}
 
 	fields := ParseAgentFields(issue.Description)
-	// Prefer the structured agent_state column when present.
-	// Some writers (for example, `bd agent state`) update the DB column directly
-	// without rewriting the description text, so description-derived state can be stale.
+	// agent_state DB column was removed in bd 0.62 (commit 0bd598ce).
+	// State is now stored in the description text only.
+	// Keep column fallback for compat with older bd versions that may still populate it.
 	if issue.AgentState != "" {
 		fields.AgentState = issue.AgentState
 	}
