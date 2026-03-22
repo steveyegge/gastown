@@ -162,7 +162,7 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	// without warning the user who may be actively reading or working (gas-6z0).
 	if !handoffYes && !handoffDryRun {
 		if !promptYesNo("Ready to hand off? This will restart the session.") {
-			fmt.Println("Handoff cancelled.")
+			fmt.Println("Handoff canceled.")
 			return nil
 		}
 	}
