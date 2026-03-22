@@ -24,6 +24,8 @@ services:
       IS_SANDBOX: 1
       GIT_USER: ${GIT_USER:-TestUser}
       GIT_EMAIL: ${GIT_EMAIL:-test@example.com}
+      GT_OTEL_METRICS_URL: http://victoriametrics:8428/opentelemetry/api/v1/push
+      GT_OTEL_LOGS_URL: http://victorialogs:9428/insert/opentelemetry/v1/logs
     volumes:
       # FOLDER must be defined in .env file, e.g. FOLDER=/home/user
       # or provided as an environment variable when running docker compose,
@@ -32,9 +34,32 @@ services:
       - ${FOLDER}:/gt
     ports:
       - "${DASHBOARD_PORT:-8080}:8080"
+    depends_on:
+      - victoriametrics
+      - victorialogs
     command: sleep infinity
 
     # Exec into the container with: docker compose exec gastown zsh
 
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: victoriametrics
+    volumes:
+      - victoriametrics-data:/victoria-metrics-data
+    ports:
+      - "${VM_PORT:-8428}:8428"
+    command:
+      - "-opentsdbHTTPListenAddr=:8428"
+
+  victorialogs:
+    image: victoriametrics/victoria-logs:latest
+    container_name: victorialogs
+    volumes:
+      - victorialogs-data:/victoria-logs-data
+    ports:
+      - "${VL_PORT:-9428}:9428"
+
 volumes:
   agent-home:
+  victoriametrics-data:
+  victorialogs-data:
