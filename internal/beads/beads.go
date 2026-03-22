@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	beadsdk "github.com/steveyegge/beads"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/telemetry"
 )
@@ -308,6 +309,14 @@ type Beads struct {
 	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
 	townRoot     string
 	townRootOnce sync.Once
+
+	// Lazy-initialized Go module storage connection.
+	// Used for direct database access without spawning a bd subprocess.
+	// Protected by storeMu; storeErr caches initialization failures so
+	// repeated calls don't re-attempt failed opens.
+	store    beadsdk.Storage
+	storeMu  sync.Mutex
+	storeErr error
 }
 
 // New creates a new Beads wrapper for the given directory.
@@ -366,21 +375,104 @@ func (b *Beads) getResolvedBeadsDir() string {
 	return ResolveBeadsDir(b.workDir)
 }
 
+// openStore returns (or lazily initializes) the Go module storage connection.
+// Uses the same beadsDir resolution as b.run() so cross-database routing works.
+// Thread-safe via storeMu.
+func (b *Beads) openStore(ctx context.Context) (beadsdk.Storage, error) {
+	b.storeMu.Lock()
+	defer b.storeMu.Unlock()
+	if b.store != nil {
+		return b.store, nil
+	}
+	if b.storeErr != nil {
+		// Retry on transient failures (e.g., server starting up) by clearing
+		// cached error if store is still nil. Permanent errors (e.g., isolated
+		// mode with no database) remain cached.
+		return nil, b.storeErr
+	}
+	beadsDir := b.getResolvedBeadsDir()
+	store, err := beadsdk.OpenFromConfig(ctx, beadsDir)
+	if err != nil {
+		b.storeErr = fmt.Errorf("opening beads store at %s: %w", beadsDir, err)
+		return nil, b.storeErr
+	}
+	b.store = store
+	return store, nil
+}
+
+// CloseStore releases the Go module storage connection, if open.
+// Safe to call even if the store was never opened.
+func (b *Beads) CloseStore() error {
+	b.storeMu.Lock()
+	defer b.storeMu.Unlock()
+	if b.store != nil {
+		err := b.store.Close()
+		b.store = nil
+		b.storeErr = nil
+		return err
+	}
+	return nil
+}
+
+// issueFromModule converts a beads module Issue to the gastown Issue type.
+func issueFromModule(mi *beadsdk.Issue) *Issue {
+	if mi == nil {
+		return nil
+	}
+	issue := &Issue{
+		ID:                 mi.ID,
+		Title:              mi.Title,
+		Description:        mi.Description,
+		Status:             string(mi.Status),
+		Priority:           mi.Priority,
+		Type:               string(mi.IssueType),
+		Assignee:           mi.Assignee,
+		Labels:             mi.Labels,
+		Ephemeral:          mi.Ephemeral,
+		HookBead:           mi.HookBead,
+		AgentState:         string(mi.AgentState),
+		AcceptanceCriteria: mi.AcceptanceCriteria,
+		CreatedBy:          mi.CreatedBy,
+	}
+	if !mi.CreatedAt.IsZero() {
+		issue.CreatedAt = mi.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	if !mi.UpdatedAt.IsZero() {
+		issue.UpdatedAt = mi.UpdatedAt.UTC().Format(time.RFC3339)
+	}
+	if mi.ClosedAt != nil {
+		issue.ClosedAt = mi.ClosedAt.UTC().Format(time.RFC3339)
+	}
+	return issue
+}
+
+// issuesFromModule converts a slice of beads module Issues to gastown Issues.
+func issuesFromModule(mis []*beadsdk.Issue) []*Issue {
+	issues := make([]*Issue, 0, len(mis))
+	for _, mi := range mis {
+		if issue := issueFromModule(mi); issue != nil {
+			issues = append(issues, issue)
+		}
+	}
+	return issues
+}
+
 // Init initializes a new beads database in the working directory.
-// This uses the same environment isolation as other commands.
-// If ServerPort is set (via NewIsolatedWithPort), passes --server-port to bd init
-// so the database is created on the test Dolt server.
+// This uses the beads Go module storage API directly (no bd shell-out).
+// If ServerPort is set (via NewIsolatedWithPort), GT_DOLT_PORT is already in
+// the environment so OpenFromConfig connects to the test server automatically.
 func (b *Beads) Init(prefix string) error {
-	args := []string{"init"}
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
+	if err != nil {
+		return fmt.Errorf("init beads: %w", err)
+	}
 	if prefix != "" {
-		args = append(args, "--prefix", prefix)
+		if err := store.SetConfig(ctx, "issue_prefix", prefix); err != nil {
+			return fmt.Errorf("set issue_prefix: %w", err)
+		}
 	}
-	args = append(args, "--quiet")
-	if b.serverPort > 0 {
-		args = append(args, "--server-port", fmt.Sprintf("%d", b.serverPort))
-	}
-	_, err := b.run(args...)
-	return err
+	return nil
 }
 
 // run executes a bd command and returns stdout.

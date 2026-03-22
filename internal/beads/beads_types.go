@@ -2,17 +2,17 @@
 package beads
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
+	beadsdk "github.com/steveyegge/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 )
@@ -133,33 +133,25 @@ func EnsureCustomTypes(beadsDir string) error {
 		return fmt.Errorf("ensure database initialized: %w", err)
 	}
 
-	// Configure custom types via bd CLI
-	bdEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DB=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
-	if dbEnv := DatabaseEnv(beadsDir); dbEnv != "" {
-		bdEnv = append(bdEnv, dbEnv)
+	// Configure custom types via Go module storage API (no bd shell-out)
+	ctx := context.Background()
+	store, err := beadsdk.OpenFromConfig(ctx, beadsDir)
+	if err != nil {
+		return fmt.Errorf("open beads store at %s: %w", beadsDir, err)
 	}
-	cmd := exec.Command("bd", "config", "set", "types.custom", typesList)
-	cmd.Dir = beadsDir
-	// Set BEADS_DIR and BEADS_DOLT_SERVER_DATABASE explicitly to ensure bd
-	// operates on the correct database. Strip inherited values first —
-	// getenv() returns the first match (gt-uygpe).
-	cmd.Env = bdEnv
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("configure custom types in %s: %s: %w",
-			beadsDir, strings.TrimSpace(string(output)), err)
+	defer store.Close()
+
+	if err := store.SetConfig(ctx, "types.custom", typesList); err != nil {
+		return fmt.Errorf("configure custom types in %s: %w", beadsDir, err)
 	}
 
 	// Verify the config was actually persisted in the database (GH#2637).
-	// bd config set can exit 0 but fail to write if it targets the wrong
-	// database (redirect mismatch, stale metadata, server not running).
-	// Without this check, the sentinel file below would cache a lie,
-	// causing all future EnsureCustomTypes calls to skip re-configuration.
-	verifyCmd := exec.Command("bd", "config", "get", "types.custom")
-	verifyCmd.Dir = beadsDir
-	verifyCmd.Env = bdEnv
-	if verifyOutput, err := verifyCmd.Output(); err != nil || !strings.Contains(string(verifyOutput), "agent") {
-		return fmt.Errorf("types.custom not persisted in %s after bd config set (verify returned %q): db may be misconfigured",
-			beadsDir, strings.TrimSpace(string(verifyOutput)))
+	// SetConfig can succeed but fail to persist if the DB is misconfigured.
+	// Without this check, the sentinel file would cache a lie.
+	verifyOutput, err := store.GetConfig(ctx, "types.custom")
+	if err != nil || !strings.Contains(verifyOutput, "agent") {
+		return fmt.Errorf("types.custom not persisted in %s after SetConfig (verify returned %q): db may be misconfigured",
+			beadsDir, strings.TrimSpace(verifyOutput))
 	}
 
 	// Write sentinel file with the types list for staleness detection.
@@ -214,19 +206,19 @@ func EnsureCustomStatuses(beadsDir string) error {
 		return fmt.Errorf("ensure database initialized: %w", err)
 	}
 
-	// Read current custom statuses and merge with required ones
-	getCmd := exec.Command("bd", "config", "get", "status.custom")
-	getCmd.Dir = beadsDir
-	getEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DB=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
-	if dbEnv := DatabaseEnv(beadsDir); dbEnv != "" {
-		getEnv = append(getEnv, dbEnv)
+	// Read current custom statuses and merge with required ones — via storage API
+	ctx := context.Background()
+	store, err := beadsdk.OpenFromConfig(ctx, beadsDir)
+	if err != nil {
+		return fmt.Errorf("open beads store at %s: %w", beadsDir, err)
 	}
-	getCmd.Env = getEnv
-	existingOutput, _ := getCmd.Output()
+	defer store.Close()
+
+	existingStr, _ := store.GetConfig(ctx, "status.custom")
 
 	// Build merged set: existing + required
 	statusSet := make(map[string]bool)
-	if existing := strings.TrimSpace(string(existingOutput)); existing != "" {
+	if existing := strings.TrimSpace(existingStr); existing != "" {
 		for _, s := range strings.Split(existing, ",") {
 			s = strings.TrimSpace(s)
 			if s != "" {
@@ -246,17 +238,9 @@ func EnsureCustomStatuses(beadsDir string) error {
 	sort.Strings(merged)
 	mergedStr := strings.Join(merged, ",")
 
-	// Configure custom statuses via bd CLI
-	cmd := exec.Command("bd", "config", "set", "status.custom", mergedStr)
-	cmd.Dir = beadsDir
-	setEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DB=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
-	if dbEnv := DatabaseEnv(beadsDir); dbEnv != "" {
-		setEnv = append(setEnv, dbEnv)
-	}
-	cmd.Env = setEnv
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("configure custom statuses in %s: %s: %w",
-			beadsDir, strings.TrimSpace(string(output)), err)
+	// Configure custom statuses via Go module storage API (no bd shell-out)
+	if err := store.SetConfig(ctx, "status.custom", mergedStr); err != nil {
+		return fmt.Errorf("configure custom statuses in %s: %w", beadsDir, err)
 	}
 
 	// Write sentinel file
@@ -322,70 +306,25 @@ func ensureDatabaseInitialized(beadsDir string) error {
 		}
 	}
 
-	// No database found — need to initialize.
+	// No database found — initialize via Go module storage API (no bd shell-out).
+	// OpenFromConfig with CreateIfMissing:true creates the database and runs all
+	// migrations automatically, replacing both "bd init" and "bd migrate".
 	prefix := detectPrefix(beadsDir)
-
-	// bd init must run from the parent directory (not inside .beads/).
-	// Use --server to match all production callers (rig/manager.go, doctor/rig_check.go, cmd/install.go).
-	parentDir := filepath.Dir(beadsDir)
-	initArgs := []string{"init"}
-	if prefix != "" {
-		initArgs = append(initArgs, "--prefix", prefix)
-	}
-	initArgs = append(initArgs, "--server")
-	cmd := exec.Command("bd", initArgs...)
-	cmd.Dir = parentDir
-	initEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DB=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
-	if dbEnv := DatabaseEnv(beadsDir); dbEnv != "" {
-		initEnv = append(initEnv, dbEnv)
-	}
-	cmd.Env = initEnv
-	if output, err := cmd.CombinedOutput(); err != nil {
-		// Handle "already initialized" gracefully, matching install.go behavior.
-		// This can happen due to race conditions or if detection heuristics miss
-		// a valid database state.
-		outputStr := string(output)
-		if strings.Contains(outputStr, "already initialized") {
+	ctx := context.Background()
+	store, err := beadsdk.OpenFromConfig(ctx, beadsDir)
+	if err != nil {
+		// Handle "already initialized" gracefully — race condition or detection heuristic miss.
+		if strings.Contains(err.Error(), "already initialized") {
 			return nil
 		}
-		return fmt.Errorf("bd init: %s: %w", strings.TrimSpace(outputStr), err)
+		return fmt.Errorf("init beads database at %s: %w", beadsDir, err)
 	}
+	defer store.Close()
 
-	// Explicitly set issue_prefix — bd init --prefix may not persist it
-	// in newer versions (see rig/manager.go InitBeads).
+	// Explicitly set issue_prefix — OpenFromConfig may not persist it
+	// for new databases (mirrors rig/manager.go InitBeads behavior).
 	if prefix != "" {
-		pfxCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
-		pfxCmd.Dir = parentDir
-		pfxEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DB=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
-		if dbEnv := DatabaseEnv(beadsDir); dbEnv != "" {
-			pfxEnv = append(pfxEnv, dbEnv)
-		}
-		pfxCmd.Env = pfxEnv
-		_, _ = pfxCmd.CombinedOutput() // Best effort — crash prevention guard
-	}
-
-	// Run bd migrate to ensure the wisps table and auxiliary tables exist.
-	// Without this, bd create --ephemeral crashes with a Dolt nil pointer
-	// dereference when the wisps table is missing (GH#1769).
-	//
-	// After bd init --server, the Dolt SQL server may need time to register
-	// the new database in its catalog. Retry once after a short delay if the
-	// first migrate attempt fails (GH#1769).
-	migrateEnv := append(stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DB=", "BEADS_DOLT_SERVER_DATABASE="), "BEADS_DIR="+beadsDir)
-	if dbEnv := DatabaseEnv(beadsDir); dbEnv != "" {
-		migrateEnv = append(migrateEnv, dbEnv)
-	}
-	migrateCmd := exec.Command("bd", "migrate", "--yes")
-	migrateCmd.Dir = parentDir
-	migrateCmd.Env = migrateEnv
-	if _, err := migrateCmd.CombinedOutput(); err != nil {
-		// First attempt failed — server may not have registered the database yet.
-		// Wait briefly and retry once.
-		time.Sleep(500 * time.Millisecond)
-		retryCmd := exec.Command("bd", "migrate", "--yes")
-		retryCmd.Dir = parentDir
-		retryCmd.Env = migrateEnv
-		_, _ = retryCmd.CombinedOutput() // Best effort on retry — CreateAgentBead fallback handles failure
+		_ = store.SetConfig(ctx, "issue_prefix", prefix) // Best effort — crash prevention guard
 	}
 
 	return nil
