@@ -87,18 +87,53 @@ func TestWitnessPatrolHasReconcileStep(t *testing.T) {
 		t.Error("detect-reverts description must mention thrash detection")
 	}
 
-	// check-timer-gates must now depend on detect-reverts (not directly on reconcile-idle)
+	// detect-merges step must exist and depend on detect-reverts
+	var detectMergesStep *Step
+	for i := range f.Steps {
+		if f.Steps[i].ID == "detect-merges" {
+			detectMergesStep = &f.Steps[i]
+			break
+		}
+	}
+	if detectMergesStep == nil {
+		t.Fatal("witness patrol formula missing 'detect-merges' step")
+	}
+
+	hasRevertsDep := false
+	for _, dep := range detectMergesStep.Needs {
+		if dep == "detect-reverts" {
+			hasRevertsDep = true
+			break
+		}
+	}
+	if !hasRevertsDep {
+		t.Error("detect-merges step must depend on 'detect-reverts'")
+	}
+
+	// Description must mention key concepts
+	mergeDesc := detectMergesStep.Description
+	if !strings.Contains(mergeDesc, "merge") {
+		t.Error("detect-merges description must mention merge commits")
+	}
+	if !strings.Contains(mergeDesc, "close") || !strings.Contains(mergeDesc, "bead") {
+		t.Error("detect-merges description must mention closing beads")
+	}
+	if !strings.Contains(mergeDesc, "in_pipeline") {
+		t.Error("detect-merges description must mention in_pipeline status")
+	}
+
+	// check-timer-gates must now depend on detect-merges (not directly on detect-reverts)
 	for i := range f.Steps {
 		if f.Steps[i].ID == "check-timer-gates" {
-			hasDetectRevertsDep := false
+			hasDetectMergesDep := false
 			for _, dep := range f.Steps[i].Needs {
-				if dep == "detect-reverts" {
-					hasDetectRevertsDep = true
+				if dep == "detect-merges" {
+					hasDetectMergesDep = true
 					break
 				}
 			}
-			if !hasDetectRevertsDep {
-				t.Error("check-timer-gates must depend on 'detect-reverts' (not directly on reconcile-idle)")
+			if !hasDetectMergesDep {
+				t.Error("check-timer-gates must depend on 'detect-merges' (not directly on detect-reverts)")
 			}
 			break
 		}
