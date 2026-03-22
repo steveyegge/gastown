@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 func captureConvoyStdoutErr(t *testing.T, fn func() error) (string, error) {
@@ -40,7 +42,13 @@ func writeRoutingBdStub(t *testing.T, scriptBody string) {
 
 	binDir := t.TempDir()
 	bdPath := filepath.Join(binDir, "bd")
-	script := "#!/bin/sh\n" + scriptBody
+	// Prepend --allow-stale version handler so BdSupportsAllowStale() probe
+	// succeeds and the flag gets prepended to commands (matching test patterns).
+	script := "#!/bin/sh\n" +
+		"case \"$*\" in\n" +
+		"  \"--allow-stale version\") echo \"bd stub\"; exit 0;;\n" +
+		"esac\n" +
+		scriptBody
 	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
 		t.Fatalf("write bd stub: %v", err)
 	}
@@ -85,6 +93,9 @@ func TestRunConvoyList_UsesTownRootAndStripsBeadsDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows - shell stubs")
 	}
+
+	beads.ResetBdAllowStaleCacheForTest()
+	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
 
 	townRoot, expectedWD := makeRoutingTownWorkspace(t)
 	chdirConvoyTest(t, townRoot)
@@ -153,6 +164,9 @@ func TestRunConvoyStatus_UsesTownRootAndStripsBeadsDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows - shell stubs")
 	}
+
+	beads.ResetBdAllowStaleCacheForTest()
+	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
 
 	townRoot, expectedWD := makeRoutingTownWorkspace(t)
 	chdirConvoyTest(t, townRoot)

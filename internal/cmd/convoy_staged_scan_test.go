@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // TestStrandedScanExcludesStagedConvoys verifies that findStrandedConvoys
@@ -19,6 +21,9 @@ func TestStrandedScanExcludesStagedConvoys(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows — shell stub")
 	}
+
+	beads.ResetBdAllowStaleCacheForTest()
+	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
 
 	// Set up a fake town with a bd stub that:
 	// 1. Logs every invocation to bd.log (so we can inspect the query)
@@ -40,6 +45,10 @@ func TestStrandedScanExcludesStagedConvoys(t *testing.T) {
 	// - For list without --status=open: returns a staged convoy (would be wrong)
 	// - For other subcommands: returns []
 	script := `#!/bin/sh
+# Handle --allow-stale version probe without logging
+case "$*" in
+  "--allow-stale version") exit 0;;
+esac
 echo "$@" >> "` + logPath + `"
 
 # Detect subcommand (skip flags)
@@ -138,6 +147,9 @@ func TestStrandedScanQueryShape(t *testing.T) {
 		t.Skip("skipping on windows — shell stub")
 	}
 
+	beads.ResetBdAllowStaleCacheForTest()
+	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
+
 	binDir := t.TempDir()
 	townRoot := t.TempDir()
 	townBeads := filepath.Join(townRoot, ".beads")
@@ -149,7 +161,11 @@ func TestStrandedScanQueryShape(t *testing.T) {
 	bdPath := filepath.Join(binDir, "bd")
 
 	// Stub that logs args and returns empty list for everything.
+	// Handle --allow-stale version probe without logging it.
 	script := `#!/bin/sh
+case "$*" in
+  "--allow-stale version") exit 0;;
+esac
 echo "$@" >> "` + logPath + `"
 echo '[]'
 exit 0
