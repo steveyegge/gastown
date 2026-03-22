@@ -1170,3 +1170,37 @@ func TestSchedulerDirectConvoyDispatch(t *testing.T) {
 		t.Errorf("direct mode should NOT show 'Would schedule'\noutput: %s", out)
 	}
 }
+
+// TestSchedulerDirectFlagBypassesDeferred verifies that gt sling --direct
+// bypasses the scheduler even when max_polecats > 0 (deferred mode).
+// This is the mechanism mountain/convoy dispatch uses to avoid the scheduler's
+// deferred dispatch, since they already control concurrency via waves.
+func TestSchedulerDirectFlagBypassesDeferred(t *testing.T) {
+	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
+
+	// Default setup has max_polecats=10 (deferred mode).
+	beadID := createTestBead(t, rigPath, "Direct flag bypass test")
+
+	// Without --direct: should be deferred (creates a sling context).
+	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig")
+	if !hasSlingContext(t, hqPath, beadID) {
+		t.Fatalf("without --direct, bead %s should have a sling context (deferred)", beadID)
+	}
+
+	// Create a second bead for the --direct test.
+	beadID2 := createTestBead(t, rigPath, "Direct flag bypass test 2")
+
+	// With --direct + --dry-run: should NOT create a sling context.
+	// --dry-run prevents actual polecat spawn, --direct bypasses scheduler.
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", beadID2, "testrig", "--hook-raw-bead", "--direct", "--dry-run")
+
+	// Should NOT show "Would schedule" (deferred path).
+	if strings.Contains(out, "Would schedule") {
+		t.Errorf("--direct should bypass scheduler, but got 'Would schedule'\noutput: %s", out)
+	}
+
+	// Should NOT have a sling context (bypassed scheduler).
+	if hasSlingContext(t, hqPath, beadID2) {
+		t.Errorf("--direct should bypass scheduler, but bead %s has a sling context", beadID2)
+	}
+}
