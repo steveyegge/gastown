@@ -130,6 +130,12 @@ type PatrolsConfig struct {
 	ScheduledMaintenance   *ScheduledMaintenanceConfig    `json:"scheduled_maintenance,omitempty"`
 	MainBranchTest         *MainBranchTestConfig          `json:"main_branch_test,omitempty"`
 	RestartTracker         *RestartTrackerConfig          `json:"restart_tracker,omitempty"`
+	TelegramBridge *TelegramBridgeConfig `json:"telegram_bridge,omitempty"`
+}
+
+// TelegramBridgeConfig holds configuration for the telegram_bridge patrol.
+type TelegramBridgeConfig struct {
+	Enabled bool `json:"enabled"`
 }
 
 // DoltRemotesConfig holds configuration for the dolt_remotes patrol.
@@ -264,6 +270,12 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 			return false
 		}
 		return config.Patrols.JsonlGitBackup.Enabled
+	}
+	if patrol == "telegram_bridge" {
+		if config == nil || config.Patrols == nil || config.Patrols.TelegramBridge == nil {
+			return false
+		}
+		return config.Patrols.TelegramBridge.Enabled
 	}
 	if patrol == "wisp_reaper" {
 		if config == nil || config.Patrols == nil || config.Patrols.WispReaper == nil {

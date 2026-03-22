@@ -35,6 +35,7 @@ import (
 	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
+	telegram "github.com/steveyegge/gastown/internal/bridge/telegram"
 	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
 )
@@ -55,6 +56,7 @@ type Daemon struct {
 	beadsStores   map[string]beadsdk.Storage
 	doltServer *DoltServerManager
 	krcPruner  *KRCPruner
+	telegramBridge *telegram.Bridge
 
 	// Mass death detection: track recent session deaths
 	deathsMu     sync.Mutex
@@ -391,6 +393,24 @@ func (d *Daemon) Run() error {
 			d.logger.Printf("Warning: failed to start KRC pruner: %v", err)
 		} else {
 			d.logger.Println("KRC pruner started")
+		}
+	}
+
+	// Start Telegram bridge if enabled
+	if IsPatrolEnabled(d.patrolConfig, "telegram_bridge") {
+		cfgPath := telegram.ConfigPath(d.config.TownRoot)
+		if tgCfg, err := telegram.LoadConfig(cfgPath); err != nil {
+			d.logger.Printf("Warning: telegram bridge enabled but config invalid: %v", err)
+		} else if tgCfg.IsEnabled() {
+			// Use CLISender — avoids importing mail/nudge packages into daemon
+			sender := telegram.NewCLISender(d.config.TownRoot)
+			d.telegramBridge = telegram.NewBridge(tgCfg, sender, d.config.TownRoot)
+			go func() {
+				if err := d.telegramBridge.Run(d.ctx); err != nil && d.ctx.Err() == nil {
+					d.logger.Printf("Telegram bridge stopped: %v", err)
+				}
+			}()
+			d.logger.Println("Telegram bridge started")
 		}
 	}
 
@@ -1638,6 +1658,12 @@ func (d *Daemon) shutdown(state *State) error { //nolint:unparam // error return
 		d.logger.Println("Convoy manager stopped")
 	}
 	d.beadsStores = nil
+
+	// Stop Telegram bridge
+	if d.telegramBridge != nil {
+		d.telegramBridge.Stop()
+		d.logger.Println("Telegram bridge stopped")
+	}
 
 	// Stop KRC pruner
 	if d.krcPruner != nil {
