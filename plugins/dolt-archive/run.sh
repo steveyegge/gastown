@@ -48,7 +48,7 @@ trap 'rm -f "$LOGFILE"' EXIT
 dolt_query() {
   local db="$1"
   local query="$2"
-  local args=(dolt --host "$DOLT_HOST" --port "$DOLT_PORT" --no-tls -u "$DOLT_USER" -p "")
+  local args=(dolt --host="$DOLT_HOST" --port="$DOLT_PORT" --no-tls -u "$DOLT_USER" -p "")
   if [[ -n "$db" ]]; then
     args+=(--use-db "$db")
   fi
@@ -59,7 +59,7 @@ dolt_query() {
 dolt_query_json() {
   local db="$1"
   local query="$2"
-  dolt --host "$DOLT_HOST" --port "$DOLT_PORT" --no-tls -u "$DOLT_USER" -p "" \
+  dolt --host="$DOLT_HOST" --port="$DOLT_PORT" --no-tls -u "$DOLT_USER" -p "" \
     --use-db "$db" sql -q "$query" --result-format json 2>>"$LOGFILE"
 }
 
