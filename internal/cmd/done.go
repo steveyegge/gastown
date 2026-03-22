@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -344,6 +345,12 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		defaultBranch = rigCfg.DefaultBranch
 	}
 
+	// Load push strategy from town settings (empty = default MR workflow).
+	pushStrategy := ""
+	if townSettings, err := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot)); err == nil {
+		pushStrategy = townSettings.PushStrategy
+	}
+
 	// For COMPLETED, we need an issue ID and branch must not be the default branch
 	var mrID string
 	var pushFailed bool
@@ -561,6 +568,21 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				}
 			}
 
+			goto notifyWitness
+		}
+
+		// Handle "fork" push strategy: push to fork remote, create GitHub PR via gh CLI.
+		// Used by contributor workflows where polecats lack push access to origin.
+		// The fork remote must be configured before gt done runs (gt sling sets it up).
+		if pushStrategy == config.PushStrategyFork {
+			fmt.Printf("%s Fork push strategy: pushing to fork remote and creating GitHub PR\n", style.Bold.Render("→"))
+			forkPushErr := runForkPushStrategy(g, branch, defaultBranch, issueID)
+			if forkPushErr != nil {
+				pushFailed = true
+				errMsg := fmt.Sprintf("fork push strategy failed: %v", forkPushErr)
+				doneErrors = append(doneErrors, errMsg)
+				style.PrintWarning("%s\nFork push or PR creation failed. Witness will be notified.", errMsg)
+			}
 			goto notifyWitness
 		}
 
@@ -1131,6 +1153,87 @@ func pushSubmoduleChanges(g *git.Git, defaultBranch string) {
 			fmt.Printf("%s Submodule %s pushed\n", style.Bold.Render("✓"), sc.Path)
 		}
 	}
+}
+
+// runForkPushStrategy pushes the branch to the fork remote and creates a GitHub PR.
+// Used when push_strategy: fork is configured in town settings. This is the contributor
+// workflow: the polecat lacks push access to origin, so it pushes to its fork and
+// opens a PR for maintainer review.
+//
+// The fork remote must be pre-configured in the worktree (gt sling sets it up).
+// If the remote doesn't exist, this function attempts to create it via gh repo fork.
+func runForkPushStrategy(g *git.Git, branch, defaultBranch, issueID string) error {
+	const forkRemote = "fork"
+
+	// Ensure the fork remote exists. If not, create it via gh repo fork.
+	remotes, err := g.Remotes()
+	if err != nil {
+		return fmt.Errorf("listing remotes: %w", err)
+	}
+	hasForkRemote := false
+	for _, r := range remotes {
+		if r == forkRemote {
+			hasForkRemote = true
+			break
+		}
+	}
+
+	if !hasForkRemote {
+		fmt.Printf("Fork remote not found — creating fork via gh...\n")
+		forkCmd := exec.Command("gh", "repo", "fork", "--clone=false", "--remote", "--remote-name=fork")
+		forkCmd.Stdout = os.Stdout
+		forkCmd.Stderr = os.Stderr
+		if forkErr := forkCmd.Run(); forkErr != nil {
+			return fmt.Errorf("gh repo fork failed: %w\n"+
+				"Ensure gh CLI is authenticated (gh auth status) and the origin remote is a GitHub repo.\n"+
+				"Alternatively, manually add a 'fork' remote: git remote add fork <your-fork-url>", forkErr)
+		}
+		fmt.Printf("%s Fork remote created\n", style.Bold.Render("✓"))
+	}
+
+	// Push branch to fork remote.
+	refspec := branch + ":" + branch
+	fmt.Printf("Pushing branch to fork remote...\n")
+	if pushErr := g.Push(forkRemote, refspec, false); pushErr != nil {
+		return fmt.Errorf("push to fork remote failed: %w", pushErr)
+	}
+	fmt.Printf("%s Branch pushed to fork\n", style.Bold.Render("✓"))
+
+	// Build PR title from issue ID if available.
+	prTitle := fmt.Sprintf("Work: %s", branch)
+	if issueID != "" {
+		prTitle = fmt.Sprintf("Work: %s (%s)", branch, issueID)
+	}
+
+	// Resolve fork owner for the --head flag (GitHub PRs from forks require owner:branch format).
+	headRef := branch
+	if ownerOut, ownerErr := exec.Command("gh", "api", "user", "-q", ".login").Output(); ownerErr == nil {
+		owner := strings.TrimSpace(string(ownerOut))
+		if owner != "" {
+			headRef = owner + ":" + branch
+		}
+	}
+
+	// Create GitHub PR via gh CLI.
+	fmt.Printf("Creating GitHub PR...\n")
+	prArgs := []string{
+		"pr", "create",
+		"--base", defaultBranch,
+		"--head", headRef,
+		"--title", prTitle,
+		"--body", fmt.Sprintf("Automated PR from polecat.\n\nIssue: %s\nBranch: %s", issueID, branch),
+	}
+	prCmd := exec.Command("gh", prArgs...)
+	prCmd.Stdout = os.Stdout
+	prCmd.Stderr = os.Stderr
+	if prErr := prCmd.Run(); prErr != nil {
+		return fmt.Errorf("gh pr create failed: %v\n"+
+			"The branch was pushed to the fork remote successfully.\n"+
+			"You can create the PR manually: gh pr create --base %s --head %s", prErr, defaultBranch, headRef)
+	}
+	fmt.Printf("%s GitHub PR created\n", style.Bold.Render("✓"))
+
+	return nil
 }
 
 // setDoneIntentLabel writes a done-intent:<type>:<unix-ts> label on the agent bead

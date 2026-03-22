@@ -790,6 +790,13 @@ func (m *Manager) addWithOptionsLocked(name string, opts AddOptions, polecatDir 
 		style.PrintWarning("could not run setup hooks: %v", err)
 	}
 
+	// If push_strategy: fork is configured, set up the fork remote in the worktree.
+	// This ensures gt done can push to the fork remote without creating it on the fly.
+	if townSettings, tsErr := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot)); tsErr == nil &&
+		townSettings.PushStrategy == config.PushStrategyFork {
+		setupForkRemoteInWorktree(clonePath)
+	}
+
 	agentID := m.agentBeadID(name)
 	if err = m.createAgentBeadWithRetry(agentID, &beads.AgentFields{
 		RoleType:   "polecat",
@@ -813,6 +820,33 @@ func (m *Manager) addWithOptionsLocked(name string, opts AddOptions, polecatDir 
 	}
 
 	return polecat, nil
+}
+
+// setupForkRemoteInWorktree configures the fork remote in the polecat worktree.
+// When push_strategy: fork is set, polecats push to the fork remote instead of origin.
+// This function is non-fatal: if gh repo fork fails, gt done will retry it.
+func setupForkRemoteInWorktree(clonePath string) {
+	worktreeGit := git.NewGit(clonePath)
+	remotes, err := worktreeGit.Remotes()
+	if err != nil {
+		style.PrintWarning("could not list remotes in worktree: %v", err)
+		return
+	}
+	for _, r := range remotes {
+		if r == "fork" {
+			return // Fork remote already configured
+		}
+	}
+
+	// Add fork remote via gh repo fork (--clone=false avoids re-cloning into a new dir).
+	forkCmd := exec.Command("gh", "repo", "fork", "--clone=false", "--remote", "--remote-name=fork")
+	forkCmd.Dir = clonePath
+	if out, forkErr := forkCmd.CombinedOutput(); forkErr != nil {
+		// Non-fatal: gt done will retry if the remote is missing.
+		style.PrintWarning("could not set up fork remote (will retry at gt done time): %s", strings.TrimSpace(string(out)))
+		return
+	}
+	fmt.Printf("   ✓ Fork remote configured (push_strategy: fork)\n")
 }
 
 // AddWithOptions creates a new polecat with the specified options.
@@ -981,6 +1015,13 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (_ *Polecat, retE
 	if err := rig.RunSetupHooks(m.rig.Path, clonePath); err != nil {
 		// Non-fatal - log warning but continue
 		style.PrintWarning("could not run setup hooks: %v", err)
+	}
+
+	// If push_strategy: fork is configured, set up the fork remote in the worktree.
+	// This ensures gt done can push to the fork remote without creating it on the fly.
+	if townSettings, tsErr := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot)); tsErr == nil &&
+		townSettings.PushStrategy == config.PushStrategyFork {
+		setupForkRemoteInWorktree(clonePath)
 	}
 
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.

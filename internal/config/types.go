@@ -102,7 +102,23 @@ type TownSettings struct {
 	// These were previously hardcoded as Go constants throughout the codebase.
 	// All values are optional — omitted values use compiled-in defaults.
 	Operational *OperationalConfig `json:"operational,omitempty"`
+
+	// PushStrategy controls how polecats push branches and submit work.
+	// Values:
+	//   ""       - default: push to origin, create internal MR bead for Refinery
+	//   "fork"   - push to fork remote, create GitHub PR via gh CLI, never attempt origin
+	//
+	// Use "fork" for contributor workflows where polecats lack push access to origin.
+	// The fork remote must be configured before gt done runs (gt sling sets it up).
+	PushStrategy string `json:"push_strategy,omitempty"`
 }
+
+// Push strategy constants.
+const (
+	// PushStrategyFork pushes to the fork remote and creates a GitHub PR instead of
+	// pushing to origin and creating an internal MR bead.
+	PushStrategyFork = "fork"
+)
 
 // NewTownSettings creates a new TownSettings with defaults.
 func NewTownSettings() *TownSettings {

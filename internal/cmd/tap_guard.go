@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var tapGuardCmd = &cobra.Command{
@@ -67,6 +70,12 @@ func init() {
 }
 
 func runTapGuardPRWorkflow(cmd *cobra.Command, args []string) error {
+	// Allow PR creation when push_strategy: fork is configured.
+	// This is the contributor workflow where polecats push to a fork and create PRs.
+	if isPushStrategyFork() {
+		return nil // Allowed — fork PR workflow
+	}
+
 	// Check if we're in a Gas Town agent context
 	if isGasTownAgentContext() {
 		fmt.Fprintln(os.Stderr, "")
@@ -136,6 +145,21 @@ func isGasTownAgentContext() bool {
 	}
 
 	return false
+}
+
+// isPushStrategyFork returns true if push_strategy: fork is configured in town settings.
+// When true, polecats are allowed to use gh pr create as part of their submission workflow.
+func isPushStrategyFork() bool {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return false
+	}
+	settingsPath := filepath.Join(townRoot, "settings", "config.json")
+	settings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return false
+	}
+	return settings.PushStrategy == config.PushStrategyFork
 }
 
 // isMaintainerOrigin returns true if the origin remote points to the maintainer's repo.
