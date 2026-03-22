@@ -254,9 +254,69 @@ Tried: <what you've attempted>"
 Do NOT proceed to the next step with uncommitted changes."""
 
 [[steps]]
+id = "write-tests"
+title = "Write tests for your implementation"
+needs = ["implement"]
+description = """
+Write tests that cover the code you just implemented. Tests are MANDATORY — you
+cannot proceed without them. This is a hard gate.
+
+**1. Identify what changed:**
+```bash
+git diff origin/{{base_branch}}...HEAD --name-only
+```
+
+**2. Write appropriate tests based on the change type:**
+
+| Change Type | Required Tests |
+|-------------|---------------|
+| New feature | Happy path + at least 2 edge cases |
+| Bug fix | Regression test that reproduces the original bug |
+| Refactor | Tests proving behavior is unchanged |
+| New endpoint/API | Request/response tests, error cases |
+| Report-only task | No tests needed — skip this step |
+
+**3. Test file conventions:**
+- Follow the project's existing test patterns and naming conventions
+- Place tests alongside the code or in the project's test directory
+- Name test files to match what they test (e.g., `foo_test.go`, `foo.test.ts`)
+
+**4. Run your tests to verify they pass:**
+
+If test_command is set:
+```bash
+{{test_command}}
+```
+
+Or run targeted tests for the files you changed:
+```bash
+# Go: go test ./internal/pkg/you/changed/...
+# JS: npx jest --testPathPattern="your-test-file"
+# Rust: cargo test -p your-crate
+```
+
+**5. Commit your tests:**
+```bash
+git add <test-files>
+git commit -m "test: add tests for {{issue}}"
+```
+
+**HARD GATE — do NOT close this step without passing:**
+```bash
+git diff --name-only origin/{{base_branch}}..HEAD
+```
+This MUST show at least one test file (e.g., `*_test.go`, `*.test.ts`, `*.test.js`,
+`*_test.rs`, `test_*.py`, `*_spec.rb`). If no test file appears in the diff:
+- You have NOT written tests. Do NOT proceed.
+- Go back and write them.
+- Report-only tasks (no code changes) are exempt from this gate.
+
+**Exit criteria:** Tests written, tests passing, test files committed to git."""
+
+[[steps]]
 id = "commit-changes"
 title = "Commit all implementation changes"
-needs = ["implement"]
+needs = ["write-tests"]
 description = """
 Ensure ALL implementation work is committed IMMEDIATELY after implementation.
 This step exists to prevent the #1 polecat failure mode: context exhaustion
@@ -337,6 +397,7 @@ git log --oneline origin/{{base_branch}}..HEAD  # All commits
 | Security | Injection, auth bypass, exposed secrets |
 | Style | Naming, formatting, code organization |
 | Completeness | Missing error handling, incomplete paths |
+| Tests | Tests written and passing for all new/changed code |
 | Cruft | Debug prints, commented code, TODOs |
 
 **3. Fix issues found:**
@@ -385,19 +446,25 @@ Empty commands mean "not configured" — skip silently.
 - Fix it. Return to implement step if needed.
 - Do NOT submit broken code to the merge queue.
 
-**3. Targeted tests (OPTIONAL — run if fast and relevant):**
+**3. Targeted tests (REQUIRED — must pass):**
 
-If you modified or added test files, run those specific tests to catch
-obvious regressions. Do NOT run the full test suite — that's the
-Refinery's job.
+You wrote tests in the write-tests step. Now run them again after the build
+to confirm nothing broke during review fixes or build adjustments.
 
+If test_command is set:
 ```bash
-# Example: run only tests in packages you changed
-go test ./internal/pkg/you/changed/...
-# Or for JS: npx jest --testPathPattern="changed-file"
+{{test_command}}
 ```
 
-If you're unsure which tests are relevant, skip this — the MQ will catch it.
+Or run targeted tests for the packages you changed:
+```bash
+# Go: go test ./internal/pkg/you/changed/...
+# JS: npx jest --testPathPattern="changed-file"
+# Rust: cargo test -p your-crate
+```
+
+Tests MUST pass. If they fail, fix the issue before proceeding. Do NOT
+submit code with failing tests to the merge queue.
 
 **4. Lint (OPTIONAL — run if configured and fast):**
 
