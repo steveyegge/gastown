@@ -154,8 +154,39 @@ var idleWatcherPollInterval = 1 * time.Second
 // For "immediate" mode: sends directly via tmux (current behavior).
 // For "queue" mode: writes to the nudge queue for cooperative delivery.
 // For "wait-idle" mode: waits for idle, then delivers or falls back to queue.
+//
+// When dedup is active (--force not set), checks whether the same message was
+// recently delivered to this target. Duplicate messages in the same session
+// are replaced with a short reference to save context window.
 func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 	townRoot, _ := workspace.FindFromCwd()
+
+	// Dedup check (skip if --force is set or no workspace found).
+	if townRoot != "" && !nudgeForceFlag {
+		sessionID := ""
+		if created, err := t.GetSessionCreatedUnix(sessionName); err == nil && created > 0 {
+			sessionID = fmt.Sprintf("%d", created)
+		}
+
+		origMessage := message // preserve for dedup state tracking
+		result, _ := nudge.CheckDedup(townRoot, sessionName, message, sessionID)
+		switch result {
+		case nudge.DedupShortRef:
+			// Same message, same session — deliver abbreviated reminder
+			message = nudge.ShortReference
+			fmt.Fprintf(os.Stderr, "○ Dedup: same message in session, sending short reference\n")
+		case nudge.DedupSuppress:
+			fmt.Fprintf(os.Stderr, "○ Dedup: suppressed (agent active)\n")
+			return nil
+		}
+		// DedupDeliver falls through to normal delivery
+
+		// Record delivery state using the ORIGINAL message hash so future
+		// dedup checks match against the real content, not the short ref.
+		defer func() {
+			_ = nudge.RecordDelivery(townRoot, sessionName, origMessage, sessionID)
+		}()
+	}
 
 	// Use the requested mode, but force queue mode for ACP sessions.
 	// ACP agents don't have tmux panes to send-keys to.
