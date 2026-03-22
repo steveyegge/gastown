@@ -302,11 +302,11 @@ func batchFetchBeadInfoByIDs(townRoot string, ids []string) map[string]beadStatu
 	// Most IDs will have a common prefix (e.g., "gt-", "bcc-", "hq-")
 	// For simplicity, try all dirs - bd show will return results only for matching IDs
 	for _, dir := range beadsSearchDirs(townRoot) {
-		// Use Beads wrapper to get proper BEADS_DIR resolution, --allow-stale,
-		// and BEADS_DOLT_PORT translation (matching how all other bd-invoking
-		// functions work). Raw exec.Command missed these, causing stale/wrong
-		// dolt database queries. See GH#803.
-		b := beads.New(dir)
+		// Use Beads wrapper with explicit beads dir resolution to follow
+		// redirect files. beads.New(dir) misses redirects, causing queries
+		// against the wrong dolt database for rigs with shared beads. See gt-e3r.
+		beadsDir := beads.ResolveBeadsDir(dir)
+		b := beads.NewWithBeadsDir(dir, beadsDir)
 		args := append([]string{"show", "--json"}, ids...)
 		out, err := b.Run(args...)
 		if err != nil {
@@ -492,11 +492,12 @@ func listReadyWorkBeadIDsWithError(townRoot string) (map[string]bool, error) {
 	failCount := 0
 	var lastErr error
 	for _, dir := range dirs {
-		// Use Beads wrapper to get proper BEADS_DIR resolution, --allow-stale,
-		// and BEADS_DOLT_PORT translation. Raw exec.Command missed these,
-		// causing the scheduler to query stale/wrong dolt databases and return
-		// empty readyWorkIDs. See GH#803.
-		b := beads.New(dir)
+		// Use Beads wrapper with explicit beads dir resolution to follow
+		// redirect files. beads.New(dir) misses redirects, causing the
+		// scheduler to query the wrong dolt database and return 0 ready
+		// beads for rigs that use shared beads via redirect. See gt-e3r.
+		beadsDir := beads.ResolveBeadsDir(dir)
+		b := beads.NewWithBeadsDir(dir, beadsDir)
 		readyOut, err := b.Run("ready", "--json", "--limit=0")
 		if err != nil {
 			failCount++
