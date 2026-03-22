@@ -8,10 +8,8 @@ import (
 )
 
 func TestOutputRoleDirectives(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: subtests use captureStdout which redirects global os.Stdout.
 	t.Run("no directives emits nothing visible", func(t *testing.T) {
-		t.Parallel()
 		townRoot := t.TempDir()
 		ctx := RoleContext{
 			Role:     RolePolecat,
@@ -29,7 +27,6 @@ func TestOutputRoleDirectives(t *testing.T) {
 	})
 
 	t.Run("town-level directive emits town header", func(t *testing.T) {
-		t.Parallel()
 		townRoot := t.TempDir()
 		dir := filepath.Join(townRoot, "directives")
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -58,7 +55,6 @@ func TestOutputRoleDirectives(t *testing.T) {
 	})
 
 	t.Run("rig-level directive emits rig header", func(t *testing.T) {
-		t.Parallel()
 		townRoot := t.TempDir()
 		dir := filepath.Join(townRoot, "myrig", "directives")
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -87,7 +83,6 @@ func TestOutputRoleDirectives(t *testing.T) {
 	})
 
 	t.Run("both levels emits combined header", func(t *testing.T) {
-		t.Parallel()
 		townRoot := t.TempDir()
 
 		townDir := filepath.Join(townRoot, "directives")
@@ -128,7 +123,6 @@ func TestOutputRoleDirectives(t *testing.T) {
 	})
 
 	t.Run("explain mode shows file paths", func(t *testing.T) {
-		t.Parallel()
 		townRoot := t.TempDir()
 
 		oldExplain := primeExplain
@@ -154,7 +148,6 @@ func TestOutputRoleDirectives(t *testing.T) {
 	})
 
 	t.Run("empty rig name skips rig path", func(t *testing.T) {
-		t.Parallel()
 		townRoot := t.TempDir()
 
 		townDir := filepath.Join(townRoot, "directives")
