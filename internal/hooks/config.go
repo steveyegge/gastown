@@ -483,96 +483,11 @@ func DiscoverTargets(townRoot string) ([]Target, error) {
 			})
 		}
 
-		// Gemini targets — per-agent settings in work directories.
-		// Unlike Claude (shared via --settings flag), gemini settings are
-		// installed in each agent's work directory.
-		targets = append(targets, discoverGeminiTargets(rigPath, rigName)...)
 	}
 
 	return targets, nil
 }
 
-// discoverGeminiTargets finds .gemini/settings.json files in agent work
-// directories within a rig. Gemini agents don't share a settings directory;
-// each has its own .gemini/settings.json in their work dir.
-func discoverGeminiTargets(rigPath, rigName string) []Target {
-	var targets []Target
-
-	// Crew members: <rig>/crew/<name>/.gemini/settings.json
-	crewDir := filepath.Join(rigPath, "crew")
-	if info, err := os.Stat(crewDir); err == nil && info.IsDir() {
-		members, _ := os.ReadDir(crewDir)
-		for _, m := range members {
-			if !m.IsDir() || strings.HasPrefix(m.Name(), ".") {
-				continue
-			}
-			geminiPath := filepath.Join(crewDir, m.Name(), ".gemini", "settings.json")
-			if _, err := os.Stat(geminiPath); err == nil {
-				targets = append(targets, Target{
-					Path:     geminiPath,
-					Key:      rigName + "/crew/" + m.Name() + "[gemini]",
-					Rig:      rigName,
-					Role:     "crew",
-					Provider: "gemini",
-				})
-			}
-		}
-	}
-
-	// Witness: <rig>/witness/.gemini/settings.json
-	witnessGemini := filepath.Join(rigPath, "witness", ".gemini", "settings.json")
-	if _, err := os.Stat(witnessGemini); err == nil {
-		targets = append(targets, Target{
-			Path:     witnessGemini,
-			Key:      rigName + "/witness[gemini]",
-			Rig:      rigName,
-			Role:     "witness",
-			Provider: "gemini",
-		})
-	}
-
-	// Refinery: check both <rig>/refinery/.gemini/ and <rig>/refinery/rig/.gemini/
-	for _, sub := range []string{"", "rig"} {
-		base := filepath.Join(rigPath, "refinery")
-		if sub != "" {
-			base = filepath.Join(base, sub)
-		}
-		refGemini := filepath.Join(base, ".gemini", "settings.json")
-		if _, err := os.Stat(refGemini); err == nil {
-			targets = append(targets, Target{
-				Path:     refGemini,
-				Key:      rigName + "/refinery[gemini]",
-				Rig:      rigName,
-				Role:     "refinery",
-				Provider: "gemini",
-			})
-			break // Only add one refinery gemini target per rig
-		}
-	}
-
-	// Polecats: <rig>/polecats/<name>/.gemini/settings.json
-	polecatsDir := filepath.Join(rigPath, "polecats")
-	if info, err := os.Stat(polecatsDir); err == nil && info.IsDir() {
-		members, _ := os.ReadDir(polecatsDir)
-		for _, m := range members {
-			if !m.IsDir() || strings.HasPrefix(m.Name(), ".") {
-				continue
-			}
-			geminiPath := filepath.Join(polecatsDir, m.Name(), ".gemini", "settings.json")
-			if _, err := os.Stat(geminiPath); err == nil {
-				targets = append(targets, Target{
-					Path:     geminiPath,
-					Key:      rigName + "/polecats/" + m.Name() + "[gemini]",
-					Rig:      rigName,
-					Role:     "polecat",
-					Provider: "gemini",
-				})
-			}
-		}
-	}
-
-	return targets
-}
 
 // RoleLocation represents a discovered role directory in the workspace,
 // independent of any specific agent. Used by callers that need to resolve

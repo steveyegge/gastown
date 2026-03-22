@@ -211,6 +211,44 @@ func TestSyncForRole_WriteError(t *testing.T) {
 	}
 }
 
+func TestSyncForRole_JSONWhitespaceInsensitive(t *testing.T) {
+	dir := t.TempDir()
+
+	// First, create the file via SyncForRole
+	result, err := SyncForRole("gemini", dir, dir, "crew", ".gemini", "settings.json", false)
+	if err != nil {
+		t.Fatalf("initial SyncForRole: %v", err)
+	}
+	if result != SyncCreated {
+		t.Fatalf("expected SyncCreated, got %d", result)
+	}
+
+	// Read the canonical file, reformat with different whitespace
+	targetPath := filepath.Join(dir, ".gemini", "settings.json")
+	original, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("reading created file: %v", err)
+	}
+
+	// Add extra whitespace — structurally identical JSON, different bytes
+	reformatted := strings.ReplaceAll(string(original), ":", " : ")
+	if string(original) == reformatted {
+		t.Fatal("reformatted content should differ from original bytes")
+	}
+	if err := os.WriteFile(targetPath, []byte(reformatted), 0600); err != nil {
+		t.Fatalf("writing reformatted file: %v", err)
+	}
+
+	// SyncForRole should treat this as unchanged (structurally equal JSON)
+	result, err = SyncForRole("gemini", dir, dir, "crew", ".gemini", "settings.json", false)
+	if err != nil {
+		t.Fatalf("SyncForRole after reformat: %v", err)
+	}
+	if result != SyncUnchanged {
+		t.Errorf("expected SyncUnchanged for whitespace-only JSON difference, got %d", result)
+	}
+}
+
 func TestSyncForRole_GeminiWithGTBinSubstitution(t *testing.T) {
 	dir := t.TempDir()
 

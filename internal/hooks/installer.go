@@ -101,8 +101,15 @@ func SyncForRole(provider, settingsDir, workDir, role, hooksDir, hooksFile strin
 	fileExisted := false
 	if existing, err := os.ReadFile(targetPath); err == nil {
 		fileExisted = true
-		if bytes.Equal(existing, content) {
-			return SyncUnchanged, nil
+		if isSettingsFile(hooksFile) {
+			// JSON files: use structural comparison to tolerate whitespace differences.
+			if TemplateContentEqual(existing, content) {
+				return SyncUnchanged, nil
+			}
+		} else {
+			if bytes.Equal(existing, content) {
+				return SyncUnchanged, nil
+			}
 		}
 	}
 
@@ -242,17 +249,7 @@ func resolveGTBinary() string {
 // This is used by the doctor hooks-sync check to compare installed files against
 // current templates.
 func ComputeExpectedTemplate(provider, hooksFile, role string) ([]byte, error) {
-	content, err := resolveTemplate(provider, hooksFile, role)
-	if err != nil {
-		return nil, err
-	}
-
-	if bytes.Contains(content, []byte("{{GT_BIN}}")) {
-		gtBin := resolveGTBinary()
-		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBin))
-	}
-
-	return content, nil
+	return resolveAndSubstitute(provider, hooksFile, role)
 }
 
 // TemplateContentEqual compares two JSON byte slices for structural equality
