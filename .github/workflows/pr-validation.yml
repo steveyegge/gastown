@@ -1,0 +1,95 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, reopened, edited ]
+
+jobs:
+  commit-lint:
+    name: Validate Commit Messages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check conventional commits
+        run: |
+          # Validate PR title follows conventional commits
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PATTERN="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .+"
+          if [[ ! "$PR_TITLE" =~ $PATTERN ]]; then
+            echo "::error::PR title does not follow Conventional Commits format."
+            echo ""
+            echo "Expected: <type>(<scope>): <description>"
+            echo "Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert"
+            echo ""
+            echo "Got: $PR_TITLE"
+            exit 1
+          fi
+          echo "PR title follows conventional commits format."
+
+  test-coverage:
+    name: Test Coverage Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Install ICU4C development headers
+        run: sudo apt-get install -y libicu-dev
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "CI Bot"
+          git config --global user.email "ci@gastown.test"
+
+      - name: Install Dolt
+        run: |
+          curl -L https://github.com/dolthub/dolt/releases/latest/download/install.sh | sudo bash
+
+      - name: Run tests with coverage
+        run: |
+          go test -short -timeout=10m -coverprofile=coverage.out -covermode=atomic ./... 2>&1 || true
+
+      - name: Check coverage threshold
+        run: |
+          if [ ! -f coverage.out ]; then
+            echo "::warning::No coverage file generated"
+            exit 0
+          fi
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage: ${COVERAGE}%"
+          echo "## Test Coverage: ${COVERAGE}%" >> $GITHUB_STEP_SUMMARY
+          # Warn if coverage is below threshold but don't fail (yet)
+          THRESHOLD=30
+          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+            echo "::warning::Coverage ${COVERAGE}% is below ${THRESHOLD}% threshold"
+          fi
+
+  pr-size:
+    name: PR Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR size
+        run: |
+          ADDITIONS=$(gh pr view ${{ github.event.pull_request.number }} --json additions -q '.additions')
+          DELETIONS=$(gh pr view ${{ github.event.pull_request.number }} --json deletions -q '.deletions')
+          TOTAL=$((ADDITIONS + DELETIONS))
+          echo "PR changes: +${ADDITIONS} -${DELETIONS} (${TOTAL} total)"
+          echo "## PR Size: ${TOTAL} lines changed" >> $GITHUB_STEP_SUMMARY
+          if [ "$TOTAL" -gt 1000 ]; then
+            echo "::warning::Large PR detected (${TOTAL} lines). Consider breaking it into smaller PRs."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
