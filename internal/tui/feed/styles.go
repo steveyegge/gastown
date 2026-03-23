@@ -162,6 +162,15 @@ var (
 	ZombieStyle = lipgloss.NewStyle().
 			Foreground(colorDim)
 
+	// Polecat lifecycle state styles (tree panel)
+	PolecatStuckStyle = lipgloss.NewStyle().
+				Foreground(colorWarning).
+				Bold(true)
+
+	PolecatZombieStyle = lipgloss.NewStyle().
+				Foreground(colorError).
+				Bold(true)
+
 	// Event symbols
 	EventSymbols = map[string]string{
 		"create":   "+",

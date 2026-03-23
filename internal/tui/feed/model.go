@@ -61,6 +61,12 @@ type Agent struct {
 	LastEvent  *Event
 	LastUpdate time.Time
 	Expanded   bool
+
+	// Polecat lifecycle fields (populated from gt polecat list)
+	PolecatState          string // working, idle, done, stuck, zombie
+	PolecatIssue          string // assigned bead ID
+	PolecatSessionRunning bool
+	PolecatZombie         bool
 }
 
 // Rig represents a rig with its agents
@@ -83,10 +89,11 @@ type Model struct {
 	feedViewport   viewport.Model
 
 	// Data
-	rigs        map[string]*Rig
-	events      []Event
-	convoyState *ConvoyState
-	townRoot    string
+	rigs         map[string]*Rig
+	events       []Event
+	convoyState  *ConvoyState
+	polecatState *PolecatState
+	townRoot     string
 
 	// UI state
 	keys     KeyMap
@@ -165,6 +172,7 @@ func (m *Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		m.listenForEvents(),
 		m.fetchConvoys(),
+		m.fetchPolecatData(),
 		tea.SetWindowTitle("GT Feed"),
 	}
 	// If starting in problems view, fetch problems immediately
@@ -180,6 +188,11 @@ type eventMsg Event
 // convoyUpdateMsg is sent when convoy data is refreshed
 type convoyUpdateMsg struct {
 	state *ConvoyState
+}
+
+// polecatUpdateMsg is sent when polecat data is refreshed
+type polecatUpdateMsg struct {
+	state *PolecatState
 }
 
 // problemsUpdateMsg is sent when problems data is refreshed
@@ -249,6 +262,29 @@ func (m *Model) convoyRefreshTick() tea.Cmd {
 	})
 }
 
+// fetchPolecatData returns a command that fetches polecat lifecycle data.
+// Captures townRoot under the read lock to avoid racing with SetTownRoot.
+func (m *Model) fetchPolecatData() tea.Cmd {
+	m.mu.RLock()
+	townRoot := m.townRoot
+	m.mu.RUnlock()
+
+	if townRoot == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		state, _ := FetchPolecats(townRoot)
+		return polecatUpdateMsg{state: state}
+	}
+}
+
+// polecatRefreshTick returns a command that schedules the next polecat refresh
+func (m *Model) polecatRefreshTick() tea.Cmd {
+	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
+		return polecatUpdateMsg{} // Empty state triggers a refresh
+	})
+}
+
 // fetchProblems returns a command that fetches problem agent data
 func (m *Model) fetchProblems() tea.Cmd {
 	detector := m.stuckDetector
@@ -298,6 +334,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			// Tick fired - fetch new data
 			cmds = append(cmds, m.fetchConvoys())
+		}
+
+	case polecatUpdateMsg:
+		if msg.state != nil {
+			// Fresh data arrived - update state and schedule next tick
+			m.mu.Lock()
+			m.polecatState = msg.state
+			m.updateViewContentLocked()
+			m.mu.Unlock()
+			cmds = append(cmds, m.polecatRefreshTick())
+		} else {
+			// Tick fired - fetch new data
+			cmds = append(cmds, m.fetchPolecatData())
 		}
 
 	case problemsUpdateMsg:

@@ -260,9 +260,16 @@ func getStateStyle(state AgentState) lipgloss.Style {
 // renderTree renders the agent tree content.
 // Caller must hold m.mu.
 func (m *Model) renderTree() string {
-	if len(m.rigs) == 0 {
+	if len(m.rigs) == 0 && m.polecatState == nil {
 		return AgentIdleStyle.Render("No agents active")
 	}
+
+	// Build polecat lookup from lifecycle data
+	polecatLookup := m.buildPolecatLookup()
+
+	// Merge polecat lifecycle data into rigs map so polecats discovered
+	// via gt polecat list appear in the tree even without events
+	m.mergePolecatsIntoRigs(polecatLookup)
 
 	var lines []string
 
@@ -309,6 +316,54 @@ func (m *Model) renderTree() string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// buildPolecatLookup creates a lookup map from rig/name -> PolecatInfo
+func (m *Model) buildPolecatLookup() map[string]*PolecatInfo {
+	lookup := make(map[string]*PolecatInfo)
+	if m.polecatState == nil {
+		return lookup
+	}
+	for i := range m.polecatState.Polecats {
+		p := &m.polecatState.Polecats[i]
+		key := p.Rig + "/" + p.Name
+		lookup[key] = p
+	}
+	return lookup
+}
+
+// mergePolecatsIntoRigs ensures polecats from lifecycle data appear in the tree.
+// Caller must hold m.mu.
+func (m *Model) mergePolecatsIntoRigs(lookup map[string]*PolecatInfo) {
+	for _, p := range lookup {
+		rig, ok := m.rigs[p.Rig]
+		if !ok {
+			rig = &Rig{
+				Name:     p.Rig,
+				Agents:   make(map[string]*Agent),
+				Expanded: true,
+			}
+			m.rigs[p.Rig] = rig
+		}
+
+		agentKey := p.Name
+		agent, ok := rig.Agents[agentKey]
+		if !ok {
+			agent = &Agent{
+				ID:   p.Name,
+				Name: p.Name,
+				Role: "polecat",
+				Rig:  p.Rig,
+			}
+			rig.Agents[agentKey] = agent
+		}
+
+		// Enrich with lifecycle data
+		agent.PolecatState = p.State
+		agent.PolecatIssue = p.Issue
+		agent.PolecatSessionRunning = p.SessionRunning
+		agent.PolecatZombie = p.Zombie
+	}
 }
 
 // groupAgentsByRole groups agents by their role
@@ -368,6 +423,11 @@ func (m *Model) renderAgent(icon string, agent *Agent, indent int) string {
 		name = parts[len(parts)-1]
 	}
 
+	// Use polecat lifecycle state for color coding when available
+	if agent.Role == "polecat" && agent.PolecatState != "" {
+		return prefix + m.renderPolecatAgent(name, agent)
+	}
+
 	nameStyle := AgentIdleStyle
 	statusIndicator := ""
 	if agent.Status == "running" || agent.Status == "working" {
@@ -386,8 +446,58 @@ func (m *Model) renderAgent(icon string, agent *Agent, indent int) string {
 		activity = fmt.Sprintf(" [%s] %s", age, msg)
 	}
 
-	line := prefix + nameStyle.Render(name+statusIndicator) + TimestampStyle.Render(activity)
-	return line
+	line := nameStyle.Render(name+statusIndicator) + TimestampStyle.Render(activity)
+	return prefix + line
+}
+
+// renderPolecatAgent renders a polecat with lifecycle state and bead info
+func (m *Model) renderPolecatAgent(name string, agent *Agent) string {
+	// State indicator with color coding
+	var stateStyle lipgloss.Style
+	var stateSymbol string
+
+	switch agent.PolecatState {
+	case "working":
+		stateStyle = AgentActiveStyle
+		stateSymbol = "●"
+	case "idle":
+		stateStyle = AgentIdleStyle
+		stateSymbol = "○"
+	case "done":
+		stateStyle = EventCompleteStyle
+		stateSymbol = "✓"
+	case "stuck":
+		stateStyle = PolecatStuckStyle
+		stateSymbol = "!"
+	case "zombie":
+		stateStyle = PolecatZombieStyle
+		stateSymbol = "☠"
+	default:
+		stateStyle = AgentIdleStyle
+		stateSymbol = "?"
+	}
+
+	// Name colored by state
+	namePart := stateStyle.Render(stateSymbol+" "+name) + " " + stateStyle.Render(agent.PolecatState)
+
+	// Bead ID + title (if assigned)
+	beadPart := ""
+	if agent.PolecatIssue != "" {
+		beadPart = " " + TimestampStyle.Render("→") + " " + ConvoyIDStyle.Render(agent.PolecatIssue)
+	}
+
+	// Last activity from events (if available)
+	activity := ""
+	if agent.LastEvent != nil {
+		age := formatAge(time.Since(agent.LastEvent.Time))
+		msg := agent.LastEvent.Message
+		if len(msg) > 30 {
+			msg = msg[:27] + "..."
+		}
+		activity = " " + TimestampStyle.Render(fmt.Sprintf("[%s] %s", age, msg))
+	}
+
+	return namePart + beadPart + activity
 }
 
 // renderFeed renders the event feed content.
