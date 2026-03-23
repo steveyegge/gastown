@@ -483,95 +483,88 @@ func DiscoverTargets(townRoot string) ([]Target, error) {
 			})
 		}
 
-		// Gemini targets — per-agent settings in work directories.
-		// Unlike Claude (shared via --settings flag), gemini settings are
-		// installed in each agent's work directory.
-		targets = append(targets, discoverGeminiTargets(rigPath, rigName)...)
 	}
 
 	return targets, nil
 }
 
-// discoverGeminiTargets finds .gemini/settings.json files in agent work
-// directories within a rig. Gemini agents don't share a settings directory;
-// each has its own .gemini/settings.json in their work dir.
-func discoverGeminiTargets(rigPath, rigName string) []Target {
-	var targets []Target
 
-	// Crew members: <rig>/crew/<name>/.gemini/settings.json
-	crewDir := filepath.Join(rigPath, "crew")
-	if info, err := os.Stat(crewDir); err == nil && info.IsDir() {
-		members, _ := os.ReadDir(crewDir)
-		for _, m := range members {
-			if !m.IsDir() || strings.HasPrefix(m.Name(), ".") {
-				continue
-			}
-			geminiPath := filepath.Join(crewDir, m.Name(), ".gemini", "settings.json")
-			if _, err := os.Stat(geminiPath); err == nil {
-				targets = append(targets, Target{
-					Path:     geminiPath,
-					Key:      rigName + "/crew/" + m.Name() + "[gemini]",
-					Rig:      rigName,
-					Role:     "crew",
-					Provider: "gemini",
-				})
-			}
+// RoleLocation represents a discovered role directory in the workspace,
+// independent of any specific agent. Used by callers that need to resolve
+// agent configuration for each location (e.g., syncing non-Claude agents).
+type RoleLocation struct {
+	Dir  string // Absolute path to the role's parent directory (e.g., .../rig/crew)
+	Rig  string // Rig name, or empty for town-level roles
+	Role string // Role name: crew, polecat, witness, refinery, mayor, deacon
+}
+
+// DiscoverRoleLocations finds all role directories in a workspace.
+// Unlike DiscoverTargets (which returns Claude-specific paths), this returns
+// agent-agnostic directory locations that callers can use with any agent config.
+func DiscoverRoleLocations(townRoot string) ([]RoleLocation, error) {
+	var locations []RoleLocation
+
+	// Town-level roles
+	for _, role := range []string{"mayor", "deacon"} {
+		dir := filepath.Join(townRoot, role)
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			locations = append(locations, RoleLocation{Dir: dir, Role: role})
 		}
 	}
 
-	// Witness: <rig>/witness/.gemini/settings.json
-	witnessGemini := filepath.Join(rigPath, "witness", ".gemini", "settings.json")
-	if _, err := os.Stat(witnessGemini); err == nil {
-		targets = append(targets, Target{
-			Path:     witnessGemini,
-			Key:      rigName + "/witness[gemini]",
-			Rig:      rigName,
-			Role:     "witness",
-			Provider: "gemini",
-		})
+	// Scan rigs
+	entries, err := os.ReadDir(townRoot)
+	if err != nil {
+		return nil, err
 	}
 
-	// Refinery: check both <rig>/refinery/.gemini/ and <rig>/refinery/rig/.gemini/
-	for _, sub := range []string{"", "rig"} {
-		base := filepath.Join(rigPath, "refinery")
-		if sub != "" {
-			base = filepath.Join(base, sub)
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == "mayor" || entry.Name() == "deacon" ||
+			entry.Name() == ".beads" || strings.HasPrefix(entry.Name(), ".") {
+			continue
 		}
-		refGemini := filepath.Join(base, ".gemini", "settings.json")
-		if _, err := os.Stat(refGemini); err == nil {
-			targets = append(targets, Target{
-				Path:     refGemini,
-				Key:      rigName + "/refinery[gemini]",
-				Rig:      rigName,
-				Role:     "refinery",
-				Provider: "gemini",
-			})
-			break // Only add one refinery gemini target per rig
-		}
-	}
 
-	// Polecats: <rig>/polecats/<name>/.gemini/settings.json
-	polecatsDir := filepath.Join(rigPath, "polecats")
-	if info, err := os.Stat(polecatsDir); err == nil && info.IsDir() {
-		members, _ := os.ReadDir(polecatsDir)
-		for _, m := range members {
-			if !m.IsDir() || strings.HasPrefix(m.Name(), ".") {
-				continue
-			}
-			geminiPath := filepath.Join(polecatsDir, m.Name(), ".gemini", "settings.json")
-			if _, err := os.Stat(geminiPath); err == nil {
-				targets = append(targets, Target{
-					Path:     geminiPath,
-					Key:      rigName + "/polecats/" + m.Name() + "[gemini]",
-					Rig:      rigName,
-					Role:     "polecat",
-					Provider: "gemini",
-				})
+		rigName := entry.Name()
+		rigPath := filepath.Join(townRoot, rigName)
+
+		if !isRig(rigPath) {
+			continue
+		}
+
+		// Map subdirectories to roles
+		for _, sub := range []struct{ dir, role string }{
+			{"crew", "crew"},
+			{"polecats", "polecat"},
+			{"witness", "witness"},
+			{"refinery", "refinery"},
+		} {
+			dir := filepath.Join(rigPath, sub.dir)
+			if info, err := os.Stat(dir); err == nil && info.IsDir() {
+				locations = append(locations, RoleLocation{Dir: dir, Rig: rigName, Role: sub.role})
 			}
 		}
 	}
 
-	return targets
+	return locations, nil
+}
+
+// DiscoverWorktrees returns subdirectories within a role parent directory that
+// are individual worktrees (e.g., crew/alice, crew/bob, polecats/toast).
+// Skips hidden directories and non-directories.
+func DiscoverWorktrees(roleDir string) []string {
+	entries, err := os.ReadDir(roleDir)
+	if err != nil {
+		return nil
+	}
+
+	var dirs []string
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		dirs = append(dirs, filepath.Join(roleDir, entry.Name()))
+	}
+	return dirs
 }
 
 // isRig checks if a directory looks like a rig (has crew/, witness/, or polecats/ subdirectory).

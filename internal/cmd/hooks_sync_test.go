@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/hooks"
 )
 
@@ -295,5 +296,143 @@ func TestRunHooksSyncFailsClosedOnIntegrityViolation(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed closed") {
 		t.Fatalf("expected fail-closed error, got: %v", err)
+	}
+}
+
+func TestRunHooksSyncNonClaudeAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	townRoot := filepath.Join(tmpDir, "town")
+
+	// Scaffold workspace: mayor, deacon, and a rig with a crew worktree
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "deacon"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "myrig", "crew", "alice"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Workspace marker
+	if err := os.WriteFile(
+		filepath.Join(townRoot, "mayor", "town.json"),
+		[]byte(`{"type":"town","version":1,"name":"test"}`),
+		0644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// Configure crew role to use opencode
+	townSettings := config.NewTownSettings()
+	townSettings.RoleAgents = map[string]string{"crew": "opencode"}
+	settingsDir := filepath.Join(townRoot, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveTownSettings(config.TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatal(err)
+	}
+
+	// Base hooks config (needed for Claude targets to not error)
+	base := &hooks.HooksConfig{
+		SessionStart: []hooks.HookEntry{
+			{Matcher: "", Hooks: []hooks.Hook{{Type: "command", Command: "echo test"}}},
+		},
+	}
+	if err := hooks.SaveBase(base); err != nil {
+		t.Fatalf("SaveBase failed: %v", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(cwd) }()
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	hooksSyncDryRun = false
+	if err := runHooksSync(nil, nil); err != nil {
+		t.Fatalf("runHooksSync failed: %v", err)
+	}
+
+	// Verify OpenCode plugin was synced to the worktree (not the parent)
+	pluginPath := filepath.Join(townRoot, "myrig", "crew", "alice", ".opencode", "plugins", "gastown.js")
+	if _, err := os.Stat(pluginPath); os.IsNotExist(err) {
+		t.Error("opencode plugin not created in worktree alice")
+	}
+
+	// Verify it was NOT created in the parent (crew/) since useSettingsDir=false
+	parentPlugin := filepath.Join(townRoot, "myrig", "crew", ".opencode", "plugins", "gastown.js")
+	if _, err := os.Stat(parentPlugin); !os.IsNotExist(err) {
+		t.Error("opencode plugin should not be in the parent crew/ directory")
+	}
+}
+
+func TestRunHooksSyncNonClaudeAgentDryRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	townRoot := filepath.Join(tmpDir, "town")
+
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "deacon"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "myrig", "crew", "alice"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(
+		filepath.Join(townRoot, "mayor", "town.json"),
+		[]byte(`{"type":"town","version":1,"name":"test"}`),
+		0644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	townSettings := config.NewTownSettings()
+	townSettings.RoleAgents = map[string]string{"crew": "opencode"}
+	if err := os.MkdirAll(filepath.Join(townRoot, "settings"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveTownSettings(config.TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatal(err)
+	}
+
+	base := &hooks.HooksConfig{
+		SessionStart: []hooks.HookEntry{
+			{Matcher: "", Hooks: []hooks.Hook{{Type: "command", Command: "echo test"}}},
+		},
+	}
+	if err := hooks.SaveBase(base); err != nil {
+		t.Fatalf("SaveBase failed: %v", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(cwd) }()
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	hooksSyncDryRun = true
+	defer func() { hooksSyncDryRun = false }()
+	if err := runHooksSync(nil, nil); err != nil {
+		t.Fatalf("runHooksSync dry-run failed: %v", err)
+	}
+
+	// Dry run should NOT create the file
+	pluginPath := filepath.Join(townRoot, "myrig", "crew", "alice", ".opencode", "plugins", "gastown.js")
+	if _, err := os.Stat(pluginPath); !os.IsNotExist(err) {
+		t.Error("dry-run should not create opencode plugin file")
 	}
 }
