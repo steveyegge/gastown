@@ -628,9 +628,9 @@ If the PR was not created or is in an unexpected state, debug and retry.
 
 The PR is created. Do NOT wait for CI. Do NOT merge.
 
-1. Record the PR URL on the MR bead:
+1. Append the PR URL and status to the MR bead notes:
    ```bash
-   bd update <mr-bead-id> --notes "PR: ${PR_URL}\nStatus: awaiting-review"
+   bd update <mr-bead-id> --append-notes "PR: ${PR_URL}\nStatus: awaiting-review"
    ```
 
 2. Do NOT send MERGED to the witness — the PR is not merged yet.
@@ -879,9 +879,9 @@ The human approved and merged the PR. Complete the lifecycle:
    gt mq post-merge <rig> <mr-bead-id>
    ```
 
-3. Update MR bead notes:
+3. Append merged status to MR bead notes:
    ```bash
-   bd update <mr-bead-id> --notes "PR: <pr-url>\\nStatus: merged"
+   bd update <mr-bead-id> --append-notes "Status: merged"
    ```
 
 **If state = "CLOSED" (not merged):**
@@ -939,9 +939,9 @@ thresholds to decide when to warn and when to escalate.
   Polecat capacity is held while this PR is open.
   Please review/merge or close the PR."
   ```
-  Then update the MR bead to prevent re-escalation:
+  Then append escalated status to MR bead notes to prevent re-escalation:
   ```bash
-  bd update <mr-bead-id> --notes "PR: <pr-url>\nStatus: escalated"
+  bd update <mr-bead-id> --append-notes "Status: escalated"
   ```"""
 
 [[steps]]
