@@ -1416,7 +1416,8 @@ doneStateUpdate:
 	if exitType == ExitEscalated {
 		doneState = "stuck"
 	}
-	if _, err := bd.Run("agent", "state", agentBeadID, doneState); err != nil {
+	// Use UpdateAgentState to sync both column and description (gt-ulom).
+	if err := bd.UpdateAgentState(agentBeadID, doneState); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s to %s: %v\n", agentBeadID, doneState, err)
 	}
 
