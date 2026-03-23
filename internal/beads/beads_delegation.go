@@ -2,6 +2,7 @@
 package beads
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -71,8 +72,12 @@ func (b *Beads) AddDelegation(d *Delegation) error {
 	}
 
 	// Set the delegated_from slot on the child issue
-	_, err = b.run("slot", "set", d.Child, "delegated_from", string(delegationJSON))
-	if err != nil {
+	ctx := context.Background()
+	store, storeErr := b.openStore(ctx)
+	if storeErr != nil {
+		return fmt.Errorf("opening store for delegation slot: %w", storeErr)
+	}
+	if err = store.SlotSet(ctx, d.Child, "delegated_from", string(delegationJSON), b.getActor()); err != nil {
 		return fmt.Errorf("setting delegation slot: %w", err)
 	}
 
@@ -88,8 +93,12 @@ func (b *Beads) AddDelegation(d *Delegation) error {
 // RemoveDelegation removes a delegation relationship.
 func (b *Beads) RemoveDelegation(parent, child string) error {
 	// Clear the delegated_from slot on the child
-	_, err := b.run("slot", "clear", child, "delegated_from")
-	if err != nil {
+	ctx := context.Background()
+	store, storeErr := b.openStore(ctx)
+	if storeErr != nil {
+		return fmt.Errorf("opening store to clear delegation slot: %w", storeErr)
+	}
+	if err := store.SlotClear(ctx, child, "delegated_from", b.getActor()); err != nil {
 		return fmt.Errorf("clearing delegation slot: %w", err)
 	}
 
@@ -111,7 +120,12 @@ func (b *Beads) GetDelegation(child string) (*Delegation, error) {
 	}
 
 	// Get delegation from the slot
-	out, err := b.run("slot", "get", child, "delegated_from")
+	ctx := context.Background()
+	store, storeErr := b.openStore(ctx)
+	if storeErr != nil {
+		return nil, fmt.Errorf("opening store for delegation slot: %w", storeErr)
+	}
+	slotValue, err := store.SlotGet(ctx, child, "delegated_from")
 	if err != nil {
 		// No delegation slot means no delegation
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no slot") {
@@ -120,7 +134,7 @@ func (b *Beads) GetDelegation(child string) (*Delegation, error) {
 		return nil, fmt.Errorf("getting delegation slot: %w", err)
 	}
 
-	slotValue := strings.TrimSpace(string(out))
+	slotValue = strings.TrimSpace(slotValue)
 	if slotValue == "" || slotValue == "null" {
 		return nil, nil
 	}
@@ -144,13 +158,19 @@ func (b *Beads) ListDelegationsFrom(parent string) ([]*Delegation, error) {
 
 	// Read delegation slots directly instead of calling GetDelegation per issue,
 	// which would redundantly call Show on each issue (already listed above).
+	ctx := context.Background()
+	store, storeErr := b.openStore(ctx)
+	if storeErr != nil {
+		return nil, fmt.Errorf("opening store for delegation slots: %w", storeErr)
+	}
+
 	var delegations []*Delegation
 	for _, issue := range issues {
-		out, err := b.run("slot", "get", issue.ID, "delegated_from")
+		slotValue, err := store.SlotGet(ctx, issue.ID, "delegated_from")
 		if err != nil {
 			continue // No delegation slot or error — skip
 		}
-		slotValue := strings.TrimSpace(string(out))
+		slotValue = strings.TrimSpace(slotValue)
 		if slotValue == "" || slotValue == "null" {
 			continue
 		}

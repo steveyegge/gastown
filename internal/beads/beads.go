@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"database/sql"
+
 	beadsdk "github.com/steveyegge/beads"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/telemetry"
@@ -27,6 +29,14 @@ var (
 	ErrNotFound     = errors.New("issue not found")
 	ErrFlagTitle    = errors.New("title looks like a CLI flag (starts with '-'); use --title=\"...\" to set flag-like titles intentionally")
 )
+
+// rawDBAccessor mirrors the beads internal storage.RawDBAccessor interface.
+// Defined locally because Go doesn't allow importing internal packages from
+// external modules. The beads DoltStore satisfies this interface.
+type rawDBAccessor interface {
+	DB() *sql.DB
+	UnderlyingDB() *sql.DB
+}
 
 // bdAllowStale caches whether the installed bd supports --allow-stale.
 // The cache is keyed by the resolved bd path so tests and subprocess stubs that
@@ -404,6 +414,19 @@ func (b *Beads) openStore(ctx context.Context) (beadsdk.Storage, error) {
 	return store, nil
 }
 
+// openRoutedStore returns a Storage for the database that owns the given issue ID.
+// For local IDs this returns b's own store; for cross-rig IDs it resolves via
+// ResolveRoutingTarget and opens the remote store. This replaces runWithRouting
+// for Go module Storage API calls.
+func (b *Beads) openRoutedStore(ctx context.Context, issueID string) (beadsdk.Storage, error) {
+	targetDir := ResolveRoutingTarget(b.getTownRoot(), issueID, b.getResolvedBeadsDir())
+	if targetDir == b.getResolvedBeadsDir() {
+		return b.openStore(ctx)
+	}
+	target := NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
+	return target.openStore(ctx)
+}
+
 // CloseStore releases the Go module storage connection, if open.
 // Safe to call even if the store was never opened.
 func (b *Beads) CloseStore() error {
@@ -433,11 +456,12 @@ func issueFromModule(mi *beadsdk.Issue) *Issue {
 		Assignee:           mi.Assignee,
 		Labels:             mi.Labels,
 		Ephemeral:          mi.Ephemeral,
-		HookBead:           mi.HookBead,
-		AgentState:         string(mi.AgentState),
 		AcceptanceCriteria: mi.AcceptanceCriteria,
 		CreatedBy:          mi.CreatedBy,
 	}
+	// HookBead and AgentState were removed from beads Issue in v0.62.
+	// They're now stored in metadata slots — populated lazily by callers
+	// that need them (e.g., lookupHookedWork calls SlotGet for hook_bead).
 	if !mi.CreatedAt.IsZero() {
 		issue.CreatedAt = mi.CreatedAt.UTC().Format(time.RFC3339)
 	}
@@ -945,41 +969,43 @@ func (b *Beads) ListMergeRequests(opts ListOptions) ([]*Issue, error) {
 			"GROUP BY w.id, w.title, w.description, w.status, w.priority, w.assignee, w.created_at, w.updated_at, w.created_by",
 		labelFilter, statusFilter)
 
-	sqlOut, sqlErr := b.run("sql", "--json", query)
-	if sqlErr == nil && len(sqlOut) > 0 && isJSONBytes(sqlOut) {
-		var rows []struct {
-			ID          string `json:"id"`
-			Title       string `json:"title"`
-			Description string `json:"description"`
-			Status      string `json:"status"`
-			Priority    int    `json:"priority"`
-			Assignee    string `json:"assignee"`
-			CreatedAt   string `json:"created_at"`
-			UpdatedAt   string `json:"updated_at"`
-			CreatedBy   string `json:"created_by"`
-			LabelsCSV   string `json:"labels_csv"`
-		}
-		if jsonErr := json.Unmarshal(sqlOut, &rows); jsonErr == nil {
-			for _, row := range rows {
-				if seen[row.ID] {
-					continue
+	// Execute raw SQL query via RawDBAccessor type assertion on the Storage interface.
+	ctx := context.Background()
+	store, storeErr := b.openStore(ctx)
+	if storeErr == nil {
+		if accessor, ok := store.(rawDBAccessor); ok {
+			db := accessor.UnderlyingDB()
+			if db != nil {
+				sqlRows, sqlErr := db.QueryContext(ctx, query)
+				if sqlErr == nil {
+					defer sqlRows.Close()
+					for sqlRows.Next() {
+						var id, title, description, status, assignee, createdAt, updatedAt, createdBy, labelsCSV string
+						var priority int
+						if scanErr := sqlRows.Scan(&id, &title, &description, &status, &priority, &assignee, &createdAt, &updatedAt, &createdBy, &labelsCSV); scanErr != nil {
+							continue
+						}
+						if seen[id] {
+							continue
+						}
+						issue := &Issue{
+							ID:          id,
+							Title:       title,
+							Description: description,
+							Status:      status,
+							Priority:    priority,
+							Assignee:    assignee,
+							CreatedAt:   createdAt,
+							UpdatedAt:   updatedAt,
+							CreatedBy:   createdBy,
+							Ephemeral:   true,
+						}
+						if labelsCSV != "" {
+							issue.Labels = strings.Split(labelsCSV, ",")
+						}
+						issueResults = append(issueResults, issue)
+					}
 				}
-				issue := &Issue{
-					ID:          row.ID,
-					Title:       row.Title,
-					Description: row.Description,
-					Status:      row.Status,
-					Priority:    row.Priority,
-					Assignee:    row.Assignee,
-					CreatedAt:   row.CreatedAt,
-					UpdatedAt:   row.UpdatedAt,
-					CreatedBy:   row.CreatedBy,
-					Ephemeral:   true,
-				}
-				if row.LabelsCSV != "" {
-					issue.Labels = strings.Split(row.LabelsCSV, ",")
-				}
-				issueResults = append(issueResults, issue)
 			}
 		}
 	}

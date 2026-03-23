@@ -3,7 +3,6 @@ package beads
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/gofrs/flock"
 
+	beadsdk "github.com/steveyegge/beads"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/telemetry"
 )
@@ -232,11 +232,15 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// agent bead's JSON field (primary lookup path in lookupHookedWork).
 	// The fallback query (status=hooked + assignee) is unreliable for
 	// cross-database scenarios. Restoring per hq-gfg.
-	// Uses runWithRouting for cross-rig agent beads (e.g., bd-beads-polecat-obsidian
+	// Uses routing-aware store for cross-rig agent beads (e.g., bd-beads-polecat-obsidian
 	// created from gastown context needs routing via routes.jsonl).
 	if fields != nil && fields.HookBead != "" {
-		if _, slotErr := b.runWithRouting("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
-			// Non-fatal: fallback query may still find the work bead
+		ctx := context.Background()
+		targetStore, storeErr := b.openRoutedStore(ctx, id)
+		if storeErr == nil {
+			if slotErr := targetStore.SlotSet(ctx, id, "hook", fields.HookBead, b.getActor()); slotErr != nil {
+				// Non-fatal: fallback query may still find the work bead
+			}
 		}
 	}
 
@@ -295,7 +299,12 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 
 	// If bead is closed, reopen it first
 	if existing.Status == "closed" {
-		if _, reopenErr := target.run("reopen", id, "--reason=re-spawning agent"); reopenErr != nil {
+		ctx := context.Background()
+		targetStore, storeErr := target.openStore(ctx)
+		if storeErr != nil {
+			return nil, fmt.Errorf("opening store to reopen agent bead %s: %w", id, storeErr)
+		}
+		if reopenErr := targetStore.ReopenIssue(ctx, id, "re-spawning agent", target.getActor()); reopenErr != nil {
 			// Reopen failed - try setting status to open via update as fallback
 			// This handles Dolt backends where bd reopen may not work
 			openStatus := "open"
@@ -318,8 +327,15 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		return nil, fmt.Errorf("updating agent bead: %w", err)
 	}
 	// Fix type separately — UpdateOptions doesn't support type changes
-	if _, err := target.run("update", id, "--type=agent"); err != nil {
-		return nil, fmt.Errorf("fixing agent bead type: %w", err)
+	{
+		ctx := context.Background()
+		targetStore, storeErr := target.openStore(ctx)
+		if storeErr != nil {
+			return nil, fmt.Errorf("opening store to fix agent bead type: %w", storeErr)
+		}
+		if err := targetStore.UpdateIssueType(ctx, id, "agent", target.getActor()); err != nil {
+			return nil, fmt.Errorf("fixing agent bead type: %w", err)
+		}
 	}
 
 	// Note: role slot no longer set - role definitions are config-based
@@ -327,10 +343,14 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	// Set hook_bead slot so gt mol status can find hooked work via the
 	// agent bead's JSON field (primary lookup path in lookupHookedWork).
 	// Restoring per hq-gfg.
-	// Uses runWithRouting for cross-rig agent beads.
+	// Uses routing-aware store for cross-rig agent beads.
 	if fields != nil && fields.HookBead != "" {
-		if _, slotErr := target.runWithRouting("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
-			// Non-fatal: fallback query may still find the work bead
+		ctx := context.Background()
+		targetStore, storeErr := target.openStore(ctx)
+		if storeErr == nil {
+			if slotErr := targetStore.SlotSet(ctx, id, "hook", fields.HookBead, target.getActor()); slotErr != nil {
+				// Non-fatal: fallback query may still find the work bead
+			}
 		}
 	}
 
@@ -395,14 +415,18 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 }
 
 // UpdateAgentState updates the agent_state field in an agent bead.
-// Uses `bd agent state` command for the database column directly.
+// Uses the Go module Storage API to update the agent_state column directly.
 func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, nil, retErr) }()
-	// Update agent state using bd agent state command
-	// Use runWithRouting so bd can resolve cross-prefix agent beads (e.g., wa-*
-	// agent beads from hq context) via routes.jsonl instead of BEADS_DIR.
-	_, err := b.runWithRouting("agent", "state", id, state)
+	// Update agent state via Go module Storage API.
+	// Uses routing-aware store so cross-prefix agent beads (e.g., wa-*
+	// agent beads from hq context) resolve correctly.
+	ctx := context.Background()
+	store, err := b.openRoutedStore(ctx, id)
 	if err != nil {
+		return fmt.Errorf("opening store for agent state update: %w", err)
+	}
+	if err := store.UpdateIssue(ctx, id, map[string]interface{}{"agent_state": state}, b.getActor()); err != nil {
 		return fmt.Errorf("updating agent state: %w", err)
 	}
 
@@ -646,30 +670,29 @@ func mergeAgentBeadSources(issuesByID, wispsByID map[string]*Issue) map[string]*
 // ListAgentBeadsFromWisps queries the wisps table for agent beads.
 // Returns nil, nil if the wisps table doesn't exist yet or has no agent beads.
 func (b *Beads) ListAgentBeadsFromWisps() (map[string]*Issue, error) {
-	out, err := b.run("mol", "wisp", "list", "--json")
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
+	if err != nil {
+		return nil, nil // Store may not be available yet
+	}
+
+	wisps, err := store.ListWisps(ctx, beadsdk.WispFilter{})
 	if err != nil {
 		return nil, nil // Wisps table may not exist yet
 	}
 
-	// bd mol wisp list --json returns {"wisps": [...], "count": N, ...}
-	var wrapper struct {
-		Wisps []*Issue `json:"wisps"`
-	}
-	if err := json.Unmarshal(out, &wrapper); err != nil {
-		return nil, nil
-	}
-
 	result := make(map[string]*Issue)
-	for _, w := range wrapper.Wisps {
+	for _, w := range wisps {
+		issue := issueFromModule(w)
 		// Check by type/label first (works when fields are present)
-		if IsAgentBead(w) {
-			result[w.ID] = w
+		if IsAgentBead(issue) {
+			result[issue.ID] = issue
 			continue
 		}
-		// Fallback: wisps JSON may omit issue_type/labels fields.
+		// Fallback: wisps may omit issue_type/labels fields.
 		// Detect agent beads by ID pattern (prefix-rig-role format).
-		if isAgentBeadByID(w.ID) {
-			result[w.ID] = w
+		if isAgentBeadByID(issue.ID) {
+			result[issue.ID] = issue
 		}
 	}
 
@@ -704,22 +727,19 @@ func isAgentBeadByID(id string) bool {
 // This is useful for existence checks where wisp metadata (type, labels)
 // may not be available in the list output.
 func (b *Beads) ListWispIDs() (map[string]bool, error) {
-	out, err := b.run("mol", "wisp", "list", "--json")
+	ctx := context.Background()
+	store, err := b.openStore(ctx)
 	if err != nil {
 		return nil, nil
 	}
 
-	var wrapper struct {
-		Wisps []struct {
-			ID string `json:"id"`
-		} `json:"wisps"`
-	}
-	if err := json.Unmarshal(out, &wrapper); err != nil {
+	wisps, err := store.ListWisps(ctx, beadsdk.WispFilter{})
+	if err != nil {
 		return nil, nil
 	}
 
-	result := make(map[string]bool, len(wrapper.Wisps))
-	for _, w := range wrapper.Wisps {
+	result := make(map[string]bool, len(wisps))
+	for _, w := range wisps {
 		result[w.ID] = true
 	}
 	return result, nil
