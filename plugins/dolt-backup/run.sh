@@ -127,16 +127,12 @@ log "$SUMMARY"
 # --- Step 3: Record result and escalate if needed -----------------------------
 
 if [[ "$FAILED" -eq 0 ]]; then
-  # Success — record quietly
-  bd create --title "dolt-backup: $SUMMARY" -t chore --ephemeral \
-    -l type:plugin-run,plugin:dolt-backup,result:success \
-    -d "$SUMMARY" --silent 2>/dev/null || true
+  # Success — record quietly (gt plugin record auto-closes the bead)
+  gt plugin record dolt-backup --result success --body "$SUMMARY" --silent 2>/dev/null || true
 else
   # Failure — record and escalate
   FAIL_MSG="$SUMMARY. Failed:$FAILED_DBS"
-  bd create --title "dolt-backup: FAILED - $FAIL_MSG" -t chore --ephemeral \
-    -l type:plugin-run,plugin:dolt-backup,result:failure \
-    -d "$FAIL_MSG" --silent 2>/dev/null || true
+  gt plugin record dolt-backup --result failure --body "FAILED - $FAIL_MSG" --silent 2>/dev/null || true
 
   gt escalate "dolt-backup FAILED: $FAIL_MSG" \
     --severity high \

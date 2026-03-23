@@ -54,6 +54,7 @@ func (d *Daemon) handleDogs() {
 	d.cleanupStuckDogs(mgr, sm)
 	d.detectStaleWorkingDogs(mgr, sm, opCfg)
 	d.reapIdleDogs(mgr, sm, opCfg)
+	d.cleanupStalePluginBeads()
 	d.dispatchPlugins(mgr, sm, rigsConfig)
 }
 
@@ -300,6 +301,22 @@ func (d *Daemon) dispatchPlugins(mgr *dog.Manager, sm *dog.SessionManager, rigsC
 		}
 
 		d.logger.Printf("Handler: dispatched plugin %s to dog %s", p.Name, idleDog.Name)
+	}
+}
+
+// cleanupStalePluginBeads closes any open plugin-run beads that were left
+// unclosed by plugin instructions. Acts as a safety net — properly written
+// plugins use "gt plugin record" which auto-closes, but legacy plugins or
+// crash-interrupted runs can leave orphans.
+func (d *Daemon) cleanupStalePluginBeads() {
+	recorder := plugin.NewRecorder(d.config.TownRoot)
+	closed, err := recorder.CloseStalePluginBeads()
+	if err != nil {
+		d.logger.Printf("Handler: failed to cleanup plugin beads: %v", err)
+		return
+	}
+	if closed > 0 {
+		d.logger.Printf("Handler: closed %d stale plugin-run bead(s)", closed)
 	}
 }
 

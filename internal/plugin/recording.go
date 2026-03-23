@@ -230,3 +230,58 @@ func (r *Recorder) CountRunsSince(pluginName string, since string) (int, error) 
 	}
 	return len(runs), nil
 }
+
+// CloseStalePluginBeads finds open beads with the type:plugin-run label
+// and closes them. These beads are created by plugin instructions but should
+// be closed immediately after creation. This method acts as a safety net
+// to clean up any that were missed (e.g., due to agent crash or old plugins
+// that don't use gt plugin record).
+func (r *Recorder) CloseStalePluginBeads() (int, error) {
+	// Query for open plugin-run beads (no --all flag = open only)
+	args := []string{
+		"list",
+		"--json",
+		"-l", "type:plugin-run",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), constants.BdCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
+	cmd.Dir = r.townRoot
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beads.ResolveBeadsDir(r.townRoot))
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if stderr.Len() == 0 || stdout.String() == "[]\n" {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("querying open plugin beads: %s: %w", stderr.String(), err)
+	}
+
+	var openBeads []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &openBeads); err != nil {
+		if stdout.String() == "[]\n" || stdout.Len() == 0 {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("parsing open plugin beads: %w", err)
+	}
+
+	closed := 0
+	for _, b := range openBeads {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), constants.BdCommandTimeout)
+		closeCmd := exec.CommandContext(closeCtx, "bd", "close", b.ID, "--reason", "stale plugin-run bead auto-closed") //nolint:gosec // G204: bd is a trusted internal tool
+		closeCmd.Dir = r.townRoot
+		closeCmd.Env = append(os.Environ(), "BEADS_DIR="+beads.ResolveBeadsDir(r.townRoot))
+		if err := closeCmd.Run(); err == nil {
+			closed++
+		}
+		closeCancel()
+	}
+
+	return closed, nil
+}

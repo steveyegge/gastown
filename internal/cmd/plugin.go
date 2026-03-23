@@ -18,15 +18,19 @@ import (
 
 // Plugin command flags
 var (
-	pluginListJSON     bool
-	pluginShowJSON     bool
-	pluginRunForce     bool
-	pluginRunDryRun    bool
-	pluginHistoryJSON  bool
-	pluginHistoryLimit int
-	pluginSyncSource   string
-	pluginSyncClean    bool
-	pluginSyncDryRun   bool
+	pluginListJSON      bool
+	pluginShowJSON      bool
+	pluginRunForce      bool
+	pluginRunDryRun     bool
+	pluginHistoryJSON   bool
+	pluginHistoryLimit  int
+	pluginSyncSource    string
+	pluginSyncClean     bool
+	pluginSyncDryRun    bool
+	pluginRecordResult  string
+	pluginRecordBody    string
+	pluginRecordRig     string
+	pluginRecordSilent  bool
 )
 
 var pluginCmd = &cobra.Command{
@@ -120,6 +124,23 @@ Examples:
 	RunE: runPluginSync,
 }
 
+var pluginRecordCmd = &cobra.Command{
+	Use:   "record <name>",
+	Short: "Record a plugin run (creates and auto-closes a tracking bead)",
+	Long: `Record that a plugin has been executed. Creates an ephemeral bead
+and immediately closes it, preventing bead accumulation.
+
+This is the preferred way for plugin instructions to record their execution.
+Use this instead of raw "bd create --ephemeral" calls.
+
+Examples:
+  gt plugin record stuck-agent-dog --result success --body "Checked 3 agents, all healthy"
+  gt plugin record compactor-dog --result failure --body "Dolt unreachable"
+  gt plugin record dolt-backup --result success --body "3 DBs synced" --silent`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPluginRecord,
+}
+
 var pluginHistoryCmd = &cobra.Command{
 	Use:   "history <name>",
 	Short: "Show plugin execution history",
@@ -155,12 +176,19 @@ func init() {
 	pluginSyncCmd.Flags().BoolVar(&pluginSyncClean, "clean", false, "Remove plugins from target that don't exist in source")
 	pluginSyncCmd.Flags().BoolVar(&pluginSyncDryRun, "dry-run", false, "Show what would happen without syncing")
 
+	// Record subcommand flags
+	pluginRecordCmd.Flags().StringVar(&pluginRecordResult, "result", "success", "Run result: success, failure, or skipped")
+	pluginRecordCmd.Flags().StringVar(&pluginRecordBody, "body", "", "Description of the run outcome")
+	pluginRecordCmd.Flags().StringVar(&pluginRecordRig, "rig", "", "Rig name (optional)")
+	pluginRecordCmd.Flags().BoolVar(&pluginRecordSilent, "silent", false, "Suppress output")
+
 	// Add subcommands
 	pluginCmd.AddCommand(pluginListCmd)
 	pluginCmd.AddCommand(pluginShowCmd)
 	pluginCmd.AddCommand(pluginRunCmd)
 	pluginCmd.AddCommand(pluginHistoryCmd)
 	pluginCmd.AddCommand(pluginSyncCmd)
+	pluginCmd.AddCommand(pluginRecordCmd)
 
 	rootCmd.AddCommand(pluginCmd)
 }
@@ -484,6 +512,45 @@ func runPluginRun(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to record run: %v\n", err)
 	} else {
 		fmt.Printf("\n%s Recorded run: %s\n", style.Dim.Render("●"), beadID)
+	}
+
+	return nil
+}
+
+func runPluginRecord(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	result := plugin.ResultSuccess
+	switch strings.ToLower(pluginRecordResult) {
+	case "failure", "fail":
+		result = plugin.ResultFailure
+	case "skipped", "skip":
+		result = plugin.ResultSkipped
+	case "success", "ok", "":
+		result = plugin.ResultSuccess
+	default:
+		// Accept arbitrary result values (e.g., "warning", "check-only")
+		result = plugin.RunResult(pluginRecordResult)
+	}
+
+	recorder := plugin.NewRecorder(townRoot)
+	beadID, err := recorder.RecordRun(plugin.PluginRunRecord{
+		PluginName: name,
+		RigName:    pluginRecordRig,
+		Result:     result,
+		Body:       pluginRecordBody,
+	})
+	if err != nil {
+		return fmt.Errorf("recording plugin run: %w", err)
+	}
+
+	if !pluginRecordSilent {
+		fmt.Printf("%s Recorded run: %s (%s)\n", style.Dim.Render("●"), beadID, result)
 	}
 
 	return nil
