@@ -77,7 +77,7 @@ func wispDeleteAge(config *DaemonPatrolConfig) time.Duration {
 // The Dog reads the formula steps and calls `gt reaper` CLI helpers.
 // Falls back to inline execution if Dog dispatch fails.
 func (d *Daemon) reapWisps() {
-	if !IsPatrolEnabled(d.patrolConfig, "wisp_reaper") {
+	if !d.isPatrolActive("wisp_reaper") {
 		return
 	}
 

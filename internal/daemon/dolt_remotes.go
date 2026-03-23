@@ -29,7 +29,7 @@ func doltRemotesInterval(config *DaemonPatrolConfig) time.Duration {
 // pushDoltRemotes commits and pushes each configured database to its remote.
 // Non-fatal: errors are logged but don't stop the patrol.
 func (d *Daemon) pushDoltRemotes() {
-	if !IsPatrolEnabled(d.patrolConfig, "dolt_remotes") {
+	if !d.isPatrolActive("dolt_remotes") {
 		return
 	}
 
