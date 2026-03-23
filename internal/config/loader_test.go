@@ -5429,3 +5429,160 @@ func TestBuildStartupCommandWithAgentOverride_ExecWrapper(t *testing.T) {
 		t.Errorf("expected wrapper immediately before claude command, got: %q", cmd)
 	}
 }
+
+// --- Tests for GH#3153: --agent override skips --settings flag ---
+
+func TestWithRoleSettingsFlag_IdempotencyGuard(t *testing.T) {
+	t.Parallel()
+	rigPath := "/fake/town/myrig"
+	rc := &RuntimeConfig{
+		Command: "claude",
+		Args:    []string{"--dangerously-skip-permissions", "--settings", "/already/set/.claude/settings.json"},
+	}
+
+	before := len(rc.Args)
+	result := withRoleSettingsFlag(rc, "polecat", rigPath)
+
+	if len(result.Args) != before {
+		t.Errorf("idempotency guard failed: expected %d args, got %d — Args = %v", before, len(result.Args), result.Args)
+	}
+	count := 0
+	for _, arg := range result.Args {
+		if arg == "--settings" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 --settings flag, got %d — Args = %v", count, result.Args)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_SettingsFlagForClaudeOverride(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	townSettings.Agents["claude-sonnet"] = &RuntimeConfig{
+		Command: "claude",
+		Args:    []string{"--model", "sonnet", "--dangerously-skip-permissions"},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": "testrig/polecats/toast"},
+		rigPath,
+		"",
+		"claude-sonnet",
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	if !strings.Contains(cmd, "--settings") {
+		t.Errorf("Claude override on polecat role should include --settings, got: %q", cmd)
+	}
+	expectedPath := filepath.Join(rigPath, "polecats", ".claude", "settings.json")
+	if !strings.Contains(cmd, expectedPath) {
+		t.Errorf("expected settings path %q in command, got: %q", expectedPath, cmd)
+	}
+}
+
+func TestBuildPolecatStartupCommandWithAgentOverride_IncludesSettingsFlag(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	townSettings.Agents["claude-sonnet"] = &RuntimeConfig{
+		Command: "claude",
+		Args:    []string{"--model", "sonnet", "--dangerously-skip-permissions"},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildPolecatStartupCommandWithAgentOverride("testrig", "toast", rigPath, "", "claude-sonnet")
+	if err != nil {
+		t.Fatalf("BuildPolecatStartupCommandWithAgentOverride: %v", err)
+	}
+
+	if !strings.Contains(cmd, "--settings") {
+		t.Errorf("polecat with Claude override must get --settings for hooks to fire, got: %q", cmd)
+	}
+	expectedPath := filepath.Join(rigPath, "polecats", ".claude", "settings.json")
+	if !strings.Contains(cmd, expectedPath) {
+		t.Errorf("expected settings path %q in command, got: %q", expectedPath, cmd)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_NoSettingsFlagForNonClaude(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": "testrig/polecats/toast"},
+		rigPath,
+		"",
+		"gemini",
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	if strings.Contains(cmd, "--settings") {
+		t.Errorf("non-Claude override (gemini) should NOT get --settings, got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_NoDoubleSettingsOnNonOverridePath(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	// No override — ResolveRoleAgentConfig already adds --settings for polecat role.
+	// The new withRoleSettingsFlag call in BuildStartupCommandWithAgentOverride should
+	// be a no-op (idempotency guard), not double-add.
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": "testrig/polecats/toast"},
+		rigPath,
+		"",
+		"", // no override
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	count := strings.Count(cmd, "--settings")
+	if count > 1 {
+		t.Errorf("expected at most 1 --settings flag (idempotency guard), got %d — cmd: %q", count, cmd)
+	}
+	if count == 0 {
+		t.Errorf("default Claude agent on polecat role should still get --settings, got: %q", cmd)
+	}
+}
