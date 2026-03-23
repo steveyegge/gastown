@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
@@ -74,6 +76,7 @@ var (
 	handoffCycle      bool
 	handoffReason     string
 	handoffNoGitCheck bool
+	handoffYes        bool
 )
 
 func init() {
@@ -87,6 +90,7 @@ func init() {
 	handoffCmd.Flags().BoolVar(&handoffCycle, "cycle", false, "Auto-cycle session (for PreCompact hooks that want full session replacement)")
 	handoffCmd.Flags().StringVar(&handoffReason, "reason", "", "Reason for handoff (e.g., 'compaction', 'idle')")
 	handoffCmd.Flags().BoolVar(&handoffNoGitCheck, "no-git-check", false, "Skip git workspace cleanliness check")
+	handoffCmd.Flags().BoolVarP(&handoffYes, "yes", "y", false, "Skip confirmation prompt (for automation and scripting)")
 	rootCmd.AddCommand(handoffCmd)
 }
 
@@ -153,6 +157,16 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		doneCmd.Stdout = os.Stdout
 		doneCmd.Stderr = os.Stderr
 		return doneCmd.Run()
+	}
+
+	// Prompt for confirmation unless --yes/-y was passed or stdin is not a TTY.
+	// Only interactive (human) sessions get prompted; agent automation proceeds
+	// without blocking on stdin (gas-6z0).
+	if !handoffYes && !handoffDryRun && term.IsTerminal(int(os.Stdin.Fd())) {
+		if !promptYesNo("Ready to hand off? This will restart the session.") {
+			fmt.Println("Handoff canceled.")
+			return nil
+		}
 	}
 
 	// Enforce minimum handoff cooldown to prevent tight restart loops (gt-058d).
