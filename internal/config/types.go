@@ -1233,6 +1233,18 @@ type MergeQueueConfig struct {
 	// Set to false for human-in-the-loop approval workflows.
 	PRAutoMerge *bool `json:"pr_auto_merge,omitempty"`
 
+	// PRStaleWarnHours is how many hours an open PR can wait before the
+	// Refinery flags it in the patrol summary. Only applies when
+	// MergeStrategy is "pr" and PRAutoMerge is false.
+	// Default: 8 (hours).
+	PRStaleWarnHours *int `json:"pr_stale_warn_hours,omitempty"`
+
+	// PRStaleEscalateHours is how many hours an open PR can wait before
+	// the Refinery sends a STALE_PR escalation to the Mayor. Only applies
+	// when MergeStrategy is "pr" and PRAutoMerge is false.
+	// Default: 24 (hours).
+	PRStaleEscalateHours *int `json:"pr_stale_escalate_hours,omitempty"`
+
 	// OnConflict specifies conflict resolution strategy: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
 
@@ -1326,6 +1338,24 @@ func (c *MergeQueueConfig) IsPRAutoMergeEnabled() bool {
 		return true
 	}
 	return *c.PRAutoMerge
+}
+
+// GetPRStaleWarnHours returns how many hours before an open PR is flagged
+// as stale in the patrol summary. Nil-safe, defaults to 8.
+func (c *MergeQueueConfig) GetPRStaleWarnHours() int {
+	if c.PRStaleWarnHours == nil {
+		return 8
+	}
+	return *c.PRStaleWarnHours
+}
+
+// GetPRStaleEscalateHours returns how many hours before an open PR triggers
+// a STALE_PR escalation to the Mayor. Nil-safe, defaults to 24.
+func (c *MergeQueueConfig) GetPRStaleEscalateHours() int {
+	if c.PRStaleEscalateHours == nil {
+		return 24
+	}
+	return *c.PRStaleEscalateHours
 }
 
 // IsRunTestsEnabled returns whether tests should run before merging.

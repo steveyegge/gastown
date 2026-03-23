@@ -150,6 +150,14 @@ default = "direct"
 description = "Whether to auto-merge PRs after CI passes (true) or leave open for human approval (false). Only applies when merge_strategy = pr."
 default = "true"
 
+[vars.pr_stale_warn_hours]
+description = "Hours before an open PR is flagged as stale in patrol summary. Only applies when merge_strategy = pr and pr_auto_merge = false."
+default = "8"
+
+[vars.pr_stale_escalate_hours]
+description = "Hours before an open PR triggers STALE_PR escalation to Mayor. Only applies when merge_strategy = pr and pr_auto_merge = false."
+default = "24"
+
 [[steps]]
 id = "inbox-check"
 title = "Check refinery mail"
@@ -908,16 +916,21 @@ PR is still awaiting review. Check how long it has been open:
 gh pr view <pr-url> --json createdAt -q '.createdAt'
 ```
 
-As human-in-the-loop PRs are intended to be compliance rubber-stamps, they should be reviewed
-and merged quickly. While a PR is open, the polecat that produced the
-work remains allocated (its MR bead is open, the witness won't recycle it).
+While a PR is open, the polecat that produced the work remains allocated
+(its MR bead is open, the witness won't recycle it). Use the configured
+thresholds to decide when to warn and when to escalate.
 
-- **Open < 2 hours**: No action. Check again next cycle.
-- **Open 2-4 hours**: Flag in patrol summary as stale. The operator
-  should be aware that polecat capacity is being held.
-- **Open > 4 hours**: Escalate to the operator:
+**Config: pr_stale_warn_hours = {{pr_stale_warn_hours}}**
+**Config: pr_stale_escalate_hours = {{pr_stale_escalate_hours}}**
+
+- **Open < {{pr_stale_warn_hours}} hours**: No action. Check again next cycle.
+- **Open >= {{pr_stale_warn_hours}} hours but < {{pr_stale_escalate_hours}} hours**: Flag in patrol summary as stale.
+  The operator should be aware that polecat capacity is being held.
+- **Open >= {{pr_stale_escalate_hours}} hours**: Escalate to the operator, but **only once**.
+  Check the MR bead notes for "Status: escalated". If already escalated, skip.
+  If not yet escalated:
   ```bash
-  gt mail send mayor/ -s "STALE_PR <polecat-name>" -m "PR awaiting review for >4h.
+  gt mail send mayor/ -s "STALE_PR <polecat-name>" -m "PR awaiting review for >{{pr_stale_escalate_hours}}h.
   PR: <pr-url>
   Issue: <issue-id>
   Polecat: <polecat-name>
@@ -925,6 +938,10 @@ work remains allocated (its MR bead is open, the witness won't recycle it).
 
   Polecat capacity is held while this PR is open.
   Please review/merge or close the PR."
+  ```
+  Then update the MR bead to prevent re-escalation:
+  ```bash
+  bd update <mr-bead-id> --notes "PR: <pr-url>\nStatus: escalated"
   ```"""
 
 [[steps]]

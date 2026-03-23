@@ -5159,6 +5159,70 @@ func TestMergeQueueConfig_MergeStrategy(t *testing.T) {
 	}
 }
 
+// TestMergeQueueConfig_PRStaleThresholds verifies that pr_stale_warn_hours
+// and pr_stale_escalate_hours round-trip through JSON and that the accessor
+// methods return the right defaults.
+func TestMergeQueueConfig_PRStaleThresholds(t *testing.T) {
+	t.Parallel()
+
+	intPtr := func(i int) *int { return &i }
+
+	tests := []struct {
+		name         string
+		json         string
+		wantWarn     int
+		wantEscalate int
+		wantWarnNil  bool
+		wantEscNil   bool
+	}{
+		{
+			name:         "both omitted — defaults apply",
+			json:         `{"enabled": true, "on_conflict": "assign_back"}`,
+			wantWarn:     8,
+			wantEscalate: 24,
+			wantWarnNil:  true,
+			wantEscNil:   true,
+		},
+		{
+			name:         "custom thresholds",
+			json:         `{"enabled": true, "on_conflict": "assign_back", "pr_stale_warn_hours": 4, "pr_stale_escalate_hours": 12}`,
+			wantWarn:     4,
+			wantEscalate: 12,
+		},
+		{
+			name:         "zero is valid (immediate)",
+			json:         `{"enabled": true, "on_conflict": "assign_back", "pr_stale_warn_hours": 0, "pr_stale_escalate_hours": 0}`,
+			wantWarn:     0,
+			wantEscalate: 0,
+		},
+	}
+
+	_ = intPtr // suppress unused if needed
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cfg MergeQueueConfig
+			if err := json.Unmarshal([]byte(tt.json), &cfg); err != nil {
+				t.Fatalf("json.Unmarshal: %v", err)
+			}
+
+			if tt.wantWarnNil && cfg.PRStaleWarnHours != nil {
+				t.Errorf("PRStaleWarnHours should be nil when omitted, got %d", *cfg.PRStaleWarnHours)
+			}
+			if tt.wantEscNil && cfg.PRStaleEscalateHours != nil {
+				t.Errorf("PRStaleEscalateHours should be nil when omitted, got %d", *cfg.PRStaleEscalateHours)
+			}
+
+			if got := cfg.GetPRStaleWarnHours(); got != tt.wantWarn {
+				t.Errorf("GetPRStaleWarnHours() = %d, want %d", got, tt.wantWarn)
+			}
+			if got := cfg.GetPRStaleEscalateHours(); got != tt.wantEscalate {
+				t.Errorf("GetPRStaleEscalateHours() = %d, want %d", got, tt.wantEscalate)
+			}
+		})
+	}
+}
+
 // --- Ephemeral Cost Tier Tests ---
 
 func TestTryResolveFromEphemeralTier(t *testing.T) {

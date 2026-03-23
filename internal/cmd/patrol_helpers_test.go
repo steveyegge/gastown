@@ -129,6 +129,7 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 	// test_command="" (language-agnostic), target_branch="main" (from rig config), delete_merged_branches=true
 	// New commands (setup, typecheck, lint, build) default to empty = omitted
 	// pr_auto_merge always emitted (accessor defaults to true); merge_strategy omitted when empty
+	// pr_stale_warn_hours and pr_stale_escalate_hours always emitted with defaults
 	expected := map[string]string{
 		"integration_branch_refinery_enabled": "true",
 		"integration_branch_auto_land":        "false",
@@ -136,6 +137,8 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 		"target_branch":                       "main",
 		"delete_merged_branches":              "true",
 		"pr_auto_merge":                       "true",
+		"pr_stale_warn_hours":                 "8",
+		"pr_stale_escalate_hours":             "24",
 	}
 
 	varMap := make(map[string]string)
@@ -444,6 +447,13 @@ func TestBuildRefineryPatrolVars_MergeStrategyPR(t *testing.T) {
 	if got := varMap["pr_auto_merge"]; got != "false" {
 		t.Errorf("pr_auto_merge = %q, want %q", got, "false")
 	}
+	// Default stale thresholds
+	if got := varMap["pr_stale_warn_hours"]; got != "8" {
+		t.Errorf("pr_stale_warn_hours = %q, want %q", got, "8")
+	}
+	if got := varMap["pr_stale_escalate_hours"]; got != "24" {
+		t.Errorf("pr_stale_escalate_hours = %q, want %q", got, "24")
+	}
 }
 
 func TestBuildRefineryPatrolVars_MergeStrategyDefault(t *testing.T) {
@@ -487,6 +497,13 @@ func TestBuildRefineryPatrolVars_MergeStrategyDefault(t *testing.T) {
 	// pr_auto_merge should always be emitted (accessor defaults to true)
 	if got := varMap["pr_auto_merge"]; got != "true" {
 		t.Errorf("pr_auto_merge = %q, want %q", got, "true")
+	}
+	// stale thresholds always emitted with defaults
+	if got := varMap["pr_stale_warn_hours"]; got != "8" {
+		t.Errorf("pr_stale_warn_hours = %q, want %q", got, "8")
+	}
+	if got := varMap["pr_stale_escalate_hours"]; got != "24" {
+		t.Errorf("pr_stale_escalate_hours = %q, want %q", got, "24")
 	}
 }
 

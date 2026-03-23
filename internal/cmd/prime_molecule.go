@@ -398,6 +398,8 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 			vars = append(vars, fmt.Sprintf("merge_strategy=%s", mq.MergeStrategy))
 		}
 		vars = append(vars, fmt.Sprintf("pr_auto_merge=%t", mq.IsPRAutoMergeEnabled()))
+		vars = append(vars, fmt.Sprintf("pr_stale_warn_hours=%d", mq.GetPRStaleWarnHours()))
+		vars = append(vars, fmt.Sprintf("pr_stale_escalate_hours=%d", mq.GetPRStaleEscalateHours()))
 		return vars
 	}
 
