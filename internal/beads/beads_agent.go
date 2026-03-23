@@ -232,8 +232,10 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// agent bead's JSON field (primary lookup path in lookupHookedWork).
 	// The fallback query (status=hooked + assignee) is unreliable for
 	// cross-database scenarios. Restoring per hq-gfg.
+	// Uses runWithRouting for cross-rig agent beads (e.g., bd-beads-polecat-obsidian
+	// created from gastown context needs routing via routes.jsonl).
 	if fields != nil && fields.HookBead != "" {
-		if _, slotErr := b.run("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
+		if _, slotErr := b.runWithRouting("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
 			// Non-fatal: fallback query may still find the work bead
 		}
 	}
@@ -325,8 +327,9 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	// Set hook_bead slot so gt mol status can find hooked work via the
 	// agent bead's JSON field (primary lookup path in lookupHookedWork).
 	// Restoring per hq-gfg.
+	// Uses runWithRouting for cross-rig agent beads.
 	if fields != nil && fields.HookBead != "" {
-		if _, slotErr := target.run("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
+		if _, slotErr := target.runWithRouting("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
 			// Non-fatal: fallback query may still find the work bead
 		}
 	}

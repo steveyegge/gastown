@@ -313,10 +313,11 @@ type Beads struct {
 	// Lazy-initialized Go module storage connection.
 	// Used for direct database access without spawning a bd subprocess.
 	// Protected by storeMu; storeErr caches initialization failures so
-	// repeated calls don't re-attempt failed opens.
-	store    beadsdk.Storage
-	storeMu  sync.Mutex
-	storeErr error
+	// repeated calls don't re-attempt failed opens (with TTL-based retry).
+	store        beadsdk.Storage
+	storeMu      sync.Mutex
+	storeErr     error
+	storeErrTime time.Time // When storeErr was set; retries after storeErrTTL
 }
 
 // New creates a new Beads wrapper for the given directory.
@@ -385,15 +386,18 @@ func (b *Beads) openStore(ctx context.Context) (beadsdk.Storage, error) {
 		return b.store, nil
 	}
 	if b.storeErr != nil {
-		// Retry on transient failures (e.g., server starting up) by clearing
-		// cached error if store is still nil. Permanent errors (e.g., isolated
-		// mode with no database) remain cached.
-		return nil, b.storeErr
+		// Retry after 5s for transient failures (e.g., Dolt server restarting).
+		// Without this, a single transient failure permanently breaks the instance.
+		if time.Since(b.storeErrTime) < 5*time.Second {
+			return nil, b.storeErr
+		}
+		b.storeErr = nil
 	}
 	beadsDir := b.getResolvedBeadsDir()
 	store, err := beadsdk.OpenFromConfig(ctx, beadsDir)
 	if err != nil {
 		b.storeErr = fmt.Errorf("opening beads store at %s: %w", beadsDir, err)
+		b.storeErrTime = time.Now()
 		return nil, b.storeErr
 	}
 	b.store = store
@@ -1485,7 +1489,10 @@ func (b *Beads) Update(id string, opts UpdateOptions) error {
 	// Handle label operations separately
 	if len(opts.SetLabels) > 0 {
 		// Get current labels and compute diff
-		current, _ := store.GetLabels(ctx, id)
+		current, err := store.GetLabels(ctx, id)
+		if err != nil {
+			return fmt.Errorf("getting labels for %s: %w", id, err)
+		}
 		currentSet := make(map[string]bool, len(current))
 		for _, l := range current {
 			currentSet[l] = true
@@ -1497,13 +1504,17 @@ func (b *Beads) Update(id string, opts UpdateOptions) error {
 		// Remove labels not in wanted
 		for _, l := range current {
 			if !wanted[l] {
-				_ = store.RemoveLabel(ctx, id, l, actor)
+				if err := store.RemoveLabel(ctx, id, l, actor); err != nil {
+					return fmt.Errorf("removing label %q: %w", l, err)
+				}
 			}
 		}
 		// Add labels not in current
 		for _, l := range opts.SetLabels {
 			if !currentSet[l] {
-				_ = store.AddLabel(ctx, id, l, actor)
+				if err := store.AddLabel(ctx, id, l, actor); err != nil {
+					return fmt.Errorf("adding label %q: %w", l, err)
+				}
 			}
 		}
 	} else {
