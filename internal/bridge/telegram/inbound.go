@@ -34,7 +34,8 @@ func NewInboundRelay(sender Sender, msgMap *MessageMap, target string) *InboundR
 
 // Relay processes an inbound Telegram message: it sends mail to the configured
 // target and nudges the mayor session. Empty messages are silently skipped.
-// A nudge failure is non-fatal; it is logged but does not return an error.
+// The mail system's auto-nudge doesn't work from the daemon's subprocess
+// context, so we send an explicit nudge after mail delivery.
 func (r *InboundRelay) Relay(ctx context.Context, msg InboundMessage) error {
 	if msg.Text == "" {
 		return nil
@@ -51,6 +52,8 @@ func (r *InboundRelay) Relay(ctx context.Context, msg InboundMessage) error {
 		return err
 	}
 
+	// Explicit nudge — the mail auto-nudge doesn't fire reliably from the
+	// daemon process context (no GT_SESSION, no tmux env).
 	if err := r.sender.Nudge(ctx, "hq-mayor", "New Telegram message from overseer"); err != nil {
 		log.Printf("telegram inbound: nudge failed (non-fatal): %v", err)
 	}

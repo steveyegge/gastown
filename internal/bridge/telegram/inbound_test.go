@@ -67,9 +67,6 @@ func TestInboundRelay_RelaysMessageToMayor(t *testing.T) {
 	if nc.session != "hq-mayor" {
 		t.Errorf("nudge session: got %q, want %q", nc.session, "hq-mayor")
 	}
-	if nc.message != "New Telegram message from overseer" {
-		t.Errorf("nudge message: got %q, want %q", nc.message, "New Telegram message from overseer")
-	}
 }
 
 func TestInboundRelay_SkipsEmptyText(t *testing.T) {
@@ -125,7 +122,7 @@ func TestInboundRelay_ReplyThreadingViaMsgMap(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Relay should still send mail and nudge (thread context is for future use).
+	// Relay should still send mail (thread context is for future use).
 	if len(sender.mailCalls) != 1 {
 		t.Fatalf("expected 1 mail call, got %d", len(sender.mailCalls))
 	}

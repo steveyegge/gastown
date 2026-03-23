@@ -3,11 +3,22 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"log"
+	"net/http"
 	"sync"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
+
+// pollTimeout is the Telegram long-poll timeout in seconds.
+const pollTimeout = 30
+
+// httpClientTimeout is the HTTP client timeout for the Telegram API.
+// It must be longer than pollTimeout to allow the long-poll to complete,
+// but short enough to detect silently-dropped TCP connections quickly
+// (e.g., cloud NAT/firewall idle timeouts).
+const httpClientTimeout = (pollTimeout + 10) * time.Second
 
 // BotSender is satisfied by any type that can send a Telegram message.
 // It is used by OutboundNotifier for testability.
@@ -25,8 +36,12 @@ type Bot struct {
 }
 
 // NewBot creates a new Bot, connecting to the Telegram API to verify the token.
+// It configures an HTTP client timeout slightly longer than the long-poll timeout
+// to detect silently-dropped TCP connections (common on cloud servers with
+// NAT/firewall idle connection timeouts).
 func NewBot(cfg Config) (*Bot, error) {
-	api, err := tgbotapi.NewBotAPI(cfg.Token)
+	client := &http.Client{Timeout: httpClientTimeout}
+	api, err := tgbotapi.NewBotAPIWithClient(cfg.Token, tgbotapi.APIEndpoint, client)
 	if err != nil {
 		return nil, fmt.Errorf("telegram: connect: %w", err)
 	}
@@ -56,7 +71,7 @@ func (b *Bot) Messages() <-chan InboundMessage {
 // until ctx is cancelled.
 func (b *Bot) Poll(ctx context.Context) {
 	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 30
+	u.Timeout = pollTimeout
 
 	updates := b.api.GetUpdatesChan(u)
 	for {
@@ -100,6 +115,8 @@ func (b *Bot) Poll(ctx context.Context) {
 			case <-ctx.Done():
 				b.api.StopReceivingUpdates()
 				return
+			default:
+				log.Printf("telegram: inbound message channel full, dropping message from user %d", msg.From.ID)
 			}
 		}
 	}

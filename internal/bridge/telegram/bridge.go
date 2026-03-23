@@ -16,6 +16,7 @@ type Bridge struct {
 	cfg         Config
 	sender      Sender
 	townRoot    string
+	logger      *log.Logger
 	inboxReader InboxReader // Optional: injected by daemon, nil = use CLIInboxReader
 	msgMap      *MessageMap // persists across reconnects to avoid duplicate sends
 
@@ -33,8 +34,16 @@ func NewBridge(cfg Config, sender Sender, townRoot string) *Bridge {
 		cfg:      cfg,
 		sender:   sender,
 		townRoot: townRoot,
+		logger:   log.Default(),
 		msgMap:   NewMessageMap(10000),
 	}
+}
+
+// SetLogger sets the logger for the bridge. When running inside the daemon,
+// this should be the daemon's file-backed logger so bridge errors appear in
+// daemon.log instead of being lost to stderr.
+func (b *Bridge) SetLogger(l *log.Logger) {
+	b.logger = l
 }
 
 // Run validates the config, then enters a retry loop calling runOnce.
@@ -52,7 +61,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if err != nil {
-			log.Printf("telegram bridge: run error (retrying in 5s): %v", err)
+			b.logger.Printf("telegram bridge: run error (retrying in 5s): %v", err)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -73,11 +82,11 @@ func (b *Bridge) Stop() {
 
 // safeGo runs fn with panic recovery so a panicking goroutine doesn't
 // crash the entire bridge. Panics are logged and the goroutine exits cleanly.
-func safeGo(wg *sync.WaitGroup, name string, fn func()) {
+func (b *Bridge) safeGo(wg *sync.WaitGroup, name string, fn func()) {
 	defer wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("telegram bridge: PANIC in %s (recovered): %v", name, r)
+			b.logger.Printf("telegram bridge: PANIC in %s (recovered): %v", name, r)
 		}
 	}()
 	fn()
@@ -117,25 +126,25 @@ func (b *Bridge) runOnce(ctx context.Context) (retErr error) {
 	if b.inboxReader == nil {
 		cliReader := NewCLIInboxReader(b.townRoot)
 		if err := cliReader.SeedForwarded(runCtx); err != nil {
-			log.Printf("telegram bridge: seed forwarded (non-fatal): %v", err)
+			b.logger.Printf("telegram bridge: seed forwarded (non-fatal): %v", err)
 		}
 		b.inboxReader = cliReader
 	}
 	inboxReader := b.inboxReader
 	b.mu.Unlock()
 
-	replyFwd := NewReplyForwarder(bot, inboxReader, b.msgMap)
+	replyFwd := NewReplyForwarder(bot, inboxReader, b.msgMap, b.logger)
 
 	var wg sync.WaitGroup
 
 	wg.Add(1)
-	go safeGo(&wg, "bot.Poll", func() { bot.Poll(runCtx) })
+	go b.safeGo(&wg, "bot.Poll", func() { bot.Poll(runCtx) })
 
 	wg.Add(1)
-	go safeGo(&wg, "outbound", func() { outbound.Run(runCtx) })
+	go b.safeGo(&wg, "outbound", func() { outbound.Run(runCtx) })
 
 	wg.Add(1)
-	go safeGo(&wg, "replyFwd", func() { replyFwd.Run(runCtx) })
+	go b.safeGo(&wg, "replyFwd", func() { replyFwd.Run(runCtx) })
 
 	// Main loop: relay inbound messages until context is cancelled.
 	for {
@@ -149,7 +158,7 @@ func (b *Bridge) runOnce(ctx context.Context) (retErr error) {
 				return nil
 			}
 			if err := inbound.Relay(runCtx, msg); err != nil {
-				log.Printf("telegram bridge: relay error: %v", err)
+				b.logger.Printf("telegram bridge: relay error: %v", err)
 			}
 		}
 	}

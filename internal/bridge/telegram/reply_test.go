@@ -58,7 +58,7 @@ func TestReplyForwarder_ForwardsMayorReply(t *testing.T) {
 	// Pre-seed the map: thread-42 was started by Telegram message 99 in chat 1001.
 	msgMap.Store(1001, 99, "thread-42")
 
-	rf := NewReplyForwarder(bot, inbox, msgMap)
+	rf := NewReplyForwarder(bot, inbox, msgMap, nil)
 	rf.PollOnce(context.Background())
 
 	if len(bot.sent) != 1 {
@@ -94,7 +94,7 @@ func TestReplyForwarder_NoUnreadMessages(t *testing.T) {
 	inbox := &mockInboxReader{} // no messages
 	msgMap := NewMessageMap(100)
 
-	rf := NewReplyForwarder(bot, inbox, msgMap)
+	rf := NewReplyForwarder(bot, inbox, msgMap, nil)
 	rf.PollOnce(context.Background())
 
 	if len(bot.sent) != 0 {
@@ -120,7 +120,7 @@ func TestReplyForwarder_NoThreadSendsWithoutReplyTo(t *testing.T) {
 	}
 	msgMap := NewMessageMap(100)
 
-	rf := NewReplyForwarder(bot, inbox, msgMap)
+	rf := NewReplyForwarder(bot, inbox, msgMap, nil)
 	rf.PollOnce(context.Background())
 
 	if len(bot.sent) != 1 {

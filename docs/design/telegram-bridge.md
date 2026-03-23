@@ -17,13 +17,15 @@ gt telegram configure \
     --chat-id <CHAT_ID> \
     --allow-from <USER_ID>
 
-# 4. Run standalone
-gt telegram run
+# 4. Enable the daemon patrol
+#    This step is required — configuring the bridge alone does NOT start it.
+#    Add telegram_bridge to the patrols section of mayor/daemon.json:
+#    { "patrols": { "telegram_bridge": { "enabled": true } } }
+#    Then restart the daemon:
+gt daemon stop && gt daemon start
 
-# Or enable as a daemon patrol (auto-starts with daemon):
-# Add to mayor/daemon.json:
-#   { "patrols": { "telegram_bridge": { "enabled": true } } }
-# Then restart: gt daemon stop && gt daemon start
+# Or run standalone (for testing):
+gt telegram run
 ```
 
 ## How It Works
@@ -56,7 +58,26 @@ You (Telegram)                    Gas Town
 2. Access gate rejects bots, checks `allow_from` list (fail-closed: empty list blocks everyone)
 3. Rate limiter enforces per-user sliding window (default 30 msgs/min)
 4. Message sent as mail: `from: overseer`, `to: mayor/`, `subject: Telegram`
-5. Nudge queued to `hq-mayor` session so Mayor picks it up on its next turn
+5. Nudge queued to `hq-mayor` via `gt nudge hq-mayor --mode=queue`
+6. Mayor picks up the message on its next turn via its existing `UserPromptSubmit`
+   hook (`gt mail check --inject`), which checks for queued nudges and injects
+   unread mail into the prompt
+
+### Mayor's Side (no configuration needed)
+
+The Mayor requires no changes to work with Telegram. It uses its existing mail
+infrastructure:
+
+- **Receiving**: The Mayor's `UserPromptSubmit` hook already runs
+  `gt mail check --inject`, which picks up nudges and injects unread mail.
+  Telegram messages arrive as ordinary mail from `overseer` with subject
+  `Telegram`.
+- **Replying**: The Mayor replies normally via `gt mail send overseer` or
+  `gt mail reply`. The reply forwarder detects these replies in the overseer
+  inbox and forwards them to Telegram automatically.
+- **No special handling**: From the Mayor's perspective, Telegram messages are
+  indistinguishable from any other overseer mail. It doesn't know or care that
+  the message originated from Telegram.
 
 ### Outbound: Mayor Replies → Telegram
 
@@ -133,13 +154,23 @@ daemon config.
 ### Daemon Patrol (recommended)
 
 Bridge runs as a goroutine inside the daemon using `DirectSender` — calls Go
-APIs directly, avoiding subprocess overhead. Enable via `mayor/daemon.json`:
+APIs directly, avoiding subprocess overhead.
 
-```json
-{ "patrols": { "telegram_bridge": { "enabled": true } } }
-```
+**Both** the config file and the daemon patrol must be set up:
 
-Both modes use identical bridge logic. Only the `Sender` implementation differs.
+1. Configure the bridge: `gt telegram configure --token ... --chat-id ... --allow-from ...`
+   (creates `mayor/telegram.json`)
+2. Enable the patrol in `mayor/daemon.json`:
+   ```json
+   { "patrols": { "telegram_bridge": { "enabled": true } } }
+   ```
+3. Restart the daemon: `gt daemon stop && gt daemon start`
+
+The config file (`mayor/telegram.json`) controls *what* the bridge connects to.
+The daemon patrol entry controls *whether* the daemon starts it. Without the
+patrol entry, the bridge won't run even if the config file is valid.
+
+Both deployment modes use identical bridge logic. Only the `Sender` implementation differs.
 
 ## Architecture
 

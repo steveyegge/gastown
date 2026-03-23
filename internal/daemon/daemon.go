@@ -405,7 +405,13 @@ func (d *Daemon) Run() error {
 			// Use CLISender — avoids importing mail/nudge packages into daemon
 			sender := telegram.NewCLISender(d.config.TownRoot)
 			d.telegramBridge = telegram.NewBridge(tgCfg, sender, d.config.TownRoot)
+			d.telegramBridge.SetLogger(d.logger)
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						d.logger.Printf("Telegram bridge goroutine PANIC: %v", r)
+					}
+				}()
 				if err := d.telegramBridge.Run(d.ctx); err != nil && d.ctx.Err() == nil {
 					d.logger.Printf("Telegram bridge stopped: %v", err)
 				}

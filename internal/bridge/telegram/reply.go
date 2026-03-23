@@ -60,7 +60,6 @@ func (r *CLIInboxReader) UnreadMessages(ctx context.Context) ([]InboxMessage, er
 	cmd := exec.CommandContext(ctx, "bd", "list",
 		"--assignee", "overseer",
 		"--label", "gt:message",
-		"--all",           // include closed
 		"--include-infra", // messages are infra beads
 		"--json",
 		"--no-pager",
@@ -158,10 +157,25 @@ func (r *CLIInboxReader) SeedForwarded(ctx context.Context) error {
 	return nil
 }
 
-// MarkRead records the message as forwarded. The mail system already auto-closes
-// messages to overseer, so we just track the ID to avoid re-forwarding.
-func (r *CLIInboxReader) MarkRead(_ context.Context, id string) error {
+// MarkRead records the message as forwarded and closes the bead so it won't
+// be re-forwarded if the bridge restarts (the in-memory forwarded set is lost
+// on restart, so we need durable state via bd close).
+func (r *CLIInboxReader) MarkRead(ctx context.Context, id string) error {
 	r.forwarded[id] = true
+
+	// Close the bead so it leaves the open query results. Best-effort:
+	// if this fails, the in-memory forwarded set still prevents duplicates
+	// within the current process lifetime.
+	cmd := exec.CommandContext(ctx, "bd", "close", id)
+	cmd.Dir = r.townRoot
+	cmd.Env = append(os.Environ(), "BD_ACTOR=overseer")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		// This goes to default logger since CLIInboxReader doesn't have the bridge logger.
+		// Best-effort close — the in-memory forwarded set still prevents duplicates.
+		log.Printf("reply forwarder: bd close %s: %v: %s", id, err, out)
+	} else {
+		log.Printf("reply forwarder: closed %s", id)
+	}
 	return nil
 }
 
@@ -171,14 +185,19 @@ type ReplyForwarder struct {
 	bot    BotSender
 	inbox  InboxReader
 	msgMap *MessageMap
+	logger *log.Logger
 }
 
 // NewReplyForwarder creates a ReplyForwarder.
-func NewReplyForwarder(bot BotSender, inbox InboxReader, msgMap *MessageMap) *ReplyForwarder {
+func NewReplyForwarder(bot BotSender, inbox InboxReader, msgMap *MessageMap, logger *log.Logger) *ReplyForwarder {
+	if logger == nil {
+		logger = log.Default()
+	}
 	return &ReplyForwarder{
 		bot:    bot,
 		inbox:  inbox,
 		msgMap: msgMap,
+		logger: logger,
 	}
 }
 
@@ -204,11 +223,16 @@ func (r *ReplyForwarder) Run(ctx context.Context) {
 func (r *ReplyForwarder) PollOnce(ctx context.Context) {
 	msgs, err := r.inbox.UnreadMessages(ctx)
 	if err != nil {
-		log.Printf("reply forwarder: UnreadMessages: %v", err)
+		r.logger.Printf("reply forwarder: UnreadMessages: %v", err)
 		return
 	}
 
+	if len(msgs) > 0 {
+		r.logger.Printf("reply forwarder: found %d message(s) to forward", len(msgs))
+	}
+
 	for _, msg := range msgs {
+		r.logger.Printf("reply forwarder: forwarding %s from=%s subject=%q", msg.ID, msg.From, msg.Subject)
 		text := fmt.Sprintf("@%s: %s", msg.From, msg.Body)
 
 		// Look up reply threading via the message map.
@@ -224,9 +248,10 @@ func (r *ReplyForwarder) PollOnce(ctx context.Context) {
 		// so it will be retried on the next cycle.
 		sentID, err := r.bot.SendMessage(text, replyTo)
 		if err != nil {
-			log.Printf("reply forwarder: SendMessage: %v (will retry)", err)
+			r.logger.Printf("reply forwarder: SendMessage: %v (will retry)", err)
 			continue
 		}
+		r.logger.Printf("reply forwarder: sent %s to Telegram (msgID=%d), closing bead", msg.ID, sentID)
 
 		// Store the outbound Telegram message ID for future threading.
 		// We don't have a chatID here, so we use 0 as a placeholder.
@@ -237,7 +262,7 @@ func (r *ReplyForwarder) PollOnce(ctx context.Context) {
 
 		// Mark read only after successful Telegram delivery.
 		if err := r.inbox.MarkRead(ctx, msg.ID); err != nil {
-			log.Printf("reply forwarder: MarkRead %s: %v", msg.ID, err)
+			r.logger.Printf("reply forwarder: MarkRead %s: %v", msg.ID, err)
 		}
 	}
 }
