@@ -58,48 +58,63 @@ func addDescendants(parentPID int, childMap map[int][]int, pids map[int]bool) {
 	}
 }
 
-// getTmuxSessionPIDs returns a set of PIDs belonging to ANY tmux session.
+// getTmuxSessionPIDs returns a set of PIDs belonging to ANY tmux session
+// across ALL tmux sockets on this machine.
+//
 // This prevents killing Claude processes that are running in tmux sessions,
 // even if they temporarily show TTY "?" during startup or session transitions.
 //
-// CRITICAL: We protect ALL tmux sessions, not just Gas Town ones (gt-*, hq-*).
-// User's personal Claude sessions (e.g., in sessions named "loomtown", "yaad")
-// must never be killed by orphan cleanup. The TTY="?" check is not reliable
-// during certain operations, so we must explicitly protect all tmux processes.
+// CRITICAL: We protect ALL tmux sessions on ALL sockets. When multiple Gas Town
+// instances run on the same machine, each uses its own tmux socket. A single-socket
+// query would miss processes in other towns' sessions, causing cross-town kills.
 func getTmuxSessionPIDs() map[int]bool {
 	pids := make(map[int]bool)
 
-	// Get list of ALL tmux sessions (not just gt-*/hq-*)
-	out, err := tmux.BuildCommand("list-sessions", "-F", "#{session_name}").Output()
-	if err != nil {
-		return pids // tmux not available or no sessions
-	}
-
-	// Build process tree once, used for all pane PIDs
+	// Build process tree once, shared across all socket scans
 	childMap := buildChildMap()
 
-	// Protect ALL sessions - user's personal sessions are just as important
-	sessions := strings.Split(strings.TrimSpace(string(out)), "\n")
+	// Scan all tmux sockets in the socket directory.
+	// Each Gas Town instance (and any personal tmux servers) gets its own socket.
+	socketDir := tmux.SocketDir()
+	entries, err := os.ReadDir(socketDir)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			socketPath := filepath.Join(socketDir, entry.Name())
+			collectPanePIDs(socketPath, childMap, pids)
+		}
+	}
 
-	// For each session, get the PIDs of processes in its panes
-	for _, session := range sessions {
-		if session == "" {
-			continue
-		}
-		out, err := tmux.BuildCommand("list-panes", "-t", session, "-F", "#{pane_pid}").Output()
-		if err != nil {
-			continue
-		}
+	// Also query the current town's socket via BuildCommand as a fallback.
+	// This handles non-standard socket locations (e.g. GT_TMUX_SOCKET override).
+	out, err := tmux.BuildCommand("list-panes", "-a", "-F", "#{pane_pid}").Output()
+	if err == nil {
 		for _, pidStr := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
 				pids[pid] = true
-				// Also add child processes of the pane shell
 				addDescendants(pid, childMap, pids)
 			}
 		}
 	}
 
 	return pids
+}
+
+// collectPanePIDs queries a single tmux socket for all pane PIDs and adds them
+// (plus their descendant processes) to the protection set.
+func collectPanePIDs(socketPath string, childMap map[int][]int, pids map[int]bool) {
+	out, err := exec.Command("tmux", "-S", socketPath, "list-panes", "-a", "-F", "#{pane_pid}").Output()
+	if err != nil {
+		return
+	}
+	for _, pidStr := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
+			pids[pid] = true
+			addDescendants(pid, childMap, pids)
+		}
+	}
 }
 
 // getACPSessionPIDs returns a set of PIDs belonging to active ACP (Agent Client Protocol) sessions.
@@ -282,28 +297,38 @@ func getProcessCwd(pid int) string {
 	return ""
 }
 
-// isInGasTownWorkspace checks whether a process's working directory is inside
-// a Gas Town workspace (identified by the mayor/town.json marker).
-// Returns true if the process cwd is at or under a Gas Town workspace root.
-// Returns false if the cwd cannot be determined or is not under any workspace.
-func isInGasTownWorkspace(pid int) bool {
+// resolveTownRoot returns the Gas Town workspace root for a process, identified
+// by walking up from its CWD looking for the mayor/town.json marker.
+// Returns the workspace root path, or "" if the process is not in any workspace
+// or its CWD cannot be determined.
+func resolveTownRoot(pid int) string {
 	cwd := getProcessCwd(pid)
 	if cwd == "" {
-		return false // Can't determine cwd; don't kill
+		return ""
 	}
+	return resolveTownRootFromDir(cwd)
+}
 
-	// Walk up from cwd looking for a Gas Town workspace marker
-	current := cwd
+// resolveTownRootFromDir walks up from dir looking for mayor/town.json.
+// Returns the workspace root path, or "" if not found.
+func resolveTownRootFromDir(dir string) string {
+	current := dir
 	for {
 		if _, err := os.Stat(filepath.Join(current, "mayor", "town.json")); err == nil {
-			return true
+			return current
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
-			return false
+			return ""
 		}
 		current = parent
 	}
+}
+
+// isInGasTownWorkspace checks whether a process's working directory is inside
+// a Gas Town workspace (identified by the mayor/town.json marker).
+func isInGasTownWorkspace(pid int) bool {
+	return resolveTownRoot(pid) != ""
 }
 
 // isIDEClaudeProcess checks if a Claude process was spawned by an IDE extension
@@ -382,9 +407,10 @@ func parseEtime(etime string) (int, error) {
 
 // OrphanedProcess represents a claude process running without a controlling terminal.
 type OrphanedProcess struct {
-	PID int
-	Cmd string
-	Age int // Age in seconds
+	PID      int
+	Cmd      string
+	Age      int    // Age in seconds
+	TownRoot string // Gas Town workspace root, or "" if not in any workspace
 }
 
 // FindOrphanedClaudeProcesses finds claude/codex/opencode processes without a controlling terminal.
@@ -474,14 +500,16 @@ func FindOrphanedClaudeProcesses() ([]OrphanedProcess, error) {
 		// Only kill orphaned Claude processes whose cwd is under a Gas Town
 		// workspace root. This prevents killing user's Claude Code instances
 		// running in repos outside ~/gt/ (or wherever the workspace is).
-		if !isInGasTownWorkspace(pid) {
+		townRoot := resolveTownRoot(pid)
+		if townRoot == "" {
 			continue
 		}
 
 		orphans = append(orphans, OrphanedProcess{
-			PID: pid,
-			Cmd: cmd,
-			Age: age,
+			PID:      pid,
+			Cmd:      cmd,
+			Age:      age,
+			TownRoot: townRoot,
 		})
 	}
 
@@ -497,10 +525,11 @@ type CleanupResult struct {
 
 // ZombieProcess represents a claude process not in any active tmux session.
 type ZombieProcess struct {
-	PID int
-	Cmd string
-	Age int    // Age in seconds
-	TTY string // TTY column from ps (may be "?" or a session like "s024")
+	PID      int
+	Cmd      string
+	Age      int    // Age in seconds
+	TTY      string // TTY column from ps (may be "?" or a session like "s024")
+	TownRoot string // Gas Town workspace root, or "" if not in any workspace
 }
 
 // FindZombieClaudeProcesses finds Claude processes with no TTY that are NOT in
@@ -590,16 +619,18 @@ func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
 		// Only kill zombie Claude processes whose cwd is under a Gas Town
 		// workspace root. This prevents killing user's Claude Code instances
 		// running in repos outside ~/gt/.
-		if !isInGasTownWorkspace(pid) {
+		townRoot := resolveTownRoot(pid)
+		if townRoot == "" {
 			continue
 		}
 
 		// This process is NOT in any active tmux session - it's a zombie
 		zombies = append(zombies, ZombieProcess{
-			PID: pid,
-			Cmd: cmd,
-			Age: age,
-			TTY: tty,
+			PID:      pid,
+			Cmd:      cmd,
+			Age:      age,
+			TTY:      tty,
+			TownRoot: townRoot,
 		})
 	}
 

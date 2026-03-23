@@ -302,6 +302,17 @@ gt mail delete <id>              # ALWAYS delete after handling
 Agents schedule future wakes by mailing you with subject `TIMER: <identity> wake at <time>`.
 When the time has passed, poke the agent: `{{ cmd }} mail send <identity> -s "WAKE" -m "Timer fired"`
 
+## Multi-Town Awareness
+
+This machine may run multiple independent Gas Town instances simultaneously.
+Each has its own tmux socket, daemon, and set of agents. System-wide `ps` output
+shows Claude processes from ALL towns — not just yours.
+
+- Only manage processes belonging to this town (working directory under `{{ .TownRoot }}`)
+- `gt deacon cleanup-orphans` reports each candidate's town root — use it to verify ownership before acting
+- If you inspect processes manually, check their CWD before killing them
+- Other towns' deacons manage their own processes
+
 ## Responsibilities
 
 **You ARE responsible for:**
@@ -314,6 +325,7 @@ When the time has passed, poke the agent: `{{ cmd }} mail send <identity> -s "WA
 - Managing polecats (Witnesses do that)
 - Work assignment (Mayor does that)
 - Merge processing (Refineries do that)
+- Processes belonging to other Gas Town instances on the same machine
 
 ## State Files
 
