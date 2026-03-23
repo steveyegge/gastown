@@ -225,6 +225,7 @@ func extractFormulaVar(formulaVars, key string) string {
 	}
 	return ""
 }
+
 // truncateDescription truncates a multi-line description to a single line summary.
 func truncateDescription(desc string, maxLen int) string {
 	// Take just the first line
@@ -271,7 +272,6 @@ func outputMoleculeContext(ctx RoleContext) {
 	// No child-based tracking needed.
 }
 
-
 // outputDeaconPatrolContext shows patrol molecule status for the Deacon.
 // Deacon uses wisps (Wisp:true issues in main .beads/) for patrol cycles.
 // Deacon is a town-level role, so it uses town root beads (not rig beads).
@@ -284,12 +284,12 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 	}
 
 	cfg := PatrolConfig{
-		RoleName:        "deacon",
-		PatrolMolName:   constants.MolDeaconPatrol,
-		BeadsDir:        ctx.TownRoot, // Town-level role uses town root beads
-		Assignee:        "deacon",
-		HeaderEmoji:     "🔄",
-		HeaderTitle:     "Patrol Status (Wisp-based)",
+		RoleName:      "deacon",
+		PatrolMolName: constants.MolDeaconPatrol,
+		BeadsDir:      ctx.TownRoot, // Town-level role uses town root beads
+		Assignee:      "deacon",
+		HeaderEmoji:   "🔄",
+		HeaderTitle:   "Patrol Status (Wisp-based)",
 		WorkLoopSteps: []string{
 			"Work through each patrol step in sequence (see checklist below)",
 			"At cycle end:\n   - If context LOW:\n     * Report and loop: `" + cli.Name() + " patrol report --summary \"<brief summary of observations>\"`\n     * This closes the current patrol and starts a new cycle\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Deacon patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
@@ -394,6 +394,10 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 		vars = append(vars, fmt.Sprintf("delete_merged_branches=%t", mq.IsDeleteMergedBranchesEnabled()))
 		vars = append(vars, fmt.Sprintf("judgment_enabled=%t", mq.IsJudgmentEnabled()))
 		vars = append(vars, fmt.Sprintf("review_depth=%s", mq.GetReviewDepth()))
+		if mq.MergeStrategy != "" {
+			vars = append(vars, fmt.Sprintf("merge_strategy=%s", mq.MergeStrategy))
+		}
+		vars = append(vars, fmt.Sprintf("pr_auto_merge=%t", mq.IsPRAutoMergeEnabled()))
 		return vars
 	}
 

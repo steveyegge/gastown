@@ -146,6 +146,10 @@ default = "standard"
 description = "Merge strategy: 'direct' (ff-only merge + push) or 'pr' (create GitHub PR). Default: direct."
 default = "direct"
 
+[vars.pr_auto_merge]
+description = "Whether to auto-merge PRs after CI passes (true) or leave open for human approval (false). Only applies when merge_strategy = pr."
+default = "true"
+
 [[steps]]
 id = "inbox-check"
 title = "Check refinery mail"
@@ -608,6 +612,39 @@ gh pr view <polecat-branch> --json url,state -q '.url + " " + .state'
 
 If the PR was not created or is in an unexpected state, debug and retry.
 
+**Step 1.55 (pr only): CHECK pr_auto_merge**
+
+**Config: pr_auto_merge = {{pr_auto_merge}}**
+
+**If pr_auto_merge = "false":**
+
+The PR is created. Do NOT wait for CI. Do NOT merge.
+
+1. Record the PR URL on the MR bead:
+   ```bash
+   bd update <mr-bead-id> --notes "PR: ${PR_URL}\nStatus: awaiting-review"
+   ```
+
+2. Do NOT send MERGED to the witness — the PR is not merged yet.
+
+3. Do NOT close the MR bead — it stays open until the PR is merged or closed.
+
+4. Clean up the temp branch and proceed to loop-check:
+   ```bash
+   git checkout {{target_branch}}
+   git branch -D temp
+   ```
+
+5. Archive the MERGE_READY mail. The poll-open-prs step will handle
+   the rest of the lifecycle.
+   ```bash
+   gt mail archive <merge-ready-message-id>
+   ```
+
+Continue to loop-check. Skip Steps 1.6 through 5 below.
+
+**If pr_auto_merge = "true" (default):** Continue to Step 1.6.
+
 **Step 1.6 (pr only): WAIT FOR CI CHECKS TO PASS**
 
 ⚠️ **DO NOT PROCEED until CI passes. DO NOT send MERGED until the PR is actually merged.**
@@ -785,9 +822,115 @@ Read the two config values above, then:
   Never land partial epics — ALL children must be closed first."""
 
 [[steps]]
+id = "poll-open-prs"
+title = "Poll open PRs awaiting human review"
+needs = ["check-integration-branches"]
+description = """
+**Config: merge_strategy = {{merge_strategy}}**
+**Config: pr_auto_merge = {{pr_auto_merge}}**
+
+If merge_strategy is NOT "pr" or pr_auto_merge is "true": skip this step.
+
+This step checks GitHub PRs that the Refinery created in previous cycles
+(when pr_auto_merge = false). It closes the lifecycle loop when a human
+merges or closes a PR.
+
+**Step 1: Find MR beads with open PRs**
+
+```bash
+bd list --type=merge-request --status=open --json
+```
+
+Filter for MR beads whose notes contain "Status: awaiting-review".
+Extract the PR URL from the notes field.
+
+If none found, skip this step.
+
+**Step 2: Check each PR's status on GitHub**
+
+For each MR bead with an open PR:
+
+```bash
+gh pr view <pr-url> --json state,mergedAt,closedAt,mergeCommit
+```
+
+**If state = "MERGED":**
+
+The human approved and merged the PR. Complete the lifecycle:
+
+1. Send MERGED to the witness:
+   ```bash
+   gt mail send <rig>/witness -s "MERGED <polecat-name>" -m "Branch: <branch>
+   Issue: <issue-id>
+   PR: <pr-url>
+   Merged-At: <mergedAt>"
+   ```
+
+2. Run post-merge cleanup:
+   ```bash
+   gt mq post-merge <rig> <mr-bead-id>
+   ```
+
+3. Update MR bead notes:
+   ```bash
+   bd update <mr-bead-id> --notes "PR: <pr-url>\\nStatus: merged"
+   ```
+
+**If state = "CLOSED" (not merged):**
+
+The PR was closed without merging. This could mean:
+- Human rejected the work
+- PR was abandoned
+- Duplicate PR
+
+1. Do NOT send MERGED — the work did not land.
+
+2. Close the MR bead:
+   ```bash
+   bd close <mr-bead-id> --reason "PR closed without merge: <pr-url>"
+   ```
+
+3. Notify the witness that the work was rejected:
+   ```bash
+   gt mail send <rig>/witness -s "PR_REJECTED <polecat-name>" -m "Branch: <branch>
+   Issue: <issue-id>
+   PR: <pr-url>
+   Reason: PR closed without merge"
+   ```
+
+   The witness can then decide whether to re-sling the work or escalate.
+
+**If state = "OPEN":**
+
+PR is still awaiting review. Check how long it has been open:
+
+```bash
+gh pr view <pr-url> --json createdAt -q '.createdAt'
+```
+
+As human-in-the-loop PRs are intended to be compliance rubber-stamps, they should be reviewed
+and merged quickly. While a PR is open, the polecat that produced the
+work remains allocated (its MR bead is open, the witness won't recycle it).
+
+- **Open < 2 hours**: No action. Check again next cycle.
+- **Open 2-4 hours**: Flag in patrol summary as stale. The operator
+  should be aware that polecat capacity is being held.
+- **Open > 4 hours**: Escalate to the operator:
+  ```bash
+  gt mail send mayor/ -s "STALE_PR <polecat-name>" -m "PR awaiting review for >4h.
+  PR: <pr-url>
+  Issue: <issue-id>
+  Polecat: <polecat-name>
+  Created: <createdAt>
+
+  Polecat capacity is held while this PR is open.
+  Please review/merge or close the PR."
+  ```"""
+
+[[steps]]
 id = "context-check"
 title = "Assess session health"
-needs = ["check-integration-branches"]
+needs = ["poll-open-prs"]
 description = """
 Assess whether this session should continue or hand off to a fresh one.
 

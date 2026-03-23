@@ -1222,6 +1222,17 @@ type MergeQueueConfig struct {
 	// Nil defaults to false (manual landing required).
 	IntegrationBranchAutoLand *bool `json:"integration_branch_auto_land,omitempty"`
 
+	// MergeStrategy controls how the Refinery lands work.
+	// "direct" (default): ff-only merge + push to target branch.
+	// "pr": create a GitHub PR, optionally wait for CI, then merge.
+	MergeStrategy string `json:"merge_strategy,omitempty"`
+
+	// PRAutoMerge controls whether the Refinery auto-merges PRs after CI passes.
+	// Only applies when MergeStrategy is "pr".
+	// Nil defaults to true (Refinery merges the PR after checks pass).
+	// Set to false for human-in-the-loop approval workflows.
+	PRAutoMerge *bool `json:"pr_auto_merge,omitempty"`
+
 	// OnConflict specifies conflict resolution strategy: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
 
@@ -1305,6 +1316,16 @@ func (c *MergeQueueConfig) IsIntegrationBranchAutoLandEnabled() bool {
 		return false
 	}
 	return *c.IntegrationBranchAutoLand
+}
+
+// IsPRAutoMergeEnabled returns whether the Refinery should auto-merge PRs.
+// Only relevant when MergeStrategy is "pr".
+// Nil-safe, defaults to true.
+func (c *MergeQueueConfig) IsPRAutoMergeEnabled() bool {
+	if c.PRAutoMerge == nil {
+		return true
+	}
+	return *c.PRAutoMerge
 }
 
 // IsRunTestsEnabled returns whether tests should run before merging.

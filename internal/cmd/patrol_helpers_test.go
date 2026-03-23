@@ -128,12 +128,14 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 	// DefaultMergeQueueConfig: refinery_enabled=true, auto_land=false, run_tests=true,
 	// test_command="" (language-agnostic), target_branch="main" (from rig config), delete_merged_branches=true
 	// New commands (setup, typecheck, lint, build) default to empty = omitted
+	// pr_auto_merge always emitted (accessor defaults to true); merge_strategy omitted when empty
 	expected := map[string]string{
 		"integration_branch_refinery_enabled": "true",
 		"integration_branch_auto_land":        "false",
 		"run_tests":                           "true",
 		"target_branch":                       "main",
 		"delete_merged_branches":              "true",
+		"pr_auto_merge":                       "true",
 	}
 
 	varMap := make(map[string]string)
@@ -155,8 +157,8 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 		}
 	}
 
-	// Verify empty commands are NOT included
-	for _, shouldBeAbsent := range []string{"setup_command", "typecheck_command", "lint_command", "build_command"} {
+	// Verify empty commands and unset merge_strategy are NOT included
+	for _, shouldBeAbsent := range []string{"setup_command", "typecheck_command", "lint_command", "build_command", "merge_strategy"} {
 		if _, ok := varMap[shouldBeAbsent]; ok {
 			t.Errorf("%q should be omitted when empty", shouldBeAbsent)
 		}
@@ -299,8 +301,8 @@ func TestBuildRefineryPatrolVars_BoolFormat(t *testing.T) {
 	trueVal := true
 	falseVal2 := false
 	mq := &config.MergeQueueConfig{
-		Enabled:                         true,
-		IntegrationBranchAutoLand:       &trueVal,
+		Enabled:                          true,
+		IntegrationBranchAutoLand:        &trueVal,
 		IntegrationBranchRefineryEnabled: &trueVal,
 		RunTests:                         &trueVal,
 		SetupCommand:                     "npm ci",
@@ -397,6 +399,94 @@ func TestBuildRefineryPatrolVars_DefaultBranchWithoutMQ(t *testing.T) {
 	}
 	if got := varMap["target_branch"]; got != "gastown" {
 		t.Errorf("target_branch = %q, want %q (should read rig config even without MQ settings)", got, "gastown")
+	}
+}
+
+func TestBuildRefineryPatrolVars_MergeStrategyPR(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigDir := filepath.Join(tmpDir, "testrig")
+	settingsDir := filepath.Join(rigDir, "settings")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	falseVal := false
+	mq := config.DefaultMergeQueueConfig()
+	mq.MergeStrategy = "pr"
+	mq.PRAutoMerge = &falseVal
+	settings := config.RigSettings{
+		Type:       "rig-settings",
+		Version:    1,
+		MergeQueue: mq,
+	}
+	data, _ := json.Marshal(settings)
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := RoleContext{
+		TownRoot: tmpDir,
+		Rig:      "testrig",
+	}
+	vars := buildRefineryPatrolVars(ctx)
+
+	varMap := make(map[string]string)
+	for _, v := range vars {
+		parts := splitFirstEquals(v)
+		if len(parts) == 2 {
+			varMap[parts[0]] = parts[1]
+		}
+	}
+
+	if got := varMap["merge_strategy"]; got != "pr" {
+		t.Errorf("merge_strategy = %q, want %q", got, "pr")
+	}
+	if got := varMap["pr_auto_merge"]; got != "false" {
+		t.Errorf("pr_auto_merge = %q, want %q", got, "false")
+	}
+}
+
+func TestBuildRefineryPatrolVars_MergeStrategyDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigDir := filepath.Join(tmpDir, "testrig")
+	settingsDir := filepath.Join(rigDir, "settings")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Default config — no MergeStrategy set, no PRAutoMerge set
+	mq := config.DefaultMergeQueueConfig()
+	settings := config.RigSettings{
+		Type:       "rig-settings",
+		Version:    1,
+		MergeQueue: mq,
+	}
+	data, _ := json.Marshal(settings)
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := RoleContext{
+		TownRoot: tmpDir,
+		Rig:      "testrig",
+	}
+	vars := buildRefineryPatrolVars(ctx)
+
+	varMap := make(map[string]string)
+	for _, v := range vars {
+		parts := splitFirstEquals(v)
+		if len(parts) == 2 {
+			varMap[parts[0]] = parts[1]
+		}
+	}
+
+	// merge_strategy should NOT be emitted when empty (formula default applies)
+	if _, ok := varMap["merge_strategy"]; ok {
+		t.Error("merge_strategy should be omitted when empty (formula default applies)")
+	}
+	// pr_auto_merge should always be emitted (accessor defaults to true)
+	if got := varMap["pr_auto_merge"]; got != "true" {
+		t.Errorf("pr_auto_merge = %q, want %q", got, "true")
 	}
 }
 

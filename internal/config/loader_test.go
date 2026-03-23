@@ -5086,6 +5086,79 @@ func TestMergeQueueConfig_PartialJSON_NilPointers(t *testing.T) {
 	}
 }
 
+// TestMergeQueueConfig_MergeStrategy verifies that merge_strategy and pr_auto_merge
+// fields round-trip through JSON correctly, and that the IsPRAutoMergeEnabled()
+// accessor returns the right defaults.
+func TestMergeQueueConfig_MergeStrategy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		json              string
+		wantMergeStrategy string
+		wantPRAutoMerge   *bool
+		wantAccessor      bool
+	}{
+		{
+			name:              "merge_strategy pr with pr_auto_merge false",
+			json:              `{"enabled": true, "on_conflict": "assign_back", "merge_strategy": "pr", "pr_auto_merge": false}`,
+			wantMergeStrategy: "pr",
+			wantPRAutoMerge:   boolPtr(false),
+			wantAccessor:      false,
+		},
+		{
+			name:              "merge_strategy pr with pr_auto_merge true",
+			json:              `{"enabled": true, "on_conflict": "assign_back", "merge_strategy": "pr", "pr_auto_merge": true}`,
+			wantMergeStrategy: "pr",
+			wantPRAutoMerge:   boolPtr(true),
+			wantAccessor:      true,
+		},
+		{
+			name:              "merge_strategy pr with pr_auto_merge omitted — defaults to true",
+			json:              `{"enabled": true, "on_conflict": "assign_back", "merge_strategy": "pr"}`,
+			wantMergeStrategy: "pr",
+			wantPRAutoMerge:   nil,
+			wantAccessor:      true,
+		},
+		{
+			name:              "merge_strategy omitted — empty string",
+			json:              `{"enabled": true, "on_conflict": "assign_back"}`,
+			wantMergeStrategy: "",
+			wantPRAutoMerge:   nil,
+			wantAccessor:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cfg MergeQueueConfig
+			if err := json.Unmarshal([]byte(tt.json), &cfg); err != nil {
+				t.Fatalf("json.Unmarshal: %v", err)
+			}
+
+			if cfg.MergeStrategy != tt.wantMergeStrategy {
+				t.Errorf("MergeStrategy = %q, want %q", cfg.MergeStrategy, tt.wantMergeStrategy)
+			}
+
+			if tt.wantPRAutoMerge == nil {
+				if cfg.PRAutoMerge != nil {
+					t.Errorf("PRAutoMerge should be nil when omitted, got %v", *cfg.PRAutoMerge)
+				}
+			} else {
+				if cfg.PRAutoMerge == nil {
+					t.Errorf("PRAutoMerge should not be nil, want %v", *tt.wantPRAutoMerge)
+				} else if *cfg.PRAutoMerge != *tt.wantPRAutoMerge {
+					t.Errorf("PRAutoMerge = %v, want %v", *cfg.PRAutoMerge, *tt.wantPRAutoMerge)
+				}
+			}
+
+			if got := cfg.IsPRAutoMergeEnabled(); got != tt.wantAccessor {
+				t.Errorf("IsPRAutoMergeEnabled() = %v, want %v", got, tt.wantAccessor)
+			}
+		})
+	}
+}
+
 // --- Ephemeral Cost Tier Tests ---
 
 func TestTryResolveFromEphemeralTier(t *testing.T) {
