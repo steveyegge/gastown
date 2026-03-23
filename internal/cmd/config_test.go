@@ -127,20 +127,15 @@ func TestConfigAgentList(t *testing.T) {
 			t.Fatalf("chdir: %v", err)
 		}
 
-		// Set JSON flag
-		configAgentListJSON = true
-		defer func() { configAgentListJSON = false }()
-
 		// Load agent registry
 		registryPath := config.DefaultAgentRegistryPath(townRoot)
 		if err := config.LoadAgentRegistry(registryPath); err != nil {
 			t.Fatalf("load agent registry: %v", err)
 		}
 
-		// Capture output
-		// Note: This test verifies the command runs without error
-		// Full JSON validation would require capturing stdout
+		// Use a command with the --json flag registered
 		cmd := &cobra.Command{}
+		cmd.Flags().Bool("json", true, "")
 		args := []string{}
 		err := runConfigAgentList(cmd, args)
 		if err != nil {
@@ -681,6 +676,47 @@ func TestConfigDefaultAgent(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "not found") {
 			t.Errorf("error = %v, want 'not found'", err)
+		}
+	})
+}
+
+func TestConfigDefaultAgentList(t *testing.T) {
+	t.Run("lists available agents via default-agent list", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// runConfigAgentList is reused by default-agent list
+		cmd := &cobra.Command{}
+		err := runConfigAgentList(cmd, []string{})
+		if err != nil {
+			t.Fatalf("runConfigAgentList (via default-agent list) failed: %v", err)
+		}
+	})
+
+	t.Run("JSON output via default-agent list", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		cmd := &cobra.Command{}
+		cmd.Flags().Bool("json", true, "")
+		err := runConfigAgentList(cmd, []string{})
+		if err != nil {
+			t.Fatalf("runConfigAgentList JSON (via default-agent list) failed: %v", err)
 		}
 	})
 }
