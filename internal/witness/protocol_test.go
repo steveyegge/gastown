@@ -26,6 +26,10 @@ func TestClassifyMessage(t *testing.T) {
 		{"🤝 HANDOFF: Patrol context", ProtoHandoff},
 		{"🤝HANDOFF: No space", ProtoHandoff},
 		{"SWARM_START", ProtoSwarmStart},
+		{"PR_REJECTED nux", ProtoPRRejected},
+		{"PR_REJECTED ace", ProtoPRRejected},
+		{"STALE_PR nux", ProtoStalePR},
+		{"STALE_PR Toast", ProtoStalePR},
 		{"Unknown message", ProtoUnknown},
 		{"", ProtoUnknown},
 	}
@@ -872,5 +876,66 @@ func TestExitTypeMatchesPolecatDonePayload(t *testing.T) {
 		if payload.Exit != string(exit) {
 			t.Errorf("ParsePolecatDone Exit = %q, want %q", payload.Exit, string(exit))
 		}
+	}
+}
+
+func TestParsePRRejected(t *testing.T) {
+	t.Parallel()
+	subject := "PR_REJECTED nux"
+	body := "Branch: polecat/nux/gt-abc\nIssue: gt-abc\nPR: https://github.com/org/repo/pull/42\nReason: PR closed without merge"
+
+	payload, err := ParsePRRejected(subject, body)
+	if err != nil {
+		t.Fatalf("ParsePRRejected() error = %v", err)
+	}
+
+	if payload.PolecatName != "nux" {
+		t.Errorf("PolecatName = %q, want %q", payload.PolecatName, "nux")
+	}
+	if payload.Branch != "polecat/nux/gt-abc" {
+		t.Errorf("Branch = %q, want %q", payload.Branch, "polecat/nux/gt-abc")
+	}
+	if payload.PRURL != "https://github.com/org/repo/pull/42" {
+		t.Errorf("PRURL = %q, want %q", payload.PRURL, "https://github.com/org/repo/pull/42")
+	}
+	if payload.Reason != "PR closed without merge" {
+		t.Errorf("Reason = %q, want %q", payload.Reason, "PR closed without merge")
+	}
+}
+
+func TestParsePRRejected_InvalidSubject(t *testing.T) {
+	t.Parallel()
+	_, err := ParsePRRejected("Invalid subject", "body")
+	if err == nil {
+		t.Error("ParsePRRejected() expected error for invalid subject")
+	}
+}
+
+func TestParseStalePR(t *testing.T) {
+	t.Parallel()
+	subject := "STALE_PR nux"
+	body := "Issue: gt-abc\nPR: https://github.com/org/repo/pull/42\nCreated-At: 2026-03-23T10:00:00Z"
+
+	payload, err := ParseStalePR(subject, body)
+	if err != nil {
+		t.Fatalf("ParseStalePR() error = %v", err)
+	}
+
+	if payload.PolecatName != "nux" {
+		t.Errorf("PolecatName = %q, want %q", payload.PolecatName, "nux")
+	}
+	if payload.PRURL != "https://github.com/org/repo/pull/42" {
+		t.Errorf("PRURL = %q, want %q", payload.PRURL, "https://github.com/org/repo/pull/42")
+	}
+	if payload.IssueID != "gt-abc" {
+		t.Errorf("IssueID = %q, want %q", payload.IssueID, "gt-abc")
+	}
+}
+
+func TestParseStalePR_InvalidSubject(t *testing.T) {
+	t.Parallel()
+	_, err := ParseStalePR("Invalid subject", "body")
+	if err == nil {
+		t.Error("ParseStalePR() expected error for invalid subject")
 	}
 }

@@ -71,6 +71,9 @@ type WitnessHandler interface {
 
 	// HandleReworkRequest is called when a branch needs rebasing.
 	HandleReworkRequest(payload *ReworkRequestPayload) error
+
+	// HandlePRRejected is called when a human closes a PR without merging.
+	HandlePRRejected(payload *PRRejectedPayload) error
 }
 
 // RefineryHandler defines the interface for Refinery protocol handlers.
@@ -106,6 +109,14 @@ func WrapWitnessHandlers(h WitnessHandler) *HandlerRegistry {
 			return err
 		}
 		return h.HandleReworkRequest(payload)
+	})
+
+	registry.Register(TypePRRejected, func(msg *mail.Message) error {
+		payload, err := ParsePRRejectedPayload(msg.Body)
+		if err != nil {
+			return err
+		}
+		return h.HandlePRRejected(payload)
 	})
 
 	return registry

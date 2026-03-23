@@ -168,6 +168,19 @@ func (h *DefaultWitnessHandler) HandleReworkRequest(payload *ReworkRequestPayloa
 	return nil
 }
 
+// HandlePRRejected handles a PR_REJECTED message from Refinery.
+// When a human closes a PR without merging, the Witness logs the rejection
+// and reports it for the operator to investigate upstream causes.
+func (h *DefaultWitnessHandler) HandlePRRejected(payload *PRRejectedPayload) error {
+	fmt.Fprintf(h.Output, "[Witness] PR_REJECTED received for polecat %s\n", payload.Polecat)
+	fmt.Fprintf(h.Output, "  PR: %s\n", payload.PRURL)
+	fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
+	fmt.Fprintf(h.Output, "  Reason: %s\n", payload.Reason)
+	fmt.Fprintf(h.Output, "[Witness] ✗ PR rejected for %s — operator should review Refinery gates and rig config\n", payload.Polecat)
+
+	return nil
+}
+
 // notifyPolecatMerged sends a merge success notification to a polecat.
 func (h *DefaultWitnessHandler) notifyPolecatMerged(payload *MergedPayload) error {
 	msg := mail.NewMessage(

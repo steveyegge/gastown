@@ -47,6 +47,12 @@ var (
 
 	// IDLE_PASSIVATED <polecat-name> - polecat passivated after idle timeout
 	PatternIdlePassivated = regexp.MustCompile(`^IDLE_PASSIVATED\s+(\S+)`)
+
+	// PR_REJECTED <polecat-name> - refinery reports PR closed without merge
+	PatternPRRejected = regexp.MustCompile(`^PR_REJECTED\s+(\S+)`)
+
+	// STALE_PR <polecat-name> - refinery reports PR awaiting review too long
+	PatternStalePR = regexp.MustCompile(`^STALE_PR\s+(\S+)`)
 )
 
 // ProtocolType identifies the type of protocol message.
@@ -65,6 +71,8 @@ const (
 	ProtoDispatchOK        ProtocolType = "dispatch_ok"
 	ProtoDispatchFail      ProtocolType = "dispatch_fail"
 	ProtoIdlePassivated    ProtocolType = "idle_passivated"
+	ProtoPRRejected        ProtocolType = "pr_rejected"
+	ProtoStalePR           ProtocolType = "stale_pr"
 	ProtoUnknown           ProtocolType = "unknown"
 )
 
@@ -113,12 +121,12 @@ type HelpCategory string
 
 const (
 	HelpCategoryDecision  HelpCategory = "decision"  // Multiple valid paths, need choice
-	HelpCategoryHelp      HelpCategory = "help"       // Need guidance or expertise
-	HelpCategoryBlocked   HelpCategory = "blocked"    // Waiting on unresolvable dependency
-	HelpCategoryFailed    HelpCategory = "failed"     // Unexpected error, can't proceed
-	HelpCategoryEmergency HelpCategory = "emergency"  // Security or data integrity issue
-	HelpCategoryLifecycle HelpCategory = "lifecycle"   // Worker stuck or needs recycle
-	HelpCategoryUnknown   HelpCategory = "help"        // Default to general help
+	HelpCategoryHelp      HelpCategory = "help"      // Need guidance or expertise
+	HelpCategoryBlocked   HelpCategory = "blocked"   // Waiting on unresolvable dependency
+	HelpCategoryFailed    HelpCategory = "failed"    // Unexpected error, can't proceed
+	HelpCategoryEmergency HelpCategory = "emergency" // Security or data integrity issue
+	HelpCategoryLifecycle HelpCategory = "lifecycle" // Worker stuck or needs recycle
+	HelpCategoryUnknown   HelpCategory = "help"      // Default to general help
 )
 
 // HelpSeverity indicates the assessed urgency of a help request.
@@ -132,10 +140,10 @@ const (
 
 // HelpAssessment contains the assessed category, severity, and routing suggestion.
 type HelpAssessment struct {
-	Category   HelpCategory
-	Severity   HelpSeverity
-	SuggestTo  string // Suggested escalation target (e.g., "deacon", "mayor", "overseer")
-	Rationale  string // Brief explanation of why this classification was chosen
+	Category  HelpCategory
+	Severity  HelpSeverity
+	SuggestTo string // Suggested escalation target (e.g., "deacon", "mayor", "overseer")
+	Rationale string // Brief explanation of why this classification was chosen
 }
 
 // HelpPayload contains parsed data from a HELP message.
@@ -194,8 +202,8 @@ type DispatchAttemptPayload struct {
 
 // DispatchOKPayload contains parsed data from a DISPATCH_OK message.
 type DispatchOKPayload struct {
-	PolecatName string
-	BeadID      string
+	PolecatName  string
+	BeadID       string
 	DispatchedAt time.Time
 }
 
@@ -212,6 +220,24 @@ type IdlePassivatedPayload struct {
 	PolecatName  string
 	IdleDuration string
 	PassivatedAt time.Time
+}
+
+// PRRejectedPayload contains parsed data from a PR_REJECTED message.
+type PRRejectedPayload struct {
+	PolecatName string
+	Branch      string
+	IssueID     string
+	PRURL       string
+	Reason      string
+	ClosedAt    time.Time
+}
+
+// StalePRPayload contains parsed data from a STALE_PR message.
+type StalePRPayload struct {
+	PolecatName string
+	IssueID     string
+	PRURL       string
+	CreatedAt   time.Time
 }
 
 // ClassifyMessage determines the protocol type from a message subject.
@@ -241,6 +267,10 @@ func ClassifyMessage(subject string) ProtocolType {
 		return ProtoDispatchFail
 	case PatternIdlePassivated.MatchString(subject):
 		return ProtoIdlePassivated
+	case PatternPRRejected.MatchString(subject):
+		return ProtoPRRejected
+	case PatternStalePR.MatchString(subject):
+		return ProtoStalePR
 	default:
 		return ProtoUnknown
 	}
@@ -565,6 +595,82 @@ func ParseIdlePassivated(subject, body string) (*IdlePassivatedPayload, error) {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "IdleDuration:") {
 			payload.IdleDuration = strings.TrimSpace(strings.TrimPrefix(line, "IdleDuration:"))
+		}
+	}
+
+	return payload, nil
+}
+
+// ParsePRRejected extracts payload from a PR_REJECTED message.
+// Subject format: PR_REJECTED <polecat-name>
+// Body format:
+//
+//	Branch: <branch>
+//	Issue: <issue-id>
+//	PR: <pr-url>
+//	Reason: <reason>
+func ParsePRRejected(subject, body string) (*PRRejectedPayload, error) {
+	matches := PatternPRRejected.FindStringSubmatch(subject)
+	if len(matches) < 2 {
+		return nil, fmt.Errorf("invalid PR_REJECTED subject: %s", subject)
+	}
+
+	payload := &PRRejectedPayload{
+		PolecatName: matches[1],
+		ClosedAt:    time.Now(),
+	}
+
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "Branch:"):
+			payload.Branch = strings.TrimSpace(strings.TrimPrefix(line, "Branch:"))
+		case strings.HasPrefix(line, "Issue:"):
+			payload.IssueID = strings.TrimSpace(strings.TrimPrefix(line, "Issue:"))
+		case strings.HasPrefix(line, "PR:"):
+			payload.PRURL = strings.TrimSpace(strings.TrimPrefix(line, "PR:"))
+		case strings.HasPrefix(line, "Reason:"):
+			payload.Reason = strings.TrimSpace(strings.TrimPrefix(line, "Reason:"))
+		case strings.HasPrefix(line, "Closed-At:"):
+			ts := strings.TrimSpace(strings.TrimPrefix(line, "Closed-At:"))
+			if t, err := time.Parse(time.RFC3339, ts); err == nil {
+				payload.ClosedAt = t
+			}
+		}
+	}
+
+	return payload, nil
+}
+
+// ParseStalePR extracts payload from a STALE_PR message.
+// Subject format: STALE_PR <polecat-name>
+// Body format:
+//
+//	Issue: <issue-id>
+//	PR: <pr-url>
+//	Created-At: <timestamp>
+func ParseStalePR(subject, body string) (*StalePRPayload, error) {
+	matches := PatternStalePR.FindStringSubmatch(subject)
+	if len(matches) < 2 {
+		return nil, fmt.Errorf("invalid STALE_PR subject: %s", subject)
+	}
+
+	payload := &StalePRPayload{
+		PolecatName: matches[1],
+	}
+
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "Issue:"):
+			payload.IssueID = strings.TrimSpace(strings.TrimPrefix(line, "Issue:"))
+		case strings.HasPrefix(line, "PR:"):
+			payload.PRURL = strings.TrimSpace(strings.TrimPrefix(line, "PR:"))
+		case strings.HasPrefix(line, "Created-At:"):
+			ts := strings.TrimSpace(strings.TrimPrefix(line, "Created-At:"))
+			if t, err := time.Parse(time.RFC3339, ts); err == nil {
+				payload.CreatedAt = t
+			}
 		}
 	}
 

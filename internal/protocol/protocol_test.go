@@ -20,6 +20,10 @@ func TestParseMessageType(t *testing.T) {
 		{"MERGE_FAILED ace", TypeMergeFailed},
 		{"REWORK_REQUEST valkyrie", TypeReworkRequest},
 		{"MERGE_READY", TypeMergeReady}, // no polecat name
+		{"PR_REJECTED nux", TypePRRejected},
+		{"STALE_PR Toast", TypeStalePR},
+		{"PR_REJECTEDNUX", ""}, // prefix without space delimiter
+		{"STALE_PRTOAST", ""},  // prefix without space delimiter
 		{"Unknown subject", ""},
 		{"", ""},
 		{"  MERGE_READY nux  ", TypeMergeReady}, // with whitespace
@@ -73,6 +77,8 @@ func TestIsProtocolMessage(t *testing.T) {
 		{"MERGE_FAILED ace", true},
 		{"REWORK_REQUEST valkyrie", true},
 		{"CONVOY_NEEDS_FEEDING hq-cv123", true},
+		{"PR_REJECTED nux", true},
+		{"STALE_PR Toast", true},
 		{"Unknown subject", false},
 		{"", false},
 		{"Hello world", false},
@@ -269,6 +275,168 @@ func TestParseConvoyNeedsFeedingPayload_InvalidInput(t *testing.T) {
 				t.Errorf("expected nil payload on error, got: %+v", payload)
 			}
 		})
+	}
+}
+
+func TestNewPRRejectedMessage(t *testing.T) {
+	msg := NewPRRejectedMessage("gastown", "nux", "polecat/nux/gt-abc", "gt-abc", "https://github.com/org/repo/pull/42", "PR closed without merge")
+
+	if msg.Subject != "PR_REJECTED nux" {
+		t.Errorf("Subject = %q, want %q", msg.Subject, "PR_REJECTED nux")
+	}
+	if msg.From != "gastown/refinery" {
+		t.Errorf("From = %q, want %q", msg.From, "gastown/refinery")
+	}
+	if msg.To != "gastown/witness" {
+		t.Errorf("To = %q, want %q", msg.To, "gastown/witness")
+	}
+	if !strings.Contains(msg.Body, "PR: https://github.com/org/repo/pull/42") {
+		t.Errorf("Body missing PR URL: %s", msg.Body)
+	}
+	if !strings.Contains(msg.Body, "Reason: PR closed without merge") {
+		t.Errorf("Body missing reason: %s", msg.Body)
+	}
+}
+
+func TestParsePRRejectedPayload(t *testing.T) {
+	body := "Branch: polecat/nux/gt-abc\nIssue: gt-abc\nPolecat: nux\nRig: gastown\nPR: https://github.com/org/repo/pull/42\nReason: PR closed without merge"
+
+	payload, err := ParsePRRejectedPayload(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if payload.Polecat != "nux" {
+		t.Errorf("Polecat = %q, want %q", payload.Polecat, "nux")
+	}
+	if payload.PRURL != "https://github.com/org/repo/pull/42" {
+		t.Errorf("PRURL = %q, want %q", payload.PRURL, "https://github.com/org/repo/pull/42")
+	}
+	if payload.Reason != "PR closed without merge" {
+		t.Errorf("Reason = %q, want %q", payload.Reason, "PR closed without merge")
+	}
+}
+
+func TestParsePRRejectedPayload_InvalidInput(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"empty body", ""},
+		{"missing polecat", "Rig: gastown\nPR: https://example.com"},
+		{"missing rig", "Polecat: nux\nPR: https://example.com"},
+		{"missing PR", "Polecat: nux\nRig: gastown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload, err := ParsePRRejectedPayload(tt.body)
+			if err == nil {
+				t.Errorf("expected error for body %q, got payload: %+v", tt.body, payload)
+			}
+			if payload != nil {
+				t.Errorf("expected nil payload on error, got: %+v", payload)
+			}
+		})
+	}
+}
+
+func TestNewStalePRMessage(t *testing.T) {
+	ts := time.Now()
+	msg := NewStalePRMessage("gastown", "nux", "gt-abc", "https://github.com/org/repo/pull/42", ts)
+
+	if msg.Subject != "STALE_PR nux" {
+		t.Errorf("Subject = %q, want %q", msg.Subject, "STALE_PR nux")
+	}
+	if msg.From != "gastown/refinery" {
+		t.Errorf("From = %q, want %q", msg.From, "gastown/refinery")
+	}
+	if msg.To != "mayor/" {
+		t.Errorf("To = %q, want %q", msg.To, "mayor/")
+	}
+	if !strings.Contains(msg.Body, "PR: https://github.com/org/repo/pull/42") {
+		t.Errorf("Body missing PR URL: %s", msg.Body)
+	}
+	if !strings.Contains(msg.Body, "Polecat capacity is held") {
+		t.Errorf("Body missing capacity warning: %s", msg.Body)
+	}
+}
+
+func TestParseStalePRPayload(t *testing.T) {
+	ts := time.Now().Format(time.RFC3339)
+	body := "Polecat: nux\nIssue: gt-abc\nRig: gastown\nPR: https://github.com/org/repo/pull/42\nCreated-At: " + ts
+
+	payload, err := ParseStalePRPayload(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if payload.Polecat != "nux" {
+		t.Errorf("Polecat = %q, want %q", payload.Polecat, "nux")
+	}
+	if payload.PRURL != "https://github.com/org/repo/pull/42" {
+		t.Errorf("PRURL = %q, want %q", payload.PRURL, "https://github.com/org/repo/pull/42")
+	}
+}
+
+func TestParseStalePRPayload_InvalidInput(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"empty body", ""},
+		{"missing polecat", "Rig: gastown\nPR: https://example.com"},
+		{"missing rig", "Polecat: nux\nPR: https://example.com"},
+		{"missing PR", "Polecat: nux\nRig: gastown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload, err := ParseStalePRPayload(tt.body)
+			if err == nil {
+				t.Errorf("expected error for body %q, got payload: %+v", tt.body, payload)
+			}
+			if payload != nil {
+				t.Errorf("expected nil payload on error, got: %+v", payload)
+			}
+		})
+	}
+}
+
+func TestWrapWitnessHandlers_PRRejected(t *testing.T) {
+	handler := &mockWitnessHandler{}
+	registry := WrapWitnessHandlers(handler)
+
+	msg := &mail.Message{
+		Subject: "PR_REJECTED nux",
+		Body:    "Branch: polecat/nux\nIssue: gt-abc\nPolecat: nux\nRig: gastown\nPR: https://github.com/org/repo/pull/42\nReason: closed",
+	}
+	if err := registry.Handle(msg); err != nil {
+		t.Errorf("HandlePRRejected error: %v", err)
+	}
+	if !handler.prRejectedCalled {
+		t.Error("HandlePRRejected was not called")
+	}
+}
+
+func TestDefaultWitnessHandler_HandlePRRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	handler := NewWitnessHandler("gastown", tmpDir)
+
+	var buf bytes.Buffer
+	handler.SetOutput(&buf)
+
+	payload := &PRRejectedPayload{
+		Polecat: "nux",
+		PRURL:   "https://github.com/org/repo/pull/42",
+		Issue:   "gt-abc",
+		Reason:  "PR closed without merge",
+	}
+	if err := handler.HandlePRRejected(payload); err != nil {
+		t.Errorf("HandlePRRejected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "PR_REJECTED received") {
+		t.Errorf("Output missing expected text: %s", buf.String())
 	}
 }
 
@@ -566,7 +734,7 @@ func TestWrapWitnessHandlers_InvalidPayload(t *testing.T) {
 	}
 
 	// Handlers should NOT have been called
-	if handler.mergedCalled || handler.failedCalled || handler.reworkCalled {
+	if handler.mergedCalled || handler.failedCalled || handler.reworkCalled || handler.prRejectedCalled {
 		t.Error("handlers should not be called when parse fails")
 	}
 }
@@ -648,9 +816,10 @@ func TestDefaultWitnessHandler(t *testing.T) {
 // Mock handlers for testing
 
 type mockWitnessHandler struct {
-	mergedCalled bool
-	failedCalled bool
-	reworkCalled bool
+	mergedCalled     bool
+	failedCalled     bool
+	reworkCalled     bool
+	prRejectedCalled bool
 }
 
 func (m *mockWitnessHandler) HandleMerged(payload *MergedPayload) error {
@@ -665,6 +834,11 @@ func (m *mockWitnessHandler) HandleMergeFailed(payload *MergeFailedPayload) erro
 
 func (m *mockWitnessHandler) HandleReworkRequest(payload *ReworkRequestPayload) error {
 	m.reworkCalled = true
+	return nil
+}
+
+func (m *mockWitnessHandler) HandlePRRejected(payload *PRRejectedPayload) error {
+	m.prRejectedCalled = true
 	return nil
 }
 

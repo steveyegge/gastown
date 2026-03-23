@@ -512,6 +512,131 @@ func ParsePolecatDonePayload(polecatName, body string) *PolecatDonePayload {
 	return payload
 }
 
+// NewPRRejectedMessage creates a PR_REJECTED protocol message.
+// Sent by Refinery to Witness when a human closes a PR without merging.
+func NewPRRejectedMessage(rig, polecat, branch, issue, prURL, reason string) *mail.Message {
+	payload := PRRejectedPayload{
+		Branch:   branch,
+		Issue:    issue,
+		Polecat:  polecat,
+		Rig:      rig,
+		PRURL:    prURL,
+		Reason:   reason,
+		ClosedAt: time.Now(),
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Branch: %s\n", payload.Branch))
+	sb.WriteString(fmt.Sprintf("Issue: %s\n", payload.Issue))
+	sb.WriteString(fmt.Sprintf("Polecat: %s\n", payload.Polecat))
+	sb.WriteString(fmt.Sprintf("Rig: %s\n", payload.Rig))
+	sb.WriteString(fmt.Sprintf("PR: %s\n", payload.PRURL))
+	sb.WriteString(fmt.Sprintf("Reason: %s\n", payload.Reason))
+	sb.WriteString(fmt.Sprintf("Closed-At: %s\n", payload.ClosedAt.Format(time.RFC3339)))
+
+	msg := mail.NewMessage(
+		fmt.Sprintf("%s/refinery", rig),
+		fmt.Sprintf("%s/witness", rig),
+		fmt.Sprintf("PR_REJECTED %s", polecat),
+		sb.String(),
+	)
+	msg.Priority = mail.PriorityHigh
+	msg.Type = mail.TypeTask
+
+	return msg
+}
+
+// ParsePRRejectedPayload parses a PR_REJECTED message body into a payload.
+// Returns an error if required fields (Polecat, Rig, PRURL) are missing.
+func ParsePRRejectedPayload(body string) (*PRRejectedPayload, error) {
+	payload := &PRRejectedPayload{
+		Branch:  parseField(body, "Branch"),
+		Issue:   parseField(body, "Issue"),
+		Polecat: parseField(body, "Polecat"),
+		Rig:     parseField(body, "Rig"),
+		PRURL:   parseField(body, "PR"),
+		Reason:  parseField(body, "Reason"),
+	}
+
+	if ts := parseField(body, "Closed-At"); ts != "" {
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			payload.ClosedAt = t
+		}
+	}
+
+	var errs []string
+	if payload.Polecat == "" {
+		errs = append(errs, "Polecat")
+	}
+	if payload.Rig == "" {
+		errs = append(errs, "Rig")
+	}
+	if payload.PRURL == "" {
+		errs = append(errs, "PR")
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("invalid PR_REJECTED payload: missing required fields: %s", strings.Join(errs, ", "))
+	}
+
+	return payload, nil
+}
+
+// NewStalePRMessage creates a STALE_PR protocol message.
+// Sent by Refinery to Mayor when a PR awaits review for too long.
+func NewStalePRMessage(rig, polecat, issue, prURL string, createdAt time.Time) *mail.Message {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Polecat: %s\n", polecat))
+	sb.WriteString(fmt.Sprintf("Issue: %s\n", issue))
+	sb.WriteString(fmt.Sprintf("Rig: %s\n", rig))
+	sb.WriteString(fmt.Sprintf("PR: %s\n", prURL))
+	sb.WriteString(fmt.Sprintf("Created-At: %s\n", createdAt.Format(time.RFC3339)))
+	sb.WriteString("\nPolecat capacity is held while this PR is open.\nPlease review/merge or close the PR.")
+
+	msg := mail.NewMessage(
+		fmt.Sprintf("%s/refinery", rig),
+		"mayor/",
+		fmt.Sprintf("STALE_PR %s", polecat),
+		sb.String(),
+	)
+	msg.Priority = mail.PriorityHigh
+	msg.Type = mail.TypeTask
+
+	return msg
+}
+
+// ParseStalePRPayload parses a STALE_PR message body into a payload.
+// Returns an error if required fields (Polecat, Rig, PRURL) are missing.
+func ParseStalePRPayload(body string) (*StalePRPayload, error) {
+	payload := &StalePRPayload{
+		Polecat: parseField(body, "Polecat"),
+		Issue:   parseField(body, "Issue"),
+		Rig:     parseField(body, "Rig"),
+		PRURL:   parseField(body, "PR"),
+	}
+
+	if ts := parseField(body, "Created-At"); ts != "" {
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			payload.CreatedAt = t
+		}
+	}
+
+	var errs []string
+	if payload.Polecat == "" {
+		errs = append(errs, "Polecat")
+	}
+	if payload.Rig == "" {
+		errs = append(errs, "Rig")
+	}
+	if payload.PRURL == "" {
+		errs = append(errs, "PR")
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("invalid STALE_PR payload: missing required fields: %s", strings.Join(errs, ", "))
+	}
+
+	return payload, nil
+}
+
 // parseField extracts a field value from a key-value body format.
 // Format: "Key: value"
 func parseField(body, key string) string {

@@ -53,6 +53,18 @@ const (
 	// feeding instead of waiting for the next deacon patrol cycle.
 	// Subject format: "CONVOY_NEEDS_FEEDING <convoy-id>"
 	TypeConvoyNeedsFeeding MessageType = "CONVOY_NEEDS_FEEDING"
+
+	// TypePRRejected is sent from Refinery to Witness when a human closes
+	// a PR without merging (pr_auto_merge=false workflow). The witness
+	// decides whether to re-sling the work or escalate.
+	// Subject format: "PR_REJECTED <polecat-name>"
+	TypePRRejected MessageType = "PR_REJECTED"
+
+	// TypeStalePR is sent from Refinery to Mayor when a PR has been
+	// awaiting human review for too long (>4h). Polecat capacity is held
+	// while the PR is open.
+	// Subject format: "STALE_PR <polecat-name>"
+	TypeStalePR MessageType = "STALE_PR"
 )
 
 // ParseMessageType extracts the protocol message type from a mail subject.
@@ -68,6 +80,8 @@ func ParseMessageType(subject string) MessageType {
 		TypeFixNeeded,
 		TypeReworkRequest,
 		TypeConvoyNeedsFeeding,
+		TypePRRejected,
+		TypeStalePR,
 	}
 
 	for _, prefix := range prefixes {
@@ -270,6 +284,50 @@ type ConvoyNeedsFeedingPayload struct {
 
 	// MergedAt is when the merge completed.
 	MergedAt time.Time `json:"merged_at"`
+}
+
+// PRRejectedPayload contains the data for a PR_REJECTED message.
+// Sent by Refinery to Witness when a human closes a PR without merging.
+type PRRejectedPayload struct {
+	// Branch is the source branch of the closed PR.
+	Branch string `json:"branch"`
+
+	// Issue is the beads issue ID.
+	Issue string `json:"issue"`
+
+	// Polecat is the worker name.
+	Polecat string `json:"polecat"`
+
+	// Rig is the rig name.
+	Rig string `json:"rig"`
+
+	// PRURL is the GitHub PR URL.
+	PRURL string `json:"pr_url"`
+
+	// Reason describes why the PR was closed.
+	Reason string `json:"reason"`
+
+	// ClosedAt is when the PR was closed.
+	ClosedAt time.Time `json:"closed_at"`
+}
+
+// StalePRPayload contains the data for a STALE_PR message.
+// Sent by Refinery to Mayor when a PR has been awaiting review too long.
+type StalePRPayload struct {
+	// Polecat is the worker name whose capacity is held.
+	Polecat string `json:"polecat"`
+
+	// Issue is the beads issue ID.
+	Issue string `json:"issue"`
+
+	// Rig is the rig name.
+	Rig string `json:"rig"`
+
+	// PRURL is the GitHub PR URL.
+	PRURL string `json:"pr_url"`
+
+	// CreatedAt is when the PR was created.
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // IsProtocolMessage returns true if the subject matches a known protocol type.

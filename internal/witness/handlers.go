@@ -439,6 +439,41 @@ func HandleMergeFailed(workDir, rigName string, msg *mail.Message, router *mail.
 	return result
 }
 
+// HandlePRRejected processes a PR_REJECTED message from the Refinery.
+// A human closed the PR without merging. The witness closes the cleanup wisp
+// and escalates to the operator via the Mayor, since PR rejection indicates
+// a systemic upstream issue (Refinery gates, AGENTS.md, or rig config).
+func HandlePRRejected(workDir, rigName string, msg *mail.Message) *HandlerResult {
+	result := &HandlerResult{
+		MessageID:    msg.ID,
+		ProtocolType: ProtoPRRejected,
+	}
+
+	payload, err := ParsePRRejected(msg.Subject, msg.Body)
+	if err != nil {
+		result.Error = fmt.Errorf("parsing PR_REJECTED: %w", err)
+		return result
+	}
+
+	// Escalate to mayor — PR rejection is a systemic issue, not a per-PR fix.
+	initRegistryFromWorkDir(workDir)
+	mayorSession := session.MayorSessionName()
+	nudgeMsg := fmt.Sprintf("PR_REJECTED: %s/%s PR closed without merge — PR: %s issue=%s reason=%s — review Refinery gates and rig config",
+		rigName, payload.PolecatName, payload.PRURL, payload.IssueID, payload.Reason)
+	t := tmux.NewTmux()
+	if err := t.NudgeSession(mayorSession, nudgeMsg); err != nil {
+		// Non-fatal: mayor may not be running, message stays in witness inbox
+		result.Action = fmt.Sprintf("PR rejected for %s (PR: %s, reason: %s) — mayor nudge failed: %v",
+			payload.PolecatName, payload.PRURL, payload.Reason, err)
+	} else {
+		result.Action = fmt.Sprintf("PR rejected for %s (PR: %s, reason: %s) — escalated to mayor",
+			payload.PolecatName, payload.PRURL, payload.Reason)
+	}
+
+	result.Handled = true
+	return result
+}
+
 // HandleSwarmStart processes a SWARM_START message from the Mayor.
 // Creates a swarm tracking wisp to monitor batch polecat work.
 func HandleSwarmStart(bd *BdCli, workDir string, msg *mail.Message) *HandlerResult {
@@ -1774,12 +1809,12 @@ func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *Po
 // Used to avoid redundant subprocess invocations during zombie detection, where the same
 // agent bead was previously queried 3-5 times per polecat per patrol cycle. (gt-2gra)
 type agentBeadSnapshot struct {
-	AgentState  string
-	HookBead    string
-	Labels      []string
-	UpdatedAt   string
-	ActiveMR    string
-	Fields      *beads.AgentFields // parsed from description
+	AgentState string
+	HookBead   string
+	Labels     []string
+	UpdatedAt  string
+	ActiveMR   string
+	Fields     *beads.AgentFields // parsed from description
 }
 
 // fetchAgentBeadSnapshot fetches all agent bead data in a single bd show call.
@@ -1958,13 +1993,13 @@ func getBeadStatus(bd *BdCli, workDir, beadID string) string {
 
 // resetAbandonedBead resets a dead polecat's hooked bead so it can be re-dispatched.
 // If the bead is in "hooked" or "in_progress" status, it:
-// 0. Checks if the polecat's work is already on main — if so, closes
-//    the bead instead of resetting (prevents re-dispatch of completed work)
-// 1. Records the respawn in the witness spawn-count ledger
-// 2. Resets status to open
-// 3. Clears assignee
-// 4. Sends mail to deacon for re-dispatch (includes respawn count; SPAWN_STORM
-//    prefix and Urgent priority when count exceeds max bead respawns config)
+//  0. Checks if the polecat's work is already on main — if so, closes
+//     the bead instead of resetting (prevents re-dispatch of completed work)
+//  1. Records the respawn in the witness spawn-count ledger
+//  2. Resets status to open
+//  3. Clears assignee
+//  4. Sends mail to deacon for re-dispatch (includes respawn count; SPAWN_STORM
+//     prefix and Urgent priority when count exceeds max bead respawns config)
 //
 // Returns true if the bead was recovered.
 func resetAbandonedBead(bd *BdCli, workDir, rigName, hookBead, polecatName string, router *mail.Router) bool {
