@@ -349,7 +349,7 @@ func createBatchConvoy(beadIDs []string, rigName string, owned bool, mergeStrate
 	var tracked []string
 	for _, beadID := range beadIDs {
 		depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
-		if out, err := BdCmd(depArgs...).Dir(townRoot).WithAutoCommit().StripBeadsDir().CombinedOutput(); err != nil {
+		if out, err := BdCmd(depArgs...).Dir(townBeads).WithAutoCommit().StripBeadsDir().CombinedOutput(); err != nil {
 			// Log but continue — partial tracking is better than no tracking
 			fmt.Printf("  Warning: could not track %s in convoy: %v\nOutput: %s\n", beadID, err, out)
 		} else {
@@ -411,13 +411,13 @@ func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy, baseB
 	}
 
 	// Add tracking relation: convoy tracks the issue.
-	// Pass the raw beadID and let bd handle cross-rig resolution via routes.jsonl,
-	// matching what gt convoy create/add already do (convoy.go:368, convoy.go:464).
-	// Use WithAutoCommit for the same reason as above.
+	// Run from townBeads (not townRoot) so bd finds routes.jsonl for cross-rig
+	// resolution, matching convoy.go:731 pattern. StripBeadsDir prevents inherited
+	// BEADS_DIR from overriding Dir().
 	depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
-	if out, err := BdCmd(depArgs...).Dir(townRoot).WithAutoCommit().StripBeadsDir().CombinedOutput(); err != nil {
+	if out, err := BdCmd(depArgs...).Dir(townBeads).WithAutoCommit().StripBeadsDir().CombinedOutput(); err != nil {
 		// Tracking failed — delete the orphan convoy to prevent accumulation
-		_ = BdCmd("close", convoyID, "-r", "tracking dep failed").Dir(townRoot).StripBeadsDir().Run()
+		_ = BdCmd("close", convoyID, "-r", "tracking dep failed").Dir(townBeads).StripBeadsDir().Run()
 		return "", fmt.Errorf("adding tracking relation for %s: %w\noutput: %s", beadID, err, out)
 	}
 
