@@ -69,7 +69,7 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
     "setup_command": "",
     "typecheck_command": "",
     "lint_command": "",
-    "test_command": "go test ./...",
+    "test_command": "",
     "build_command": "",
     "on_conflict": "assign_back",
     "delete_merged_branches": true,
@@ -133,7 +133,7 @@ Town-level role defaults live in `mayor/config.json` under:
 | `setup_command` | `string` | `""` | Setup/install command (e.g., `pnpm install`) |
 | `typecheck_command` | `string` | `""` | Type check command (e.g., `tsc --noEmit`) |
 | `lint_command` | `string` | `""` | Lint command (e.g., `eslint .`) |
-| `test_command` | `string` | `"go test ./..."` | Test command to run |
+| `test_command` | `string` | `""` | Test command to run. Empty = skip. |
 | `build_command` | `string` | `""` | Build command (e.g., `go build ./...`) |
 | `on_conflict` | `string` | `"assign_back"` | Conflict strategy: `assign_back` or `auto_rebase` |
 | `delete_merged_branches` | `bool` | `true` | Delete source branches after merging |
@@ -456,7 +456,13 @@ gt config agent remove <name>     # Remove custom agent (built-ins protected)
 gt config default-agent [name]    # Get or set town default agent
 ```
 
-**Built-in agents**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`
+**Built-in agents**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`, `opencode`, `copilot`
+
+> **Note on GitHub Copilot**: The `copilot` preset uses executable lifecycle hooks in
+> `.github/hooks/gastown.json` (`sessionStart`, `userPromptSubmitted`, `preToolUse`,
+> `sessionEnd`) — the same lifecycle events as Claude Code, in Copilot's JSON format.
+> Copilot uses a 5-second ready delay instead of prompt-based detection. Requires a
+> Copilot seat and org-level CLI policy enabled.
 
 **Custom agents**: Define per-town via CLI or JSON:
 ```bash

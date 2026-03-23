@@ -10,7 +10,7 @@ import (
 )
 
 // TestInitRegistry_SocketFromTownName verifies GT_TMUX_SOCKET socket selection:
-//   - unset / "default" / "auto" → use the default tmux socket (empty name)
+//   - unset / "default" / "auto" → per-town socket derived from town directory path
 //   - explicit value              → that value verbatim
 func TestInitRegistry_SocketFromTownName(t *testing.T) {
 	origTMUX := os.Getenv("TMUX")
@@ -75,9 +75,10 @@ func TestInitRegistry_SocketFromTownName(t *testing.T) {
 			_ = InitRegistry(townRoot)
 
 			got := tmux.GetDefaultSocket()
-			if got != "" {
-				t.Errorf("after InitRegistry(%q) with GT_TMUX_SOCKET=%q:\n  socket = %q, want default socket \"\"",
-					townRoot, tt.gtTmuxSocket, got)
+			want := townSocketName(townRoot)
+			if got != want {
+				t.Errorf("after InitRegistry(%q) with GT_TMUX_SOCKET=%q:\n  socket = %q, want %q",
+					townRoot, tt.gtTmuxSocket, got, want)
 			}
 
 			tmux.SetDefaultSocket("")
@@ -120,10 +121,48 @@ func TestInitRegistry_SocketFromTownName(t *testing.T) {
 		_ = InitRegistry(townB)
 		socketB := tmux.GetDefaultSocket()
 
-		if socketA != "" || socketB != "" {
-			t.Errorf("default socket should stay empty across towns: A=%q, B=%q", socketA, socketB)
+		if socketA == "" || socketB == "" {
+			t.Errorf("sockets should be non-empty: A=%q, B=%q", socketA, socketB)
+		}
+		if socketA == socketB {
+			t.Errorf("different town paths should get different sockets: A=%q, B=%q", socketA, socketB)
+		}
+		if !strings.HasPrefix(socketA, "gt-") || !strings.HasPrefix(socketB, "gt-") {
+			t.Errorf("sockets should start with 'gt-': A=%q, B=%q", socketA, socketB)
 		}
 	})
+}
+
+func TestInitRegistry_SocketFormat(t *testing.T) {
+	origSocket := tmux.GetDefaultSocket()
+	origGTSocket := os.Getenv("GT_TMUX_SOCKET")
+	t.Cleanup(func() {
+		os.Setenv("GT_TMUX_SOCKET", origGTSocket)
+		tmux.SetDefaultSocket(origSocket)
+	})
+
+	os.Unsetenv("GT_TMUX_SOCKET")
+	tmux.SetDefaultSocket("")
+
+	townRoot := filepath.Join(t.TempDir(), "myproject")
+	os.MkdirAll(townRoot, 0o755)
+	_ = InitRegistry(townRoot)
+
+	got := tmux.GetDefaultSocket()
+
+	if !strings.HasPrefix(got, "myproject-") {
+		t.Fatalf("socket %q should start with 'myproject-'", got)
+	}
+	hash := strings.TrimPrefix(got, "myproject-")
+	if len(hash) != 6 {
+		t.Errorf("socket hash suffix %q should be 6 hex chars, got %d", hash, len(hash))
+	}
+	for _, c := range hash {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			t.Errorf("socket hash suffix %q contains non-hex char %c", hash, c)
+			break
+		}
+	}
 }
 
 func TestSanitizeTownName(t *testing.T) {

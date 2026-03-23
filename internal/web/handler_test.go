@@ -1151,7 +1151,8 @@ func TestConvoyHandler_CachePreventsDuplicateFetches(t *testing.T) {
 	}
 }
 
-// TestConvoyHandler_CacheBypassOnExpand verifies that ?expand= requests bypass cache.
+// TestConvoyHandler_CacheBypassOnExpand verifies that ?expand= requests bypass
+// the normal response cache but have their own per-panel expand cache (GH#3117).
 func TestConvoyHandler_CacheBypassOnExpand(t *testing.T) {
 	fetchCount := 0
 	mock := &CountingMockFetcher{
@@ -1174,13 +1175,22 @@ func TestConvoyHandler_CacheBypassOnExpand(t *testing.T) {
 		t.Fatalf("After first request, fetchCount = %d, want 1", fetchCount)
 	}
 
-	// Expand request — should bypass cache
+	// First expand request — should bypass normal cache (different template)
 	req2 := httptest.NewRequest("GET", "/?expand=convoys", nil)
 	w2 := httptest.NewRecorder()
 	handler.ServeHTTP(w2, req2)
 
 	if fetchCount != 2 {
-		t.Errorf("Expand request fetchCount = %d, want 2 (should bypass cache)", fetchCount)
+		t.Errorf("First expand request fetchCount = %d, want 2 (should bypass normal cache)", fetchCount)
+	}
+
+	// Second identical expand request — should hit expand cache (GH#3117)
+	req3 := httptest.NewRequest("GET", "/?expand=convoys", nil)
+	w3 := httptest.NewRecorder()
+	handler.ServeHTTP(w3, req3)
+
+	if fetchCount != 2 {
+		t.Errorf("Second expand request fetchCount = %d, want 2 (should hit expand cache)", fetchCount)
 	}
 }
 
@@ -1244,4 +1254,66 @@ func TestConvoyHandler_NonFatalErrors(t *testing.T) {
 	if !strings.Contains(body, "hq-cv-test") {
 		t.Error("Response should contain convoy data even when other fetches fail")
 	}
+}
+
+// TestFetchCircuitBreaker verifies exponential backoff on consecutive failures (GH#3117).
+func TestFetchCircuitBreaker(t *testing.T) {
+	var cb fetchCircuitBreaker
+
+	// Initially allowed
+	if !cb.allow() {
+		t.Fatal("circuit breaker should allow first attempt")
+	}
+
+	// Record a failure — should block immediate retry
+	cb.recordFailure()
+	if cb.allow() {
+		t.Fatal("circuit breaker should block after first failure (within backoff)")
+	}
+
+	// Verify failure count and backoff are set
+	cb.mu.Lock()
+	if cb.failures != 1 {
+		t.Errorf("failures = %d, want 1", cb.failures)
+	}
+	if cb.backoff < 5*time.Second {
+		t.Errorf("backoff = %v, want >= 5s", cb.backoff)
+	}
+	cb.mu.Unlock()
+
+	// Record success — should reset
+	cb.recordSuccess()
+	if !cb.allow() {
+		t.Fatal("circuit breaker should allow after success reset")
+	}
+	cb.mu.Lock()
+	if cb.failures != 0 {
+		t.Errorf("failures after reset = %d, want 0", cb.failures)
+	}
+	cb.mu.Unlock()
+
+	// Multiple failures should increase backoff
+	cb.recordFailure()
+	cb.mu.Lock()
+	backoff1 := cb.backoff
+	cb.mu.Unlock()
+
+	cb.recordFailure()
+	cb.mu.Lock()
+	backoff2 := cb.backoff
+	cb.mu.Unlock()
+
+	if backoff2 <= backoff1 {
+		t.Errorf("backoff should increase: first=%v, second=%v", backoff1, backoff2)
+	}
+
+	// Backoff should cap at maxBackoff
+	for i := 0; i < 20; i++ {
+		cb.recordFailure()
+	}
+	cb.mu.Lock()
+	if cb.backoff > maxBackoff {
+		t.Errorf("backoff %v exceeds maxBackoff %v", cb.backoff, maxBackoff)
+	}
+	cb.mu.Unlock()
 }

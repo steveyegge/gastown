@@ -8,7 +8,7 @@ import (
 )
 
 func TestValidateStampInputs_Valid(t *testing.T) {
-	t.Parallel()
+	// Not parallel: mutates package-level flag vars
 	// Save and restore globals
 	origQ, origR, origC := wlStampQuality, wlStampReliability, wlStampCreativity
 	origSev, origType, origCtx := wlStampSeverity, wlStampType, wlStampContextType
@@ -33,7 +33,7 @@ func TestValidateStampInputs_Valid(t *testing.T) {
 }
 
 func TestValidateStampInputs_QualityOutOfRange(t *testing.T) {
-	t.Parallel()
+	// Not parallel: mutates package-level flag vars
 	origQ, origR, origC := wlStampQuality, wlStampReliability, wlStampCreativity
 	origSev, origType, origCtx := wlStampSeverity, wlStampType, wlStampContextType
 	defer func() {
@@ -55,7 +55,7 @@ func TestValidateStampInputs_QualityOutOfRange(t *testing.T) {
 }
 
 func TestValidateStampInputs_BadSeverity(t *testing.T) {
-	t.Parallel()
+	// Not parallel: mutates package-level flag vars
 	origQ, origR, origC := wlStampQuality, wlStampReliability, wlStampCreativity
 	origSev, origType, origCtx := wlStampSeverity, wlStampType, wlStampContextType
 	defer func() {
@@ -77,7 +77,7 @@ func TestValidateStampInputs_BadSeverity(t *testing.T) {
 }
 
 func TestValidateStampInputs_BadStampType(t *testing.T) {
-	t.Parallel()
+	// Not parallel: mutates package-level flag vars
 	origQ, origR, origC := wlStampQuality, wlStampReliability, wlStampCreativity
 	origSev, origType, origCtx := wlStampSeverity, wlStampType, wlStampContextType
 	defer func() {

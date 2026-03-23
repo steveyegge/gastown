@@ -1190,6 +1190,21 @@ func TestLooksLikeBeadID(t *testing.T) {
 		{"123-abc", false},      // numeric prefix
 		{"a-", false},           // nothing after hyphen
 		{"aaaaaa-b", false},     // prefix too long (6 chars)
+
+		// Injection / invalid suffix characters - should return false
+		{"gt-abc;rm -rf /", false},       // shell injection in suffix
+		{"gt-abc$(cmd)", false},          // command substitution in suffix
+		{"gt-abc&bg", false},            // ampersand in suffix
+		{"gt-abc|pipe", false},          // pipe in suffix
+		{"gt-abc`tick`", false},         // backtick in suffix
+		{"gt-abc>redir", false},         // redirect in suffix
+		{"gt-abc<redir", false},         // redirect in suffix
+		{"gt-abc'quote", false},         // single quote in suffix
+		{"gt-abc\"dquote", false},       // double quote in suffix
+		{"gt-abc\\slash", false},        // backslash in suffix
+		{"gt-abc xyz", false},           // space in suffix
+		{"gt-ABC", false},              // uppercase in suffix
+		{"gt-abc/path", false},          // slash in suffix
 	}
 
 	for _, tt := range tests {

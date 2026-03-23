@@ -37,6 +37,12 @@ type ConvoyFetcher interface {
 	FetchActivity() ([]ActivityRow, error)
 }
 
+// expandCacheEntry holds a cached expanded-view response.
+type expandCacheEntry struct {
+	body []byte
+	time time.Time
+}
+
 // ConvoyHandler handles HTTP requests for the convoy dashboard.
 type ConvoyHandler struct {
 	fetcher      ConvoyFetcher
@@ -52,6 +58,12 @@ type ConvoyHandler struct {
 	cacheTime  time.Time
 	cacheTTL   time.Duration
 	cacheInUse sync.Mutex // serializes concurrent fetches (only one runs at a time)
+
+	// Expanded-view cache: expanded views previously bypassed the response
+	// cache entirely, allowing process storms via repeated ?expand= requests.
+	// See GH#3117.
+	expandCacheMu sync.Mutex
+	expandCache   map[string]expandCacheEntry
 }
 
 // defaultCacheTTL is the minimum interval between full dashboard fetches.
@@ -79,11 +91,11 @@ func NewConvoyHandler(fetcher ConvoyFetcher, fetchTimeout time.Duration, csrfTok
 // requests (htmx auto-refresh, multiple tabs). Only one fetch cycle
 // runs at a time; concurrent requests get the cached response.
 func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Check for expand parameter — expanded views bypass cache since they
-	// render a different template variant.
+	// Check for expand parameter — expanded views render a different template
+	// variant but are still cached to prevent process storms (GH#3117).
 	expandPanel := r.URL.Query().Get("expand")
 
-	// Fast path: serve from cache if fresh and no expand param.
+	// Fast path: serve from cache if fresh.
 	if expandPanel == "" {
 		h.cacheMu.Lock()
 		if len(h.cacheBody) > 0 && time.Since(h.cacheTime) < h.cacheTTL {
@@ -96,6 +108,19 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.cacheMu.Unlock()
+	} else {
+		// Expanded views: check per-panel cache to prevent process storms
+		h.expandCacheMu.Lock()
+		if entry, ok := h.expandCache[expandPanel]; ok && time.Since(entry.time) < h.cacheTTL {
+			body := entry.body
+			h.expandCacheMu.Unlock()
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if _, err := w.Write(body); err != nil {
+				log.Printf("dashboard: cached expand response write failed: %v", err)
+			}
+			return
+		}
+		h.expandCacheMu.Unlock()
 	}
 
 	// Serialize fetch cycles: only one request triggers a full fetch at a time.
@@ -116,6 +141,18 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.cacheMu.Unlock()
+	} else {
+		h.expandCacheMu.Lock()
+		if entry, ok := h.expandCache[expandPanel]; ok && time.Since(entry.time) < h.cacheTTL {
+			body := entry.body
+			h.expandCacheMu.Unlock()
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if _, err := w.Write(body); err != nil {
+				log.Printf("dashboard: cached expand response write failed: %v", err)
+			}
+			return
+		}
+		h.expandCacheMu.Unlock()
 	}
 
 	body := h.fetchAndRender(r, expandPanel)
@@ -124,12 +161,19 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update cache for non-expanded views
+	// Update cache
 	if expandPanel == "" {
 		h.cacheMu.Lock()
 		h.cacheBody = body
 		h.cacheTime = time.Now()
 		h.cacheMu.Unlock()
+	} else {
+		h.expandCacheMu.Lock()
+		if h.expandCache == nil {
+			h.expandCache = make(map[string]expandCacheEntry)
+		}
+		h.expandCache[expandPanel] = expandCacheEntry{body: body, time: time.Now()}
+		h.expandCacheMu.Unlock()
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

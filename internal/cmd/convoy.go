@@ -201,7 +201,9 @@ COMMANDS:
   close     Close a convoy (verifies all items done, or use --force)
   land      Land an owned convoy (cleanup worktrees, close convoy)
   status    Show convoy progress, tracked issues, and active workers
-  list      List convoys (the dashboard view)`,
+  list      List convoys (the dashboard view)
+  watch     Subscribe to convoy completion notifications
+  unwatch   Unsubscribe from convoy completion notifications`,
 }
 
 var convoyCreateCmd = &cobra.Command{
@@ -1727,6 +1729,15 @@ func notifyConvoyCompletion(townBeads, convoyID, title string) {
 		mailCmd := exec.Command("gt", mailArgs...)
 		if err := mailCmd.Run(); err != nil {
 			style.PrintWarning("could not notify %s: %v", addr, err)
+		}
+	}
+
+	// Send nudge notifications to nudge watchers
+	for _, addr := range fields.NudgeNotificationAddresses() {
+		nudgeMsg := fmt.Sprintf("🚚 Convoy landed: %s — Convoy %s has completed. All tracked issues are now closed.", title, convoyID)
+		nudgeCmd := exec.Command("gt", "nudge", addr, "-m", nudgeMsg)
+		if err := nudgeCmd.Run(); err != nil {
+			style.PrintWarning("could not nudge %s: %v", addr, err)
 		}
 	}
 

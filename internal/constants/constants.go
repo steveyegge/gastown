@@ -71,13 +71,18 @@ const (
 	DialogPollTimeout = 8 * time.Second
 
 	// StartupNudgeVerifyDelay is how long to wait after sending a startup nudge
-	// before checking if the agent started working.
+	// before checking if the agent started working. 25s because Claude may
+	// still be processing gt prime output and preparing its first response;
+	// the c2claude wrapper adds extra latency. 5s was consistently too short,
+	// causing false retries that interrupted Claude mid-processing (GH#3031).
 	// Configurable via operational.session.startup_nudge_verify_delay.
-	StartupNudgeVerifyDelay = 5 * time.Second
+	StartupNudgeVerifyDelay = 25 * time.Second
 
 	// StartupNudgeMaxRetries is the maximum number of times to retry a startup nudge.
+	// With the 25s verify delay, 2 retries = 50s total before deferring to
+	// witness zombie patrol. Reduced from 3 to limit interrupt risk (GH#3031).
 	// Configurable via operational.session.startup_nudge_max_retries.
-	StartupNudgeMaxRetries = 3
+	StartupNudgeMaxRetries = 2
 
 	// MinHandoffCooldown is the minimum time between handoffs for the same
 	// component. Prevents tight restart loops when a patrol agent (e.g.,

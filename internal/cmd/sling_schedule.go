@@ -55,6 +55,7 @@ type ScheduleOptions struct {
 	DryRun      bool     // Show what would be done without acting
 	Force       bool     // Force schedule even if bead is hooked/in_progress
 	NoMerge     bool     // Skip merge queue on completion
+	ReviewOnly  bool     // Review-only mode: assignee evaluates and reports back, no merge/commit/push
 	Account     string   // Claude Code account handle
 	Agent       string   // Agent override (e.g., "gemini", "codex")
 	HookRawBead bool     // Hook raw bead without default formula
@@ -151,6 +152,7 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 		fields.BaseBranch = opts.BaseBranch
 	}
 	fields.NoMerge = opts.NoMerge
+	fields.ReviewOnly = opts.ReviewOnly
 	if opts.Account != "" {
 		fields.Account = opts.Account
 	}

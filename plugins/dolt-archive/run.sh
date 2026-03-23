@@ -48,7 +48,7 @@ trap 'rm -f "$LOGFILE"' EXIT
 dolt_query() {
   local db="$1"
   local query="$2"
-  local args=(dolt --host "$DOLT_HOST" --port "$DOLT_PORT" --no-tls -u "$DOLT_USER" -p "")
+  local args=(dolt --host="$DOLT_HOST" --port="$DOLT_PORT" --no-tls -u "$DOLT_USER" -p "")
   if [[ -n "$db" ]]; then
     args+=(--use-db "$db")
   fi
@@ -59,7 +59,7 @@ dolt_query() {
 dolt_query_json() {
   local db="$1"
   local query="$2"
-  dolt --host "$DOLT_HOST" --port "$DOLT_PORT" --no-tls -u "$DOLT_USER" -p "" \
+  dolt --host="$DOLT_HOST" --port="$DOLT_PORT" --no-tls -u "$DOLT_USER" -p "" \
     --use-db "$db" sql -q "$query" --result-format json 2>>"$LOGFILE"
 }
 
@@ -72,11 +72,9 @@ if [[ "$DEFAULT_DBS" == "auto" ]]; then
     log "ERROR: No user databases found on Dolt server at $DOLT_HOST:$DOLT_PORT"
     exit 1
   fi
-  # Portable: read -ra with IFS=$'\n' only reads first line on bash 3.2 (macOS).
-  # Use a while+read loop into an array instead.
   PROD_DBS=()
-  while IFS= read -r line; do
-    [[ -n "$line" ]] && PROD_DBS+=("$line")
+  while IFS= read -r _db; do
+    [[ -n "$_db" ]] && PROD_DBS+=("$_db")
   done <<< "$DISCOVERED"
   log "Discovered ${#PROD_DBS[@]} databases: ${PROD_DBS[*]}"
 else
@@ -124,9 +122,12 @@ done
 # Prune old exports (keep last 24 snapshots per DB)
 # Portable: use ls + tail instead of mapfile (bash 4+ only)
 for DB in "${PROD_DBS[@]}"; do
-  SNAP_COUNT=$(ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null | wc -l | tr -d ' ')
-  if (( SNAP_COUNT > 24 )); then
-    ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null | tail -n +"$((24 + 1))" | xargs rm -f
+  ALL_SNAPS=()
+  while IFS= read -r f; do
+    ALL_SNAPS+=("$f")
+  done < <(ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null || true)
+  if (( ${#ALL_SNAPS[@]} > 24 )); then
+    printf '%s\n' "${ALL_SNAPS[@]:24}" | xargs rm -f
     log "Pruned old $DB snapshots"
   fi
 done

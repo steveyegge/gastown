@@ -86,9 +86,21 @@ func (hc *HealthChecker) Check(d *Dog, maxInactivity time.Duration, autoClear bo
 			}
 
 		case tmux.AgentHung:
-			// Hung: process alive but no activity.  Report only — ZFC.
+			// Hung: process alive but no tmux activity for maxInactivity.
+			// If autoClear is on, kill and reclaim — the dog almost certainly
+			// finished its work but failed to call `gt dog done`.
 			result.NeedsAttention = true
-			result.Recommendation = "hung: agent alive but no tmux activity"
+			if autoClear {
+				_ = hc.checker.KillSession(session)
+				if err := hc.mgr.ClearWork(d.Name); err == nil {
+					result.AutoCleared = true
+					result.Recommendation = "hung dog auto-cleared (idle prompt, session killed)"
+				} else {
+					result.Recommendation = "hung: auto-clear failed: " + err.Error()
+				}
+			} else {
+				result.Recommendation = "hung: agent alive but no tmux activity"
+			}
 
 		default: // SessionHealthy — status.String() already set above
 		}
@@ -99,7 +111,13 @@ func (hc *HealthChecker) Check(d *Dog, maxInactivity time.Duration, autoClear bo
 		if has {
 			result.SessionStatus = "orphan"
 			result.NeedsAttention = true
-			result.Recommendation = "orphan: dog idle but tmux session exists"
+			if autoClear {
+				_ = hc.checker.KillSession(session)
+				result.AutoCleared = true
+				result.Recommendation = "orphan auto-cleared (session killed)"
+			} else {
+				result.Recommendation = "orphan: dog idle but tmux session exists"
+			}
 		} else {
 			result.SessionStatus = "none"
 		}

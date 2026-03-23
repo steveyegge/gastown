@@ -65,8 +65,11 @@ func TestConvoyResolveBeadsDir_RegressionEmptyConvoy(t *testing.T) {
 		}
 
 		// ResolveBeadsDir must bridge the gap.
+		// Normalize both via EvalSymlinks to handle macOS /private/var vs /var differences.
 		resolved := beads.ResolveBeadsDir(result)
-		if resolved != beadsDir {
+		resolvedReal, _ := filepath.EvalSymlinks(resolved)
+		beadsDirReal, _ := filepath.EvalSymlinks(beadsDir)
+		if resolvedReal != beadsDirReal {
 			t.Errorf("ResolveBeadsDir(getTownBeadsDir()) = %q, want %q",
 				resolved, beadsDir)
 		}

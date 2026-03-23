@@ -294,7 +294,7 @@ func getActiveTmuxSessions() []string {
 	// Format: "session_name:session_id" e.g., "gt-beads-crew-dave:$55"
 	// Use the town's tmux socket so we query the correct server.
 	// Without -L, bare "tmux" queries the "default" socket, which misses
-	// all sessions on the per-town socket (e.g., "gt") and causes
+	// all sessions on the per-town socket (e.g., "gt-a1b2c3") and causes
 	// CleanStaleLocks to incorrectly remove locks for active sessions.
 	args := []string{}
 	if sock := tmux.GetDefaultSocket(); sock != "" {

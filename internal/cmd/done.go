@@ -824,6 +824,13 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 		// Pre-declare for checkpoint goto (gt-aufru)
 		var existingMR *beads.Issue
+		var commitSHA string
+
+		// GH#3032: Resolve HEAD commit SHA for MR dedup.
+		// Branch name alone is not a valid dedup key — a polecat may push new
+		// commits to the same branch after a gate failure. The commit SHA
+		// distinguishes genuinely new submissions from idempotent retries.
+		commitSHA, _ = g.Rev("HEAD")
 
 		// Resume: skip MR creation if already completed in a previous run (gt-aufru).
 		// Mirrors the push checkpoint pattern above. Without this, every retry
@@ -834,15 +841,19 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			goto afterMR
 		}
 
-		// Check if MR bead already exists for this branch (idempotency)
-		existingMR, err = bd.FindMRForBranch(branch)
+		// Check if MR bead already exists for this branch+SHA (idempotency)
+		if commitSHA != "" {
+			existingMR, err = bd.FindMRForBranchAndSHA(branch, commitSHA)
+		} else {
+			existingMR, err = bd.FindMRForBranch(branch)
+		}
 		if err != nil {
 			style.PrintWarning("could not check for existing MR: %v", err)
 			// Continue with creation attempt - Create will fail if duplicate
 		}
 
 		if existingMR != nil {
-			// MR already exists - use it instead of creating a new one
+			// MR already exists with same branch AND commit — true idempotent retry
 			mrID = existingMR.ID
 			fmt.Printf("%s MR already exists (idempotent)\n", style.Bold.Render("✓"))
 			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
@@ -851,6 +862,9 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			title := fmt.Sprintf("Merge: %s", issueID)
 			description := fmt.Sprintf("branch: %s\ntarget: %s\nsource_issue: %s\nrig: %s",
 				branch, target, issueID, rigName)
+			if commitSHA != "" {
+				description += fmt.Sprintf("\ncommit_sha: %s", commitSHA)
+			}
 			if worker != "" {
 				description += fmt.Sprintf("\nworker: %s", worker)
 			}
@@ -916,6 +930,26 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				doneErrors = append(doneErrors, errMsg)
 				style.PrintWarning("%s\nBranch is pushed but MR bead not confirmed. Preserving worktree.", errMsg)
 				goto notifyWitness
+			}
+
+			// GH#3032: Supersede older open MRs for the same source issue.
+			// When a polecat re-submits after fixing a gate failure, the old MR
+			// (same branch, different SHA) is stale. Close it so the refinery
+			// doesn't process the old submission.
+			if issueID != "" {
+				if oldMRs, findErr := bd.FindOpenMRsForIssue(issueID); findErr == nil {
+					for _, old := range oldMRs {
+						if old.ID == mrID {
+							continue // skip the one we just created
+						}
+						reason := fmt.Sprintf("superseded by %s", mrID)
+						if closeErr := bd.CloseWithReason(reason, old.ID); closeErr != nil {
+							style.PrintWarning("could not supersede old MR %s: %v", old.ID, closeErr)
+							continue
+						}
+						fmt.Printf("  %s Superseded old MR: %s\n", style.Dim.Render("○"), old.ID)
+					}
+				}
 			}
 
 			// Update agent bead with active_mr reference (for traceability)

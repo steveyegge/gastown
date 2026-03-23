@@ -35,8 +35,8 @@ func TestDoctorDogInterval(t *testing.T) {
 func TestDoctorDogDatabases(t *testing.T) {
 	// Default databases
 	dbs := doctorDogDatabases(nil)
-	if len(dbs) != 6 {
-		t.Errorf("expected 6 default databases, got %d", len(dbs))
+	if len(dbs) != 3 {
+		t.Errorf("expected 3 default databases, got %d", len(dbs))
 	}
 
 	// Custom databases

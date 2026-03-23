@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -1216,36 +1215,6 @@ func nudgeFlockPath(townRoot, session string) string {
 	return filepath.Join(townRoot, constants.DirRuntime, "nudge_queue", safe, ".lock")
 }
 
-// acquireFlockLock acquires a file-based lock using flock(2) for cross-process
-// serialization. Returns an unlock function that must be called to release the lock.
-// Uses non-blocking flock in a polling loop to respect the timeout.
-func acquireFlockLock(lockPath string, timeout time.Duration) (func(), error) {
-	dir := filepath.Dir(lockPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("creating lock dir: %w", err)
-	}
-
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		return nil, fmt.Errorf("opening lock file: %w", err)
-	}
-
-	deadline := time.Now().Add(timeout)
-	for {
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			return func() {
-				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-				f.Close()
-			}, nil
-		}
-		if time.Now().After(deadline) {
-			f.Close()
-			return nil, fmt.Errorf("timeout after %s waiting for flock", timeout)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-}
 
 // IsSessionAttached returns true if the session has any clients attached.
 func (t *Tmux) IsSessionAttached(target string) bool {
@@ -1394,6 +1363,83 @@ func (t *Tmux) dismissRewindMode(target string) {
 	time.Sleep(300 * time.Millisecond)
 }
 
+// sendEnterVerified sends Enter to a tmux target and verifies it was processed
+// by checking that the pane content changes. Under load, tmux may buffer
+// keystrokes, causing Enter to race with text delivery — Enter arrives while
+// tmux is still processing text/Escape and gets treated as part of the text
+// stream rather than a separate submit action.
+//
+// After sending Enter, polls the pane content with exponential backoff. If the
+// content hasn't changed (Enter wasn't processed), retries the Enter keystroke.
+// Max 3 retries before returning an error.
+//
+// Falls back to best-effort (no verification) if pane capture fails.
+func (t *Tmux) sendEnterVerified(target string) error {
+	const (
+		maxRetries       = 3
+		initialBackoff   = 500 * time.Millisecond
+		verifyLines      = 5 // capture last N lines for comparison
+	)
+
+	// Snapshot pane content before Enter so we can detect processing.
+	preSnapshot, preErr := t.CapturePane(target, verifyLines)
+
+	// Send Enter
+	if _, err := t.run("send-keys", "-t", target, "Enter"); err != nil {
+		return fmt.Errorf("send Enter: %w", err)
+	}
+
+	// If we can't snapshot, fall back to unverified delivery (old behavior).
+	if preErr != nil {
+		return nil
+	}
+
+	backoff := initialBackoff
+	for retry := 0; retry < maxRetries; retry++ {
+		time.Sleep(backoff)
+
+		postSnapshot, err := t.CapturePane(target, verifyLines)
+		if err != nil {
+			// Can't verify — assume success.
+			return nil
+		}
+
+		if postSnapshot != preSnapshot {
+			// Content changed — Enter was processed.
+			return nil
+		}
+
+		// Content unchanged — Enter may not have been processed. Retry.
+		if _, err := t.run("send-keys", "-t", target, "Enter"); err != nil {
+			return fmt.Errorf("send Enter (retry %d): %w", retry+1, err)
+		}
+
+		// Exponential backoff: 500ms → 1000ms → 2000ms
+		backoff *= 2
+	}
+
+	// Final verification after last retry.
+	time.Sleep(500 * time.Millisecond)
+	postSnapshot, err := t.CapturePane(target, verifyLines)
+	if err != nil || postSnapshot != preSnapshot {
+		return nil // Can't verify or content changed — consider success.
+	}
+
+	return fmt.Errorf("nudge Enter not processed after %d retries: pane content unchanged", maxRetries)
+}
+
+// adaptiveTextDelay returns the post-text-delivery delay for a message.
+// Base 500ms + 25ms per chunk beyond the first, capped at 2s.
+// Longer messages need more time for tmux to process all chunks under load.
+func adaptiveTextDelay(messageLen int) time.Duration {
+	numChunks := (messageLen + sendKeysChunkSize - 1) / sendKeysChunkSize
+	delay := 500*time.Millisecond + time.Duration(max(0, numChunks-1))*25*time.Millisecond
+	if delay > 2*time.Second {
+		delay = 2 * time.Second
+	}
+	return delay
+}
+
 // sendMessageToTarget sends a sanitized message to a tmux target. For small
 // messages (< sendKeysChunkSize), uses send-keys -l. For larger messages,
 // sends in chunks with delays to avoid overwhelming the TTY input buffer.
@@ -1405,9 +1451,9 @@ func (t *Tmux) dismissRewindMode(target string) {
 // raw stdin (like Claude Code's TUI) are not affected.
 const sendKeysChunkSize = 512
 
-func (t *Tmux) sendMessageToTarget(target, text string, timeout time.Duration) error {
+func (t *Tmux) sendMessageToTarget(target, text string) error {
 	if len(text) <= sendKeysChunkSize {
-		return t.sendKeysLiteralWithRetry(target, text, timeout)
+		return t.sendKeysLiteralWithRetry(target, text, constants.NudgeReadyTimeout)
 	}
 	// Send in chunks to avoid tmux send-keys argument length limits.
 	// Each chunk is sent with a small delay to let the terminal process it.
@@ -1419,7 +1465,7 @@ func (t *Tmux) sendMessageToTarget(target, text string, timeout time.Duration) e
 		chunk := text[i:end]
 		if i == 0 {
 			// First chunk uses retry logic for startup race
-			if err := t.sendKeysLiteralWithRetry(target, chunk, timeout); err != nil {
+			if err := t.sendKeysLiteralWithRetry(target, chunk, constants.NudgeReadyTimeout); err != nil {
 				return err
 			}
 		} else {
@@ -1566,12 +1612,13 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 
 	// 3. Send text via send-keys -l. Messages > 512 bytes are chunked
 	//    with 10ms inter-chunk delays to avoid argument length limits.
-	if err := t.sendMessageToTarget(target, sanitized, constants.NudgeReadyTimeout); err != nil {
+	if err := t.sendMessageToTarget(target, sanitized); err != nil {
 		return err
 	}
 
-	// 4. Wait 500ms for text delivery to complete (tested, required)
-	time.Sleep(500 * time.Millisecond)
+	// 4. Adaptive post-text delay: scales with message length to give tmux
+	// enough time to process all chunks under load. (GH#gt-0b5)
+	time.Sleep(adaptiveTextDelay(len(sanitized)))
 
 	if !opts.SkipEscape {
 		// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
@@ -1593,26 +1640,20 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 		if t.isInRewindMode(target) {
 			t.dismissRewindMode(target)
 			// Re-send message text — Rewind consumed the original input.
-			_ = t.sendMessageToTarget(target, sanitized, constants.NudgeReadyTimeout)
-			time.Sleep(500 * time.Millisecond)
+			_ = t.sendMessageToTarget(target, sanitized)
+			time.Sleep(adaptiveTextDelay(len(sanitized)))
 		}
 	}
 
-	// 7. Send Enter with retry (critical for message submission)
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			time.Sleep(200 * time.Millisecond)
-		}
-		if _, err := t.run("send-keys", "-t", target, "Enter"); err != nil {
-			lastErr = err
-			continue
-		}
-		// 8. Wake the pane to trigger SIGWINCH for detached sessions
-		t.WakePaneIfDetached(session)
-		return nil
+	// 7. Send Enter with verification — polls pane content to confirm Enter
+	// was processed, retrying with exponential backoff under load. (GH#gt-0b5)
+	if err := t.sendEnterVerified(target); err != nil {
+		return fmt.Errorf("nudge to session %q: %w", session, err)
 	}
-	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+
+	// 8. Wake the pane to trigger SIGWINCH for detached sessions
+	t.WakePaneIfDetached(session)
+	return nil
 }
 
 // NudgePane sends a message to a specific pane reliably.
@@ -1644,12 +1685,12 @@ func (t *Tmux) NudgePane(pane, message string) error {
 
 	// 3. Send text via send-keys -l. Messages > 512 bytes are chunked
 	//    with 10ms inter-chunk delays to avoid argument length limits.
-	if err := t.sendMessageToTarget(pane, sanitized, constants.NudgeReadyTimeout); err != nil {
+	if err := t.sendMessageToTarget(pane, sanitized); err != nil {
 		return err
 	}
 
-	// 4. Wait 500ms for text delivery to complete (tested, required)
-	time.Sleep(500 * time.Millisecond)
+	// 4. Adaptive post-text delay: scales with message length. (GH#gt-0b5)
+	time.Sleep(adaptiveTextDelay(len(sanitized)))
 
 	// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
 	// See: https://github.com/anthropics/gastown/issues/307
@@ -1661,25 +1702,19 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	// 6.5. Post-Escape: check if our Escape triggered Rewind mode. (GH#gt-8el)
 	if t.isInRewindMode(pane) {
 		t.dismissRewindMode(pane)
-		_ = t.sendMessageToTarget(pane, sanitized, constants.NudgeReadyTimeout)
-		time.Sleep(500 * time.Millisecond)
+		_ = t.sendMessageToTarget(pane, sanitized)
+		time.Sleep(adaptiveTextDelay(len(sanitized)))
 	}
 
-	// 7. Send Enter with retry (critical for message submission)
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			time.Sleep(200 * time.Millisecond)
-		}
-		if _, err := t.run("send-keys", "-t", pane, "Enter"); err != nil {
-			lastErr = err
-			continue
-		}
-		// 8. Wake the pane to trigger SIGWINCH for detached sessions
-		t.WakePaneIfDetached(pane)
-		return nil
+	// 7. Send Enter with verification — polls pane content to confirm Enter
+	// was processed, retrying with exponential backoff under load. (GH#gt-0b5)
+	if err := t.sendEnterVerified(pane); err != nil {
+		return fmt.Errorf("nudge to pane %q: %w", pane, err)
 	}
-	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+
+	// 8. Wake the pane to trigger SIGWINCH for detached sessions
+	t.WakePaneIfDetached(pane)
+	return nil
 }
 
 // AcceptStartupDialogs dismisses startup dialogs that can block automated
@@ -3324,7 +3359,7 @@ func (t *Tmux) SetAgentsBinding(session string) error {
 // specific tmux socket. This is used during gt up to ensure the bindings work
 // even when the user is on a different socket than the town socket.
 //
-// townSocket is the socket name where GT agents live (e.g. "gt"). When
+// townSocket is the socket name where GT agents live (e.g. "gt-a1b2c3"). When
 // non-empty it is embedded in the binding command as GT_TOWN_SOCKET=<name>
 // so that gt agents menu can locate agent sessions even when invoked from a
 // directory outside the town root (e.g. a personal tmux session where

@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/wasteland"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -19,16 +20,18 @@ var wlShowJSON bool
 var wlShowCmd = &cobra.Command{
 	Use:   "show <work-id>",
 	Short: "Show full details of a wanted item",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWLShow,
-	Long: `Show the full details of a wasteland wanted item by ID.
+	Long: `Display all fields of a single wanted item from the wl-commons database.
 
-Uses the local fork directory if available (fast), otherwise clones
-the commons database temporarily.
+Unlike 'gt wl browse' which truncates titles and omits descriptions,
+'gt wl show' displays every field of the item.
+
+The local wl-commons database is queried directly (kept in sync by gt wl sync).
 
 EXAMPLES:
-  gt wl show w-gc-003          # Show details of work item
-  gt wl show w-gc-003 --json   # JSON output`,
+  gt wl show w-abc123             # Display all fields
+  gt wl show w-abc123 --json      # JSON output`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWLShow,
 }
 
 func init() {
@@ -37,7 +40,7 @@ func init() {
 }
 
 func runWLShow(cmd *cobra.Command, args []string) error {
-	workID := args[0]
+	wantedID := args[0]
 
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -49,118 +52,227 @@ func runWLShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("dolt not found in PATH — install from https://docs.dolthub.com/introduction/installation")
 	}
 
-	// Try local fork first (fast path)
-	forkDir := findWLCommonsFork(townRoot)
-	cloneDir := forkDir
-
-	// No local fork — clone fresh (like wl browse)
-	if cloneDir == "" {
-		tmpDir, tmpErr := os.MkdirTemp("", "wl-show-*")
-		if tmpErr != nil {
-			return fmt.Errorf("creating temp directory: %w", tmpErr)
-		}
+	cloneDir, tmpDir, err := resolveWLCommonsClone(townRoot, doltPath)
+	if err != nil {
+		return err
+	}
+	if tmpDir != "" {
 		defer os.RemoveAll(tmpDir)
+	} else {
+		// Persistent clone exists — auto-fetch to freshen data.
+		autoFetchWLCommons(doltPath, cloneDir, townRoot)
+	}
 
-		commonsOrg := "hop"
-		commonsDB := "wl-commons"
-		cloneDir = filepath.Join(tmpDir, commonsDB)
-		remote := fmt.Sprintf("%s/%s", commonsOrg, commonsDB)
+	query := buildWLShowQuery(wantedID)
 
-		if !wlShowJSON {
-			fmt.Printf("Cloning %s...\n", style.Bold.Render(remote))
-		}
+	if wlShowJSON {
+		sqlCmd := exec.Command(doltPath, "sql", "-q", query, "-r", "json")
+		sqlCmd.Dir = cloneDir
+		sqlCmd.Stdout = os.Stdout
+		sqlCmd.Stderr = os.Stderr
+		return sqlCmd.Run()
+	}
 
-		cloneCmd := exec.Command(doltPath, "clone", remote, cloneDir)
-		if !wlShowJSON {
-			cloneCmd.Stderr = os.Stderr
-		}
-		if err := cloneCmd.Run(); err != nil {
-			return fmt.Errorf("cloning %s: %w", remote, err)
+	item, err := queryWantedFromClone(doltPath, cloneDir, wantedID)
+	if err != nil {
+		return err
+	}
+	return renderWantedItem(item)
+}
+
+// resolveWLCommonsClone finds the local wl-commons clone directory.
+// Returns (cloneDir, tmpDir, err). If tmpDir is non-empty, caller must
+// defer os.RemoveAll(tmpDir) — a temporary clone was created.
+func resolveWLCommonsClone(townRoot, doltPath string) (cloneDir, tmpDir string, err error) {
+	// Try wasteland config (set by gt wl join).
+	if cfg, cfgErr := wasteland.LoadConfig(townRoot); cfgErr == nil && cfg.LocalDir != "" {
+		if _, statErr := os.Stat(filepath.Join(cfg.LocalDir, ".dolt")); statErr == nil {
+			return cfg.LocalDir, "", nil
 		}
 	}
 
-	// Query the wanted item by ID
-	query := fmt.Sprintf(
-		"SELECT id, title, description, project, type, priority, tags, posted_by, status, effort_level, created_at, updated_at FROM wanted WHERE id = '%s'",
-		doltserver.EscapeSQL(workID),
-	)
+	// Try standard location: .wasteland/hop/wl-commons.
+	stdPath := wasteland.LocalCloneDir(townRoot, "hop", "wl-commons")
+	if _, statErr := os.Stat(filepath.Join(stdPath, ".dolt")); statErr == nil {
+		return stdPath, "", nil
+	}
 
-	sqlCmd := exec.Command(doltPath, "sql", "-q", query, "-r", "json")
+	// Try common fallback locations.
+	if forkDir := findWLCommonsFork(townRoot); forkDir != "" {
+		return forkDir, "", nil
+	}
+
+	// No local clone — do a one-time clone-then-discard, like browse.
+	fmt.Fprintf(os.Stderr, "No local wl-commons clone found. Cloning temporarily.\nRun 'gt wl sync' to keep a persistent local copy.\n\n")
+	tmpDir, err = os.MkdirTemp("", "wl-show-*")
+	if err != nil {
+		return "", "", fmt.Errorf("creating temp directory: %w", err)
+	}
+	remote := "hop/wl-commons"
+	cloneDir = filepath.Join(tmpDir, "wl-commons")
+	fmt.Printf("Cloning %s...\n", style.Bold.Render(remote))
+	cloneCmd := exec.Command(doltPath, "clone", remote, cloneDir)
+	cloneCmd.Stderr = os.Stderr
+	if cloneErr := cloneCmd.Run(); cloneErr != nil {
+		os.RemoveAll(tmpDir)
+		return "", "", fmt.Errorf("cloning %s: %w\nEnsure the database exists on DoltHub: https://www.dolthub.com/%s", remote, cloneErr, remote)
+	}
+	return cloneDir, tmpDir, nil
+}
+
+// autoFetchWLCommons runs dolt fetch + merge on the local clone to freshen data.
+// Errors are non-fatal: the command proceeds with whatever local data exists.
+func autoFetchWLCommons(doltPath, cloneDir, townRoot string) {
+	// Use "upstream" remote if this is a wasteland fork, otherwise "origin".
+	remote := "origin"
+	if cfg, err := wasteland.LoadConfig(townRoot); err == nil && cfg.LocalDir == cloneDir {
+		remote = "upstream"
+	}
+	fetchCmd := exec.Command(doltPath, "fetch", remote)
+	fetchCmd.Dir = cloneDir
+	if err := fetchCmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to fetch from %s: %v\n", remote, err)
+		return
+	}
+	mergeCmd := exec.Command(doltPath, "merge", remote+"/main")
+	mergeCmd.Dir = cloneDir
+	if err := mergeCmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to merge %s/main: %v\n", remote, err)
+	}
+}
+
+// buildWLShowQuery returns the SELECT query for a single wanted item.
+func buildWLShowQuery(wantedID string) string {
+	return fmt.Sprintf(
+		"SELECT id, title,"+
+			" COALESCE(description, '') as description,"+
+			" COALESCE(project, '') as project,"+
+			" COALESCE(type, '') as type,"+
+			" priority,"+
+			" COALESCE(tags, JSON_ARRAY()) as tags,"+
+			" COALESCE(posted_by, '') as posted_by,"+
+			" COALESCE(claimed_by, '') as claimed_by,"+
+			" status,"+
+			" COALESCE(effort_level, '') as effort_level,"+
+			" COALESCE(evidence_url, '') as evidence_url,"+
+			" COALESCE(sandbox_required, 0) as sandbox_required,"+
+			" COALESCE(CAST(created_at AS CHAR), '') as created_at,"+
+			" COALESCE(CAST(updated_at AS CHAR), '') as updated_at"+
+			" FROM wanted WHERE id='%s'",
+		doltserver.EscapeSQL(wantedID))
+}
+
+// queryWantedFromClone queries a local dolt clone dir and returns the WantedItem.
+func queryWantedFromClone(doltPath, cloneDir, wantedID string) (*doltserver.WantedItem, error) {
+	query := buildWLShowQuery(wantedID)
+	sqlCmd := exec.Command(doltPath, "sql", "-q", query, "-r", "csv")
 	sqlCmd.Dir = cloneDir
 	output, err := sqlCmd.Output()
 	if err != nil {
-		return fmt.Errorf("querying wanted item: %w", err)
-	}
-
-	// Parse JSON response — dolt returns {"rows": [...]}
-	var result struct {
-		Rows []map[string]interface{} `json:"rows"`
-	}
-	if err := json.Unmarshal(output, &result); err != nil {
-		return fmt.Errorf("parsing response: %w", err)
-	}
-
-	if len(result.Rows) == 0 {
-		return fmt.Errorf("wanted item %q not found", workID)
-	}
-
-	item := result.Rows[0]
-
-	if wlShowJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(item)
-	}
-
-	// Human-readable output
-	fmt.Printf("%s %s\n", style.Bold.Render("ID:"), getString(item, "id"))
-	fmt.Printf("%s %s\n", style.Bold.Render("Title:"), getString(item, "title"))
-	fmt.Printf("%s %s\n", style.Bold.Render("Project:"), getString(item, "project"))
-	fmt.Printf("%s %s\n", style.Bold.Render("Type:"), getString(item, "type"))
-	fmt.Printf("%s %s\n", style.Bold.Render("Priority:"), getString(item, "priority"))
-	fmt.Printf("%s %s\n", style.Bold.Render("Status:"), getString(item, "status"))
-	fmt.Printf("%s %s\n", style.Bold.Render("Effort:"), getString(item, "effort_level"))
-	fmt.Printf("%s %s\n", style.Bold.Render("Posted by:"), getString(item, "posted_by"))
-	fmt.Printf("%s %s\n", style.Bold.Render("Tags:"), getString(item, "tags"))
-	fmt.Printf("%s %s\n", style.Bold.Render("Created:"), getString(item, "created_at"))
-	fmt.Printf("%s %s\n", style.Bold.Render("Updated:"), getString(item, "updated_at"))
-
-	desc := getString(item, "description")
-	if desc != "" {
-		fmt.Printf("\n%s\n%s\n", style.Bold.Render("Description:"), desc)
-	}
-
-	// Also show completions for this item
-	compQuery := fmt.Sprintf(
-		"SELECT id, completed_by, evidence, completed_at FROM completions WHERE wanted_id = '%s'",
-		doltserver.EscapeSQL(workID),
-	)
-	compCmd := exec.Command(doltPath, "sql", "-q", compQuery, "-r", "json")
-	compCmd.Dir = cloneDir
-	compOutput, compErr := compCmd.Output()
-	if compErr == nil {
-		var compResult struct {
-			Rows []map[string]interface{} `json:"rows"`
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("query failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
 		}
-		if json.Unmarshal(compOutput, &compResult) == nil && len(compResult.Rows) > 0 {
-			fmt.Printf("\n%s (%d)\n", style.Bold.Render("Completions:"), len(compResult.Rows))
-			for _, comp := range compResult.Rows {
-				fmt.Printf("  %s by %s (%s)\n",
-					getString(comp, "id"),
-					getString(comp, "completed_by"),
-					getString(comp, "completed_at"),
-				)
-				if ev := getString(comp, "evidence"); ev != "" {
-					// Show first 200 chars of evidence
-					if len(ev) > 200 {
-						ev = ev[:200] + "..."
-					}
-					fmt.Printf("    %s\n", strings.ReplaceAll(ev, "\n", "\n    "))
-				}
-			}
+		return nil, fmt.Errorf("running query: %w", err)
+	}
+
+	rows := wlParseCSV(string(output))
+	if len(rows) < 2 {
+		return nil, fmt.Errorf("wanted item %q not found", wantedID)
+	}
+
+	headers := rows[0]
+	values := rows[1]
+	data := make(map[string]string, len(headers))
+	for i, h := range headers {
+		if i < len(values) {
+			data[h] = values[i]
 		}
 	}
 
+	item := &doltserver.WantedItem{
+		ID:          data["id"],
+		Title:       data["title"],
+		Description: data["description"],
+		Project:     data["project"],
+		Type:        data["type"],
+		PostedBy:    data["posted_by"],
+		ClaimedBy:   data["claimed_by"],
+		Status:      data["status"],
+		EffortLevel: data["effort_level"],
+		EvidenceURL: data["evidence_url"],
+		CreatedAt:   data["created_at"],
+		UpdatedAt:   data["updated_at"],
+	}
+	if p := data["priority"]; p != "" {
+		_, _ = fmt.Sscanf(p, "%d", &item.Priority)
+	}
+	if data["sandbox_required"] == "1" {
+		item.SandboxRequired = true
+	}
+	if tagsJSON := data["tags"]; tagsJSON != "" && tagsJSON != "[]" {
+		_ = json.Unmarshal([]byte(tagsJSON), &item.Tags)
+	}
+	return item, nil
+}
+
+// showWanted contains the testable logic for displaying a wanted item.
+func showWanted(store doltserver.WLCommonsStore, wantedID string, asJSON bool) error {
+	item, err := store.QueryWantedFull(wantedID)
+	if err != nil {
+		return err
+	}
+
+	if asJSON {
+		data, err := json.MarshalIndent(item, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshaling JSON: %w", err)
+		}
+		fmt.Println(string(data))
+		return nil
+	}
+
+	return renderWantedItem(item)
+}
+
+func renderWantedItem(item *doltserver.WantedItem) error {
+	tags := strings.Join(item.Tags, ", ")
+
+	sandboxVal := "No"
+	if item.SandboxRequired {
+		sandboxVal = "Yes"
+	}
+
+	rows := []struct{ label, value string }{
+		{"ID", item.ID},
+		{"Title", item.Title},
+		{"Description", item.Description},
+		{"Project", item.Project},
+		{"Type", item.Type},
+		{"Priority", wlFormatPriority(fmt.Sprintf("%d", item.Priority))},
+		{"Tags", tags},
+		{"Posted By", item.PostedBy},
+		{"Claimed By", item.ClaimedBy},
+		{"Status", item.Status},
+		{"Effort", item.EffortLevel},
+		{"Evidence URL", item.EvidenceURL},
+		{"Sandbox", sandboxVal},
+		{"Created", item.CreatedAt},
+		{"Updated", item.UpdatedAt},
+	}
+
+	labelWidth := 13
+	indent := strings.Repeat(" ", labelWidth+2)
+	for _, r := range rows {
+		val := r.value
+		if val == "" {
+			val = "(none)"
+		}
+		lines := strings.Split(val, "\n")
+		fmt.Printf("%-*s  %s\n", labelWidth, r.label+":", lines[0])
+		for _, line := range lines[1:] {
+			fmt.Printf("%s%s\n", indent, line)
+		}
+	}
 	return nil
 }
 

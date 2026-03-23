@@ -435,8 +435,8 @@ func TestAgentEnvOmitsGTAgent_FallbackRequired(t *testing.T) {
 }
 
 // TestVerifyStartupNudgeDelivery_IdleAgent tests that verifyStartupNudgeDelivery
-// detects an idle agent (at prompt) and retries the nudge. Uses a real tmux session
-// with a shell prompt that matches the ReadyPromptPrefix.
+// detects an idle agent (at prompt, no busy indicator) and retries the nudge.
+// Uses a real tmux session with a shell prompt that matches the ReadyPromptPrefix.
 func TestVerifyStartupNudgeDelivery_IdleAgent(t *testing.T) {
 	requireTmux(t)
 
@@ -456,6 +456,7 @@ func TestVerifyStartupNudgeDelivery_IdleAgent(t *testing.T) {
 
 	// Configure the shell to show the Claude prompt prefix, simulating an idle agent.
 	// The prompt "❯ " is what Claude Code shows when idle.
+	// No "esc to interrupt" busy indicator — simulates a truly idle agent.
 	time.Sleep(300 * time.Millisecond) // Let shell initialize
 	_ = tm.SendKeys(sessionName, "export PS1='❯ '")
 	time.Sleep(300 * time.Millisecond)
@@ -469,15 +470,17 @@ func TestVerifyStartupNudgeDelivery_IdleAgent(t *testing.T) {
 		},
 	}
 
-	// IsAtPrompt should detect the idle prompt
-	if !tm.IsAtPrompt(sessionName, rc) {
-		t.Log("Warning: prompt not detected (tmux timing); skipping idle verification")
-		t.Skip("prompt detection unreliable in test environment")
+	// IsIdle should detect the idle state (prompt visible, no busy indicator)
+	if !tm.IsIdle(sessionName) {
+		t.Log("Warning: idle state not detected (tmux timing); skipping idle verification")
+		t.Skip("idle detection unreliable in test environment")
 	}
 
 	// verifyStartupNudgeDelivery should detect idle state and retry.
 	// We can't easily assert the retry happened, but we verify it doesn't panic/hang.
 	// Use a goroutine with timeout to prevent test hanging.
+	// Timeout accounts for DefaultStartupNudgeVerifyDelay (25s) * DefaultStartupNudgeMaxRetries (2)
+	// plus overhead = ~60s. Use 90s for safety.
 	done := make(chan struct{})
 	go func() {
 		m.verifyStartupNudgeDelivery(sessionName, rc)
@@ -487,8 +490,8 @@ func TestVerifyStartupNudgeDelivery_IdleAgent(t *testing.T) {
 	select {
 	case <-done:
 		// Success - function completed
-	case <-time.After(30 * time.Second):
-		t.Fatal("verifyStartupNudgeDelivery hung (exceeded 30s timeout)")
+	case <-time.After(90 * time.Second):
+		t.Fatal("verifyStartupNudgeDelivery hung (exceeded 90s timeout)")
 	}
 }
 

@@ -29,7 +29,7 @@ session carry the same `run.id`.
 | `run.id` | string (UUID v4) | generated at spawn; propagated via `GT_RUN` |
 | `instance` | string | `hostname:basename(town_root)` |
 | `town_root` | string | absolute town root path |
-| `agent_type` | string | `"claudecode"`, `"opencode"`, … |
+| `agent_type` | string | `"claudecode"`, `"opencode"`, `"copilot"`, … |
 | `role` | string | `polecat` · `witness` · `mayor` · `refinery` · `crew` · `deacon` · `dog` · `boot` |
 | `agent_name` | string | specific name within the role (e.g. `"wyvern-Toast"`); equals role for singletons |
 | `session_id` | string | tmux pane name |
@@ -48,7 +48,7 @@ Emitted once per agent spawn. Anchors all subsequent events for that run.
 | `run.id` | string | run UUID |
 | `instance` | string | `hostname:basename(town_root)` |
 | `town_root` | string | absolute town root path |
-| `agent_type` | string | `"claudecode"` · `"opencode"` · … |
+| `agent_type` | string | `"claudecode"` · `"opencode"` · `"copilot"` · … |
 | `role` | string | Gastown role |
 | `agent_name` | string | agent name |
 | `session_id` | string | tmux pane name |

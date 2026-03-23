@@ -547,3 +547,145 @@ func TestParseAgentFields_WithCompletionMetadata(t *testing.T) {
 		t.Errorf("MRID = %q, want empty (not in desc)", got.MRID)
 	}
 }
+
+// --- Convoy watcher tests ---
+
+func TestConvoyFieldsWatchersRoundTrip(t *testing.T) {
+	original := &ConvoyFields{
+		Owner:         "mayor/",
+		Notify:        "witness/",
+		Watchers:      "gastown/crew/mel,gastown/crew/tom",
+		NudgeWatchers: "gastown/crew/joe",
+	}
+	formatted := FormatConvoyFields(original)
+	parsed := ParseConvoyFields(&Issue{Description: formatted})
+	if parsed == nil {
+		t.Fatal("round-trip parse returned nil")
+	}
+	if parsed.Watchers != original.Watchers {
+		t.Errorf("Watchers: got %q, want %q", parsed.Watchers, original.Watchers)
+	}
+	if parsed.NudgeWatchers != original.NudgeWatchers {
+		t.Errorf("NudgeWatchers: got %q, want %q", parsed.NudgeWatchers, original.NudgeWatchers)
+	}
+}
+
+func TestConvoyFieldsAddWatcher(t *testing.T) {
+	f := &ConvoyFields{}
+
+	// First add
+	if !f.AddWatcher("gastown/crew/mel") {
+		t.Error("AddWatcher should return true for new address")
+	}
+	if f.Watchers != "gastown/crew/mel" {
+		t.Errorf("Watchers = %q, want %q", f.Watchers, "gastown/crew/mel")
+	}
+
+	// Second add
+	if !f.AddWatcher("gastown/crew/tom") {
+		t.Error("AddWatcher should return true for new address")
+	}
+	if f.Watchers != "gastown/crew/mel,gastown/crew/tom" {
+		t.Errorf("Watchers = %q, want %q", f.Watchers, "gastown/crew/mel,gastown/crew/tom")
+	}
+
+	// Duplicate add
+	if f.AddWatcher("gastown/crew/mel") {
+		t.Error("AddWatcher should return false for duplicate")
+	}
+}
+
+func TestConvoyFieldsAddNudgeWatcher(t *testing.T) {
+	f := &ConvoyFields{}
+
+	if !f.AddNudgeWatcher("mayor/") {
+		t.Error("AddNudgeWatcher should return true for new address")
+	}
+	if f.NudgeWatchers != "mayor/" {
+		t.Errorf("NudgeWatchers = %q, want %q", f.NudgeWatchers, "mayor/")
+	}
+
+	if f.AddNudgeWatcher("mayor/") {
+		t.Error("AddNudgeWatcher should return false for duplicate")
+	}
+}
+
+func TestConvoyFieldsRemoveWatcher(t *testing.T) {
+	f := &ConvoyFields{Watchers: "a,b,c"}
+
+	if !f.RemoveWatcher("b") {
+		t.Error("RemoveWatcher should return true for existing address")
+	}
+	if f.Watchers != "a,c" {
+		t.Errorf("Watchers = %q, want %q", f.Watchers, "a,c")
+	}
+
+	if f.RemoveWatcher("d") {
+		t.Error("RemoveWatcher should return false for non-existing address")
+	}
+}
+
+func TestConvoyFieldsRemoveNudgeWatcher(t *testing.T) {
+	f := &ConvoyFields{NudgeWatchers: "x,y"}
+
+	if !f.RemoveNudgeWatcher("x") {
+		t.Error("RemoveNudgeWatcher should return true for existing address")
+	}
+	if f.NudgeWatchers != "y" {
+		t.Errorf("NudgeWatchers = %q, want %q", f.NudgeWatchers, "y")
+	}
+}
+
+func TestNotificationAddressesIncludesWatchers(t *testing.T) {
+	f := &ConvoyFields{
+		Owner:    "mayor/",
+		Notify:   "witness/",
+		Watchers: "gastown/crew/mel,mayor/", // mayor/ overlaps with Owner
+	}
+	addrs := f.NotificationAddresses()
+
+	// Should be deduplicated: mayor/, witness/, gastown/crew/mel
+	want := map[string]bool{"mayor/": true, "witness/": true, "gastown/crew/mel": true}
+	got := make(map[string]bool)
+	for _, a := range addrs {
+		got[a] = true
+	}
+	if len(got) != len(want) {
+		t.Errorf("NotificationAddresses: got %v, want %v", addrs, want)
+	}
+	for k := range want {
+		if !got[k] {
+			t.Errorf("NotificationAddresses missing %q, got %v", k, addrs)
+		}
+	}
+}
+
+func TestNudgeNotificationAddresses(t *testing.T) {
+	f := &ConvoyFields{
+		NudgeWatchers: "gastown/crew/mel,gastown/crew/tom",
+	}
+	addrs := f.NudgeNotificationAddresses()
+	if len(addrs) != 2 {
+		t.Errorf("NudgeNotificationAddresses: got %d addresses, want 2", len(addrs))
+	}
+}
+
+func TestSetConvoyFieldsPreservesWatchers(t *testing.T) {
+	issue := &Issue{Description: "Some text\nWatchers: a,b\nnudge_watchers: c"}
+	fields := &ConvoyFields{
+		Owner:         "new/",
+		Watchers:      "a,b,d",
+		NudgeWatchers: "c,e",
+	}
+	got := SetConvoyFields(issue, fields)
+
+	if !strings.Contains(got, "Watchers: a,b,d") {
+		t.Errorf("missing updated Watchers, got:\n%s", got)
+	}
+	if !strings.Contains(got, "nudge_watchers: c,e") {
+		t.Errorf("missing updated nudge_watchers, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Some text") {
+		t.Errorf("lost prose, got:\n%s", got)
+	}
+}
