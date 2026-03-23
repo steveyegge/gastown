@@ -416,7 +416,8 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 }
 
 // UpdateAgentState updates the agent_state field in an agent bead.
-// Uses `bd agent state` command for the database column directly.
+// Uses `bd agent state` command for the database column directly,
+// then syncs the description's agent_state field to match (gt-ulom).
 func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, nil, retErr) }()
 	// Update agent state using bd agent state command
@@ -427,7 +428,11 @@ func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 		return fmt.Errorf("updating agent state: %w", err)
 	}
 
-	// Hook slot no longer maintained (hq-l6mm5) — removed hook_bead parameter.
+	// Sync the description's agent_state field with the column (gt-ulom).
+	// Without this, the description stays stale (e.g., "spawning" after the
+	// column transitions to "working"), causing bd show and dashboards to
+	// display incorrect state after idle polecat reuse via gt sling.
+	_ = b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{AgentState: &state})
 
 	return nil
 }
@@ -441,6 +446,7 @@ func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 // This allows multiple fields to be updated in a single read-modify-write
 // cycle, avoiding races where concurrent callers overwrite each other's changes.
 type AgentFieldUpdates struct {
+	AgentState        *string // Sync description agent_state with column (gt-ulom)
 	CleanupStatus     *string
 	ActiveMR          *string
 	NotificationLevel *string
@@ -482,6 +488,9 @@ func (b *Beads) UpdateAgentDescriptionFields(id string, updates AgentFieldUpdate
 
 	fields := ParseAgentFields(issue.Description)
 
+	if updates.AgentState != nil {
+		fields.AgentState = *updates.AgentState
+	}
 	if updates.CleanupStatus != nil {
 		fields.CleanupStatus = *updates.CleanupStatus
 	}

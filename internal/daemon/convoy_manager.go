@@ -261,8 +261,12 @@ func (m *ConvoyManager) pollStoresSnapshot(stores map[string]beadsdk.Storage) bo
 // The seen set deduplicates issueIDs across stores within a poll cycle.
 // Returns an error if the poll failed (used by caller for backoff decisions).
 func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map[string]beadsdk.Storage, seen map[string]bool) error {
-	// Load per-store high-water mark
-	var highWater time.Time
+	// Load per-store high-water mark.
+	// Default to Unix epoch (not zero time) because Go's zero time.Time
+	// (0001-01-01) causes Dolt's SQL driver to produce +Inf when converting
+	// to a float parameter, triggering "Error 1366: +Inf is not a valid
+	// value for double". Unix epoch is safe for all SQL backends.
+	highWater := time.Unix(0, 0).UTC()
 	if v, ok := m.lastEventIDs.Load(name); ok {
 		highWater = v.(time.Time)
 	}
