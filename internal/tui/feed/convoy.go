@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
@@ -32,10 +34,20 @@ type Convoy struct {
 	ClosedAt  time.Time `json:"closed_at,omitempty"`
 }
 
+// MQEntry represents a single merge request in the merge queue
+type MQEntry struct {
+	ID      string // Bead ID (e.g., "gt-mr-abc")
+	Branch  string // Source branch name
+	Status  string // queued, merging, merged, failed
+	Polecat string // Polecat that submitted (e.g., "nux")
+	Rig     string // Which rig this MR belongs to
+}
+
 // ConvoyState holds all convoy data for the panel
 type ConvoyState struct {
 	InProgress []Convoy
 	Landed     []Convoy
+	MQEntries  []MQEntry
 	LastUpdate time.Time
 }
 
@@ -81,6 +93,9 @@ func FetchConvoys(townRoot string) (*ConvoyState, error) {
 	sort.Slice(state.Landed, func(i, j int) bool {
 		return state.Landed[i].ClosedAt.After(state.Landed[j].ClosedAt)
 	})
+
+	// Fetch merge queue entries from all rigs
+	state.MQEntries = fetchMQEntries(townRoot)
 
 	return state, nil
 }
@@ -225,6 +240,17 @@ func (m *Model) renderConvoys() string {
 		}
 	}
 
+	// Merge Queue section
+	lines = append(lines, "")
+	lines = append(lines, MQTitleStyle.Render("⚙ Merge Queue"))
+	if len(m.convoyState.MQEntries) == 0 {
+		lines = append(lines, "  "+AgentIdleStyle.Render("No pending merges"))
+	} else {
+		for _, entry := range m.convoyState.MQEntries {
+			lines = append(lines, renderMQLine(entry))
+		}
+	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -252,6 +278,186 @@ func renderConvoyLine(c Convoy, landed bool) string {
 	progress := renderProgressBar(c.Completed, c.Total)
 	count := ConvoyProgressStyle.Render(fmt.Sprintf("%d/%d", c.Completed, c.Total))
 	return fmt.Sprintf("  %s  %-20s  %s %s", id, title, count, progress)
+}
+
+// renderMQLine renders a single merge queue entry
+func renderMQLine(entry MQEntry) string {
+	// Format: "  ⚙ polecat/nux  branch-name       merging"
+	var statusStyle lipgloss.Style
+	var statusIcon string
+	switch entry.Status {
+	case "merging":
+		statusStyle = MQStatusMerging
+		statusIcon = "⚙"
+	case "queued":
+		statusStyle = MQStatusQueued
+		statusIcon = "○"
+	case "merged":
+		statusStyle = MQStatusMerged
+		statusIcon = "✓"
+	case "failed":
+		statusStyle = MQStatusFailed
+		statusIcon = "✗"
+	default:
+		statusStyle = MQStatusQueued
+		statusIcon = "?"
+	}
+
+	// Truncate branch name if too long (rune-safe)
+	branch := entry.Branch
+	if utf8.RuneCountInString(branch) > 30 {
+		runes := []rune(branch)
+		branch = string(runes[:27]) + "..."
+	}
+
+	// Build the line
+	status := statusStyle.Render(statusIcon + " " + entry.Status)
+	branchPart := MQBranchStyle.Render(branch)
+
+	polecatPart := ""
+	if entry.Polecat != "" {
+		polecatPart = MQPolecatStyle.Render(entry.Polecat)
+	}
+
+	return fmt.Sprintf("  %s  %-30s  %s", status, branchPart, polecatPart)
+}
+
+// MQ panel styles
+var (
+	MQTitleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(colorPrimary)
+
+	MQStatusQueued = lipgloss.NewStyle().
+			Foreground(colorDim)
+
+	MQStatusMerging = lipgloss.NewStyle().
+				Foreground(colorPrimary)
+
+	MQStatusMerged = lipgloss.NewStyle().
+			Foreground(colorSuccess).
+			Bold(true)
+
+	MQStatusFailed = lipgloss.NewStyle().
+			Foreground(colorError).
+			Bold(true)
+
+	MQBranchStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15"))
+
+	MQPolecatStyle = lipgloss.NewStyle().
+			Foreground(colorAccent)
+)
+
+// mqListItem represents a raw MR bead from bd list --json output
+type mqListItem struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	CreatedBy string `json:"created_by,omitempty"`
+	Assignee  string `json:"assignee,omitempty"`
+}
+
+// fetchMQEntries queries all rigs for merge-request beads
+func fetchMQEntries(townRoot string) []MQEntry {
+	// Load rigs config to discover rigs
+	rigsConfigPath := constants.MayorRigsPath(townRoot)
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		return nil
+	}
+
+	var entries []MQEntry
+	for rigName := range rigsConfig.Rigs {
+		rigPath := filepath.Join(townRoot, rigName)
+		// Check rig directory exists
+		if _, err := os.Stat(rigPath); err != nil {
+			continue
+		}
+
+		// Fetch open and in-progress MRs
+		for _, status := range []string{"open", "in_progress"} {
+			items := listMQBeads(rigPath, status)
+			for _, item := range items {
+				entry := mqItemToEntry(item, rigName)
+				entries = append(entries, entry)
+			}
+		}
+	}
+
+	// Sort: in-progress (merging) first, then open (queued)
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Status != entries[j].Status {
+			return entries[i].Status == "merging"
+		}
+		return entries[i].ID < entries[j].ID
+	})
+
+	return entries
+}
+
+// listMQBeads queries bd for merge-request beads with given status
+func listMQBeads(rigPath, status string) []mqListItem {
+	ctx, cancel := context.WithTimeout(context.Background(), constants.BdSubprocessTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bd", "list",
+		"--label=gt:merge-request",
+		"--status="+status,
+		"--json",
+	)
+	cmd.Dir = rigPath
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+
+	var items []mqListItem
+	if err := json.Unmarshal(stdout.Bytes(), &items); err != nil {
+		return nil
+	}
+	return items
+}
+
+// mqItemToEntry converts a raw MQ bead to an MQEntry with display-friendly fields
+func mqItemToEntry(item mqListItem, rigName string) MQEntry {
+	entry := MQEntry{
+		ID:  item.ID,
+		Rig: rigName,
+	}
+
+	// Map bead status to display status
+	switch item.Status {
+	case "in_progress":
+		entry.Status = "merging"
+	case "open":
+		entry.Status = "queued"
+	case "closed":
+		entry.Status = "merged"
+	default:
+		entry.Status = item.Status
+	}
+
+	// Extract branch name from title (MR beads typically titled with branch name)
+	entry.Branch = item.Title
+	if entry.Branch == "" {
+		entry.Branch = item.ID
+	}
+
+	// Extract polecat name from assignee or created_by
+	polecat := item.Assignee
+	if polecat == "" {
+		polecat = item.CreatedBy
+	}
+	// Shorten: "gastown/polecats/nux" -> "nux", "gastown/nux" -> "nux"
+	if parts := strings.Split(polecat, "/"); len(parts) > 0 {
+		polecat = parts[len(parts)-1]
+	}
+	entry.Polecat = polecat
+
+	return entry
 }
 
 // renderProgressBar creates a simple progress bar: ●●○○
