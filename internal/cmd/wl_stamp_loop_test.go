@@ -10,7 +10,6 @@ import (
 // TestStampLoop_EndToEnd exercises the full pilot stamp loop:
 // post → claim → done → stamp → query → verify passbook chain.
 func TestStampLoop_EndToEnd(t *testing.T) {
-	t.Parallel()
 	store := newFakeWLCommonsStore()
 
 	// Step 1: Post a wanted item
@@ -126,8 +125,8 @@ func TestStampLoop_EndToEnd(t *testing.T) {
 }
 
 // TestStampLoop_SelfStampFails verifies the yearbook rule (author != subject).
+// Not parallel: modifies package-level globals (wlStamp* vars).
 func TestStampLoop_SelfStampFails(t *testing.T) {
-	t.Parallel()
 
 	// Save/restore globals
 	origQ, origR, origC := wlStampQuality, wlStampReliability, wlStampCreativity
@@ -172,8 +171,8 @@ func TestStampLoop_SelfStampFails(t *testing.T) {
 }
 
 // TestStampLoop_InvalidValence verifies validation rejects out-of-range scores.
+// Not parallel: modifies package-level globals (wlStamp* vars).
 func TestStampLoop_InvalidValence(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name     string
 		quality  float64
