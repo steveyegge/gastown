@@ -269,6 +269,44 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
+	// SAFETY NET: Auto-commit uncommitted work before ANY exit path (gt-pvx).
+	// Polecats have been observed running gt done without committing their
+	// implementation work (1000s of lines lost). This happened because:
+	// 1. The agent skips the "commit changes" formula step
+	// 2. The COMPLETED check blocks, but the agent retries with --status DEFERRED
+	//    which skips all checks
+	// 3. The agent's session dies after the error, before it can commit
+	//
+	// Auto-commit ensures work is NEVER lost regardless of exit type or agent behavior.
+	// The commit message is clearly marked as an auto-save so reviewers know.
+	if cwdAvailable && doneCleanupStatus == "uncommitted" {
+		// Re-check to get file details (cleanup detection already confirmed uncommitted changes)
+		workStatus, err := g.CheckUncommittedWork()
+		if err == nil && workStatus.HasUncommittedChanges && !workStatus.CleanExcludingRuntime() {
+			fmt.Printf("\n%s Uncommitted changes detected — auto-saving to prevent work loss\n", style.Bold.Render("⚠"))
+			fmt.Printf("  Files: %s\n\n", workStatus.String())
+
+			// Stage all changes (git add -A)
+			if addErr := g.Add("-A"); addErr != nil {
+				style.PrintWarning("auto-commit: git add failed: %v — uncommitted work may be at risk", addErr)
+			} else {
+				// Build a descriptive commit message
+				autoMsg := "fix: auto-save uncommitted implementation work (gt-pvx safety net)"
+				if issueFromBranch := parseBranchName(branch).Issue; issueFromBranch != "" {
+					autoMsg = fmt.Sprintf("fix: auto-save uncommitted implementation work (%s, gt-pvx safety net)", issueFromBranch)
+				}
+				if commitErr := g.Commit(autoMsg); commitErr != nil {
+					style.PrintWarning("auto-commit: git commit failed: %v — uncommitted work may be at risk", commitErr)
+				} else {
+					fmt.Printf("%s Auto-committed uncommitted work (safety net)\n", style.Bold.Render("✓"))
+					fmt.Printf("  The agent should have committed before running gt done.\n")
+					fmt.Printf("  This auto-save prevents work loss.\n\n")
+					doneCleanupStatus = "unpushed" // Update status — changes are now committed but not pushed
+				}
+			}
+		}
+	}
+
 	// Parse branch info
 	info := parseBranchName(branch)
 
@@ -1069,7 +1107,20 @@ notifyWitness:
 		// Phase 3 of persistent-polecat-pool: DONE→IDLE syncs to main and deletes old branch.
 		// Non-fatal: if sync fails, the polecat is still IDLE and the Witness
 		// or next gt sling can handle the branch state.
-		if cwdAvailable && !pushFailed {
+		//
+		// GUARD (gt-pvx): Refuse to sync if uncommitted changes remain.
+		// If the auto-commit safety net above failed (git add/commit error),
+		// switching branches would discard the work. Better to leave the worktree
+		// dirty on the feature branch so work can be recovered.
+		syncSafe := true
+		if cwdAvailable {
+			if ws, wsErr := g.CheckUncommittedWork(); wsErr == nil && ws.HasUncommittedChanges && !ws.CleanExcludingRuntime() {
+				syncSafe = false
+				style.PrintWarning("uncommitted changes still present — skipping worktree sync to preserve work")
+				fmt.Printf("  Files: %s\n", ws.String())
+			}
+		}
+		if cwdAvailable && !pushFailed && syncSafe {
 			// Remember the old branch so we can delete it after switching
 			oldBranch := branch
 
