@@ -120,7 +120,9 @@ func (e *Engineer) BuildRebaseStack(ctx context.Context, batch []*MRInfo, target
 		// Check branch exists
 		exists, brErr := e.git.BranchExists(mr.Branch)
 		if brErr != nil || !exists {
-			_, _ = fmt.Fprintf(e.output, "[Batch] MR %s: branch %s not found, skipping\n", mr.ID, mr.Branch)
+			// Branch not found — escalate to mayor (gas-556)
+			_, _ = fmt.Fprintf(e.output, "[Batch] MR %s: branch %s not found, escalating to mayor\n", mr.ID, mr.Branch)
+			e.HandleMRInfoFailure(mr, ProcessResult{BranchNotFound: true})
 			conflicts = append(conflicts, mr)
 			continue
 		}
@@ -299,9 +301,8 @@ func (e *Engineer) processSingleMR(ctx context.Context, mr *MRInfo, target strin
 	} else if processResult.TestsFailed {
 		result.Culprits = []*MRInfo{mr}
 	} else if processResult.BranchNotFound {
-		// Branch was cleaned up before we could process it (e.g. cherry-picked to target).
-		// Treat as a skip: log and move on rather than halting the queue.
-		_, _ = fmt.Fprintf(e.output, "[Batch] MR %s: branch %s not found, skipping\n", mr.ID, mr.Branch)
+		// Branch not found on remote — escalate to mayor via HandleMRInfoFailure (gas-556).
+		e.HandleMRInfoFailure(mr, processResult)
 		result.Conflicts = []*MRInfo{mr}
 	} else if processResult.NoMerge {
 		// Source issue has no_merge flag — intentionally blocked. Dequeue silently.

@@ -1118,10 +1118,19 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 		return
 	}
 
-	// Branch-not-found means the remote branch was cleaned up before we could process it
-	// (e.g. cherry-picked to target directly). Skip polecat nudge — the polecat is gone.
+	// Branch-not-found: the remote branch doesn't exist. This can mean either
+	// the branch was cleanly cherry-picked to target, OR the polecat's work was
+	// lost (e.g., worktree in /tmp wiped by reboot before gt done pushed).
+	// Escalate to mayor so lost work can be re-dispatched (gas-556).
 	if result.BranchNotFound {
-		_, _ = fmt.Fprintf(e.output, "[Engineer] MR %s: branch %s no longer exists, skipping (queue continues)\n", mr.ID, mr.Branch)
+		_, _ = fmt.Fprintf(e.output, "[Engineer] MR %s: branch %s not found on remote — escalating to mayor (possible work loss)\n", mr.ID, mr.Branch)
+		mayorMsg := fmt.Sprintf("BRANCH_MISSING: MR %s branch=%s issue=%s worker=%s — branch not on origin, work may be lost; re-dispatch if needed",
+			mr.ID, mr.Branch, mr.SourceIssue, mr.Worker)
+		mayorCmd := exec.Command("gt", "nudge", "mayor/", mayorMsg)
+		mayorCmd.Dir = e.workDir
+		if err := mayorCmd.Run(); err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to nudge mayor about missing branch: %v\n", err)
+		}
 		return
 	}
 

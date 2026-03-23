@@ -196,11 +196,30 @@ func HandlePolecatDoneFromBead(bd *BdCli, workDir, rigName, polecatName string, 
 		MRID:        fields.MRID,
 		Branch:      fields.Branch,
 		MRFailed:    fields.MRFailed,
+		PushFailed:  fields.PushFailed,
 	}
 
 	if payload.Exit == "PHASE_COMPLETE" {
 		result.Handled = true
 		result.Action = fmt.Sprintf("phase-complete for %s - session recycled, awaiting gate", polecatName)
+		return result
+	}
+
+	// Push failed: branch never reached origin (gas-556). Report recovery needed.
+	if payload.PushFailed {
+		result.Handled = true
+		result.Action = fmt.Sprintf("push-failed-recovery-needed for %s (branch=%s issue=%s) — branch not on origin, worktree may be at risk",
+			polecatName, payload.Branch, payload.IssueID)
+		townRoot, _ := workspace.Find(workDir)
+		if townRoot != "" {
+			mayorMsg := fmt.Sprintf("PUSH_FAILED: polecat=%s branch=%s issue=%s — branch not on origin, possible work loss",
+				polecatName, payload.Branch, payload.IssueID)
+			mayorSession := session.MayorSessionName()
+			t := tmux.NewTmux()
+			if running, err := t.HasSession(mayorSession); err == nil && running {
+				_ = t.NudgeSession(mayorSession, mayorMsg)
+			}
+		}
 		return result
 	}
 
@@ -1619,6 +1638,7 @@ type CompletionDiscovery struct {
 	MRID           string
 	Branch         string
 	MRFailed       bool
+	PushFailed     bool   // True when branch push to origin failed (gas-556)
 	CompletionTime string
 	Action         string // What was done: "merge-ready-sent", "acknowledged-idle", "phase-complete"
 	WispCreated    string // ID of cleanup wisp if created
@@ -1688,6 +1708,7 @@ func DiscoverCompletions(bd *BdCli, workDir, rigName string, router *mail.Router
 			MRID:           fields.MRID,
 			Branch:         fields.Branch,
 			MRFailed:       fields.MRFailed,
+			PushFailed:     fields.PushFailed,
 			CompletionTime: fields.CompletionTime,
 		}
 
@@ -1699,6 +1720,7 @@ func DiscoverCompletions(bd *BdCli, workDir, rigName string, router *mail.Router
 			MRID:        fields.MRID,
 			Branch:      fields.Branch,
 			MRFailed:    fields.MRFailed,
+			PushFailed:  fields.PushFailed,
 		}
 
 		// Route based on exit type and MR presence
@@ -1722,6 +1744,26 @@ func DiscoverCompletions(bd *BdCli, workDir, rigName string, router *mail.Router
 func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *PolecatDonePayload, discovery *CompletionDiscovery) {
 	if payload.Exit == string(ExitTypePhaseComplete) {
 		discovery.Action = "phase-complete"
+		return
+	}
+
+	// Push failed: branch never reached origin. Work is committed locally only.
+	// The polecat's worktree may be in /tmp and lost on reboot. Escalate so the
+	// witness agent can investigate and trigger recovery (gas-556).
+	if payload.PushFailed {
+		discovery.Action = fmt.Sprintf("push-failed-recovery-needed (branch=%s issue=%s) — branch not on origin, worktree may be at risk",
+			payload.Branch, payload.IssueID)
+		// Notify mayor so a new polecat can be dispatched if work is lost.
+		townRoot, _ := workspace.Find(workDir)
+		if townRoot != "" {
+			mayorMsg := fmt.Sprintf("PUSH_FAILED: polecat=%s branch=%s issue=%s — branch not on origin, possible work loss",
+				payload.PolecatName, payload.Branch, payload.IssueID)
+			mayorSession := session.MayorSessionName()
+			t := tmux.NewTmux()
+			if running, err := t.HasSession(mayorSession); err == nil && running {
+				_ = t.NudgeSession(mayorSession, mayorMsg)
+			}
+		}
 		return
 	}
 
