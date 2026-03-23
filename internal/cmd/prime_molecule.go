@@ -309,7 +309,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 	cfg := PatrolConfig{
 		RoleName:        "witness",
 		PatrolMolName:   constants.MolWitnessPatrol,
-		BeadsDir:        ctx.WorkDir,
+		BeadsDir:        ctx.TownRoot,
 		Assignee:        ctx.Rig + "/witness",
 		HeaderEmoji:     constants.EmojiWitness,
 		HeaderTitle:     "Witness Patrol Status",
@@ -332,7 +332,7 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 	cfg := PatrolConfig{
 		RoleName:        "refinery",
 		PatrolMolName:   constants.MolRefineryPatrol,
-		BeadsDir:        ctx.WorkDir,
+		BeadsDir:        ctx.TownRoot,
 		Assignee:        ctx.Rig + "/refinery",
 		HeaderEmoji:     "🔧",
 		HeaderTitle:     "Refinery Patrol Status",
