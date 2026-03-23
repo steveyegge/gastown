@@ -1271,6 +1271,17 @@ type MergeQueueConfig struct {
 	// is enabled. Valid values: "quick", "standard", "deep".
 	// Nil defaults to "standard".
 	ReviewDepth string `json:"review_depth,omitempty"`
+
+	// JudgmentGateEnabled promotes quality review from measurement-only (Phase 1)
+	// to a real merge gate (Phase 2). When true, breach scores block merges and
+	// route feedback to the polecat for rework. Requires JudgmentEnabled.
+	// Nil defaults to false (measurement-only).
+	JudgmentGateEnabled *bool `json:"judgment_gate_enabled,omitempty"`
+
+	// JudgmentGateThreshold is the score below which a merge is blocked when
+	// judgment gating is enabled. Scores below this value are considered breaches.
+	// Zero value defaults to 0.45.
+	JudgmentGateThreshold float64 `json:"judgment_gate_threshold,omitempty"`
 }
 
 // OnConflict strategy constants.
@@ -1341,6 +1352,24 @@ func (c *MergeQueueConfig) GetReviewDepth() string {
 		return "standard"
 	}
 	return c.ReviewDepth
+}
+
+// IsJudgmentGateEnabled returns whether quality review acts as a merge gate.
+// Nil-safe, defaults to false.
+func (c *MergeQueueConfig) IsJudgmentGateEnabled() bool {
+	if c.JudgmentGateEnabled == nil {
+		return false
+	}
+	return *c.JudgmentGateEnabled
+}
+
+// GetJudgmentGateThreshold returns the score threshold below which merges are
+// blocked when judgment gating is enabled. Zero value defaults to 0.45.
+func (c *MergeQueueConfig) GetJudgmentGateThreshold() float64 {
+	if c.JudgmentGateThreshold == 0 {
+		return 0.45
+	}
+	return c.JudgmentGateThreshold
 }
 
 // boolPtr returns a pointer to a bool value.

@@ -66,6 +66,8 @@ source of truth.
 | delete_merged_branches | true | Whether to delete source branches after merge |
 | judgment_enabled | false | Enable quality review for merges (true/false) |
 | review_depth | standard | Review depth: quick, standard, or deep |
+| judgment_gate_enabled | false | Promote quality review to a merge gate (Phase 2). Requires judgment_enabled. |
+| judgment_gate_threshold | 0.45 | Score below which merge is blocked when judgment gating is enabled |
 | merge_strategy | direct | Merge strategy: 'direct' (ff-only merge+push) or 'pr' (GitHub PR) |
 
 ## Target Resolution Rule
@@ -388,9 +390,14 @@ needs = ["run-tests"]
 description = """
 **Config: judgment_enabled = {{judgment_enabled}}**
 **Config: review_depth = {{review_depth}}**
+**Config: judgment_gate_enabled = {{judgment_gate_enabled}}**
+**Config: judgment_gate_threshold = {{judgment_gate_threshold}}**
 
-Review the merge diff for quality issues. This step is measurement-only (Phase 1):
-reviews are recorded but do NOT gate merges.
+Review the merge diff for quality issues.
+
+**Mode:**
+- If judgment_gate_enabled is "true": Phase 2 — breach scores BLOCK merges.
+- Otherwise: Phase 1 (measurement-only) — reviews are recorded but do NOT gate merges.
 
 **Step 1: Check if quality review is enabled**
 
@@ -443,12 +450,32 @@ bd create "quality-review: Score <score>, <recommendation>" -t chore --ephemeral
   --silent 2>/dev/null || true
 ```
 
-**Step 6: Handle breach scores (measurement-only)**
+**Step 6: Handle breach scores**
 
-If score < 0.45 (breach threshold):
+If score < {{judgment_gate_threshold}} (breach threshold):
+
+**If judgment_gate_enabled is "true" (Phase 2 — blocking gate):**
+- Record the breach wisp (same as measurement — Step 5 above)
+- Set the quality review outcome to BLOCKED:
+  - Write a file `.gt-quality-gate-blocked` in the repo root with content:
+    ```
+    QUALITY_GATE_BLOCKED=true
+    SCORE=<score>
+    THRESHOLD={{judgment_gate_threshold}}
+    ISSUES=<count>
+    REVIEW_SUMMARY=<one-line summary of critical/major issues>
+    ```
+  - This file signals handle-failures to send FIX_NEEDED instead of proceeding
+- Do NOT proceed to merge — handle-failures will route the feedback
+
+**If judgment_gate_enabled is NOT "true" (Phase 1 — measurement-only):**
 - Add a note to your merge summary: "Warning: Quality review breach (score: X.XX)"
 - List the critical/major issues found
 - Do NOT block the merge — Phase 1 is measurement-only
+- Proceed to handle-failures normally
+
+If score >= {{judgment_gate_threshold}}:
+- Remove `.gt-quality-gate-blocked` if it exists (ensure clean state)
 - Proceed to handle-failures normally
 
 Track: review score, recommendation, issue count, duration."""
@@ -459,6 +486,39 @@ title = "Handle quality check or test failures"
 needs = ["quality-review"]
 description = """
 **VERIFICATION GATE**: This step enforces the Beads Promise.
+
+**Step 0: Check for quality gate block (Phase 2)**
+
+If the file `.gt-quality-gate-blocked` exists in the repo root:
+1. Read its contents to get SCORE, THRESHOLD, ISSUES, and REVIEW_SUMMARY
+2. Treat this as a branch-caused failure (same as test failure):
+   - Abort merge (clean up temp branch)
+   - Send FIX_NEEDED to the polecat with the quality review feedback:
+     ```bash
+     gt mail send <rig>/polecats/<polecat-name> -s "FIX_NEEDED <polecat-name>" --stdin <<'BODY'
+     Branch: <branch>
+     Issue: <issue-id>
+     Polecat: <polecat-name>
+     Rig: <rig>
+     Target: <target-branch>
+     Failed-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+     Failure-Type: quality-review
+     Error: Quality gate breach — score <SCORE> below threshold <THRESHOLD>. Issues: <REVIEW_SUMMARY>
+     MR-Bead-ID: <mr-bead-id>
+     Attempt-Number: <N>
+     BODY
+     ```
+   - Update the bead with failure details:
+     ```bash
+     bd update <issue-id> --notes "Quality gate breach (attempt <N>): score <SCORE> < threshold <THRESHOLD>. <REVIEW_SUMMARY>"
+     ```
+   - Clean up: `rm .gt-quality-gate-blocked`, clean temp branch
+   - Follow the FIX_NEEDED CHECKLIST below, then skip to loop-check
+3. Do NOT proceed to merge
+
+If `.gt-quality-gate-blocked` does NOT exist: continue with normal failure handling below.
+
+---
 
 If all checks and tests PASSED: This step auto-completes. Proceed to merge.
 
