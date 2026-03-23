@@ -1635,6 +1635,15 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 		return nil, fmt.Errorf("agent bead required for polecat tracking: %w", err)
 	}
 
+	// Sync agent_state column to "spawning" (gt-ulom).
+	// createAgentBeadWithRetry sets agent_state in the description only.
+	// The column stays stale (e.g., "idle" from previous gt done) until
+	// StartSession sets it to "working". Without this, the column and
+	// description diverge, causing dashboards to show incorrect state.
+	if err := m.beads.UpdateAgentState(agentID, "spawning"); err != nil {
+		style.PrintWarning("could not sync agent_state column to spawning: %v", err)
+	}
+
 	now := time.Now()
 	return &Polecat{
 		Name:      name,
