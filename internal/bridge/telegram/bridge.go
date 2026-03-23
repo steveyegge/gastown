@@ -2,8 +2,11 @@ package telegram
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
@@ -146,6 +149,9 @@ func (b *Bridge) runOnce(ctx context.Context) (retErr error) {
 	wg.Add(1)
 	go b.safeGo(&wg, "replyFwd", func() { replyFwd.Run(runCtx) })
 
+	wg.Add(1)
+	go b.safeGo(&wg, "inboundCleanup", func() { b.cleanupInboundBeads(runCtx) })
+
 	// Main loop: relay inbound messages until context is cancelled.
 	for {
 		select {
@@ -161,5 +167,70 @@ func (b *Bridge) runOnce(ctx context.Context) (retErr error) {
 				b.logger.Printf("telegram bridge: relay error: %v", err)
 			}
 		}
+	}
+}
+
+// cleanupInboundBeads periodically closes Telegram inbound beads that have
+// been delivered. Without this, every inbound Telegram message leaves an open
+// wisp bead assigned to the target (mayor/), polluting the issue queue.
+// Runs every 60 seconds, closing beads older than 30 seconds to give the
+// recipient time to read them via gt mail check --inject.
+func (b *Bridge) cleanupInboundBeads(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			b.closeDeliveredInbound(ctx)
+		}
+	}
+}
+
+// closeDeliveredInbound finds and closes open Telegram inbound beads
+// assigned to the configured target that are older than 30 seconds.
+func (b *Bridge) closeDeliveredInbound(ctx context.Context) {
+	cmd := exec.CommandContext(ctx, "bd", "list",
+		"--assignee", b.cfg.Target,
+		"--label", "gt:message",
+		"--label", "from:overseer",
+		"--include-infra",
+		"--json",
+		"--no-pager",
+	)
+	cmd.Dir = b.townRoot
+	cmd.Env = append(os.Environ(), "BD_ACTOR=overseer")
+
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return
+	}
+
+	var issues []struct {
+		ID        string `json:"id"`
+		CreatedAt string `json:"created_at"`
+	}
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return
+	}
+
+	cutoff := time.Now().Add(-30 * time.Second)
+	closed := 0
+	for _, iss := range issues {
+		created, err := time.Parse(time.RFC3339, iss.CreatedAt)
+		if err != nil || created.After(cutoff) {
+			continue // too recent, let the mayor read it first
+		}
+		closeCmd := exec.CommandContext(ctx, "bd", "close", iss.ID)
+		closeCmd.Dir = b.townRoot
+		closeCmd.Env = append(os.Environ(), "BD_ACTOR=overseer")
+		if _, err := closeCmd.CombinedOutput(); err == nil {
+			closed++
+		}
+	}
+	if closed > 0 {
+		b.logger.Printf("telegram bridge: closed %d delivered inbound bead(s)", closed)
 	}
 }
