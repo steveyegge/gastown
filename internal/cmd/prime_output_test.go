@@ -148,7 +148,8 @@ func TestOutputRoleDirectives(t *testing.T) {
 		if !strings.Contains(out, "[EXPLAIN]") {
 			t.Errorf("expected EXPLAIN output, got: %s", out)
 		}
-		if !strings.Contains(out, "directives/polecat.md") {
+		// Use filepath.Join for OS-appropriate separator (backslash on Windows).
+		if !strings.Contains(out, filepath.Join("directives", "polecat.md")) {
 			t.Errorf("expected file path in explain output, got: %s", out)
 		}
 	})
