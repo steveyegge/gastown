@@ -318,11 +318,8 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 
 	// Verify: convoy has a "tracks" dependency pointing to the rig bead.
 	// This is the core cross-rig link: convoy lives in HQ DB, bead in rig DB.
-	// NOTE: Cross-rig dep persistence is broken in bd when the dep add runs as
-	// a subprocess within gt sling (bd resolves the route but the dependency is
-	// not committed to the Dolt server). Filed as a beads issue. The convoy
-	// creation, sling context, and convoy metadata are all verified above.
-	// TODO(beads): re-enable when bd cross-rig dep add is fixed.
+	// Cross-rig deps are stored in the HQ database's dependencies table and
+	// returned as stub issues by bd dep list (GH#2624 fix).
 	depArgs := beads.MaybePrependAllowStale([]string{"dep", "list", fields.Convoy, "--direction=down", "--type=tracks", "--json"})
 	depCmd := exec.Command("bd", depArgs...)
 	depCmd.Dir = hqPath
@@ -344,7 +341,7 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 		}
 	}
 	if !foundTracked {
-		t.Logf("KNOWN ISSUE: convoy %s cross-rig tracks dep to %s not persisted (beads cross-db dep bug), got deps: %s", fields.Convoy, beadID, depOut)
+		t.Errorf("convoy %s should track %s, got deps: %s", fields.Convoy, beadID, depOut)
 	}
 }
 
