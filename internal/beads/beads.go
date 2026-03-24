@@ -70,6 +70,7 @@ func BdSupportsAllowStaleWithEnv(env []string) bool {
 	}
 
 	cmd := exec.Command(bdPath, "--allow-stale", "version") //nolint:gosec // G204: bd is a trusted internal tool
+	util.SetProcessGroup(cmd)
 	if env != nil {
 		cmd.Env = env
 	}
