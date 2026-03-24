@@ -522,6 +522,249 @@ func fetchCrossRigBeadStatus(townRoot string, ids []string) map[string]*beadsdk.
 	return result
 }
 
+// GCIdleAssigneeResult holds the result of a GC operation.
+type GCIdleAssigneeResult struct {
+	ConvoyID   string   `json:"convoy_id"`
+	LegsClosed int      `json:"legs_closed"`
+	ClosedIDs  []string `json:"closed_ids,omitempty"`
+}
+
+// GCIdleAssigneeLegs finds open legs in a convoy whose assignee is a polecat
+// with agent_state idle, stuck, or nuked, and closes them. Returns the result
+// including count and IDs of legs closed. This unblocks convoys stuck because
+// polecats went idle/done without properly closing their leg beads.
+//
+// Uses bd CLI commands (no store dependency) so it can be called from both
+// the CLI command and the daemon (via subprocess).
+func GCIdleAssigneeLegs(ctx context.Context, townRoot, convoyID, caller string, logger func(format string, args ...interface{})) GCIdleAssigneeResult {
+	if logger == nil {
+		logger = func(format string, args ...interface{}) {}
+	}
+
+	result := GCIdleAssigneeResult{ConvoyID: convoyID}
+
+	// Get tracked issues via bd dep list
+	tracked := getTrackedIssuesViaCLI(townRoot, convoyID)
+	if len(tracked) == 0 {
+		return result
+	}
+
+	for _, issue := range tracked {
+		// Only look at non-closed issues with an assignee
+		if issue.Status == "closed" || issue.Status == "tombstone" || issue.Assignee == "" {
+			continue
+		}
+
+		// Check if the assignee is a polecat with idle/stuck/nuked state
+		agentState := queryAssigneeAgentState(townRoot, issue.Assignee)
+		if agentState == "" {
+			continue // Can't determine state, skip
+		}
+
+		// GC if the polecat is idle, stuck, or nuked (all indicate it's not working on this leg)
+		switch agentState {
+		case "idle", "stuck", "nuked":
+			reason := fmt.Sprintf("auto-gc: assignee polecat %s (agent_state=%s)", issue.Assignee, agentState)
+			logger("%s: convoy %s: closing leg %s — %s", caller, convoyID, issue.ID, reason)
+
+			if err := closeTrackedLeg(ctx, townRoot, issue.ID, reason); err != nil {
+				logger("%s: convoy %s: failed to close leg %s: %s", caller, convoyID, issue.ID, err)
+				continue
+			}
+			result.LegsClosed++
+			result.ClosedIDs = append(result.ClosedIDs, issue.ID)
+		}
+	}
+
+	return result
+}
+
+// cliTrackedIssue holds basic info from bd dep list for GC purposes.
+type cliTrackedIssue struct {
+	ID       string `json:"id"`
+	Status   string `json:"status"`
+	Assignee string `json:"assignee"`
+}
+
+// getTrackedIssuesViaCLI fetches tracked issues for a convoy using bd dep list.
+func getTrackedIssuesViaCLI(townRoot, convoyID string) []cliTrackedIssue {
+	cmd := exec.Command("bd", "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
+	cmd.Dir = townRoot
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+
+	var deps []struct {
+		ID       string `json:"id"`
+		Status   string `json:"status"`
+		Assignee string `json:"assignee"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
+		return nil
+	}
+
+	// Unwrap external:prefix:id and refresh status via bd show
+	var ids []string
+	for i := range deps {
+		deps[i].ID = extractIssueID(deps[i].ID)
+		ids = append(ids, deps[i].ID)
+	}
+
+	// Batch-refresh status and assignee via bd show --json
+	if len(ids) > 0 {
+		freshMap := batchShowIssues(townRoot, ids)
+		for i := range deps {
+			if fresh, ok := freshMap[deps[i].ID]; ok {
+				deps[i].Status = fresh.Status
+				if fresh.Assignee != "" {
+					deps[i].Assignee = fresh.Assignee
+				}
+			}
+		}
+	}
+
+	result := make([]cliTrackedIssue, len(deps))
+	for i, d := range deps {
+		result[i] = cliTrackedIssue{ID: d.ID, Status: d.Status, Assignee: d.Assignee}
+	}
+	return result
+}
+
+// batchShowIssues fetches fresh issue details for multiple IDs via bd show --json.
+func batchShowIssues(townRoot string, ids []string) map[string]struct{ Status, Assignee string } {
+	result := make(map[string]struct{ Status, Assignee string })
+	if len(ids) == 0 {
+		return result
+	}
+
+	args := append([]string{"show", "--json"}, ids...)
+	cmd := exec.Command("bd", args...)
+	cmd.Dir = townRoot
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return result
+	}
+
+	var issues []struct {
+		ID       string `json:"id"`
+		Status   string `json:"status"`
+		Assignee string `json:"assignee"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return result
+	}
+
+	for _, iss := range issues {
+		result[iss.ID] = struct{ Status, Assignee string }{iss.Status, iss.Assignee}
+	}
+	return result
+}
+
+// resolvePolecatBeadID parses a mail-style assignee address and resolves it
+// to the agent bead ID for a polecat. Returns ("", "", false) if the assignee
+// is not a polecat address.
+func resolvePolecatBeadID(townRoot, assignee string) (agentBeadID string, polecatName string, ok bool) {
+	parts := strings.Split(strings.TrimSuffix(assignee, "/"), "/")
+	if len(parts) < 2 {
+		return "", "", false
+	}
+
+	var rig, name string
+	switch len(parts) {
+	case 2:
+		// Short form: rig/name — could be polecat or other role
+		rig = parts[0]
+		role := parts[1]
+		// Skip known singleton roles
+		if role == "witness" || role == "refinery" {
+			return "", "", false
+		}
+		name = role
+	case 3:
+		// Explicit: rig/polecats/name or rig/crew/name
+		rig = parts[0]
+		if parts[1] != "polecats" {
+			return "", "", false // Not a polecat
+		}
+		name = parts[2]
+	default:
+		return "", "", false
+	}
+
+	// Resolve rig prefix using beads routing
+	prefix := beads.GetPrefixForRig(townRoot, rig)
+	if prefix == "" {
+		prefix = "gt"
+	}
+
+	beadID := beads.AgentBeadIDWithPrefix(prefix, rig, "polecat", name)
+	return beadID, name, true
+}
+
+// queryAssigneeAgentState resolves a mail-style assignee address to an agent bead ID
+// and queries the agent bead's agent_state. Returns empty string if the assignee
+// is not a polecat or the state can't be determined.
+func queryAssigneeAgentState(townRoot, assignee string) string {
+	agentBeadID, _, ok := resolvePolecatBeadID(townRoot, assignee)
+	if !ok {
+		return ""
+	}
+
+	// Query agent bead via bd show --json
+	cmd := exec.Command("bd", "show", agentBeadID, "--json")
+	cmd.Dir = townRoot
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return "" // Can't query, skip
+	}
+
+	return parseAgentStateFromShowJSON(stdout.Bytes())
+}
+
+// parseAgentStateFromShowJSON extracts agent_state from bd show --json output.
+func parseAgentStateFromShowJSON(data []byte) string {
+	var issues []struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(data, &issues); err != nil || len(issues) == 0 {
+		return ""
+	}
+
+	for _, line := range strings.Split(issues[0].Description, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "agent_state:") {
+			state := strings.TrimSpace(strings.TrimPrefix(line, "agent_state:"))
+			if state == "null" || state == "" {
+				return ""
+			}
+			return state
+		}
+	}
+
+	return ""
+}
+
+// closeTrackedLeg closes a convoy leg bead with a reason via bd close.
+func closeTrackedLeg(ctx context.Context, townRoot, issueID, reason string) error {
+	cmd := exec.CommandContext(ctx, "bd", "close", issueID, "--reason="+reason, "--force")
+	cmd.Dir = townRoot
+	util.SetProcessGroup(cmd)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
 // dispatchIssue dispatches an issue to a rig via gt sling.
 // The context parameter enables cancellation on daemon shutdown.
 // gtPath is the resolved path to the gt binary.

@@ -1684,3 +1684,149 @@ func TestFetchCrossRigBeadStatus_EmptyInput(t *testing.T) {
 		t.Errorf("expected 0 results for empty input, got %d", len(result))
 	}
 }
+
+func TestParseAgentStateFromShowJSON(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+		want string
+	}{
+		{
+			name: "idle state",
+			json: `[{"description": "Agent bead\n\nrole_type: polecat\nrig: gastown\nagent_state: idle\nhook_bead: null"}]`,
+			want: "idle",
+		},
+		{
+			name: "stuck state",
+			json: `[{"description": "Agent bead\n\nagent_state: stuck"}]`,
+			want: "stuck",
+		},
+		{
+			name: "working state",
+			json: `[{"description": "Agent bead\n\nagent_state: working"}]`,
+			want: "working",
+		},
+		{
+			name: "nuked state",
+			json: `[{"description": "Agent bead\n\nagent_state: nuked"}]`,
+			want: "nuked",
+		},
+		{
+			name: "null state",
+			json: `[{"description": "Agent bead\n\nagent_state: null"}]`,
+			want: "",
+		},
+		{
+			name: "empty state",
+			json: `[{"description": "Agent bead\n\nagent_state: "}]`,
+			want: "",
+		},
+		{
+			name: "no agent_state line",
+			json: `[{"description": "Just a regular bead"}]`,
+			want: "",
+		},
+		{
+			name: "empty array",
+			json: `[]`,
+			want: "",
+		},
+		{
+			name: "invalid json",
+			json: `not json`,
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseAgentStateFromShowJSON([]byte(tt.json))
+			if got != tt.want {
+				t.Errorf("parseAgentStateFromShowJSON() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolvePolecatBeadID(t *testing.T) {
+	// Note: resolvePolecatBeadID calls beads.GetPrefixForRig which reads
+	// routes.jsonl. With a non-existent townRoot, it falls back to "gt".
+	townRoot := "/nonexistent"
+
+	tests := []struct {
+		name     string
+		assignee string
+		wantID   string
+		wantName string
+		wantOK   bool
+	}{
+		{
+			name:     "explicit polecat address",
+			assignee: "gastown/polecats/dag",
+			wantID:   "gt-gastown-polecat-dag",
+			wantName: "dag",
+			wantOK:   true,
+		},
+		{
+			name:     "short form polecat",
+			assignee: "gastown/nux",
+			wantID:   "gt-gastown-polecat-nux",
+			wantName: "nux",
+			wantOK:   true,
+		},
+		{
+			name:     "witness singleton",
+			assignee: "gastown/witness",
+			wantOK:   false,
+		},
+		{
+			name:     "refinery singleton",
+			assignee: "gastown/refinery",
+			wantOK:   false,
+		},
+		{
+			name:     "crew not polecat",
+			assignee: "gastown/crew/max",
+			wantOK:   false,
+		},
+		{
+			name:     "trailing slash",
+			assignee: "gastown/polecats/dag/",
+			wantID:   "gt-gastown-polecat-dag",
+			wantName: "dag",
+			wantOK:   true,
+		},
+		{
+			name:     "empty",
+			assignee: "",
+			wantOK:   false,
+		},
+		{
+			name:     "single part",
+			assignee: "gastown",
+			wantOK:   false,
+		},
+		{
+			name:     "too many parts",
+			assignee: "gastown/polecats/dag/extra",
+			wantOK:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotID, gotName, gotOK := resolvePolecatBeadID(townRoot, tt.assignee)
+			if gotOK != tt.wantOK {
+				t.Errorf("ok = %v, want %v", gotOK, tt.wantOK)
+			}
+			if tt.wantOK {
+				if gotID != tt.wantID {
+					t.Errorf("agentBeadID = %q, want %q", gotID, tt.wantID)
+				}
+				if gotName != tt.wantName {
+					t.Errorf("polecatName = %q, want %q", gotName, tt.wantName)
+				}
+			}
+		})
+	}
+}
