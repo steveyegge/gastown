@@ -150,7 +150,15 @@ func resolveAndSubstitute(provider, hooksFile, role string) ([]byte, error) {
 
 	if bytes.Contains(content, []byte("{{GT_BIN}}")) {
 		gtBin := resolveGTBinary()
-		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBin))
+		gtBinBytes := []byte(gtBin)
+		if isSettingsFile(hooksFile) {
+			// JSON-encode the path so Windows backslashes are properly escaped.
+			// json.Marshal produces `"C:\\path\\gt.exe"` (with quotes); strip the quotes.
+			if encoded, err := json.Marshal(gtBin); err == nil {
+				gtBinBytes = encoded[1 : len(encoded)-1]
+			}
+		}
+		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), gtBinBytes)
 	}
 
 	return content, nil
