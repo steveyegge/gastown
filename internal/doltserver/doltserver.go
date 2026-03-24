@@ -39,6 +39,7 @@ import (
 	"path/filepath"
 
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -2977,6 +2978,12 @@ func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 		dbToRig[k] = v
 	}
 
+	// Group databases by rig name to detect collisions (e.g., "gastown" and
+	// "gt" both mapping to the "gastown" rig). Preserve encounter order so
+	// the result slice is deterministic.
+	rigToDbs := make(map[string][]string)
+	var rigOrder []string
+	seenRig := make(map[string]bool)
 	for _, dbName := range databases {
 		rigName := dbName
 		if mapped, ok := dbToRig[dbName]; ok {
@@ -2986,6 +2993,19 @@ func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 		if dbName == "hq" {
 			rigName = "hq"
 		}
+		rigToDbs[rigName] = append(rigToDbs[rigName], dbName)
+		if !seenRig[rigName] {
+			seenRig[rigName] = true
+			rigOrder = append(rigOrder, rigName)
+		}
+	}
+
+	// For each rig, choose exactly one canonical database. When multiple
+	// databases map to the same rig (e.g., "gastown" and "gt" for the gastown
+	// rig), prefer whichever database metadata.json already records — this
+	// prevents ping-pong where each database's turn overwrites the other's value.
+	for _, rigName := range rigOrder {
+		dbName := chooseCanonicalDB(townRoot, rigName, rigToDbs[rigName])
 		// Pass dbName explicitly so EnsureMetadata writes the correct
 		// dolt_database value ("be") rather than the rig dir name ("beads_el").
 		if err := EnsureMetadata(townRoot, rigName, dbName); err != nil {
@@ -2996,6 +3016,38 @@ func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 	}
 
 	return updated, errs
+}
+
+// chooseCanonicalDB picks the single database name to use for a rig when
+// multiple Dolt databases map to the same rig directory. It reads the rig's
+// existing metadata.json and returns the current dolt_database value if it is
+// in the candidate list (stable — avoids rewriting metadata.json). If no
+// stable choice exists it returns the lexicographically first candidate.
+func chooseCanonicalDB(townRoot, rigName string, candidates []string) string {
+	if len(candidates) == 1 {
+		return candidates[0]
+	}
+	// Build a set for O(1) lookup.
+	valid := make(map[string]bool, len(candidates))
+	for _, db := range candidates {
+		valid[db] = true
+	}
+	// Check what metadata.json currently records.
+	beadsDir := FindRigBeadsDir(townRoot, rigName)
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	if data, readErr := os.ReadFile(metadataPath); readErr == nil {
+		var meta map[string]interface{}
+		if json.Unmarshal(data, &meta) == nil {
+			if current, ok := meta["dolt_database"].(string); ok && valid[current] {
+				return current // already stable — keep it
+			}
+		}
+	}
+	// No stable value — pick lexicographically first for determinism.
+	sorted := make([]string, len(candidates))
+	copy(sorted, candidates)
+	sort.Strings(sorted)
+	return sorted[0]
 }
 
 // buildDatabaseToRigMap loads routes.jsonl and builds a map from database name
