@@ -127,7 +127,13 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 			if loc.Rig != "" {
 				rigPath = filepath.Join(townRoot, loc.Rig)
 			}
-			rc := config.ResolveRoleAgentConfig(loc.Role, townRoot, rigPath)
+			// Use ResolveRoleAgentName + ResolveAgentConfigByName so hooks sync works
+			// even when the agent binary is not installed on this machine.
+			agentName, _ := config.ResolveRoleAgentName(loc.Role, townRoot, rigPath)
+			if agentName == "" || agentName == "claude" {
+				continue
+			}
+			rc := config.ResolveAgentConfigByName(agentName, townRoot, rigPath)
 			if rc == nil || rc.Hooks == nil || rc.Hooks.Provider == "" {
 				continue
 			}

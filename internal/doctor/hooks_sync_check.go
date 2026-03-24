@@ -99,7 +99,13 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 			if loc.Rig != "" {
 				rigPath = filepath.Join(ctx.TownRoot, loc.Rig)
 			}
-			rc := config.ResolveRoleAgentConfig(loc.Role, ctx.TownRoot, rigPath)
+			// Use ResolveRoleAgentName + ResolveAgentConfigByName so the check works
+			// even when the agent binary is not installed on this machine.
+			agentName, _ := config.ResolveRoleAgentName(loc.Role, ctx.TownRoot, rigPath)
+			if agentName == "" || agentName == "claude" {
+				continue
+			}
+			rc := config.ResolveAgentConfigByName(agentName, ctx.TownRoot, rigPath)
 			if rc == nil || rc.Hooks == nil || rc.Hooks.Provider == "" {
 				continue
 			}

@@ -1698,6 +1698,34 @@ func ResolveRoleAgentName(role, townRoot, rigPath string) (agentName string, isR
 	return "claude", false
 }
 
+// ResolveAgentConfigByName looks up an agent's RuntimeConfig by name without requiring
+// the agent binary to be installed. Checks custom agents first, then built-in presets.
+// Returns nil if the agent name is unknown. Used by hooks sync, which needs the preset's
+// hooks metadata regardless of whether the binary is installed on this machine.
+func ResolveAgentConfigByName(name, townRoot, rigPath string) *RuntimeConfig {
+	resolveConfigMu.Lock()
+	defer resolveConfigMu.Unlock()
+
+	var rigSettings *RigSettings
+	if rigPath != "" {
+		if rs, err := LoadRigSettings(RigSettingsPath(rigPath)); err == nil {
+			rigSettings = rs
+		}
+	}
+
+	townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		townSettings = NewTownSettings()
+	}
+
+	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
+	if rigPath != "" {
+		_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
+	}
+
+	return lookupAgentConfigIfExists(name, townSettings, rigSettings)
+}
+
 // lookupAgentConfig looks up an agent by name.
 // Checks rig-level custom agents first, then town's custom agents, then built-in presets from agents.go.
 // Falls back to DefaultRuntimeConfig() if no match is found.
