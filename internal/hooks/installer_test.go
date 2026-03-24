@@ -265,9 +265,10 @@ func TestSyncForRole_GeminiWithGTBinSubstitution(t *testing.T) {
 	if strings.Contains(string(got), "{{GT_BIN}}") {
 		t.Error("{{GT_BIN}} placeholder was not substituted")
 	}
-	// Verify the resolved binary path is present
+	// Verify the resolved binary path is present (JSON-escaped for Windows compatibility).
 	gtBin := resolveGTBinary()
-	if !strings.Contains(string(got), gtBin) {
+	gtBinJSON := strings.ReplaceAll(gtBin, `\`, `\\`)
+	if !strings.Contains(string(got), gtBinJSON) {
 		t.Errorf("expected resolved gt binary %q in output", gtBin)
 	}
 }
@@ -372,9 +373,10 @@ func TestInstallForRole_GeminiRoleAware(t *testing.T) {
 	got, _ := os.ReadFile(filepath.Join(dir, ".gemini", "settings.json"))
 	want, _ := templateFS.ReadFile("templates/gemini/settings-autonomous.json")
 	// Gemini templates contain {{GT_BIN}} which gets resolved at install time.
-	// Apply the same substitution to the expected content for comparison.
+	// Apply the same substitution (with JSON escaping) to the expected content for comparison.
 	gtBin := resolveGTBinary()
-	wantResolved := strings.ReplaceAll(string(want), "{{GT_BIN}}", gtBin)
+	gtBinJSON := strings.ReplaceAll(gtBin, `\`, `\\`)
+	wantResolved := strings.ReplaceAll(string(want), "{{GT_BIN}}", gtBinJSON)
 	if string(got) != wantResolved {
 		t.Error("gemini autonomous: content mismatch")
 	}
