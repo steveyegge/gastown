@@ -126,9 +126,8 @@ func TestStampLoop_EndToEnd(t *testing.T) {
 }
 
 // TestStampLoop_SelfStampFails verifies the yearbook rule (author != subject).
+// Note: not parallel — modifies package-level globals.
 func TestStampLoop_SelfStampFails(t *testing.T) {
-	t.Parallel()
-
 	// Save/restore globals
 	origQ, origR, origC := wlStampQuality, wlStampReliability, wlStampCreativity
 	origSev, origType, origCtx := wlStampSeverity, wlStampType, wlStampContextType
@@ -172,8 +171,8 @@ func TestStampLoop_SelfStampFails(t *testing.T) {
 }
 
 // TestStampLoop_InvalidValence verifies validation rejects out-of-range scores.
+// Note: not parallel — modifies package-level globals.
 func TestStampLoop_InvalidValence(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name     string
 		quality  float64
