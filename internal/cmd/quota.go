@@ -775,7 +775,7 @@ func executeKeychainRotation(
 	// Context recovery is handled by --continue in the restart command.
 	result.ResumedSession = "continue"
 
-	// Update quota state: mark account as used
+	// Update quota state: mark account as used and record swap mapping
 	if err := mgr.WithLock(func() error {
 		state, loadErr := mgr.Load()
 		if loadErr != nil {
@@ -784,6 +784,11 @@ func executeKeychainRotation(
 		existing := state.Accounts[newAccount]
 		existing.LastUsed = time.Now().UTC().Format(time.RFC3339)
 		state.Accounts[newAccount] = existing
+
+		// Record the swap mapping so SyncSwappedTokens can propagate
+		// fresh tokens if the source account re-authenticates later.
+		quota.RecordSwap(state, currentConfigDir, newAccount)
+
 		return mgr.SaveUnlocked(state)
 	}); err != nil {
 		style.PrintWarning("could not update LastUsed for %s: %v", newAccount, err)
@@ -876,6 +881,20 @@ func runWatchCycle(townRoot string, acctCfg *config.AccountsConfig) {
 	}
 
 	mgr := quota.NewManager(townRoot)
+
+	// Sync swapped tokens: if a source account re-authenticated since the
+	// last rotation, propagate the fresh token to all target keychain entries.
+	if state, err := mgr.Load(); err == nil && len(state.ActiveSwaps) > 0 {
+		resolved := quota.ResolveSwapSourceDirs(state.ActiveSwaps, acctCfg.Accounts)
+		if n := quota.SyncSwappedTokens(resolved); n > 0 {
+			now := time.Now().Format("15:04:05")
+			fmt.Printf(" [%s] %s synced %d swapped keychain(s)\n",
+				style.Dim.Render(now),
+				style.Info.Render("Sync:"),
+				n)
+		}
+	}
+
 	plan, err := quota.PlanRotation(scanner, mgr, acctCfg, quota.PlanOpts{IncludeNearLimit: true})
 	if err != nil {
 		style.PrintWarning("planning rotation: %v", err)
