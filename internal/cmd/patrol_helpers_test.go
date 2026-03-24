@@ -128,12 +128,15 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 	// DefaultMergeQueueConfig: refinery_enabled=true, auto_land=false, run_tests=true,
 	// test_command="" (language-agnostic), target_branch="main" (from rig config), delete_merged_branches=true
 	// New commands (setup, typecheck, lint, build) default to empty = omitted
+	// judgment_enabled defaults to false, review_depth defaults to "standard"
 	expected := map[string]string{
 		"integration_branch_refinery_enabled": "true",
 		"integration_branch_auto_land":        "false",
 		"run_tests":                           "true",
 		"target_branch":                       "main",
 		"delete_merged_branches":              "true",
+		"judgment_enabled":                    "false",
+		"review_depth":                        "standard",
 	}
 
 	varMap := make(map[string]string)
