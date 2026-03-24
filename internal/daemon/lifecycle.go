@@ -840,14 +840,15 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 		info.Rig = fields.Rig
 	}
 
-	// Use AgentState from database column directly (not from description).
-	// UpdateAgentState updates the DB column but not the description text,
-	// so the description can contain stale state (e.g., "spawning" after
-	// the polecat has transitioned to "working"). Fall back to description
-	// only if the DB column is empty (legacy beads).
-	info.State = issue.AgentState
-	if info.State == "" && fields != nil {
+	// Use AgentState from description text (authoritative post-v0.62.0).
+	// bd agent state was removed in beads v0.62.0 (ZFC design gt-zecmc), so the
+	// DB column is stuck at "spawning" permanently. Description text is updated
+	// by UpdateAgentState via UpdateAgentDescriptionFields and is the source of
+	// truth. Fall back to DB column only if description is empty (legacy beads).
+	if fields != nil && fields.AgentState != "" {
 		info.State = fields.AgentState
+	} else {
+		info.State = issue.AgentState
 	}
 
 	// Use HookBead from database column directly (not from description)
