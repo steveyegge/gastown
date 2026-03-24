@@ -99,11 +99,12 @@ gt reaper reap --db=<name> --port={{dolt_port}} \\
 ```
 
 **2. Inspect results:**
-- Compare reaped count to scan candidates. A mismatch (scan > reap) is NORMAL
-  and expected — the witness may close wisps for dead polecat sessions between
-  scan and reap. Do NOT escalate scan/reap count mismatches.
+- Note: reap count may differ from scan count — this is expected and NOT an anomaly.
+  Scan and reap run at different times; wisps may close naturally between steps
+  (polecats completing work) or be reaped by a concurrent formula run.
+  A reap count of 0 when scan found candidates is normal churn, not a bug.
 - Only escalate if reap returns an actual error (not a zero count).
-- Check for any anomalies in the response
+- Check for any anomalies in the response (Dolt commit failures are the real concern).
 
 **3. Alert check:**
 If total open wisps across all databases exceed {{alert_threshold}},
