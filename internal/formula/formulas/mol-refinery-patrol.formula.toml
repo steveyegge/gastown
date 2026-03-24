@@ -614,7 +614,7 @@ If the PR was not created or is in an unexpected state, debug and retry.
 
 ```bash
 # Get the repo URL for gh commands
-REPO_URL=$(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\.git/\1/')
+REPO_URL=$(git remote get-url origin | sed 's/.*github.com[:/]\\(.*\\)\\.git/\\1/')
 
 # Wait for CI checks (timeout 15 minutes)
 gh pr checks <polecat-branch> --repo "$REPO_URL" --watch --fail-fast
