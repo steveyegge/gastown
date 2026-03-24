@@ -3054,7 +3054,16 @@ func (t *Tmux) SetDynamicStatus(session string) error {
 
 	// tmux calls this command every status-interval seconds
 	// gt status-line reads env vars and mail to build the status
-	right := fmt.Sprintf(`#(gt status-line --session=%s 2>/dev/null) %%H:%%M`, session)
+	//
+	// On Windows, tmux #() spawns a visible cmd.exe + conhost.exe window on
+	// every invocation, causing rapid screen flashing. Fall back to a static
+	// status until psmux supports CREATE_NO_WINDOW for #() commands.
+	var right string
+	if runtime.GOOS == "windows" {
+		right = `%H:%M`
+	} else {
+		right = fmt.Sprintf(`#(gt status-line --session=%s 2>/dev/null) %%H:%%M`, session)
+	}
 
 	if _, err := t.run("set-option", "-t", session, "status-right-length", "80"); err != nil {
 		return err
