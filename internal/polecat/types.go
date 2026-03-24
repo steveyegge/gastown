@@ -146,7 +146,8 @@ func (s CleanupStatus) RequiresRecovery() bool {
 }
 
 // CanForceRemove returns true if the status allows forced removal.
-// Uncommitted changes can be force-removed, but stashes and unpushed commits cannot.
+// Force removal bypasses all git safety checks including unpushed commits.
+// Stashes are excluded since they represent intentional work-in-progress.
 func (s CleanupStatus) CanForceRemove() bool {
-	return s == CleanupClean || s == CleanupUncommitted
+	return s == CleanupClean || s == CleanupUncommitted || s == CleanupUnpushed
 }
