@@ -110,6 +110,12 @@ type Daemon struct {
 	// triggers a zombie restart, debouncing transient gaps during handoffs.
 	// Only accessed from heartbeat loop goroutine - no sync needed.
 	mayorZombieCount int
+
+	// inFlightScripts tracks plugin names currently being executed directly
+	// (via run.sh) to prevent re-dispatch while the script is still running.
+	// Accessed from both the heartbeat goroutine and script goroutines, so
+	// sync.Map is used for safe concurrent access.
+	inFlightScripts sync.Map
 }
 
 // sessionDeath records a detected session death for mass death analysis.

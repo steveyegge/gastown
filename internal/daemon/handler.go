@@ -1,8 +1,12 @@
 package daemon
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -256,6 +260,14 @@ func (d *Daemon) dispatchPlugins(mgr *dog.Manager, sm *dog.SessionManager, rigsC
 			}
 		}
 
+		// Direct execution: plugins with run.sh are executed as subprocesses
+		// instead of spawning a Claude session. This eliminates API token burn,
+		// wisp creation, and mail overhead for trivial shell operations.
+		if p.HasRunScript {
+			d.executePluginDirect(p, recorder)
+			continue
+		}
+
 		// Find an idle dog.
 		idleDog, err := mgr.GetIdleDog()
 		if err != nil {
@@ -301,6 +313,71 @@ func (d *Daemon) dispatchPlugins(mgr *dog.Manager, sm *dog.SessionManager, rigsC
 
 		d.logger.Printf("Handler: dispatched plugin %s to dog %s", p.Name, idleDog.Name)
 	}
+}
+
+// defaultScriptTimeout is the maximum execution time for a direct plugin
+// script when the plugin does not specify its own timeout.
+const defaultScriptTimeout = 5 * time.Minute
+
+// executePluginDirect runs a plugin's run.sh directly as a subprocess instead
+// of spawning a Claude session. This is the fast path for plugins that are
+// self-contained shell scripts (resource-monitor, dolt-backup, etc.).
+//
+// The script runs in a background goroutine so it does not block the heartbeat.
+// An in-flight guard prevents re-dispatch while the script is still running.
+// The script is expected to record its own result via bd create (the existing
+// scripts already do this), so the cooldown gate will see the recording.
+func (d *Daemon) executePluginDirect(p *plugin.Plugin, _ *plugin.Recorder) {
+	// Guard: skip if this plugin is already running.
+	if _, loaded := d.inFlightScripts.LoadOrStore(p.Name, true); loaded {
+		d.logger.Printf("Handler: plugin %s already running directly, skipping", p.Name)
+		return
+	}
+
+	// Parse timeout from plugin config or use default.
+	timeout := defaultScriptTimeout
+	if p.Execution != nil && p.Execution.Timeout != "" {
+		if parsed, err := time.ParseDuration(p.Execution.Timeout); err == nil {
+			timeout = parsed
+		}
+	}
+
+	scriptPath := filepath.Join(p.Path, "run.sh")
+	d.logger.Printf("Handler: executing plugin %s directly via %s (timeout %v)", p.Name, scriptPath, timeout)
+
+	go func() {
+		defer d.inFlightScripts.Delete(p.Name)
+
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, "bash", scriptPath) //nolint:gosec // G204: plugin path is from trusted plugin directory
+		cmd.Dir = p.Path
+		// Use a process group so the timeout kills all child processes (e.g.,
+		// sleep, dolt) — not just the parent bash. Without this, orphaned
+		// children hold pipes open and cmd.Run blocks until they exit.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		err := cmd.Run()
+
+		if err != nil {
+			// Scripts handle their own recording and escalation via bd create.
+			// If the script was killed by timeout, it will be re-dispatched
+			// on the next heartbeat after the in-flight guard clears.
+			d.logger.Printf("Handler: plugin %s direct execution failed: %v\nstderr: %s",
+				p.Name, err, stderr.String())
+			return
+		}
+
+		d.logger.Printf("Handler: plugin %s completed successfully", p.Name)
+	}()
 }
 
 // loadRigsConfig loads the rigs configuration from mayor/rigs.json.

@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/dog"
+	"github.com/steveyegge/gastown/internal/plugin"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -393,5 +394,160 @@ func TestReapIdleDogs_Constants(t *testing.T) {
 	}
 	if maxDogPoolSize != 4 {
 		t.Errorf("maxDogPoolSize = %d, want 4", maxDogPoolSize)
+	}
+}
+
+// --- Direct plugin execution tests ---
+
+// testCreatePluginWithScript creates a plugin directory with a run.sh
+// that writes a marker file on execution.
+func testCreatePluginWithScript(t *testing.T, dir, name, script string) *plugin.Plugin {
+	t.Helper()
+	pluginDir := filepath.Join(dir, name)
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		t.Fatalf("Failed to create plugin dir: %v", err)
+	}
+	scriptPath := filepath.Join(pluginDir, "run.sh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil { //nolint:gosec // G306: test helper
+		t.Fatalf("Failed to write run.sh: %v", err)
+	}
+	return &plugin.Plugin{
+		Name:         name,
+		Path:         pluginDir,
+		HasRunScript: true,
+		Gate: &plugin.Gate{
+			Type:     plugin.GateCooldown,
+			Duration: "15m",
+		},
+	}
+}
+
+func TestExecutePluginDirect_RunsScript(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows: requires bash")
+	}
+	townRoot := t.TempDir()
+	d := testHandlerDaemon(t, townRoot)
+
+	markerFile := filepath.Join(townRoot, "executed.marker")
+	p := testCreatePluginWithScript(t, townRoot, "test-plugin",
+		"#!/usr/bin/env bash\necho ok > "+markerFile+"\n")
+
+	recorder := plugin.NewRecorder(townRoot)
+	d.executePluginDirect(p, recorder)
+
+	// Wait for the goroutine to complete.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(markerFile); err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if _, err := os.Stat(markerFile); os.IsNotExist(err) {
+		t.Error("run.sh was not executed: marker file not created")
+	}
+}
+
+func TestExecutePluginDirect_PreventsReDispatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows: requires bash")
+	}
+	townRoot := t.TempDir()
+	d := testHandlerDaemon(t, townRoot)
+
+	counterFile := filepath.Join(townRoot, "counter")
+	// Script that sleeps briefly and appends to a counter file.
+	p := testCreatePluginWithScript(t, townRoot, "slow-plugin",
+		"#!/usr/bin/env bash\nsleep 1\necho x >> "+counterFile+"\n")
+
+	recorder := plugin.NewRecorder(townRoot)
+
+	// First dispatch — should start.
+	d.executePluginDirect(p, recorder)
+
+	// Second dispatch while first is still running — should be skipped.
+	time.Sleep(100 * time.Millisecond)
+	d.executePluginDirect(p, recorder)
+
+	// Wait for the first goroutine to finish.
+	time.Sleep(2 * time.Second)
+
+	data, err := os.ReadFile(counterFile)
+	if err != nil {
+		t.Fatalf("Failed to read counter file: %v", err)
+	}
+
+	// Should have been executed exactly once (the re-dispatch was skipped).
+	lines := 0
+	for _, b := range data {
+		if b == 'x' {
+			lines++
+		}
+	}
+	if lines != 1 {
+		t.Errorf("expected plugin to run once, got %d executions", lines)
+	}
+}
+
+func TestExecutePluginDirect_ClearsInFlightOnCompletion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows: requires bash")
+	}
+	townRoot := t.TempDir()
+	d := testHandlerDaemon(t, townRoot)
+
+	p := testCreatePluginWithScript(t, townRoot, "fast-plugin",
+		"#!/usr/bin/env bash\necho done\n")
+
+	recorder := plugin.NewRecorder(townRoot)
+	d.executePluginDirect(p, recorder)
+
+	// Wait for completion.
+	time.Sleep(500 * time.Millisecond)
+
+	// In-flight should be cleared — second dispatch should succeed.
+	if _, loaded := d.inFlightScripts.Load(p.Name); loaded {
+		t.Error("inFlightScripts should be cleared after script completes")
+	}
+}
+
+func TestExecutePluginDirect_RespectsTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows: requires bash")
+	}
+	townRoot := t.TempDir()
+	d := testHandlerDaemon(t, townRoot)
+
+	markerFile := filepath.Join(townRoot, "should-not-exist")
+	// Script sleeps 60s then writes a marker. With a 500ms timeout, the
+	// marker should never appear because the script is killed first.
+	p := testCreatePluginWithScript(t, townRoot, "timeout-plugin",
+		"#!/usr/bin/env bash\nsleep 60\necho done > "+markerFile+"\n")
+	p.Execution = &plugin.Execution{
+		Timeout: "500ms",
+	}
+
+	recorder := plugin.NewRecorder(townRoot)
+	d.executePluginDirect(p, recorder)
+
+	// Wait for the timeout to fire and the goroutine to finish.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, loaded := d.inFlightScripts.Load(p.Name); !loaded {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// In-flight should be cleared after timeout.
+	if _, loaded := d.inFlightScripts.Load(p.Name); loaded {
+		t.Error("inFlightScripts should be cleared after timeout")
+	}
+
+	// The script should have been killed before writing the marker.
+	if _, err := os.Stat(markerFile); err == nil {
+		t.Error("script should have been killed by timeout before writing marker")
 	}
 }
