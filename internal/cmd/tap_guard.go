@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var tapGuardCmd = &cobra.Command{
@@ -69,6 +72,12 @@ func init() {
 func runTapGuardPRWorkflow(cmd *cobra.Command, args []string) error {
 	// Check if we're in a Gas Town agent context
 	if isGasTownAgentContext() {
+		// If the rig uses a fork push strategy, PR creation is part of the
+		// submission flow (ForkPushStrategy.Submit calls gh pr create).
+		// Allow it rather than blocking.
+		if isRigForkStrategy() {
+			return nil
+		}
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "╔══════════════════════════════════════════════════════════════════╗")
 		fmt.Fprintln(os.Stderr, "║  ❌ PR WORKFLOW BLOCKED                                          ║")
@@ -136,6 +145,35 @@ func isGasTownAgentContext() bool {
 	}
 
 	return false
+}
+
+// isRigForkStrategy returns true if the current rig is configured to use the
+// fork push strategy (i.e., rig config has a PushURL set). Agents in fork rigs
+// need to run gh pr create as part of the submission flow.
+func isRigForkStrategy() bool {
+	townRoot, cwd, err := workspace.FindFromCwdWithFallback()
+	if err != nil || cwd == "" {
+		return false
+	}
+	// Derive rig name from cwd relative to town root.
+	relPath, err := filepath.Rel(townRoot, cwd)
+	if err != nil {
+		return false
+	}
+	parts := strings.SplitN(relPath, string(filepath.Separator), 2)
+	if len(parts) == 0 || parts[0] == "" || parts[0] == "." {
+		return false
+	}
+	rigName := parts[0]
+	if envRig := os.Getenv("GT_RIG"); envRig != "" {
+		rigName = envRig
+	}
+
+	rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, rigName))
+	if err != nil {
+		return false
+	}
+	return selectPushStrategy(rigCfg).IsFork()
 }
 
 // isMaintainerOrigin returns true if the origin remote points to the maintainer's repo.

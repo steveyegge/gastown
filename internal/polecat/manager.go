@@ -762,6 +762,14 @@ func (m *Manager) addWithOptionsLocked(name string, opts AddOptions, polecatDir 
 		style.PrintWarning("could not provision polecat CLAUDE.md: %v", err)
 	}
 
+	// Ensure fork remote is configured in the bare repo for fork-strategy rigs.
+	// Polecat worktrees inherit remotes from the bare repo, so this ensures
+	// pushes to the fork remote work correctly. Non-fatal: worktree can still
+	// function even if fork remote setup fails (e.g., PushURL not reachable).
+	if err := m.setupForkRemoteInWorktree(repoGit); err != nil {
+		style.PrintWarning("could not set up fork remote: %v", err)
+	}
+
 	if err := m.setupSharedBeads(clonePath); err != nil {
 		cleanupOnError()
 		return nil, fmt.Errorf("setting up shared beads: %w (polecat cannot submit MRs without shared beads)", err)
@@ -935,6 +943,11 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (_ *Polecat, retE
 	if _, err := templates.CreatePolecatCLAUDEmd(clonePath, rigName, name); err != nil {
 		// Non-fatal — polecat can still learn via gt prime hook
 		style.PrintWarning("could not provision polecat CLAUDE.md: %v", err)
+	}
+
+	// Ensure fork remote is configured in the bare repo for fork-strategy rigs.
+	if err := m.setupForkRemoteInWorktree(repoGit); err != nil {
+		style.PrintWarning("could not set up fork remote: %v", err)
 	}
 
 	// Set up shared beads: polecat uses rig's .beads via redirect file.
@@ -2221,6 +2234,43 @@ func isCurrentHookedIssueForAssignee(issue *beads.Issue, assignee string) bool {
 // setupSharedBeads creates a redirect file so the polecat uses the rig's shared .beads database.
 // This eliminates the need for git sync between polecat clones - all polecats share one database.
 // Also propagates beads git config (role, issue_prefix) so bd commands work without warnings.
+// setupForkRemoteInWorktree ensures the fork remote is configured in the bare
+// repo for rigs that use the fork push strategy (PushURL set in config.json).
+// Polecat worktrees inherit remotes from the bare repo, so configuring the
+// bare repo once makes the remote available to all worktrees.
+//
+// This function is called from both AddWithOptions and addWithOptionsLocked.
+// Having it in one place (rather than duplicated inline) prevents divergence
+// when the setup logic evolves.
+func (m *Manager) setupForkRemoteInWorktree(repoGit *git.Git) error {
+	rigCfg, err := rig.LoadRigConfig(m.rig.Path)
+	if err != nil || rigCfg.PushURL == "" {
+		// Not a fork-strategy rig — nothing to do.
+		return nil
+	}
+
+	// Ensure the "fork" remote exists in the bare repo.
+	// The remote name "fork" is the convention for the push-only fork URL.
+	const forkRemoteName = "fork"
+	existingURL, err := repoGit.RemoteURL(forkRemoteName)
+	if err != nil {
+		// Remote doesn't exist — add it.
+		if _, addErr := repoGit.AddRemote(forkRemoteName, rigCfg.PushURL); addErr != nil {
+			return fmt.Errorf("adding fork remote %q: %w", rigCfg.PushURL, addErr)
+		}
+		return nil
+	}
+
+	// Remote exists — update URL if it changed.
+	if existingURL != rigCfg.PushURL {
+		if _, setErr := repoGit.SetRemoteURL(forkRemoteName, rigCfg.PushURL); setErr != nil {
+			return fmt.Errorf("updating fork remote URL to %q: %w", rigCfg.PushURL, setErr)
+		}
+	}
+
+	return nil
+}
+
 func (m *Manager) setupSharedBeads(clonePath string) error {
 	townRoot := filepath.Dir(m.rig.Path)
 	if err := beads.SetupRedirect(townRoot, clonePath); err != nil {

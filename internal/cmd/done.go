@@ -377,10 +377,17 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		polecat.TouchSessionHeartbeatWithState(townRoot, sessionName, polecat.HeartbeatExiting, "gt done", issueID)
 	}
 
-	// Get configured default branch for this rig
+	// Get configured default branch for this rig, and select push strategy.
 	defaultBranch := "main" // fallback
-	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, rigName)); err == nil && rigCfg.DefaultBranch != "" {
-		defaultBranch = rigCfg.DefaultBranch
+	var pushStrategy PushStrategy = &DefaultPushStrategy{}
+	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, rigName)); err == nil {
+		if rigCfg.DefaultBranch != "" {
+			defaultBranch = rigCfg.DefaultBranch
+		}
+		pushStrategy = selectPushStrategy(rigCfg)
+	}
+	if pushStrategy.Name() != "default" {
+		fmt.Printf("  Push strategy: %s\n", pushStrategy.Name())
 	}
 
 	// For COMPLETED, we need an issue ID and branch must not be the default branch
@@ -619,8 +626,11 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		// Default: "mr" strategy (or no convoy) — push branch, create MR bead
 
 		// Pre-declare push variables for checkpoint goto (gt-aufru)
-		var refspec string
 		var pushErr error
+		verifyRemote := "origin"
+		if pushStrategy.IsFork() {
+			verifyRemote = "fork"
+		}
 
 		// Resume: skip push if already completed in a previous run (gt-aufru).
 		// Validate checkpoint branch matches current branch (ge-sbo: stale checkpoint
@@ -644,82 +654,47 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		// If the parent repo's submodule pointer references commits that don't
 		// exist on the submodule's remote, the Refinery MR will be broken.
 		// Detect modified submodules and push each one first.
-		pushSubmoduleChanges(g, defaultBranch)
-
-		// Use explicit refspec (branch:branch) to create the remote branch.
-		// Without refspec, git push follows the tracking config — polecat branches
-		// track origin/main, so a bare push sends commits to main directly,
-		// bypassing the MR/refinery flow (G20 root cause).
-		fmt.Printf("Pushing branch to remote...\n")
-		refspec = branch + ":" + branch
-		pushErr = g.Push("origin", refspec, false)
-		if pushErr != nil {
-			// Primary push failed — try fallback from the bare repo (GH #1348).
-			// When polecat sessions are reused or worktrees are stale, the worktree's
-			// git context may be broken. But the branch always exists in the bare repo
-			// (.repo.git) because worktree commits share the same object database.
-			style.PrintWarning("primary push failed: %v — trying bare repo fallback...", pushErr)
-			rigPath := filepath.Join(townRoot, rigName)
-			bareRepoPath := filepath.Join(rigPath, ".repo.git")
-			if _, statErr := os.Stat(bareRepoPath); statErr == nil {
-				bareGit := git.NewGitWithDir(bareRepoPath, "")
-				pushErr = bareGit.Push("origin", refspec, false)
-				if pushErr != nil {
-					style.PrintWarning("bare repo push also failed: %v", pushErr)
-				} else {
-					fmt.Printf("%s Branch pushed via bare repo fallback\n", style.Bold.Render("✓"))
-				}
-			} else {
-				// No bare repo — try mayor/rig as last resort
-				mayorPath := filepath.Join(rigPath, "mayor", "rig")
-				if _, statErr := os.Stat(mayorPath); statErr == nil {
-					mayorGit := git.NewGit(mayorPath)
-					pushErr = mayorGit.Push("origin", refspec, false)
-					if pushErr != nil {
-						style.PrintWarning("mayor/rig push also failed: %v", pushErr)
-					} else {
-						fmt.Printf("%s Branch pushed via mayor/rig fallback\n", style.Bold.Render("✓"))
-					}
-				}
-			}
+		// Submodule push only applies to the default (origin) strategy.
+		if !pushStrategy.IsFork() {
+			pushSubmoduleChanges(g, defaultBranch)
 		}
 
+		// Dispatch to push strategy. DefaultPushStrategy pushes to origin with
+		// bare repo / mayor fallbacks. ForkPushStrategy pushes to the fork remote.
+		fmt.Printf("Pushing branch to remote...\n")
+		pushErr = pushStrategy.Push(g, branch, townRoot, rigName)
 		if pushErr != nil {
-			// All push attempts failed
 			pushFailed = true
-			errMsg := fmt.Sprintf("push failed for branch '%s': %v", branch, pushErr)
+			errMsg := pushErr.Error()
 			doneErrors = append(doneErrors, errMsg)
 			style.PrintWarning("%s\nCommits exist locally but failed to push. Witness will be notified.", errMsg)
 			goto notifyWitness
 		}
 
-		// Verify the branch actually exists on the push target (GH #1348).
-		// Push can return exit 0 without actually pushing (e.g., stale refs,
-		// worktree/bare-repo state mismatch). Verify before creating MR bead.
-		// Use PushRemoteBranchExists: with a split fetch/push URL (common for
-		// polecats), ls-remote resolves the fetch URL (GitHub) not the push
-		// target (local bare repo).
-		if exists, verifyErr := g.PushRemoteBranchExists("origin", branch); verifyErr != nil {
+		// Verify the branch actually exists on the target remote (GH #1348).
+		// Push can return exit 0 without actually pushing (e.g., stale refs).
+		// For fork strategy, verify against the fork remote; for default, origin.
+		if exists, verifyErr := g.RemoteBranchExists(verifyRemote, branch); verifyErr != nil {
 			style.PrintWarning("could not verify push: %v (proceeding optimistically)", verifyErr)
 		} else if !exists {
-			// Push "succeeded" but branch not on push target — try bare repo
-			// verification (worktree git may not see the pushed ref).
-			// The branch is a local ref in the bare repo, not a remote ref.
-			rigPath := filepath.Join(townRoot, rigName)
-			bareRepoPath := filepath.Join(rigPath, ".repo.git")
-			if _, statErr := os.Stat(bareRepoPath); statErr == nil {
-				bareGit := git.NewGitWithDir(bareRepoPath, "")
-				exists, verifyErr = bareGit.BranchExists(branch)
+			// For default strategy: try bare repo verification as fallback.
+			if !pushStrategy.IsFork() {
+				rigPath := filepath.Join(townRoot, rigName)
+				bareRepoPath := filepath.Join(rigPath, ".repo.git")
+				if _, statErr := os.Stat(bareRepoPath); statErr == nil {
+					bareGit := git.NewGitWithDir(bareRepoPath, "")
+					exists, verifyErr = bareGit.RemoteBranchExists("origin", branch)
+				}
 			}
 			if verifyErr != nil || !exists {
 				pushFailed = true
-				errMsg := fmt.Sprintf("push appeared to succeed but branch '%s' not found on push target", branch)
+				errMsg := fmt.Sprintf("push appeared to succeed but branch '%s' not found on remote %s", branch, verifyRemote)
 				doneErrors = append(doneErrors, errMsg)
 				style.PrintWarning("%s\nThis may indicate a stale git context. Witness will be notified.", errMsg)
 				goto notifyWitness
 			}
 		}
-		fmt.Printf("%s Branch pushed to origin\n", style.Bold.Render("✓"))
+		fmt.Printf("%s Branch pushed to %s\n", style.Bold.Render("✓"), verifyRemote)
 
 		// Fix cleanup_status after successful push (gt-wcr).
 		// Status was detected before push, so "unpushed" is now stale.
@@ -919,7 +894,6 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 
 		// Pre-declare for checkpoint goto (gt-aufru)
-		var existingMR *beads.Issue
 		var commitSHA string
 
 		// GH#3032: Resolve HEAD commit SHA for MR dedup.
@@ -928,11 +902,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		// distinguishes genuinely new submissions from idempotent retries.
 		commitSHA, _ = g.Rev("HEAD")
 
-		// Resume: skip MR creation if already completed in a previous run (gt-aufru).
-		// Mirrors the push checkpoint pattern above. Without this, every retry
-		// re-attempts bd.Create which hits unique constraints or creates duplicates.
-		// Validate that the checkpoint MR corresponds to the current branch (ge-sbo:
-		// stale checkpoint on polecat reassignment would reuse old MR for new work).
+		// Resume: skip submission if already completed in a previous run (gt-aufru).
 		if checkpoints[CheckpointMRCreated] != "" {
 			cpMRID := checkpoints[CheckpointMRCreated]
 			if cpMR, cpErr := bd.Show(cpMRID); cpErr == nil && cpMR != nil {
@@ -948,140 +918,29 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			// If MR lookup fails, fall through to create/find MR normally.
 		}
 
-		// Check if MR bead already exists for this branch+SHA (idempotency)
-		if commitSHA != "" {
-			existingMR, err = bd.FindMRForBranchAndSHA(branch, commitSHA)
-		} else {
-			existingMR, err = bd.FindMRForBranch(branch)
-		}
+		// Dispatch to push strategy for submission (MR bead or GitHub PR).
+		mrID, err = pushStrategy.Submit(StrategySubmitParams{
+			G:           g,
+			BD:          bd,
+			Branch:      branch,
+			Target:      target,
+			IssueID:     issueID,
+			Priority:    priority,
+			CommitSHA:   commitSHA,
+			Worker:      worker,
+			AgentBeadID: agentBeadID,
+			PreVerified: donePreVerified,
+			RigName:     rigName,
+		})
 		if err != nil {
-			style.PrintWarning("could not check for existing MR: %v", err)
-			// Continue with creation attempt - Create will fail if duplicate
-		}
-
-		if existingMR != nil {
-			// MR already exists with same branch AND commit — true idempotent retry
-			mrID = existingMR.ID
-			fmt.Printf("%s MR already exists (idempotent)\n", style.Bold.Render("✓"))
-			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
-		} else {
-			// Build MR bead title and description
-			title := fmt.Sprintf("Merge: %s", issueID)
-			description := fmt.Sprintf("branch: %s\ntarget: %s\nsource_issue: %s\nrig: %s",
-				branch, target, issueID, rigName)
-			if commitSHA != "" {
-				description += fmt.Sprintf("\ncommit_sha: %s", commitSHA)
-			}
-			if worker != "" {
-				description += fmt.Sprintf("\nworker: %s", worker)
-			}
-			if agentBeadID != "" {
-				description += fmt.Sprintf("\nagent_bead: %s", agentBeadID)
-			}
-
-			// Add conflict resolution tracking fields (initialized, updated by Refinery)
-			description += "\nretry_count: 0"
-			description += "\nlast_conflict_sha: null"
-			description += "\nconflict_task_id: null"
-
-			// Phase 3: Add pre-verification metadata if polecat ran gates after rebasing.
-			// The refinery uses these fields to fast-path merge without re-running gates.
-			if donePreVerified {
-				description += "\npre_verified: true"
-				description += fmt.Sprintf("\npre_verified_at: %s", time.Now().UTC().Format(time.RFC3339))
-				// Capture current origin/target HEAD as the verified base.
-				// The polecat rebased onto this SHA before running gates.
-				if verifiedBase, baseErr := g.Rev("origin/" + target); baseErr == nil {
-					description += fmt.Sprintf("\npre_verified_base: %s", verifiedBase)
-				} else {
-					style.PrintWarning("could not resolve origin/%s for pre-verified base: %v (pre-verification data incomplete)", target, baseErr)
-				}
-			}
-
-			mrIssue, err := bd.Create(beads.CreateOptions{
-				Title:       title,
-				Labels:      []string{"gt:merge-request"},
-				Priority:    priority,
-				Description: description,
-				Ephemeral:   true,
-			})
-			if err != nil {
-				// Non-fatal: record the error and skip to notifyWitness.
-				// Push succeeded so branch is on remote, but MR bead failed.
-				// Set mrFailed so the witness knows not to send MERGE_READY.
-				mrFailed = true
-				errMsg := fmt.Sprintf("MR bead creation failed: %v", err)
-				doneErrors = append(doneErrors, errMsg)
-				style.PrintWarning("%s\nBranch is pushed but MR bead not created. Witness will be notified.", errMsg)
-				goto notifyWitness
-			}
-			mrID = mrIssue.ID
-
-			// Guard against empty ID from bd create (observed in ephemeral/wisp mode).
-			// Fail fast with a clear message rather than passing "" to bd.Show.
-			if mrID == "" {
-				mrFailed = true
-				errMsg := "MR bead creation returned empty ID"
-				doneErrors = append(doneErrors, errMsg)
-				style.PrintWarning("%s\nBranch is pushed but MR bead has no ID. Witness will be notified.", errMsg)
-				goto notifyWitness
-			}
-
-			// GH#1945: Verify MR bead is readable before considering it confirmed.
-			// bd.Create() succeeds when the bead is written locally, but if the write
-			// didn't persist (Dolt failure, corrupt state), we'd nuke the worktree
-			// with no MR in the queue — losing the polecat's work permanently.
-			if verifiedMR, verifyErr := bd.Show(mrID); verifyErr != nil || verifiedMR == nil {
-				mrFailed = true
-				errMsg := fmt.Sprintf("MR bead created but verification read-back failed (id=%s): %v", mrID, verifyErr)
-				doneErrors = append(doneErrors, errMsg)
-				style.PrintWarning("%s\nBranch is pushed but MR bead not confirmed. Preserving worktree.", errMsg)
-				goto notifyWitness
-			}
-
-			// GH#3032: Supersede older open MRs for the same source issue.
-			// When a polecat re-submits after fixing a gate failure, the old MR
-			// (same branch, different SHA) is stale. Close it so the refinery
-			// doesn't process the old submission.
-			if issueID != "" {
-				if oldMRs, findErr := bd.FindOpenMRsForIssue(issueID); findErr == nil {
-					for _, old := range oldMRs {
-						if old.ID == mrID {
-							continue // skip the one we just created
-						}
-						reason := fmt.Sprintf("superseded by %s", mrID)
-						if closeErr := bd.CloseWithReason(reason, old.ID); closeErr != nil {
-							style.PrintWarning("could not supersede old MR %s: %v", old.ID, closeErr)
-							continue
-						}
-						fmt.Printf("  %s Superseded old MR: %s\n", style.Dim.Render("○"), old.ID)
-					}
-				}
-			}
-
-			// Update agent bead with active_mr reference (for traceability)
-			if agentBeadID != "" {
-				if err := bd.UpdateAgentActiveMR(agentBeadID, mrID); err != nil {
-					style.PrintWarning("could not update agent bead with active_mr: %v", err)
-				}
-			}
-
-			// GH#2599: Back-link source issue to MR bead for discoverability.
-			if issueID != "" {
-				comment := fmt.Sprintf("MR created: %s", mrID)
-				if _, err := bd.Run("comments", "add", issueID, comment); err != nil {
-					style.PrintWarning("could not back-link source issue %s to MR %s: %v", issueID, mrID, err)
-				}
-			}
-
-			// Success output
-			fmt.Printf("%s Work submitted to merge queue (verified)\n", style.Bold.Render("✓"))
-			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
-
-			// NOTE: Refinery nudge is deferred to AFTER the Dolt branch merge
-			// (see post-merge nudge below). Nudging here would race with the
-			// merge — refinery wakes up and queries main before the polecat's
-			// Dolt branch (containing the MR bead) is merged.
+			// Non-fatal: record the error and skip to notifyWitness.
+			// Push succeeded so branch is on remote, but submission failed.
+			// Set mrFailed so the witness knows not to send MERGE_READY.
+			mrFailed = true
+			errMsg := err.Error()
+			doneErrors = append(doneErrors, errMsg)
+			style.PrintWarning("%s\nBranch is pushed but submission failed. Witness will be notified.", errMsg)
+			goto notifyWitness
 		}
 
 		// Write MR checkpoint for resume (gt-aufru)
@@ -1099,7 +958,11 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 		fmt.Printf("  Priority: P%d\n", priority)
 		fmt.Println()
-		fmt.Printf("%s\n", style.Dim.Render("The Refinery will process your merge request."))
+		if pushStrategy.IsFork() {
+			fmt.Printf("%s\n", style.Dim.Render("Pull request submitted for review."))
+		} else {
+			fmt.Printf("%s\n", style.Dim.Render("The Refinery will process your merge request."))
+		}
 	} else {
 		// For ESCALATED or DEFERRED, just print status
 		fmt.Printf("%s Signaling %s\n", style.Bold.Render("→"), exitType)
@@ -1110,8 +973,9 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 notifyWitness:
-	// Nudge refinery — MR bead is already on main (transaction-based shared main).
-	if mrID != "" {
+	// Nudge refinery for default strategy — MR bead is on main (Dolt shared main).
+	// Fork strategy uses GitHub review, not Refinery, so skip the nudge.
+	if mrID != "" && !pushStrategy.IsFork() {
 		nudgeRefinery(rigName, "MERGE_READY received - check inbox for pending work")
 	}
 
