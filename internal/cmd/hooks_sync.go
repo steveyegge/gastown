@@ -127,7 +127,7 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 			if loc.Rig != "" {
 				rigPath = filepath.Join(townRoot, loc.Rig)
 			}
-			rc := config.ResolveRoleAgentConfig(loc.Role, townRoot, rigPath)
+			rc := config.ResolveRoleConfiguredAgentConfig(loc.Role, townRoot, rigPath)
 			if rc == nil || rc.Hooks == nil || rc.Hooks.Provider == "" {
 				continue
 			}

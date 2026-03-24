@@ -58,7 +58,7 @@ func InstallForRole(provider, settingsDir, workDir, role, hooksDir, hooksFile st
 		// Stale file detected — fall through to overwrite with current template
 	}
 
-	return writeTemplate(provider, role, hooksDir, hooksFile, targetPath)
+	return writeTemplate(provider, role, hooksFile, targetPath)
 }
 
 // needsUpgrade returns true if an existing hooks file contains stale patterns
@@ -150,14 +150,30 @@ func resolveAndSubstitute(provider, hooksFile, role string) ([]byte, error) {
 
 	if bytes.Contains(content, []byte("{{GT_BIN}}")) {
 		gtBin := resolveGTBinary()
+		if isSettingsFile(hooksFile) {
+			gtBin = jsonTemplateStringValue(gtBin)
+		}
 		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBin))
 	}
 
 	return content, nil
 }
 
+// jsonTemplateStringValue escapes a string for insertion into an existing JSON
+// string literal template. json.Marshal adds surrounding quotes, so strip them.
+func jsonTemplateStringValue(value string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return value
+	}
+	if len(encoded) >= 2 {
+		return string(encoded[1 : len(encoded)-1])
+	}
+	return value
+}
+
 // writeTemplate resolves a template, substitutes placeholders, and writes it to targetPath.
-func writeTemplate(provider, role, hooksDir, hooksFile, targetPath string) error {
+func writeTemplate(provider, role, hooksFile, targetPath string) error {
 	content, err := resolveAndSubstitute(provider, hooksFile, role)
 	if err != nil {
 		return err

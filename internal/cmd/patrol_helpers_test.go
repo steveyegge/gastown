@@ -134,6 +134,8 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 		"run_tests":                           "true",
 		"target_branch":                       "main",
 		"delete_merged_branches":              "true",
+		"judgment_enabled":                    "false",
+		"review_depth":                        "standard",
 	}
 
 	varMap := make(map[string]string)
@@ -299,8 +301,8 @@ func TestBuildRefineryPatrolVars_BoolFormat(t *testing.T) {
 	trueVal := true
 	falseVal2 := false
 	mq := &config.MergeQueueConfig{
-		Enabled:                         true,
-		IntegrationBranchAutoLand:       &trueVal,
+		Enabled:                          true,
+		IntegrationBranchAutoLand:        &trueVal,
 		IntegrationBranchRefineryEnabled: &trueVal,
 		RunTests:                         &trueVal,
 		SetupCommand:                     "npm ci",

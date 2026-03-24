@@ -1698,6 +1698,76 @@ func ResolveRoleAgentName(role, townRoot, rigPath string) (agentName string, isR
 	return "claude", false
 }
 
+// ResolveRoleConfiguredAgentConfig returns the configured agent for a role
+// without requiring its binary to exist in PATH. This is for config-driven
+// flows like hooks sync and doctor checks that need the intended provider and
+// template even before the runtime is installed locally.
+func ResolveRoleConfiguredAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
+	resolveConfigMu.Lock()
+	defer resolveConfigMu.Unlock()
+
+	var rigSettings *RigSettings
+	if rigPath != "" {
+		var err error
+		rigSettings, err = LoadRigSettings(RigSettingsPath(rigPath))
+		if err != nil {
+			rigSettings = nil
+		}
+	}
+
+	townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		townSettings = NewTownSettings()
+	}
+
+	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
+	if rigPath != "" {
+		_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
+	}
+
+	resolveNamed := func(agentName string) *RuntimeConfig {
+		if agentName == "" {
+			return nil
+		}
+		rc := lookupAgentConfigIfExists(agentName, townSettings, rigSettings)
+		if rc == nil {
+			return nil
+		}
+		rc.ResolvedAgent = agentName
+		return rc
+	}
+
+	if rigSettings != nil && rigSettings.RoleAgents != nil {
+		if agentName, ok := rigSettings.RoleAgents[role]; ok && agentName != "" {
+			if rc := resolveNamed(agentName); rc != nil {
+				return rc
+			}
+		}
+	}
+
+	if townSettings.RoleAgents != nil {
+		if agentName, ok := townSettings.RoleAgents[role]; ok && agentName != "" {
+			if rc := resolveNamed(agentName); rc != nil {
+				return rc
+			}
+		}
+	}
+
+	if rigSettings != nil && rigSettings.Agent != "" {
+		if rc := resolveNamed(rigSettings.Agent); rc != nil {
+			return rc
+		}
+	}
+
+	if townSettings.DefaultAgent != "" {
+		if rc := resolveNamed(townSettings.DefaultAgent); rc != nil {
+			return rc
+		}
+	}
+
+	return DefaultRuntimeConfig()
+}
+
 // lookupAgentConfig looks up an agent by name.
 // Checks rig-level custom agents first, then town's custom agents, then built-in presets from agents.go.
 // Falls back to DefaultRuntimeConfig() if no match is found.
