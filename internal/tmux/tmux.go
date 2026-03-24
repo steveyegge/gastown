@@ -2247,6 +2247,56 @@ func (t *Tmux) SelectWindow(session string, index int) error {
 	return err
 }
 
+// ResolveCurrentSession returns the session name for the tmux pane that is an
+// ancestor of the calling process. Works even when $TMUX and $TMUX_PANE are
+// not in the process environment (e.g., Claude Code hook subprocesses).
+//
+// Walks up the process parent chain and matches against tmux pane PIDs on
+// the configured socket.
+func (t *Tmux) ResolveCurrentSession() (string, error) {
+	out, err := t.run("list-panes", "-a", "-F", "#{pane_pid} #{session_name}")
+	if err != nil {
+		return "", fmt.Errorf("listing panes: %w", err)
+	}
+
+	paneSessions := make(map[int]string)
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		pid, err := strconv.Atoi(parts[0])
+		if err != nil {
+			continue
+		}
+		paneSessions[pid] = parts[1]
+	}
+
+	// Walk up from our PID to PID 1, checking each against pane PIDs
+	pid := os.Getpid()
+	for pid > 1 {
+		if name, ok := paneSessions[pid]; ok {
+			return name, nil
+		}
+		ppid, err := parentPID(pid)
+		if err != nil || ppid == pid {
+			break
+		}
+		pid = ppid
+	}
+
+	return "", fmt.Errorf("no tmux pane ancestor found for pid %d", os.Getpid())
+}
+
+// parentPID returns the parent PID of the given process.
+func parentPID(pid int) (int, error) {
+	data, err := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(string(data)))
+}
+
 // SetEnvironment sets an environment variable in the session.
 func (t *Tmux) SetEnvironment(session, key, value string) error {
 	_, err := t.run("set-environment", "-t", session, key, value)

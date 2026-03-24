@@ -164,7 +164,7 @@ default = "500"
 
 [vars.databases]
 description = "Comma-separated list of databases to compact (falls back to wisp_reaper config, then auto-discovery)"
-default = "hq,beads,gastown"
+default = "hq,bd,gt"
 
 [vars.mode]
 description = "Compaction strategy: 'flatten' (default) or 'surgical'"

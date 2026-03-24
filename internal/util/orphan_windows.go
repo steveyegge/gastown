@@ -5,9 +5,10 @@ package util
 // OrphanedProcess represents a claude process running without a controlling terminal.
 // On Windows, orphan cleanup is not supported, so this is a stub definition.
 type OrphanedProcess struct {
-	PID int
-	Cmd string
-	Age int // Age in seconds
+	PID      int
+	Cmd      string
+	Age      int    // Age in seconds
+	TownRoot string // Gas Town workspace root, or "" if not in any workspace
 }
 
 // CleanupResult describes what happened to an orphaned process.
@@ -21,10 +22,11 @@ type CleanupResult struct {
 // ZombieProcess represents a claude process not in any active tmux session.
 // On Windows, zombie cleanup is not supported, so this is a stub definition.
 type ZombieProcess struct {
-	PID int
-	Cmd string
-	Age int    // Age in seconds
-	TTY string // TTY column from ps
+	PID      int
+	Cmd      string
+	Age      int    // Age in seconds
+	TTY      string // TTY column from ps
+	TownRoot string // Gas Town workspace root, or "" if not in any workspace
 }
 
 // ZombieCleanupResult describes what happened to a zombie process.

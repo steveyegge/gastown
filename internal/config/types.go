@@ -102,6 +102,16 @@ type TownSettings struct {
 	// These were previously hardcoded as Go constants throughout the codebase.
 	// All values are optional — omitted values use compiled-in defaults.
 	Operational *OperationalConfig `json:"operational,omitempty"`
+
+	// DisabledPatrols lists patrol names to disable at the town level.
+	// This provides a simple way to turn off individual daemon patrol dogs
+	// without editing mayor/daemon.json. Patrol names match the keys used
+	// in daemon.json patrols section (e.g., "deacon", "witness", "refinery",
+	// "doctor_dog", "compactor_dog", "checkpoint_dog", "wisp_reaper",
+	// "dolt_remotes", "dolt_backup", "jsonl_git_backup", "scheduled_maintenance",
+	// "main_branch_test", "handler").
+	// Example: ["doctor_dog", "compactor_dog"]
+	DisabledPatrols []string `json:"disabled_patrols,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
@@ -1250,6 +1260,17 @@ type MergeQueueConfig struct {
 	// StaleClaimTimeout is how long a claimed MR can go without updates before
 	// being considered abandoned and eligible for re-claim (e.g., "30m").
 	StaleClaimTimeout string `json:"stale_claim_timeout,omitempty"`
+
+	// JudgmentEnabled controls whether the refinery performs quality review
+	// before merging. When true, the refinery patrol's quality-review step
+	// evaluates the diff for correctness, security, and code quality.
+	// Nil defaults to false (no quality review).
+	JudgmentEnabled *bool `json:"judgment_enabled,omitempty"`
+
+	// ReviewDepth controls the thoroughness of quality review when judgment
+	// is enabled. Valid values: "quick", "standard", "deep".
+	// Nil defaults to "standard".
+	ReviewDepth string `json:"review_depth,omitempty"`
 }
 
 // OnConflict strategy constants.
@@ -1302,6 +1323,24 @@ func (c *MergeQueueConfig) IsDeleteMergedBranchesEnabled() bool {
 		return true
 	}
 	return *c.DeleteMergedBranches
+}
+
+// IsJudgmentEnabled returns whether quality review is enabled for merges.
+// Nil-safe, defaults to false.
+func (c *MergeQueueConfig) IsJudgmentEnabled() bool {
+	if c.JudgmentEnabled == nil {
+		return false
+	}
+	return *c.JudgmentEnabled
+}
+
+// GetReviewDepth returns the configured review depth.
+// Nil-safe, defaults to "standard".
+func (c *MergeQueueConfig) GetReviewDepth() string {
+	if c.ReviewDepth == "" {
+		return "standard"
+	}
+	return c.ReviewDepth
 }
 
 // boolPtr returns a pointer to a bool value.

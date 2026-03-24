@@ -96,5 +96,7 @@
         "done_dedupe_window": "10s",
         "sling_aggregate_window": "30s",
         "min_aggregate_count": 3
-    }
+    },
+
+    "disabled_patrols": ["doctor_dog", "compactor_dog"]
 }

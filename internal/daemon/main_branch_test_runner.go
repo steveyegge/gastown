@@ -136,7 +136,7 @@ func loadRigGateConfig(rigPath string) (*rigGateConfig, error) {
 // runMainBranchTests runs quality gates on each rig's main branch.
 // It fetches the latest main, runs configured gates/tests, and escalates failures.
 func (d *Daemon) runMainBranchTests() {
-	if !IsPatrolEnabled(d.patrolConfig, "main_branch_test") {
+	if !d.isPatrolActive("main_branch_test") {
 		return
 	}
 

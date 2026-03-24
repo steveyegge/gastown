@@ -309,7 +309,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 	cfg := PatrolConfig{
 		RoleName:        "witness",
 		PatrolMolName:   constants.MolWitnessPatrol,
-		BeadsDir:        ctx.WorkDir,
+		BeadsDir:        ctx.TownRoot,
 		Assignee:        ctx.Rig + "/witness",
 		HeaderEmoji:     constants.EmojiWitness,
 		HeaderTitle:     "Witness Patrol Status",
@@ -332,7 +332,7 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 	cfg := PatrolConfig{
 		RoleName:        "refinery",
 		PatrolMolName:   constants.MolRefineryPatrol,
-		BeadsDir:        ctx.WorkDir,
+		BeadsDir:        ctx.TownRoot,
 		Assignee:        ctx.Rig + "/refinery",
 		HeaderEmoji:     "🔧",
 		HeaderTitle:     "Refinery Patrol Status",
@@ -392,6 +392,8 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 			vars = append(vars, fmt.Sprintf("build_command=%s", mq.BuildCommand))
 		}
 		vars = append(vars, fmt.Sprintf("delete_merged_branches=%t", mq.IsDeleteMergedBranchesEnabled()))
+		vars = append(vars, fmt.Sprintf("judgment_enabled=%t", mq.IsJudgmentEnabled()))
+		vars = append(vars, fmt.Sprintf("review_depth=%s", mq.GetReviewDepth()))
 		return vars
 	}
 

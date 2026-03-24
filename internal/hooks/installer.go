@@ -21,11 +21,20 @@ import (
 var templateFS embed.FS
 
 // InstallForRole provisions hook/settings files for an agent based on its preset config.
-// settingsDir is the gastown-managed parent (used by agents with --settings flag).
-// workDir is the agent's working directory.
-// role is the Gas Town role (e.g., "polecat", "crew", "witness").
-// hooksDir and hooksFile come from the preset's HooksDir and HooksSettingsFile.
-// provider is the preset's HooksProvider (e.g., "claude", "gemini").
+// It creates the file if it does not exist, or overwrites if the existing file contains
+// known stale patterns (e.g., legacy "export PATH=" format). Otherwise it does not
+// overwrite — this is the safe path for session startup, where Claude's settings.json
+// may have been customized by syncTarget (base + role overrides merge) and must not
+// be clobbered.
+//
+// For explicit sync operations that should update stale files, use SyncForRole.
+//
+// Parameters:
+//   - provider: the preset's HooksProvider (e.g., "claude", "gemini").
+//   - settingsDir: the gastown-managed parent (used by agents with --settings flag).
+//   - workDir: the agent's working directory.
+//   - role: the Gas Town role (e.g., "polecat", "crew", "witness").
+//   - hooksDir/hooksFile: from the preset's HooksDir and HooksSettingsFile.
 //
 // Template resolution:
 //   - Role-aware agents (have both autonomous and interactive templates):
@@ -40,44 +49,124 @@ func InstallForRole(provider, settingsDir, workDir, role, hooksDir, hooksFile st
 		return nil
 	}
 
-	// Determine install root
+	targetPath := installTargetPath(settingsDir, workDir, hooksDir, hooksFile, useSettingsDir)
+
+	if existing, err := os.ReadFile(targetPath); err == nil {
+		if !needsUpgrade(existing) {
+			return nil // File exists and is current — don't overwrite
+		}
+		// Stale file detected — fall through to overwrite with current template
+	}
+
+	return writeTemplate(provider, role, hooksDir, hooksFile, targetPath)
+}
+
+// needsUpgrade returns true if an existing hooks file contains stale patterns
+// that should be replaced by the current template. This allows the installer
+// to auto-upgrade hooks from earlier versions without requiring manual intervention.
+func needsUpgrade(content []byte) bool {
+	// Stale pattern: export PATH=... && gt — replaced by {{GT_BIN}} in current templates.
+	// The PATH export breaks Gemini CLI's hook runner which expands $PATH into
+	// an enormous string. Also catches files missing GT_HOOK_SOURCE env vars.
+	return bytes.Contains(content, []byte(`export PATH=`))
+}
+
+// SyncResult describes what SyncForRole did.
+type SyncResult int
+
+const (
+	SyncUnchanged SyncResult = iota // File already matches template
+	SyncCreated                     // File did not exist, created
+	SyncUpdated                     // File existed but content differed, updated
+)
+
+// SyncForRole compares the deployed hook/settings file against the current template
+// and overwrites if content differs. Returns what action was taken.
+//
+// This is the explicit sync path used by "gt hooks sync" for template-based agents
+// (OpenCode, Copilot, Pi, OMP, etc.). It should NOT be used for agents whose settings
+// are managed by the JSON merge path (Claude), as that would clobber merged overrides.
+func SyncForRole(provider, settingsDir, workDir, role, hooksDir, hooksFile string, useSettingsDir bool) (SyncResult, error) {
+	if provider == "" || hooksDir == "" || hooksFile == "" {
+		return SyncUnchanged, nil
+	}
+
+	targetPath := installTargetPath(settingsDir, workDir, hooksDir, hooksFile, useSettingsDir)
+
+	content, err := resolveAndSubstitute(provider, hooksFile, role)
+	if err != nil {
+		return 0, err
+	}
+
+	fileExisted := false
+	if existing, err := os.ReadFile(targetPath); err == nil {
+		fileExisted = true
+		if isSettingsFile(hooksFile) {
+			// JSON files: use structural comparison to tolerate whitespace differences.
+			if TemplateContentEqual(existing, content) {
+				return SyncUnchanged, nil
+			}
+		} else {
+			if bytes.Equal(existing, content) {
+				return SyncUnchanged, nil
+			}
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+		return 0, fmt.Errorf("creating hooks directory: %w", err)
+	}
+
+	perm := os.FileMode(0644)
+	if isSettingsFile(hooksFile) {
+		perm = 0600
+	}
+
+	if err := os.WriteFile(targetPath, content, perm); err != nil {
+		return 0, fmt.Errorf("writing hooks file: %w", err)
+	}
+
+	if fileExisted {
+		return SyncUpdated, nil
+	}
+	return SyncCreated, nil
+}
+
+// installTargetPath computes the full path for a hook/settings file.
+func installTargetPath(settingsDir, workDir, hooksDir, hooksFile string, useSettingsDir bool) string {
 	installDir := workDir
 	if useSettingsDir {
 		installDir = settingsDir
 	}
+	return filepath.Join(installDir, hooksDir, hooksFile)
+}
 
-	targetPath := filepath.Join(installDir, hooksDir, hooksFile)
+// resolveAndSubstitute resolves the template and performs {{GT_BIN}} substitution.
+func resolveAndSubstitute(provider, hooksFile, role string) ([]byte, error) {
+	content, err := resolveTemplate(provider, hooksFile, role)
+	if err != nil {
+		return nil, fmt.Errorf("resolving template for %s: %w", provider, err)
+	}
 
-	// Check if existing file needs upgrading. Stale hooks from earlier
-	// versions used `export PATH=...` which breaks Gemini CLI's hook runner.
-	// Replace them with the current template that uses absolute gt paths.
-	if existing, err := os.ReadFile(targetPath); err == nil {
-		if !needsUpgrade(existing) {
-			return nil // Existing file is current — don't overwrite
-		}
-		// Stale file detected — fall through to overwrite with current template
+	if bytes.Contains(content, []byte("{{GT_BIN}}")) {
+		gtBin := resolveGTBinary()
+		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBin))
+	}
+
+	return content, nil
+}
+
+// writeTemplate resolves a template, substitutes placeholders, and writes it to targetPath.
+func writeTemplate(provider, role, hooksDir, hooksFile, targetPath string) error {
+	content, err := resolveAndSubstitute(provider, hooksFile, role)
+	if err != nil {
+		return err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 		return fmt.Errorf("creating hooks directory: %w", err)
 	}
 
-	// Try role-aware templates first (autonomous/interactive variants)
-	content, err := resolveTemplate(provider, hooksFile, role)
-	if err != nil {
-		return fmt.Errorf("resolving template for %s: %w", provider, err)
-	}
-
-	// Substitute {{GT_BIN}} with the resolved gt binary path.
-	// Templates use this placeholder so hooks call gt directly instead of
-	// relying on PATH exports, which fail on Gemini CLI (the hook runner
-	// expands $PATH into an enormous string that breaks command parsing).
-	if bytes.Contains(content, []byte("{{GT_BIN}}")) {
-		gtBin := resolveGTBinary()
-		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBin))
-	}
-
-	// Use restrictive permissions for settings that may contain role instructions
 	perm := os.FileMode(0644)
 	if isSettingsFile(hooksFile) {
 		perm = 0600
@@ -141,19 +230,6 @@ func isSettingsFile(name string) bool {
 	return filepath.Ext(name) == ".json"
 }
 
-// needsUpgrade returns true if an existing hooks file contains stale patterns
-// that should be replaced by the current template. This allows the installer
-// to auto-upgrade hooks from earlier versions without requiring manual intervention.
-func needsUpgrade(content []byte) bool {
-	// Stale pattern: export PATH=... && gt — replaced by {{GT_BIN}} in current templates.
-	// The PATH export breaks Gemini CLI's hook runner which expands $PATH into
-	// an enormous string. Also catches files missing GT_HOOK_SOURCE env vars.
-	if bytes.Contains(content, []byte(`export PATH=`)) {
-		return true
-	}
-	return false
-}
-
 // resolveGTBinary returns the absolute path to the gt binary.
 // Tries os.Executable() first (most reliable when running as gt), then
 // falls back to exec.LookPath for PATH-based discovery. If both fail,
@@ -173,17 +249,7 @@ func resolveGTBinary() string {
 // This is used by the doctor hooks-sync check to compare installed files against
 // current templates.
 func ComputeExpectedTemplate(provider, hooksFile, role string) ([]byte, error) {
-	content, err := resolveTemplate(provider, hooksFile, role)
-	if err != nil {
-		return nil, err
-	}
-
-	if bytes.Contains(content, []byte("{{GT_BIN}}")) {
-		gtBin := resolveGTBinary()
-		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBin))
-	}
-
-	return content, nil
+	return resolveAndSubstitute(provider, hooksFile, role)
 }
 
 // TemplateContentEqual compares two JSON byte slices for structural equality

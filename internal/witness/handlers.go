@@ -1479,10 +1479,12 @@ const SpawnGracePeriod = 5 * time.Minute
 
 // StalledResult represents a single stalled polecat detection.
 type StalledResult struct {
-	PolecatName string // e.g., "alpha"
-	StallType   string // "startup-stall", "unknown-prompt"
-	Action      string // "auto-dismissed", "escalated"
-	Error       error
+	PolecatName   string // e.g., "alpha"
+	StallType     string // "startup-stall", "unknown-prompt"
+	Action        string // "auto-dismissed", "escalated"
+	AgentState    string // Agent state from beads (e.g., "idle", "working")
+	HasHookedWork bool   // Whether this polecat has hooked work assigned
+	Error         error
 }
 
 // DetectStalledPolecatsResult holds aggregate results.
