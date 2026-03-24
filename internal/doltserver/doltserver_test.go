@@ -4164,6 +4164,83 @@ func TestEnsureAllMetadata_FallbackToDbName(t *testing.T) {
 	}
 }
 
+// TestEnsureAllMetadata_NoPingPong is a regression test for the bug where two
+// Dolt databases map to the same rig (e.g., "gastown" and "gt" both resolving
+// to the "gastown" rig). Previously, each call to EnsureMetadata overwrote the
+// other's dolt_database value on every invocation of EnsureAllMetadata, causing
+// alternating "correcting" warnings in gt up output.
+//
+// Expected: EnsureAllMetadata calls EnsureMetadata exactly once per rig,
+// and the chosen database is stable across repeated calls.
+func TestEnsureAllMetadata_NoPingPong(t *testing.T) {
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+
+	// Both "gastown" and "gt" databases exist.
+	setupDoltDB(t, dataDir, "gastown")
+	setupDoltDB(t, dataDir, "gt")
+
+	// routes.jsonl maps prefix "gt-" → rig "gastown".
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	routesContent := `{"prefix":"gt-","path":"gastown/mayor/rig"}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create gastown rig beads directory.
+	gastownBeads := filepath.Join(townRoot, "gastown", "mayor", "rig", ".beads")
+	if err := os.MkdirAll(gastownBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// First call: no prior metadata — a canonical database is chosen.
+	updated1, errs1 := EnsureAllMetadata(townRoot)
+	if len(errs1) > 0 {
+		t.Fatalf("first call: unexpected errors: %v", errs1)
+	}
+	// Both databases exist but map to the same rig → only one update expected.
+	if len(updated1) != 1 {
+		t.Errorf("first call: expected 1 updated entry (one per rig), got %d: %v", len(updated1), updated1)
+	}
+
+	// Read what was written.
+	meta1 := readMetadataJSON(t, filepath.Join(gastownBeads, "metadata.json"))
+	chosen := meta1["dolt_database"].(string)
+	if chosen != "gastown" && chosen != "gt" {
+		t.Fatalf("first call: unexpected dolt_database %q", chosen)
+	}
+
+	// Second call: metadata already set — same database should be kept.
+	updated2, errs2 := EnsureAllMetadata(townRoot)
+	if len(errs2) > 0 {
+		t.Fatalf("second call: unexpected errors: %v", errs2)
+	}
+	meta2 := readMetadataJSON(t, filepath.Join(gastownBeads, "metadata.json"))
+	if meta2["dolt_database"] != chosen {
+		t.Errorf("ping-pong detected: first call chose %q, second call chose %q",
+			chosen, meta2["dolt_database"])
+	}
+	_ = updated2 // may be 0 or 1 depending on whether anything changed
+}
+
+// readMetadataJSON reads and parses a metadata.json file, failing the test on error.
+func readMetadataJSON(t *testing.T, path string) map[string]interface{} {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading metadata.json at %s: %v", path, err)
+	}
+	var meta map[string]interface{}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatalf("parsing metadata.json at %s: %v", path, err)
+	}
+	return meta
+}
+
 func TestCleanStaleSocket_RemovesStaleFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix sockets not applicable on Windows")
