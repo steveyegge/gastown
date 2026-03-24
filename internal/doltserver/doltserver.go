@@ -534,7 +534,7 @@ func IsRunning(townRoot string) (bool, int, error) {
 		serverDataDir := getServerDataDir(townRoot, pid)
 		if serverDataDir == "" || serverDataDir == config.DataDir {
 			// Cross-check process args to guard against PID reuse.
-			actualDir := getDoltDataDirFromProcess(pid)
+			actualDir := GetDoltDataDirFromProcess(pid)
 			if actualDir == "" {
 				return true, pid, nil
 			}
