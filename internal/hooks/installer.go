@@ -157,7 +157,7 @@ func resolveAndSubstitute(provider, hooksFile, role string) ([]byte, error) {
 }
 
 // writeTemplate resolves a template, substitutes placeholders, and writes it to targetPath.
-func writeTemplate(provider, role, hooksDir, hooksFile, targetPath string) error {
+func writeTemplate(provider, role, _, hooksFile, targetPath string) error {
 	content, err := resolveAndSubstitute(provider, hooksFile, role)
 	if err != nil {
 		return err
