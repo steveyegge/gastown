@@ -154,7 +154,10 @@ RECENT_RUNS=$(bd list --label plugin:compactor-dog --status closed --json 2>/dev
   | jq -r '.[0].created_at // "never"' 2>/dev/null || echo "unknown")
 echo "  Last compactor run: $RECENT_RUNS"
 
-# Check for flatten evidence (single-commit history = recently flattened)
+# Check for flatten evidence:
+# - Single-commit history (count ≤ 5) = recently flattened
+# - Oldest commit < 2 hours ago = flattened very recently (suppress escalation to
+#   break feedback loop: post-flatten ack commits look like "runaway growth")
 FLATTEN_CANDIDATES=""
 while IFS= read -r DB; do
   [ -z "$DB" ] && continue
@@ -168,7 +171,7 @@ while IFS= read -r DB; do
 done <<< "$PROD_DBS"
 
 if [ -n "$FLATTEN_CANDIDATES" ]; then
-  echo "  Recently flattened DBs:$FLATTEN_CANDIDATES"
+  echo "  Recently flattened DBs (≤5 commits):$FLATTEN_CANDIDATES"
 fi
 ```
 
@@ -212,11 +215,23 @@ gathered above and decide whether to escalate.
 
 **If you judge maintenance is needed:**
 
+**IMPORTANT: Use `gt nudge` NOT `gt escalate` for routine compaction alerts.**
+
+`gt escalate` creates a wisp bead + sends mail. Mail delivery acks from multiple
+dogs add 3 label commits each. This creates a feedback loop: escalation →
+10-15 commits → next check sees "runaway growth" → escalation → repeat.
+
+`gt nudge` is ephemeral — zero Dolt commits, zero mail, zero acks. Use it for
+all routine compaction recommendations.
+
+Only use `gt escalate` (HIGH or CRITICAL) for genuine emergencies:
+- A database is **completely inaccessible** or corrupted
+- Data loss is actively occurring
+- Server is down and won't restart
+
 ```bash
-gt escalate "Dolt compaction recommended" \
-  -s MEDIUM \
-  --reason "Commit growth analysis:
-$REPORT
+# Routine compaction nudge — no Dolt side effects
+gt nudge mayor "Dolt compaction recommended: $REPORT
 
 Total: $TOTAL_COMMITS commits across all DBs
 Active polecats: $POLECAT_SESSIONS
