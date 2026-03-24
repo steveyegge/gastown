@@ -67,6 +67,7 @@ source of truth.
 | judgment_enabled | false | Enable quality review for merges (true/false) |
 | review_depth | standard | Review depth: quick, standard, or deep |
 | merge_strategy | direct | Merge strategy: 'direct' (ff-only merge+push) or 'pr' (GitHub PR) |
+| fork_remote | (empty) | Fork remote name for cross-fork PR creation. When set with merge_strategy=pr, refinery fetches the polecat branch from this remote (the fork) and creates a cross-fork PR on the upstream. Empty = current behavior unchanged. |
 
 ## Target Resolution Rule
 
@@ -87,7 +88,7 @@ resolve that placeholder with this rule:
 You MUST process steps in strict DAG order. Walk through each step sequentially,
 unless you are explicitly told to skip to a step."""
 formula = "mol-refinery-patrol"
-version = 12
+version = 13
 
 [vars]
 [vars.wisp_type]
@@ -145,6 +146,10 @@ default = "standard"
 [vars.merge_strategy]
 description = "Merge strategy: 'direct' (ff-only merge + push) or 'pr' (create GitHub PR). Default: direct."
 default = "direct"
+
+[vars.fork_remote]
+description = "Fork remote name for cross-fork PR creation (e.g. 'fork'). When set and merge_strategy=pr, refinery fetches the polecat branch from this remote and creates a cross-fork PR on the upstream repo. Empty = current behavior unchanged."
+default = ""
 
 [[steps]]
 id = "inbox-check"
@@ -533,6 +538,7 @@ Merge and push. CRITICAL: Notifications come IMMEDIATELY after push.
 **Config: target_branch = {{target_branch}}**
 **Config: delete_merged_branches = {{delete_merged_branches}}**
 **Config: merge_strategy = {{merge_strategy}}**
+**Config: fork_remote = {{fork_remote}}**
 
 **Step 1: Merge (strategy-dependent)**
 
@@ -570,13 +576,21 @@ echo "Remote: $REMOTE_SHA"
 
 Push the rebased branch and create a GitHub PR instead of direct merge.
 
+Two sub-modes depending on whether `fork_remote` is set:
+
+**Sub-mode A: Same-repo PR (fork_remote is empty — default)**
+
 ```bash
 # Push the rebased polecat branch (force-push since we rebased)
 git checkout temp
 git push origin temp:refs/heads/<polecat-branch> --force-with-lease
 
+# Determine upstream repo URL
+REPO_URL=$(git remote get-url origin | sed 's/.*github.com[:/]\\(.*\\)\\.git/\\1/' | sed 's/.*github.com[:/]\\(.*\\)$/\\1/')
+
 # Create the PR using bead metadata for title/description
 PR_URL=$(gh pr create \
+  --repo "$REPO_URL" \
   --base <merge-target> \
   --head <polecat-branch> \
   --title "<issue-title> (<issue-id>)" \
@@ -594,16 +608,60 @@ Automated merge from polecat branch.
 echo "PR created: $PR_URL"
 ```
 
-If the PR already exists for this branch, `gh pr create` will fail. In that case,
+**Sub-mode B: Cross-fork PR (fork_remote is set)**
+
+Use this when polecats lack write access to the upstream repo and pushed their branch to a fork.
+The refinery fetches the polecat branch from the fork remote and creates a cross-fork PR on the upstream.
+
+```bash
+git checkout temp
+
+# Fetch polecat branch from the fork remote (where polecats pushed)
+git fetch {{fork_remote}} <polecat-branch>
+
+# Push the rebased branch to the fork
+git push {{fork_remote}} temp:refs/heads/<polecat-branch> --force-with-lease
+
+# Determine upstream repo and fork owner
+UPSTREAM_REPO=$(git remote get-url origin | sed 's/.*github.com[:/]\\(.*\\)\\.git/\\1/' | sed 's/.*github.com[:/]\\(.*\\)$/\\1/')
+FORK_OWNER=$(git remote get-url {{fork_remote}} | sed 's|.*github.com[:/]\\([^/]*\\)/.*|\\1|' | sed 's|.*github.com[:/]\\([^:]*\\):.*|\\1|')
+
+# Create cross-fork PR: upstream repo, head = fork-owner:branch
+PR_URL=$(gh pr create \
+  --repo "$UPSTREAM_REPO" \
+  --base <merge-target> \
+  --head "${FORK_OWNER}:<polecat-branch>" \
+  --title "<issue-title> (<issue-id>)" \
+  --body "## Summary
+
+Automated merge from polecat branch (cross-fork).
+
+- **Issue**: <issue-id>
+- **Polecat**: <polecat-name>
+- **Branch**: <polecat-branch>
+- **Fork**: ${FORK_OWNER}
+- **Tests**: Passed (verified by refinery)
+
+---
+*Created by Gas Town Refinery*")
+echo "PR created: $PR_URL"
+```
+
+For both sub-modes, if the PR already exists for this branch, `gh pr create` will fail. In that case,
 find the existing PR:
 ```bash
-PR_URL=$(gh pr view <polecat-branch> --json url -q '.url')
+# Same-repo:
+PR_URL=$(gh pr view <polecat-branch> --repo "$REPO_URL" --json url -q '.url' 2>/dev/null)
+# Cross-fork (if REPO_URL not set):
+PR_URL=$(gh pr view "${FORK_OWNER}:<polecat-branch>" --repo "$UPSTREAM_REPO" --json url -q '.url' 2>/dev/null)
 ```
 
 **Step 1.5 (pr only): VERIFY PR CREATED**
 
 ```bash
-gh pr view <polecat-branch> --json url,state -q '.url + " " + .state'
+# TARGET_REPO is UPSTREAM_REPO for cross-fork, REPO_URL for same-repo
+TARGET_REPO="${UPSTREAM_REPO:-$REPO_URL}"
+gh pr view <polecat-branch> --repo "$TARGET_REPO" --json url,state -q '.url + " " + .state'
 ```
 
 If the PR was not created or is in an unexpected state, debug and retry.
@@ -613,17 +671,17 @@ If the PR was not created or is in an unexpected state, debug and retry.
 ⚠️ **DO NOT PROCEED until CI passes. DO NOT send MERGED until the PR is actually merged.**
 
 ```bash
-# Get the repo URL for gh commands
-REPO_URL=$(git remote get-url origin | sed 's/.*github.com[:/]\\(.*\\)\\.git/\\1/')
+# Use the upstream repo (for cross-fork) or origin repo (for same-repo)
+TARGET_REPO="${UPSTREAM_REPO:-$REPO_URL}"
 
 # Wait for CI checks (timeout 15 minutes)
-gh pr checks <polecat-branch> --repo "$REPO_URL" --watch --fail-fast
+gh pr checks <polecat-branch> --repo "$TARGET_REPO" --watch --fail-fast
 ```
 
 **If CI checks FAIL:**
 Do NOT merge. Send FIX_NEEDED back to the polecat:
 ```bash
-FAILURE_OUTPUT=$(gh pr checks <polecat-branch> --repo "$REPO_URL" 2>&1)
+FAILURE_OUTPUT=$(gh pr checks <polecat-branch> --repo "$TARGET_REPO" 2>&1)
 gt mail send <rig>/witness -s "FIX_NEEDED <polecat-name>" -m "Branch: <branch>
 Issue: <issue-id>
 PR: ${PR_URL}
@@ -636,7 +694,7 @@ Then skip to Step 4 (archive mail) and continue patrol.
 **If CI checks PASS:**
 Merge the PR:
 ```bash
-gh pr merge <polecat-branch> --repo "$REPO_URL" --merge --delete-branch
+gh pr merge <polecat-branch> --repo "$TARGET_REPO" --merge --delete-branch
 ```
 
 If merge fails (conflict, branch protection), debug and retry.
