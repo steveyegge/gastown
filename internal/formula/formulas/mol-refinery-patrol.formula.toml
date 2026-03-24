@@ -165,6 +165,15 @@ description = """
 First, clean up wisps from previous cycles (closed wisps + abandoned wisps):
 ```bash
 bd mol wisp gc --closed --force
+```
+
+Then clean abandoned wisps. 
+If pr_auto_merge is "false" exclude merge-request wisps (they stay open until the PR is merged or closed — the poll-open-prs step handles their lifecycle)
+```bash
+bd mol wisp gc --age 1h --force --exclude-type merge-request
+```
+Otherwise: 
+```bash
 bd mol wisp gc --age 1h --force
 ```
 
