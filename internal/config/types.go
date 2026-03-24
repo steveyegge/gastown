@@ -1420,6 +1420,17 @@ func DefaultAccountsConfigDir() (string, error) {
 type QuotaState struct {
 	Version  int                          `json:"version"`  // schema version
 	Accounts map[string]AccountQuotaState `json:"accounts"` // handle -> quota state
+
+	// ActiveSwaps tracks keychain swap mappings from quota rotation.
+	// Key: target config dir (where the swapped token was written)
+	// Value: source account handle (whose token was swapped in)
+	//
+	// When a session is rotated, its config dir's keychain entry gets
+	// overwritten with the source account's token. If the source account
+	// later re-authenticates, the fresh token goes to the source's own
+	// keychain entry — not the target's. SyncSwappedTokens uses this map
+	// to propagate fresh tokens to all target keychain entries.
+	ActiveSwaps map[string]string `json:"active_swaps,omitempty"` // targetConfigDir -> sourceAccountHandle
 }
 
 // AccountQuotaStatus is the rate-limit status of an account.
