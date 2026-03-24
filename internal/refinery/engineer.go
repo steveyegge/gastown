@@ -23,6 +23,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // shortSHA returns at most 8 characters of a SHA for display.
@@ -765,6 +766,7 @@ func (e *Engineer) runTests(ctx context.Context) ProcessResult {
 		// is intentional for flexibility (pipes, env vars, etc).
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Executing test command: %s\n", e.config.TestCommand)
 		cmd := exec.CommandContext(ctx, "sh", "-c", e.config.TestCommand) //nolint:gosec // G204: TestCommand is from trusted rig config
+		util.SetProcessGroup(cmd)
 		cmd.Dir = e.workDir
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
@@ -814,6 +816,7 @@ func (e *Engineer) runGate(ctx context.Context, name string, gate *GateConfig) G
 	}
 
 	cmd := exec.CommandContext(gateCtx, "sh", "-c", gate.Cmd) //nolint:gosec // G204: Gate commands are from trusted rig config
+	util.SetProcessGroup(cmd)
 	cmd.Dir = e.workDir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -1096,6 +1099,7 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 	// Uses nudge (not mail) to avoid permanent Dolt commits for routine signals (GH#2434).
 	nudgeMsg := fmt.Sprintf("MERGED: %s issue=%s branch=%s", mr.ID, mr.SourceIssue, mr.Branch)
 	nudgeCmd := exec.Command("gt", "nudge", "mayor/", nudgeMsg)
+	util.SetProcessGroup(nudgeCmd)
 	nudgeCmd.Dir = e.workDir
 	if err := nudgeCmd.Run(); err != nil {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to nudge mayor about merge: %v\n", err)
@@ -1157,6 +1161,7 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 	nudgeMsg := fmt.Sprintf("MERGE_FAILED: branch=%s issue=%s type=%s error=%s — fix and resubmit with 'gt done'",
 		mr.Branch, mr.SourceIssue, failureType, result.Error)
 	nudgeCmd := exec.Command("gt", "nudge", nudgeTarget, nudgeMsg)
+	util.SetProcessGroup(nudgeCmd)
 	nudgeCmd.Dir = e.workDir
 	if err := nudgeCmd.Run(); err != nil {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to nudge %s about merge failure: %v\n", polecatName, err)
@@ -1168,6 +1173,7 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 	// dependent work immediately. Mirrors the success nudge in HandleMRInfoSuccess.
 	mayorMsg := fmt.Sprintf("MERGE_FAILED: %s issue=%s branch=%s type=%s", mr.ID, mr.SourceIssue, mr.Branch, failureType)
 	mayorCmd := exec.Command("gt", "nudge", "mayor/", mayorMsg)
+	util.SetProcessGroup(mayorCmd)
 	mayorCmd.Dir = e.workDir
 	if err := mayorCmd.Run(); err != nil {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to nudge mayor about merge failure: %v\n", err)
@@ -1726,6 +1732,7 @@ func (e *Engineer) notifyDeaconConvoyFeeding(mr *MRInfo) {
 	// this nudge just accelerates discovery.
 	nudgeMsg := fmt.Sprintf("CONVOY_NEEDS_FEEDING: convoy=%s issue=%s", mr.ConvoyID, mr.SourceIssue)
 	nudgeCmd := exec.Command("gt", "nudge", "deacon", nudgeMsg)
+	util.SetProcessGroup(nudgeCmd)
 	nudgeCmd.Dir = e.workDir
 	if err := nudgeCmd.Run(); err != nil {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to nudge deacon about convoy feeding for %s: %v\n", mr.ConvoyID, err)
@@ -1749,6 +1756,7 @@ type convoyInfo struct {
 func (e *Engineer) checkAndCloseCompletedConvoys(townRoot, townBeads string) []convoyInfo {
 	// List all open convoys
 	listCmd := exec.Command("bd", "list", "--type=convoy", "--status=open", "--json")
+	util.SetProcessGroup(listCmd)
 	listCmd.Dir = townBeads
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout
@@ -1774,6 +1782,7 @@ func (e *Engineer) checkAndCloseCompletedConvoys(townRoot, townBeads string) []c
 	for _, convoy := range convoys {
 		// Get tracked issues for this convoy via bd dep list
 		depCmd := exec.Command("bd", "dep", "list", convoy.ID, "--direction=down", "--type=tracks", "--json")
+		util.SetProcessGroup(depCmd)
 		depCmd.Dir = townRoot
 		var depOut bytes.Buffer
 		depCmd.Stdout = &depOut
@@ -1804,6 +1813,7 @@ func (e *Engineer) checkAndCloseCompletedConvoys(townRoot, townBeads string) []c
 
 			// Get fresh status from home rig via bd show with routing
 			showCmd := exec.Command("bd", "show", depID, "--json")
+			util.SetProcessGroup(showCmd)
 			showCmd.Dir = townRoot
 			var showOut bytes.Buffer
 			showCmd.Stdout = &showOut
@@ -1839,6 +1849,7 @@ func (e *Engineer) checkAndCloseCompletedConvoys(townRoot, townBeads string) []c
 		}
 
 		closeCmd := exec.Command("bd", "close", convoy.ID, "-r", reason)
+		util.SetProcessGroup(closeCmd)
 		closeCmd.Dir = townBeads
 
 		if err := closeCmd.Run(); err != nil {
@@ -1868,6 +1879,7 @@ func (e *Engineer) notifyConvoyCompletion(townRoot, convoyID, title, description
 		mailCmd := exec.Command("gt", "mail", "send", addr,
 			"-s", fmt.Sprintf("🚚 Convoy landed: %s", title),
 			"-m", fmt.Sprintf("Convoy %s has completed.\n\nAll tracked issues are now closed.\n\nClosed by: %s/refinery", convoyID, e.rig.Name))
+		util.SetProcessGroup(mailCmd)
 		mailCmd.Dir = townRoot
 		if err := mailCmd.Run(); err != nil {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not notify %s: %v\n", addr, err)
@@ -1904,6 +1916,7 @@ func (e *Engineer) landConvoySwarm(townRoot string, convoy convoyInfo) {
 
 	// Use gt swarm land to perform the landing
 	landCmd := exec.Command("gt", "swarm", "land", moleculeID)
+	util.SetProcessGroup(landCmd)
 	landCmd.Dir = townRoot
 	var landOut, landErr bytes.Buffer
 	landCmd.Stdout = &landOut
