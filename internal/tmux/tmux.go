@@ -174,7 +174,9 @@ func BuildCommandContext(ctx context.Context, args ...string) *exec.Cmd {
 		allArgs = append(allArgs, "-L", sock)
 	}
 	allArgs = append(allArgs, args...)
-	return exec.CommandContext(ctx, "tmux", allArgs...)
+	cmd := exec.CommandContext(ctx, "tmux", allArgs...)
+	hideConsoleWindow(cmd)
+	return cmd
 }
 
 // Tmux wraps tmux operations.
@@ -227,6 +229,7 @@ func (t *Tmux) run(args ...string) (string, error) {
 	}
 	allArgs = append(allArgs, args...)
 	cmd := exec.Command("tmux", allArgs...)
+	hideConsoleWindow(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -988,6 +991,7 @@ func (t *Tmux) SetExitEmpty(on bool) error {
 // IsAvailable checks if tmux is installed and can be invoked.
 func (t *Tmux) IsAvailable() bool {
 	cmd := exec.Command("tmux", "-V")
+	hideConsoleWindow(cmd)
 	return cmd.Run() == nil
 }
 
