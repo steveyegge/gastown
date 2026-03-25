@@ -7,14 +7,33 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/gofrs/flock"
 
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/telemetry"
 )
+
+// bdAgentStateAvailable caches whether `bd agent state` exists.
+// The command was documented in beads CHANGELOG v0.40.0 but was never shipped
+// (steveyegge/beads#2828). We probe once and skip silently if missing.
+var (
+	bdAgentStateOnce      sync.Once
+	bdAgentStateAvailable bool
+)
+
+func probeBdAgentState() bool {
+	// Fast probe: run `bd agent --help` and check for "unknown command"
+	out, err := exec.Command("bd", "agent", "--help").CombinedOutput() //nolint:gosec // G204: bd is trusted
+	if err != nil && strings.Contains(string(out), "unknown command") {
+		return false
+	}
+	return err == nil
+}
 
 // lockAgentBead acquires an exclusive file lock for a specific agent bead ID.
 // This prevents concurrent read-modify-write races in methods like
@@ -418,20 +437,30 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 // UpdateAgentState updates the agent_state field in an agent bead.
 // Uses `bd agent state` command for the database column directly,
 // then syncs the description's agent_state field to match (gt-ulom).
+//
+// If `bd agent state` is not available (steveyegge/beads#2828), falls back
+// to updating only the description field. The probe runs once per process.
 func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, nil, retErr) }()
-	// Update agent state using bd agent state command
-	// Use runWithRouting so bd can resolve cross-prefix agent beads (e.g., wa-*
-	// agent beads from hq context) via routes.jsonl instead of BEADS_DIR.
-	_, err := b.runWithRouting("agent", "state", id, state)
-	if err != nil {
-		return fmt.Errorf("updating agent state: %w", err)
+
+	// Probe once whether bd agent state exists (beads#2828).
+	bdAgentStateOnce.Do(func() { bdAgentStateAvailable = probeBdAgentState() })
+
+	if bdAgentStateAvailable {
+		// Update agent state using bd agent state command.
+		// Use runWithRouting so bd can resolve cross-prefix agent beads (e.g., wa-*
+		// agent beads from hq context) via routes.jsonl instead of BEADS_DIR.
+		_, err := b.runWithRouting("agent", "state", id, state)
+		if err != nil {
+			return fmt.Errorf("updating agent state: %w", err)
+		}
 	}
 
 	// Sync the description's agent_state field with the column (gt-ulom).
 	// Without this, the description stays stale (e.g., "spawning" after the
 	// column transitions to "working"), causing bd show and dashboards to
 	// display incorrect state after idle polecat reuse via gt sling.
+	// When bd agent state is unavailable, this is the only update path.
 	_ = b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{AgentState: &state})
 
 	return nil
