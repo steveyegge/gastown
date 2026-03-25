@@ -50,10 +50,30 @@ type Event struct {
 	Context   string    `json:"context,omitempty"` // Additional context (issue ID, error message, etc.)
 }
 
+// ErrorEventFunc is called for error-level lifecycle events (crash, session_death, etc.).
+// Callers can use this to forward events to external error reporters like faultline.
+type ErrorEventFunc func(event Event)
+
+// defaultErrorHook is applied to all new loggers created via NewLogger.
+var (
+	defaultHookMu   sync.RWMutex
+	defaultErrorHook ErrorEventFunc
+)
+
+// SetDefaultErrorHook registers a package-level error hook inherited by all
+// future Logger instances. Call once at startup after initializing the error
+// reporter (e.g., gtfaultline.Init).
+func SetDefaultErrorHook(fn ErrorEventFunc) {
+	defaultHookMu.Lock()
+	defer defaultHookMu.Unlock()
+	defaultErrorHook = fn
+}
+
 // Logger handles writing events to the town log file.
 type Logger struct {
-	logPath string
-	mu      sync.Mutex
+	logPath      string
+	mu           sync.Mutex
+	onErrorEvent ErrorEventFunc
 }
 
 // logDir returns the directory for town logs.
@@ -67,10 +87,32 @@ func logPath(townRoot string) string {
 }
 
 // NewLogger creates a new Logger for the given town root.
+// If a default error hook is set, the new logger inherits it.
 func NewLogger(townRoot string) *Logger {
+	defaultHookMu.RLock()
+	hook := defaultErrorHook
+	defaultHookMu.RUnlock()
 	return &Logger{
-		logPath: logPath(townRoot),
+		logPath:      logPath(townRoot),
+		onErrorEvent: hook,
 	}
+}
+
+// SetErrorHook registers a callback for error-level events.
+// Events forwarded: crash, session_death, mass_death.
+func (l *Logger) SetErrorHook(fn ErrorEventFunc) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.onErrorEvent = fn
+}
+
+// isErrorEvent returns true for event types that represent errors.
+func isErrorEvent(t EventType) bool {
+	switch t {
+	case EventCrash, EventSessionDeath, EventMassDeath:
+		return true
+	}
+	return false
 }
 
 // LogEvent logs a single event to the town log.
@@ -94,6 +136,11 @@ func (l *Logger) LogEvent(event Event) error {
 	line := formatLogLine(event)
 	if _, err := f.WriteString(line + "\n"); err != nil {
 		return fmt.Errorf("writing log line: %w", err)
+	}
+
+	// Forward error-level events to external reporter if configured.
+	if l.onErrorEvent != nil && isErrorEvent(event.Type) {
+		l.onErrorEvent(event)
 	}
 
 	return nil
