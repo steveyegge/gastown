@@ -2977,11 +2977,31 @@ func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 		dbToRig[k] = v
 	}
 
+	// Build reverse map: rig → canonical DB name. When an orphaned database
+	// shares a rig's directory name (e.g., "gastown" db alongside canonical "gt"),
+	// both would write to the same metadata.json with different dolt_database
+	// values, causing flip-flop warnings on every startup.
+	rigToCanonicalDB := make(map[string]string)
+	for dbName, rigName := range dbToRig {
+		rigToCanonicalDB[rigName] = dbName
+	}
+
 	for _, dbName := range databases {
 		rigName := dbName
 		if mapped, ok := dbToRig[dbName]; ok {
 			rigName = mapped
 		}
+
+		// Skip orphan databases that share a rig's directory name but aren't
+		// that rig's canonical database. E.g., skip "gastown" db when rig
+		// "gastown" uses "gt" as its canonical DB — processing both would
+		// flip-flop the metadata.json dolt_database value on every startup.
+		if _, inMap := dbToRig[dbName]; !inMap {
+			if canonicalDB, hasCanonical := rigToCanonicalDB[rigName]; hasCanonical && canonicalDB != dbName {
+				continue
+			}
+		}
+
 		// Special case: "hq" database maps to "hq" rig (town-level)
 		if dbName == "hq" {
 			rigName = "hq"

@@ -4164,6 +4164,81 @@ func TestEnsureAllMetadata_FallbackToDbName(t *testing.T) {
 	}
 }
 
+// TestEnsureAllMetadata_SkipsOrphanDatabases verifies that orphan databases
+// sharing a rig's directory name don't flip-flop the metadata.json dolt_database
+// value. E.g., if rig "gastown" uses canonical DB "gt" and an orphan "gastown"
+// DB also exists, only "gt" should write to gastown's metadata.json.
+func TestEnsureAllMetadata_SkipsOrphanDatabases(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create both canonical and orphan databases
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	setupDoltDB(t, dataDir, "hq")
+	setupDoltDB(t, dataDir, "gt")       // canonical DB for gastown rig
+	setupDoltDB(t, dataDir, "gastown")   // orphan with same name as rig
+	setupDoltDB(t, dataDir, "mo")        // canonical DB for monorepo rig
+	setupDoltDB(t, dataDir, "monorepo")  // orphan with same name as rig
+
+	// Create routes.jsonl mapping prefixes to rigs
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	routesContent := `{"prefix":"hq-","path":"."}
+{"prefix":"gt-","path":"gastown/mayor/rig"}
+{"prefix":"mo-","path":"monorepo/mayor/rig"}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create rig beads directories
+	if err := os.MkdirAll(filepath.Join(townRoot, "gastown", "mayor", "rig", ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "monorepo", "mayor", "rig", ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run EnsureAllMetadata
+	updated, errs := EnsureAllMetadata(townRoot)
+	if len(errs) > 0 {
+		t.Errorf("unexpected errors: %v", errs)
+	}
+
+	// Should only process canonical DBs (hq, gt, mo), NOT orphans (gastown, monorepo)
+	if len(updated) != 3 {
+		t.Errorf("expected 3 updated databases (hq, gt, mo), got %d: %v", len(updated), updated)
+	}
+
+	// Verify gastown metadata has "gt" (canonical), not "gastown" (orphan)
+	gastownMeta := filepath.Join(townRoot, "gastown", "mayor", "rig", ".beads", "metadata.json")
+	data, err := os.ReadFile(gastownMeta)
+	if err != nil {
+		t.Fatalf("reading gastown metadata: %v", err)
+	}
+	var meta map[string]interface{}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatalf("parsing gastown metadata: %v", err)
+	}
+	if meta["dolt_database"] != "gt" {
+		t.Errorf("gastown dolt_database should be %q (canonical), got %q", "gt", meta["dolt_database"])
+	}
+
+	// Verify monorepo metadata has "mo" (canonical), not "monorepo" (orphan)
+	monorepoMeta := filepath.Join(townRoot, "monorepo", "mayor", "rig", ".beads", "metadata.json")
+	data, err = os.ReadFile(monorepoMeta)
+	if err != nil {
+		t.Fatalf("reading monorepo metadata: %v", err)
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatalf("parsing monorepo metadata: %v", err)
+	}
+	if meta["dolt_database"] != "mo" {
+		t.Errorf("monorepo dolt_database should be %q (canonical), got %q", "mo", meta["dolt_database"])
+	}
+}
+
 func TestCleanStaleSocket_RemovesStaleFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix sockets not applicable on Windows")
