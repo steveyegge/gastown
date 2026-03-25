@@ -1225,6 +1225,10 @@ type MergeQueueConfig struct {
 	// OnConflict specifies conflict resolution strategy: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
 
+	// VerificationMode controls whether merge-queue verification is advisory or strict.
+	// Empty values default to advisory for backward compatibility.
+	VerificationMode string `json:"verification_mode,omitempty"`
+
 	// RunTests controls whether to run tests before merging.
 	// Nil defaults to true (tests are run).
 	RunTests *bool `json:"run_tests,omitempty"`
@@ -1243,6 +1247,17 @@ type MergeQueueConfig struct {
 
 	// TypecheckCommand is the command to run for type checking (e.g., tsc --noEmit).
 	TypecheckCommand string `json:"typecheck_command,omitempty"`
+
+	// Gates defines named verification commands.
+	Gates map[string]*MergeQueueGateConfig `json:"gates,omitempty"`
+
+	// GatesParallel controls whether pre-merge gates run concurrently.
+	// Nil defaults to true.
+	GatesParallel *bool `json:"gates_parallel,omitempty"`
+
+	// AutoPush controls whether the refinery pushes merged results automatically.
+	// Nil defaults to true.
+	AutoPush *bool `json:"auto_push,omitempty"`
 
 	// DeleteMergedBranches controls whether to delete branches after merging.
 	// Nil defaults to true (merged branches are deleted).
@@ -1273,10 +1288,34 @@ type MergeQueueConfig struct {
 	ReviewDepth string `json:"review_depth,omitempty"`
 }
 
+// MergeQueueGateConfig defines a single merge-queue verification gate.
+type MergeQueueGateConfig struct {
+	// Cmd is the shell command to execute.
+	Cmd string `json:"cmd"`
+
+	// Timeout is the maximum duration the gate may run (e.g. "10m").
+	Timeout string `json:"timeout,omitempty"`
+
+	// Phase controls when this gate runs: "pre-merge" (default) or "post-squash".
+	Phase string `json:"phase,omitempty"`
+}
+
 // OnConflict strategy constants.
 const (
 	OnConflictAssignBack = "assign_back"
 	OnConflictAutoRebase = "auto_rebase"
+)
+
+// Merge queue verification mode constants.
+const (
+	VerificationModeAdvisory = "advisory"
+	VerificationModeStrict   = "strict"
+)
+
+// Merge queue gate phase constants.
+const (
+	MergeQueueGatePhasePreMerge   = "pre-merge"
+	MergeQueueGatePhasePostSquash = "post-squash"
 )
 
 // IsPolecatIntegrationEnabled returns whether polecat integration branch
@@ -1314,6 +1353,37 @@ func (c *MergeQueueConfig) IsRunTestsEnabled() bool {
 		return true
 	}
 	return *c.RunTests
+}
+
+// GetVerificationMode returns the configured verification mode.
+func (c *MergeQueueConfig) GetVerificationMode() string {
+	if c == nil || c.VerificationMode == "" {
+		return VerificationModeAdvisory
+	}
+	return c.VerificationMode
+}
+
+// IsStrictVerification returns true when strict merge-queue verification is enabled.
+func (c *MergeQueueConfig) IsStrictVerification() bool {
+	return c.GetVerificationMode() == VerificationModeStrict
+}
+
+// IsGatesParallelEnabled returns whether pre-merge gates should run concurrently.
+// Nil-safe, defaults to true.
+func (c *MergeQueueConfig) IsGatesParallelEnabled() bool {
+	if c == nil || c.GatesParallel == nil {
+		return true
+	}
+	return *c.GatesParallel
+}
+
+// IsAutoPushEnabled returns whether the refinery should push merged results automatically.
+// Nil-safe, defaults to true.
+func (c *MergeQueueConfig) IsAutoPushEnabled() bool {
+	if c == nil || c.AutoPush == nil {
+		return true
+	}
+	return *c.AutoPush
 }
 
 // IsDeleteMergedBranchesEnabled returns whether merged branches should be deleted.
@@ -1355,8 +1425,11 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 		IntegrationBranchPolecatEnabled:  boolPtr(true),
 		IntegrationBranchRefineryEnabled: boolPtr(true),
 		OnConflict:                       OnConflictAssignBack,
+		VerificationMode:                 VerificationModeAdvisory,
 		RunTests:                         boolPtr(true),
 		TestCommand:                      "",
+		GatesParallel:                    boolPtr(true),
+		AutoPush:                         boolPtr(true),
 		DeleteMergedBranches:             boolPtr(true),
 		RetryFlakyTests:                  1,
 		PollInterval:                     "30s",

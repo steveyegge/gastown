@@ -33,6 +33,9 @@ var (
 
 	// ErrMissingField indicates a required field is missing.
 	ErrMissingField = errors.New("missing required field")
+
+	// ErrInvalidVerificationMode indicates merge_queue.verification_mode is invalid.
+	ErrInvalidVerificationMode = errors.New("invalid verification_mode")
 )
 
 // LoadTownConfig loads and validates a town configuration file.
@@ -259,7 +262,108 @@ func validateMergeQueueConfig(c *MergeQueueConfig) error {
 		return fmt.Errorf("%w: max_concurrent must be non-negative", ErrMissingField)
 	}
 
+	if mode := c.GetVerificationMode(); mode != VerificationModeAdvisory && mode != VerificationModeStrict {
+		return fmt.Errorf("%w: got %q, want %q or %q", ErrInvalidVerificationMode, mode, VerificationModeAdvisory, VerificationModeStrict)
+	}
+
+	for name, gate := range c.Gates {
+		if gate == nil {
+			return fmt.Errorf("gate %q is null", name)
+		}
+		if strings.TrimSpace(gate.Cmd) == "" {
+			return fmt.Errorf("gate %q command is empty", name)
+		}
+		phase := normalizeMergeQueueGatePhase(gate.Phase)
+		switch phase {
+		case MergeQueueGatePhasePreMerge, MergeQueueGatePhasePostSquash:
+		default:
+			return fmt.Errorf("gate %q has invalid phase %q: must be %q or %q", name, gate.Phase, MergeQueueGatePhasePreMerge, MergeQueueGatePhasePostSquash)
+		}
+		if gate.Timeout != "" {
+			dur, err := time.ParseDuration(gate.Timeout)
+			if err != nil {
+				return fmt.Errorf("invalid timeout for gate %q: %w", name, err)
+			}
+			if dur <= 0 {
+				return fmt.Errorf("gate %q timeout must be positive, got %v", name, dur)
+			}
+		}
+	}
+
 	return nil
+}
+
+func validateStrictMergeQueueRequirements(c *MergeQueueConfig) error {
+	if c == nil || !c.IsStrictVerification() {
+		return nil
+	}
+
+	hasPreMergeGate := false
+	hasRepoLocalPreMergeGate := false
+	for _, gate := range c.Gates {
+		if gate == nil {
+			continue
+		}
+		if normalizeMergeQueueGatePhase(gate.Phase) != MergeQueueGatePhasePreMerge {
+			continue
+		}
+		hasPreMergeGate = true
+		if isRepoLocalVerificationCommand(gate.Cmd) {
+			hasRepoLocalPreMergeGate = true
+		}
+	}
+
+	if !hasPreMergeGate {
+		return fmt.Errorf("merge_queue.verification_mode=%q requires at least one %q gate", VerificationModeStrict, MergeQueueGatePhasePreMerge)
+	}
+	if !hasRepoLocalPreMergeGate {
+		return fmt.Errorf("merge_queue.verification_mode=%q requires at least one repo-local %q gate", VerificationModeStrict, MergeQueueGatePhasePreMerge)
+	}
+	return nil
+}
+
+func normalizeMergeQueueGatePhase(phase string) string {
+	if phase == "" {
+		return MergeQueueGatePhasePreMerge
+	}
+	return phase
+}
+
+func trimShellToken(token string) string {
+	return strings.Trim(token, "\"'`()")
+}
+
+func isRepoLocalVerificationCommand(cmd string) bool {
+	tokens := strings.Fields(cmd)
+	if len(tokens) == 0 {
+		return false
+	}
+
+	for _, token := range tokens {
+		trimmed := trimShellToken(token)
+		if trimmed == "" {
+			continue
+		}
+		if filepath.IsAbs(trimmed) {
+			return false
+		}
+		if trimmed == "./..." || trimmed == "../..." || strings.HasSuffix(trimmed, "/...") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "./") || strings.HasPrefix(trimmed, "../") {
+			return true
+		}
+		if strings.Contains(trimmed, "/") {
+			return true
+		}
+	}
+
+	switch trimShellToken(tokens[0]) {
+	case "make", "gmake", "just", "task", "mage", "npm", "pnpm", "yarn", "bun", "uv", "poetry", "tox", "nox":
+		return len(tokens) > 1
+	default:
+		return false
+	}
 }
 
 // NewRigConfig creates a new RigConfig (identity only).
@@ -314,10 +418,9 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 	if repo == nil && local == nil {
 		return nil
 	}
-	result := &MergeQueueConfig{}
-	// Start from repo defaults
-	if repo != nil {
-		*result = *repo
+	result := cloneMergeQueueConfig(repo)
+	if result == nil {
+		result = &MergeQueueConfig{}
 	}
 	// Overlay local overrides (non-empty fields win)
 	if local != nil {
@@ -335,6 +438,20 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 		}
 		if local.BuildCommand != "" {
 			result.BuildCommand = local.BuildCommand
+		}
+		if local.VerificationMode != "" {
+			result.VerificationMode = local.VerificationMode
+		}
+		if local.Gates != nil {
+			result.Gates = cloneMergeQueueGateMap(local.Gates)
+		}
+		if local.GatesParallel != nil {
+			gatesParallel := *local.GatesParallel
+			result.GatesParallel = &gatesParallel
+		}
+		if local.AutoPush != nil {
+			autoPush := *local.AutoPush
+			result.AutoPush = &autoPush
 		}
 		// Merge non-command fields from local if explicitly set
 		if local.Enabled {
@@ -363,6 +480,78 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 		}
 	}
 	return result
+}
+
+func cloneMergeQueueGateMap(src map[string]*MergeQueueGateConfig) map[string]*MergeQueueGateConfig {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]*MergeQueueGateConfig, len(src))
+	for name, gate := range src {
+		if gate == nil {
+			dst[name] = nil
+			continue
+		}
+		copy := *gate
+		dst[name] = &copy
+	}
+	return dst
+}
+
+func cloneMergeQueueConfig(src *MergeQueueConfig) *MergeQueueConfig {
+	if src == nil {
+		return nil
+	}
+	copy := *src
+	copy.Gates = cloneMergeQueueGateMap(src.Gates)
+	if src.GatesParallel != nil {
+		gatesParallel := *src.GatesParallel
+		copy.GatesParallel = &gatesParallel
+	}
+	if src.AutoPush != nil {
+		autoPush := *src.AutoPush
+		copy.AutoPush = &autoPush
+	}
+	return &copy
+}
+
+// LoadEffectiveMergeQueueConfig loads merge-queue settings using the repo-local
+// defaults from .gastown/settings.json overlaid with local rig settings.
+func LoadEffectiveMergeQueueConfig(rigPath string) (*MergeQueueConfig, error) {
+	repoRoot := filepath.Join(rigPath, "mayor", "rig")
+	if _, err := os.Stat(filepath.Join(rigPath, RepoSettingsPath)); err == nil {
+		repoRoot = rigPath
+	}
+
+	var repoMQ *MergeQueueConfig
+	repoSettings, err := LoadRepoSettings(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	if repoSettings != nil {
+		repoMQ = repoSettings.MergeQueue
+	}
+
+	var localMQ *MergeQueueConfig
+	localSettings, err := LoadRigSettings(filepath.Join(rigPath, "settings", "config.json"))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if localSettings != nil {
+		localMQ = localSettings.MergeQueue
+	}
+
+	merged := MergeSettingsCommand(repoMQ, localMQ)
+	if merged == nil {
+		return nil, nil
+	}
+	if err := validateMergeQueueConfig(merged); err != nil {
+		return nil, err
+	}
+	if err := validateStrictMergeQueueRequirements(merged); err != nil {
+		return nil, err
+	}
+	return merged, nil
 }
 
 // LoadRigSettings loads and validates a rig settings file.

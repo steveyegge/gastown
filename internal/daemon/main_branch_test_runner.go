@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,7 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/verify"
 )
 
 const (
@@ -69,15 +75,57 @@ func mainBranchTestRigs(config *DaemonPatrolConfig) []string {
 	return nil
 }
 
-// rigGateConfig holds the gate/test configuration extracted from a rig's config.json.
+// rigGateConfig holds the gate/test configuration extracted from merge-queue settings.
 type rigGateConfig struct {
-	TestCommand string
-	Gates       map[string]string // gate name → command
+	TestCommand   string
+	Gates         []verify.Gate
+	GatesParallel bool
 }
 
-// loadRigGateConfig reads the merge_queue section from a rig's config.json
-// to discover what test/gate commands to run.
+type mainBranchCheckFailure struct {
+	Check string
+	Error string
+}
+
+type mainBranchTestFailure struct {
+	RigName       string
+	RigPath       string
+	DefaultBranch string
+	CommitSHA     string
+	Checks        []mainBranchCheckFailure
+}
+
+func (f *mainBranchTestFailure) Error() string {
+	if f == nil || len(f.Checks) == 0 {
+		return "main branch verification failed"
+	}
+	parts := make([]string, 0, len(f.Checks))
+	for _, check := range f.Checks {
+		parts = append(parts, fmt.Sprintf("%s: %s", check.Check, check.Error))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// loadRigGateConfig reads the merge_queue section from layered rig settings
+// to discover what verification commands to run.
 func loadRigGateConfig(rigPath string) (*rigGateConfig, error) {
+	if mq, err := config.LoadEffectiveMergeQueueConfig(rigPath); err != nil {
+		return nil, err
+	} else if mq != nil {
+		gates, err := verify.GatesForPhase(mq, verify.PhasePreMerge)
+		if err != nil {
+			return nil, err
+		}
+		if len(gates) == 0 && mq.TestCommand == "" {
+			return nil, nil
+		}
+		return &rigGateConfig{
+			TestCommand:   mq.TestCommand,
+			Gates:         gates,
+			GatesParallel: mq.IsGatesParallelEnabled(),
+		}, nil
+	}
+
 	configPath := filepath.Join(rigPath, "config.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -99,8 +147,9 @@ func loadRigGateConfig(rigPath string) (*rigGateConfig, error) {
 	}
 
 	var mq struct {
-		TestCommand *string                    `json:"test_command"`
-		Gates       map[string]json.RawMessage `json:"gates"`
+		TestCommand   *string                    `json:"test_command"`
+		Gates         map[string]json.RawMessage `json:"gates"`
+		GatesParallel *bool                      `json:"gates_parallel"`
 	}
 	if err := json.Unmarshal(raw.MergeQueue, &mq); err != nil {
 		return nil, fmt.Errorf("parsing merge_queue: %w", err)
@@ -110,15 +159,18 @@ func loadRigGateConfig(rigPath string) (*rigGateConfig, error) {
 
 	// Extract gates (preferred over legacy test_command)
 	if len(mq.Gates) > 0 {
-		cfg.Gates = make(map[string]string, len(mq.Gates))
+		cfg.Gates = make([]verify.Gate, 0, len(mq.Gates))
 		for name, rawGate := range mq.Gates {
 			var gate struct {
 				Cmd string `json:"cmd"`
 			}
 			if err := json.Unmarshal(rawGate, &gate); err == nil && gate.Cmd != "" {
-				cfg.Gates[name] = gate.Cmd
+				cfg.Gates = append(cfg.Gates, verify.Gate{Name: name, Cmd: gate.Cmd, Phase: verify.PhasePreMerge})
 			}
 		}
+	}
+	if mq.GatesParallel != nil {
+		cfg.GatesParallel = *mq.GatesParallel
 	}
 
 	// Fall back to legacy test_command
@@ -162,6 +214,19 @@ func (d *Daemon) runMainBranchTests() {
 		rigPath := filepath.Join(d.config.TownRoot, rigName)
 		if err := d.testRigMainBranch(rigName, rigPath, timeout); err != nil {
 			d.logger.Printf("main_branch_test: %s: FAILED: %v", rigName, err)
+			var testFailure *mainBranchTestFailure
+			if errors.As(err, &testFailure) {
+				for _, check := range testFailure.Checks {
+					beadID, beadErr := d.recordMainBranchCIFailure(testFailure, check)
+					if beadErr != nil {
+						d.logger.Printf("main_branch_test: %s: could not record ci-failure bead for %s: %v", rigName, check.Check, beadErr)
+						continue
+					}
+					if notifyErr := d.notifyMainBranchCIFailure(testFailure, check, beadID); notifyErr != nil {
+						d.logger.Printf("main_branch_test: %s: could not notify witness/refinery for %s: %v", rigName, check.Check, notifyErr)
+					}
+				}
+			}
 			failures = append(failures, fmt.Sprintf("%s: %v", rigName, err))
 			failed++
 		} else {
@@ -181,7 +246,7 @@ func (d *Daemon) runMainBranchTests() {
 
 // testRigMainBranch tests a single rig's main branch.
 func (d *Daemon) testRigMainBranch(rigName, rigPath string, timeout time.Duration) error {
-	// Load gate config from the rig's config.json
+	// Load gate config from the rig's merge-queue settings.
 	gateCfg, err := loadRigGateConfig(rigPath)
 	if err != nil {
 		return fmt.Errorf("loading gate config: %w", err)
@@ -240,23 +305,51 @@ func (d *Daemon) testRigMainBranch(rigName, rigPath string, timeout time.Duratio
 		}
 	}()
 
+	worktreeGit := git.NewGit(worktreePath)
+	commitSHA, err := worktreeGit.Rev("HEAD")
+	if err != nil {
+		return fmt.Errorf("resolving main branch commit: %w", err)
+	}
+
 	// Run gates or legacy test command
 	if len(gateCfg.Gates) > 0 {
-		return d.runGatesOnWorktree(ctx, rigName, worktreePath, gateCfg.Gates)
-	}
-	return d.runCommandOnWorktree(ctx, rigName, worktreePath, "test", gateCfg.TestCommand)
-}
-
-// runGatesOnWorktree runs all configured gates sequentially on the given worktree.
-func (d *Daemon) runGatesOnWorktree(ctx context.Context, rigName, workDir string, gates map[string]string) error {
-	var failures []string
-	for name, cmd := range gates {
-		if err := d.runCommandOnWorktree(ctx, rigName, workDir, name, cmd); err != nil {
-			failures = append(failures, fmt.Sprintf("gate %q: %v", name, err))
+		d.logger.Printf("main_branch_test: %s: running %d gate(s) on %s", rigName, len(gateCfg.Gates), commitSHA[:min(8, len(commitSHA))])
+		summary := verify.Run(ctx, worktreePath, gateCfg.Gates, gateCfg.GatesParallel, func(format string, args ...interface{}) {
+			d.logger.Printf("main_branch_test: %s: %s", rigName, fmt.Sprintf(format, args...))
+		})
+		if !summary.Success {
+			failures := make([]mainBranchCheckFailure, 0, len(summary.Results))
+			for _, result := range summary.Results {
+				if !result.Success {
+					failures = append(failures, mainBranchCheckFailure{
+						Check: result.Name,
+						Error: result.Error,
+					})
+				}
+			}
+			return &mainBranchTestFailure{
+				RigName:       rigName,
+				RigPath:       rigPath,
+				DefaultBranch: defaultBranch,
+				CommitSHA:     commitSHA,
+				Checks:        failures,
+			}
 		}
+		return nil
 	}
-	if len(failures) > 0 {
-		return fmt.Errorf("%s", strings.Join(failures, "; "))
+	if err := d.runCommandOnWorktree(ctx, rigName, worktreePath, "test", gateCfg.TestCommand); err != nil {
+		return &mainBranchTestFailure{
+			RigName:       rigName,
+			RigPath:       rigPath,
+			DefaultBranch: defaultBranch,
+			CommitSHA:     commitSHA,
+			Checks: []mainBranchCheckFailure{
+				{
+					Check: "test",
+					Error: err.Error(),
+				},
+			},
+		}
 	}
 	return nil
 }
@@ -280,6 +373,97 @@ func (d *Daemon) runCommandOnWorktree(ctx context.Context, rigName, workDir, lab
 		return fmt.Errorf("%s failed: %v\n%s", label, err, strings.Join(tail, "\n"))
 	}
 	return nil
+}
+
+func (d *Daemon) recordMainBranchCIFailure(failure *mainBranchTestFailure, check mainBranchCheckFailure) (string, error) {
+	if failure == nil {
+		return "", fmt.Errorf("main branch failure is nil")
+	}
+
+	bd := beads.New(filepath.Join(failure.RigPath, "mayor", "rig"))
+	title := fmt.Sprintf("CI failure: %s %s @ %s", failure.RigName, check.Check, shortSHA(failure.CommitSHA))
+	description := d.mainBranchFailureDescription(bd, failure, check)
+	priority := 2
+
+	existing, err := bd.FindLatestOpenIssueByTitleAndLabel(title, "ci-failure")
+	if err == nil && existing != nil {
+		if updateErr := bd.Update(existing.ID, beads.UpdateOptions{
+			Description: &description,
+			Priority:    &priority,
+			AddLabels:   []string{"gt:task", "ci-failure", "source:main-branch-test", "rig:" + failure.RigName},
+		}); updateErr != nil {
+			return "", updateErr
+		}
+		return existing.ID, nil
+	}
+	if err != nil && !errors.Is(err, beads.ErrNotFound) {
+		return "", err
+	}
+
+	issue, err := bd.Create(beads.CreateOptions{
+		Title:       title,
+		Description: description,
+		Priority:    priority,
+		Labels:      []string{"gt:task", "ci-failure", "source:main-branch-test", "rig:" + failure.RigName},
+	})
+	if err != nil {
+		return "", err
+	}
+	return issue.ID, nil
+}
+
+func (d *Daemon) notifyMainBranchCIFailure(failure *mainBranchTestFailure, check mainBranchCheckFailure, beadID string) error {
+	if failure == nil {
+		return fmt.Errorf("main branch failure is nil")
+	}
+
+	router := mail.NewRouterWithTownRoot(d.config.TownRoot, d.config.TownRoot)
+	defer router.WaitPendingNotifications()
+
+	msg := &mail.Message{
+		To:      failure.RigName + "/witness",
+		From:    "daemon",
+		Subject: fmt.Sprintf("MAIN_BRANCH_CI_FAILURE: %s %s @ %s", failure.RigName, check.Check, shortSHA(failure.CommitSHA)),
+		Body: fmt.Sprintf("Rig: %s\nBranch: %s\nCommit: %s\nCheck: %s\nIssue: %s\n%s",
+			failure.RigName, failure.DefaultBranch, failure.CommitSHA, check.Check, beadID, check.Error),
+	}
+	return router.Send(msg)
+}
+
+func (d *Daemon) mainBranchFailureDescription(bd *beads.Beads, failure *mainBranchTestFailure, check mainBranchCheckFailure) string {
+	mrID := ""
+	sourceIssue := ""
+	if bd != nil {
+		if mr, err := bd.FindMRForMergeCommit(failure.CommitSHA); err == nil && mr != nil {
+			mrID = mr.ID
+			if fields := beads.ParseMRFields(mr); fields != nil {
+				sourceIssue = fields.SourceIssue
+			}
+		}
+	}
+
+	lines := []string{
+		fmt.Sprintf("rig: %s", failure.RigName),
+		fmt.Sprintf("default_branch: %s", failure.DefaultBranch),
+		fmt.Sprintf("merge_commit: %s", failure.CommitSHA),
+		fmt.Sprintf("failing_check: %s", check.Check),
+		"detected_by: main_branch_test",
+	}
+	if mrID != "" {
+		lines = append(lines, fmt.Sprintf("merge_request: %s", mrID))
+	}
+	if sourceIssue != "" {
+		lines = append(lines, fmt.Sprintf("source_issue: %s", sourceIssue))
+	}
+	lines = append(lines, "", check.Error)
+	return strings.Join(lines, "\n")
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
 }
 
 // contains checks if a string slice contains a value.

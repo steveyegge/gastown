@@ -13,16 +13,17 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/verify"
 )
 
 // DefaultStaleClaimTimeout is the default duration after which a claimed MR
@@ -98,6 +99,9 @@ type MergeQueueConfig struct {
 	// OnConflict is the strategy for handling conflicts: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
 
+	// VerificationMode controls whether pre-merge verification is advisory or strict.
+	VerificationMode string `json:"verification_mode"`
+
 	// RunTests controls whether to run tests before merging.
 	RunTests bool `json:"run_tests"`
 
@@ -161,6 +165,7 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 	return &MergeQueueConfig{
 		Enabled:                 true,
 		OnConflict:              "assign_back",
+		VerificationMode:        config.VerificationModeAdvisory,
 		RunTests:                true,
 		TestCommand:             "",
 		DeleteMergedBranches:    true,
@@ -216,7 +221,6 @@ type MRAnomaly struct {
 	Age      time.Duration `json:"age,omitempty"`
 	Detail   string        `json:"detail"`
 }
-
 
 // errMergeSlotTimeout is returned by acquireMainPushSlot when retries are
 // exhausted due to slot contention. Infrastructure errors (beads down,
@@ -287,8 +291,15 @@ func (e *Engineer) SetOutput(w io.Writer) {
 	e.output = w
 }
 
-// LoadConfig loads merge queue configuration from the rig's config.json.
+// LoadConfig loads merge queue configuration from layered rig settings,
+// falling back to the legacy rig-root config.json shape when needed.
 func (e *Engineer) LoadConfig() error {
+	if mqCfg, err := config.LoadEffectiveMergeQueueConfig(e.rig.Path); err != nil {
+		return fmt.Errorf("loading effective merge queue config: %w", err)
+	} else if mqCfg != nil {
+		return e.applyConfigSettings(mqCfg)
+	}
+
 	configPath := filepath.Join(e.rig.Path, "config.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -315,18 +326,19 @@ func (e *Engineer) LoadConfig() error {
 	// Parse merge_queue section into our config struct
 	// We need special handling for poll_interval (string -> Duration)
 	var mqRaw struct {
-		Enabled              *bool                      `json:"enabled"`
-		OnConflict           *string                    `json:"on_conflict"`
-		RunTests             *bool                      `json:"run_tests"`
-		TestCommand          *string                    `json:"test_command"`
-		DeleteMergedBranches *bool                      `json:"delete_merged_branches"`
-		RetryFlakyTests      *int                       `json:"retry_flaky_tests"`
-		PollInterval         *string                    `json:"poll_interval"`
-		MaxConcurrent        *int                       `json:"max_concurrent"`
-		StaleClaimTimeout    *string                    `json:"stale_claim_timeout"`
-		Gates                map[string]*gateConfigRaw  `json:"gates"`
-		GatesParallel        *bool                      `json:"gates_parallel"`
-		AutoPush             *bool                      `json:"auto_push"`
+		Enabled              *bool                     `json:"enabled"`
+		OnConflict           *string                   `json:"on_conflict"`
+		VerificationMode     *string                   `json:"verification_mode"`
+		RunTests             *bool                     `json:"run_tests"`
+		TestCommand          *string                   `json:"test_command"`
+		DeleteMergedBranches *bool                     `json:"delete_merged_branches"`
+		RetryFlakyTests      *int                      `json:"retry_flaky_tests"`
+		PollInterval         *string                   `json:"poll_interval"`
+		MaxConcurrent        *int                      `json:"max_concurrent"`
+		StaleClaimTimeout    *string                   `json:"stale_claim_timeout"`
+		Gates                map[string]*gateConfigRaw `json:"gates"`
+		GatesParallel        *bool                     `json:"gates_parallel"`
+		AutoPush             *bool                     `json:"auto_push"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -339,6 +351,9 @@ func (e *Engineer) LoadConfig() error {
 	}
 	if mqRaw.OnConflict != nil {
 		e.config.OnConflict = *mqRaw.OnConflict
+	}
+	if mqRaw.VerificationMode != nil {
+		e.config.VerificationMode = *mqRaw.VerificationMode
 	}
 	if mqRaw.RunTests != nil {
 		e.config.RunTests = *mqRaw.RunTests
@@ -404,6 +419,68 @@ func (e *Engineer) LoadConfig() error {
 	}
 	if mqRaw.AutoPush != nil {
 		e.config.AutoPush = *mqRaw.AutoPush
+	}
+
+	return nil
+}
+
+func (e *Engineer) applyConfigSettings(mq *config.MergeQueueConfig) error {
+	if mq == nil {
+		return nil
+	}
+
+	e.config.Enabled = mq.Enabled
+	e.config.OnConflict = mq.OnConflict
+	e.config.VerificationMode = mq.GetVerificationMode()
+	e.config.RunTests = mq.IsRunTestsEnabled()
+	e.config.TestCommand = mq.TestCommand
+	e.config.DeleteMergedBranches = mq.IsDeleteMergedBranchesEnabled()
+	e.config.RetryFlakyTests = mq.RetryFlakyTests
+	e.config.MaxConcurrent = mq.MaxConcurrent
+	e.config.GatesParallel = mq.IsGatesParallelEnabled()
+	e.config.AutoPush = mq.IsAutoPushEnabled()
+
+	if mq.PollInterval != "" {
+		dur, err := time.ParseDuration(mq.PollInterval)
+		if err != nil {
+			return fmt.Errorf("invalid poll_interval %q: %w", mq.PollInterval, err)
+		}
+		e.config.PollInterval = dur
+	}
+	if mq.StaleClaimTimeout != "" {
+		dur, err := time.ParseDuration(mq.StaleClaimTimeout)
+		if err != nil {
+			return fmt.Errorf("invalid stale_claim_timeout %q: %w", mq.StaleClaimTimeout, err)
+		}
+		if dur <= 0 {
+			return fmt.Errorf("stale_claim_timeout must be positive, got %v", dur)
+		}
+		e.config.StaleClaimTimeout = dur
+	}
+
+	if mq.Gates != nil {
+		e.config.Gates = make(map[string]*GateConfig, len(mq.Gates))
+		for name, gate := range mq.Gates {
+			if gate == nil {
+				e.config.Gates[name] = nil
+				continue
+			}
+			cfg := &GateConfig{
+				Cmd:   gate.Cmd,
+				Phase: GatePhase(config.MergeQueueGatePhasePreMerge),
+			}
+			if gate.Phase != "" {
+				cfg.Phase = GatePhase(gate.Phase)
+			}
+			if gate.Timeout != "" {
+				dur, err := time.ParseDuration(gate.Timeout)
+				if err != nil {
+					return fmt.Errorf("invalid timeout for gate %q: %w", name, err)
+				}
+				cfg.Timeout = dur
+			}
+			e.config.Gates[name] = cfg
+		}
 	}
 
 	return nil
@@ -851,78 +928,62 @@ func (e *Engineer) runGates(ctx context.Context) ProcessResult {
 // Gates run in parallel if GatesParallel is true; otherwise sequentially.
 // Any single gate failure means overall failure.
 func (e *Engineer) runGatesForPhase(ctx context.Context, phase GatePhase) ProcessResult {
-	// Filter gates for this phase. Empty phase is treated as pre-merge (default).
-	gates := make(map[string]*GateConfig)
-	for name, gc := range e.config.Gates {
-		gatePhase := gc.Phase
-		if gatePhase == "" {
-			gatePhase = GatePhasePreMerge
-		}
-		if gatePhase == phase {
-			gates[name] = gc
+	gates, err := e.verificationGatesForPhase(phase)
+	if err != nil {
+		return ProcessResult{
+			Success:     false,
+			TestsFailed: true,
+			Error:       err.Error(),
 		}
 	}
 	if len(gates) == 0 {
 		return ProcessResult{Success: true}
 	}
 
-	// Sort gate names for deterministic ordering
-	names := make([]string, 0, len(gates))
-	for name := range gates {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	parallel := e.config.GatesParallel && phase == GatePhasePreMerge // post-squash always sequential
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Running %d %s gate(s) (parallel=%v)\n", len(names), phase, parallel)
-
-	var results []GateResult
-
-	if parallel {
-		results = make([]GateResult, len(names))
-		var wg sync.WaitGroup
-		for i, name := range names {
-			wg.Add(1)
-			go func(idx int, gateName string) {
-				defer wg.Done()
-				_, _ = fmt.Fprintf(e.output, "[Engineer] Gate %q: starting (%s)\n", gateName, gates[gateName].Cmd)
-				results[idx] = e.runGate(ctx, gateName, gates[gateName])
-			}(i, name)
-		}
-		wg.Wait()
-	} else {
-		for _, name := range names {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Gate %q: starting (%s)\n", name, gates[name].Cmd)
-			result := e.runGate(ctx, name, gates[name])
-			results = append(results, result)
-			if !result.Success {
-				// Sequential mode: stop on first failure
-				break
-			}
-		}
-	}
-
-	// Report results
-	var failures []string
-	for _, r := range results {
-		if r.Success {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Gate %q: passed (%v)\n", r.Name, r.Elapsed.Truncate(time.Millisecond))
-		} else {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Gate %q: FAILED (%v) - %s\n", r.Name, r.Elapsed.Truncate(time.Millisecond), r.Error)
-			failures = append(failures, fmt.Sprintf("%s: %s", r.Name, r.Error))
-		}
-	}
-
-	if len(failures) > 0 {
+	parallel := e.config.GatesParallel && phase == GatePhasePreMerge
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Running %d %s gate(s) (parallel=%v)\n", len(gates), phase, parallel)
+	summary := verify.Run(ctx, e.workDir, gates, parallel, func(format string, args ...interface{}) {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] %s\n", fmt.Sprintf(format, args...))
+	})
+	if !summary.Success {
 		return ProcessResult{
 			Success:     false,
 			TestsFailed: true,
-			Error:       fmt.Sprintf("quality gates failed: %s", strings.Join(failures, "; ")),
+			Error:       summary.Error,
 		}
 	}
-
-	_, _ = fmt.Fprintln(e.output, "[Engineer] All quality gates passed")
 	return ProcessResult{Success: true}
+}
+
+func (e *Engineer) verificationGatesForPhase(phase GatePhase) ([]verify.Gate, error) {
+	if len(e.config.Gates) == 0 {
+		return nil, nil
+	}
+
+	gates := make([]verify.Gate, 0, len(e.config.Gates))
+	for name, gate := range e.config.Gates {
+		if gate == nil {
+			return nil, fmt.Errorf("gate %q is null", name)
+		}
+		gatePhase := gate.Phase
+		if gatePhase == "" {
+			gatePhase = GatePhasePreMerge
+		}
+		if gatePhase != phase {
+			continue
+		}
+		gates = append(gates, verify.Gate{
+			Name:    name,
+			Cmd:     gate.Cmd,
+			Timeout: gate.Timeout,
+			Phase:   verify.Phase(gatePhase),
+		})
+	}
+
+	sort.Slice(gates, func(i, j int) bool {
+		return gates[i].Name < gates[j].Name
+	})
+	return gates, nil
 }
 
 // syncCrewWorkspaces pulls latest changes to all crew workspaces.
@@ -970,7 +1031,7 @@ func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult 
 	// If the polecat already rebased onto the target and ran gates, and the target
 	// hasn't moved since, we can skip running gates entirely (~5s merge).
 	skipGates := false
-	if mr.PreVerified && mr.PreVerifiedBase != "" {
+	if e.config.VerificationMode != config.VerificationModeStrict && mr.PreVerified && mr.PreVerifiedBase != "" {
 		_, _ = fmt.Fprintf(e.output, "  Pre-verified: yes (base=%s)\n", mr.PreVerifiedBase[:min(8, len(mr.PreVerifiedBase))])
 		// Check if target HEAD still matches the verified base
 		targetHead, err := e.git.Rev("origin/" + mr.Target)
@@ -983,6 +1044,8 @@ func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult 
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Pre-verification stale — target moved (%s → %s), running gates normally\n",
 				mr.PreVerifiedBase[:min(8, len(mr.PreVerifiedBase))], targetHead[:min(8, len(targetHead))])
 		}
+	} else if e.config.VerificationMode == config.VerificationModeStrict && mr.PreVerified {
+		_, _ = fmt.Fprintln(e.output, "[Engineer] Strict verification enabled — ignoring polecat pre-verification claim")
 	}
 
 	// Use the shared merge logic

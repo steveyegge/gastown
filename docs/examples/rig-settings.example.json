@@ -31,6 +31,7 @@
         "integration_branch_template": "integration/{epic}",
         "integration_branch_auto_land": false,
         "on_conflict": "assign_back",
+        "verification_mode": "strict",
         "run_tests": true,
         "test_command": "",
         "build_command": "go build ./...",
@@ -38,10 +39,11 @@
         "setup_command": "",
         "typecheck_command": "",
         "gates": {
-            "lint": {"cmd": "golangci-lint run ./...", "timeout": "2m"},
-            "test": {"cmd": "go test ./...", "timeout": "5m"},
-            "build-check": {"cmd": "go build ./...", "timeout": "2m", "phase": "post-squash"}
+            "verify": {"cmd": "./scripts/ci/verify.sh", "timeout": "10m"},
+            "smoke-post-squash": {"cmd": "make ci-smoke", "timeout": "2m", "phase": "post-squash"}
         },
+        "gates_parallel": true,
+        "auto_push": true,
         "delete_merged_branches": true,
         "retry_flaky_tests": 1,
         "poll_interval": "30s",

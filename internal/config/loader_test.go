@@ -554,6 +554,154 @@ func TestMergeSettingsCommand(t *testing.T) {
 	})
 }
 
+func TestValidateStrictMergeQueueRequirements(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		cfg     *MergeQueueConfig
+		wantErr bool
+	}{
+		{
+			name: "strict with repo-local gate",
+			cfg: &MergeQueueConfig{
+				VerificationMode: VerificationModeStrict,
+				Gates: map[string]*MergeQueueGateConfig{
+					"verify": {Cmd: "./scripts/ci/verify.sh"},
+				},
+			},
+		},
+		{
+			name: "strict with make target",
+			cfg: &MergeQueueConfig{
+				VerificationMode: VerificationModeStrict,
+				Gates: map[string]*MergeQueueGateConfig{
+					"verify": {Cmd: "make ci-verify"},
+				},
+			},
+		},
+		{
+			name: "strict missing gates",
+			cfg: &MergeQueueConfig{
+				VerificationMode: VerificationModeStrict,
+			},
+			wantErr: true,
+		},
+		{
+			name: "strict with non-local command",
+			cfg: &MergeQueueConfig{
+				VerificationMode: VerificationModeStrict,
+				Gates: map[string]*MergeQueueGateConfig{
+					"verify": {Cmd: "go test ./..."},
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateStrictMergeQueueRequirements(tt.cfg)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateStrictMergeQueueRequirements() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestMergeSettingsCommand_MergesStrictFields(t *testing.T) {
+	t.Parallel()
+
+	repo := &MergeQueueConfig{
+		VerificationMode: VerificationModeAdvisory,
+		Gates: map[string]*MergeQueueGateConfig{
+			"verify": {Cmd: "./scripts/ci/verify.sh"},
+		},
+		GatesParallel: boolPtr(true),
+		AutoPush:      boolPtr(true),
+	}
+	local := &MergeQueueConfig{
+		VerificationMode: VerificationModeStrict,
+		Gates: map[string]*MergeQueueGateConfig{
+			"verify": {Cmd: "make ci-verify"},
+		},
+		GatesParallel: boolPtr(false),
+		AutoPush:      boolPtr(false),
+	}
+
+	merged := MergeSettingsCommand(repo, local)
+	if merged.GetVerificationMode() != VerificationModeStrict {
+		t.Fatalf("VerificationMode = %q, want %q", merged.GetVerificationMode(), VerificationModeStrict)
+	}
+	if merged.Gates["verify"].Cmd != "make ci-verify" {
+		t.Fatalf("verify gate = %q, want make ci-verify", merged.Gates["verify"].Cmd)
+	}
+	if merged.IsGatesParallelEnabled() {
+		t.Fatal("expected gates_parallel=false override")
+	}
+	if merged.IsAutoPushEnabled() {
+		t.Fatal("expected auto_push=false override")
+	}
+}
+
+func TestLoadEffectiveMergeQueueConfig(t *testing.T) {
+	t.Parallel()
+
+	rigPath := t.TempDir()
+	repoSettingsPath := filepath.Join(rigPath, "mayor", "rig", RepoSettingsPath)
+	localSettingsPath := filepath.Join(rigPath, "settings", "config.json")
+
+	repoSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: CurrentRigSettingsVersion,
+		MergeQueue: &MergeQueueConfig{
+			VerificationMode: VerificationModeAdvisory,
+			Gates: map[string]*MergeQueueGateConfig{
+				"verify": {Cmd: "./scripts/ci/verify.sh"},
+			},
+			GatesParallel: boolPtr(true),
+		},
+	}
+	localSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: CurrentRigSettingsVersion,
+		MergeQueue: &MergeQueueConfig{
+			VerificationMode: VerificationModeStrict,
+			GatesParallel:    boolPtr(false),
+			AutoPush:         boolPtr(false),
+		},
+	}
+
+	if err := SaveRigSettings(repoSettingsPath, repoSettings); err != nil {
+		t.Fatalf("SaveRigSettings(repo): %v", err)
+	}
+	if err := SaveRigSettings(localSettingsPath, localSettings); err != nil {
+		t.Fatalf("SaveRigSettings(local): %v", err)
+	}
+
+	mq, err := LoadEffectiveMergeQueueConfig(rigPath)
+	if err != nil {
+		t.Fatalf("LoadEffectiveMergeQueueConfig: %v", err)
+	}
+	if mq == nil {
+		t.Fatal("expected merged merge_queue config")
+	}
+	if mq.GetVerificationMode() != VerificationModeStrict {
+		t.Fatalf("VerificationMode = %q, want %q", mq.GetVerificationMode(), VerificationModeStrict)
+	}
+	if mq.Gates["verify"].Cmd != "./scripts/ci/verify.sh" {
+		t.Fatalf("verify gate = %q, want repo-local verifier", mq.Gates["verify"].Cmd)
+	}
+	if mq.IsGatesParallelEnabled() {
+		t.Fatal("expected local gates_parallel=false override")
+	}
+	if mq.IsAutoPushEnabled() {
+		t.Fatal("expected local auto_push=false override")
+	}
+}
+
 func TestMayorConfigRoundTrip(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
