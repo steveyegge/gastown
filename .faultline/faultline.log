@@ -74,3 +74,9 @@
 {"time":"2026-03-25T12:16:32.079613-07:00","level":"ERROR","msg":"list events","err":"list events: Error 1105 (HY000): column \"project_id\" could not be found in any table in scope"}
 {"time":"2026-03-25T12:16:32.092244-07:00","level":"ERROR","msg":"process store event","err":"insert event: Error 1054 (HY000): Unknown column 'project_id' in 'events'","event_id":"fb989fd6-0f7e-495d-91d9-0905feb2fdfa"}
 {"time":"2026-03-25T12:16:50.690356-07:00","level":"INFO","msg":"dolt commit","writes":1}
+{"time":"2026-03-25T12:26:31.091158-07:00","level":"ERROR","msg":"list events","err":"list events: Error 1105 (HY000): column \"project_id\" could not be found in any table in scope"}
+{"time":"2026-03-25T12:26:31.103216-07:00","level":"ERROR","msg":"process store event","err":"insert event: Error 1054 (HY000): Unknown column 'project_id' in 'events'","event_id":"7e4e52a0-1a5d-466c-bfa8-1a20f71713fa"}
+{"time":"2026-03-25T12:26:50.699619-07:00","level":"INFO","msg":"dolt commit","writes":1}
+{"time":"2026-03-25T12:30:50.674491-07:00","level":"ERROR","msg":"retention: purge events","err":"delete events: Error 1105 (HY000): column \"received_at\" could not be found in any table in scope"}
+{"time":"2026-03-25T12:30:50.695763-07:00","level":"ERROR","msg":"process store event","err":"insert event: Error 1054 (HY000): Unknown column 'project_id' in 'events'","event_id":"33d530d3-67de-4005-87f2-8eb670e57858"}
+{"time":"2026-03-25T12:31:50.70186-07:00","level":"INFO","msg":"dolt commit","writes":1}
