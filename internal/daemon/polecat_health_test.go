@@ -169,20 +169,19 @@ func TestCheckPolecatHealth_SpawningGuardExpires(t *testing.T) {
 	}
 }
 
-// TestCheckPolecatHealth_DBStateOverridesDescription verifies that the daemon
-// reads agent_state from the DB column (source of truth), not the description
-// text. UpdateAgentState updates the DB column but not the description, so a
-// polecat that transitioned from "spawning" to "working" will have stale
-// description text. The DB column must be authoritative.
-func TestCheckPolecatHealth_DBStateOverridesDescription(t *testing.T) {
+// TestCheckPolecatHealth_DescriptionOverridesDBState verifies that the daemon
+// reads agent_state from the description (source of truth), not the DB column.
+// UpdateAgentState updates the description (gt-3hn3); the DB column is no
+// longer maintained since bd removed `bd agent state` (0bd598ce).
+func TestCheckPolecatHealth_DescriptionOverridesDBState(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test uses Unix shell script mocks for tmux and bd")
 	}
 	binDir := t.TempDir()
 	writeFakeTestTmux(t, binDir)
 	recentTime := time.Now().UTC().Format(time.RFC3339)
-	// Description says "spawning" (stale) but DB column says "working" (truth)
-	bdPath := writeFakeTestBD(t, binDir, "spawning", "working", "gt-xyz", recentTime)
+	// Description says "working" (truth) but DB column says "spawning" (stale)
+	bdPath := writeFakeTestBD(t, binDir, "working", "spawning", "gt-xyz", recentTime)
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
@@ -197,13 +196,13 @@ func TestCheckPolecatHealth_DBStateOverridesDescription(t *testing.T) {
 	d.checkPolecatHealth("myr", "mycat")
 
 	got := logBuf.String()
-	// Should NOT skip due to spawning guard — DB says "working"
+	// Should NOT skip due to spawning guard — description says "working"
 	if strings.Contains(got, "Skipping restart") {
-		t.Errorf("daemon should use DB agent_state (working), not stale description (spawning), got: %q", got)
+		t.Errorf("daemon should use description agent_state (working), not stale DB column (spawning), got: %q", got)
 	}
-	// Should detect crash since DB says working + session is dead
+	// Should detect crash since description says working + session is dead
 	if !strings.Contains(got, "CRASH DETECTED") {
-		t.Errorf("expected CRASH DETECTED when DB state is 'working' with dead session, got: %q", got)
+		t.Errorf("expected CRASH DETECTED when description state is 'working' with dead session, got: %q", got)
 	}
 }
 

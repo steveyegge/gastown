@@ -1802,13 +1802,21 @@ func fetchAgentBeadSnapshot(bd *BdCli, workDir, agentBeadID string) *agentBeadSn
 		return nil
 	}
 
+	fields := beads.ParseAgentFields(issues[0].Description)
+	// Description is the authoritative source for agent_state (gt-3hn3).
+	// The agent_state column is no longer maintained since bd removed the
+	// `bd agent state` command (0bd598ce). Prefer description-parsed state.
+	agentState := fields.AgentState
+	if agentState == "" {
+		agentState = issues[0].AgentState // fallback to stale column for migration
+	}
 	return &agentBeadSnapshot{
-		AgentState: issues[0].AgentState,
+		AgentState: agentState,
 		HookBead:   issues[0].HookBead,
 		Labels:     issues[0].Labels,
 		UpdatedAt:  issues[0].UpdatedAt,
 		ActiveMR:   issues[0].ActiveMR,
-		Fields:     beads.ParseAgentFields(issues[0].Description),
+		Fields:     fields,
 	}
 }
 
@@ -1891,6 +1899,7 @@ func clearCompletionMetadata(bd *BdCli, workDir, agentBeadID string) error {
 
 // getAgentBeadState reads agent_state and hook_bead from an agent bead.
 // Returns the agent_state string and hook_bead ID.
+// Prefers description-parsed agent_state (gt-3hn3), falls back to column.
 func getAgentBeadState(bd *BdCli, workDir, agentBeadID string) (agentState, hookBead string) {
 	output, err := bd.Exec(workDir, "show", agentBeadID, "--json")
 	if err != nil || output == "" {
@@ -1899,14 +1908,20 @@ func getAgentBeadState(bd *BdCli, workDir, agentBeadID string) (agentState, hook
 
 	// Parse JSON response — bd show --json returns an array
 	var issues []struct {
-		AgentState string `json:"agent_state"`
-		HookBead   string `json:"hook_bead"`
+		AgentState  string `json:"agent_state"`
+		HookBead    string `json:"hook_bead"`
+		Description string `json:"description"`
 	}
 	if err := json.Unmarshal([]byte(output), &issues); err != nil || len(issues) == 0 {
 		return "", ""
 	}
 
-	return issues[0].AgentState, issues[0].HookBead
+	// Description is authoritative for agent_state (gt-3hn3).
+	state := issues[0].AgentState
+	if fields := beads.ParseAgentFields(issues[0].Description); fields.AgentState != "" {
+		state = fields.AgentState
+	}
+	return state, issues[0].HookBead
 }
 
 // getAgentBeadAge returns the time since the agent bead was last updated.

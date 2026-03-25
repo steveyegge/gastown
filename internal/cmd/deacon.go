@@ -1164,15 +1164,16 @@ func sendMail(townRoot, to, subject, body string) {
 	_ = cmd.Run() // Best effort
 }
 
-// updateAgentBeadState updates an agent bead's state.
+// updateAgentBeadState updates an agent bead's state via label-based tracking.
+// Uses `bd set-state` which records an event bead and sets a dimension label (gt-3hn3).
+// Previously used `bd agent state` which was removed in bd upstream refactor (0bd598ce).
 func updateAgentBeadState(townRoot, agent, state, _ string) { // reason unused but kept for API consistency
 	beadID, _, err := agentAddressToIDs(agent)
 	if err != nil {
 		return
 	}
 
-	// Use bd agent state command
-	cmd := exec.Command("bd", "agent", "state", beadID, state)
+	cmd := exec.Command("bd", "set-state", beadID, "agent_state="+state) //nolint:gosec // trusted internal values
 	cmd.Dir = townRoot
 	_ = cmd.Run() // Best effort
 }

@@ -70,13 +70,17 @@ esac
 	t.Setenv("MOCK_BD_SHOW_OUTPUT", showOutput)
 }
 
-func TestGetAgentBead_PrefersStructuredAgentState(t *testing.T) {
+// TestGetAgentBead_PrefersDescriptionAgentState verifies that description-parsed
+// agent_state is authoritative over the database column (gt-3hn3).
+// The agent_state column is no longer maintained since bd removed `bd agent state`.
+func TestGetAgentBead_PrefersDescriptionAgentState(t *testing.T) {
 	tmpDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
-	installMockBDFixedShowOutput(t, `[{"id":"gt-gastown-polecat-nux","title":"Polecat nux","issue_type":"agent","labels":["gt:agent"],"description":"role_type: polecat\nrig: gastown\nagent_state: spawning\nhook_bead: null","agent_state":"idle"}]`)
+	// Description says "working" (truth), DB column says "spawning" (stale)
+	installMockBDFixedShowOutput(t, `[{"id":"gt-gastown-polecat-nux","title":"Polecat nux","issue_type":"agent","labels":["gt:agent"],"description":"role_type: polecat\nrig: gastown\nagent_state: working\nhook_bead: null","agent_state":"spawning"}]`)
 
 	bd := NewIsolated(tmpDir)
 	issue, fields, err := bd.GetAgentBead("gt-gastown-polecat-nux")
@@ -89,11 +93,13 @@ func TestGetAgentBead_PrefersStructuredAgentState(t *testing.T) {
 	if fields == nil {
 		t.Fatal("GetAgentBead returned nil fields")
 	}
-	if issue.AgentState != "idle" {
-		t.Fatalf("issue.AgentState = %q, want %q", issue.AgentState, "idle")
+	// Column still shows stale value
+	if issue.AgentState != "spawning" {
+		t.Fatalf("issue.AgentState = %q, want %q (raw column)", issue.AgentState, "spawning")
 	}
-	if fields.AgentState != "idle" {
-		t.Fatalf("fields.AgentState = %q, want %q", fields.AgentState, "idle")
+	// Fields should use description (authoritative), not column
+	if fields.AgentState != "working" {
+		t.Fatalf("fields.AgentState = %q, want %q (from description)", fields.AgentState, "working")
 	}
 }
 

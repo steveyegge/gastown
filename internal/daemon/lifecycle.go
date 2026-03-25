@@ -810,7 +810,7 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 		Description string   `json:"description"`
 		UpdatedAt   string   `json:"updated_at"`
 		HookBead    string   `json:"hook_bead"`   // Read from database column
-		AgentState  string   `json:"agent_state"` // Read from database column
+		AgentState  string   `json:"agent_state"` // Stale column — description is authoritative (gt-3hn3)
 	}
 
 	if err := json.Unmarshal(output, &issues); err != nil {
@@ -840,14 +840,14 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 		info.Rig = fields.Rig
 	}
 
-	// Use AgentState from database column directly (not from description).
-	// UpdateAgentState updates the DB column but not the description text,
-	// so the description can contain stale state (e.g., "spawning" after
-	// the polecat has transitioned to "working"). Fall back to description
-	// only if the DB column is empty (legacy beads).
-	info.State = issue.AgentState
-	if info.State == "" && fields != nil {
+	// Description is the authoritative source for agent_state (gt-3hn3).
+	// UpdateAgentState now updates the description, not the DB column
+	// (bd removed the `bd agent state` command in 0bd598ce).
+	// Fall back to DB column for beads not yet updated via description.
+	if fields != nil && fields.AgentState != "" {
 		info.State = fields.AgentState
+	} else {
+		info.State = issue.AgentState
 	}
 
 	// Use HookBead from database column directly (not from description)

@@ -415,25 +415,16 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 	return nil
 }
 
-// UpdateAgentState updates the agent_state field in an agent bead.
-// Uses `bd agent state` command for the database column directly,
-// then syncs the description's agent_state field to match (gt-ulom).
+// UpdateAgentState updates the agent_state field in an agent bead's description.
+// The description is the authoritative source for agent_state (gt-3hn3).
+// Previously used `bd agent state` to update a DB column directly, but that
+// command was removed in bd upstream refactor (0bd598ce). The column is no
+// longer maintained; reads should use description-parsed state instead.
 func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, nil, retErr) }()
-	// Update agent state using bd agent state command
-	// Use runWithRouting so bd can resolve cross-prefix agent beads (e.g., wa-*
-	// agent beads from hq context) via routes.jsonl instead of BEADS_DIR.
-	_, err := b.runWithRouting("agent", "state", id, state)
-	if err != nil {
-		return fmt.Errorf("updating agent state: %w", err)
+	if err := b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{AgentState: &state}); err != nil {
+		return fmt.Errorf("updating agent state in description: %w", err)
 	}
-
-	// Sync the description's agent_state field with the column (gt-ulom).
-	// Without this, the description stays stale (e.g., "spawning" after the
-	// column transitions to "working"), causing bd show and dashboards to
-	// display incorrect state after idle polecat reuse via gt sling.
-	_ = b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{AgentState: &state})
-
 	return nil
 }
 
@@ -446,7 +437,7 @@ func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 // This allows multiple fields to be updated in a single read-modify-write
 // cycle, avoiding races where concurrent callers overwrite each other's changes.
 type AgentFieldUpdates struct {
-	AgentState        *string // Sync description agent_state with column (gt-ulom)
+	AgentState        *string // Authoritative agent_state source (gt-3hn3, was gt-ulom)
 	CleanupStatus     *string
 	ActiveMR          *string
 	NotificationLevel *string
@@ -617,12 +608,9 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 	}
 
 	fields := ParseAgentFields(issue.Description)
-	// Prefer the structured agent_state column when present.
-	// Some writers (for example, `bd agent state`) update the DB column directly
-	// without rewriting the description text, so description-derived state can be stale.
-	if issue.AgentState != "" {
-		fields.AgentState = issue.AgentState
-	}
+	// Description is the authoritative source for agent_state (gt-3hn3).
+	// The agent_state column is no longer maintained since bd removed the
+	// `bd agent state` command (0bd598ce). Description-parsed state is used.
 	return issue, fields, nil
 }
 
