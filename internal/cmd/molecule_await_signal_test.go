@@ -62,6 +62,15 @@ func TestCalculateEffectiveTimeout(t *testing.T) {
 			want:        5 * time.Minute,
 		},
 		{
+			name:        "backoff overflow guard: idle=34 with max cap",
+			timeout:     "60s",
+			backoffBase: "30s",
+			backoffMult: 2,
+			backoffMax:  "5m",
+			idleCycles:  34, // 30s * 2^34 overflows int64; must clamp to 5m
+			want:        5 * time.Minute,
+		},
+		{
 			name:        "backoff base exceeds max",
 			timeout:     "60s",
 			backoffBase: "15m",
