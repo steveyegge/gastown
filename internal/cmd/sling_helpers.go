@@ -251,18 +251,18 @@ func getBeadInfo(beadID string) (*beadInfo, error) {
 // This enables a single read-modify-write cycle instead of sequential independent updates,
 // eliminating the race condition where concurrent writers could overwrite each other's fields.
 type beadFieldUpdates struct {
-	Dispatcher       string // Agent that dispatched the work
-	Args             string // Natural language instructions
+	Dispatcher       string   // Agent that dispatched the work
+	Args             string   // Natural language instructions
 	Vars             []string // Formula variables (key=value pairs)
-	AttachedMolecule string // Wisp root ID
-	AttachedFormula  string // Formula name (e.g., "mol-polecat-work") for inline step display
-	NoMerge          bool   // Skip merge queue on completion
-	ReviewOnly       bool   // Review-only mode: assignee must not merge/commit/push
-	Mode             string // Execution mode: "" (normal) or "ralph"
-	ConvoyID         string // Convoy bead ID (e.g., "hq-cv-abc")
-	MergeStrategy    string // Convoy merge strategy: "direct", "mr", "local"
-	ConvoyOwned      bool   // Convoy has gt:owned label (caller-managed lifecycle)
-	FormulaVars      string // Newline-separated key=value pairs for formula template substitution
+	AttachedMolecule string   // Wisp root ID
+	AttachedFormula  string   // Formula name (e.g., "mol-polecat-work") for inline step display
+	NoMerge          bool     // Skip merge queue on completion
+	ReviewOnly       bool     // Review-only mode: assignee must not merge/commit/push
+	Mode             string   // Execution mode: "" (normal) or "ralph"
+	ConvoyID         string   // Convoy bead ID (e.g., "hq-cv-abc")
+	MergeStrategy    string   // Convoy merge strategy: "direct", "mr", "local"
+	ConvoyOwned      bool     // Convoy has gt:owned label (caller-managed lifecycle)
+	FormulaVars      string   // Newline-separated key=value pairs for formula template substitution
 }
 
 // storeFieldsInBead performs a single read-modify-write to update all attachment fields
@@ -700,7 +700,7 @@ func InstantiateFormulaOnBead(ctx context.Context, formulaName, beadID, title, h
 		if err := BdCmd("cook", formulaName).
 			Dir(formulaWorkDir).
 			WithGTRoot(townRoot).
-				Run(); err != nil {
+			Run(); err != nil {
 			// Retry with embedded formula
 			resolvedFormula, formulaCleanup = resolveFormulaToTempFile(formulaName)
 			if formulaCleanup != nil {
@@ -1081,9 +1081,87 @@ func isSlingConfigError(err error) bool {
 		strings.Contains(msg, "connection refused")
 }
 
+// appendVar appends a key=value var if value is non-empty.
+func appendVar(vars []string, key, value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return vars
+	}
+	return append(vars, fmt.Sprintf("%s=%s", key, value))
+}
+
+// appendBoolPtrVar appends a key=value var if the pointer is non-nil.
+func appendBoolPtrVar(vars []string, key string, value *bool) []string {
+	if value == nil {
+		return vars
+	}
+	return append(vars, fmt.Sprintf("%s=%t", key, *value))
+}
+
+func gateCommand(mq *config.MergeQueueConfig, name string) string {
+	if mq == nil || mq.Gates == nil {
+		return ""
+	}
+	gate := mq.Gates[name]
+	if gate == nil {
+		return ""
+	}
+	return strings.TrimSpace(gate.Cmd)
+}
+
+func appendMergeQueuePromptVars(vars []string, mq *config.MergeQueueConfig) []string {
+	if mq == nil {
+		return vars
+	}
+
+	vars = append(vars, fmt.Sprintf("integration_branch_refinery_enabled=%t", mq.IsRefineryIntegrationEnabled()))
+	vars = append(vars, fmt.Sprintf("integration_branch_auto_land=%t", mq.IsIntegrationBranchAutoLandEnabled()))
+	vars = append(vars, fmt.Sprintf("run_tests=%t", mq.IsRunTestsEnabled()))
+	vars = append(vars, fmt.Sprintf("delete_merged_branches=%t", mq.IsDeleteMergedBranchesEnabled()))
+	vars = append(vars, fmt.Sprintf("judgment_enabled=%t", mq.IsJudgmentEnabled()))
+	vars = appendVar(vars, "review_depth", mq.GetReviewDepth())
+	vars = appendVar(vars, "verification_mode", mq.GetVerificationMode())
+	vars = appendVar(vars, "setup_command", mq.SetupCommand)
+	vars = appendVar(vars, "typecheck_command", mq.TypecheckCommand)
+	vars = appendVar(vars, "lint_command", mq.LintCommand)
+	vars = appendVar(vars, "test_command", mq.TestCommand)
+	vars = appendVar(vars, "build_command", mq.BuildCommand)
+	vars = appendVar(vars, "verify_gate_command", gateCommand(mq, "verify"))
+	vars = appendVar(vars, "smoke_gate_command", gateCommand(mq, "smoke"))
+	return vars
+}
+
+func appendRepoContractPromptVars(vars []string, contract *config.RepoContractConfig, mq *config.MergeQueueConfig) []string {
+	if contract == nil {
+		return vars
+	}
+
+	vars = appendVar(vars, "repo_type", contract.RepoType)
+	vars = appendVar(vars, "enforcement_tier", contract.GetEnforcementTier())
+	verifyCommand := contract.VerifyCommand
+	if verifyCommand == "" {
+		verifyCommand = gateCommand(mq, "verify")
+	}
+	smokeCommand := contract.SmokeCommand
+	if smokeCommand == "" {
+		smokeCommand = gateCommand(mq, "smoke")
+	}
+	vars = appendVar(vars, "verify_command", verifyCommand)
+	vars = appendVar(vars, "smoke_command", smokeCommand)
+	vars = appendVar(vars, "release_check_command", contract.ReleaseCheckCommand)
+	vars = appendVar(vars, "e2e_command", contract.E2ECommand)
+	vars = appendVar(vars, "perf_command", contract.PerfCommand)
+	vars = appendBoolPtrVar(vars, "requires_migrations", contract.RequiresMigrations)
+	vars = appendBoolPtrVar(vars, "requires_e2e", contract.RequiresE2E)
+	vars = appendBoolPtrVar(vars, "requires_security_scan", contract.RequiresSecurityScan)
+	if len(contract.CriticalPaths) > 0 {
+		vars = appendVar(vars, "critical_paths", strings.Join(contract.CriticalPaths, ", "))
+	}
+	return vars
+}
+
 // loadRigCommandVars reads rig settings and returns --var key=value strings
-// for all configured build pipeline commands (setup, typecheck, lint, test, build)
-// and the default branch (base_branch). Only non-empty values are included.
+// for the default branch, effective merge-queue verifier settings, and the
+// repo contract safety fields. Only non-empty values are included.
 //
 // Settings are resolved in priority order:
 //  1. Repository defaults: <rig>/mayor/rig/.gastown/settings.json (committed to git)
@@ -1102,43 +1180,12 @@ func loadRigCommandVars(townRoot, rig string) []string {
 		vars = append(vars, fmt.Sprintf("base_branch=%s", rigCfg.DefaultBranch))
 	}
 
-	// Load repo-sourced settings (floor — committed to git, always present after clone)
-	var repoMQ *config.MergeQueueConfig
-	repoRoot := filepath.Join(townRoot, rig, "mayor", "rig")
-	repoSettings, _ := config.LoadRepoSettings(repoRoot)
-	if repoSettings != nil {
-		repoMQ = repoSettings.MergeQueue
-	}
+	rigPath := filepath.Join(townRoot, rig)
+	mq, _ := config.LoadEffectiveMergeQueueConfig(rigPath)
+	vars = appendMergeQueuePromptVars(vars, mq)
 
-	// Load rig-local settings (override — operator tuning)
-	var localMQ *config.MergeQueueConfig
-	settingsPath := filepath.Join(townRoot, rig, "settings", "config.json")
-	localSettings, err := config.LoadRigSettings(settingsPath)
-	if err == nil && localSettings != nil {
-		localMQ = localSettings.MergeQueue
-	}
-
-	// Merge: repo defaults + local overrides
-	mq := config.MergeSettingsCommand(repoMQ, localMQ)
-	if mq == nil {
-		return vars
-	}
-
-	if mq.SetupCommand != "" {
-		vars = append(vars, fmt.Sprintf("setup_command=%s", mq.SetupCommand))
-	}
-	if mq.TypecheckCommand != "" {
-		vars = append(vars, fmt.Sprintf("typecheck_command=%s", mq.TypecheckCommand))
-	}
-	if mq.LintCommand != "" {
-		vars = append(vars, fmt.Sprintf("lint_command=%s", mq.LintCommand))
-	}
-	if mq.TestCommand != "" {
-		vars = append(vars, fmt.Sprintf("test_command=%s", mq.TestCommand))
-	}
-	if mq.BuildCommand != "" {
-		vars = append(vars, fmt.Sprintf("build_command=%s", mq.BuildCommand))
-	}
+	repoContract, _ := config.LoadEffectiveRepoContract(rigPath)
+	vars = appendRepoContractPromptVars(vars, repoContract, mq)
 	return vars
 }
 

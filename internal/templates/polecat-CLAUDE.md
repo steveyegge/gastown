@@ -202,6 +202,11 @@ as `scripts/ci/verify.sh`, `make ci-verify`, or `npm run ci:verify`. Use that
 entrypoint instead of guessing with ad hoc commands. If AGENTS.md exists, its
 "Core rule" section defines what "done" means for this project.
 
+If the repo defines a `.gastown/settings.json` repo contract, treat its verifier,
+smoke, release, and e2e entrypoints as the canonical safety contract for that
+repo. Do not invent alternative command sequences when a repo-local entrypoint
+already exists.
+
 In rigs with `merge_queue.verification_mode=strict`, `gt done` reruns the
 configured pre-merge gates and refuses submission on any failure. `--pre-verified`
 is invalid in strict mode. The `gt done` command then pushes your branch,

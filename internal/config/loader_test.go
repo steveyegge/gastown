@@ -615,7 +615,11 @@ func TestMergeSettingsCommand_MergesStrictFields(t *testing.T) {
 	t.Parallel()
 
 	repo := &MergeQueueConfig{
-		VerificationMode: VerificationModeAdvisory,
+		VerificationMode:                 VerificationModeAdvisory,
+		IntegrationBranchAutoLand:        boolPtr(false),
+		IntegrationBranchRefineryEnabled: boolPtr(true),
+		JudgmentEnabled:                  boolPtr(false),
+		ReviewDepth:                      "standard",
 		Gates: map[string]*MergeQueueGateConfig{
 			"verify": {Cmd: "./scripts/ci/verify.sh"},
 		},
@@ -623,7 +627,11 @@ func TestMergeSettingsCommand_MergesStrictFields(t *testing.T) {
 		AutoPush:      boolPtr(true),
 	}
 	local := &MergeQueueConfig{
-		VerificationMode: VerificationModeStrict,
+		VerificationMode:                 VerificationModeStrict,
+		IntegrationBranchAutoLand:        boolPtr(true),
+		IntegrationBranchRefineryEnabled: boolPtr(false),
+		JudgmentEnabled:                  boolPtr(true),
+		ReviewDepth:                      "deep",
 		Gates: map[string]*MergeQueueGateConfig{
 			"verify": {Cmd: "make ci-verify"},
 		},
@@ -643,6 +651,18 @@ func TestMergeSettingsCommand_MergesStrictFields(t *testing.T) {
 	}
 	if merged.IsAutoPushEnabled() {
 		t.Fatal("expected auto_push=false override")
+	}
+	if !merged.IsIntegrationBranchAutoLandEnabled() {
+		t.Fatal("expected integration_branch_auto_land=true override")
+	}
+	if merged.IsRefineryIntegrationEnabled() {
+		t.Fatal("expected integration_branch_refinery_enabled=false override")
+	}
+	if !merged.IsJudgmentEnabled() {
+		t.Fatal("expected judgment_enabled=true override")
+	}
+	if merged.GetReviewDepth() != "deep" {
+		t.Fatalf("review_depth = %q, want deep", merged.GetReviewDepth())
 	}
 }
 
@@ -699,6 +719,154 @@ func TestLoadEffectiveMergeQueueConfig(t *testing.T) {
 	}
 	if mq.IsAutoPushEnabled() {
 		t.Fatal("expected local auto_push=false override")
+	}
+}
+
+func TestLoadEffectiveMergeQueueConfig_InjectsRepoContractGates(t *testing.T) {
+	t.Parallel()
+
+	rigPath := t.TempDir()
+	repoSettingsPath := filepath.Join(rigPath, "mayor", "rig", RepoSettingsPath)
+	localSettingsPath := filepath.Join(rigPath, "settings", "config.json")
+
+	repoSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: CurrentRigSettingsVersion,
+		RepoContract: &RepoContractConfig{
+			VerifyCommand: "./scripts/ci/verify.sh",
+			SmokeCommand:  "./scripts/ci/smoke.sh",
+		},
+	}
+	localSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: CurrentRigSettingsVersion,
+		MergeQueue: &MergeQueueConfig{
+			VerificationMode: VerificationModeStrict,
+		},
+	}
+
+	if err := SaveRigSettings(repoSettingsPath, repoSettings); err != nil {
+		t.Fatalf("SaveRigSettings(repo): %v", err)
+	}
+	if err := SaveRigSettings(localSettingsPath, localSettings); err != nil {
+		t.Fatalf("SaveRigSettings(local): %v", err)
+	}
+
+	mq, err := LoadEffectiveMergeQueueConfig(rigPath)
+	if err != nil {
+		t.Fatalf("LoadEffectiveMergeQueueConfig: %v", err)
+	}
+	if mq == nil {
+		t.Fatal("expected merge_queue config")
+	}
+	verifyGate := mq.Gates["verify"]
+	if verifyGate == nil {
+		t.Fatal("expected verify gate from repo contract")
+	}
+	if verifyGate.Cmd != "./scripts/ci/verify.sh" {
+		t.Fatalf("verify gate cmd = %q, want ./scripts/ci/verify.sh", verifyGate.Cmd)
+	}
+	if normalizeMergeQueueGatePhase(verifyGate.Phase) != MergeQueueGatePhasePreMerge {
+		t.Fatalf("verify gate phase = %q, want %q", normalizeMergeQueueGatePhase(verifyGate.Phase), MergeQueueGatePhasePreMerge)
+	}
+	smokeGate := mq.Gates["smoke"]
+	if smokeGate == nil {
+		t.Fatal("expected smoke gate from repo contract")
+	}
+	if smokeGate.Cmd != "./scripts/ci/smoke.sh" {
+		t.Fatalf("smoke gate cmd = %q, want ./scripts/ci/smoke.sh", smokeGate.Cmd)
+	}
+	if normalizeMergeQueueGatePhase(smokeGate.Phase) != MergeQueueGatePhasePostSquash {
+		t.Fatalf("smoke gate phase = %q, want %q", normalizeMergeQueueGatePhase(smokeGate.Phase), MergeQueueGatePhasePostSquash)
+	}
+}
+
+func TestLoadEffectiveRepoContract(t *testing.T) {
+	t.Parallel()
+
+	rigPath := t.TempDir()
+	repoSettingsPath := filepath.Join(rigPath, "mayor", "rig", RepoSettingsPath)
+	localSettingsPath := filepath.Join(rigPath, "settings", "config.json")
+	requiresSecurityScan := true
+	requiresE2E := true
+
+	repoSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: CurrentRigSettingsVersion,
+		RepoContract: &RepoContractConfig{
+			RepoType:             "backend-api",
+			EnforcementTier:      RepoContractTierStrong,
+			VerifyCommand:        "./scripts/ci/verify.sh",
+			RequiresSecurityScan: &requiresSecurityScan,
+			CriticalPaths:        []string{"ingest", "respond"},
+		},
+	}
+	localSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: CurrentRigSettingsVersion,
+		RepoContract: &RepoContractConfig{
+			EnforcementTier: RepoContractTierProduction,
+			E2ECommand:      "./scripts/ci/e2e.sh",
+			RequiresE2E:     &requiresE2E,
+			CriticalPaths:   []string{"recover-session"},
+		},
+	}
+
+	if err := SaveRigSettings(repoSettingsPath, repoSettings); err != nil {
+		t.Fatalf("SaveRigSettings(repo): %v", err)
+	}
+	if err := SaveRigSettings(localSettingsPath, localSettings); err != nil {
+		t.Fatalf("SaveRigSettings(local): %v", err)
+	}
+
+	contract, err := LoadEffectiveRepoContract(rigPath)
+	if err != nil {
+		t.Fatalf("LoadEffectiveRepoContract: %v", err)
+	}
+	if contract == nil {
+		t.Fatal("expected repo contract")
+	}
+	if contract.RepoType != "backend-api" {
+		t.Fatalf("RepoType = %q, want backend-api", contract.RepoType)
+	}
+	if contract.GetEnforcementTier() != RepoContractTierProduction {
+		t.Fatalf("EnforcementTier = %q, want %q", contract.GetEnforcementTier(), RepoContractTierProduction)
+	}
+	if contract.VerifyCommand != "./scripts/ci/verify.sh" {
+		t.Fatalf("VerifyCommand = %q, want ./scripts/ci/verify.sh", contract.VerifyCommand)
+	}
+	if contract.E2ECommand != "./scripts/ci/e2e.sh" {
+		t.Fatalf("E2ECommand = %q, want ./scripts/ci/e2e.sh", contract.E2ECommand)
+	}
+	if contract.RequiresSecurityScan == nil || !*contract.RequiresSecurityScan {
+		t.Fatal("expected RequiresSecurityScan=true")
+	}
+	if contract.RequiresE2E == nil || !*contract.RequiresE2E {
+		t.Fatal("expected RequiresE2E=true")
+	}
+	if got := strings.Join(contract.CriticalPaths, ","); got != "recover-session" {
+		t.Fatalf("CriticalPaths = %q, want recover-session", got)
+	}
+}
+
+func TestValidateRepoContractConfig(t *testing.T) {
+	t.Parallel()
+
+	if err := validateRepoContractConfig(&RepoContractConfig{
+		RepoType:        "worker",
+		EnforcementTier: RepoContractTierProduction,
+		VerifyCommand:   "./scripts/ci/verify.sh",
+		E2ECommand:      "make ci-e2e",
+	}); err != nil {
+		t.Fatalf("validateRepoContractConfig(valid): %v", err)
+	}
+
+	if err := validateRepoContractConfig(&RepoContractConfig{RepoType: "unknown"}); err == nil || !strings.Contains(err.Error(), "repo_contract.repo_type") {
+		t.Fatalf("expected repo_type validation error, got %v", err)
+	}
+
+	if err := validateRepoContractConfig(&RepoContractConfig{VerifyCommand: "/usr/local/bin/verify"}); err == nil || !strings.Contains(err.Error(), "repo_contract.verify_command") {
+		t.Fatalf("expected verify_command validation error, got %v", err)
 	}
 }
 

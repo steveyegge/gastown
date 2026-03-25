@@ -628,14 +628,15 @@ type WorkflowConfig struct {
 
 // RigSettings represents per-rig behavioral configuration (settings/config.json).
 type RigSettings struct {
-	Type       string            `json:"type"`                  // "rig-settings"
-	Version    int               `json:"version"`               // schema version
-	MergeQueue *MergeQueueConfig `json:"merge_queue,omitempty"` // merge queue settings
-	Theme      *ThemeConfig      `json:"theme,omitempty"`       // tmux theme settings
-	Namepool   *NamepoolConfig   `json:"namepool,omitempty"`    // polecat name pool settings
-	Crew       *CrewConfig       `json:"crew,omitempty"`        // crew startup settings
-	Workflow   *WorkflowConfig   `json:"workflow,omitempty"`    // workflow settings
-	Runtime    *RuntimeConfig    `json:"runtime,omitempty"`     // LLM runtime settings (deprecated: use Agent)
+	Type         string              `json:"type"`                    // "rig-settings"
+	Version      int                 `json:"version"`                 // schema version
+	MergeQueue   *MergeQueueConfig   `json:"merge_queue,omitempty"`   // merge queue settings
+	RepoContract *RepoContractConfig `json:"repo_contract,omitempty"` // canonical repo verifier/smoke/release contract
+	Theme        *ThemeConfig        `json:"theme,omitempty"`         // tmux theme settings
+	Namepool     *NamepoolConfig     `json:"namepool,omitempty"`      // polecat name pool settings
+	Crew         *CrewConfig         `json:"crew,omitempty"`          // crew startup settings
+	Workflow     *WorkflowConfig     `json:"workflow,omitempty"`      // workflow settings
+	Runtime      *RuntimeConfig      `json:"runtime,omitempty"`       // LLM runtime settings (deprecated: use Agent)
 
 	// Agent selects which agent preset to use for this rig.
 	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp", "opencode", "copilot")
@@ -661,6 +662,46 @@ type RigSettings struct {
 	// Takes precedence over RoleAgents["crew"] but is overridden by explicit --agent flags.
 	// Example: {"denali": "codex", "glacier": "gemini"}
 	WorkerAgents map[string]string `json:"worker_agents,omitempty"`
+}
+
+// RepoContractConfig defines the repo-local safety contract Gastown should enforce.
+// This lives in the committed repo settings file so every role uses the same
+// verifier, smoke, and release checks.
+type RepoContractConfig struct {
+	// RepoType classifies the repo so prompts and automation can choose the
+	// right test bundle. Examples: "backend-api", "frontend-app", "worker".
+	RepoType string `json:"repo_type,omitempty"`
+
+	// EnforcementTier controls how much safety the repo expects. Supported
+	// values: "basic", "strong", "production". Empty defaults to "strong".
+	EnforcementTier string `json:"enforcement_tier,omitempty"`
+
+	// VerifyCommand is the canonical pre-merge verifier entrypoint.
+	VerifyCommand string `json:"verify_command,omitempty"`
+
+	// SmokeCommand is the canonical merged-result or post-deploy smoke check.
+	SmokeCommand string `json:"smoke_command,omitempty"`
+
+	// ReleaseCheckCommand is the canonical release/deploy gate entrypoint.
+	ReleaseCheckCommand string `json:"release_check_command,omitempty"`
+
+	// E2ECommand is the canonical end-to-end test entrypoint.
+	E2ECommand string `json:"e2e_command,omitempty"`
+
+	// PerfCommand is the canonical performance budget check entrypoint.
+	PerfCommand string `json:"perf_command,omitempty"`
+
+	// RequiresMigrations indicates that schema or migration safety checks are required.
+	RequiresMigrations *bool `json:"requires_migrations,omitempty"`
+
+	// RequiresE2E indicates that end-to-end coverage is required before landing.
+	RequiresE2E *bool `json:"requires_e2e,omitempty"`
+
+	// RequiresSecurityScan indicates that dependency/security scanning is required.
+	RequiresSecurityScan *bool `json:"requires_security_scan,omitempty"`
+
+	// CriticalPaths lists the core user or data flows that must stay healthy.
+	CriticalPaths []string `json:"critical_paths,omitempty"`
 }
 
 // CrewConfig represents crew workspace settings for a rig.
@@ -1312,6 +1353,13 @@ const (
 	VerificationModeStrict   = "strict"
 )
 
+// Repo contract enforcement tier constants.
+const (
+	RepoContractTierBasic      = "basic"
+	RepoContractTierStrong     = "strong"
+	RepoContractTierProduction = "production"
+)
+
 // Merge queue gate phase constants.
 const (
 	MergeQueueGatePhasePreMerge   = "pre-merge"
@@ -1416,6 +1464,15 @@ func (c *MergeQueueConfig) GetReviewDepth() string {
 // boolPtr returns a pointer to a bool value.
 func boolPtr(b bool) *bool {
 	return &b
+}
+
+// GetEnforcementTier returns the configured repo contract tier.
+// Empty values default to "strong".
+func (c *RepoContractConfig) GetEnforcementTier() string {
+	if c == nil || c.EnforcementTier == "" {
+		return RepoContractTierStrong
+	}
+	return c.EnforcementTier
 }
 
 // DefaultMergeQueueConfig returns a MergeQueueConfig with sensible defaults.

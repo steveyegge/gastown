@@ -48,6 +48,10 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
 
 ### Settings (`settings/config.json`)
 
+`repo_contract` is normally stored in the committed repo-local file
+`.gastown/settings.json`. The local `settings/config.json` file can override it
+for operator-specific tuning.
+
 ```json
 {
   "theme": {
@@ -80,6 +84,19 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
     "integration_branch_refinery_enabled": true,
     "integration_branch_template": "integration/{title}",
     "integration_branch_auto_land": false
+  },
+  "repo_contract": {
+    "repo_type": "backend-api",
+    "enforcement_tier": "production",
+    "verify_command": "./scripts/ci/verify.sh",
+    "smoke_command": "./scripts/ci/smoke.sh",
+    "release_check_command": "./scripts/ci/release-check.sh",
+    "e2e_command": "./scripts/ci/e2e.sh",
+    "perf_command": "./scripts/ci/perf.sh",
+    "requires_migrations": true,
+    "requires_e2e": true,
+    "requires_security_scan": true,
+    "critical_paths": ["login", "checkout", "retry worker"]
   }
 }
 ```
@@ -146,6 +163,26 @@ Town-level role defaults live in `mayor/config.json` under:
 | `integration_branch_auto_land` | `*bool` | `false` | Refinery patrol auto-lands when all children closed |
 
 See [Integration Branches](concepts/integration-branches.md) for integration branch details.
+
+**Repo contract fields:**
+
+`repo_contract` lives in the repo-local `.gastown/settings.json` file and defines
+the canonical safety contract for every Gastown role. Its commands must be repo-local
+entrypoints such as `./scripts/ci/verify.sh`, `make ci-verify`, or `npm run ci:verify`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `repo_type` | `string` | unset | Repo class: `library`, `backend-api`, `frontend-app`, `worker`, `cli`, `data-pipeline`, or `infra` |
+| `enforcement_tier` | `string` | `"strong"` | Safety tier: `basic`, `strong`, or `production` |
+| `verify_command` | `string` | unset | Canonical pre-merge verifier entrypoint |
+| `smoke_command` | `string` | unset | Canonical merged-result or post-deploy smoke entrypoint |
+| `release_check_command` | `string` | unset | Canonical release/deploy gate entrypoint |
+| `e2e_command` | `string` | unset | Canonical end-to-end test entrypoint |
+| `perf_command` | `string` | unset | Canonical performance budget entrypoint |
+| `requires_migrations` | `*bool` | unset | Whether schema/migration safety checks are required |
+| `requires_e2e` | `*bool` | unset | Whether end-to-end coverage is required before landing |
+| `requires_security_scan` | `*bool` | unset | Whether dependency/security scanning is required |
+| `critical_paths` | `[]string` | unset | Core user or data flows that must stay healthy |
 
 ### Runtime (`.runtime/` - gitignored)
 

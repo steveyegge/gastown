@@ -225,6 +225,7 @@ func extractFormulaVar(formulaVars, key string) string {
 	}
 	return ""
 }
+
 // truncateDescription truncates a multi-line description to a single line summary.
 func truncateDescription(desc string, maxLen int) string {
 	// Take just the first line
@@ -271,7 +272,6 @@ func outputMoleculeContext(ctx RoleContext) {
 	// No child-based tracking needed.
 }
 
-
 // outputDeaconPatrolContext shows patrol molecule status for the Deacon.
 // Deacon uses wisps (Wisp:true issues in main .beads/) for patrol cycles.
 // Deacon is a town-level role, so it uses town root beads (not rig beads).
@@ -284,12 +284,12 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 	}
 
 	cfg := PatrolConfig{
-		RoleName:        "deacon",
-		PatrolMolName:   constants.MolDeaconPatrol,
-		BeadsDir:        ctx.TownRoot, // Town-level role uses town root beads
-		Assignee:        "deacon",
-		HeaderEmoji:     "🔄",
-		HeaderTitle:     "Patrol Status (Wisp-based)",
+		RoleName:      "deacon",
+		PatrolMolName: constants.MolDeaconPatrol,
+		BeadsDir:      ctx.TownRoot, // Town-level role uses town root beads
+		Assignee:      "deacon",
+		HeaderEmoji:   "🔄",
+		HeaderTitle:   "Patrol Status (Wisp-based)",
 		WorkLoopSteps: []string{
 			"Work through each patrol step in sequence (see checklist below)",
 			"At cycle end:\n   - If context LOW:\n     * Report and loop: `" + cli.Name() + " patrol report --summary \"<brief summary of observations>\"`\n     * This closes the current patrol and starts a new cycle\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Deacon patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
@@ -307,12 +307,12 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 		return
 	}
 	cfg := PatrolConfig{
-		RoleName:        "witness",
-		PatrolMolName:   constants.MolWitnessPatrol,
-		BeadsDir:        ctx.TownRoot,
-		Assignee:        ctx.Rig + "/witness",
-		HeaderEmoji:     constants.EmojiWitness,
-		HeaderTitle:     "Witness Patrol Status",
+		RoleName:      "witness",
+		PatrolMolName: constants.MolWitnessPatrol,
+		BeadsDir:      ctx.TownRoot,
+		Assignee:      ctx.Rig + "/witness",
+		HeaderEmoji:   constants.EmojiWitness,
+		HeaderTitle:   "Witness Patrol Status",
 		WorkLoopSteps: []string{
 			"Work through each patrol step in sequence (see checklist below)",
 			"At cycle end:\n   - If context LOW:\n     * Report and loop: `" + cli.Name() + " patrol report --summary \"<brief summary of observations>\"`\n     * This closes the current patrol and starts a new cycle\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Witness patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
@@ -330,13 +330,13 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 		return
 	}
 	cfg := PatrolConfig{
-		RoleName:        "refinery",
-		PatrolMolName:   constants.MolRefineryPatrol,
-		BeadsDir:        ctx.TownRoot,
-		Assignee:        ctx.Rig + "/refinery",
-		HeaderEmoji:     "🔧",
-		HeaderTitle:     "Refinery Patrol Status",
-		ExtraVars:       buildRefineryPatrolVars(ctx),
+		RoleName:      "refinery",
+		PatrolMolName: constants.MolRefineryPatrol,
+		BeadsDir:      ctx.TownRoot,
+		Assignee:      ctx.Rig + "/refinery",
+		HeaderEmoji:   "🔧",
+		HeaderTitle:   "Refinery Patrol Status",
+		ExtraVars:     buildRefineryPatrolVars(ctx),
 		WorkLoopSteps: []string{
 			"Work through each patrol step in sequence (see checklist below)",
 			"At cycle end:\n   - If context LOW:\n     * Report and loop: `" + cli.Name() + " patrol report --summary \"<brief summary of observations>\"`\n     * This closes the current patrol and starts a new cycle\n   - If context HIGH:\n     * Send handoff: `" + cli.Name() + " handoff -s \"Refinery patrol\" -m \"<observations>\"`\n     * Exit cleanly (daemon respawns fresh session)",
@@ -346,8 +346,8 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 	showFormulaStepsFull(constants.MolRefineryPatrol, ctx.TownRoot, ctx.Rig, cfg.ExtraVars)
 }
 
-// buildRefineryPatrolVars loads rig MQ settings and returns --var key=value
-// strings for the refinery patrol formula.
+// buildRefineryPatrolVars loads the effective rig verifier settings and repo
+// contract vars for the refinery patrol formula.
 func buildRefineryPatrolVars(ctx RoleContext) []string {
 	var vars []string
 	if ctx.TownRoot == "" || ctx.Rig == "" {
@@ -367,33 +367,17 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 	}
 	vars = append(vars, fmt.Sprintf("target_branch=%s", defaultBranch))
 
-	// MQ-specific vars: try settings/config.json first (legacy format), then
-	// fall back to the layered rig config (bead labels / wisp layer).
-	settingsPath := filepath.Join(rigPath, "settings", "config.json")
-	settings, sErr := config.LoadRigSettings(settingsPath)
-	if sErr == nil && settings != nil && settings.MergeQueue != nil {
-		mq := settings.MergeQueue
-		vars = append(vars, fmt.Sprintf("integration_branch_refinery_enabled=%t", mq.IsRefineryIntegrationEnabled()))
-		vars = append(vars, fmt.Sprintf("integration_branch_auto_land=%t", mq.IsIntegrationBranchAutoLandEnabled()))
-		vars = append(vars, fmt.Sprintf("run_tests=%t", mq.IsRunTestsEnabled()))
-		if mq.SetupCommand != "" {
-			vars = append(vars, fmt.Sprintf("setup_command=%s", mq.SetupCommand))
-		}
-		if mq.TypecheckCommand != "" {
-			vars = append(vars, fmt.Sprintf("typecheck_command=%s", mq.TypecheckCommand))
-		}
-		if mq.LintCommand != "" {
-			vars = append(vars, fmt.Sprintf("lint_command=%s", mq.LintCommand))
-		}
-		if mq.TestCommand != "" {
-			vars = append(vars, fmt.Sprintf("test_command=%s", mq.TestCommand))
-		}
-		if mq.BuildCommand != "" {
-			vars = append(vars, fmt.Sprintf("build_command=%s", mq.BuildCommand))
-		}
-		vars = append(vars, fmt.Sprintf("delete_merged_branches=%t", mq.IsDeleteMergedBranchesEnabled()))
-		vars = append(vars, fmt.Sprintf("judgment_enabled=%t", mq.IsJudgmentEnabled()))
-		vars = append(vars, fmt.Sprintf("review_depth=%s", mq.GetReviewDepth()))
+	mq, mqErr := config.LoadEffectiveMergeQueueConfig(rigPath)
+	if mqErr == nil && mq != nil {
+		vars = appendMergeQueuePromptVars(vars, mq)
+	}
+
+	repoContract, contractErr := config.LoadEffectiveRepoContract(rigPath)
+	if contractErr == nil {
+		vars = appendRepoContractPromptVars(vars, repoContract, mq)
+	}
+
+	if mq != nil {
 		return vars
 	}
 

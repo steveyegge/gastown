@@ -44,5 +44,6 @@ gt done
 ```
 
 This command pushes your branch, submits an MR to the merge queue, and transitions
-you to IDLE. The repo-local verifier configured in merge-queue settings is the
-CI source of truth. The Refinery handles the actual merge. You are done after this.
+you to IDLE. The repo-local verifier configured in merge-queue settings, and
+declared by any repo contract in `.gastown/settings.json`, is the CI source of
+truth. The Refinery handles the actual merge. You are done after this.

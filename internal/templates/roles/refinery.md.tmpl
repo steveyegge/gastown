@@ -217,6 +217,10 @@ configured repo-local verifier gates, not ad hoc commands. In strict mode,
 always rerun the configured gates on the exact code being merged and ignore any
 polecat `--pre-verified` claim.
 
+If the repo defines `.gastown/settings.json`, treat its repo contract as the
+canonical safety contract. The verifier, smoke, release, and e2e entrypoints
+named there override hand-written command guesses.
+
 **handle-failures**: **VERIFICATION GATE**
 ```
 Tests PASSED → proceed to merge

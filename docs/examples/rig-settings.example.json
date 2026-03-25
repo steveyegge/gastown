@@ -2,6 +2,7 @@
     "_comment": "Rig-level settings: ~/gt/<rig>/settings/config.json",
     "_comment2": "Overrides town-level agent/role settings for this specific rig.",
     "_comment3": "Only include fields you want to override — omitted fields inherit from town settings.",
+    "_comment4": "repo_contract usually lives in the committed repo file .gastown/settings.json; including it here overrides those repo defaults locally.",
 
     "type": "rig-settings",
     "version": 1,
@@ -49,6 +50,24 @@
         "poll_interval": "30s",
         "max_concurrent": 1,
         "stale_claim_timeout": "30m"
+    },
+
+    "repo_contract": {
+        "repo_type": "backend-api",
+        "enforcement_tier": "production",
+        "verify_command": "./scripts/ci/verify.sh",
+        "smoke_command": "./scripts/ci/smoke.sh",
+        "release_check_command": "./scripts/ci/release-check.sh",
+        "e2e_command": "./scripts/ci/e2e.sh",
+        "perf_command": "./scripts/ci/perf.sh",
+        "requires_migrations": true,
+        "requires_e2e": true,
+        "requires_security_scan": true,
+        "critical_paths": [
+            "signup and login",
+            "checkout and payment",
+            "background job retry"
+        ]
     },
 
     "theme": {
