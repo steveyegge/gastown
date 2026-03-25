@@ -2236,6 +2236,29 @@ func (d *Daemon) isBeadClosed(beadID string) bool {
 	return issues[0].Status == "closed"
 }
 
+// hasAssignedOpenWork checks if any work bead is assigned to the given polecat
+// with a non-terminal status (hooked, in_progress, or open). This is the
+// authoritative source of polecat work — the sling code sets status=hooked +
+// assignee on the work bead, but no longer maintains the agent bead's hook_bead
+// field (updateAgentHookBead is a no-op). Without this fallback, the idle reaper
+// kills working polecats whose agent bead hook_bead is stale.
+func (d *Daemon) hasAssignedOpenWork(rigName, assignee string) bool {
+	for _, status := range []string{"hooked", "in_progress", "open"} {
+		cmd := exec.Command(d.bdPath, "list", "--rig="+rigName, "--assignee="+assignee, "--status="+status, "--json") //nolint:gosec // G204: args are constructed internally
+		cmd.Dir = d.config.TownRoot
+		cmd.Env = os.Environ()
+		output, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+		var issues []json.RawMessage
+		if json.Unmarshal(output, &issues) == nil && len(issues) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // notifyWitnessOfCrashedPolecat notifies the witness when a polecat crash is detected.
 // The stuck-agent-dog plugin handles context-aware restart decisions.
 func (d *Daemon) notifyWitnessOfCrashedPolecat(rigName, polecatName, hookBead string) {
@@ -2342,6 +2365,17 @@ func (d *Daemon) reapIdlePolecat(rigName, polecatName string, timeout time.Durat
 		// But if the hook_bead is closed, the work is done and this is just an idle
 		// polecat with a stale hook reference — safe to reap.
 		if info.HookBead != "" && !d.isBeadClosed(info.HookBead) {
+			return
+		}
+
+		// Fallback: agent bead hook_bead may be stale (updateAgentHookBead is a
+		// no-op since the sling code declared work bead assignee as authoritative).
+		// Before killing, check if any work bead is assigned to this polecat with
+		// a non-terminal status. This prevents the reaper from killing polecats
+		// whose agent bead hook_bead points to a closed bead from a previous swarm
+		// while the polecat is actively working on a newly-slung bead.
+		assignee := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+		if d.hasAssignedOpenWork(rigName, assignee) {
 			return
 		}
 
