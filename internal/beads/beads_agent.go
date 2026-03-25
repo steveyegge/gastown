@@ -415,15 +415,22 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 	return nil
 }
 
-// UpdateAgentState updates the agent_state field in an agent bead's description.
+// UpdateAgentState updates the agent_state dimension on an agent bead.
 //
-// bd agent state was removed in beads v0.62.0 as part of observable-states
-// deprecation (ZFC design gt-zecmc). The DB column is no longer maintained
-// by gt; tmux session presence is the authoritative source for liveness.
-// This function updates the description text only, for human-readable bd show output.
+// Uses `bd set-state` (beads 0.62.0+) which writes a dimension:value label
+// (agent_state:<state>) and an event bead for the audit trail. Labels are
+// indexed and queryable ("bd list --label agent_state:working") across rigs.
+//
+// bd agent state was removed in beads v0.62.0 when the agent-as-bead subsystem
+// was extracted as Gas Town infrastructure (commit 0bd598c). bd set-state uses
+// beads' generic dimension:value label convention and is not GT-specific.
+// Approach inspired by PR #3283 (EthanJStark). (gt-4ly)
 func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, nil, retErr) }()
-	if err := b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{AgentState: &state}); err != nil {
+	// Use runWithRouting so bd can resolve cross-prefix agent beads (e.g., wa-*
+	// agent beads from hq context) via routes.jsonl instead of BEADS_DIR.
+	_, err := b.runWithRouting("set-state", id, "agent_state="+state)
+	if err != nil {
 		return fmt.Errorf("updating agent state: %w", err)
 	}
 	return nil
@@ -609,8 +616,15 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 	}
 
 	fields := ParseAgentFields(issue.Description)
-	// Note: agent_state column is no longer maintained (bd agent state removed in
-	// beads v0.62.0, ZFC design gt-zecmc). Description text is authoritative.
+	// Read agent_state from label (authoritative, set via bd set-state).
+	// bd set-state writes "agent_state:<value>" labels — indexed and queryable.
+	// The agent_state DB column was removed in beads v0.62.0 (gt-4ly).
+	for _, label := range issue.Labels {
+		if strings.HasPrefix(label, "agent_state:") {
+			fields.AgentState = strings.TrimPrefix(label, "agent_state:")
+			break
+		}
+	}
 	return issue, fields, nil
 }
 

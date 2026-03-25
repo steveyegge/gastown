@@ -28,16 +28,18 @@ func writeFakeTestTmux(t *testing.T, dir string) {
 }
 
 // writeFakeTestBD creates a shell script in dir named "bd" that outputs a
-// polecat agent bead JSON. The descState parameter controls what appears in
-// the description text (parsed by ParseAgentFields), while
-// dbState controls the agent_state database column. updatedAt controls the
-// bead's updated_at timestamp for time-bound testing.
-func writeFakeTestBD(t *testing.T, dir, descState, dbState, hookBead, updatedAt string) string {
+// polecat agent bead JSON. The labelState parameter controls the agent_state
+// label (authoritative source, set via bd set-state). The descState parameter
+// controls the description text fallback. updatedAt controls the bead's
+// updated_at timestamp for time-bound testing. (gt-4ly)
+func writeFakeTestBD(t *testing.T, dir, descState, labelState, hookBead, updatedAt string) string {
 	t.Helper()
 	desc := "agent_state: " + descState
-	// JSON matches the structure that getAgentBeadInfo expects from bd show --json
-	bdJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent"],"description":"%s","hook_bead":"%s","agent_state":"%s","updated_at":"%s"}]`,
-		desc, hookBead, dbState, updatedAt)
+	labels := fmt.Sprintf(`["gt:agent","agent_state:%s"]`, labelState)
+	// JSON matches the structure that getAgentBeadInfo expects from bd show --json.
+	// agent_state DB column omitted — removed in beads v0.62.0 (gt-4ly).
+	bdJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":%s,"description":"%s","hook_bead":"%s","updated_at":"%s"}]`,
+		labels, desc, hookBead, updatedAt)
 	script := "#!/bin/sh\necho '" + bdJSON + "'\n"
 	path := filepath.Join(dir, "bd")
 	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
@@ -52,8 +54,8 @@ func writeFakeTestBD(t *testing.T, dir, descState, dbState, hookBead, updatedAt 
 // beads have independent lifecycles (e.g., agent done/nuked while hook_bead open).
 func writeFakeBDWithHookBead(t *testing.T, dir, agentState, hookBeadID, hookBeadStatus, updatedAt string) string {
 	t.Helper()
-	agentJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent"],"description":"agent_state: %s","hook_bead":"%s","agent_state":"%s","updated_at":"%s"}]`,
-		agentState, hookBeadID, agentState, updatedAt)
+	agentJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent","agent_state:%s"],"description":"agent_state: %s","hook_bead":"%s","updated_at":"%s"}]`,
+		agentState, agentState, hookBeadID, updatedAt)
 	hookJSON := fmt.Sprintf(`[{"id":"%s","status":"%s"}]`, hookBeadID, hookBeadStatus)
 	script := fmt.Sprintf("#!/bin/sh\n"+
 		"case \"$2\" in\n"+
@@ -169,19 +171,19 @@ func TestCheckPolecatHealth_SpawningGuardExpires(t *testing.T) {
 	}
 }
 
-// TestCheckPolecatHealth_DescriptionOverridesDBColumn verifies that the daemon
-// reads agent_state from the description text (source of truth), not the DB column.
-// bd agent state was removed in beads v0.62.0 (ZFC design gt-zecmc), so the DB
-// column stays at "spawning" permanently. Description text is now authoritative.
-func TestCheckPolecatHealth_DescriptionOverridesDBColumn(t *testing.T) {
+// TestCheckPolecatHealth_LabelStateOverridesDescription verifies that the daemon
+// reads agent_state from the label (source of truth, set via bd set-state), not
+// the description text. A polecat that transitioned from "spawning" to "working"
+// will have a stale description but an up-to-date agent_state label. (gt-4ly)
+func TestCheckPolecatHealth_LabelStateOverridesDescription(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test uses Unix shell script mocks for tmux and bd")
 	}
 	binDir := t.TempDir()
 	writeFakeTestTmux(t, binDir)
 	recentTime := time.Now().UTC().Format(time.RFC3339)
-	// Description says "working" (truth) but DB column says "spawning" (stale)
-	bdPath := writeFakeTestBD(t, binDir, "working", "spawning", "gt-xyz", recentTime)
+	// Description says "spawning" (stale) but label says "working" (truth)
+	bdPath := writeFakeTestBD(t, binDir, "spawning", "working", "gt-xyz", recentTime)
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
@@ -196,13 +198,13 @@ func TestCheckPolecatHealth_DescriptionOverridesDBColumn(t *testing.T) {
 	d.checkPolecatHealth("myr", "mycat")
 
 	got := logBuf.String()
-	// Should NOT skip due to spawning guard — description says "working"
+	// Should NOT skip due to spawning guard — label says "working"
 	if strings.Contains(got, "Skipping restart") {
-		t.Errorf("daemon should use description agent_state (working), not stale DB column (spawning), got: %q", got)
+		t.Errorf("daemon should use label agent_state (working), not stale description (spawning), got: %q", got)
 	}
-	// Should detect crash since description says working + session is dead
+	// Should detect crash since label says working + session is dead
 	if !strings.Contains(got, "CRASH DETECTED") {
-		t.Errorf("expected CRASH DETECTED when description state is 'working' with dead session, got: %q", got)
+		t.Errorf("expected CRASH DETECTED when label state is 'working' with dead session, got: %q", got)
 	}
 }
 
