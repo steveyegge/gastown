@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -671,7 +672,8 @@ func nudgeRefinery(townRoot, rigName string) error {
 // notifyMayorSlotOpen nudges the Mayor that a polecat slot is now open.
 // This is critical for pipeline throughput: without it, the Mayor sits idle
 // even when open beads exist, because it never learns about the completion.
-// Uses nudge (not mail) per communication hygiene. (GH#2727)
+// Prefers nudge per communication hygiene, falls back to mail if nudge
+// can't reach the Mayor (e.g., ACP session, no tmux). (GH#2727)
 func notifyMayorSlotOpen(workDir, rigName, polecatName, exitType string) {
 	townRoot, _ := workspace.Find(workDir)
 	if townRoot == "" {
@@ -686,15 +688,23 @@ func notifyMayorSlotOpen(workDir, rigName, polecatName, exitType string) {
 		"exit=" + exitType,
 	})
 
-	// Belt-and-suspenders: also nudge the Mayor's tmux session directly.
-	// This handles cases where the Mayor is at the Claude prompt rather
-	// than in an await-event loop.
+	// Try nudge first — lightweight, no Dolt commit.
 	mayorSession := session.MayorSessionName()
 	t := tmux.NewTmux()
 	if running, err := t.HasSession(mayorSession); err == nil && running {
 		msg := fmt.Sprintf("SLOT_OPEN: %s/%s completed (exit=%s) — slot available. Run `gt polecat list` to verify and sling next bead.", rigName, polecatName, exitType)
-		_ = t.NudgeSession(mayorSession, msg)
+		if err := t.NudgeSession(mayorSession, msg); err == nil {
+			return // Nudge delivered — no mail needed.
+		}
 	}
+
+	// Nudge failed or Mayor not in tmux (e.g., ACP/Claude Code session).
+	// Fall back to mail so the completion is not silently lost.
+	subject := fmt.Sprintf("SLOT_OPEN: %s/%s completed (exit=%s)", rigName, polecatName, exitType)
+	body := fmt.Sprintf("Polecat %s/%s finished (exit=%s). Slot available for next bead.", rigName, polecatName, exitType)
+	cmd := exec.Command("gt", "mail", "send", "mayor/", "-s", subject, "-m", body)
+	cmd.Dir = townRoot
+	_ = cmd.Run()
 }
 
 // RecoveryPayload contains data for RECOVERY_NEEDED escalation.
