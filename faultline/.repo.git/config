@@ -11,6 +11,3 @@
 [beads]
 	issue-prefix = fl
 	role = contributor
-[branch "polecat/obsidian/fl-rq0@mn6fvlvf"]
-	remote = origin
-	merge = refs/heads/main
