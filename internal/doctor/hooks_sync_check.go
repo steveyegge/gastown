@@ -99,7 +99,7 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 			if loc.Rig != "" {
 				rigPath = filepath.Join(ctx.TownRoot, loc.Rig)
 			}
-			rc := config.ResolveRoleAgentConfig(loc.Role, ctx.TownRoot, rigPath)
+			rc := config.ResolvePersistedRoleAgentConfig(loc.Role, ctx.TownRoot, rigPath)
 			if rc == nil || rc.Hooks == nil || rc.Hooks.Provider == "" {
 				continue
 			}

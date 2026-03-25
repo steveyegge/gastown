@@ -58,7 +58,7 @@ func InstallForRole(provider, settingsDir, workDir, role, hooksDir, hooksFile st
 		// Stale file detected — fall through to overwrite with current template
 	}
 
-	return writeTemplate(provider, role, hooksDir, hooksFile, targetPath)
+	return writeTemplate(provider, role, hooksFile, targetPath)
 }
 
 // needsUpgrade returns true if an existing hooks file contains stale patterns
@@ -157,7 +157,7 @@ func resolveAndSubstitute(provider, hooksFile, role string) ([]byte, error) {
 }
 
 // writeTemplate resolves a template, substitutes placeholders, and writes it to targetPath.
-func writeTemplate(provider, role, hooksDir, hooksFile, targetPath string) error {
+func writeTemplate(provider, role, hooksFile, targetPath string) error {
 	content, err := resolveAndSubstitute(provider, hooksFile, role)
 	if err != nil {
 		return err

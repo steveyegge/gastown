@@ -1318,6 +1318,17 @@ func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
 	return withRoleSettingsFlag(rc, role, rigPath)
 }
 
+// ResolvePersistedRoleAgentConfig resolves the configured agent for a role using
+// persisted town/rig settings only. Unlike ResolveRoleAgentConfig, it does not
+// require the agent binary to be installed and it ignores ephemeral cost-tier
+// overrides. This is used by hook/template management, which needs the intended
+// provider even in environments where the runtime isn't installed yet.
+func ResolvePersistedRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
+	resolveConfigMu.Lock()
+	defer resolveConfigMu.Unlock()
+	return resolvePersistedRoleAgentConfigInternal(role, townRoot, rigPath)
+}
+
 // tryResolveNamedAgent attempts to resolve a named agent through the custom agent
 // and standard lookup pipelines. Returns the resolved config with ResolvedAgent set,
 // or nil if validation fails. The warnPrefix is used in the fallback warning message
@@ -1648,6 +1659,28 @@ func resolveRoleAgentConfigCore(role, townRoot, rigPath string) *RuntimeConfig {
 	// Fall back to existing resolution (rig's Agent → town's DefaultAgent → "claude")
 	// Use internal version — caller already holds resolveConfigMu.
 	return resolveAgentConfigInternal(townRoot, rigPath)
+}
+
+func resolvePersistedRoleAgentConfigInternal(role, townRoot, rigPath string) *RuntimeConfig {
+	var rigSettings *RigSettings
+	if rigPath != "" {
+		rigSettings, _ = LoadRigSettings(RigSettingsPath(rigPath))
+	}
+
+	townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		townSettings = NewTownSettings()
+	}
+
+	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
+	if rigPath != "" {
+		_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
+	}
+
+	agentName, _ := ResolveRoleAgentName(role, townRoot, rigPath)
+	rc := lookupAgentConfig(agentName, townSettings, rigSettings)
+	rc.ResolvedAgent = agentName
+	return withRoleSettingsFlag(rc, role, rigPath)
 }
 
 // ResolveRoleAgentName returns the agent name that would be used for a specific role.
