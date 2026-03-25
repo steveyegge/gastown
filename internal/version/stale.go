@@ -139,11 +139,11 @@ func GetRepoRoot() (string, error) {
 	// Check if GT_ROOT environment variable is set (agents always have this)
 	if gtRoot := os.Getenv("GT_ROOT"); gtRoot != "" {
 		candidates := []string{
-			gtRoot + "/gastown",
 			gtRoot + "/gastown/mayor/rig",
+			gtRoot + "/gastown",
 		}
 		for _, candidate := range candidates {
-			if hasGtSource(candidate) {
+			if hasGtSource(candidate) && isGitRepo(candidate) {
 				return candidate, nil
 			}
 		}
@@ -153,15 +153,15 @@ func GetRepoRoot() (string, error) {
 	home := os.Getenv("HOME")
 	if home != "" {
 		candidates := []string{
-			home + "/gt/gastown",
 			home + "/gt/gastown/mayor/rig",
-			home + "/gastown",
+			home + "/gt/gastown",
 			home + "/gastown/mayor/rig",
-			home + "/src/gastown",
+			home + "/gastown",
 			home + "/src/gastown/mayor/rig",
+			home + "/src/gastown",
 		}
 		for _, candidate := range candidates {
-			if hasGtSource(candidate) {
+			if hasGtSource(candidate) && isGitRepo(candidate) {
 				return candidate, nil
 			}
 		}
