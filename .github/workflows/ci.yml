@@ -17,20 +17,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Check for replace directives in go.mod
-        run: |
-          if grep -qE '^replace\s' go.mod; then
-            echo "ERROR: go.mod contains replace directives."
-            echo ""
-            echo "Replace directives break 'go install github.com/steveyegge/gastown/cmd/gt@latest'."
-            echo "See: https://github.com/steveyegge/gastown/issues/2230"
-            echo ""
-            echo "Found:"
-            grep -n '^replace' go.mod
-            echo ""
-            echo "Remove replace directives before merging to main."
-            exit 1
-          fi
-          echo "OK: no replace directives in go.mod"
+        run: ./scripts/ci/verify.sh guard-replace
 
   # Guard: gastown no longer supports issues.jsonl — Dolt server is the only backend.
   check-no-issues-jsonl:
@@ -41,20 +28,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Reject issues.jsonl if present
-        run: |
-          if [ -f .beads/issues.jsonl ]; then
-            echo "ERROR: .beads/issues.jsonl must not exist in the repository."
-            echo ""
-            echo "Gastown requires a Dolt server — issues.jsonl is no longer supported."
-            echo ""
-            echo "To fix, run:"
-            echo "  git rm .beads/issues.jsonl"
-            echo "  git commit --amend"
-            echo "  git push --force"
-            echo ""
-            exit 1
-          fi
-          echo "OK: no issues.jsonl found"
+        run: ./scripts/ci/verify.sh guard-issues-jsonl
 
   test:
     name: Test
@@ -86,12 +60,15 @@ jobs:
         run: go install gotest.tools/gotestsum@latest
 
       - name: Build
-        run: go build -v ./cmd/gt
+        run: ./scripts/ci/verify.sh build
 
       - name: Test with Coverage
+        env:
+          GASTOWN_VERIFY_JUNIT_FILE: junit.xml
+          GASTOWN_VERIFY_COVERPROFILE: coverage.out
         run: |
           set -o pipefail
-          gotestsum --format testname --junitfile junit.xml -- -race -short -timeout=10m -coverprofile=coverage.out ./... 2>&1 | tee test-output.txt
+          ./scripts/ci/verify.sh unit 2>&1 | tee test-output.txt
 
       - name: Test Report
         if: always()
@@ -133,11 +110,11 @@ jobs:
       - name: Install ICU4C development headers
         run: sudo apt-get install -y libicu-dev
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9
-        with:
-          version: v2.11.4
-          args: --timeout=5m
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
+
+      - name: Lint
+        run: ./scripts/ci/verify.sh lint
 
   integration:
     name: Integration Tests
@@ -189,7 +166,9 @@ jobs:
         run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Integration Tests
-        run: gotestsum --format testname --junitfile junit-integration.xml -- -tags=integration -timeout=15m -v ./internal/cmd/...
+        env:
+          GASTOWN_VERIFY_JUNIT_FILE: junit-integration.xml
+        run: ./scripts/ci/verify.sh integration
 
       - name: Test Report
         if: always()
