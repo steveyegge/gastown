@@ -32,6 +32,7 @@ var (
 	formulaRunDryRun  bool
 	formulaRunAgent   string
 	formulaRunFiles   []string
+	formulaRunSet     []string
 	formulaCreateType string
 )
 
@@ -171,6 +172,7 @@ func init() {
 	formulaRunCmd.Flags().BoolVar(&formulaRunDryRun, "dry-run", false, "Preview execution without running")
 	formulaRunCmd.Flags().StringVar(&formulaRunAgent, "agent", "", "Override agent/runtime for all legs (e.g., gemini, codex, claude-haiku)")
 	formulaRunCmd.Flags().StringSliceVar(&formulaRunFiles, "files", nil, "Files to pass to formula legs (available as {{.files}} in templates)")
+	formulaRunCmd.Flags().StringSliceVar(&formulaRunSet, "set", nil, "Set input variables as key=value pairs (available as {{.key}} in templates)")
 
 	// Create flags
 	formulaCreateCmd.Flags().StringVar(&formulaCreateType, "type", "task", "Formula type: task, workflow, or patrol")
@@ -314,9 +316,21 @@ func dryRunFormula(f *formula.Formula, formulaName, targetRig string) error {
 		fmt.Printf("  Agent:   %s\n", effectiveAgent)
 	}
 
+	// Show --set variables if provided
+	if len(formulaRunSet) > 0 {
+		fmt.Printf("  Set:")
+		for _, s := range formulaRunSet {
+			fmt.Printf(" %s", s)
+		}
+		fmt.Println()
+	}
+
 	if f.Type == formula.TypeConvoy && len(f.Legs) > 0 {
 		// Generate review ID for dry-run display
 		reviewID := generateFormulaShortID()
+
+		// Parse --set key=value pairs for template rendering
+		setVars := parseSetVars(formulaRunSet)
 
 		// Build target description
 		var targetDescription string
@@ -346,6 +360,9 @@ func dryRunFormula(f *formula.Formula, formulaName, targetRig string) error {
 				"review_id":    reviewID,
 				"formula_name": formulaName,
 			}
+			for k, v := range setVars {
+				dirCtx[k] = v
+			}
 			outputDir = renderTemplateOrDefault(f.Output.Directory, dirCtx, ".reviews/"+reviewID)
 			fmt.Printf("\n  Output directory: %s\n", outputDir)
 		}
@@ -368,6 +385,9 @@ func dryRunFormula(f *formula.Formula, formulaName, targetRig string) error {
 					},
 					"changed_files": changedFiles,
 					"files":         formulaRunFiles,
+				}
+				for k, v := range setVars {
+					legCtx[k] = v
 				}
 				legPattern := renderTemplateOrDefault(f.Output.LegPattern, legCtx, leg.ID+"-findings.md")
 				outputPath := filepath.Join(outputDir, legPattern)
@@ -418,7 +438,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 	fmt.Printf("%s Executing convoy formula: %s\n\n",
 		style.Bold.Render("🚚"), formulaName)
 
-	// Get town beads directory for convoy creation
+	// Get town root and resolve rig-scoped bead prefix
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return fmt.Errorf("finding town root: %w", err)
@@ -443,7 +463,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 	}
 
 	// Step 1: Create convoy bead
-	convoyID := fmt.Sprintf("hq-cv-%s", generateFormulaShortID())
+	convoyID := fmt.Sprintf("%s-cv-%s", beadPrefix, generateFormulaShortID())
 	convoyTitle := fmt.Sprintf("%s: %s", formulaName, f.Description)
 	if len(convoyTitle) > 80 {
 		convoyTitle = convoyTitle[:77] + "..."
@@ -518,6 +538,9 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 		}
 	}
 
+	// Parse --set key=value pairs for template rendering
+	setVars := parseSetVars(formulaRunSet)
+
 	// Step 2: Create leg beads and track them
 	legBeads := make(map[string]string) // leg.ID -> bead ID
 	for _, leg := range f.Legs {
@@ -542,6 +565,11 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 					},
 					"changed_files": changedFiles,
 					"files":         formulaRunFiles,
+				}
+
+				// Inject --set key=value pairs into template context
+				for k, v := range setVars {
+					legCtx[k] = v
 				}
 
 				// Compute output path for this leg
@@ -930,6 +958,17 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// parseSetVars parses --set key=value pairs into a map for template rendering.
+func parseSetVars(setArgs []string) map[string]interface{} {
+	vars := make(map[string]interface{})
+	for _, arg := range setArgs {
+		if idx := strings.IndexByte(arg, '='); idx > 0 {
+			vars[arg[:idx]] = arg[idx+1:]
+		}
+	}
+	return vars
 }
 
 // findFormulaFile searches for a formula file by name
