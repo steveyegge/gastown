@@ -340,6 +340,9 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 		if local.Enabled {
 			result.Enabled = local.Enabled
 		}
+		if local.MergeStrategy != "" {
+			result.MergeStrategy = local.MergeStrategy
+		}
 		if local.OnConflict != "" {
 			result.OnConflict = local.OnConflict
 		}

@@ -1222,6 +1222,10 @@ type MergeQueueConfig struct {
 	// Nil defaults to false (manual landing required).
 	IntegrationBranchAutoLand *bool `json:"integration_branch_auto_land,omitempty"`
 
+	// MergeStrategy controls how the refinery lands approved work: "direct" (default)
+	// merges directly to the base branch, "pr" creates a GitHub pull request.
+	MergeStrategy string `json:"merge_strategy,omitempty"`
+
 	// OnConflict specifies conflict resolution strategy: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
 
