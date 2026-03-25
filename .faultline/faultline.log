@@ -324,3 +324,28 @@
 {"time":"2026-03-25T15:13:05.209153-07:00","level":"DEBUG","msg":"bd status check failed","bead_id":"✓ Created issue in rig \"faultline\": fl-97j — TestError: Hell","err":"bd show: Error fetching ✓ Created issue in rig \"faultline\": fl-97j — TestError: Hell: no issue found matching \"✓ Created issue in rig \\\"faultline\\\": fl-97j — TestError: Hell\"\n: exit status 1"}
 {"time":"2026-03-25T15:14:05.102952-07:00","level":"DEBUG","msg":"bd status check failed","bead_id":"✓ Created issue in rig \"faultline\": fl-9dg — faultline.inter","err":"bd show: Error fetching ✓ Created issue in rig \"faultline\": fl-9dg — faultline.inter: no issue found matching \"✓ Created issue in rig \\\"faultline\\\": fl-9dg — faultline.inter\"\n: exit status 1"}
 {"time":"2026-03-25T15:14:05.184269-07:00","level":"DEBUG","msg":"bd status check failed","bead_id":"✓ Created issue in rig \"faultline\": fl-97j — TestError: Hell","err":"bd show: Error fetching ✓ Created issue in rig \"faultline\": fl-97j — TestError: Hell: no issue found matching \"✓ Created issue in rig \\\"faultline\\\": fl-97j — TestError: Hell\"\n: exit status 1"}
+{"time":"2026-03-25T15:14:10.595364-07:00","level":"INFO","msg":"health monitor stopped"}
+{"time":"2026-03-25T15:14:11.159565-07:00","level":"INFO","msg":"self-monitoring enabled","endpoint":"http://localhost:8080/api/0/store/"}
+{"time":"2026-03-25T15:14:11.178137-07:00","level":"INFO","msg":"health monitor started","interval":60000000000,"gt_doctor":false}
+{"time":"2026-03-25T15:14:11.178268-07:00","level":"INFO","msg":"relay poller started","url":"https://faultline-relay.fly.dev/relay/poll","interval":30000000000}
+{"time":"2026-03-25T15:14:11.178359-07:00","level":"INFO","msg":"slow-burn sweep enabled","age":3600000000000,"interval":300000000000}
+{"time":"2026-03-25T15:14:11.17853-07:00","level":"INFO","msg":"listening","addr":":8080"}
+{"time":"2026-03-25T15:14:11.349527-07:00","level":"WARN","msg":"relay poll: bad status","status":404,"body":"404 page not found\n"}
+{"time":"2026-03-25T15:14:41.214874-07:00","level":"WARN","msg":"relay poll: bad status","status":404,"body":"404 page not found\n"}
+{"time":"2026-03-25T15:15:11.210028-07:00","level":"INFO","msg":"dolt commit","writes":10}
+{"time":"2026-03-25T15:15:11.213399-07:00","level":"WARN","msg":"relay poll: bad status","status":404,"body":"404 page not found\n"}
+{"time":"2026-03-25T15:15:11.273155-07:00","level":"DEBUG","msg":"bd status check failed","bead_id":"✓ Created issue in rig \"faultline\": fl-9dg — faultline.inter","err":"bd show: Error fetching ✓ Created issue in rig \"faultline\": fl-9dg — faultline.inter: no issue found matching \"✓ Created issue in rig \\\"faultline\\\": fl-9dg — faultline.inter\"\n: exit status 1"}
+{"time":"2026-03-25T15:15:11.37581-07:00","level":"DEBUG","msg":"bd status check failed","bead_id":"✓ Created issue in rig \"faultline\": fl-97j — TestError: Hell","err":"bd show: Error fetching ✓ Created issue in rig \"faultline\": fl-97j — TestError: Hell: no issue found matching \"✓ Created issue in rig \\\"faultline\\\": fl-97j — TestError: Hell\"\n: exit status 1"}
+{"time":"2026-03-25T15:15:41.211209-07:00","level":"WARN","msg":"relay poll: bad status","status":404,"body":"404 page not found\n"}
+{"time":"2026-03-25T15:16:11.212728-07:00","level":"WARN","msg":"relay poll: bad status","status":404,"body":"404 page not found\n"}
+{"time":"2026-03-25T15:16:11.27876-07:00","level":"DEBUG","msg":"bd status check failed","bead_id":"✓ Created issue in rig \"faultline\": fl-9dg — faultline.inter","err":"bd show: Error fetching ✓ Created issue in rig \"faultline\": fl-9dg — faultline.inter: no issue found matching \"✓ Created issue in rig \\\"faultline\\\": fl-9dg — faultline.inter\"\n: exit status 1"}
+{"time":"2026-03-25T15:16:11.403342-07:00","level":"DEBUG","msg":"bd status check failed","bead_id":"✓ Created issue in rig \"faultline\": fl-97j — TestError: Hell","err":"bd show: Error fetching ✓ Created issue in rig \"faultline\": fl-97j — TestError: Hell: no issue found matching \"✓ Created issue in rig \\\"faultline\\\": fl-97j — TestError: Hell\"\n: exit status 1"}
+{"time":"2026-03-25T15:16:41.210038-07:00","level":"WARN","msg":"relay poll: bad status","status":404,"body":"404 page not found\n"}
+{"time":"2026-03-25T15:23:22.780856-07:00","level":"INFO","msg":"self-monitoring enabled","endpoint":"http://localhost:8080/api/0/store/"}
+{"time":"2026-03-25T15:23:22.792932-07:00","level":"INFO","msg":"health monitor started","interval":60000000000,"gt_doctor":false}
+{"time":"2026-03-25T15:23:22.793023-07:00","level":"INFO","msg":"relay poller started","url":"https://faultline-relay.fly.dev/relay/poll","interval":30000000000}
+{"time":"2026-03-25T15:23:22.793111-07:00","level":"INFO","msg":"slow-burn sweep enabled","age":3600000000000,"interval":300000000000}
+{"time":"2026-03-25T15:23:22.793531-07:00","level":"INFO","msg":"listening","addr":":8080"}
+{"time":"2026-03-25T15:23:22.955922-07:00","level":"WARN","msg":"relay poll: bad status","status":404,"body":"404 page not found\n"}
+{"time":"2026-03-25T15:23:41.603824-07:00","level":"INFO","msg":"envelope ingested","event_id":"44df52c5-3783-4bed-a4c5-b927bc607e0c","project":3,"items":2,"processed":1}
+{"time":"2026-03-25T15:23:52.826413-07:00","level":"WARN","msg":"relay poll: bad status","status":404,"body":"404 page not found\n"}
