@@ -1171,8 +1171,8 @@ func updateAgentBeadState(townRoot, agent, state, _ string) { // reason unused b
 		return
 	}
 
-	// Use bd agent state command
-	cmd := exec.Command("bd", "agent", "state", beadID, state)
+	// Use bd set-state command (bd 0.62.0+)
+	cmd := exec.Command("bd", "set-state", beadID, "agent_state="+state)
 	cmd.Dir = townRoot
 	_ = cmd.Run() // Best effort
 }

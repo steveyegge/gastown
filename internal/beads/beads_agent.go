@@ -416,14 +416,14 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 }
 
 // UpdateAgentState updates the agent_state field in an agent bead.
-// Uses `bd agent state` command for the database column directly,
+// Uses `bd set-state` (bd 0.62.0+) to update the state dimension,
 // then syncs the description's agent_state field to match (gt-ulom).
 func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, nil, retErr) }()
-	// Update agent state using bd agent state command
+	// Update agent state using bd set-state command (bd 0.62.0+).
 	// Use runWithRouting so bd can resolve cross-prefix agent beads (e.g., wa-*
 	// agent beads from hq context) via routes.jsonl instead of BEADS_DIR.
-	_, err := b.runWithRouting("agent", "state", id, state)
+	_, err := b.runWithRouting("set-state", id, "agent_state="+state)
 	if err != nil {
 		return fmt.Errorf("updating agent state: %w", err)
 	}
