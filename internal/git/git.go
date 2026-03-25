@@ -1185,10 +1185,10 @@ func (g *Git) submoduleReferencePath() string {
 }
 
 // isValidSubmoduleReference checks if a path is suitable as a --reference
-// for git submodule update. It must have .gitmodules and not be a shallow clone
-// (git rejects shallow repos as references).
+// for git submodule update. It must have a tracked .gitmodules and not be a
+// shallow clone (git rejects shallow repos as references).
 func isValidSubmoduleReference(repoPath string) bool {
-	if _, err := os.Stat(filepath.Join(repoPath, ".gitmodules")); err != nil {
+	if !hasTrackedGitmodules(repoPath) {
 		return false
 	}
 	// Check if shallow — git rev-parse --is-shallow-repository
@@ -1786,8 +1786,7 @@ type SubmoduleChange struct {
 // to share git objects from a local clone instead of fetching from remote.
 // This makes submodule init near-instant for large submodules (e.g. 655MB gitlabhq).
 func InitSubmodules(repoPath string, referencePath ...string) error {
-	gitmodules := filepath.Join(repoPath, ".gitmodules")
-	if _, err := os.Stat(gitmodules); os.IsNotExist(err) {
+	if !hasTrackedGitmodules(repoPath) {
 		return nil
 	}
 
@@ -1796,8 +1795,7 @@ func InitSubmodules(repoPath string, referencePath ...string) error {
 	// Use --reference to share objects from a local clone (avoids remote fetch)
 	if len(referencePath) > 0 && referencePath[0] != "" {
 		refPath := referencePath[0]
-		refModules := filepath.Join(refPath, ".gitmodules")
-		if _, err := os.Stat(refModules); err == nil {
+		if hasTrackedGitmodules(refPath) {
 			args = append(args, "--reference", refPath)
 		}
 	}
@@ -1809,6 +1807,21 @@ func InitSubmodules(repoPath string, referencePath ...string) error {
 		return fmt.Errorf("initializing submodules: %s", strings.TrimSpace(stderr.String()))
 	}
 	return nil
+}
+
+// hasTrackedGitmodules checks whether .gitmodules exists on disk AND is tracked
+// by git. After a submodule-to-monorepo migration, .gitmodules may linger as an
+// untracked file (e.g., in a stale mayor/rig clone or bare repo worktree) even
+// though it has been removed from the repository. Checking only os.Stat would
+// incorrectly trigger submodule init on these stale artifacts.
+func hasTrackedGitmodules(repoPath string) bool {
+	gitmodules := filepath.Join(repoPath, ".gitmodules")
+	if _, err := os.Stat(gitmodules); os.IsNotExist(err) {
+		return false
+	}
+	// Verify .gitmodules is actually tracked in the index.
+	cmd := exec.Command("git", "-C", repoPath, "ls-files", "--error-unmatch", ".gitmodules")
+	return cmd.Run() == nil
 }
 
 // InitSparseCheckout initializes sparse checkout with cone mode and configures
