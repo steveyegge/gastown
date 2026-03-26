@@ -162,8 +162,8 @@ func (c *Client) GetPRReviewComments(ctx context.Context, owner, repo string, pr
 // ReplyToPRComment posts a reply to an existing review comment.
 func (c *Client) ReplyToPRComment(ctx context.Context, owner, repo string, prNumber int, commentID int64, body string) error {
 	reqBody := map[string]any{
-		"body":                  body,
-		"in_reply_to":          commentID,
+		"body":         body,
+		"in_reply_to":  commentID,
 	}
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/comments", owner, repo, prNumber)
 	if err := c.restRequest(ctx, "POST", path, reqBody, nil); err != nil {
