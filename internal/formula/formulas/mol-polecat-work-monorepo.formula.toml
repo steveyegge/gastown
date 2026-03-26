@@ -69,6 +69,13 @@ title = "Load context and verify assignment"
 description = """
 Initialize your session and understand your assignment.
 
+**0. IMMEDIATELY mark your bead as in-progress (convoy safety):**
+```bash
+bd update {{issue}} --status=in_progress
+```
+This MUST be the very first command you run. It prevents the convoy dispatch
+loop from seeing your bead as unowned and force-stealing it from you.
+
 **1. Prime your environment:**
 ```bash
 gt prime                    # Load role context

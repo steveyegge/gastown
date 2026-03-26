@@ -1,5 +1,9 @@
 description = """
-Full polecat work lifecycle from assignment through completion.
+Polecat work lifecycle for swarm mode — merging into a shared feature branch via the merge queue.
+
+No PR creation, no CI validation, no AI review steps. Polecats implement their fix,
+run gates locally, rebase onto the feature branch, and submit to the merge queue.
+The refinery serializes merges to the feature branch.
 
 This molecule guides a polecat through a complete work assignment. Each step
 has clear entry/exit criteria and specific commands to run. A polecat can
@@ -25,18 +29,24 @@ branch (pre-verify step). This enables the refinery to fast-path merge your MR
 in ~5 seconds instead of re-running gates. If pre-verification is skipped or
 stale, the refinery falls through to normal gate execution.
 
+**Swarm mode:** You are part of a swarm of polecats working on sub-tasks of an
+epic. All work merges into a shared feature branch ({{base_branch}}), NOT main.
+There are no PRs — the feature branch has its own PR against main that a human
+manages. Your job is to implement, validate locally, and submit to the merge queue.
+
 **You do NOT:**
-- Push directly to main (Refinery merges from MQ)
+- Push directly to the feature branch (Refinery merges from MQ)
+- Create PRs (the feature branch PR exists already)
 - Close your own issue (Refinery closes after merge)
 - Wait for merge (you're gone after `gt done`)
-- Fix pre-existing failures on main (Refinery owns main health)
+- Fix pre-existing failures (Refinery owns branch health)
 
 ## Variables
 
 | Variable | Source | Description |
 |----------|--------|-------------|
 | issue | hook_bead | The issue ID you're assigned to work on |
-| base_branch | sling vars | The base branch to rebase on (default: main) |
+| base_branch | sling vars | The feature branch to merge into (REQUIRED, must not be main) |
 | setup_command | rig config | Setup/install command (e.g., `pnpm install`). Empty = skip. |
 | typecheck_command | rig config | Type check command (e.g., `tsc --noEmit`). Empty = skip. |
 | test_command | rig config | Test command. Empty = skip. Rig must configure for its language. |
@@ -48,11 +58,12 @@ stale, the refinery falls through to normal gate execution.
 | Situation | Action |
 |-----------|--------|
 | Build fails | Fix it. Do not proceed if it won't compile. |
+| Rebase conflicts | Resolve carefully. If stuck, mail Witness. |
 | Blocked on external | Mail Witness for help, mark yourself stuck |
 | Context filling | Use gt handoff to cycle to fresh session |
 | Unsure what to do | Mail Witness, don't guess |"""
-formula = "mol-polecat-work"
-version = 10
+formula = "mol-polecat-work-monorepo-swarm"
+version = 1
 
 [[steps]]
 id = "load-context"
@@ -89,31 +100,13 @@ gt mail inbox
 # Read any HANDOFF or assignment messages
 ```
 
-**4. Check for prior merge failure context:**
-
-If the bead notes contain "MERGE REJECTION", a previous polecat's work was
-rejected by the refinery. Read the failure details carefully:
-- **Failure-Type**: what broke (tests, build, lint, typecheck)
-- **Error**: the actual error output
-- **Branch**: the previous branch may still exist with the original work
-
-If a prior branch exists, check it out instead of creating a new one:
-```bash
-git fetch origin
-git branch -a | grep <branch-from-notes>
-# If it exists: git checkout <branch> && git rebase origin/{{base_branch}}
-```
-
-This lets you make a targeted fix rather than starting from scratch.
-
-**5. Understand the requirements:**
+**4. Understand the requirements:**
 - What exactly needs to be done?
 - What files are likely involved?
 - Are there dependencies or blockers?
 - What does "done" look like?
-- If this is a rework: what specifically failed and why?
 
-**6. Verify you can proceed:**
+**5. Verify you can proceed:**
 - No unresolved blockers on the issue
 - You understand what to do
 - Required resources are available
@@ -139,20 +132,7 @@ git status
 git branch --show-current
 ```
 
-**2. Check for a prior branch from a rejected MR:**
-
-If the bead notes contain "MERGE REJECTION" with a branch name, check if that
-branch still exists on the remote. Reusing it preserves all previous work:
-```bash
-git fetch origin
-# Check for prior branch
-git branch -r | grep <prior-branch>
-# If found, check it out:
-git checkout -b <prior-branch> origin/<prior-branch>
-git rebase origin/{{base_branch}}
-```
-
-**If no prior branch, create a fresh one:**
+**2. If not on a feature branch, create one:**
 ```bash
 git fetch origin
 git checkout -b polecat/<name> origin/{{base_branch}}
@@ -255,80 +235,14 @@ Problem: <what's blocking you>
 Tried: <what you've attempted>"
 ```
 
-**Exit criteria (HARD GATE):** Implementation complete AND code committed to git.
-- Code tasks: `git status` shows clean working tree, `git log origin/{{base_branch}}..HEAD` shows at least 1 commit
-- Report tasks: all findings persisted to bead via --notes or --design
-Do NOT proceed to the next step with uncommitted changes."""
-
-[[steps]]
-id = "commit-changes"
-title = "Commit all implementation changes"
-needs = ["implement"]
-description = """
-Ensure ALL implementation work is committed IMMEDIATELY after implementation.
-This step exists to prevent the #1 polecat failure mode: context exhaustion
-before code is committed. Commit NOW, review and build AFTER.
-
-**CRITICAL: You MUST commit all changes from implementation.**
-NEVER use `git checkout -- .` or `git restore .` to discard implementation work.
-ALWAYS commit ALL uncommitted changes from your implementation.
-
-**1. Check for uncommitted changes:**
-```bash
-git status
-```
-
-**2. If there are ANY uncommitted changes, commit them now:**
-```bash
-git add -A && git commit -m "<type>: <descriptive message> ({{issue}})"
-```
-
-**3. If working tree is already clean, that's fine — but you MUST still have commits (step 4).**
-
-**4. VERIFY commits exist (HARD GATE — do NOT close this step without passing):**
-```bash
-git log origin/{{base_branch}}..HEAD --oneline
-```
-
-This MUST show at least 1 commit. If it shows NOTHING:
-- You have NOT completed your implementation. Do NOT close this step.
-- Go back to the implement step and do the work.
-- If the task genuinely requires no code changes (already fixed upstream, etc.),
-  run `gt done --status DEFERRED` and skip remaining steps.
-- Do NOT proceed to review or build with zero commits.
-
-**5. VERIFY clean working tree:**
-```bash
-git status
-```
-Must show "nothing to commit, working tree clean".
-
-**Report-only tasks (audits, reviews, research — no code changes):**
-If your task produced no code changes, verify your findings are persisted to the bead:
-```bash
-bd show {{issue}}    # Check notes/design fields have your findings
-```
-If findings are persisted, proceed to review. Report-only tasks with findings
-persisted can skip commit verification.
-
-**Exit criteria:** Working tree clean AND either (a) at least 1 commit ahead of origin/{{base_branch}}, or (b) report-only task with findings persisted to bead."""
+**Exit criteria:** Implementation complete. Code tasks: all changes committed. Report tasks: all findings persisted to bead."""
 
 [[steps]]
 id = "self-review"
 title = "Self-review changes"
-needs = ["commit-changes"]
+needs = ["implement"]
 description = """
-Review your own changes before the build check. Use `/review --branch` for
-structured grading, or do a manual review.
-
-**Option A: Use /review (recommended)**
-```bash
-/review --branch
-```
-This gives you a structured grade (A-F) with CRITICAL/MAJOR/MINOR findings
-and specific fix suggestions. Fix any CRITICAL or MAJOR issues before proceeding.
-
-**Option B: Manual review**
+Review your own changes before the build check.
 
 **1. Review the diff:**
 ```bash
@@ -357,8 +271,7 @@ git diff --stat origin/{{base_branch}}...HEAD
 
 If you accidentally modified unrelated files, remove those changes.
 
-**Exit criteria:** Changes are clean, reviewed (Grade B or better if using /review),
-and ready for build check."""
+**Exit criteria:** Changes are clean, reviewed, and ready for build check."""
 
 [[steps]]
 id = "build-check"
@@ -416,119 +329,101 @@ If lint_command is set:
 **Exit criteria:** Code compiles. Obvious regressions caught. Ready to submit."""
 
 [[steps]]
-id = "pre-verify"
-title = "Pre-merge rebase verification"
+id = "commit-changes"
+title = "Commit all implementation changes"
 needs = ["build-check"]
 description = """
-Rebase onto the target branch and run the full gate suite. This enables the
-refinery to fast-path merge your MR without re-running gates (~5s merge
-instead of minutes).
+Ensure ALL implementation work is committed before submitting.
 
-**1. Fetch and rebase onto target:**
+**CRITICAL: You MUST commit all changes from implementation.**
+NEVER use `git checkout -- .` or `git restore .` to discard implementation work.
+ALWAYS commit ALL uncommitted changes from your implementation.
+
+**1. Check for uncommitted changes:**
 ```bash
-git fetch origin {{base_branch}}
-git rebase origin/{{base_branch}}
+git status
 ```
 
-If rebase conflicts:
-- Resolve them carefully
-- Re-run the build to ensure the resolution is correct
-- If stuck, mail Witness
-
-**2. Run the full gate suite on the rebased result:**
-
-Run ALL configured gates (not just targeted tests — this is the full verification):
-
-If build_command is set:
+**2. If there are ANY uncommitted changes, commit them now:**
 ```bash
-{{build_command}}
+git add -A && git commit -m "<type>: <descriptive message> ({{issue}})"
 ```
 
-If typecheck_command is set:
+**3. If working tree is already clean, that's fine — but you MUST still have commits (step 4).**
+
+**4. VERIFY commits exist (HARD GATE — do NOT close this step without passing):**
 ```bash
-{{typecheck_command}}
+git log origin/{{base_branch}}..HEAD --oneline
 ```
 
-If lint_command is set:
+This MUST show at least 1 commit. If it shows NOTHING:
+- You have NOT completed your implementation. Do NOT close this step.
+- Go back to the implement step and do the work.
+- If the task genuinely requires no code changes (already fixed upstream, etc.),
+  close the bead with `bd close {{issue}} --reason="no-changes: <explanation>"`
+  and run `gt done`.
+- Do NOT proceed to submit with zero commits.
+
+**5. VERIFY clean working tree:**
 ```bash
-{{lint_command}}
+git status
 ```
+Must show "nothing to commit, working tree clean".
 
-If test_command is set:
+**Report-only tasks (audits, reviews, research — no code changes):**
+If your task produced no code changes, verify your findings are persisted to the bead:
 ```bash
-{{test_command}}
+bd show {{issue}}    # Check notes/design fields have your findings
 ```
+If findings are persisted, close the bead and run `gt done`.
 
-Empty commands mean "not configured" — skip silently.
-
-**3. If any gate fails after rebase:**
-- Fix the issue, commit, and re-run from step 1
-- Do NOT proceed with --pre-verified if gates failed
-
-**4. If all gates pass:**
-You will use `gt done --pre-verified` in the next step. This tells the refinery
-that you ran the full gate suite on a rebased branch, enabling fast-path merge.
-
-**Note:** If this step takes too long or the gates are not configured for this
-project, you may skip this step and use `gt done` without --pre-verified.
-The refinery will run gates normally (slower but still correct).
-
-**Exit criteria:** Branch rebased onto latest origin/{{base_branch}}, all configured gates pass."""
+**Exit criteria:** Working tree clean AND at least 1 commit ahead of origin/{{base_branch}}."""
 
 [[steps]]
-id = "submit-and-exit"
-title = "Submit work and self-clean"
-needs = ["pre-verify"]
+id = "pre-verify-and-submit"
+title = "Pre-verify on feature branch and submit to merge queue"
+needs = ["commit-changes"]
 description = """
-Submit your work and clean up. You cease to exist after this step.
-
-**Self-Cleaning Model:**
-Once you run `gt done`, you're gone. The command:
-1. Pushes your branch to origin
-2. Creates an MR bead in the merge queue
-3. Nukes your sandbox (worktree removal)
-4. Exits your session immediately
+Rebase onto the latest feature branch, run the full gate suite, and submit
+to the merge queue. The refinery will merge your work into {{base_branch}}.
 
 **Pre-flight: Verify you have actual work to submit (HARD GATE):**
 ```bash
 git log origin/{{base_branch}}..HEAD --oneline
 ```
 This MUST show at least 1 commit. If it shows nothing, do NOT run `gt done`.
-`gt done` will reject zero-commit branches for polecats.
 
-**Run gt done:**
+**1. Rebase onto latest feature branch:**
 ```bash
-# For code tasks with pre-verification (recommended — enables fast-path merge):
+git fetch origin {{base_branch}}
+git rebase origin/{{base_branch}}
+```
+
+If rebase conflicts: resolve carefully. If stuck, mail Witness.
+
+**2. Run the full gate suite on the rebased result (pre-verify):**
+
+If build_command is set: run {{build_command}}
+If typecheck_command is set: run {{typecheck_command}}
+If lint_command is set: run {{lint_command}}
+If test_command is set: run {{test_command}}
+
+Skip any empty/unconfigured commands silently.
+
+**3. If all gates pass, submit to merge queue:**
+```bash
 gt done --pre-verified --target {{base_branch}}
-
-# For code tasks without pre-verification (gates skipped or failed):
-gt done --target {{base_branch}}
-
-# For report-only tasks (no commits — audits, reviews, research):
-gt done --status DEFERRED
 ```
 
-You should see output like:
-```
-✓ Work submitted to merge queue
-  MR ID: gt-xxxxx
-  Source: polecat/<name>
-  Target: {{base_branch}}
-  Issue: {{issue}}
-✓ Sandbox nuked
-✓ Session exiting
-```
+**4. If gates fail:** fix, commit, re-rebase, re-run gates. Do NOT submit broken code.
 
 **What happens next (not your concern):**
-- Refinery batches MRs and runs gates on the merged stack
-- If green: all MRs in the batch merge to {{base_branch}} at once
-- If red: Refinery bisects to isolate the culprit, merges the good ones
-- Refinery fixes failures itself (inline or via helper polecats)
-- Refinery closes your issue after successful merge
+- Refinery merges your work into {{base_branch}} (the feature branch)
+- Once all swarm work lands, a human manages the feature branch PR against main
 
-You are NOT involved in any of that. You're gone. Done means gone.
+You are GONE after `gt done`. Done means gone.
 
-**Exit criteria:** Work submitted, sandbox nuked, session exited."""
+**Exit criteria:** Work submitted to merge queue, sandbox nuked, session exited."""
 
 [vars]
 [vars.issue]
@@ -536,8 +431,8 @@ description = "The issue ID assigned to this polecat"
 required = true
 
 [vars.base_branch]
-description = "The base branch to rebase on and compare against (e.g., main, integration/epic-id)"
-default = "main"
+description = "The feature branch to merge into (e.g., feat/contract-review-procedure-rebased). MUST NOT be main."
+required = true
 
 [vars.setup_command]
 description = "Setup/install command (e.g., pnpm install). Empty = skip."
