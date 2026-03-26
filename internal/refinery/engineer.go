@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -926,9 +927,18 @@ func (e *Engineer) runGatesForPhase(ctx context.Context, phase GatePhase) Proces
 		})
 	}
 
-	summary := verify.RunPhase(ctx, e.workDir, gates, verify.Phase(phase), verify.RunOptions{
-		Parallel: e.config.GatesParallel && phase == GatePhasePreMerge,
-		Output:   e.output,
+	// Filter to just the gates for this phase before running, sorted by name for determinism.
+	phaseGates := make([]verify.Gate, 0, len(gates))
+	for _, g := range gates {
+		if g.Phase == verify.Phase(phase) {
+			phaseGates = append(phaseGates, g)
+		}
+	}
+	sort.Slice(phaseGates, func(i, j int) bool { return phaseGates[i].Name < phaseGates[j].Name })
+	parallel := e.config.GatesParallel && phase == GatePhasePreMerge
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Running %d %s gate(s) (parallel=%v)\n", len(phaseGates), phase, parallel)
+	summary := verify.Run(ctx, e.workDir, phaseGates, parallel, func(format string, args ...interface{}) {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] %s\n", fmt.Sprintf(format, args...))
 	})
 	if !summary.Success {
 		var failures []string

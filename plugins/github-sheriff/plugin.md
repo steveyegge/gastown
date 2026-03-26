@@ -1,6 +1,6 @@
 +++
 name = "github-sheriff"
-description = "Monitor GitHub CI checks on open PRs and create beads for failures"
+description = "Monitor GitHub CI checks on open PRs and the default branch, and create beads for failures"
 version = 1
 
 [gate]
@@ -19,14 +19,20 @@ severity = "low"
 
 # GitHub Sheriff
 
-Polls GitHub for open pull requests, categorizes them by readiness, and creates
-`ci-failure` beads for new failures. Implements the PR Sheriff pattern from the
+Polls GitHub for open pull requests and the default branch, categorizes PRs by
+readiness, and creates or updates `ci-failure` beads for new failures. Implements
+the PR Sheriff pattern from the
 [Gas Town User Manual](https://steve-yegge.medium.com/gas-town-emergency-user-manual-cf0e4556d74b)
 as a Deacon plugin.
 
 Categorizes each PR as:
 - **Easy win**: CI passing, small (<200 LOC changed), no merge conflicts
 - **Needs review**: CI failing, large, or has conflicts
+
+Also watches the latest default-branch workflow run. If the default branch goes
+red, create or update the same `ci-failure` bead key used by Gastown's
+`main_branch_test` patrol: rig + commit SHA + failing check. Include the
+workflow URL, job URL, merge commit, MR bead, and source issue when known.
 
 Requires: `gh` CLI installed and authenticated (`gh auth status`).
 
