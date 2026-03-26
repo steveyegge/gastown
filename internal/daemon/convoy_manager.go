@@ -100,6 +100,11 @@ type ConvoyManager struct {
 	// event is seen from multiple stores or across poll cycles where high-water
 	// marks don't perfectly deduplicate (e.g., event replication). See GH #1798.
 	processedCloses sync.Map // map[string]bool
+
+	// onTerminalConvoy is called when a batch-pr convoy reaches terminal
+	// completion (all tracked issues closed). The handler runs the gate suite
+	// on the integration branch and signals pass/fail for draft→ready conversion.
+	onTerminalConvoy func(ctx context.Context, convoyID string) error
 }
 
 // NewConvoyManager creates a new convoy manager.
@@ -129,6 +134,13 @@ func NewConvoyManager(townRoot string, logger func(format string, args ...interf
 		isRigParked:  isRigParked,
 		gtPath:       gtPath,
 	}
+}
+
+// SetTerminalConvoyHandler sets the callback for batch-pr terminal convoy
+// completion. When all tracked issues in a batch-pr convoy close, this
+// handler runs the gate suite on the integration branch.
+func (m *ConvoyManager) SetTerminalConvoyHandler(h func(ctx context.Context, convoyID string) error) {
+	m.onTerminalConvoy = h
 }
 
 // Start begins the convoy manager goroutines (event poll + stranded scan).
@@ -334,7 +346,18 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map
 
 		m.logger("Convoy: close detected: %s (from %s)", issueID, name)
 		resolver := convoy.NewStoreResolver(m.townRoot, stores)
-		convoy.CheckConvoysForIssue(m.ctx, hqStore, m.townRoot, issueID, "Convoy", m.logger, m.gtPath, m.isRigParked, resolver)
+		result := convoy.CheckConvoysForIssue(m.ctx, hqStore, m.townRoot, issueID, "Convoy", m.logger, m.gtPath, m.isRigParked, resolver)
+
+		// Handle batch-pr terminal convoy completion: when all tracked issues
+		// close, run the gate suite on the integration branch.
+		if result != nil && len(result.TerminalConvoyIDs) > 0 && m.onTerminalConvoy != nil {
+			for _, terminalID := range result.TerminalConvoyIDs {
+				m.logger("Convoy: terminal completion detected for batch-pr convoy %s, triggering gate suite", terminalID)
+				if err := m.onTerminalConvoy(m.ctx, terminalID); err != nil {
+					m.logger("Convoy: gate suite failed for convoy %s: %s", terminalID, util.FirstLine(err.Error()))
+				}
+			}
+		}
 	}
 	return nil
 }
