@@ -381,6 +381,15 @@ func (d *Daemon) Run() error {
 		storeOpener = d.openBeadsStores
 	}
 	d.convoyManager = NewConvoyManager(d.config.TownRoot, d.logger.Printf, d.gtPath, 0, d.beadsStores, storeOpener, isRigParked)
+
+	// Wire terminal convoy handler: when all tracked issues in a batch-pr
+	// convoy close, run the gate suite on the integration branch.
+	townRoot := d.config.TownRoot
+	gtPath := d.gtPath
+	d.convoyManager.SetTerminalConvoyHandler(func(ctx context.Context, convoyID string) error {
+		return refinery.HandleTerminalConvoy(ctx, townRoot, convoyID, d.logger.Printf, gtPath)
+	})
+
 	if err := d.convoyManager.Start(); err != nil {
 		d.logger.Printf("Warning: failed to start convoy manager: %v", err)
 	} else {
