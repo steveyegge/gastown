@@ -43,6 +43,8 @@ type EnsureOptions struct {
 	PollInterval time.Duration
 	Timeout      time.Duration
 	Output       io.Writer
+	// NowFn overrides time.Now for testing. Leave nil to use time.Now.
+	NowFn func() time.Time
 }
 
 // Runner executes external commands.
@@ -114,7 +116,11 @@ func (c *Client) EnsureBranchCI(ctx context.Context, opts EnsureOptions) (*Workf
 		_, _ = fmt.Fprintf(opts.Output, "[github-ci] waiting for push-triggered %s run on %s@%s\n", workflow, opts.Branch, shortSHA(opts.SHA))
 	}
 
-	pushDeadline := time.Now().Add(pushWait)
+	nowFn := opts.NowFn
+	if nowFn == nil {
+		nowFn = time.Now
+	}
+	pushDeadline := nowFn().Add(pushWait)
 	for {
 		run, err := c.FindRun(runCtx, repo, workflow, opts.Branch, opts.SHA, "push")
 		if err != nil {
@@ -123,7 +129,7 @@ func (c *Client) EnsureBranchCI(ctx context.Context, opts EnsureOptions) (*Workf
 		if run != nil {
 			return c.waitForRun(runCtx, repo, run, pollInterval, opts.Output)
 		}
-		if time.Now().After(pushDeadline) {
+		if nowFn().After(pushDeadline) {
 			break
 		}
 		select {

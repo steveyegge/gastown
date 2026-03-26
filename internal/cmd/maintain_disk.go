@@ -69,10 +69,7 @@ func runMaintainDisk(cmd *cobra.Command, args []string) error {
 	// --- Build plan ---
 	fmt.Printf("%s Building disk cleanup plan...\n", style.Bold.Render("●"))
 
-	logsToRotate, err := findLogsToRotate(townRoot)
-	if err != nil {
-		return fmt.Errorf("scanning logs: %w", err)
-	}
+	logsToRotate := findLogsToRotate(townRoot)
 
 	goCache, goCacheSize := estimateGoCache()
 	worktrees := findRigWorktrees(townRoot)
@@ -109,7 +106,7 @@ func runMaintainDisk(cmd *cobra.Command, args []string) error {
 	if !maintainForce {
 		fmt.Printf("\nProceed? [y/N] ")
 		var answer string
-		fmt.Scanln(&answer)
+		_, _ = fmt.Scanln(&answer)
 		if strings.ToLower(strings.TrimSpace(answer)) != "y" {
 			fmt.Println("Aborted.")
 			return nil
@@ -176,7 +173,7 @@ func runMaintainDisk(cmd *cobra.Command, args []string) error {
 }
 
 // findLogsToRotate returns daemon log files larger than diskLogSizeThreshold.
-func findLogsToRotate(townRoot string) ([]string, error) {
+func findLogsToRotate(townRoot string) []string {
 	var large []string
 
 	// Daemon-level logs
@@ -195,7 +192,7 @@ func findLogsToRotate(townRoot string) ([]string, error) {
 	// Rig-level dolt-server.log
 	entries, err := os.ReadDir(townRoot)
 	if err != nil {
-		return large, nil
+		return large
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") || entry.Name() == "daemon" {
@@ -208,7 +205,7 @@ func findLogsToRotate(townRoot string) ([]string, error) {
 		}
 	}
 
-	return large, nil
+	return large
 }
 
 // estimateGoCache returns a human-readable size estimate and byte count of the Go build cache.

@@ -35,6 +35,21 @@ func (r *scriptedRunner) Run(_ context.Context, name string, args ...string) ([]
 }
 
 func TestEnsureBranchCIDispatchesFallback(t *testing.T) {
+	// Use a controlled clock: starts before the deadline, then advances past it
+	// after the first poll so the push-wait loop runs exactly twice, then dispatches.
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	pushWait := 5 * time.Second
+	callCount := 0
+	fakeClock := func() time.Time {
+		callCount++
+		// First two calls (deadline setup + first check): before deadline.
+		// Third call onward: past deadline, triggering dispatch.
+		if callCount <= 2 {
+			return t0
+		}
+		return t0.Add(pushWait + time.Second)
+	}
+
 	runner := &scriptedRunner{
 		t: t,
 		steps: []scriptStep{
@@ -67,9 +82,10 @@ func TestEnsureBranchCIDispatchesFallback(t *testing.T) {
 		Workflow:     "CI",
 		Branch:       "feature",
 		SHA:          "abc123",
-		PushWait:     time.Millisecond,
-		PollInterval: time.Millisecond,
-		Timeout:      time.Second,
+		PushWait:     pushWait,
+		PollInterval: time.Nanosecond,
+		Timeout:      time.Minute,
+		NowFn:        fakeClock,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

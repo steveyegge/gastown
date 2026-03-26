@@ -14,8 +14,8 @@ func getDiskUsage(path string) (*DiskUsageInfo, error) {
 		return nil, fmt.Errorf("statfs %s: %w", path, err)
 	}
 
-	totalBytes := stat.Blocks * uint64(stat.Bsize)  //nolint:unconvert
-	freeBytes := stat.Bavail * uint64(stat.Bsize)    //nolint:unconvert
+	totalBytes := stat.Blocks * uint64(stat.Bsize)         //nolint:unconvert
+	freeBytes := uint64(stat.Bavail) * uint64(stat.Bsize) //nolint:unconvert
 	usedBytes := totalBytes - freeBytes
 
 	var usedFraction float64

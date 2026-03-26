@@ -227,7 +227,7 @@ func (w *Watcher) buildMessage(issue *beads.Issue, category string) string {
 	return sb.String()
 }
 
-// Run starts the watcher loop, blocking until ctx is cancelled.
+// Run starts the watcher loop, blocking until ctx is canceled.
 // It ticks immediately on start and then on every PollInterval thereafter.
 func (w *Watcher) Run(ctx context.Context) error {
 	// First tick immediately.
