@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
+	gh "github.com/steveyegge/gastown/internal/github"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -313,11 +316,33 @@ func runConvoyLaunch(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("resolve town root for dispatch: %w", err)
 			}
 
-			// For batch-pr convoys, create integration branch before dispatch.
+			// For batch-pr convoys, create integration branch and draft PR before dispatch.
 			merge := convoyMergeFromFields(result.Description)
 			if merge == "batch-pr" {
 				if err := createBatchPRIntegrationBranch(convoyID, result.Description, dag, townRoot); err != nil {
 					return fmt.Errorf("create integration branch: %w", err)
+				}
+				// Re-read description to pick up integration_branch field.
+				updated, err := bdShow(convoyID)
+				if err != nil {
+					return fmt.Errorf("re-read convoy after integration branch: %w", err)
+				}
+
+				// Load the primary rig for PR creation.
+				primaryRigName := primaryRigFromDAG(dag)
+				rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+				rigsConfig, loadErr := config.LoadRigsConfig(rigsConfigPath)
+				if loadErr != nil {
+					return fmt.Errorf("load rigs config for PR: %w", loadErr)
+				}
+				rigMgr := rig.NewManager(townRoot, rigsConfig, git.NewGit(townRoot))
+				r, rigErr := rigMgr.GetRig(primaryRigName)
+				if rigErr != nil {
+					return fmt.Errorf("rig %q not found for PR: %w", primaryRigName, rigErr)
+				}
+
+				if err := createBatchPRDraftPR(convoyID, updated.Description, result.Title, dag, r); err != nil {
+					return fmt.Errorf("create draft PR: %w", err)
 				}
 			}
 
@@ -432,6 +457,159 @@ func primaryRigFromDAG(dag *ConvoyDAG) string {
 		}
 	}
 	return primaryRig
+}
+
+// ghClientFactory creates a GitHub API client. Tests override this to inject
+// a mock HTTP server.
+var ghClientFactory = func(opts ...gh.Option) (*gh.Client, error) {
+	return gh.NewClient(opts...)
+}
+
+// sshRemoteRegex matches git@host:owner/repo.git style remote URLs.
+var sshRemoteRegex = regexp.MustCompile(`^[\w.+-]+@([^:]+):([^/]+)/([^/]+?)(?:\.git)?$`)
+
+// parseOwnerRepo extracts the owner and repo name from a git remote URL.
+// Supports HTTPS (https://github.com/owner/repo.git) and SSH (git@github.com:owner/repo.git).
+func parseOwnerRepo(remoteURL string) (owner, repo string, err error) {
+	remoteURL = strings.TrimSpace(remoteURL)
+
+	// SSH: git@github.com:owner/repo.git
+	if m := sshRemoteRegex.FindStringSubmatch(remoteURL); m != nil {
+		return m[2], m[3], nil
+	}
+
+	// HTTPS: https://github.com/owner/repo.git
+	// Strip trailing .git and protocol prefix.
+	u := remoteURL
+	u = strings.TrimSuffix(u, ".git")
+	for _, prefix := range []string{"https://", "http://"} {
+		if strings.HasPrefix(u, prefix) {
+			u = u[len(prefix):]
+			break
+		}
+	}
+
+	// Expect: host/owner/repo
+	parts := strings.SplitN(u, "/", 4)
+	if len(parts) < 3 {
+		return "", "", fmt.Errorf("cannot parse owner/repo from remote URL: %s", remoteURL)
+	}
+	return parts[1], parts[2], nil
+}
+
+// createBatchPRDraftPR creates a draft pull request for a batch-pr convoy.
+// For fork-based rigs (PushURL set), the head is "forkOwner:branchName" and the
+// base repo is the upstream (fetch URL). For direct rigs, head and base are the same repo.
+func createBatchPRDraftPR(convoyID, convoyDesc string, convoyTitle string, dag *ConvoyDAG, r *rig.Rig) error {
+	integrationBranch := beads.GetIntegrationBranchField(convoyDesc)
+	if integrationBranch == "" {
+		return fmt.Errorf("convoy %s: no integration branch found in description", convoyID)
+	}
+
+	// Determine base repo (upstream) owner/repo from fetch URL.
+	g, err := getRigGit(r.Path)
+	if err != nil {
+		return fmt.Errorf("initializing git for rig: %w", err)
+	}
+
+	fetchURL, err := g.RemoteURL("origin")
+	if err != nil {
+		return fmt.Errorf("getting origin fetch URL: %w", err)
+	}
+	baseOwner, baseRepo, err := parseOwnerRepo(fetchURL)
+	if err != nil {
+		return fmt.Errorf("parsing origin fetch URL: %w", err)
+	}
+
+	// Determine base branch from convoy fields or rig default.
+	convoyFields := beads.ParseConvoyFields(&beads.Issue{Description: convoyDesc})
+	baseBranch := r.DefaultBranch()
+	if convoyFields != nil && convoyFields.BaseBranch != "" {
+		baseBranch = convoyFields.BaseBranch
+	}
+
+	// Determine head reference.
+	head := integrationBranch
+	if r.PushURL != "" {
+		// Fork-based: head must be "forkOwner:branchName".
+		forkOwner, _, err := parseOwnerRepo(r.PushURL)
+		if err != nil {
+			return fmt.Errorf("parsing push URL for fork owner: %w", err)
+		}
+		head = forkOwner + ":" + integrationBranch
+	}
+
+	// Build PR body: convoy description + tracked issues list.
+	body := buildPRBody(convoyDesc, dag)
+
+	// Create draft PR.
+	fmt.Printf("Creating draft PR for convoy %s...\n", convoyID)
+	client, err := ghClientFactory()
+	if err != nil {
+		return fmt.Errorf("creating GitHub client: %w", err)
+	}
+
+	result, err := client.CreateDraftPR(context.Background(), baseOwner, baseRepo, head, baseBranch, convoyTitle, body)
+	if err != nil {
+		return fmt.Errorf("creating draft PR: %w", err)
+	}
+
+	// Store PR number and URL on convoy bead.
+	newDesc := beads.AddPRURLField(convoyDesc, result.URL)
+	newDesc = beads.AddPRNumberField(newDesc, result.Number)
+	if err := bdUpdateConvoyDescription(convoyID, newDesc); err != nil {
+		fmt.Printf("  (warning: could not store PR info on convoy: %v)\n", err)
+	}
+
+	fmt.Printf("  ✓ Draft PR: %s (#%d)\n", result.URL, result.Number)
+	return nil
+}
+
+// buildPRBody constructs the PR body from convoy description and tracked issues.
+func buildPRBody(convoyDesc string, dag *ConvoyDAG) string {
+	var b strings.Builder
+
+	// Include convoy description (strip metadata fields for readability).
+	for _, line := range strings.Split(convoyDesc, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// Skip metadata fields (key: value at top of description).
+		if strings.Contains(trimmed, ":") {
+			key := strings.TrimSpace(strings.SplitN(trimmed, ":", 2)[0])
+			switch strings.ToLower(key) {
+			case "owner", "notify", "molecule", "merge", "base_branch",
+				"integration_branch", "pr_url", "pr_number", "watchers",
+				"nudge_watchers":
+				continue
+			}
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	// Add tracked issues list.
+	if dag != nil && len(dag.Nodes) > 0 {
+		b.WriteString("\n## Tracked Issues\n\n")
+
+		var ids []string
+		for id := range dag.Nodes {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+
+		for _, id := range ids {
+			node := dag.Nodes[id]
+			if node == nil {
+				continue
+			}
+			status := "pending"
+			if node.Status != "" {
+				status = node.Status
+			}
+			fmt.Fprintf(&b, "- [ ] **%s**: %s (%s)\n", node.ID, node.Title, status)
+		}
+	}
+
+	return strings.TrimSpace(b.String())
 }
 
 // bdUpdateConvoyDescription updates a convoy bead's description.

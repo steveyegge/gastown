@@ -865,3 +865,110 @@ func TestPrimaryRigFromDAG_NoRigAssigned(t *testing.T) {
 		t.Errorf("primaryRigFromDAG = %q, want empty", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// parseOwnerRepo tests
+// ---------------------------------------------------------------------------
+
+func TestParseOwnerRepo_HTTPS(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		url       string
+		wantOwner string
+		wantRepo  string
+	}{
+		{"https://github.com/steveyegge/gastown.git", "steveyegge", "gastown"},
+		{"https://github.com/steveyegge/gastown", "steveyegge", "gastown"},
+		{"https://github.com/myorg/my-project.git", "myorg", "my-project"},
+		{"http://github.com/owner/repo.git", "owner", "repo"},
+	}
+	for _, tt := range tests {
+		owner, repo, err := parseOwnerRepo(tt.url)
+		if err != nil {
+			t.Errorf("parseOwnerRepo(%q): unexpected error: %v", tt.url, err)
+			continue
+		}
+		if owner != tt.wantOwner || repo != tt.wantRepo {
+			t.Errorf("parseOwnerRepo(%q) = (%q, %q), want (%q, %q)",
+				tt.url, owner, repo, tt.wantOwner, tt.wantRepo)
+		}
+	}
+}
+
+func TestParseOwnerRepo_SSH(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		url       string
+		wantOwner string
+		wantRepo  string
+	}{
+		{"git@github.com:steveyegge/gastown.git", "steveyegge", "gastown"},
+		{"git@github.com:myorg/my-project.git", "myorg", "my-project"},
+		{"git@github.com:owner/repo", "owner", "repo"},
+	}
+	for _, tt := range tests {
+		owner, repo, err := parseOwnerRepo(tt.url)
+		if err != nil {
+			t.Errorf("parseOwnerRepo(%q): unexpected error: %v", tt.url, err)
+			continue
+		}
+		if owner != tt.wantOwner || repo != tt.wantRepo {
+			t.Errorf("parseOwnerRepo(%q) = (%q, %q), want (%q, %q)",
+				tt.url, owner, repo, tt.wantOwner, tt.wantRepo)
+		}
+	}
+}
+
+func TestParseOwnerRepo_Invalid(t *testing.T) {
+	t.Parallel()
+	_, _, err := parseOwnerRepo("not-a-url")
+	if err == nil {
+		t.Error("parseOwnerRepo(invalid) expected error, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// buildPRBody tests
+// ---------------------------------------------------------------------------
+
+func TestBuildPRBody_StripsMetadata(t *testing.T) {
+	t.Parallel()
+	desc := "merge: batch-pr\nowner: crew/nuclear\n\n## Goals\nDo the thing."
+	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{}}
+
+	body := buildPRBody(desc, dag)
+	if strings.Contains(body, "merge:") {
+		t.Error("body should strip merge: metadata field")
+	}
+	if strings.Contains(body, "owner:") {
+		t.Error("body should strip owner: metadata field")
+	}
+	if !strings.Contains(body, "## Goals") {
+		t.Error("body should preserve non-metadata content")
+	}
+}
+
+func TestBuildPRBody_IncludesTrackedIssues(t *testing.T) {
+	t.Parallel()
+	desc := "A convoy."
+	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
+		"gt-abc": {ID: "gt-abc", Title: "First task", Status: "open"},
+		"gt-def": {ID: "gt-def", Title: "Second task", Status: "in_progress"},
+	}}
+
+	body := buildPRBody(desc, dag)
+	if !strings.Contains(body, "## Tracked Issues") {
+		t.Error("body should contain Tracked Issues section")
+	}
+	if !strings.Contains(body, "gt-abc") || !strings.Contains(body, "gt-def") {
+		t.Error("body should list all tracked issues")
+	}
+}
+
+func TestBuildPRBody_NilDAG(t *testing.T) {
+	t.Parallel()
+	body := buildPRBody("A convoy.", nil)
+	if strings.Contains(body, "Tracked Issues") {
+		t.Error("body should not contain Tracked Issues for nil DAG")
+	}
+}
