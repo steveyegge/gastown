@@ -151,7 +151,7 @@ func (m *Manager) Start(agentOverride string) error {
 	}
 
 	// Apply Deacon theming (non-fatal: theming failure doesn't affect operation)
-	theme := tmux.ResolveSessionTheme(m.townRoot, "", "deacon")
+	theme := tmux.ResolveSessionTheme(m.townRoot, "", "deacon", "")
 	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Deacon", "health-check")
 
 	// Wait for Claude to start - fatal if Claude fails to launch

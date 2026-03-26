@@ -10,14 +10,16 @@ import (
 
 // ResolveSessionTheme returns the configured tmux theme for a session.
 // A nil theme means tmux theming is explicitly disabled.
-func ResolveSessionTheme(townRoot, rigName, role string) *Theme {
+// crewMember is the crew member name (e.g. "krieger"); pass "" for non-crew roles.
+// When non-empty, crew_themes config is checked before role-level fallback.
+func ResolveSessionTheme(townRoot, rigName, role, crewMember string) *Theme {
 	role = normalizeThemeRole(role)
 
-	if rigTheme := resolveRigSessionTheme(townRoot, rigName, role); rigTheme != unresolvedTheme {
+	if rigTheme := resolveRigSessionTheme(townRoot, rigName, role, crewMember); rigTheme != unresolvedTheme {
 		return rigTheme
 	}
 
-	if townTheme := resolveTownSessionTheme(townRoot, role); townTheme != unresolvedTheme {
+	if townTheme := resolveTownSessionTheme(townRoot, role, crewMember); townTheme != unresolvedTheme {
 		return townTheme
 	}
 
@@ -48,7 +50,7 @@ func ResolveSessionTheme(townRoot, rigName, role string) *Theme {
 
 var unresolvedTheme = &Theme{Name: "__unresolved__"}
 
-func resolveRigSessionTheme(townRoot, rigName, role string) *Theme {
+func resolveRigSessionTheme(townRoot, rigName, role, crewMember string) *Theme {
 	if townRoot == "" || rigName == "" {
 		return unresolvedTheme
 	}
@@ -57,6 +59,13 @@ func resolveRigSessionTheme(townRoot, rigName, role string) *Theme {
 	settings, err := config.LoadRigSettings(settingsPath)
 	if err != nil || settings.Theme == nil {
 		return unresolvedTheme
+	}
+
+	// Per-member theme takes priority over role-level theme.
+	if crewMember != "" && settings.Theme.CrewThemes != nil {
+		if resolved, ok := resolveRoleThemeName(settings.Theme.CrewThemes[crewMember]); ok {
+			return resolved
+		}
 	}
 
 	if settings.Theme.RoleThemes != nil {
@@ -68,7 +77,7 @@ func resolveRigSessionTheme(townRoot, rigName, role string) *Theme {
 	return resolveThemeConfig(settings.Theme)
 }
 
-func resolveTownSessionTheme(townRoot, role string) *Theme {
+func resolveTownSessionTheme(townRoot, role, crewMember string) *Theme {
 	if townRoot == "" {
 		return unresolvedTheme
 	}
@@ -76,6 +85,13 @@ func resolveTownSessionTheme(townRoot, role string) *Theme {
 	mayorCfg, err := config.LoadMayorConfig(filepath.Join(townRoot, "mayor", "config.json"))
 	if err != nil || mayorCfg.Theme == nil {
 		return unresolvedTheme
+	}
+
+	// Per-member theme takes priority over role defaults at town level too.
+	if crewMember != "" && mayorCfg.Theme.CrewThemes != nil {
+		if resolved, ok := resolveRoleThemeName(mayorCfg.Theme.CrewThemes[crewMember]); ok {
+			return resolved
+		}
 	}
 
 	if mayorCfg.Theme.RoleDefaults != nil {
