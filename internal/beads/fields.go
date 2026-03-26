@@ -23,7 +23,7 @@ type AttachmentFields struct {
 	ReviewOnly       bool   // If true, assignee must evaluate and report back — no merge/commit/push
 	Mode             string // Execution mode: "" (normal) or "ralph" (Ralph Wiggum loop)
 	ConvoyID         string // Convoy bead ID tracking this issue (e.g., "hq-cv-abc")
-	MergeStrategy    string // Convoy merge strategy: "direct", "mr", "local", or "" (default = mr)
+	MergeStrategy    string // Convoy merge strategy: "direct", "mr", "local", "batch-pr", or "" (default = mr)
 	ConvoyOwned      bool   // If true, convoy has gt:owned label (caller-managed lifecycle)
 	FormulaVars      string // Newline-separated key=value pairs for formula template substitution
 }

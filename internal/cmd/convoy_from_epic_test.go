@@ -63,6 +63,7 @@ func TestConvoyCreate_InvalidMergeFlag(t *testing.T) {
 		{"direct", false},
 		{"mr", false},
 		{"local", false},
+		{"batch-pr", false},
 		{"", false},
 		{"invalid", true},
 		{"DIRECT", true},
@@ -76,10 +77,10 @@ func TestConvoyCreate_InvalidMergeFlag(t *testing.T) {
 		var err error
 		if convoyMerge != "" {
 			switch convoyMerge {
-			case "direct", "mr", "local":
+			case "direct", "mr", "local", "batch-pr":
 				// Valid
 			default:
-				err = fmt.Errorf("invalid --merge value %q: must be direct, mr, or local", convoyMerge)
+				err = fmt.Errorf("invalid --merge value %q: must be direct, mr, local, or batch-pr", convoyMerge)
 			}
 		}
 

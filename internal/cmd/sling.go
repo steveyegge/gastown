@@ -225,10 +225,10 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	// Validate --merge flag if provided
 	if slingMerge != "" {
 		switch slingMerge {
-		case "direct", "mr", "local":
+		case "direct", "mr", "local", "batch-pr":
 			// Valid
 		default:
-			return fmt.Errorf("invalid --merge value %q: must be direct, mr, or local", slingMerge)
+			return fmt.Errorf("invalid --merge value %q: must be direct, mr, local, or batch-pr", slingMerge)
 		}
 	}
 

@@ -536,9 +536,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 		// Determine merge strategy from convoy (gt-myofa.3)
 		// Convoys can override the default MR-based workflow:
-		//   direct: push commits straight to target branch, bypass refinery
-		//   mr:     default — create merge-request bead, refinery merges
-		//   local:  keep on feature branch, no push, no MR (for human review/upstream PRs)
+		//   direct:   push commits straight to target branch, bypass refinery
+		//   mr:       default — create merge-request bead, refinery merges
+		//   local:    keep on feature branch, no push, no MR (for human review/upstream PRs)
+		//   batch-pr: like mr, but targets an integration branch (for batched PRs)
 		//
 		// Primary: read convoy info from the issue's attachment fields (gt-7b6wf fix).
 		// gt sling stores convoy_id and merge_strategy on the issue when dispatching,

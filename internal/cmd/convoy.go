@@ -219,9 +219,10 @@ notification by default). If not specified, defaults to created_by.
 The --notify flag adds additional subscribers beyond the owner.
 
 The --merge flag sets the merge strategy for all work in the convoy:
-  direct  Push branch directly to main (no MR, no refinery)
-  mr      Create merge-request bead, refinery processes (default)
-  local   Keep on feature branch (for upstream PRs, human review)
+  direct    Push branch directly to main (no MR, no refinery)
+  mr        Create merge-request bead, refinery processes (default)
+  local     Keep on feature branch (for upstream PRs, human review)
+  batch-pr  Like mr, but targets an integration branch (for batched PRs)
 
 Examples:
   gt convoy create "Deploy v2.0" gt-abc bd-xyz
@@ -596,10 +597,10 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	// Validate --merge flag if provided
 	if convoyMerge != "" {
 		switch convoyMerge {
-		case "direct", "mr", "local":
+		case "direct", "mr", "local", "batch-pr":
 			// Valid
 		default:
-			return fmt.Errorf("invalid --merge value %q: must be direct, mr, or local", convoyMerge)
+			return fmt.Errorf("invalid --merge value %q: must be direct, mr, local, or batch-pr", convoyMerge)
 		}
 	}
 
@@ -2137,7 +2138,7 @@ func hasLabel(labels []string, target string) bool { //nolint:unparam // target 
 
 // convoyMergeFromFields extracts the merge strategy from a convoy description
 // using the typed ConvoyFields accessor.
-// Returns the strategy string ("direct", "mr", "local") or empty string if not set.
+// Returns the strategy string ("direct", "mr", "local", "batch-pr") or empty string if not set.
 func convoyMergeFromFields(description string) string {
 	fields := beads.ParseConvoyFields(&beads.Issue{Description: description})
 	if fields == nil {
