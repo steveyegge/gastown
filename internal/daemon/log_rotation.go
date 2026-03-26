@@ -14,8 +14,8 @@ import (
 
 const (
 	// logRotationMaxSize is the max size in bytes before auto-rotation triggers.
-	// 100MB matches the lumberjack default for daemon.log.
-	logRotationMaxSize int64 = 100 * 1024 * 1024
+	// 50MB ensures logs are rotated before they can consume excessive disk space.
+	logRotationMaxSize int64 = 50 * 1024 * 1024
 
 	// logRotationMaxBackups is the maximum number of rotated log files to keep.
 	logRotationMaxBackups = 3

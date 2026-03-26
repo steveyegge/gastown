@@ -109,6 +109,10 @@ type Daemon struct {
 	// triggers a zombie restart, debouncing transient gaps during handoffs.
 	// Only accessed from heartbeat loop goroutine - no sync needed.
 	mayorZombieCount int
+
+	// diskWatchdogState tracks the last disk alert level for cooldown.
+	// Only accessed from disk watchdog ticker goroutine - no sync needed.
+	diskWatchdogState diskWatchdogState
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -137,10 +141,10 @@ func New(config *Config) (*Daemon, error) {
 		return nil, fmt.Errorf("creating daemon directory: %w", err)
 	}
 
-	// Open log file with rotation (100MB max, 3 backups, 7 days, compressed)
+	// Open log file with rotation (50MB max, 3 backups, 7 days, compressed)
 	logWriter := &lumberjack.Logger{
 		Filename:   config.LogFile,
-		MaxSize:    100, // megabytes
+		MaxSize:    50, // megabytes
 		MaxBackups: 3,
 		MaxAge:     7, // days
 		Compress:   true,
@@ -534,6 +538,18 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("Main branch test ticker started (interval %v)", interval)
 	}
 
+	// Start disk watchdog ticker if configured.
+	// Checks free disk space and triggers cleanup or alerts at configured thresholds.
+	var diskWatchdogTicker *time.Ticker
+	var diskWatchdogChan <-chan time.Time
+	if d.isPatrolActive("disk_watchdog") {
+		interval := diskWatchdogInterval(d.patrolConfig)
+		diskWatchdogTicker = time.NewTicker(interval)
+		diskWatchdogChan = diskWatchdogTicker.C
+		defer diskWatchdogTicker.Stop()
+		d.logger.Printf("Disk watchdog ticker started (interval %v)", interval)
+	}
+
 	// Note: PATCH-010 uses per-session hooks in deacon/manager.go (SetAutoRespawnHook).
 	// Global pane-died hooks don't fire reliably in tmux 3.2a, so we rely on the
 	// per-session approach which has been tested to work for continuous recovery.
@@ -633,6 +649,13 @@ func (d *Daemon) Run() error {
 			// rig's main branch to catch regressions from merges or direct pushes.
 			if !d.isShutdownInProgress() {
 				d.runMainBranchTests()
+			}
+
+		case <-diskWatchdogChan:
+			// Disk watchdog — checks free disk space and triggers cleanup or alerts
+			// at configured thresholds (80%/90%/95% full).
+			if !d.isShutdownInProgress() {
+				d.runDiskWatchdog()
 			}
 
 		case <-timer.C:

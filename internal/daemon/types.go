@@ -130,6 +130,7 @@ type PatrolsConfig struct {
 	ScheduledMaintenance   *ScheduledMaintenanceConfig    `json:"scheduled_maintenance,omitempty"`
 	MainBranchTest         *MainBranchTestConfig          `json:"main_branch_test,omitempty"`
 	RestartTracker         *RestartTrackerConfig          `json:"restart_tracker,omitempty"`
+	DiskWatchdog           *DiskWatchdogConfig            `json:"disk_watchdog,omitempty"`
 }
 
 // DoltRemotesConfig holds configuration for the dolt_remotes patrol.
@@ -300,6 +301,12 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 			return false
 		}
 		return config.Patrols.MainBranchTest.Enabled
+	}
+	if patrol == "disk_watchdog" {
+		if config == nil || config.Patrols == nil || config.Patrols.DiskWatchdog == nil {
+			return false
+		}
+		return config.Patrols.DiskWatchdog.Enabled
 	}
 
 	if config == nil || config.Patrols == nil {
