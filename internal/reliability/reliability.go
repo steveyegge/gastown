@@ -57,11 +57,14 @@ func (r *RigContext) RunVerificationPhase(ctx context.Context, phase verify.Phas
 	if r == nil || r.Settings == nil || r.Settings.MergeQueue == nil {
 		return verify.Summary{Success: true}, nil
 	}
-	gates := r.Settings.MergeQueue.ToVerifyGates()
-	summary := verify.RunPhase(ctx, r.RepoRoot, gates, phase, verify.RunOptions{
-		Parallel: parallel,
-		Output:   out,
-	})
+	gates, err := verify.GatesForPhase(r.Settings.MergeQueue, phase)
+	if err != nil {
+		return verify.Summary{}, err
+	}
+	logf := func(format string, args ...interface{}) {
+		fmt.Fprintf(out, format+"\n", args...)
+	}
+	summary := verify.Run(ctx, r.RepoRoot, gates, parallel, logf)
 	if summary.Success {
 		return summary, nil
 	}

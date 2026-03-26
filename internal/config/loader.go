@@ -33,6 +33,9 @@ var (
 
 	// ErrMissingField indicates a required field is missing.
 	ErrMissingField = errors.New("missing required field")
+
+	// ErrInvalidVerificationMode indicates merge_queue.verification_mode is invalid.
+	ErrInvalidVerificationMode = errors.New("invalid verification_mode")
 )
 
 // LoadTownConfig loads and validates a town configuration file.
@@ -220,7 +223,7 @@ func validateRigSettings(c *RigSettings) error {
 		}
 	}
 	if c.RepoContract != nil {
-		if err := validateRepoContract(c.RepoContract); err != nil {
+		if err := validateRepoContractConfig(c.RepoContract); err != nil {
 			return err
 		}
 	}
@@ -270,21 +273,30 @@ func validateMergeQueueConfig(c *MergeQueueConfig) error {
 		return fmt.Errorf("%w: max_concurrent must be non-negative", ErrMissingField)
 	}
 
+	if mode := c.GetVerificationMode(); mode != VerificationModeAdvisory && mode != VerificationModeStrict {
+		return fmt.Errorf("%w: got %q, want %q or %q", ErrInvalidVerificationMode, mode, VerificationModeAdvisory, VerificationModeStrict)
+	}
+
 	for name, gate := range c.Gates {
 		if gate == nil {
-			return fmt.Errorf("gate %q is nil", name)
+			return fmt.Errorf("gate %q is null", name)
 		}
 		if strings.TrimSpace(gate.Cmd) == "" {
-			return fmt.Errorf("gate %q cmd must not be empty", name)
+			return fmt.Errorf("gate %q command is empty", name)
 		}
-		switch strings.TrimSpace(gate.Phase) {
-		case "", "pre-merge", "post-squash":
+		phase := normalizeMergeQueueGatePhase(gate.Phase)
+		switch phase {
+		case MergeQueueGatePhasePreMerge, MergeQueueGatePhasePostSquash:
 		default:
-			return fmt.Errorf("gate %q has invalid phase %q", name, gate.Phase)
+			return fmt.Errorf("gate %q has invalid phase %q: must be %q or %q", name, gate.Phase, MergeQueueGatePhasePreMerge, MergeQueueGatePhasePostSquash)
 		}
 		if gate.Timeout != "" {
-			if _, err := time.ParseDuration(gate.Timeout); err != nil {
-				return fmt.Errorf("gate %q timeout: %w", name, err)
+			dur, err := time.ParseDuration(gate.Timeout)
+			if err != nil {
+				return fmt.Errorf("invalid timeout for gate %q: %w", name, err)
+			}
+			if dur <= 0 {
+				return fmt.Errorf("gate %q timeout must be positive, got %v", name, dur)
 			}
 		}
 	}
@@ -292,13 +304,113 @@ func validateMergeQueueConfig(c *MergeQueueConfig) error {
 	return nil
 }
 
-func validateRepoContract(c *RepoContract) error {
+func validateStrictMergeQueueRequirements(c *MergeQueueConfig) error {
+	if c == nil || !c.IsStrictVerification() {
+		return nil
+	}
+
+	hasPreMergeGate := false
+	hasRepoLocalPreMergeGate := false
+	for _, gate := range c.Gates {
+		if gate == nil {
+			continue
+		}
+		if normalizeMergeQueueGatePhase(gate.Phase) != MergeQueueGatePhasePreMerge {
+			continue
+		}
+		hasPreMergeGate = true
+		if isRepoLocalVerificationCommand(gate.Cmd) {
+			hasRepoLocalPreMergeGate = true
+		}
+	}
+
+	if !hasPreMergeGate {
+		return fmt.Errorf("merge_queue.verification_mode=%q requires at least one %q gate", VerificationModeStrict, MergeQueueGatePhasePreMerge)
+	}
+	if !hasRepoLocalPreMergeGate {
+		return fmt.Errorf("merge_queue.verification_mode=%q requires at least one repo-local %q gate", VerificationModeStrict, MergeQueueGatePhasePreMerge)
+	}
+	return nil
+}
+
+func normalizeMergeQueueGatePhase(phase string) string {
+	if phase == "" {
+		return MergeQueueGatePhasePreMerge
+	}
+	return phase
+}
+
+func trimShellToken(token string) string {
+	return strings.Trim(token, "\"'`()")
+}
+
+func isRepoLocalVerificationCommand(cmd string) bool {
+	tokens := strings.Fields(cmd)
+	if len(tokens) == 0 {
+		return false
+	}
+
+	for _, token := range tokens {
+		trimmed := trimShellToken(token)
+		if trimmed == "" {
+			continue
+		}
+		if filepath.IsAbs(trimmed) || strings.HasPrefix(trimmed, "/") {
+			return false
+		}
+		if trimmed == "./..." || trimmed == "../..." || strings.HasSuffix(trimmed, "/...") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "./") || strings.HasPrefix(trimmed, "../") {
+			return true
+		}
+		if strings.Contains(trimmed, "/") {
+			return true
+		}
+	}
+
+	switch trimShellToken(tokens[0]) {
+	case "make", "gmake", "just", "task", "mage", "npm", "pnpm", "yarn", "bun", "uv", "poetry", "tox", "nox":
+		return len(tokens) > 1
+	default:
+		return false
+	}
+}
+
+func validateRepoContractConfig(c *RepoContractConfig) error {
 	if c == nil {
 		return nil
 	}
-	if c.GitHubCI != nil && strings.TrimSpace(c.GitHubCI.WorkflowName()) == "" {
-		return fmt.Errorf("repo_contract.github_ci.workflow must not be empty")
+
+	if c.RepoType != "" {
+		switch c.RepoType {
+		case "library", "backend-api", "frontend-app", "worker", "cli", "data-pipeline", "infra":
+		default:
+			return fmt.Errorf("invalid repo_contract.repo_type %q", c.RepoType)
+		}
 	}
+
+	switch tier := c.GetEnforcementTier(); tier {
+	case RepoContractTierBasic, RepoContractTierStrong, RepoContractTierProduction:
+	default:
+		return fmt.Errorf("invalid repo_contract.enforcement_tier %q", tier)
+	}
+
+	for field, command := range map[string]string{
+		"verify_command":        c.VerifyCommand,
+		"smoke_command":         c.SmokeCommand,
+		"release_check_command": c.ReleaseCheckCommand,
+		"e2e_command":           c.E2ECommand,
+		"perf_command":          c.PerfCommand,
+	} {
+		if command == "" {
+			continue
+		}
+		if !isRepoLocalVerificationCommand(command) {
+			return fmt.Errorf("repo_contract.%s must use a repo-local entrypoint, got %q", field, command)
+		}
+	}
+
 	return nil
 }
 
@@ -354,13 +466,27 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 	if repo == nil && local == nil {
 		return nil
 	}
-	result := &MergeQueueConfig{}
-	// Start from repo defaults
-	if repo != nil {
-		*result = *repo
+	result := cloneMergeQueueConfig(repo)
+	if result == nil {
+		result = &MergeQueueConfig{}
 	}
 	// Overlay local overrides (non-empty fields win)
 	if local != nil {
+		if local.IntegrationBranchPolecatEnabled != nil {
+			value := *local.IntegrationBranchPolecatEnabled
+			result.IntegrationBranchPolecatEnabled = &value
+		}
+		if local.IntegrationBranchRefineryEnabled != nil {
+			value := *local.IntegrationBranchRefineryEnabled
+			result.IntegrationBranchRefineryEnabled = &value
+		}
+		if local.IntegrationBranchTemplate != "" {
+			result.IntegrationBranchTemplate = local.IntegrationBranchTemplate
+		}
+		if local.IntegrationBranchAutoLand != nil {
+			value := *local.IntegrationBranchAutoLand
+			result.IntegrationBranchAutoLand = &value
+		}
 		if local.SetupCommand != "" {
 			result.SetupCommand = local.SetupCommand
 		}
@@ -379,57 +505,267 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 		if local.VerificationMode != "" {
 			result.VerificationMode = local.VerificationMode
 		}
-		// Merge non-command fields from local if explicitly set
-		if local.Enabled {
-			result.Enabled = local.Enabled
+		if local.Gates != nil {
+			result.Gates = cloneMergeQueueGateMap(local.Gates)
 		}
-		if local.OnConflict != "" {
-			result.OnConflict = local.OnConflict
+		if local.GatesParallel != nil {
+			gatesParallel := *local.GatesParallel
+			result.GatesParallel = &gatesParallel
 		}
-		if local.RunTests != nil {
-			result.RunTests = local.RunTests
-		}
-		if local.DeleteMergedBranches != nil {
-			result.DeleteMergedBranches = local.DeleteMergedBranches
-		}
-		if local.RetryFlakyTests > 0 {
-			result.RetryFlakyTests = local.RetryFlakyTests
-		}
-		if local.PollInterval != "" {
-			result.PollInterval = local.PollInterval
-		}
-		if local.MaxConcurrent > 0 {
-			result.MaxConcurrent = local.MaxConcurrent
-		}
-		if local.StaleClaimTimeout != "" {
-			result.StaleClaimTimeout = local.StaleClaimTimeout
-		}
-		if local.IntegrationBranchPolecatEnabled != nil {
-			result.IntegrationBranchPolecatEnabled = local.IntegrationBranchPolecatEnabled
-		}
-		if local.IntegrationBranchRefineryEnabled != nil {
-			result.IntegrationBranchRefineryEnabled = local.IntegrationBranchRefineryEnabled
-		}
-		if local.IntegrationBranchTemplate != "" {
-			result.IntegrationBranchTemplate = local.IntegrationBranchTemplate
-		}
-		if local.IntegrationBranchAutoLand != nil {
-			result.IntegrationBranchAutoLand = local.IntegrationBranchAutoLand
-		}
-		if local.JudgmentEnabled != nil {
-			result.JudgmentEnabled = local.JudgmentEnabled
+		if local.AutoPush != nil {
+			autoPush := *local.AutoPush
+			result.AutoPush = &autoPush
 		}
 		if local.ReviewDepth != "" {
 			result.ReviewDepth = local.ReviewDepth
 		}
-		if local.Gates != nil {
-			result.Gates = cloneVerificationGates(local.Gates)
+		if local.JudgmentEnabled != nil {
+			value := *local.JudgmentEnabled
+			result.JudgmentEnabled = &value
 		}
-		if local.GatesParallel != nil {
-			result.GatesParallel = local.GatesParallel
+		if local.RunTests != nil {
+			value := *local.RunTests
+			result.RunTests = &value
+		}
+		if local.DeleteMergedBranches != nil {
+			value := *local.DeleteMergedBranches
+			result.DeleteMergedBranches = &value
 		}
 	}
 	return result
+}
+
+// mergeRepoContractConfig merges a repo-sourced RepoContractConfig (floor) with local overrides.
+func mergeRepoContractConfig(repo, local *RepoContractConfig) *RepoContractConfig {
+	if repo == nil && local == nil {
+		return nil
+	}
+	result := cloneRepoContract(repo)
+	if result == nil {
+		result = &RepoContractConfig{}
+	}
+	if local == nil {
+		return result
+	}
+
+	if local.RepoType != "" {
+		result.RepoType = local.RepoType
+	}
+	if local.EnforcementTier != "" {
+		result.EnforcementTier = local.EnforcementTier
+	}
+	if local.VerifyCommand != "" {
+		result.VerifyCommand = local.VerifyCommand
+	}
+	if local.SmokeCommand != "" {
+		result.SmokeCommand = local.SmokeCommand
+	}
+	if local.ReleaseCheckCommand != "" {
+		result.ReleaseCheckCommand = local.ReleaseCheckCommand
+	}
+	if local.E2ECommand != "" {
+		result.E2ECommand = local.E2ECommand
+	}
+	if local.PerfCommand != "" {
+		result.PerfCommand = local.PerfCommand
+	}
+	if local.RequiresMigrations != nil {
+		value := *local.RequiresMigrations
+		result.RequiresMigrations = &value
+	}
+	if local.RequiresE2E != nil {
+		value := *local.RequiresE2E
+		result.RequiresE2E = &value
+	}
+	if local.RequiresSecurityScan != nil {
+		value := *local.RequiresSecurityScan
+		result.RequiresSecurityScan = &value
+	}
+	if local.CriticalPaths != nil {
+		result.CriticalPaths = append([]string(nil), local.CriticalPaths...)
+	}
+	return result
+}
+
+func cloneMergeQueueGateMap(src map[string]*VerificationGateConfig) map[string]*VerificationGateConfig {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]*VerificationGateConfig, len(src))
+	for name, gate := range src {
+		if gate == nil {
+			dst[name] = nil
+			continue
+		}
+		copy := *gate
+		dst[name] = &copy
+	}
+	return dst
+}
+
+// repoContractToConfig converts the new RepoContract type to the legacy RepoContractConfig
+// used by loader.go's merge and validation logic.
+func repoContractToConfig(rc *RepoContract) *RepoContractConfig {
+	if rc == nil {
+		return nil
+	}
+	return &RepoContractConfig{
+		RepoType:            rc.RepoType,
+		VerifyCommand:       rc.VerifyCommand,
+		SmokeCommand:        rc.SmokeCommand,
+		ReleaseCheckCommand: rc.ReleaseCheckCommand,
+		E2ECommand:          rc.E2ECommand,
+		CriticalPaths:       append([]string(nil), rc.CriticalPaths...),
+	}
+}
+
+func cloneMergeQueueConfig(src *MergeQueueConfig) *MergeQueueConfig {
+	if src == nil {
+		return nil
+	}
+	copy := *src
+	copy.Gates = cloneMergeQueueGateMap(src.Gates)
+	if src.GatesParallel != nil {
+		gatesParallel := *src.GatesParallel
+		copy.GatesParallel = &gatesParallel
+	}
+	if src.AutoPush != nil {
+		autoPush := *src.AutoPush
+		copy.AutoPush = &autoPush
+	}
+	return &copy
+}
+
+func cloneRepoContract(src *RepoContractConfig) *RepoContractConfig {
+	if src == nil {
+		return nil
+	}
+	copy := *src
+	if src.RequiresMigrations != nil {
+		value := *src.RequiresMigrations
+		copy.RequiresMigrations = &value
+	}
+	if src.RequiresE2E != nil {
+		value := *src.RequiresE2E
+		copy.RequiresE2E = &value
+	}
+	if src.RequiresSecurityScan != nil {
+		value := *src.RequiresSecurityScan
+		copy.RequiresSecurityScan = &value
+	}
+	if src.CriticalPaths != nil {
+		copy.CriticalPaths = append([]string(nil), src.CriticalPaths...)
+	}
+	return &copy
+}
+
+func applyRepoContractToMergeQueue(mq *MergeQueueConfig, contract *RepoContractConfig) *MergeQueueConfig {
+	if mq == nil || contract == nil {
+		return mq
+	}
+	result := cloneMergeQueueConfig(mq)
+	if result.Gates == nil {
+		result.Gates = make(map[string]*VerificationGateConfig)
+	}
+	if contract.VerifyCommand != "" {
+		if _, ok := result.Gates["verify"]; !ok {
+			result.Gates["verify"] = &VerificationGateConfig{
+				Cmd:   contract.VerifyCommand,
+				Phase: MergeQueueGatePhasePreMerge,
+			}
+		}
+	}
+	if contract.SmokeCommand != "" {
+		if _, ok := result.Gates["smoke"]; !ok {
+			result.Gates["smoke"] = &VerificationGateConfig{
+				Cmd:   contract.SmokeCommand,
+				Phase: MergeQueueGatePhasePostSquash,
+			}
+		}
+	}
+	return result
+}
+
+// LoadEffectiveMergeQueueConfig loads merge-queue settings using the repo-local
+// defaults from .gastown/settings.json overlaid with local rig settings.
+func LoadEffectiveMergeQueueConfig(rigPath string) (*MergeQueueConfig, error) {
+	repoRoot := filepath.Join(rigPath, "mayor", "rig")
+	if _, err := os.Stat(filepath.Join(rigPath, RepoSettingsPath)); err == nil {
+		repoRoot = rigPath
+	}
+
+	var repoMQ *MergeQueueConfig
+	repoSettings, err := LoadRepoSettings(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	if repoSettings != nil {
+		repoMQ = repoSettings.MergeQueue
+	}
+
+	var localMQ *MergeQueueConfig
+	localSettings, err := LoadRigSettings(filepath.Join(rigPath, "settings", "config.json"))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if localSettings != nil {
+		localMQ = localSettings.MergeQueue
+	}
+
+	repoContract := (*RepoContractConfig)(nil)
+	if repoSettings != nil {
+		repoContract = repoSettings.RepoContract
+	}
+	localContract := (*RepoContractConfig)(nil)
+	if localSettings != nil {
+		localContract = localSettings.RepoContract
+	}
+
+	mergedContract := mergeRepoContractConfig(repoContract, localContract)
+	merged := applyRepoContractToMergeQueue(MergeSettingsCommand(repoMQ, localMQ), mergedContract)
+	if merged == nil {
+		return nil, nil
+	}
+	if err := validateMergeQueueConfig(merged); err != nil {
+		return nil, err
+	}
+	if err := validateStrictMergeQueueRequirements(merged); err != nil {
+		return nil, err
+	}
+	return merged, nil
+}
+
+// LoadEffectiveRepoContract loads the repo contract from committed repo settings
+// overlaid with any rig-local overrides.
+func LoadEffectiveRepoContract(rigPath string) (*RepoContractConfig, error) {
+	repoRoot := filepath.Join(rigPath, "mayor", "rig")
+	if _, err := os.Stat(filepath.Join(rigPath, RepoSettingsPath)); err == nil {
+		repoRoot = rigPath
+	}
+
+	var repoContract *RepoContractConfig
+	repoSettings, err := LoadRepoSettings(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	if repoSettings != nil {
+		repoContract = repoSettings.RepoContract
+	}
+
+	var localContract *RepoContractConfig
+	localSettings, err := LoadRigSettings(filepath.Join(rigPath, "settings", "config.json"))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if localSettings != nil {
+		localContract = localSettings.RepoContract
+	}
+
+	merged := mergeRepoContractConfig(repoContract, localContract)
+	if err := validateRepoContractConfig(merged); err != nil {
+		return nil, err
+	}
+	return merged, nil
 }
 
 // LoadRigSettings loads and validates a rig settings file.

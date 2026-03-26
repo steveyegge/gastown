@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
 )
 
@@ -100,6 +102,83 @@ func TestWakeRigAgentsDoesNotNudgeRefinery(t *testing.T) {
 	}
 	if strings.Contains(string(logBytes), "refinery") {
 		t.Errorf("wakeRigAgents() should not nudge refinery, but log contains: %s", string(logBytes))
+	}
+}
+
+func TestLoadRigCommandVars_UsesEffectiveRepoContractAndMergeQueue(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigDir := filepath.Join(tmpDir, "testrig")
+	if err := os.MkdirAll(filepath.Join(rigDir, ".gastown"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigDir, "settings"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	rigConfig := map[string]interface{}{
+		"type":           "rig",
+		"version":        1,
+		"name":           "testrig",
+		"default_branch": "develop",
+	}
+	rigData, _ := json.Marshal(rigConfig)
+	if err := os.WriteFile(filepath.Join(rigDir, "config.json"), rigData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	repoSettings := config.RigSettings{
+		Type:    "rig-settings",
+		Version: 1,
+		RepoContract: &config.RepoContractConfig{
+			RepoType:        "backend-api",
+			EnforcementTier: config.RepoContractTierProduction,
+			VerifyCommand:   "./scripts/ci/verify.sh",
+			SmokeCommand:    "./scripts/ci/smoke.sh",
+			CriticalPaths:   []string{"ingest", "respond"},
+		},
+	}
+	repoData, _ := json.Marshal(repoSettings)
+	if err := os.WriteFile(filepath.Join(rigDir, ".gastown", "settings.json"), repoData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	localSettings := config.RigSettings{
+		Type:    "rig-settings",
+		Version: 1,
+		MergeQueue: &config.MergeQueueConfig{
+			VerificationMode: config.VerificationModeStrict,
+			TestCommand:      "pytest -q",
+		},
+	}
+	localData, _ := json.Marshal(localSettings)
+	if err := os.WriteFile(filepath.Join(rigDir, "settings", "config.json"), localData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	vars := loadRigCommandVars(tmpDir, "testrig")
+	varMap := make(map[string]string)
+	for _, v := range vars {
+		parts := strings.SplitN(v, "=", 2)
+		if len(parts) == 2 {
+			varMap[parts[0]] = parts[1]
+		}
+	}
+
+	expected := map[string]string{
+		"base_branch":         "develop",
+		"verification_mode":   "strict",
+		"test_command":        "pytest -q",
+		"verify_gate_command": "./scripts/ci/verify.sh",
+		"verify_command":      "./scripts/ci/verify.sh",
+		"smoke_command":       "./scripts/ci/smoke.sh",
+		"repo_type":           "backend-api",
+		"enforcement_tier":    "production",
+		"critical_paths":      "ingest, respond",
+	}
+	for key, want := range expected {
+		if got := varMap[key]; got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
 	}
 }
 

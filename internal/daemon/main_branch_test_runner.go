@@ -74,8 +74,9 @@ func mainBranchTestRigs(config *DaemonPatrolConfig) []string {
 
 // rigGateConfig is the legacy gate/test view used by tests and compatibility code.
 type rigGateConfig struct {
-	TestCommand string
-	Gates       map[string]string
+	TestCommand   string
+	Gates         []verify.Gate
+	GatesParallel bool
 }
 
 // loadRigGateConfig reads verification commands from a rig root. It preserves
@@ -101,13 +102,12 @@ func loadRigGateConfig(rigPath string) (*rigGateConfig, error) {
 				cfg.TestCommand = *mq.TestCommand
 			}
 			if len(mq.Gates) > 0 {
-				cfg.Gates = make(map[string]string, len(mq.Gates))
 				for name, rawGate := range mq.Gates {
 					var gate struct {
 						Cmd string `json:"cmd"`
 					}
 					if err := json.Unmarshal(rawGate, &gate); err == nil && gate.Cmd != "" {
-						cfg.Gates[name] = gate.Cmd
+						cfg.Gates = append(cfg.Gates, verify.Gate{Name: name, Cmd: gate.Cmd})
 					}
 				}
 			}
@@ -128,12 +128,10 @@ func loadRigGateConfig(rigPath string) (*rigGateConfig, error) {
 	cfg := &rigGateConfig{}
 	if mq := rigCtx.Settings.MergeQueue; mq != nil {
 		cfg.TestCommand = mq.TestCommand
-		if len(mq.Gates) > 0 {
-			cfg.Gates = make(map[string]string, len(mq.Gates))
-			for name, gate := range mq.Gates {
-				if gate != nil && gate.Cmd != "" {
-					cfg.Gates[name] = gate.Cmd
-				}
+		cfg.GatesParallel = mq.IsGatesParallelEnabled()
+		for name, gate := range mq.Gates {
+			if gate != nil && gate.Cmd != "" {
+				cfg.Gates = append(cfg.Gates, verify.Gate{Name: name, Cmd: gate.Cmd})
 			}
 		}
 	}

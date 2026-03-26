@@ -1689,6 +1689,21 @@ func selfKillSession(townRoot string, roleInfo RoleInfo) error {
 	return nil
 }
 
+// shouldRunDoneStrictVerification reports whether strict pre-merge verification
+// should run for this gt done invocation.
+func shouldRunDoneStrictVerification(mq *config.MergeQueueConfig, isNoMerge bool, convoy *ConvoyInfo) bool {
+	if mq == nil || !mq.IsStrictVerification() {
+		return false
+	}
+	if isNoMerge {
+		return false
+	}
+	if convoy != nil && convoy.MergeStrategy == "local" {
+		return false
+	}
+	return true
+}
+
 // purgeClosedEphemeralBeads removes closed ephemeral beads (wisps) that accumulated
 // during this and prior sessions. Polecat/witness sessions create mol-polecat-work
 // steps, mol-witness-patrol cycles, etc. as wisps. These get closed during normal
