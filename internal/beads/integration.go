@@ -94,6 +94,26 @@ func AddBaseBranchField(description, baseBranch string) string {
 	return addMetadataField(description, "base_branch", baseBranch)
 }
 
+// GetPRURLField extracts the pr_url field from a description.
+func GetPRURLField(description string) string {
+	return getMetadataField(description, "pr_url")
+}
+
+// AddPRURLField adds or updates the pr_url field in a description.
+func AddPRURLField(description, url string) string {
+	return addMetadataField(description, "pr_url", url)
+}
+
+// GetPRNumberField extracts the pr_number field from a description.
+func GetPRNumberField(description string) string {
+	return getMetadataField(description, "pr_number")
+}
+
+// AddPRNumberField adds or updates the pr_number field in a description.
+func AddPRNumberField(description string, number int) string {
+	return addMetadataField(description, "pr_number", fmt.Sprintf("%d", number))
+}
+
 // addMetadataField adds or updates a key: value field in a description.
 func addMetadataField(description, key, value string) string {
 	fieldLine := key + ": " + value
