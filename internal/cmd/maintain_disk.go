@@ -29,9 +29,8 @@ var (
 )
 
 var maintainDiskCmd = &cobra.Command{
-	Use:     "disk",
-	Short:   "Reclaim disk space (log rotation, Go cache, git gc)",
-	GroupID: GroupServices,
+	Use:   "disk",
+	Short: "Reclaim disk space (log rotation, Go cache, git gc)",
 	Long: `Reclaim disk space without risking data loss.
 
 Actions performed:
