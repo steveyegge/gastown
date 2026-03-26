@@ -17,10 +17,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"regexp"
+
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
+	gh "github.com/steveyegge/gastown/internal/github"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 )
@@ -1078,12 +1081,17 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 		}
 	}
 
-	// 3. Check and auto-close completed convoys
+	// 3. Update batch-pr GitHub PR description (gt-ku2)
+	// When merging to an integration branch (not the default branch), update
+	// the associated GitHub PR description to reflect the latest merged issues.
+	e.updateBatchPRDescription(mr)
+
+	// 4. Check and auto-close completed convoys
 	// After closing a source issue, its parent convoy may now be complete.
 	// Run convoy check to auto-close and notify subscribers.
 	e.postMergeConvoyCheck(mr)
 
-	// 4. Nudge mayor about successful merge so dispatcher can unblock
+	// 5. Nudge mayor about successful merge so dispatcher can unblock
 	// dependent work. Without this, mayor only discovers completion by polling.
 	// Uses nudge (not mail) to avoid permanent Dolt commits for routine signals (GH#2434).
 	nudgeMsg := fmt.Sprintf("MERGED: %s issue=%s branch=%s", mr.ID, mr.SourceIssue, mr.Branch)
@@ -1093,7 +1101,7 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to nudge mayor about merge: %v\n", err)
 	}
 
-	// 5. Log success
+	// 6. Log success
 	_, _ = fmt.Fprintf(e.output, "[Engineer] ✓ Merged: %s (commit: %s)\n", mr.ID, result.MergeCommit)
 }
 
@@ -1650,6 +1658,198 @@ func (e *Engineer) ReleaseMR(mrID string) error {
 	return e.beads.Update(mrID, beads.UpdateOptions{
 		Assignee: &empty,
 	})
+}
+
+// sshRemoteRegex matches git@host:owner/repo.git style remote URLs.
+var sshRemoteRegex = regexp.MustCompile(`^[\w.+-]+@([^:]+):([^/]+)/([^/]+?)(?:\.git)?$`)
+
+// parseOwnerRepo extracts owner and repo from a git remote URL.
+// Supports HTTPS (https://github.com/owner/repo.git) and SSH (git@github.com:owner/repo.git).
+func parseOwnerRepo(remoteURL string) (owner, repo string, err error) {
+	remoteURL = strings.TrimSpace(remoteURL)
+
+	// SSH: git@github.com:owner/repo.git
+	if m := sshRemoteRegex.FindStringSubmatch(remoteURL); m != nil {
+		return m[2], m[3], nil
+	}
+
+	// HTTPS: https://github.com/owner/repo.git
+	u := strings.TrimSuffix(remoteURL, ".git")
+	for _, prefix := range []string{"https://", "http://"} {
+		if strings.HasPrefix(u, prefix) {
+			u = u[len(prefix):]
+			break
+		}
+	}
+
+	parts := strings.SplitN(u, "/", 4)
+	if len(parts) < 3 {
+		return "", "", fmt.Errorf("cannot parse owner/repo from remote URL: %s", remoteURL)
+	}
+	return parts[1], parts[2], nil
+}
+
+// ghClientFactory creates a GitHub API client. Tests override this to inject mocks.
+var ghClientFactory = func(opts ...gh.Option) (*gh.Client, error) {
+	return gh.NewClient(opts...)
+}
+
+// updateBatchPRDescription updates the GitHub PR description for a batch-pr
+// convoy after a polecat's MR has been merged to the integration branch.
+// No-op if the MR target is the default branch or has no convoy.
+func (e *Engineer) updateBatchPRDescription(mr *MRInfo) {
+	// Only applies to integration branch merges with a convoy.
+	if mr.ConvoyID == "" {
+		return
+	}
+	defaultBranch := e.rig.DefaultBranch()
+	if mr.Target == defaultBranch {
+		return
+	}
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Batch-PR: updating PR description for convoy %s\n", mr.ConvoyID)
+
+	// Load convoy bead to get PR number.
+	townRoot := filepath.Dir(e.rig.Path)
+	townBeads := filepath.Join(townRoot, ".beads")
+
+	showCmd := exec.Command("bd", "show", mr.ConvoyID, "--json")
+	showCmd.Dir = townBeads
+	var showOut bytes.Buffer
+	showCmd.Stdout = &showOut
+	if err := showCmd.Run(); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to load convoy %s: %v\n", mr.ConvoyID, err)
+		return
+	}
+
+	var convoy struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(showOut.Bytes(), &convoy); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to parse convoy %s: %v\n", mr.ConvoyID, err)
+		return
+	}
+
+	prNumberStr := beads.GetPRNumberField(convoy.Description)
+	if prNumberStr == "" {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: convoy %s has no pr_number field\n", mr.ConvoyID)
+		return
+	}
+	var prNumber int
+	if _, err := fmt.Sscanf(prNumberStr, "%d", &prNumber); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: convoy %s has invalid pr_number %q: %v\n", mr.ConvoyID, prNumberStr, err)
+		return
+	}
+
+	// Get tracked issues for this convoy.
+	depCmd := exec.Command("bd", "dep", "list", mr.ConvoyID, "--direction=down", "--type=tracks", "--json")
+	depCmd.Dir = townRoot
+	var depOut bytes.Buffer
+	depCmd.Stdout = &depOut
+	if err := depCmd.Run(); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to list convoy %s tracked issues: %v\n", mr.ConvoyID, err)
+		return
+	}
+
+	var trackedIssues []struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(depOut.Bytes(), &trackedIssues); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to parse convoy %s tracked issues: %v\n", mr.ConvoyID, err)
+		return
+	}
+
+	// Build updated PR description.
+	body := buildBatchPRBody(convoy.Title, convoy.Description, trackedIssues)
+
+	// Determine repo owner/repo from origin fetch URL.
+	fetchURL, err := e.git.RemoteURL("origin")
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to get origin URL: %v\n", err)
+		return
+	}
+	owner, repo, err := parseOwnerRepo(fetchURL)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: %v\n", err)
+		return
+	}
+
+	// Call GitHub API to update PR description.
+	client, err := ghClientFactory()
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to create GitHub client: %v\n", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := client.UpdatePRDescription(ctx, owner, repo, prNumber, body); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to update PR #%d description: %v\n", prNumber, err)
+		return
+	}
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] ✓ Updated PR #%d description for convoy %s\n", prNumber, mr.ConvoyID)
+}
+
+// buildBatchPRBody constructs the PR body from convoy info and tracked issues.
+func buildBatchPRBody(convoyTitle, convoyDesc string, issues []struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}) string {
+	var b strings.Builder
+
+	b.WriteString("## ")
+	b.WriteString(convoyTitle)
+	b.WriteString("\n\n")
+
+	// Include convoy description, stripping metadata fields.
+	for _, line := range strings.Split(convoyDesc, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			b.WriteString("\n")
+			continue
+		}
+		if colonIdx := strings.Index(trimmed, ":"); colonIdx > 0 {
+			key := strings.ToLower(strings.TrimSpace(trimmed[:colonIdx]))
+			switch key {
+			case "owner", "notify", "molecule", "merge", "base_branch",
+				"integration_branch", "pr_url", "pr_number", "watchers",
+				"nudge_watchers":
+				continue
+			}
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	if len(issues) > 0 {
+		b.WriteString("\n## Tracked Issues\n\n")
+
+		// Sort by ID for deterministic output.
+		sort.Slice(issues, func(i, j int) bool {
+			return issues[i].ID < issues[j].ID
+		})
+
+		for _, issue := range issues {
+			status := issue.Status
+			if status == "" {
+				status = "pending"
+			}
+			checked := " "
+			if status == "closed" {
+				checked = "x"
+			}
+			fmt.Fprintf(&b, "- [%s] **%s**: %s (%s)\n", checked, issue.ID, issue.Title, status)
+		}
+	}
+
+	return strings.TrimSpace(b.String())
 }
 
 // postMergeConvoyCheck runs convoy completion checks after a successful merge.
