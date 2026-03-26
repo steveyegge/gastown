@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -70,6 +71,80 @@ esac
 	t.Setenv("MOCK_BD_SHOW_OUTPUT", showOutput)
 }
 
+func installMockBDForAgentStateUpdate(t *testing.T, showOutput, logPath string) {
+	t.Helper()
+
+	binDir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		scriptPath := filepath.Join(binDir, "bd.cmd")
+		script := "@echo off\r\n" +
+			"setlocal EnableDelayedExpansion\r\n" +
+			"set \"all=\"\r\n" +
+			"for %%a in (%*) do set \"all=!all! %%~a\"\r\n" +
+			">> \"%MOCK_BD_LOG%\" echo(!all:~1!\r\n" +
+			"set \"cmd=\"\r\n" +
+			":findcmd\r\n" +
+			"if \"%~1\"==\"\" goto havecmd\r\n" +
+			"set \"arg=%~1\"\r\n" +
+			"if /I \"!arg:~0,2!\"==\"--\" (\r\n" +
+			"  shift\r\n" +
+			"  goto findcmd\r\n" +
+			")\r\n" +
+			"set \"cmd=%~1\"\r\n" +
+			":havecmd\r\n" +
+			"if /I \"%cmd%\"==\"version\" exit /b 0\r\n" +
+			"if /I \"%cmd%\"==\"show\" (\r\n" +
+			"  echo(%MOCK_BD_SHOW_OUTPUT%\r\n" +
+			"  exit /b 0\r\n" +
+			")\r\n" +
+			"if /I \"%cmd%\"==\"sql\" exit /b 0\r\n" +
+			"if /I \"%cmd%\"==\"update\" exit /b 0\r\n" +
+			"exit /b 0\r\n"
+		if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+			t.Fatalf("write mock bd: %v", err)
+		}
+		t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		t.Setenv("MOCK_BD_SHOW_OUTPUT", showOutput)
+		t.Setenv("MOCK_BD_LOG", logPath)
+		return
+	}
+
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$MOCK_BD_LOG"
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    --*) ;;
+    *) cmd="$arg"; break ;;
+  esac
+done
+
+case "$cmd" in
+  version)
+    exit 0
+    ;;
+  show)
+    printf '%s\n' "$MOCK_BD_SHOW_OUTPUT"
+    exit 0
+    ;;
+  sql|update)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`
+	scriptPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write mock bd: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("MOCK_BD_SHOW_OUTPUT", showOutput)
+	t.Setenv("MOCK_BD_LOG", logPath)
+}
+
 func TestGetAgentBead_PrefersStructuredAgentState(t *testing.T) {
 	tmpDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755); err != nil {
@@ -115,6 +190,42 @@ func TestGetAgentBead_FallsBackToDescriptionAgentState(t *testing.T) {
 	}
 	if fields.AgentState != "spawning" {
 		t.Fatalf("fields.AgentState = %q, want %q", fields.AgentState, "spawning")
+	}
+}
+
+func TestUpdateAgentState_UsesSQLAndDoesNotCallMissingBDSubcommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	logPath := filepath.Join(tmpDir, "bd.log")
+	installMockBDForAgentStateUpdate(
+		t,
+		`[{"id":"gt-gastown-polecat-nux","title":"Polecat nux","issue_type":"agent","labels":["gt:agent"],"description":"Polecat nux\n\nrole_type: polecat\nrig: gastown\nagent_state: spawning\nhook_bead: null","agent_state":"spawning"}]`,
+		logPath,
+	)
+
+	bd := NewIsolated(tmpDir)
+	if err := bd.UpdateAgentState("gt-gastown-polecat-nux", "working"); err != nil {
+		t.Fatalf("UpdateAgentState: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	logOutput := string(logBytes)
+
+	wantSQL := "sql UPDATE issues SET agent_state = 'working' WHERE id = 'gt-gastown-polecat-nux'"
+	if !strings.Contains(logOutput, wantSQL) {
+		t.Fatalf("expected SQL agent_state update in log, got:\n%s", logOutput)
+	}
+	if strings.Contains(logOutput, "agent state gt-gastown-polecat-nux working") {
+		t.Fatalf("unexpected deprecated bd agent state call in log:\n%s", logOutput)
+	}
+	if !strings.Contains(logOutput, "update gt-gastown-polecat-nux --description=") {
+		t.Fatalf("expected description sync update in log, got:\n%s", logOutput)
 	}
 }
 

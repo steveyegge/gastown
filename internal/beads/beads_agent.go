@@ -416,15 +416,14 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 }
 
 // UpdateAgentState updates the agent_state field in an agent bead.
-// Uses `bd agent state` command for the database column directly,
-// then syncs the description's agent_state field to match (gt-ulom).
+// The structured issues.agent_state column is authoritative for witness and
+// status views, while the description field keeps `bd show` and dashboards in
+// sync. Older/newer bd binaries do not reliably expose a dedicated
+// `bd agent state` subcommand, so write the column via `bd sql` directly.
+// Then sync the description field to match (gt-ulom).
 func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, nil, retErr) }()
-	// Update agent state using bd agent state command
-	// Use runWithRouting so bd can resolve cross-prefix agent beads (e.g., wa-*
-	// agent beads from hq context) via routes.jsonl instead of BEADS_DIR.
-	_, err := b.runWithRouting("agent", "state", id, state)
-	if err != nil {
+	if err := b.updateAgentStateColumn(id, state); err != nil {
 		return fmt.Errorf("updating agent state: %w", err)
 	}
 
@@ -435,6 +434,25 @@ func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 	_ = b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{AgentState: &state})
 
 	return nil
+}
+
+func (b *Beads) updateAgentStateColumn(id string, state string) error {
+	targetDir := ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
+	target := b
+	if targetDir != b.getResolvedBeadsDir() {
+		target = NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
+	}
+
+	escapedID := strings.ReplaceAll(id, "'", "''")
+	escapedState := strings.ReplaceAll(state, "'", "''")
+	query := fmt.Sprintf(
+		"UPDATE issues SET agent_state = '%s' WHERE id = '%s'",
+		escapedState,
+		escapedID,
+	)
+
+	_, err := target.run("sql", query)
+	return err
 }
 
 // SetHookBead and ClearHookBead removed (hq-l6mm5).
