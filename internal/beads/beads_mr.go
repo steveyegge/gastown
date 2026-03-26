@@ -108,6 +108,28 @@ func (b *Beads) FindOpenMRsForIssue(issueID string) ([]*Issue, error) {
 	return matches, nil
 }
 
+// FindMRForMergeCommit returns the MR bead whose merge_commit field matches the SHA.
+// Searches across all merge-request beads, open and closed.
+func (b *Beads) FindMRForMergeCommit(mergeCommit string) (*Issue, error) {
+	if strings.TrimSpace(mergeCommit) == "" {
+		return nil, nil
+	}
+	issues, err := b.ListMergeRequests(ListOptions{
+		Status: "all",
+		Label:  "gt:merge-request",
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, issue := range issues {
+		fields := ParseMRFields(issue)
+		if fields != nil && fields.MergeCommit == mergeCommit {
+			return issue, nil
+		}
+	}
+	return nil, nil
+}
+
 // MatchesMRSourceIssue returns true if the MR description contains a
 // source_issue field matching the given issue ID exactly. The trailing
 // newline in the needle prevents partial ID matches (e.g., "gt-abc"

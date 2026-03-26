@@ -219,6 +219,11 @@ func validateRigSettings(c *RigSettings) error {
 			return err
 		}
 	}
+	if c.RepoContract != nil {
+		if err := validateRepoContract(c.RepoContract); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -227,6 +232,12 @@ var ErrInvalidOnConflict = errors.New("invalid on_conflict strategy")
 
 // validateMergeQueueConfig validates a MergeQueueConfig.
 func validateMergeQueueConfig(c *MergeQueueConfig) error {
+	switch c.GetVerificationMode() {
+	case VerificationModeAdvisory, VerificationModeStrict:
+	default:
+		return fmt.Errorf("invalid verification_mode: %q", c.VerificationMode)
+	}
+
 	// Validate on_conflict strategy
 	if c.OnConflict != "" && c.OnConflict != OnConflictAssignBack && c.OnConflict != OnConflictAutoRebase {
 		return fmt.Errorf("%w: got '%s', want '%s' or '%s'",
@@ -259,6 +270,35 @@ func validateMergeQueueConfig(c *MergeQueueConfig) error {
 		return fmt.Errorf("%w: max_concurrent must be non-negative", ErrMissingField)
 	}
 
+	for name, gate := range c.Gates {
+		if gate == nil {
+			return fmt.Errorf("gate %q is nil", name)
+		}
+		if strings.TrimSpace(gate.Cmd) == "" {
+			return fmt.Errorf("gate %q cmd must not be empty", name)
+		}
+		switch strings.TrimSpace(gate.Phase) {
+		case "", "pre-merge", "post-squash":
+		default:
+			return fmt.Errorf("gate %q has invalid phase %q", name, gate.Phase)
+		}
+		if gate.Timeout != "" {
+			if _, err := time.ParseDuration(gate.Timeout); err != nil {
+				return fmt.Errorf("gate %q timeout: %w", name, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func validateRepoContract(c *RepoContract) error {
+	if c == nil {
+		return nil
+	}
+	if c.GitHubCI != nil && strings.TrimSpace(c.GitHubCI.WorkflowName()) == "" {
+		return fmt.Errorf("repo_contract.github_ci.workflow must not be empty")
+	}
 	return nil
 }
 
@@ -336,6 +376,9 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 		if local.BuildCommand != "" {
 			result.BuildCommand = local.BuildCommand
 		}
+		if local.VerificationMode != "" {
+			result.VerificationMode = local.VerificationMode
+		}
 		// Merge non-command fields from local if explicitly set
 		if local.Enabled {
 			result.Enabled = local.Enabled
@@ -360,6 +403,30 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 		}
 		if local.StaleClaimTimeout != "" {
 			result.StaleClaimTimeout = local.StaleClaimTimeout
+		}
+		if local.IntegrationBranchPolecatEnabled != nil {
+			result.IntegrationBranchPolecatEnabled = local.IntegrationBranchPolecatEnabled
+		}
+		if local.IntegrationBranchRefineryEnabled != nil {
+			result.IntegrationBranchRefineryEnabled = local.IntegrationBranchRefineryEnabled
+		}
+		if local.IntegrationBranchTemplate != "" {
+			result.IntegrationBranchTemplate = local.IntegrationBranchTemplate
+		}
+		if local.IntegrationBranchAutoLand != nil {
+			result.IntegrationBranchAutoLand = local.IntegrationBranchAutoLand
+		}
+		if local.JudgmentEnabled != nil {
+			result.JudgmentEnabled = local.JudgmentEnabled
+		}
+		if local.ReviewDepth != "" {
+			result.ReviewDepth = local.ReviewDepth
+		}
+		if local.Gates != nil {
+			result.Gates = cloneVerificationGates(local.Gates)
+		}
+		if local.GatesParallel != nil {
+			result.GatesParallel = local.GatesParallel
 		}
 	}
 	return result

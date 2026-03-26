@@ -29,10 +29,10 @@ func TestMatchPattern(t *testing.T) {
 		{"gastown/crew/*", "gastown/polecats/Toast", false},
 
 		// Different path lengths
-		{"gastown/*", "gastown/crew/max", false},      // * matches single segment
-		{"gastown/*/*", "gastown/crew/max", true},     // Multiple wildcards
-		{"*/*", "gastown/witness", true},              // Both wildcards
-		{"*/*/*", "gastown/crew/max", true},           // Three-level wildcard
+		{"gastown/*", "gastown/crew/max", false},  // * matches single segment
+		{"gastown/*/*", "gastown/crew/max", true}, // Multiple wildcards
+		{"*/*", "gastown/witness", true},          // Both wildcards
+		{"*/*/*", "gastown/crew/max", true},       // Three-level wildcard
 	}
 
 	for _, tt := range tests {
@@ -92,23 +92,28 @@ func TestResolverResolve_DirectAddresses(t *testing.T) {
 	resolver := NewResolver(nil, "")
 
 	tests := []struct {
-		name    string
-		address string
-		want    RecipientType
-		wantLen int
+		name     string
+		address  string
+		wantAddr string
+		want     RecipientType
+		wantLen  int
 	}{
 		// Direct agent addresses
-		{"direct agent", "gastown/witness", RecipientAgent, 1},
-		{"direct crew", "gastown/crew/max", RecipientAgent, 1},
-		{"mayor", "mayor/", RecipientAgent, 1},
+		{"direct agent", "gastown/witness", "gastown/witness", RecipientAgent, 1},
+		{"direct crew", "gastown/crew/max", "gastown/crew/max", RecipientAgent, 1},
+		{"mayor with slash", "mayor/", "mayor/", RecipientAgent, 1},
+		{"mayor bare", "mayor", "mayor/", RecipientAgent, 1},
+		{"deacon bare", "deacon", "deacon/", RecipientAgent, 1},
+		{"daemon alias", "daemon", "deacon/", RecipientAgent, 1},
+		{"overseer bare", "overseer", "overseer", RecipientAgent, 1},
 
 		// Legacy prefixes (pass-through)
-		{"list prefix", "list:oncall", RecipientAgent, 1},
-		{"announce prefix", "announce:alerts", RecipientAgent, 1},
+		{"list prefix", "list:oncall", "list:oncall", RecipientAgent, 1},
+		{"announce prefix", "announce:alerts", "announce:alerts", RecipientAgent, 1},
 
 		// Explicit type prefixes
-		{"queue prefix", "queue:work", RecipientQueue, 1},
-		{"channel prefix", "channel:alerts", RecipientChannel, 1},
+		{"queue prefix", "queue:work", "queue:work", RecipientQueue, 1},
+		{"channel prefix", "channel:alerts", "channel:alerts", RecipientChannel, 1},
 	}
 
 	for _, tt := range tests {
@@ -122,6 +127,9 @@ func TestResolverResolve_DirectAddresses(t *testing.T) {
 			}
 			if len(got) > 0 && got[0].Type != tt.want {
 				t.Errorf("Resolve(%q)[0].Type = %v, want %v", tt.address, got[0].Type, tt.want)
+			}
+			if len(got) > 0 && got[0].Address != tt.wantAddr {
+				t.Errorf("Resolve(%q)[0].Address = %q, want %q", tt.address, got[0].Address, tt.wantAddr)
 			}
 		})
 	}

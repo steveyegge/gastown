@@ -149,11 +149,20 @@ func resolveAndSubstitute(provider, hooksFile, role string) ([]byte, error) {
 	}
 
 	if bytes.Contains(content, []byte("{{GT_BIN}}")) {
-		gtBin := resolveGTBinary()
-		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBin))
+		content = substituteGTBinary(content, hooksFile, resolveGTBinary())
 	}
 
 	return content, nil
+}
+
+func substituteGTBinary(content []byte, hooksFile, gtBin string) []byte {
+	if isSettingsFile(hooksFile) {
+		// JSON templates embed GT_BIN inside quoted strings, so the resolved path
+		// must be escaped before substitution on Windows paths like C:\...
+		escaped, _ := json.Marshal(gtBin)
+		gtBin = string(escaped[1 : len(escaped)-1])
+	}
+	return bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBin))
 }
 
 // writeTemplate resolves a template, substitutes placeholders, and writes it to targetPath.

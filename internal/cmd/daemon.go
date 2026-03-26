@@ -185,13 +185,7 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("finding executable: %w", err)
 	}
 
-	daemonCmd := exec.Command(gtPath, "daemon", "run")
-	daemonCmd.Dir = townRoot
-
-	// Detach from terminal
-	daemonCmd.Stdin = nil
-	daemonCmd.Stdout = nil
-	daemonCmd.Stderr = nil
+	daemonCmd := buildDaemonStartCommand(gtPath, townRoot)
 
 	if err := daemonCmd.Start(); err != nil {
 		return fmt.Errorf("starting daemon: %w", err)
@@ -225,6 +219,19 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Daemon started (PID %d)\n", style.Bold.Render("✓"), pid)
 	return nil
+}
+
+func buildDaemonStartCommand(gtPath, townRoot string) *exec.Cmd {
+	daemonCmd := exec.Command(gtPath, "daemon", "run")
+	daemonCmd.Dir = townRoot
+
+	// Fully detach from the caller so the daemon survives the start command's exit.
+	daemonCmd.Stdin = nil
+	daemonCmd.Stdout = nil
+	daemonCmd.Stderr = nil
+	configureBackgroundDaemonStart(daemonCmd)
+
+	return daemonCmd
 }
 
 func runDaemonStop(cmd *cobra.Command, args []string) error {

@@ -98,6 +98,7 @@ install: check-up-to-date build
 	@mkdir -p $(INSTALL_DIR)
 	@rm -f $(INSTALL_DIR)/$(BINARY)
 	@cp $(BUILD_DIR)/$(BINARY) $(INSTALL_DIR)/$(BINARY)
+	@printf '%s\n' "$$(git rev-parse --show-toplevel)" > $(INSTALL_DIR)/$(BINARY).repo
 	@# Nuke any stale go-install binaries that shadow the canonical location
 	@for bad in $(HOME)/go/bin/$(BINARY) $(HOME)/bin/$(BINARY); do \
 		if [ -f "$$bad" ]; then \
@@ -129,6 +130,7 @@ safe-install: check-up-to-date check-forward-only build
 	@# Atomic-ish replace: copy to temp then move (move is atomic on same filesystem)
 	@cp $(BUILD_DIR)/$(BINARY) $(INSTALL_DIR)/$(BINARY).new
 	@mv $(INSTALL_DIR)/$(BINARY).new $(INSTALL_DIR)/$(BINARY)
+	@printf '%s\n' "$$(git rev-parse --show-toplevel)" > $(INSTALL_DIR)/$(BINARY).repo
 	@# Nuke any stale go-install binaries that shadow the canonical location
 	@for bad in $(HOME)/go/bin/$(BINARY) $(HOME)/bin/$(BINARY); do \
 		if [ -f "$$bad" ]; then \
@@ -144,6 +146,9 @@ clean:
 
 test:
 	go test ./...
+
+test-integration:
+	go test -tags=integration ./...
 
 # Run e2e tests in isolated container (the only supported way to run them)
 test-e2e-container:
