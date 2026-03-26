@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -292,12 +297,12 @@ func runConvoyLaunch(cmd *cobra.Command, args []string) error {
 			}
 
 			// Rebuild DAG from tracked beads and dispatch Wave 1.
-			beads, deps, err := collectConvoyBeads(convoyID)
+			trackedBeads, deps, err := collectConvoyBeads(convoyID)
 			if err != nil {
 				return fmt.Errorf("collect beads for dispatch: %w", err)
 			}
 
-			dag := buildConvoyDAG(beads, deps)
+			dag := buildConvoyDAG(trackedBeads, deps)
 			waves, _, err := computeWaves(dag)
 			if err != nil {
 				return fmt.Errorf("compute waves for dispatch: %w", err)
@@ -306,6 +311,14 @@ func runConvoyLaunch(cmd *cobra.Command, args []string) error {
 			townRoot, err := workspace.FindFromCwdOrError()
 			if err != nil {
 				return fmt.Errorf("resolve town root for dispatch: %w", err)
+			}
+
+			// For batch-pr convoys, create integration branch before dispatch.
+			merge := convoyMergeFromFields(result.Description)
+			if merge == "batch-pr" {
+				if err := createBatchPRIntegrationBranch(convoyID, result.Description, dag, townRoot); err != nil {
+					return fmt.Errorf("create integration branch: %w", err)
+				}
 			}
 
 			// Check for parked/docked rigs before dispatch (gt-4owfd.1, #2120)
@@ -329,4 +342,109 @@ func runConvoyLaunch(cmd *cobra.Command, args []string) error {
 	convoyStageLaunch = true
 	defer func() { convoyStageLaunch = false }()
 	return runConvoyStage(cmd, args)
+}
+
+// createBatchPRIntegrationBranch creates an integration branch for a batch-pr convoy.
+// The branch is created on the primary rig (most common rig among slingable nodes)
+// from the rig's default branch (or the convoy's base_branch if set).
+// The branch name is stored on the convoy bead's description for downstream consumption.
+func createBatchPRIntegrationBranch(convoyID, convoyDesc string, dag *ConvoyDAG, townRoot string) error {
+	// 1. Determine primary rig from DAG.
+	primaryRigName := primaryRigFromDAG(dag)
+	if primaryRigName == "" {
+		return fmt.Errorf("convoy %s: no rig found in DAG for integration branch", convoyID)
+	}
+
+	// 2. Load the rig.
+	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		return fmt.Errorf("load rigs config: %w", err)
+	}
+	rigMgr := rig.NewManager(townRoot, rigsConfig, git.NewGit(townRoot))
+	r, err := rigMgr.GetRig(primaryRigName)
+	if err != nil {
+		return fmt.Errorf("rig %q not found: %w", primaryRigName, err)
+	}
+
+	// 3. Determine base branch from convoy fields or rig default.
+	convoyFields := beads.ParseConvoyFields(&beads.Issue{Description: convoyDesc})
+	baseBranch := r.DefaultBranch()
+	if convoyFields != nil && convoyFields.BaseBranch != "" {
+		baseBranch = convoyFields.BaseBranch
+	}
+
+	// 4. Determine integration branch name: convoy/<convoy-id>.
+	branchName := "convoy/" + convoyID
+
+	// 5. Get git client for the rig and create the branch.
+	g, err := getRigGit(r.Path)
+	if err != nil {
+		return fmt.Errorf("initializing git for rig %s: %w", primaryRigName, err)
+	}
+
+	fmt.Printf("Creating integration branch %s from %s on rig %s...\n", branchName, baseBranch, primaryRigName)
+
+	if err := g.Fetch("origin"); err != nil {
+		return fmt.Errorf("fetching from origin: %w", err)
+	}
+
+	if err := g.CreateBranchFrom(branchName, "origin/"+baseBranch); err != nil {
+		return fmt.Errorf("creating branch %s: %w", branchName, err)
+	}
+
+	if err := g.Push("origin", branchName, false); err != nil {
+		// Clean up local branch on push failure.
+		_ = g.DeleteBranch(branchName, true)
+		return fmt.Errorf("pushing branch %s to origin: %w", branchName, err)
+	}
+
+	// 6. Store integration branch name on convoy bead.
+	newDesc := beads.AddIntegrationBranchField(convoyDesc, branchName)
+	if err := bdUpdateConvoyDescription(convoyID, newDesc); err != nil {
+		// Non-fatal: branch was created, just metadata update failed.
+		fmt.Printf("  (warning: could not store integration branch on convoy: %v)\n", err)
+	}
+
+	fmt.Printf("  ✓ Integration branch: %s (rig: %s, base: %s)\n", branchName, primaryRigName, baseBranch)
+	return nil
+}
+
+// primaryRigFromDAG returns the most common rig name among slingable nodes in the DAG.
+// Returns empty string if no slingable nodes have a rig assignment.
+func primaryRigFromDAG(dag *ConvoyDAG) string {
+	rigCount := make(map[string]int)
+	for _, node := range dag.Nodes {
+		if !isSlingableType(node.Type) {
+			continue
+		}
+		if node.Rig != "" {
+			rigCount[node.Rig]++
+		}
+	}
+
+	var primaryRig string
+	maxCount := 0
+	for rigName, count := range rigCount {
+		if count > maxCount {
+			maxCount = count
+			primaryRig = rigName
+		}
+	}
+	return primaryRig
+}
+
+// bdUpdateConvoyDescription updates a convoy bead's description.
+// Convoys live in the town HQ beads database.
+func bdUpdateConvoyDescription(convoyID, description string) error {
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("bd", "update", convoyID, "--description="+description)
+	cmd.Dir = townBeads
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("bd update %s --description: %w\noutput: %s", convoyID, err, out)
+	}
+	return nil
 }
