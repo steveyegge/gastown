@@ -276,3 +276,18 @@ func DetectIntegrationBranch(bd IssueShower, checker BranchChecker, issueID stri
 
 	return "", nil
 }
+
+// GetPRURLField extracts the pr_url field from a description.
+func GetPRURLField(description string) string {
+	return getMetadataField(description, "pr_url")
+}
+
+// GetReviewRoundField extracts the review_round counter from a description.
+// Returns "0" if not set.
+func GetReviewRoundField(description string) string {
+	v := getMetadataField(description, "review_round")
+	if v == "" {
+		return "0"
+	}
+	return v
+}
