@@ -296,8 +296,9 @@ func TestSyncForRole_GeminiWithGTBinSubstitution(t *testing.T) {
 	}
 	// Verify the resolved binary path is present
 	gtBin := resolveGTBinary()
-	if !strings.Contains(string(got), gtBin) {
-		t.Errorf("expected resolved gt binary %q in output", gtBin)
+	expectedGTBin := string(substituteGTBinary([]byte("{{GT_BIN}}"), "settings.json", gtBin))
+	if !strings.Contains(string(got), expectedGTBin) {
+		t.Errorf("expected resolved gt binary %q in output", expectedGTBin)
 	}
 }
 
