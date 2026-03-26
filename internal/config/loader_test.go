@@ -389,6 +389,41 @@ func TestRigSettingsValidation(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "valid merge strategy mr",
+			settings: &RigSettings{
+				Type:                 "rig-settings",
+				Version:              1,
+				DefaultMergeStrategy: "mr",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid merge strategy batch-pr",
+			settings: &RigSettings{
+				Type:                 "rig-settings",
+				Version:              1,
+				DefaultMergeStrategy: "batch-pr",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid merge strategy empty",
+			settings: &RigSettings{
+				Type:    "rig-settings",
+				Version: 1,
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid merge strategy",
+			settings: &RigSettings{
+				Type:                 "rig-settings",
+				Version:              1,
+				DefaultMergeStrategy: "unknown",
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
