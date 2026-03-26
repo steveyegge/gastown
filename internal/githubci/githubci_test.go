@@ -43,6 +43,10 @@ func TestEnsureBranchCIDispatchesFallback(t *testing.T) {
 				out:   "[]",
 			},
 			{
+				match: "gh run list --repo owner/repo --workflow CI --branch feature",
+				out:   "[]",
+			},
+			{
 				match: "gh workflow run CI --repo owner/repo --ref feature",
 				out:   "",
 			},
