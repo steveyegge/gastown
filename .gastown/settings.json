@@ -1,0 +1,50 @@
+{
+  "type": "rig-settings",
+  "version": 1,
+  "merge_queue": {
+    "enabled": true,
+    "on_conflict": "auto_rebase",
+    "verification_mode": "strict",
+    "run_tests": true,
+    "gates": {
+      "verify": {
+        "cmd": "./scripts/ci/verify.sh pre-merge",
+        "timeout": "20m"
+      },
+      "coverage": {
+        "cmd": "./scripts/ci/verify.sh coverage",
+        "timeout": "10m"
+      },
+      "vuln": {
+        "cmd": "govulncheck ./...",
+        "timeout": "5m"
+      },
+      "integration": {
+        "cmd": "./scripts/ci/verify.sh integration",
+        "timeout": "30m",
+        "phase": "post-squash"
+      }
+    },
+    "gates_parallel": true,
+    "auto_push": true,
+    "delete_merged_branches": true,
+    "retry_flaky_tests": 1,
+    "poll_interval": "30s",
+    "max_concurrent": 1,
+    "stale_claim_timeout": "30m"
+  },
+  "repo_contract": {
+    "repo_type": "cli",
+    "enforcement_tier": "production",
+    "verify_command": "./scripts/ci/verify.sh pre-merge",
+    "smoke_command": "./scripts/ci/verify.sh smoke",
+    "e2e_command": "./scripts/ci/verify.sh integration",
+    "requires_e2e": true,
+    "critical_paths": [
+      "gt build and install",
+      "rig add and workspace boot",
+      "merge queue processing",
+      "agent session startup"
+    ]
+  }
+}
