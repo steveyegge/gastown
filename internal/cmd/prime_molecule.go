@@ -369,42 +369,73 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 
 	// MQ-specific vars come from the effective layered settings:
 	// repo contract floor + rig-local overrides.
-	settings, sErr := config.LoadEffectiveRigSettings(rigPath, filepath.Join(rigPath, "mayor", "rig"))
-	if sErr == nil && settings != nil && settings.MergeQueue != nil {
-		mq := settings.MergeQueue
-		vars = append(vars, fmt.Sprintf("integration_branch_refinery_enabled=%t", mq.IsRefineryIntegrationEnabled()))
-		vars = append(vars, fmt.Sprintf("integration_branch_auto_land=%t", mq.IsIntegrationBranchAutoLandEnabled()))
-		vars = append(vars, fmt.Sprintf("run_tests=%t", mq.IsRunTestsEnabled()))
-		if mq.IsStrictVerification() {
-			vars = append(vars, fmt.Sprintf("verification_mode=%s", mq.GetVerificationMode()))
-		}
-		if mq.SetupCommand != "" {
-			vars = append(vars, fmt.Sprintf("setup_command=%s", mq.SetupCommand))
-		}
-		if mq.TypecheckCommand != "" {
-			vars = append(vars, fmt.Sprintf("typecheck_command=%s", mq.TypecheckCommand))
-		}
-		if mq.LintCommand != "" {
-			vars = append(vars, fmt.Sprintf("lint_command=%s", mq.LintCommand))
-		}
-		if mq.TestCommand != "" {
-			vars = append(vars, fmt.Sprintf("test_command=%s", mq.TestCommand))
-		}
-		if mq.BuildCommand != "" {
-			vars = append(vars, fmt.Sprintf("build_command=%s", mq.BuildCommand))
-		}
-		vars = append(vars, fmt.Sprintf("delete_merged_branches=%t", mq.IsDeleteMergedBranchesEnabled()))
-		vars = append(vars, fmt.Sprintf("judgment_enabled=%t", mq.IsJudgmentEnabled()))
-		vars = append(vars, fmt.Sprintf("review_depth=%s", mq.GetReviewDepth()))
-		if settings.RepoContract != nil {
-			if settings.RepoContract.VerifyCommand != "" {
-				vars = append(vars, fmt.Sprintf("verify_command=%s", settings.RepoContract.VerifyCommand))
+	repoRoot := rigManagedRepoRoot(rigPath)
+	settings, sErr := config.LoadEffectiveRigSettings(rigPath, repoRoot)
+	if sErr == nil && settings != nil {
+		if mq := settings.MergeQueue; mq != nil {
+			vars = append(vars, fmt.Sprintf("integration_branch_refinery_enabled=%t", mq.IsRefineryIntegrationEnabled()))
+			vars = append(vars, fmt.Sprintf("integration_branch_auto_land=%t", mq.IsIntegrationBranchAutoLandEnabled()))
+			vars = append(vars, fmt.Sprintf("run_tests=%t", mq.IsRunTestsEnabled()))
+			if mode := mq.GetVerificationMode(); mode != "" {
+				vars = append(vars, fmt.Sprintf("verification_mode=%s", mode))
 			}
-			if settings.RepoContract.SmokeCommand != "" {
-				vars = append(vars, fmt.Sprintf("smoke_command=%s", settings.RepoContract.SmokeCommand))
+			if mq.SetupCommand != "" {
+				vars = append(vars, fmt.Sprintf("setup_command=%s", mq.SetupCommand))
+			}
+			if mq.TypecheckCommand != "" {
+				vars = append(vars, fmt.Sprintf("typecheck_command=%s", mq.TypecheckCommand))
+			}
+			if mq.LintCommand != "" {
+				vars = append(vars, fmt.Sprintf("lint_command=%s", mq.LintCommand))
+			}
+			if mq.TestCommand != "" {
+				vars = append(vars, fmt.Sprintf("test_command=%s", mq.TestCommand))
+			}
+			if mq.BuildCommand != "" {
+				vars = append(vars, fmt.Sprintf("build_command=%s", mq.BuildCommand))
+			}
+			vars = append(vars, fmt.Sprintf("delete_merged_branches=%t", mq.IsDeleteMergedBranchesEnabled()))
+			vars = append(vars, fmt.Sprintf("judgment_enabled=%t", mq.IsJudgmentEnabled()))
+			vars = append(vars, fmt.Sprintf("review_depth=%s", mq.GetReviewDepth()))
+		}
+		if rc := settings.RepoContract; rc != nil {
+			if rc.RepoType != "" {
+				vars = append(vars, fmt.Sprintf("repo_type=%s", rc.RepoType))
+			}
+			if rc.EnforcementTier != "" {
+				vars = append(vars, fmt.Sprintf("enforcement_tier=%s", rc.EnforcementTier))
+			}
+			if rc.VerifyCommand != "" {
+				vars = append(vars, fmt.Sprintf("verify_command=%s", rc.VerifyCommand))
+			}
+			if rc.SmokeCommand != "" {
+				vars = append(vars, fmt.Sprintf("smoke_command=%s", rc.SmokeCommand))
+			}
+			if rc.ReleaseCheckCommand != "" {
+				vars = append(vars, fmt.Sprintf("release_check_command=%s", rc.ReleaseCheckCommand))
+			}
+			if rc.E2ECommand != "" {
+				vars = append(vars, fmt.Sprintf("e2e_command=%s", rc.E2ECommand))
+			}
+			if rc.PerfCommand != "" {
+				vars = append(vars, fmt.Sprintf("perf_command=%s", rc.PerfCommand))
+			}
+			if rc.RequiresMigrations != nil {
+				vars = append(vars, fmt.Sprintf("requires_migrations=%t", *rc.RequiresMigrations))
+			}
+			if rc.RequiresE2E != nil {
+				vars = append(vars, fmt.Sprintf("requires_e2e=%t", *rc.RequiresE2E))
+			}
+			if rc.RequiresSecurityScan != nil {
+				vars = append(vars, fmt.Sprintf("requires_security_scan=%t", *rc.RequiresSecurityScan))
+			}
+			if len(rc.CriticalPaths) > 0 {
+				vars = append(vars, fmt.Sprintf("critical_paths=%s", strings.Join(rc.CriticalPaths, ", ")))
 			}
 		}
-		return vars
+		if settings.MergeQueue != nil || settings.RepoContract != nil {
+			return vars
+		}
 	}
 
 	// Fallback: read command vars from rig identity bead labels.

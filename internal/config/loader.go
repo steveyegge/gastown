@@ -523,6 +523,14 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 			value := *local.JudgmentEnabled
 			result.JudgmentEnabled = &value
 		}
+		if local.RunTests != nil {
+			value := *local.RunTests
+			result.RunTests = &value
+		}
+		if local.DeleteMergedBranches != nil {
+			value := *local.DeleteMergedBranches
+			result.DeleteMergedBranches = &value
+		}
 	}
 	return result
 }
