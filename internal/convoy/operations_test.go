@@ -166,6 +166,20 @@ func TestCheckConvoysForIssue_NilLogger(t *testing.T) {
 	}
 }
 
+func TestConvoyCheckResult_TerminalConvoyIDs(t *testing.T) {
+	// Verify ConvoyCheckResult struct works correctly.
+	r := &ConvoyCheckResult{
+		CheckedConvoyIDs:  []string{"cv-1", "cv-2"},
+		TerminalConvoyIDs: []string{"cv-2"},
+	}
+	if len(r.CheckedConvoyIDs) != 2 {
+		t.Errorf("expected 2 checked convoys, got %d", len(r.CheckedConvoyIDs))
+	}
+	if len(r.TerminalConvoyIDs) != 1 || r.TerminalConvoyIDs[0] != "cv-2" {
+		t.Errorf("expected terminal convoy cv-2, got %v", r.TerminalConvoyIDs)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // blockingDepTypes map tests
 // ---------------------------------------------------------------------------
@@ -1267,7 +1281,7 @@ func TestCheckConvoysForIssue_SkipsStagedReady(t *testing.T) {
 	result := CheckConvoysForIssue(ctx, store, townRoot, tracked.ID, "DS-07", logger, gtPath, nil)
 
 	// The convoy should be returned (it was found as a tracker)
-	if len(result) == 0 {
+	if result == nil || len(result.CheckedConvoyIDs) == 0 {
 		t.Skipf("no tracking convoys found — GetDependentsWithMetadata may not work in embedded Dolt")
 	}
 
@@ -1352,7 +1366,7 @@ func TestCheckConvoysForIssue_SkipsStagedWarnings(t *testing.T) {
 
 	result := CheckConvoysForIssue(ctx, store, townRoot, tracked.ID, "DS-08", logger, gtPath, nil)
 
-	if len(result) == 0 {
+	if result == nil || len(result.CheckedConvoyIDs) == 0 {
 		t.Skipf("no tracking convoys found — GetDependentsWithMetadata may not work in embedded Dolt")
 	}
 
@@ -1442,7 +1456,7 @@ func TestCheckConvoysForIssue_FeedsAfterStagedToOpenTransition(t *testing.T) {
 	gtPath, _ := makeGTStub(t, 0)
 
 	result1 := CheckConvoysForIssue(ctx, store, townRoot, tracked.ID, "DS-10-staged", logger1, gtPath, nil)
-	if len(result1) == 0 {
+	if result1 == nil || len(result1.CheckedConvoyIDs) == 0 {
 		t.Skipf("no tracking convoys found — GetDependentsWithMetadata may not work in embedded Dolt")
 	}
 
@@ -1490,6 +1504,408 @@ func TestCheckConvoysForIssue_FeedsAfterStagedToOpenTransition(t *testing.T) {
 		if strings.Contains(msg, "staged") && strings.Contains(msg, "skipping") {
 			t.Errorf("convoy should NOT be skipped after transition to open, but found: %s", msg)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Batch-PR terminal detection tests
+// ---------------------------------------------------------------------------
+
+func TestIsBatchPRConvoy(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Create a convoy with batch-pr merge strategy
+	batchConvoy := &beadsdk.Issue{
+		ID:          "test-cv-bp1",
+		Title:       "Batch PR Convoy",
+		Description: "Owner: test\nMerge: batch-pr\nbase_branch: main",
+		Status:      beadsdk.StatusOpen,
+		Priority:    2,
+		IssueType:   beadsdk.TypeTask,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	// Create a convoy with regular mr strategy
+	mrConvoy := &beadsdk.Issue{
+		ID:          "test-cv-mr1",
+		Title:       "MR Convoy",
+		Description: "Owner: test\nMerge: mr",
+		Status:      beadsdk.StatusOpen,
+		Priority:    2,
+		IssueType:   beadsdk.TypeTask,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	// Create a convoy with no merge field
+	noMerge := &beadsdk.Issue{
+		ID:        "test-cv-nm1",
+		Title:     "No Merge Convoy",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	for _, iss := range []*beadsdk.Issue{batchConvoy, mrConvoy, noMerge} {
+		if err := store.CreateIssue(ctx, iss, "test"); err != nil {
+			t.Fatalf("CreateIssue %s: %v", iss.ID, err)
+		}
+	}
+
+	tests := []struct {
+		convoyID string
+		want     bool
+	}{
+		{"test-cv-bp1", true},
+		{"test-cv-mr1", false},
+		{"test-cv-nm1", false},
+		{"test-nonexistent", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.convoyID, func(t *testing.T) {
+			got := isBatchPRConvoy(ctx, store, tt.convoyID)
+			if got != tt.want {
+				t.Errorf("isBatchPRConvoy(%s) = %v, want %v", tt.convoyID, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAreAllTrackedIssuesClosed(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	convoy := &beadsdk.Issue{
+		ID:        "test-cv-allc",
+		Title:     "All Closed Test Convoy",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	task1 := &beadsdk.Issue{
+		ID:        "test-t1-allc",
+		Title:     "Task 1",
+		Status:    beadsdk.StatusClosed,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	task2 := &beadsdk.Issue{
+		ID:        "test-t2-allc",
+		Title:     "Task 2",
+		Status:    beadsdk.StatusClosed,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	task3Open := &beadsdk.Issue{
+		ID:        "test-t3-allc",
+		Title:     "Task 3 (open)",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	for _, iss := range []*beadsdk.Issue{convoy, task1, task2, task3Open} {
+		if err := store.CreateIssue(ctx, iss, "test"); err != nil {
+			t.Fatalf("CreateIssue %s: %v", iss.ID, err)
+		}
+	}
+
+	// Add tracks dependencies
+	for _, taskID := range []string{task1.ID, task2.ID, task3Open.ID} {
+		dep := &beadsdk.Dependency{
+			IssueID:     convoy.ID,
+			DependsOnID: taskID,
+			Type:        beadsdk.DependencyType("tracks"),
+			CreatedAt:   now,
+			CreatedBy:   "test",
+		}
+		if err := store.AddDependency(ctx, dep, "test"); err != nil {
+			t.Fatalf("AddDependency %s: %v", taskID, err)
+		}
+	}
+
+	townRoot := setupTownRoot(t)
+
+	// With one open task: should NOT be terminal
+	if areAllTrackedIssuesClosed(ctx, store, convoy.ID, townRoot, nil) {
+		t.Error("expected false when task3 is open")
+	}
+
+	// Close task3
+	if err := store.UpdateIssue(ctx, task3Open.ID, map[string]interface{}{
+		"status": "closed",
+	}, "test"); err != nil {
+		t.Fatalf("UpdateIssue: %v", err)
+	}
+
+	// Now all should be closed
+	if !areAllTrackedIssuesClosed(ctx, store, convoy.ID, townRoot, nil) {
+		t.Error("expected true when all tasks are closed")
+	}
+
+	// Empty convoy (no tracked issues) should return false
+	emptyConvoy := &beadsdk.Issue{
+		ID:        "test-cv-empty",
+		Title:     "Empty Convoy",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := store.CreateIssue(ctx, emptyConvoy, "test"); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if areAllTrackedIssuesClosed(ctx, store, emptyConvoy.ID, townRoot, nil) {
+		t.Error("expected false for empty convoy")
+	}
+}
+
+func TestCheckConvoysForIssue_BatchPRTerminalDetection(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Create a batch-pr convoy
+	convoy := &beadsdk.Issue{
+		ID:          "test-cv-term",
+		Title:       "Terminal Detection Convoy",
+		Description: "Owner: test\nMerge: batch-pr\nbase_branch: main",
+		Status:      beadsdk.StatusOpen,
+		Priority:    2,
+		IssueType:   beadsdk.TypeTask,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	task1 := &beadsdk.Issue{
+		ID:        "test-t1-term",
+		Title:     "Task 1",
+		Status:    beadsdk.StatusClosed,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	task2 := &beadsdk.Issue{
+		ID:        "test-t2-term",
+		Title:     "Task 2 (last to close)",
+		Status:    beadsdk.StatusClosed,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	for _, iss := range []*beadsdk.Issue{convoy, task1, task2} {
+		if err := store.CreateIssue(ctx, iss, "test"); err != nil {
+			t.Fatalf("CreateIssue %s: %v", iss.ID, err)
+		}
+	}
+
+	// Add tracks dependencies (convoy tracks both tasks)
+	for _, taskID := range []string{task1.ID, task2.ID} {
+		dep := &beadsdk.Dependency{
+			IssueID:     convoy.ID,
+			DependsOnID: taskID,
+			Type:        beadsdk.DependencyType("tracks"),
+			CreatedAt:   now,
+			CreatedBy:   "test",
+		}
+		if err := store.AddDependency(ctx, dep, "test"); err != nil {
+			t.Fatalf("AddDependency %s: %v", taskID, err)
+		}
+	}
+
+	townRoot := setupTownRoot(t)
+	gtPath, _ := makeGTStub(t, 0)
+	logger, logMsgs := makeLogger()
+
+	// Both tasks closed → terminal detection should fire
+	result := CheckConvoysForIssue(ctx, store, townRoot, task2.ID, "Terminal", logger, gtPath, nil)
+
+	if result == nil || len(result.CheckedConvoyIDs) == 0 {
+		t.Skipf("no tracking convoys found — GetDependentsWithMetadata may not work in embedded Dolt")
+	}
+
+	// Verify terminal detection logged
+	foundTerminal := false
+	for _, msg := range *logMsgs {
+		if strings.Contains(msg, "terminal completion") && strings.Contains(msg, convoy.ID) {
+			foundTerminal = true
+			break
+		}
+	}
+	if !foundTerminal {
+		t.Errorf("expected terminal completion log for convoy %s, got: %v", convoy.ID, *logMsgs)
+	}
+
+	// Verify TerminalConvoyIDs populated
+	if len(result.TerminalConvoyIDs) == 0 {
+		t.Errorf("expected TerminalConvoyIDs to contain %s, got empty", convoy.ID)
+	} else if result.TerminalConvoyIDs[0] != convoy.ID {
+		t.Errorf("expected TerminalConvoyIDs[0] = %s, got %s", convoy.ID, result.TerminalConvoyIDs[0])
+	}
+}
+
+func TestCheckConvoysForIssue_NonBatchPRNoTerminal(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Create a regular mr convoy (NOT batch-pr)
+	convoy := &beadsdk.Issue{
+		ID:          "test-cv-mr2",
+		Title:       "MR Convoy (non-batch)",
+		Description: "Owner: test\nMerge: mr",
+		Status:      beadsdk.StatusOpen,
+		Priority:    2,
+		IssueType:   beadsdk.TypeTask,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	task := &beadsdk.Issue{
+		ID:        "test-t1-mr2",
+		Title:     "Only Task",
+		Status:    beadsdk.StatusClosed,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	for _, iss := range []*beadsdk.Issue{convoy, task} {
+		if err := store.CreateIssue(ctx, iss, "test"); err != nil {
+			t.Fatalf("CreateIssue %s: %v", iss.ID, err)
+		}
+	}
+
+	dep := &beadsdk.Dependency{
+		IssueID:     convoy.ID,
+		DependsOnID: task.ID,
+		Type:        beadsdk.DependencyType("tracks"),
+		CreatedAt:   now,
+		CreatedBy:   "test",
+	}
+	if err := store.AddDependency(ctx, dep, "test"); err != nil {
+		t.Fatalf("AddDependency: %v", err)
+	}
+
+	townRoot := setupTownRoot(t)
+	gtPath, _ := makeGTStub(t, 0)
+	logger, logMsgs := makeLogger()
+
+	result := CheckConvoysForIssue(ctx, store, townRoot, task.ID, "NonBatch", logger, gtPath, nil)
+
+	if result == nil || len(result.CheckedConvoyIDs) == 0 {
+		t.Skipf("no tracking convoys found")
+	}
+
+	// Non-batch-pr convoy should NOT trigger terminal detection
+	for _, msg := range *logMsgs {
+		if strings.Contains(msg, "terminal completion") {
+			t.Errorf("unexpected terminal completion for non-batch-pr convoy: %s", msg)
+		}
+	}
+
+	if len(result.TerminalConvoyIDs) != 0 {
+		t.Errorf("expected no TerminalConvoyIDs for non-batch-pr convoy, got %v", result.TerminalConvoyIDs)
+	}
+}
+
+func TestCheckConvoysForIssue_BatchPRNotTerminalWhenOpenIssue(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	convoy := &beadsdk.Issue{
+		ID:          "test-cv-partial",
+		Title:       "Partial Convoy",
+		Description: "Owner: test\nMerge: batch-pr\nbase_branch: main",
+		Status:      beadsdk.StatusOpen,
+		Priority:    2,
+		IssueType:   beadsdk.TypeTask,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	task1Closed := &beadsdk.Issue{
+		ID:        "test-t1-partial",
+		Title:     "Closed Task",
+		Status:    beadsdk.StatusClosed,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	task2Open := &beadsdk.Issue{
+		ID:        "test-t2-partial",
+		Title:     "Open Task",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	for _, iss := range []*beadsdk.Issue{convoy, task1Closed, task2Open} {
+		if err := store.CreateIssue(ctx, iss, "test"); err != nil {
+			t.Fatalf("CreateIssue %s: %v", iss.ID, err)
+		}
+	}
+
+	for _, taskID := range []string{task1Closed.ID, task2Open.ID} {
+		dep := &beadsdk.Dependency{
+			IssueID:     convoy.ID,
+			DependsOnID: taskID,
+			Type:        beadsdk.DependencyType("tracks"),
+			CreatedAt:   now,
+			CreatedBy:   "test",
+		}
+		if err := store.AddDependency(ctx, dep, "test"); err != nil {
+			t.Fatalf("AddDependency: %v", err)
+		}
+	}
+
+	townRoot := setupTownRoot(t)
+	gtPath, _ := makeGTStub(t, 0)
+	logger, logMsgs := makeLogger()
+
+	// task1 closes but task2 still open → NOT terminal
+	result := CheckConvoysForIssue(ctx, store, townRoot, task1Closed.ID, "Partial", logger, gtPath, nil)
+
+	if result == nil || len(result.CheckedConvoyIDs) == 0 {
+		t.Skipf("no tracking convoys found")
+	}
+
+	for _, msg := range *logMsgs {
+		if strings.Contains(msg, "terminal completion") {
+			t.Errorf("unexpected terminal completion with open issues: %s", msg)
+		}
+	}
+
+	if len(result.TerminalConvoyIDs) != 0 {
+		t.Errorf("expected no TerminalConvoyIDs with open issues, got %v", result.TerminalConvoyIDs)
 	}
 }
 

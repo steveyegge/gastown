@@ -16,10 +16,24 @@ import (
 	"github.com/steveyegge/gastown/internal/util"
 )
 
+// ConvoyCheckResult holds the results of a convoy check operation.
+type ConvoyCheckResult struct {
+	// CheckedConvoyIDs lists convoy IDs that were checked (may be empty if issue isn't tracked).
+	CheckedConvoyIDs []string
+
+	// TerminalConvoyIDs lists batch-pr convoy IDs where all tracked issues are now closed.
+	// The caller can use this to trigger gate sequences on the integration branch.
+	TerminalConvoyIDs []string
+}
+
 // CheckConvoysForIssue finds any convoys tracking the given issue and triggers
 // convoy completion checks. If the convoy is not complete, it reactively feeds
 // the next ready issue to keep the convoy progressing without waiting for
 // polling-based patrol cycles.
+//
+// For batch-pr convoys, also checks whether all tracked issues are now closed
+// (terminal completion). When terminal, the convoy ID is included in
+// result.TerminalConvoyIDs so the caller can trigger the gate sequence.
 //
 // The check is idempotent - running it multiple times for the same issue is safe.
 // The underlying `gt convoy check` handles already-closed convoys gracefully.
@@ -34,8 +48,8 @@ import (
 //   - gtPath: resolved path to the gt binary (e.g. from exec.LookPath or daemon config)
 //   - resolver: optional StoreResolver for cross-database issue resolution (nil falls back to subprocess)
 //
-// Returns the convoy IDs that were checked (may be empty if issue isn't tracked).
-func CheckConvoysForIssue(ctx context.Context, store beadsdk.Storage, townRoot, issueID, caller string, logger func(format string, args ...interface{}), gtPath string, isRigParked func(string) bool, resolver ...*StoreResolver) []string {
+// Returns a ConvoyCheckResult with checked and terminal convoy IDs.
+func CheckConvoysForIssue(ctx context.Context, store beadsdk.Storage, townRoot, issueID, caller string, logger func(format string, args ...interface{}), gtPath string, isRigParked func(string) bool, resolver ...*StoreResolver) *ConvoyCheckResult {
 	if logger == nil {
 		logger = func(format string, args ...interface{}) {} // no-op
 	}
@@ -60,9 +74,13 @@ func CheckConvoysForIssue(ctx context.Context, store beadsdk.Storage, townRoot, 
 
 	logger("%s: %s tracked by %d convoy(s): %v", caller, issueID, len(convoyIDs), convoyIDs)
 
+	result := &ConvoyCheckResult{}
+
 	// Run convoy check for each tracking convoy
 	// Note: gt convoy check is idempotent and handles already-closed convoys
 	for _, convoyID := range convoyIDs {
+		result.CheckedConvoyIDs = append(result.CheckedConvoyIDs, convoyID)
+
 		if isConvoyClosed(ctx, store, convoyID) {
 			logger("%s: convoy %s already closed, skipping", caller, convoyID)
 			continue
@@ -84,9 +102,19 @@ func CheckConvoysForIssue(ctx context.Context, store beadsdk.Storage, townRoot, 
 		if !isConvoyClosed(ctx, store, convoyID) {
 			feedNextReadyIssue(ctx, store, townRoot, convoyID, caller, logger, gtPath, isRigParked, res)
 		}
+
+		// Terminal detection for batch-pr convoys: when all tracked issues
+		// are closed, the convoy has reached terminal completion and the
+		// gate sequence should be triggered on the integration branch.
+		if isBatchPRConvoy(ctx, store, convoyID) {
+			if areAllTrackedIssuesClosed(ctx, store, convoyID, townRoot, res) {
+				logger("%s: convoy %s (batch-pr): terminal completion — all tracked issues closed", caller, convoyID)
+				result.TerminalConvoyIDs = append(result.TerminalConvoyIDs, convoyID)
+			}
+		}
 	}
 
-	return convoyIDs
+	return result
 }
 
 // getTrackingConvoys returns convoy IDs that track the given issue.
@@ -519,6 +547,32 @@ func fetchCrossRigBeadStatus(townRoot string, ids []string) map[string]*beadsdk.
 	}
 
 	return result
+}
+
+// isBatchPRConvoy checks if a convoy uses the "batch-pr" merge strategy.
+// Reads the convoy bead's description and parses the Merge field from ConvoyFields.
+func isBatchPRConvoy(ctx context.Context, store beadsdk.Storage, convoyID string) bool {
+	convoy, err := store.GetIssue(ctx, convoyID)
+	if err != nil || convoy == nil {
+		return false
+	}
+	cf := beads.ParseConvoyFields(&beads.Issue{Description: convoy.Description})
+	return cf != nil && cf.Merge == "batch-pr"
+}
+
+// areAllTrackedIssuesClosed checks whether every issue tracked by a convoy is closed.
+// Uses getConvoyTrackedIssues for cross-rig-accurate status resolution.
+func areAllTrackedIssuesClosed(ctx context.Context, store beadsdk.Storage, convoyID, townRoot string, resolver *StoreResolver) bool {
+	tracked := getConvoyTrackedIssues(ctx, store, convoyID, townRoot, resolver)
+	if len(tracked) == 0 {
+		return false // empty convoy is not terminal
+	}
+	for _, issue := range tracked {
+		if issue.Status != "closed" {
+			return false
+		}
+	}
+	return true
 }
 
 // dispatchIssue dispatches an issue to a rig via gt sling.
