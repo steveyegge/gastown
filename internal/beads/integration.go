@@ -119,6 +119,16 @@ func GetConvoyStatusField(description string) string {
 	return getMetadataField(description, "convoy_status")
 }
 
+// GetReviewRoundField extracts the review_round counter from a description.
+// Returns "0" if not set.
+func GetReviewRoundField(description string) string {
+	v := getMetadataField(description, "review_round")
+	if v == "" {
+		return "0"
+	}
+	return v
+}
+
 // addMetadataField adds or updates a key: value field in a description.
 func addMetadataField(description, key, value string) string {
 	fieldLine := key + ": " + value

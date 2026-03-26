@@ -156,7 +156,7 @@ func checkConvoyReview(ctx context.Context, hqBeads *beads.Beads, townRoot strin
 	case gh.ReviewApproved:
 		handleReviewApproved(hqBeads, townRoot, convoy, prNumber, logger, gtPath)
 	case gh.ReviewChangesRequired:
-		handleChangesRequested(ctx, hqBeads, townRoot, convoy, prNumber, owner, repo, logger, gtPath)
+		HandleReviewFeedback(ctx, hqBeads, townRoot, convoy, prNumber, owner, repo, logger, gtPath)
 	case gh.ReviewPending, gh.ReviewCommented, gh.ReviewDismissed:
 		// No action — will be checked again next poll cycle.
 	}
@@ -184,80 +184,7 @@ func handleReviewApproved(hqBeads *beads.Beads, townRoot string, convoy *beads.I
 	nudgeConvoyStakeholders(convoyFields, msg, townRoot, convoy.ID, logger, gtPath)
 }
 
-// handleChangesRequested processes a convoy whose PR received change requests.
-// Creates a feedback bead and dispatches a polecat to address the review comments.
-func handleChangesRequested(ctx context.Context, hqBeads *beads.Beads, townRoot string, convoy *beads.Issue, prNumber int, owner, repo string, logger func(format string, args ...interface{}), gtPath string) {
-	logger("ReviewMonitor: convoy %s PR #%d: CHANGES_REQUESTED — creating feedback bead", convoy.ID, prNumber)
-
-	// Update convoy bead description with changes_requested status.
-	newDesc := replaceMetadataFields(convoy.Description, map[string]string{
-		"convoy_status":     "changes_requested",
-		"review_changes_at": time.Now().UTC().Format(time.RFC3339),
-	})
-	if err := hqBeads.Update(convoy.ID, beads.UpdateOptions{Description: &newDesc}); err != nil {
-		logger("ReviewMonitor: convoy %s: failed to update bead: %v", convoy.ID, err)
-	}
-
-	// Fetch review comments for context in the feedback bead.
-	var commentSummary string
-	client, err := gh.NewClient()
-	if err == nil {
-		comments, cerr := client.GetPRReviewComments(ctx, owner, repo, prNumber)
-		if cerr == nil && len(comments) > 0 {
-			commentSummary = formatReviewComments(comments)
-		}
-	}
-
-	// Determine the integration branch for the feedback polecat to work on.
-	integrationBranch := beads.GetIntegrationBranchField(convoy.Description)
-	prURL := beads.GetPRURLField(convoy.Description)
-
-	// Create a feedback bead — a task for a polecat to address review comments.
-	title := fmt.Sprintf("Address PR review feedback for %s", convoy.ID)
-	desc := fmt.Sprintf("convoy_id: %s\npr_number: %d\npr_url: %s\nintegration_branch: %s\nmerge_strategy: batch-pr\n\n"+
-		"## Context\nThe PR for convoy %s received CHANGES_REQUESTED from reviewers.\n"+
-		"Address the review comments and push fixes to the integration branch.\n\n"+
-		"## Review Comments\n%s",
-		convoy.ID, prNumber, prURL, integrationBranch, convoy.ID, commentSummary)
-
-	feedbackIssue, err := hqBeads.Create(beads.CreateOptions{
-		Title:       title,
-		Type:        "task",
-		Priority:    2,
-		Description: desc,
-	})
-	if err != nil {
-		logger("ReviewMonitor: convoy %s: failed to create feedback bead: %v", convoy.ID, err)
-		return
-	}
-	feedbackID := feedbackIssue.ID
-	logger("ReviewMonitor: convoy %s: created feedback bead %s", convoy.ID, feedbackID)
-
-	// Dispatch the feedback bead to a rig for a polecat to pick up.
-	rigName := findRigNameWithRefinery(townRoot)
-	if rigName == "" {
-		logger("ReviewMonitor: convoy %s: cannot determine rig for dispatch", convoy.ID)
-		return
-	}
-
-	slingArgs := []string{"sling", feedbackID, rigName, "--no-boot"}
-	if baseBranch := beads.GetBaseBranchField(convoy.Description); baseBranch != "" {
-		slingArgs = append(slingArgs, "--base-branch="+baseBranch)
-	}
-	slingCmd := exec.CommandContext(ctx, gtPath, slingArgs...)
-	slingCmd.Dir = townRoot
-	util.SetProcessGroup(slingCmd)
-	if err := slingCmd.Run(); err != nil {
-		logger("ReviewMonitor: convoy %s: failed to dispatch feedback bead %s: %v", convoy.ID, feedbackID, err)
-	} else {
-		logger("ReviewMonitor: convoy %s: dispatched feedback bead %s to %s", convoy.ID, feedbackID, rigName)
-	}
-
-	// Nudge convoy stakeholders about the changes requested.
-	convoyFields := beads.ParseConvoyFields(&beads.Issue{Description: convoy.Description})
-	msg := fmt.Sprintf("CHANGES_REQUESTED: convoy=%s pr=#%d feedback=%s", convoy.ID, prNumber, feedbackID)
-	nudgeConvoyStakeholders(convoyFields, msg, townRoot, convoy.ID, logger, gtPath)
-}
+// handleChangesRequested is now delegated to HandleReviewFeedback in feedback.go.
 
 // replaceMetadataFields replaces or adds key: value fields in a description.
 // Existing fields with matching keys are replaced; new fields are appended.
