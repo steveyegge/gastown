@@ -209,6 +209,34 @@ func (c *Client) GetRepoMergeMethod(ctx context.Context, owner, repo string) (st
 	}
 }
 
+// PRState holds the state of a pull request.
+type PRState struct {
+	State  string // "open" or "closed"
+	Merged bool
+}
+
+// GetPRState returns the current state of a pull request.
+func (c *Client) GetPRState(ctx context.Context, owner, repo string, prNumber int) (PRState, error) {
+	var pr struct {
+		State  string `json:"state"`
+		Merged bool   `json:"merged"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, prNumber)
+	if err := c.restRequest(ctx, "GET", path, nil, &pr); err != nil {
+		return PRState{}, fmt.Errorf("get PR state: %w", err)
+	}
+	return PRState{State: pr.State, Merged: pr.Merged}, nil
+}
+
+// DeleteBranch deletes a branch from the remote repository.
+func (c *Client) DeleteBranch(ctx context.Context, owner, repo, branch string) error {
+	path := fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", owner, repo, branch)
+	if err := c.restRequest(ctx, "DELETE", path, nil, nil); err != nil {
+		return fmt.Errorf("delete branch %s: %w", branch, err)
+	}
+	return nil
+}
+
 // getPRNodeID fetches the GraphQL node ID for a PR (needed for mutations).
 func (c *Client) getPRNodeID(ctx context.Context, owner, repo string, prNumber int) (string, error) {
 	var pr struct {

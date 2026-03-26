@@ -56,8 +56,10 @@ func PollConvoyReviews(ctx context.Context, townRoot string, logger func(format 
 		default:
 		}
 
-		// Only process convoys in awaiting_review state.
-		if beads.GetConvoyStatusField(convoy.Description) != "awaiting_review" {
+		// Process convoys in awaiting_review or approved state.
+		// "approved" convoys need merge retry if a previous attempt failed.
+		status := beads.GetConvoyStatusField(convoy.Description)
+		if status != "awaiting_review" && status != "approved" {
 			continue
 		}
 
@@ -134,7 +136,7 @@ func checkConvoyReview(ctx context.Context, hqBeads *beads.Beads, townRoot strin
 		return result
 	}
 
-	// Check PR review status via GitHub API.
+	// Create GitHub client for all API operations.
 	client, err := gh.NewClient()
 	if err != nil {
 		result.Error = fmt.Sprintf("create github client: %v", err)
@@ -142,6 +144,35 @@ func checkConvoyReview(ctx context.Context, hqBeads *beads.Beads, townRoot strin
 		return result
 	}
 
+	// Check if the PR is still open before checking review status.
+	prState, err := client.GetPRState(ctx, owner, repo, prNumber)
+	if err != nil {
+		result.Error = fmt.Sprintf("get PR state: %v", err)
+		logger("ReviewMonitor: convoy %s: %s", convoy.ID, result.Error)
+		return result
+	}
+
+	if prState.State == "closed" && prState.Merged {
+		// PR was merged externally (e.g., manually via GitHub UI).
+		logger("ReviewMonitor: convoy %s PR #%d: already merged externally", convoy.ID, prNumber)
+		handleExternallyMerged(ctx, client, hqBeads, townRoot, convoy, prNumber, owner, repo, logger, gtPath)
+		return result
+	}
+	if prState.State == "closed" && !prState.Merged {
+		// PR was closed without merge — abandoned.
+		logger("ReviewMonitor: convoy %s PR #%d: closed without merge", convoy.ID, prNumber)
+		handlePRClosedWithoutMerge(hqBeads, townRoot, convoy, prNumber, logger, gtPath)
+		return result
+	}
+
+	// For convoys already in "approved" state, go straight to merge.
+	convoyStatus := beads.GetConvoyStatusField(convoy.Description)
+	if convoyStatus == "approved" {
+		handleFinalMerge(ctx, client, hqBeads, townRoot, convoy, prNumber, owner, repo, logger, gtPath)
+		return result
+	}
+
+	// Check PR review status via GitHub API.
 	reviewState, err := client.GetPRReviewStatus(ctx, owner, repo, prNumber)
 	if err != nil {
 		result.Error = fmt.Sprintf("get review status: %v", err)
@@ -154,7 +185,7 @@ func checkConvoyReview(ctx context.Context, hqBeads *beads.Beads, townRoot strin
 
 	switch reviewState {
 	case gh.ReviewApproved:
-		handleReviewApproved(hqBeads, townRoot, convoy, prNumber, logger, gtPath)
+		handleReviewApproved(ctx, client, hqBeads, townRoot, convoy, prNumber, owner, repo, logger, gtPath)
 	case gh.ReviewChangesRequired:
 		HandleReviewFeedback(ctx, hqBeads, townRoot, convoy, prNumber, owner, repo, logger, gtPath)
 	case gh.ReviewPending, gh.ReviewCommented, gh.ReviewDismissed:
@@ -165,8 +196,8 @@ func checkConvoyReview(ctx context.Context, hqBeads *beads.Beads, townRoot strin
 }
 
 // handleReviewApproved processes a convoy whose PR has been approved.
-// Updates the convoy status to approved and nudges downstream for final merge.
-func handleReviewApproved(hqBeads *beads.Beads, townRoot string, convoy *beads.Issue, prNumber int, logger func(format string, args ...interface{}), gtPath string) {
+// Updates the convoy status to approved, then performs the final merge.
+func handleReviewApproved(ctx context.Context, client *gh.Client, hqBeads *beads.Beads, townRoot string, convoy *beads.Issue, prNumber int, owner, repo string, logger func(format string, args ...interface{}), gtPath string) {
 	logger("ReviewMonitor: convoy %s PR #%d: APPROVED — triggering final merge", convoy.ID, prNumber)
 
 	// Update convoy bead description with approved status.
@@ -178,9 +209,134 @@ func handleReviewApproved(hqBeads *beads.Beads, townRoot string, convoy *beads.I
 		logger("ReviewMonitor: convoy %s: failed to update bead: %v", convoy.ID, err)
 	}
 
-	// Nudge downstream agents that the PR is approved and ready for final merge.
+	handleFinalMerge(ctx, client, hqBeads, townRoot, convoy, prNumber, owner, repo, logger, gtPath)
+}
+
+// handleFinalMerge merges an approved PR, cleans up the integration branch,
+// closes the convoy bead, and notifies the convoy owner.
+func handleFinalMerge(ctx context.Context, client *gh.Client, hqBeads *beads.Beads, townRoot string, convoy *beads.Issue, prNumber int, owner, repo string, logger func(format string, args ...interface{}), gtPath string) {
+	logger("ReviewMonitor: convoy %s PR #%d: performing final merge", convoy.ID, prNumber)
+
+	// Step 1: Detect the repo's preferred merge method (fallback: squash).
+	mergeMethod, err := client.GetRepoMergeMethod(ctx, owner, repo)
+	if err != nil {
+		logger("ReviewMonitor: convoy %s: failed to detect merge method: %v (falling back to squash)", convoy.ID, err)
+		mergeMethod = "squash"
+	}
+	logger("ReviewMonitor: convoy %s: merge method = %s", convoy.ID, mergeMethod)
+
+	// Step 2: Merge the PR.
+	if err := client.MergePR(ctx, owner, repo, prNumber, mergeMethod); err != nil {
+		logger("ReviewMonitor: convoy %s: failed to merge PR #%d: %v", convoy.ID, prNumber, err)
+		// Update status to reflect merge failure for retry on next poll.
+		failDesc := replaceMetadataFields(convoy.Description, map[string]string{
+			"convoy_status": "approved",
+			"merge_error":   err.Error(),
+			"merge_failed_at": time.Now().UTC().Format(time.RFC3339),
+		})
+		_ = hqBeads.Update(convoy.ID, beads.UpdateOptions{Description: &failDesc})
+		return
+	}
+	logger("ReviewMonitor: convoy %s: ✓ PR #%d merged via %s", convoy.ID, prNumber, mergeMethod)
+
+	// Step 3: Delete the integration branch (remote via API, best-effort).
+	integrationBranch := beads.GetIntegrationBranchField(convoy.Description)
+	if integrationBranch != "" {
+		if err := client.DeleteBranch(ctx, owner, repo, integrationBranch); err != nil {
+			logger("ReviewMonitor: convoy %s: failed to delete remote branch %s: %v (non-fatal)", convoy.ID, integrationBranch, err)
+		} else {
+			logger("ReviewMonitor: convoy %s: ✓ Deleted remote branch %s", convoy.ID, integrationBranch)
+		}
+	}
+
+	// Step 4: Close the convoy bead with reason: merged.
+	closeConvoyAfterMerge(hqBeads, convoy, prNumber, mergeMethod, logger)
+
+	// Step 5: Notify convoy owner.
 	convoyFields := beads.ParseConvoyFields(&beads.Issue{Description: convoy.Description})
-	msg := fmt.Sprintf("PR_APPROVED: convoy=%s pr=#%d", convoy.ID, prNumber)
+	prURL := beads.GetPRURLField(convoy.Description)
+	msg := fmt.Sprintf("PR_MERGED: convoy=%s pr=#%d method=%s", convoy.ID, prNumber, mergeMethod)
+	if prURL != "" {
+		msg += " url=" + prURL
+	}
+	nudgeConvoyStakeholders(convoyFields, msg, townRoot, convoy.ID, logger, gtPath)
+}
+
+// closeConvoyAfterMerge updates the convoy description with merge metadata
+// and closes the bead.
+func closeConvoyAfterMerge(hqBeads *beads.Beads, convoy *beads.Issue, prNumber int, mergeMethod string, logger func(format string, args ...interface{})) {
+	newDesc := replaceMetadataFields(convoy.Description, map[string]string{
+		"convoy_status": "merged",
+		"merged_at":     time.Now().UTC().Format(time.RFC3339),
+		"merge_method":  mergeMethod,
+	})
+	if err := hqBeads.Update(convoy.ID, beads.UpdateOptions{Description: &newDesc}); err != nil {
+		logger("ReviewMonitor: convoy %s: failed to update bead with merge status: %v", convoy.ID, err)
+	}
+
+	reason := fmt.Sprintf("PR #%d merged via %s", prNumber, mergeMethod)
+	if err := hqBeads.CloseWithReason(reason, convoy.ID); err != nil {
+		logger("ReviewMonitor: convoy %s: failed to close bead: %v", convoy.ID, err)
+	} else {
+		logger("ReviewMonitor: convoy %s: ✓ Convoy closed (merged)", convoy.ID)
+	}
+}
+
+// handlePRClosedWithoutMerge processes a convoy whose PR was closed without
+// being merged. Sets convoy status to abandoned and notifies the owner.
+// Leaves the integration branch intact for manual cleanup.
+func handlePRClosedWithoutMerge(hqBeads *beads.Beads, townRoot string, convoy *beads.Issue, prNumber int, logger func(format string, args ...interface{}), gtPath string) {
+	logger("ReviewMonitor: convoy %s PR #%d: closed without merge — marking abandoned", convoy.ID, prNumber)
+
+	// Update convoy status to abandoned.
+	newDesc := replaceMetadataFields(convoy.Description, map[string]string{
+		"convoy_status": "abandoned",
+		"abandoned_at":  time.Now().UTC().Format(time.RFC3339),
+		"abandon_reason": fmt.Sprintf("PR #%d closed without merge", prNumber),
+	})
+	if err := hqBeads.Update(convoy.ID, beads.UpdateOptions{Description: &newDesc}); err != nil {
+		logger("ReviewMonitor: convoy %s: failed to update bead: %v", convoy.ID, err)
+	}
+
+	// Close the convoy bead with abandon reason.
+	reason := fmt.Sprintf("PR #%d closed without merge", prNumber)
+	if err := hqBeads.CloseWithReason(reason, convoy.ID); err != nil {
+		logger("ReviewMonitor: convoy %s: failed to close bead: %v", convoy.ID, err)
+	}
+
+	// Notify convoy owner about the abandonment.
+	// Integration branch is left intact for manual cleanup.
+	convoyFields := beads.ParseConvoyFields(&beads.Issue{Description: convoy.Description})
+	integrationBranch := beads.GetIntegrationBranchField(convoy.Description)
+	msg := fmt.Sprintf("PR_ABANDONED: convoy=%s pr=#%d", convoy.ID, prNumber)
+	if integrationBranch != "" {
+		msg += " branch=" + integrationBranch + " (left for manual cleanup)"
+	}
+	nudgeConvoyStakeholders(convoyFields, msg, townRoot, convoy.ID, logger, gtPath)
+}
+
+// handleExternallyMerged processes a convoy whose PR was merged outside
+// the normal review monitor flow (e.g., manually via GitHub UI).
+// Cleans up the integration branch and closes the convoy.
+func handleExternallyMerged(ctx context.Context, client *gh.Client, hqBeads *beads.Beads, townRoot string, convoy *beads.Issue, prNumber int, owner, repo string, logger func(format string, args ...interface{}), gtPath string) {
+	logger("ReviewMonitor: convoy %s PR #%d: merged externally — cleaning up", convoy.ID, prNumber)
+
+	// Delete the integration branch (best-effort).
+	integrationBranch := beads.GetIntegrationBranchField(convoy.Description)
+	if integrationBranch != "" {
+		if err := client.DeleteBranch(ctx, owner, repo, integrationBranch); err != nil {
+			logger("ReviewMonitor: convoy %s: failed to delete remote branch %s: %v (non-fatal)", convoy.ID, integrationBranch, err)
+		} else {
+			logger("ReviewMonitor: convoy %s: ✓ Deleted remote branch %s", convoy.ID, integrationBranch)
+		}
+	}
+
+	// Close the convoy bead.
+	closeConvoyAfterMerge(hqBeads, convoy, prNumber, "external", logger)
+
+	// Notify convoy owner.
+	convoyFields := beads.ParseConvoyFields(&beads.Issue{Description: convoy.Description})
+	msg := fmt.Sprintf("PR_MERGED: convoy=%s pr=#%d method=external (merged outside review monitor)", convoy.ID, prNumber)
 	nudgeConvoyStakeholders(convoyFields, msg, townRoot, convoy.ID, logger, gtPath)
 }
 
