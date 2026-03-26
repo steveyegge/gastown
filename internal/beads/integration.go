@@ -114,6 +114,11 @@ func AddPRNumberField(description string, number int) string {
 	return addMetadataField(description, "pr_number", fmt.Sprintf("%d", number))
 }
 
+// GetConvoyStatusField extracts the convoy_status field from a description.
+func GetConvoyStatusField(description string) string {
+	return getMetadataField(description, "convoy_status")
+}
+
 // addMetadataField adds or updates a key: value field in a description.
 func addMetadataField(description, key, value string) string {
 	fieldLine := key + ": " + value
