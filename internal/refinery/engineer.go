@@ -14,10 +14,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"regexp"
 	"sync/atomic"
 	"time"
-
-	"regexp"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/crew"
