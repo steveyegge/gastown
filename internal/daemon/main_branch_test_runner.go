@@ -10,7 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/reliability"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/verify"
 )
 
 const (
@@ -69,67 +72,74 @@ func mainBranchTestRigs(config *DaemonPatrolConfig) []string {
 	return nil
 }
 
-// rigGateConfig holds the gate/test configuration extracted from a rig's config.json.
+// rigGateConfig is the legacy gate/test view used by tests and compatibility code.
 type rigGateConfig struct {
 	TestCommand string
-	Gates       map[string]string // gate name → command
+	Gates       map[string]string
 }
 
-// loadRigGateConfig reads the merge_queue section from a rig's config.json
-// to discover what test/gate commands to run.
+// loadRigGateConfig reads verification commands from a rig root. It preserves
+// the legacy config.json merge_queue path for compatibility and falls back to
+// the effective layered settings when present.
 func loadRigGateConfig(rigPath string) (*rigGateConfig, error) {
 	configPath := filepath.Join(rigPath, "config.json")
 	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil // No config, skip
+	if err == nil {
+		var raw struct {
+			MergeQueue json.RawMessage `json:"merge_queue"`
 		}
+		if json.Unmarshal(data, &raw) == nil && raw.MergeQueue != nil {
+			var mq struct {
+				TestCommand *string                    `json:"test_command"`
+				Gates       map[string]json.RawMessage `json:"gates"`
+			}
+			if err := json.Unmarshal(raw.MergeQueue, &mq); err != nil {
+				return nil, fmt.Errorf("parsing merge_queue: %w", err)
+			}
+			cfg := &rigGateConfig{}
+			if mq.TestCommand != nil {
+				cfg.TestCommand = *mq.TestCommand
+			}
+			if len(mq.Gates) > 0 {
+				cfg.Gates = make(map[string]string, len(mq.Gates))
+				for name, rawGate := range mq.Gates {
+					var gate struct {
+						Cmd string `json:"cmd"`
+					}
+					if err := json.Unmarshal(rawGate, &gate); err == nil && gate.Cmd != "" {
+						cfg.Gates[name] = gate.Cmd
+					}
+				}
+			}
+			if cfg.TestCommand != "" || len(cfg.Gates) > 0 {
+				return cfg, nil
+			}
+			return nil, nil
+		}
+	}
+	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
 
-	var raw struct {
-		MergeQueue json.RawMessage `json:"merge_queue"`
+	rigCtx, err := reliability.LoadRigContext(rigPath, filepath.Join(rigPath, "mayor", "rig"))
+	if err != nil || rigCtx == nil || rigCtx.Settings == nil || rigCtx.Settings.MergeQueue == nil {
+		return nil, err
 	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parsing config.json: %w", err)
-	}
-
-	if raw.MergeQueue == nil {
-		return nil, nil // No merge_queue section
-	}
-
-	var mq struct {
-		TestCommand *string                    `json:"test_command"`
-		Gates       map[string]json.RawMessage `json:"gates"`
-	}
-	if err := json.Unmarshal(raw.MergeQueue, &mq); err != nil {
-		return nil, fmt.Errorf("parsing merge_queue: %w", err)
-	}
-
 	cfg := &rigGateConfig{}
-
-	// Extract gates (preferred over legacy test_command)
-	if len(mq.Gates) > 0 {
-		cfg.Gates = make(map[string]string, len(mq.Gates))
-		for name, rawGate := range mq.Gates {
-			var gate struct {
-				Cmd string `json:"cmd"`
-			}
-			if err := json.Unmarshal(rawGate, &gate); err == nil && gate.Cmd != "" {
-				cfg.Gates[name] = gate.Cmd
+	if mq := rigCtx.Settings.MergeQueue; mq != nil {
+		cfg.TestCommand = mq.TestCommand
+		if len(mq.Gates) > 0 {
+			cfg.Gates = make(map[string]string, len(mq.Gates))
+			for name, gate := range mq.Gates {
+				if gate != nil && gate.Cmd != "" {
+					cfg.Gates[name] = gate.Cmd
+				}
 			}
 		}
 	}
-
-	// Fall back to legacy test_command
-	if mq.TestCommand != nil && *mq.TestCommand != "" {
-		cfg.TestCommand = *mq.TestCommand
+	if cfg.TestCommand == "" && len(cfg.Gates) == 0 {
+		return nil, nil
 	}
-
-	if len(cfg.Gates) == 0 && cfg.TestCommand == "" {
-		return nil, nil // No runnable commands
-	}
-
 	return cfg, nil
 }
 
@@ -181,16 +191,6 @@ func (d *Daemon) runMainBranchTests() {
 
 // testRigMainBranch tests a single rig's main branch.
 func (d *Daemon) testRigMainBranch(rigName, rigPath string, timeout time.Duration) error {
-	// Load gate config from the rig's config.json
-	gateCfg, err := loadRigGateConfig(rigPath)
-	if err != nil {
-		return fmt.Errorf("loading gate config: %w", err)
-	}
-	if gateCfg == nil {
-		d.logger.Printf("main_branch_test: %s: no test commands configured, skipping", rigName)
-		return nil
-	}
-
 	// Determine default branch
 	defaultBranch := "main"
 	if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
@@ -240,44 +240,56 @@ func (d *Daemon) testRigMainBranch(rigName, rigPath string, timeout time.Duratio
 		}
 	}()
 
-	// Run gates or legacy test command
-	if len(gateCfg.Gates) > 0 {
-		return d.runGatesOnWorktree(ctx, rigName, worktreePath, gateCfg.Gates)
-	}
-	return d.runCommandOnWorktree(ctx, rigName, worktreePath, "test", gateCfg.TestCommand)
-}
-
-// runGatesOnWorktree runs all configured gates sequentially on the given worktree.
-func (d *Daemon) runGatesOnWorktree(ctx context.Context, rigName, workDir string, gates map[string]string) error {
-	var failures []string
-	for name, cmd := range gates {
-		if err := d.runCommandOnWorktree(ctx, rigName, workDir, name, cmd); err != nil {
-			failures = append(failures, fmt.Sprintf("gate %q: %v", name, err))
-		}
-	}
-	if len(failures) > 0 {
-		return fmt.Errorf("%s", strings.Join(failures, "; "))
-	}
-	return nil
-}
-
-// runCommandOnWorktree runs a single shell command in the given worktree directory.
-func (d *Daemon) runCommandOnWorktree(ctx context.Context, rigName, workDir, label, command string) error {
-	d.logger.Printf("main_branch_test: %s: running %s: %s", rigName, label, command)
-
-	cmd := exec.CommandContext(ctx, "sh", "-c", command) //nolint:gosec // G204: command is from trusted rig config
-	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "CI=true") // Signal test environment
-
-	output, err := cmd.CombinedOutput()
+	headSHABytes, err := exec.CommandContext(ctx, "git", "rev-parse", "HEAD").Output()
 	if err != nil {
-		// Truncate output to last 50 lines for the error message
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		tail := lines
-		if len(tail) > 50 {
-			tail = tail[len(tail)-50:]
+		return fmt.Errorf("git rev-parse HEAD: %w", err)
+	}
+	headSHA := strings.TrimSpace(string(headSHABytes))
+
+	rigCtx, err := reliability.LoadRigContext(rigPath, worktreePath)
+	if err != nil {
+		return fmt.Errorf("loading effective rig settings: %w", err)
+	}
+	if rigCtx != nil {
+		if err := rigCtx.ValidateStrictPreconditions(); err != nil {
+			return err
 		}
-		return fmt.Errorf("%s failed: %v\n%s", label, err, strings.Join(tail, "\n"))
+	}
+
+	if rigCtx == nil || rigCtx.Settings == nil || rigCtx.Settings.MergeQueue == nil {
+		d.logger.Printf("main_branch_test: %s: no verification config, skipping", rigName)
+		return nil
+	}
+
+	if _, err := rigCtx.RunVerificationPhase(ctx, verify.PhasePreMerge, nil, rigCtx.Settings.MergeQueue.IsGatesParallelEnabled()); err != nil {
+		_ = d.recordMainBranchIncident(rigName, rigPath, headSHA, "local-verification", err.Error(), "")
+		return err
+	}
+	if _, err := rigCtx.RunVerificationPhase(ctx, verify.PhasePostSquash, nil, false); err != nil {
+		_ = d.recordMainBranchIncident(rigName, rigPath, headSHA, "post-squash-smoke", err.Error(), "")
+		return err
+	}
+
+	if rigCtx.GitHubCI != nil && rigCtx.GitHubCI.IsRequired() {
+		run, err := rigCtx.EnsureGitHubBranchCI(ctx, defaultBranch, headSHA, nil)
+		if err != nil {
+			runURL := ""
+			if run != nil {
+				runURL = run.URL
+			}
+			_ = d.recordMainBranchIncident(rigName, rigPath, headSHA, "github-ci", err.Error(), runURL)
+			return err
+		}
+		if err := d.resolveMainBranchIncident(rigName, rigPath, headSHA, "github-ci"); err != nil {
+			d.logger.Printf("main_branch_test: %s: warning: closing recovered github-ci incident: %v", rigName, err)
+		}
+	}
+
+	if err := d.resolveMainBranchIncident(rigName, rigPath, headSHA, "local-verification"); err != nil {
+		d.logger.Printf("main_branch_test: %s: warning: closing recovered local incident: %v", rigName, err)
+	}
+	if err := d.resolveMainBranchIncident(rigName, rigPath, headSHA, "post-squash-smoke"); err != nil {
+		d.logger.Printf("main_branch_test: %s: warning: closing recovered smoke incident: %v", rigName, err)
 	}
 	return nil
 }
@@ -290,4 +302,83 @@ func sliceContains(slice []string, val string) bool {
 		}
 	}
 	return false
+}
+
+func (d *Daemon) recordMainBranchIncident(rigName, rigPath, commitSHA, checkName, detail, workflowURL string) error {
+	bd := beads.New(rigPath)
+	title := fmt.Sprintf("CI failure: %s %s %s", rigName, checkName, shortSHA(commitSHA))
+	mrIssue, _ := bd.FindMRForMergeCommit(commitSHA)
+	sourceIssue := ""
+	mrID := ""
+	if mrIssue != nil {
+		mrID = mrIssue.ID
+		if fields := beads.ParseMRFields(mrIssue); fields != nil {
+			sourceIssue = fields.SourceIssue
+		}
+	}
+
+	description := buildIncidentDescription(rigName, commitSHA, checkName, detail, workflowURL, mrID, sourceIssue, "human-action-required")
+	if existing, err := bd.FindLatestIssueByTitle(title); err == nil && existing != nil {
+		priority := 1
+		status := "open"
+		return bd.Update(existing.ID, beads.UpdateOptions{
+			Description: &description,
+			Priority:    &priority,
+			Status:      &status,
+			SetLabels:   []string{"gt:incident", "gt:ci-failure"},
+		})
+	}
+
+	_, err := bd.Create(beads.CreateOptions{
+		Title:       title,
+		Labels:      []string{"gt:incident", "gt:ci-failure"},
+		Priority:    1,
+		Description: description,
+	})
+	return err
+}
+
+func (d *Daemon) resolveMainBranchIncident(rigName, rigPath, commitSHA, checkName string) error {
+	bd := beads.New(rigPath)
+	title := fmt.Sprintf("CI failure: %s %s %s", rigName, checkName, shortSHA(commitSHA))
+	issue, err := bd.FindLatestIssueByTitle(title)
+	if err != nil || issue == nil || issue.Status == "closed" {
+		return nil
+	}
+	recovered := buildIncidentDescription(rigName, commitSHA, checkName, "recovered automatically", "", "", "", "recovered")
+	if err := bd.Update(issue.ID, beads.UpdateOptions{Description: &recovered}); err != nil {
+		return err
+	}
+	return bd.CloseWithReason("recovered", issue.ID)
+}
+
+func buildIncidentDescription(rigName, commitSHA, checkName, detail, workflowURL, mrID, sourceIssue, statusClass string) string {
+	lines := []string{
+		"rig: " + rigName,
+		"commit_sha: " + commitSHA,
+		"check: " + checkName,
+		"status_class: " + statusClass,
+		"last_recovery_attempt_at: " + time.Now().UTC().Format(time.RFC3339),
+		"last_recovery_result: " + statusClass,
+	}
+	if workflowURL != "" {
+		lines = append(lines, "workflow_run: "+workflowURL)
+	}
+	if mrID != "" {
+		lines = append(lines, "merge_request: "+mrID)
+	}
+	if sourceIssue != "" {
+		lines = append(lines, "source_issue: "+sourceIssue)
+	}
+	if detail != "" {
+		lines = append(lines, "", detail)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
 }

@@ -55,12 +55,12 @@ run_lint() {
 
 run_integration_tests() {
   echo "[verify] integration tests"
-  local args=("-tags=integration" "-timeout=15m" "-v" "./internal/cmd/...")
+  local args=("-tags=integration" "-timeout=20m" "-v" "./...")
   if command -v gotestsum >/dev/null 2>&1 && [[ -n "${GASTOWN_VERIFY_JUNIT_FILE:-}" ]]; then
     gotestsum --format testname --junitfile "${GASTOWN_VERIFY_JUNIT_FILE}" -- "${args[@]}"
     return
   fi
-  go test -tags=integration -timeout=15m -v ./internal/cmd/...
+  go test -tags=integration -timeout=20m -v ./...
 }
 
 case "$MODE" in

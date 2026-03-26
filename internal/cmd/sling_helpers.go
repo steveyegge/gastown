@@ -251,18 +251,18 @@ func getBeadInfo(beadID string) (*beadInfo, error) {
 // This enables a single read-modify-write cycle instead of sequential independent updates,
 // eliminating the race condition where concurrent writers could overwrite each other's fields.
 type beadFieldUpdates struct {
-	Dispatcher       string // Agent that dispatched the work
-	Args             string // Natural language instructions
+	Dispatcher       string   // Agent that dispatched the work
+	Args             string   // Natural language instructions
 	Vars             []string // Formula variables (key=value pairs)
-	AttachedMolecule string // Wisp root ID
-	AttachedFormula  string // Formula name (e.g., "mol-polecat-work") for inline step display
-	NoMerge          bool   // Skip merge queue on completion
-	ReviewOnly       bool   // Review-only mode: assignee must not merge/commit/push
-	Mode             string // Execution mode: "" (normal) or "ralph"
-	ConvoyID         string // Convoy bead ID (e.g., "hq-cv-abc")
-	MergeStrategy    string // Convoy merge strategy: "direct", "mr", "local"
-	ConvoyOwned      bool   // Convoy has gt:owned label (caller-managed lifecycle)
-	FormulaVars      string // Newline-separated key=value pairs for formula template substitution
+	AttachedMolecule string   // Wisp root ID
+	AttachedFormula  string   // Formula name (e.g., "mol-polecat-work") for inline step display
+	NoMerge          bool     // Skip merge queue on completion
+	ReviewOnly       bool     // Review-only mode: assignee must not merge/commit/push
+	Mode             string   // Execution mode: "" (normal) or "ralph"
+	ConvoyID         string   // Convoy bead ID (e.g., "hq-cv-abc")
+	MergeStrategy    string   // Convoy merge strategy: "direct", "mr", "local"
+	ConvoyOwned      bool     // Convoy has gt:owned label (caller-managed lifecycle)
+	FormulaVars      string   // Newline-separated key=value pairs for formula template substitution
 }
 
 // storeFieldsInBead performs a single read-modify-write to update all attachment fields
@@ -700,7 +700,7 @@ func InstantiateFormulaOnBead(ctx context.Context, formulaName, beadID, title, h
 		if err := BdCmd("cook", formulaName).
 			Dir(formulaWorkDir).
 			WithGTRoot(townRoot).
-				Run(); err != nil {
+			Run(); err != nil {
 			// Retry with embedded formula
 			resolvedFormula, formulaCleanup = resolveFormulaToTempFile(formulaName)
 			if formulaCleanup != nil {
@@ -1102,27 +1102,12 @@ func loadRigCommandVars(townRoot, rig string) []string {
 		vars = append(vars, fmt.Sprintf("base_branch=%s", rigCfg.DefaultBranch))
 	}
 
-	// Load repo-sourced settings (floor — committed to git, always present after clone)
-	var repoMQ *config.MergeQueueConfig
 	repoRoot := filepath.Join(townRoot, rig, "mayor", "rig")
-	repoSettings, _ := config.LoadRepoSettings(repoRoot)
-	if repoSettings != nil {
-		repoMQ = repoSettings.MergeQueue
-	}
-
-	// Load rig-local settings (override — operator tuning)
-	var localMQ *config.MergeQueueConfig
-	settingsPath := filepath.Join(townRoot, rig, "settings", "config.json")
-	localSettings, err := config.LoadRigSettings(settingsPath)
-	if err == nil && localSettings != nil {
-		localMQ = localSettings.MergeQueue
-	}
-
-	// Merge: repo defaults + local overrides
-	mq := config.MergeSettingsCommand(repoMQ, localMQ)
-	if mq == nil {
+	effectiveSettings, err := config.LoadEffectiveRigSettings(filepath.Join(townRoot, rig), repoRoot)
+	if err != nil || effectiveSettings == nil || effectiveSettings.MergeQueue == nil {
 		return vars
 	}
+	mq := effectiveSettings.MergeQueue
 
 	if mq.SetupCommand != "" {
 		vars = append(vars, fmt.Sprintf("setup_command=%s", mq.SetupCommand))
@@ -1138,6 +1123,14 @@ func loadRigCommandVars(townRoot, rig string) []string {
 	}
 	if mq.BuildCommand != "" {
 		vars = append(vars, fmt.Sprintf("build_command=%s", mq.BuildCommand))
+	}
+	if effectiveSettings.RepoContract != nil {
+		if effectiveSettings.RepoContract.VerifyCommand != "" {
+			vars = append(vars, fmt.Sprintf("verify_command=%s", effectiveSettings.RepoContract.VerifyCommand))
+		}
+		if effectiveSettings.RepoContract.SmokeCommand != "" {
+			vars = append(vars, fmt.Sprintf("smoke_command=%s", effectiveSettings.RepoContract.SmokeCommand))
+		}
 	}
 	return vars
 }
