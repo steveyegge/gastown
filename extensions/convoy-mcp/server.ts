@@ -148,8 +148,17 @@ async function fetchGastownData(): Promise<GastownData> {
     try {
       const raw = await runCmd("bd", ["ready", "--json"]);
       // bd ready --json returns a JSON array or newline-delimited JSON objects
-      const parsed = parseJsonOutput<ReadyIssue[]>(raw);
-      readyIssues = Array.isArray(parsed) ? parsed : [];
+      // bd returns "issue_type" but our interface expects "type"
+      const parsed = parseJsonOutput<Array<Record<string, unknown>>>(raw);
+      readyIssues = Array.isArray(parsed)
+        ? parsed.map((i) => ({
+            id: String(i.id ?? ""),
+            title: String(i.title ?? ""),
+            priority: Number(i.priority ?? 2),
+            type: String(i.issue_type ?? i.type ?? "unknown"),
+            status: String(i.status ?? "open"),
+          }))
+        : [];
     } catch (e) {
       errors.push(`bd ready: ${String(e)}`);
     }

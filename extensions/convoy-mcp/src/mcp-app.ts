@@ -169,7 +169,8 @@ function renderAll(data: GastownData): void {
   setText("status-text", `Updated ${new Date(data.fetchedAt).toLocaleTimeString()}${hasErrors ? ` (${data.errors.length} warn)` : ""}`);
 }
 
-function esc(s: string): string {
+function esc(s: string | undefined | null): string {
+  if (s == null) return "";
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
@@ -200,34 +201,26 @@ app.ontoolresult = async () => {
   startPolling();
 };
 
-// Fallback: wait for app to be connected, then start polling.
-// The SDK auto-connects via postMessage handshake with the host.
-// In AppHub the bridge may take a few seconds to set up.
-async function waitForConnectionAndPoll(): Promise<void> {
-  // Retry connection check every 500ms for up to 10s
-  for (let i = 0; i < 20; i++) {
-    try {
-      // Test if connected by making a lightweight call
-      await app.callServerTool({ name: "get-gastown-data", arguments: {} });
-      // If we get here, we're connected
+async function initialize(): Promise<void> {
+  try {
+    await app.connect();
+    console.log("[CONVOY] Connected to host");
+    app.sendSizeChanged({ height: 600 });
+
+    // Start polling after a short delay to let the bridge settle
+    setTimeout(() => {
       hideLoading();
       startPolling();
-      return;
-    } catch {
-      await new Promise((r) => setTimeout(r, 500));
-    }
+    }, 500);
+  } catch (error) {
+    console.error("[CONVOY] Failed to connect:", error);
+    hideLoading();
+    setText("status-text", `Connection error: ${error instanceof Error ? error.message : String(error)}`);
+    el<HTMLDivElement>("status-dot").className = "dot error";
   }
-  // After 10s, show the UI anyway with an error
-  hideLoading();
-  setText("status-text", "Connection timeout — click Refresh");
-  el<HTMLDivElement>("status-dot").className = "dot error";
 }
 
-setTimeout(() => {
-  if (!pollTimer) {
-    void waitForConnectionAndPoll();
-  }
-}, 2000);
+initialize();
 
 function hideLoading(): void {
   el<HTMLDivElement>("loading").style.display = "none";
