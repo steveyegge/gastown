@@ -1180,12 +1180,36 @@ func loadRigCommandVars(townRoot, rig string) []string {
 		vars = append(vars, fmt.Sprintf("base_branch=%s", rigCfg.DefaultBranch))
 	}
 
-	rigPath := filepath.Join(townRoot, rig)
-	mq, _ := config.LoadEffectiveMergeQueueConfig(rigPath)
-	vars = appendMergeQueuePromptVars(vars, mq)
+	repoRoot := filepath.Join(townRoot, rig, "mayor", "rig")
+	effectiveSettings, err := config.LoadEffectiveRigSettings(filepath.Join(townRoot, rig), repoRoot)
+	if err != nil || effectiveSettings == nil || effectiveSettings.MergeQueue == nil {
+		return vars
+	}
+	mq := effectiveSettings.MergeQueue
 
-	repoContract, _ := config.LoadEffectiveRepoContract(rigPath)
-	vars = appendRepoContractPromptVars(vars, repoContract, mq)
+	if mq.SetupCommand != "" {
+		vars = append(vars, fmt.Sprintf("setup_command=%s", mq.SetupCommand))
+	}
+	if mq.TypecheckCommand != "" {
+		vars = append(vars, fmt.Sprintf("typecheck_command=%s", mq.TypecheckCommand))
+	}
+	if mq.LintCommand != "" {
+		vars = append(vars, fmt.Sprintf("lint_command=%s", mq.LintCommand))
+	}
+	if mq.TestCommand != "" {
+		vars = append(vars, fmt.Sprintf("test_command=%s", mq.TestCommand))
+	}
+	if mq.BuildCommand != "" {
+		vars = append(vars, fmt.Sprintf("build_command=%s", mq.BuildCommand))
+	}
+	if effectiveSettings.RepoContract != nil {
+		if effectiveSettings.RepoContract.VerifyCommand != "" {
+			vars = append(vars, fmt.Sprintf("verify_command=%s", effectiveSettings.RepoContract.VerifyCommand))
+		}
+		if effectiveSettings.RepoContract.SmokeCommand != "" {
+			vars = append(vars, fmt.Sprintf("smoke_command=%s", effectiveSettings.RepoContract.SmokeCommand))
+		}
+	}
 	return vars
 }
 

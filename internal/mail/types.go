@@ -546,6 +546,7 @@ func ParseMessageType(s string) MessageType {
 //   - "overseer" → "overseer" (human operator, no trailing slash)
 //   - "mayor" or "mayor/" → "mayor/" (town-level, trailing slash)
 //   - "deacon" or "deacon/" → "deacon/" (town-level, trailing slash)
+//   - "daemon" or "daemon/" → "deacon/" (legacy alias)
 //   - "gastown/polecats/Toast" → "gastown/Toast" (crew/polecats normalized)
 //   - "gastown/crew/max" → "gastown/max" (crew/polecats normalized)
 //   - "gastown/Toast" → "gastown/Toast" (already canonical)
@@ -561,6 +562,9 @@ func normalizeAddress(s string) string {
 		return "mayor/"
 	}
 	if s == "deacon" || s == "deacon/" {
+		return "deacon/"
+	}
+	if s == "daemon" || s == "daemon/" {
 		return "deacon/"
 	}
 
@@ -583,6 +587,7 @@ func normalizeAddress(s string) string {
 //   - "mayor" → "mayor/"
 //   - "deacon/" → "deacon/"
 //   - "deacon" → "deacon/"
+//   - "daemon" → "deacon/" (legacy alias)
 //   - "gastown/polecats/Toast" → "gastown/Toast" (normalized)
 //   - "gastown/crew/max" → "gastown/max" (normalized)
 //   - "gastown/Toast" → "gastown/Toast" (already canonical)

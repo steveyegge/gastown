@@ -114,7 +114,6 @@ func (b *Beads) FindMRForMergeCommit(mergeCommit string) (*Issue, error) {
 	if strings.TrimSpace(mergeCommit) == "" {
 		return nil, nil
 	}
-
 	issues, err := b.ListMergeRequests(ListOptions{
 		Status: "all",
 		Label:  "gt:merge-request",
@@ -122,7 +121,6 @@ func (b *Beads) FindMRForMergeCommit(mergeCommit string) (*Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	for _, issue := range issues {
 		fields := ParseMRFields(issue)
 		if fields != nil && fields.MergeCommit == mergeCommit {

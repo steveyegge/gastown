@@ -93,49 +93,6 @@ run_coverage_check() {
   echo "[verify] coverage ${pct}% (floor: ${floor}%)"
 }
 
-case "$MODE" in
-  guard)
-    run_guard_checks
-    ;;
-  guard-replace)
-    check_no_replace_directives
-    ;;
-  guard-issues-jsonl)
-    check_no_issues_jsonl
-    ;;
-  build)
-    build_gt
-    ;;
-  unit)
-    run_unit_tests
-    ;;
-  lint)
-    run_lint
-    ;;
-  pre-merge|full)
-    run_guard_checks
-    build_gt
-    run_unit_tests
-    run_lint
-    ;;
-  smoke)
-    run_guard_checks
-    build_gt
-    ;;
-  integration)
-    run_integration_tests
-    ;;
-  failure)
-    run_failure_tests
-    ;;
-  fuzz)
-    run_fuzz_tests
-    ;;
-  coverage)
-    run_coverage_check
-    ;;
-  *)
-    echo "usage: $0 [guard|guard-replace|guard-issues-jsonl|build|unit|lint|pre-merge|smoke|integration|failure|fuzz|coverage|full]" >&2
     exit 2
     ;;
 esac

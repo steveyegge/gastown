@@ -55,10 +55,10 @@ func buildGTResourceAttrs() string {
 //   - BD_OTEL_LOGS_URL         — bd's own logs var   (mirrors GT_OTEL_LOGS_URL)
 //
 // Called once at gt startup (Execute) when telemetry is active.
-// No-op when GT_OTEL_METRICS_URL is not set.
+// No-op when no effective telemetry endpoints remain after filtering.
 func SetProcessOTELAttrs() {
-	metricsURL := os.Getenv(EnvMetricsURL)
-	if metricsURL == "" {
+	metricsURL, logsURL := EffectiveURLsFromEnv()
+	if metricsURL == "" && logsURL == "" {
 		return
 	}
 	if attrs := buildGTResourceAttrs(); attrs != "" {
@@ -66,8 +66,10 @@ func SetProcessOTELAttrs() {
 	}
 	// Mirror GT vars into bd's own var names so bd subprocesses
 	// emit their metrics to the same VictoriaMetrics instance.
-	_ = os.Setenv("BD_OTEL_METRICS_URL", metricsURL)
-	if logsURL := os.Getenv(EnvLogsURL); logsURL != "" {
+	if metricsURL != "" {
+		_ = os.Setenv("BD_OTEL_METRICS_URL", metricsURL)
+	}
+	if logsURL != "" {
 		_ = os.Setenv("BD_OTEL_LOGS_URL", logsURL)
 	}
 }
@@ -79,18 +81,20 @@ func SetProcessOTELAttrs() {
 // (beads.go run, mail/bd.go runBdCommand) so the vars aren't lost when the
 // explicit env slice is built from scratch instead of os.Environ().
 //
-// Returns nil when GT telemetry is not active (GT_OTEL_METRICS_URL not set).
+// Returns nil when no effective telemetry endpoints remain after filtering.
 func OTELEnvForSubprocess() []string {
-	metricsURL := os.Getenv(EnvMetricsURL)
-	if metricsURL == "" {
+	metricsURL, logsURL := EffectiveURLsFromEnv()
+	if metricsURL == "" && logsURL == "" {
 		return nil
 	}
 	var env []string
 	if attrs := buildGTResourceAttrs(); attrs != "" {
 		env = append(env, "OTEL_RESOURCE_ATTRIBUTES="+attrs)
 	}
-	env = append(env, "BD_OTEL_METRICS_URL="+metricsURL)
-	if logsURL := os.Getenv(EnvLogsURL); logsURL != "" {
+	if metricsURL != "" {
+		env = append(env, "BD_OTEL_METRICS_URL="+metricsURL)
+	}
+	if logsURL != "" {
 		env = append(env, "BD_OTEL_LOGS_URL="+logsURL)
 	}
 	if runID := os.Getenv("GT_RUN"); runID != "" {

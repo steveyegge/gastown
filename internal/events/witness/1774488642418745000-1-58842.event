@@ -1,0 +1,9 @@
+{
+  "channel": "witness",
+  "payload": {
+    "message": "POLECAT_DONE alpha exit=DEFERRED",
+    "source": "polecat"
+  },
+  "timestamp": "2026-03-25T21:30:42-04:00",
+  "type": "POLECAT_DONE"
+}

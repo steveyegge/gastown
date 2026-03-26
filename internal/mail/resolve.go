@@ -92,6 +92,14 @@ func (r *Resolver) resolveWithVisited(address string, visited map[string]bool) (
 		return r.resolveAtPatternWithVisited(address, visited)
 	}
 
+	// 3. Bare singleton names map to direct agent delivery.
+	// These must not fall through to generic name lookup, which probes queue and
+	// channel beads and can emit misleading routing warnings for legacy aliases
+	// like "daemon".
+	if recipient, ok := resolveSingletonAddress(address); ok {
+		return []Recipient{recipient}, nil
+	}
+
 	// 3. Contains '/' → agent address or pattern
 	if strings.Contains(address, "/") {
 		return r.resolveAgentAddress(address)
@@ -99,6 +107,19 @@ func (r *Resolver) resolveWithVisited(address string, visited map[string]bool) (
 
 	// 4. Name lookup: group → queue → channel
 	return r.resolveByNameWithVisited(address, visited)
+}
+
+func resolveSingletonAddress(address string) (Recipient, bool) {
+	switch normalizeAddress(address) {
+	case constants.RoleMayor + "/":
+		return Recipient{Address: constants.RoleMayor + "/", Type: RecipientAgent}, true
+	case constants.RoleDeacon + "/":
+		return Recipient{Address: constants.RoleDeacon + "/", Type: RecipientAgent}, true
+	case "overseer":
+		return Recipient{Address: "overseer", Type: RecipientAgent}, true
+	default:
+		return Recipient{}, false
+	}
 }
 
 // resolveAgentAddress handles addresses containing '/'.

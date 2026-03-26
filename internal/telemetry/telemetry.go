@@ -17,7 +17,10 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,6 +56,13 @@ var (
 	initMu         sync.Mutex
 	initDone       bool
 	globalProvider *Provider
+
+	endpointProbeMu    sync.Mutex
+	endpointProbeCache = make(map[string]string)
+	dialEndpoint       = func(ctx context.Context, network, address string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, address)
+	}
 )
 
 // Provider wraps OTel SDK providers and their shutdown functions.
@@ -93,6 +103,26 @@ func IsActive() bool {
 	return os.Getenv(EnvMetricsURL) != "" || os.Getenv(EnvLogsURL) != ""
 }
 
+// EffectiveURLsFromEnv resolves the active OTLP endpoints from the current
+// environment, applying default URLs for partially configured telemetry and
+// suppressing local loopback endpoints when nothing is listening there.
+func EffectiveURLsFromEnv() (metricsURL, logsURL string) {
+	metricsURL = os.Getenv(EnvMetricsURL)
+	logsURL = os.Getenv(EnvLogsURL)
+
+	if metricsURL == "" && logsURL == "" {
+		return "", ""
+	}
+	if metricsURL == "" {
+		metricsURL = DefaultMetricsURL
+	}
+	if logsURL == "" {
+		logsURL = DefaultLogsURL
+	}
+
+	return filterUnavailableLoopbackEndpoint(metricsURL), filterUnavailableLoopbackEndpoint(logsURL)
+}
+
 // Init initializes OTel metric and log providers.
 //
 // Idempotent: subsequent calls (same or different arguments) return the
@@ -116,20 +146,13 @@ func Init(ctx context.Context, serviceName, serviceVersion string) (*Provider, e
 		return globalProvider, nil
 	}
 
-	metricsURL := os.Getenv(EnvMetricsURL)
-	logsURL := os.Getenv(EnvLogsURL)
+	metricsURL, logsURL := EffectiveURLsFromEnv()
 
 	// Both unset → telemetry disabled, not an error.
 	if metricsURL == "" && logsURL == "" {
 		initDone = true
 		globalProvider = nil
 		return nil, nil
-	}
-	if metricsURL == "" {
-		metricsURL = DefaultMetricsURL
-	}
-	if logsURL == "" {
-		logsURL = DefaultLogsURL
 	}
 
 	res, err := resource.New(ctx,
@@ -146,40 +169,111 @@ func Init(ctx context.Context, serviceName, serviceVersion string) (*Provider, e
 
 	p := &Provider{}
 
-	// Metrics → VictoriaMetrics
-	metricExp, err := otlpmetrichttp.New(ctx,
-		otlpmetrichttp.WithEndpointURL(metricsURL),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("creating OTLP metric exporter: %w", err)
-	}
-	mp := sdkmetric.NewMeterProvider(
-		sdkmetric.WithResource(res),
-		sdkmetric.WithReader(
-			sdkmetric.NewPeriodicReader(metricExp,
-				sdkmetric.WithInterval(ExportInterval),
+	if metricsURL != "" {
+		metricExp, err := otlpmetrichttp.New(ctx,
+			otlpmetrichttp.WithEndpointURL(metricsURL),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("creating OTLP metric exporter: %w", err)
+		}
+		mp := sdkmetric.NewMeterProvider(
+			sdkmetric.WithResource(res),
+			sdkmetric.WithReader(
+				sdkmetric.NewPeriodicReader(metricExp,
+					sdkmetric.WithInterval(ExportInterval),
+				),
 			),
-		),
-	)
-	otel.SetMeterProvider(mp)
-	p.shutdowns = append(p.shutdowns, mp.Shutdown)
-	initInstruments()
-
-	// Logs → VictoriaLogs
-	logExp, err := otlploghttp.New(ctx,
-		otlploghttp.WithEndpointURL(logsURL),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("creating OTLP log exporter: %w", err)
+		)
+		otel.SetMeterProvider(mp)
+		p.shutdowns = append(p.shutdowns, mp.Shutdown)
+		initInstruments()
 	}
-	lp := sdklog.NewLoggerProvider(
-		sdklog.WithResource(res),
-		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
-	)
-	global.SetLoggerProvider(lp)
-	p.shutdowns = append(p.shutdowns, lp.Shutdown)
+
+	if logsURL != "" {
+		logExp, err := otlploghttp.New(ctx,
+			otlploghttp.WithEndpointURL(logsURL),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("creating OTLP log exporter: %w", err)
+		}
+		lp := sdklog.NewLoggerProvider(
+			sdklog.WithResource(res),
+			sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
+		)
+		global.SetLoggerProvider(lp)
+		p.shutdowns = append(p.shutdowns, lp.Shutdown)
+	}
 
 	initDone = true
 	globalProvider = p
 	return p, nil
+}
+
+func filterUnavailableLoopbackEndpoint(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+
+	endpointProbeMu.Lock()
+	if cached, ok := endpointProbeCache[rawURL]; ok {
+		endpointProbeMu.Unlock()
+		return cached
+	}
+	endpointProbeMu.Unlock()
+
+	resolved := rawURL
+	if isLoopbackEndpoint(rawURL) && !isEndpointReachable(rawURL) {
+		resolved = ""
+	}
+
+	endpointProbeMu.Lock()
+	endpointProbeCache[rawURL] = resolved
+	endpointProbeMu.Unlock()
+	return resolved
+}
+
+func isLoopbackEndpoint(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func isEndpointReachable(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return true
+	}
+	host := u.Hostname()
+	if host == "" {
+		return true
+	}
+
+	port := u.Port()
+	if port == "" {
+		switch strings.ToLower(u.Scheme) {
+		case "https":
+			port = "443"
+		default:
+			port = "80"
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	conn, err := dialEndpoint(ctx, "tcp", net.JoinHostPort(host, port))
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }

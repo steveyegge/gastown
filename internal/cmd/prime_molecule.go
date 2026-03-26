@@ -367,17 +367,43 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 	}
 	vars = append(vars, fmt.Sprintf("target_branch=%s", defaultBranch))
 
-	mq, mqErr := config.LoadEffectiveMergeQueueConfig(rigPath)
-	if mqErr == nil && mq != nil {
-		vars = appendMergeQueuePromptVars(vars, mq)
-	}
-
-	repoContract, contractErr := config.LoadEffectiveRepoContract(rigPath)
-	if contractErr == nil {
-		vars = appendRepoContractPromptVars(vars, repoContract, mq)
-	}
-
-	if mq != nil {
+	// MQ-specific vars come from the effective layered settings:
+	// repo contract floor + rig-local overrides.
+	settings, sErr := config.LoadEffectiveRigSettings(rigPath, filepath.Join(rigPath, "mayor", "rig"))
+	if sErr == nil && settings != nil && settings.MergeQueue != nil {
+		mq := settings.MergeQueue
+		vars = append(vars, fmt.Sprintf("integration_branch_refinery_enabled=%t", mq.IsRefineryIntegrationEnabled()))
+		vars = append(vars, fmt.Sprintf("integration_branch_auto_land=%t", mq.IsIntegrationBranchAutoLandEnabled()))
+		vars = append(vars, fmt.Sprintf("run_tests=%t", mq.IsRunTestsEnabled()))
+		if mq.IsStrictVerification() {
+			vars = append(vars, fmt.Sprintf("verification_mode=%s", mq.GetVerificationMode()))
+		}
+		if mq.SetupCommand != "" {
+			vars = append(vars, fmt.Sprintf("setup_command=%s", mq.SetupCommand))
+		}
+		if mq.TypecheckCommand != "" {
+			vars = append(vars, fmt.Sprintf("typecheck_command=%s", mq.TypecheckCommand))
+		}
+		if mq.LintCommand != "" {
+			vars = append(vars, fmt.Sprintf("lint_command=%s", mq.LintCommand))
+		}
+		if mq.TestCommand != "" {
+			vars = append(vars, fmt.Sprintf("test_command=%s", mq.TestCommand))
+		}
+		if mq.BuildCommand != "" {
+			vars = append(vars, fmt.Sprintf("build_command=%s", mq.BuildCommand))
+		}
+		vars = append(vars, fmt.Sprintf("delete_merged_branches=%t", mq.IsDeleteMergedBranchesEnabled()))
+		vars = append(vars, fmt.Sprintf("judgment_enabled=%t", mq.IsJudgmentEnabled()))
+		vars = append(vars, fmt.Sprintf("review_depth=%s", mq.GetReviewDepth()))
+		if settings.RepoContract != nil {
+			if settings.RepoContract.VerifyCommand != "" {
+				vars = append(vars, fmt.Sprintf("verify_command=%s", settings.RepoContract.VerifyCommand))
+			}
+			if settings.RepoContract.SmokeCommand != "" {
+				vars = append(vars, fmt.Sprintf("smoke_command=%s", settings.RepoContract.SmokeCommand))
+			}
+		}
 		return vars
 	}
 

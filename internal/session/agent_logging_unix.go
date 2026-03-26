@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/telemetry"
 )
 
 // ActivateAgentLogging spawns a detached `gt agent-log` process to stream the
@@ -39,8 +41,10 @@ func ActivateAgentLogging(sessionID, workDir, runID string) error {
 	// Kill any previous watcher for this session (e.g. on daemon restart).
 	killPreviousAgentLogger(pidFile)
 
-	logsURL := os.Getenv("GT_OTEL_LOGS_URL")
-	metricsURL := os.Getenv("GT_OTEL_METRICS_URL")
+	metricsURL, logsURL := telemetry.EffectiveURLsFromEnv()
+	if logsURL == "" {
+		return nil
+	}
 
 	// --since: exclude JSONL files that predate this session start.
 	// We use now-60s to give a buffer for Claude's startup time while still

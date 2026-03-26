@@ -128,22 +128,41 @@ func loadRigGateConfig(rigPath string) (*rigGateConfig, error) {
 
 	configPath := filepath.Join(rigPath, "config.json")
 	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil // No config, skip
+	if err == nil {
+		var raw struct {
+			MergeQueue json.RawMessage `json:"merge_queue"`
 		}
+		if json.Unmarshal(data, &raw) == nil && raw.MergeQueue != nil {
+			var mq struct {
+				TestCommand *string                    `json:"test_command"`
+				Gates       map[string]json.RawMessage `json:"gates"`
+			}
+			if err := json.Unmarshal(raw.MergeQueue, &mq); err != nil {
+				return nil, fmt.Errorf("parsing merge_queue: %w", err)
+			}
+			cfg := &rigGateConfig{}
+			if mq.TestCommand != nil {
+				cfg.TestCommand = *mq.TestCommand
+			}
+			if len(mq.Gates) > 0 {
+				cfg.Gates = make(map[string]string, len(mq.Gates))
+				for name, rawGate := range mq.Gates {
+					var gate struct {
+						Cmd string `json:"cmd"`
+					}
+					if err := json.Unmarshal(rawGate, &gate); err == nil && gate.Cmd != "" {
+						cfg.Gates[name] = gate.Cmd
+					}
+				}
+			}
+			if cfg.TestCommand != "" || len(cfg.Gates) > 0 {
+				return cfg, nil
+			}
+			return nil, nil
+		}
+	}
+	if err != nil && !os.IsNotExist(err) {
 		return nil, err
-	}
-
-	var raw struct {
-		MergeQueue json.RawMessage `json:"merge_queue"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parsing config.json: %w", err)
-	}
-
-	if raw.MergeQueue == nil {
-		return nil, nil // No merge_queue section
 	}
 
 	var mq struct {
@@ -154,7 +173,6 @@ func loadRigGateConfig(rigPath string) (*rigGateConfig, error) {
 	if err := json.Unmarshal(raw.MergeQueue, &mq); err != nil {
 		return nil, fmt.Errorf("parsing merge_queue: %w", err)
 	}
-
 	cfg := &rigGateConfig{}
 
 	// Extract gates (preferred over legacy test_command)
@@ -177,11 +195,6 @@ func loadRigGateConfig(rigPath string) (*rigGateConfig, error) {
 	if mq.TestCommand != nil && *mq.TestCommand != "" {
 		cfg.TestCommand = *mq.TestCommand
 	}
-
-	if len(cfg.Gates) == 0 && cfg.TestCommand == "" {
-		return nil, nil // No runnable commands
-	}
-
 	return cfg, nil
 }
 
@@ -256,121 +269,43 @@ func (d *Daemon) testRigMainBranch(rigName, rigPath string, timeout time.Duratio
 		return nil
 	}
 
-	// Determine default branch
-	defaultBranch := "main"
-	if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
-		defaultBranch = rigCfg.DefaultBranch
-	}
-
-	// Create a temporary worktree for testing to avoid interfering with
-	// the refinery's working directory.
-	worktreePath := filepath.Join(rigPath, ".main-test-worktree")
-	bareRepoPath := filepath.Join(rigPath, ".repo.git")
-
-	// Verify bare repo exists
-	if _, err := os.Stat(bareRepoPath); os.IsNotExist(err) {
-		return fmt.Errorf("bare repo not found at %s", bareRepoPath)
-	}
-
-	// Clean up stale worktree if it exists
-	if _, err := os.Stat(worktreePath); err == nil {
-		cleanupCmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
-		cleanupCmd.Dir = bareRepoPath
-		_ = cleanupCmd.Run()
-	}
-
-	ctx, cancel := context.WithTimeout(d.ctx, timeout)
-	defer cancel()
-
-	// Fetch latest main
-	fetchCmd := exec.CommandContext(ctx, "git", "fetch", "origin", defaultBranch)
-	fetchCmd.Dir = bareRepoPath
-	if output, err := fetchCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git fetch failed: %v (%s)", err, strings.TrimSpace(string(output)))
-	}
-
-	// Create temporary worktree at origin/<default_branch>
-	addCmd := exec.CommandContext(ctx, "git", "worktree", "add", "--detach", worktreePath, "origin/"+defaultBranch)
-	addCmd.Dir = bareRepoPath
-	if output, err := addCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git worktree add failed: %v (%s)", err, strings.TrimSpace(string(output)))
-	}
-
-	// Always clean up the worktree
-	defer func() {
-		removeCmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
-		removeCmd.Dir = bareRepoPath
-		if err := removeCmd.Run(); err != nil {
-			d.logger.Printf("main_branch_test: %s: warning: worktree cleanup failed: %v", rigName, err)
 		}
-	}()
-
-	worktreeGit := git.NewGit(worktreePath)
-	commitSHA, err := worktreeGit.Rev("HEAD")
-	if err != nil {
-		return fmt.Errorf("resolving main branch commit: %w", err)
 	}
 
-	// Run gates or legacy test command
-	if len(gateCfg.Gates) > 0 {
-		d.logger.Printf("main_branch_test: %s: running %d gate(s) on %s", rigName, len(gateCfg.Gates), commitSHA[:min(8, len(commitSHA))])
-		summary := verify.Run(ctx, worktreePath, gateCfg.Gates, gateCfg.GatesParallel, func(format string, args ...interface{}) {
-			d.logger.Printf("main_branch_test: %s: %s", rigName, fmt.Sprintf(format, args...))
-		})
-		if !summary.Success {
-			failures := make([]mainBranchCheckFailure, 0, len(summary.Results))
-			for _, result := range summary.Results {
-				if !result.Success {
-					failures = append(failures, mainBranchCheckFailure{
-						Check: result.Name,
-						Error: result.Error,
-					})
-				}
-			}
-			return &mainBranchTestFailure{
-				RigName:       rigName,
-				RigPath:       rigPath,
-				DefaultBranch: defaultBranch,
-				CommitSHA:     commitSHA,
-				Checks:        failures,
-			}
-		}
+	if rigCtx == nil || rigCtx.Settings == nil || rigCtx.Settings.MergeQueue == nil {
+		d.logger.Printf("main_branch_test: %s: no verification config, skipping", rigName)
 		return nil
 	}
-	if err := d.runCommandOnWorktree(ctx, rigName, worktreePath, "test", gateCfg.TestCommand); err != nil {
-		return &mainBranchTestFailure{
-			RigName:       rigName,
-			RigPath:       rigPath,
-			DefaultBranch: defaultBranch,
-			CommitSHA:     commitSHA,
-			Checks: []mainBranchCheckFailure{
-				{
-					Check: "test",
-					Error: err.Error(),
-				},
-			},
+
+	if _, err := rigCtx.RunVerificationPhase(ctx, verify.PhasePreMerge, nil, rigCtx.Settings.MergeQueue.IsGatesParallelEnabled()); err != nil {
+		_ = d.recordMainBranchIncident(rigName, rigPath, headSHA, "local-verification", err.Error(), "")
+		return err
+	}
+	if _, err := rigCtx.RunVerificationPhase(ctx, verify.PhasePostSquash, nil, false); err != nil {
+		_ = d.recordMainBranchIncident(rigName, rigPath, headSHA, "post-squash-smoke", err.Error(), "")
+		return err
+	}
+
+	if rigCtx.GitHubCI != nil && rigCtx.GitHubCI.IsRequired() {
+		run, err := rigCtx.EnsureGitHubBranchCI(ctx, defaultBranch, headSHA, nil)
+		if err != nil {
+			runURL := ""
+			if run != nil {
+				runURL = run.URL
+			}
+			_ = d.recordMainBranchIncident(rigName, rigPath, headSHA, "github-ci", err.Error(), runURL)
+			return err
+		}
+		if err := d.resolveMainBranchIncident(rigName, rigPath, headSHA, "github-ci"); err != nil {
+			d.logger.Printf("main_branch_test: %s: warning: closing recovered github-ci incident: %v", rigName, err)
 		}
 	}
-	return nil
-}
 
-// runCommandOnWorktree runs a single shell command in the given worktree directory.
-func (d *Daemon) runCommandOnWorktree(ctx context.Context, rigName, workDir, label, command string) error {
-	d.logger.Printf("main_branch_test: %s: running %s: %s", rigName, label, command)
-
-	cmd := exec.CommandContext(ctx, "sh", "-c", command) //nolint:gosec // G204: command is from trusted rig config
-	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "CI=true") // Signal test environment
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Truncate output to last 50 lines for the error message
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		tail := lines
-		if len(tail) > 50 {
-			tail = tail[len(tail)-50:]
-		}
-		return fmt.Errorf("%s failed: %v\n%s", label, err, strings.Join(tail, "\n"))
+	if err := d.resolveMainBranchIncident(rigName, rigPath, headSHA, "local-verification"); err != nil {
+		d.logger.Printf("main_branch_test: %s: warning: closing recovered local incident: %v", rigName, err)
+	}
+	if err := d.resolveMainBranchIncident(rigName, rigPath, headSHA, "post-squash-smoke"); err != nil {
+		d.logger.Printf("main_branch_test: %s: warning: closing recovered smoke incident: %v", rigName, err)
 	}
 	return nil
 }
@@ -474,4 +409,83 @@ func sliceContains(slice []string, val string) bool {
 		}
 	}
 	return false
+}
+
+func (d *Daemon) recordMainBranchIncident(rigName, rigPath, commitSHA, checkName, detail, workflowURL string) error {
+	bd := beads.New(rigPath)
+	title := fmt.Sprintf("CI failure: %s %s %s", rigName, checkName, shortSHA(commitSHA))
+	mrIssue, _ := bd.FindMRForMergeCommit(commitSHA)
+	sourceIssue := ""
+	mrID := ""
+	if mrIssue != nil {
+		mrID = mrIssue.ID
+		if fields := beads.ParseMRFields(mrIssue); fields != nil {
+			sourceIssue = fields.SourceIssue
+		}
+	}
+
+	description := buildIncidentDescription(rigName, commitSHA, checkName, detail, workflowURL, mrID, sourceIssue, "human-action-required")
+	if existing, err := bd.FindLatestIssueByTitle(title); err == nil && existing != nil {
+		priority := 1
+		status := "open"
+		return bd.Update(existing.ID, beads.UpdateOptions{
+			Description: &description,
+			Priority:    &priority,
+			Status:      &status,
+			SetLabels:   []string{"gt:incident", "gt:ci-failure"},
+		})
+	}
+
+	_, err := bd.Create(beads.CreateOptions{
+		Title:       title,
+		Labels:      []string{"gt:incident", "gt:ci-failure"},
+		Priority:    1,
+		Description: description,
+	})
+	return err
+}
+
+func (d *Daemon) resolveMainBranchIncident(rigName, rigPath, commitSHA, checkName string) error {
+	bd := beads.New(rigPath)
+	title := fmt.Sprintf("CI failure: %s %s %s", rigName, checkName, shortSHA(commitSHA))
+	issue, err := bd.FindLatestIssueByTitle(title)
+	if err != nil || issue == nil || issue.Status == "closed" {
+		return nil
+	}
+	recovered := buildIncidentDescription(rigName, commitSHA, checkName, "recovered automatically", "", "", "", "recovered")
+	if err := bd.Update(issue.ID, beads.UpdateOptions{Description: &recovered}); err != nil {
+		return err
+	}
+	return bd.CloseWithReason("recovered", issue.ID)
+}
+
+func buildIncidentDescription(rigName, commitSHA, checkName, detail, workflowURL, mrID, sourceIssue, statusClass string) string {
+	lines := []string{
+		"rig: " + rigName,
+		"commit_sha: " + commitSHA,
+		"check: " + checkName,
+		"status_class: " + statusClass,
+		"last_recovery_attempt_at: " + time.Now().UTC().Format(time.RFC3339),
+		"last_recovery_result: " + statusClass,
+	}
+	if workflowURL != "" {
+		lines = append(lines, "workflow_run: "+workflowURL)
+	}
+	if mrID != "" {
+		lines = append(lines, "merge_request: "+mrID)
+	}
+	if sourceIssue != "" {
+		lines = append(lines, "source_issue: "+sourceIssue)
+	}
+	if detail != "" {
+		lines = append(lines, "", detail)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
 }

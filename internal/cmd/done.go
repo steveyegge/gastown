@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/reliability"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -310,6 +311,27 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 	// Parse branch info
 	info := parseBranchName(branch)
+
+	rigPath := filepath.Join(townRoot, rigName)
+	var rigReliability *reliability.RigContext
+	if cwdAvailable {
+		rigReliability, err = reliability.LoadRigContext(rigPath, cwd)
+		if err != nil {
+			style.PrintWarning("could not load effective rig settings: %v", err)
+		}
+	} else {
+		// We can still load local operator settings without a live worktree, but
+		// strict verification cannot execute without the actual branch checkout.
+		rigReliability, err = reliability.LoadRigContext(rigPath, filepath.Join(rigPath, "mayor", "rig"))
+		if err != nil {
+			style.PrintWarning("could not load fallback rig settings: %v", err)
+		}
+	}
+
+	if donePreVerified && rigReliability != nil && rigReliability.Settings != nil &&
+		rigReliability.Settings.MergeQueue != nil && rigReliability.Settings.MergeQueue.IsStrictVerification() {
+		return fmt.Errorf("--pre-verified is not allowed when merge_queue.verification_mode=strict")
+	}
 
 	// Override with explicit flags
 	issueID := doneIssue
@@ -622,6 +644,21 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 		// Default: "mr" strategy (or no convoy) — push branch, create MR bead
 
+		if rigReliability != nil && rigReliability.Settings != nil &&
+			rigReliability.Settings.MergeQueue != nil && rigReliability.Settings.MergeQueue.IsStrictVerification() {
+			if !cwdAvailable {
+				return fmt.Errorf("strict verification requires a live worktree; current working directory is unavailable")
+			}
+			if err := rigReliability.ValidateStrictPreconditions(); err != nil {
+				return err
+			}
+			fmt.Printf("%s Running strict pre-merge verification\n", style.Bold.Render("→"))
+			if _, err := rigReliability.RunVerificationPhase(cmd.Context(), verify.PhasePreMerge, os.Stdout, rigReliability.Settings.MergeQueue.IsGatesParallelEnabled()); err != nil {
+				return err
+			}
+			fmt.Printf("%s Strict pre-merge verification passed\n", style.Bold.Render("✓"))
+		}
+
 		// Pre-declare push variables for checkpoint goto (gt-aufru)
 		var refspec string
 		var pushErr error
@@ -886,6 +923,17 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		// commits to the same branch after a gate failure. The commit SHA
 		// distinguishes genuinely new submissions from idempotent retries.
 		commitSHA, _ = g.Rev("HEAD")
+
+		if rigReliability != nil && rigReliability.GitHubCI != nil && rigReliability.GitHubCI.IsRequired() && commitSHA != "" {
+			fmt.Printf("%s Ensuring GitHub CI for %s\n", style.Bold.Render("→"), commitSHA[:min(8, len(commitSHA))])
+			run, err := rigReliability.EnsureGitHubBranchCI(cmd.Context(), branch, commitSHA, os.Stdout)
+			if err != nil {
+				return fmt.Errorf("github ci assurance failed: %w", err)
+			}
+			if run != nil && run.URL != "" {
+				fmt.Printf("%s GitHub CI passed: %s\n", style.Bold.Render("✓"), run.URL)
+			}
+		}
 
 		// Resume: skip MR creation if already completed in a previous run (gt-aufru).
 		// Mirrors the push checkpoint pattern above. Without this, every retry

@@ -235,6 +235,12 @@ var ErrInvalidOnConflict = errors.New("invalid on_conflict strategy")
 
 // validateMergeQueueConfig validates a MergeQueueConfig.
 func validateMergeQueueConfig(c *MergeQueueConfig) error {
+	switch c.GetVerificationMode() {
+	case VerificationModeAdvisory, VerificationModeStrict:
+	default:
+		return fmt.Errorf("invalid verification_mode: %q", c.VerificationMode)
+	}
+
 	// Validate on_conflict strategy
 	if c.OnConflict != "" && c.OnConflict != OnConflictAssignBack && c.OnConflict != OnConflictAutoRebase {
 		return fmt.Errorf("%w: got '%s', want '%s' or '%s'",
@@ -298,7 +304,7 @@ func validateMergeQueueConfig(c *MergeQueueConfig) error {
 	return nil
 }
 
-func validateStrictMergeQueueRequirements(c *MergeQueueConfig) error {
+dispatffunc validateStrictMergeQueueRequirements(c *MergeQueueConfig) error {
 	if c == nil || !c.IsStrictVerification() {
 		return nil
 	}
@@ -510,34 +516,6 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 			autoPush := *local.AutoPush
 			result.AutoPush = &autoPush
 		}
-		// Merge non-command fields from local if explicitly set
-		if local.Enabled {
-			result.Enabled = local.Enabled
-		}
-		if local.OnConflict != "" {
-			result.OnConflict = local.OnConflict
-		}
-		if local.RunTests != nil {
-			result.RunTests = local.RunTests
-		}
-		if local.DeleteMergedBranches != nil {
-			result.DeleteMergedBranches = local.DeleteMergedBranches
-		}
-		if local.RetryFlakyTests > 0 {
-			result.RetryFlakyTests = local.RetryFlakyTests
-		}
-		if local.PollInterval != "" {
-			result.PollInterval = local.PollInterval
-		}
-		if local.MaxConcurrent > 0 {
-			result.MaxConcurrent = local.MaxConcurrent
-		}
-		if local.StaleClaimTimeout != "" {
-			result.StaleClaimTimeout = local.StaleClaimTimeout
-		}
-		if local.JudgmentEnabled != nil {
-			value := *local.JudgmentEnabled
-			result.JudgmentEnabled = &value
 		}
 		if local.ReviewDepth != "" {
 			result.ReviewDepth = local.ReviewDepth
@@ -1716,6 +1694,17 @@ func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
 	return withRoleSettingsFlag(rc, role, rigPath)
 }
 
+// ResolvePersistedRoleAgentConfig resolves the configured agent for a role using
+// persisted town/rig settings only. Unlike ResolveRoleAgentConfig, it does not
+// require the agent binary to be installed and it ignores ephemeral cost-tier
+// overrides. This is used by hook/template management, which needs the intended
+// provider even in environments where the runtime isn't installed yet.
+func ResolvePersistedRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
+	resolveConfigMu.Lock()
+	defer resolveConfigMu.Unlock()
+	return resolvePersistedRoleAgentConfigInternal(role, townRoot, rigPath)
+}
+
 // tryResolveNamedAgent attempts to resolve a named agent through the custom agent
 // and standard lookup pipelines. Returns the resolved config with ResolvedAgent set,
 // or nil if validation fails. The warnPrefix is used in the fallback warning message
@@ -2046,6 +2035,28 @@ func resolveRoleAgentConfigCore(role, townRoot, rigPath string) *RuntimeConfig {
 	// Fall back to existing resolution (rig's Agent → town's DefaultAgent → "claude")
 	// Use internal version — caller already holds resolveConfigMu.
 	return resolveAgentConfigInternal(townRoot, rigPath)
+}
+
+func resolvePersistedRoleAgentConfigInternal(role, townRoot, rigPath string) *RuntimeConfig {
+	var rigSettings *RigSettings
+	if rigPath != "" {
+		rigSettings, _ = LoadRigSettings(RigSettingsPath(rigPath))
+	}
+
+	townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		townSettings = NewTownSettings()
+	}
+
+	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
+	if rigPath != "" {
+		_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
+	}
+
+	agentName, _ := ResolveRoleAgentName(role, townRoot, rigPath)
+	rc := lookupAgentConfig(agentName, townSettings, rigSettings)
+	rc.ResolvedAgent = agentName
+	return withRoleSettingsFlag(rc, role, rigPath)
 }
 
 // ResolveRoleAgentName returns the agent name that would be used for a specific role.
