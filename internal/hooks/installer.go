@@ -157,6 +157,8 @@ func resolveAndSubstitute(provider, hooksFile, role string) ([]byte, error) {
 }
 
 // writeTemplate resolves a template, substitutes placeholders, and writes it to targetPath.
+//
+//nolint:unparam // hooksDir kept for API symmetry with InstallForRole
 func writeTemplate(provider, role, hooksDir, hooksFile, targetPath string) error {
 	content, err := resolveAndSubstitute(provider, hooksFile, role)
 	if err != nil {

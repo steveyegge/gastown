@@ -134,6 +134,8 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 		"run_tests":                           "true",
 		"target_branch":                       "main",
 		"delete_merged_branches":              "true",
+		"judgment_enabled":                    "false",
+		"review_depth":                        "standard",
 	}
 
 	varMap := make(map[string]string)
