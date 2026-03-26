@@ -17,7 +17,6 @@ import (
 
 	"github.com/gofrs/flock"
 	beadsdk "github.com/steveyegge/beads"
-	"gopkg.in/natefinch/lumberjack.v2"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/config"
@@ -37,6 +36,7 @@ import (
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // Daemon is the town-level background service.
@@ -53,8 +53,8 @@ type Daemon struct {
 	curator       *feed.Curator
 	convoyManager *ConvoyManager
 	beadsStores   map[string]beadsdk.Storage
-	doltServer *DoltServerManager
-	krcPruner  *KRCPruner
+	doltServer    *DoltServerManager
+	krcPruner     *KRCPruner
 
 	// disabledPatrols is loaded from town settings (disabled_patrols field).
 	// Provides a simple way to disable individual patrol dogs without editing
@@ -875,7 +875,6 @@ func (d *Daemon) pourDoctorMolecule(warnings []string) {
 	mol.closeStep("report")
 }
 
-
 // checkAllRigsDolt verifies all rigs are using the Dolt backend.
 func (d *Daemon) checkAllRigsDolt() error {
 	var problems []string
@@ -1129,8 +1128,8 @@ func (d *Daemon) checkDeaconHeartbeat() {
 
 	age := hb.Age()
 
-	// If heartbeat is fresh, nothing to do
-	if !hb.IsVeryStale() {
+	// Fresh heartbeat means Deacon is making progress.
+	if hb.IsFresh() {
 		return
 	}
 
@@ -1149,14 +1148,14 @@ func (d *Daemon) checkDeaconHeartbeat() {
 		return
 	}
 
-	// Session exists but heartbeat is stale - Deacon is stuck
-	// PATCH-002: Reduced from 30m to 10m for faster recovery.
-	// Must be > backoff-max (5m) to avoid false positive kills during legitimate sleep.
-	if age > 10*time.Minute {
+	// Session exists but heartbeat is stale - Deacon is stuck.
+	// Nudge throughout the stale window so an idle live session wakes back up.
+	// Escalate only once the heartbeat is critically old.
+	if shouldEscalateStaleDeacon(age) {
 		// Detection only: stuck-agent-dog plugin handles context-aware restart
 		d.logger.Printf("STUCK DEACON: heartbeat stale for %s, session %s needs restart", age.Round(time.Minute), sessionName)
 	} else {
-		// Stuck but not critically - nudge to wake up
+		// Stale but not critically old - nudge to wake up.
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
 		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
 			d.logger.Printf("Error nudging stuck Deacon: %v", err)
@@ -1164,6 +1163,9 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	}
 }
 
+func shouldEscalateStaleDeacon(age time.Duration) bool {
+	return age >= deacon.HeartbeatVeryStaleThreshold
+}
 
 // ensureWitnessesRunning ensures witnesses are running for configured rigs.
 // Called on each heartbeat to maintain witness patrol loops.
@@ -1585,7 +1587,7 @@ func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 	// Check rig bead labels (global/synced docked status)
 	// This is the persistent docked state set by 'gt rig dock'
 	rigPath := filepath.Join(d.config.TownRoot, rigName)
-	
+
 	// Try to get prefix from rig config.json, fall back to rigs.json registry
 	var prefix string
 	if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.Beads != nil {
@@ -1594,7 +1596,7 @@ func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 		// Fall back to registry (mayor/rigs.json) when config.json is missing
 		prefix = config.GetRigPrefix(d.config.TownRoot, rigName)
 	}
-	
+
 	rigBeadID := fmt.Sprintf("%s-rig-%s", prefix, rigName)
 	rigBeadsDir := beads.ResolveBeadsDir(rigPath)
 	bd := beads.NewWithBeadsDir(rigPath, rigBeadsDir)
