@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
 	"sync"
 	"testing"
 )
@@ -177,5 +178,40 @@ func TestEffectiveURLsFromEnv_DropsUnavailableLoopbackEndpoints(t *testing.T) {
 	metricsURL, logsURL := EffectiveURLsFromEnv()
 	if metricsURL != "" || logsURL != "" {
 		t.Fatalf("EffectiveURLsFromEnv() = (%q, %q), want empty endpoints", metricsURL, logsURL)
+	}
+}
+
+func TestIsActive_UsesConfiguredEnvEvenWhenLoopbackIsUnavailable(t *testing.T) {
+	resetInitState(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	t.Setenv(EnvMetricsURL, "")
+	t.Setenv(EnvLogsURL, "http://"+addr+"/v1/logs")
+
+	if !IsActive() {
+		t.Fatal("IsActive() = false, want true when telemetry env vars are configured")
+	}
+
+	metricsURL, logsURL := EffectiveURLsFromEnv()
+	if metricsURL != "" || logsURL != "" {
+		t.Fatalf("EffectiveURLsFromEnv() = (%q, %q), want empty endpoints after loopback probe fails", metricsURL, logsURL)
+	}
+}
+
+func TestIsActive_FalseWhenTelemetryEnvUnset(t *testing.T) {
+	resetInitState(t)
+	t.Setenv(EnvMetricsURL, "")
+	t.Setenv(EnvLogsURL, "")
+	_ = os.Unsetenv(EnvMetricsURL)
+	_ = os.Unsetenv(EnvLogsURL)
+
+	if IsActive() {
+		t.Fatal("IsActive() = true, want false when telemetry env vars are unset")
 	}
 }

@@ -1,6 +1,8 @@
 package hooks
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -230,12 +232,22 @@ func TestSyncForRole_JSONWhitespaceInsensitive(t *testing.T) {
 		t.Fatalf("reading created file: %v", err)
 	}
 
-	// Add extra whitespace — structurally identical JSON, different bytes
-	reformatted := strings.ReplaceAll(string(original), ":", " : ")
-	if string(original) == reformatted {
+	// Reformat the JSON while preserving string contents so the test remains
+	// whitespace-only on Windows paths like C:\...
+	var reformatted bytes.Buffer
+	if err := json.Compact(&reformatted, original); err != nil {
+		t.Fatalf("compacting JSON: %v", err)
+	}
+	if bytes.Equal(original, reformatted.Bytes()) {
+		reformatted.Reset()
+		if err := json.Indent(&reformatted, original, "", "  "); err != nil {
+			t.Fatalf("indenting JSON: %v", err)
+		}
+	}
+	if bytes.Equal(original, reformatted.Bytes()) {
 		t.Fatal("reformatted content should differ from original bytes")
 	}
-	if err := os.WriteFile(targetPath, []byte(reformatted), 0600); err != nil {
+	if err := os.WriteFile(targetPath, reformatted.Bytes(), 0600); err != nil {
 		t.Fatalf("writing reformatted file: %v", err)
 	}
 

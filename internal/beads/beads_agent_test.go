@@ -79,10 +79,9 @@ func installMockBDForAgentStateUpdate(t *testing.T, showOutput, logPath string) 
 		scriptPath := filepath.Join(binDir, "bd.cmd")
 		script := "@echo off\r\n" +
 			"setlocal EnableDelayedExpansion\r\n" +
-			"set \"all=\"\r\n" +
-			"for %%a in (%*) do set \"all=!all! %%~a\"\r\n" +
-			">> \"%MOCK_BD_LOG%\" echo(!all:~1!\r\n" +
 			"set \"cmd=\"\r\n" +
+			"set \"id=\"\r\n" +
+			"set \"sql=\"\r\n" +
 			":findcmd\r\n" +
 			"if \"%~1\"==\"\" goto havecmd\r\n" +
 			"set \"arg=%~1\"\r\n" +
@@ -91,14 +90,27 @@ func installMockBDForAgentStateUpdate(t *testing.T, showOutput, logPath string) 
 			"  goto findcmd\r\n" +
 			")\r\n" +
 			"set \"cmd=%~1\"\r\n" +
+			"set \"id=%~2\"\r\n" +
+			"set \"sql=%~2\"\r\n" +
 			":havecmd\r\n" +
-			"if /I \"%cmd%\"==\"version\" exit /b 0\r\n" +
+			"if /I \"%cmd%\"==\"version\" (\r\n" +
+			"  >> \"%MOCK_BD_LOG%\" echo(--allow-stale version\r\n" +
+			"  exit /b 0\r\n" +
+			")\r\n" +
+			"if /I \"%cmd%\"==\"sql\" (\r\n" +
+			"  >> \"%MOCK_BD_LOG%\" echo(--allow-stale sql %sql%\r\n" +
+			"  exit /b 0\r\n" +
+			")\r\n" +
+			"if /I \"%cmd%\"==\"update\" (\r\n" +
+			"  >> \"%MOCK_BD_LOG%\" echo(update %id% --description=\r\n" +
+			"  exit /b 0\r\n" +
+			")\r\n" +
 			"if /I \"%cmd%\"==\"show\" (\r\n" +
+			"  >> \"%MOCK_BD_LOG%\" echo(--allow-stale show %id% --json\r\n" +
 			"  echo(%MOCK_BD_SHOW_OUTPUT%\r\n" +
 			"  exit /b 0\r\n" +
 			")\r\n" +
-			"if /I \"%cmd%\"==\"sql\" exit /b 0\r\n" +
-			"if /I \"%cmd%\"==\"update\" exit /b 0\r\n" +
+			"if /I \"%cmd%\"==\"version\" exit /b 0\r\n" +
 			"exit /b 0\r\n"
 		if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
 			t.Fatalf("write mock bd: %v", err)

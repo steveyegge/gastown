@@ -100,8 +100,7 @@ func (p *Provider) Shutdown(ctx context.Context) error {
 // Used to gate side-effectful operations (env var injection, tmux session updates)
 // that only make sense when telemetry is collecting data.
 func IsActive() bool {
-	metricsURL, logsURL := EffectiveURLsFromEnv()
-	return metricsURL != "" || logsURL != ""
+	return os.Getenv(EnvMetricsURL) != "" || os.Getenv(EnvLogsURL) != ""
 }
 
 // EffectiveURLsFromEnv resolves the active OTLP endpoints from the current
