@@ -3907,7 +3907,7 @@ func TestWriteServerConfig_Defaults(t *testing.T) {
 		"max_connections: 1000",
 		fmt.Sprintf("read_timeout_millis: %d", DefaultReadTimeoutMs),
 		fmt.Sprintf("write_timeout_millis: %d", DefaultWriteTimeoutMs),
-		"data_dir: \"" + dir + "\"",
+		"data_dir: \"" + filepath.ToSlash(dir) + "\"",
 		"log_level: warning",
 		"auto_gc_behavior:",
 	}

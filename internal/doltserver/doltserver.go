@@ -510,8 +510,8 @@ func IsRunning(townRoot string) (bool, int, error) {
 			// Check if process is alive
 			process, err := os.FindProcess(pid)
 			if err == nil {
-				// On Unix, FindProcess always succeeds. Send signal 0 to check if alive.
-				if err := process.Signal(syscall.Signal(0)); err == nil {
+				// Check if process is alive (cross-platform).
+				if processAlive(process) {
 					// Verify it's actually serving on the expected port.
 					// More reliable than ps string matching (ZFC fix: gt-utuk).
 					if isDoltServerOnPort(config.Port) {
@@ -1031,15 +1031,15 @@ func KillImposters(townRoot string) error {
 		return fmt.Errorf("finding imposter process %d: %w", pid, err)
 	}
 
-	// SIGTERM first, then SIGKILL
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("sending SIGTERM to imposter PID %d: %w", pid, err)
+	// Terminate first, then force kill
+	if err := processTerminate(process); err != nil {
+		return fmt.Errorf("sending terminate to imposter PID %d: %w", pid, err)
 	}
 
 	// Wait for graceful shutdown
 	for i := 0; i < 10; i++ {
 		time.Sleep(500 * time.Millisecond)
-		if err := process.Signal(syscall.Signal(0)); err != nil {
+		if !processAlive(process) {
 			// Clean up PID file if it pointed to the imposter
 			_ = os.Remove(config.PidFile)
 			return nil
@@ -1047,7 +1047,7 @@ func KillImposters(townRoot string) error {
 	}
 
 	// Force kill
-	_ = process.Signal(syscall.SIGKILL)
+	_ = processKill(process)
 	time.Sleep(100 * time.Millisecond)
 	_ = os.Remove(config.PidFile)
 
@@ -1142,18 +1142,18 @@ func StopIdleMonitors(townRoot string) int {
 		if err != nil {
 			continue
 		}
-		if err := proc.Signal(syscall.SIGTERM); err != nil {
+		if err := processTerminate(proc); err != nil {
 			continue
 		}
 
 		// Wait briefly for termination
 		for i := 0; i < 5; i++ {
 			time.Sleep(100 * time.Millisecond)
-			if err := proc.Signal(syscall.Signal(0)); err != nil {
+			if !processAlive(proc) {
 				break // Process exited
 			}
 			if i == 4 {
-				_ = proc.Signal(syscall.SIGKILL)
+				_ = processKill(proc)
 			}
 		}
 		stopped++
@@ -1273,7 +1273,7 @@ behavior:
 		maxConnLine,
 		readTimeoutLine,
 		writeTimeoutLine,
-		config.DataDir,
+		filepath.ToSlash(config.DataDir),
 	)
 
 	return os.WriteFile(configPath, []byte(content), 0600)
@@ -1351,7 +1351,7 @@ func Start(townRoot string) error {
 		if squatterPID := findDoltServerOnPort(config.Port); squatterPID > 0 {
 			fmt.Fprintf(os.Stderr, "Warning: port %d held by unowned dolt process (PID %d) — killing before start\n", config.Port, squatterPID)
 			if proc, findErr := os.FindProcess(squatterPID); findErr == nil {
-				_ = proc.Signal(syscall.SIGTERM)
+				_ = processTerminate(proc)
 				if err := waitForPortRelease(config.Port, 5*time.Second); err != nil {
 					// SIGTERM didn't work, escalate to SIGKILL
 					_ = proc.Kill()
@@ -1571,8 +1571,8 @@ func Start(townRoot string) error {
 		time.Sleep(500 * time.Millisecond)
 
 		// Check if the process we started is still alive.
-		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
-			return fmt.Errorf("Dolt server process died during startup (check logs with 'gt dolt logs'): %w", err)
+		if !processAlive(cmd.Process) {
+			return fmt.Errorf("Dolt server process died during startup (check logs with 'gt dolt logs')")
 		}
 
 		if err := CheckServerReachable(townRoot); err == nil {
@@ -1666,24 +1666,24 @@ func Stop(townRoot string) error {
 		return fmt.Errorf("finding process: %w", err)
 	}
 
-	// Send SIGTERM for graceful shutdown
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("sending SIGTERM: %w", err)
+	// Send terminate for graceful shutdown
+	if err := processTerminate(process); err != nil {
+		return fmt.Errorf("sending terminate: %w", err)
 	}
 
 	// Wait for graceful shutdown (dolt needs more time)
 	for i := 0; i < 10; i++ {
 		time.Sleep(500 * time.Millisecond)
-		if err := process.Signal(syscall.Signal(0)); err != nil {
+		if !processAlive(process) {
 			// Process has exited
 			break
 		}
 	}
 
 	// Check if still running
-	if err := process.Signal(syscall.Signal(0)); err == nil {
+	if processAlive(process) {
 		// Still running, force kill
-		_ = process.Signal(syscall.SIGKILL)
+		_ = processKill(process)
 		time.Sleep(100 * time.Millisecond)
 	}
 
