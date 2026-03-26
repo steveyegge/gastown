@@ -626,6 +626,22 @@ type WorkflowConfig struct {
 	DefaultFormula string `json:"default_formula,omitempty"`
 }
 
+// Merge strategy constants for DefaultMergeStrategy.
+const (
+	MergeStrategyMR      = "mr"       // merge request via refinery merge queue (default)
+	MergeStrategyDirect  = "direct"   // push directly to target branch
+	MergeStrategyLocal   = "local"    // merge locally without pushing
+	MergeStrategyBatchPR = "batch-pr" // batch pull request workflow
+)
+
+// ValidMergeStrategies is the set of recognized merge strategy values.
+var ValidMergeStrategies = map[string]bool{
+	MergeStrategyMR:      true,
+	MergeStrategyDirect:  true,
+	MergeStrategyLocal:   true,
+	MergeStrategyBatchPR: true,
+}
+
 // RigSettings represents per-rig behavioral configuration (settings/config.json).
 type RigSettings struct {
 	Type       string            `json:"type"`                  // "rig-settings"
@@ -636,6 +652,11 @@ type RigSettings struct {
 	Crew       *CrewConfig       `json:"crew,omitempty"`        // crew startup settings
 	Workflow   *WorkflowConfig   `json:"workflow,omitempty"`    // workflow settings
 	Runtime    *RuntimeConfig    `json:"runtime,omitempty"`     // LLM runtime settings (deprecated: use Agent)
+
+	// DefaultMergeStrategy selects how polecat work is landed for this rig.
+	// Valid values: "mr" (merge queue), "direct", "local", "batch-pr".
+	// Empty means use the global default ("mr").
+	DefaultMergeStrategy string `json:"default_merge_strategy,omitempty"`
 
 	// Agent selects which agent preset to use for this rig.
 	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp", "opencode", "copilot")

@@ -214,6 +214,10 @@ func validateRigSettings(c *RigSettings) error {
 	if c.Version > CurrentRigSettingsVersion {
 		return fmt.Errorf("%w: got %d, max supported %d", ErrInvalidVersion, c.Version, CurrentRigSettingsVersion)
 	}
+	if c.DefaultMergeStrategy != "" && !ValidMergeStrategies[c.DefaultMergeStrategy] {
+		return fmt.Errorf("%w: unknown default_merge_strategy %q, valid values: mr, direct, local, batch-pr",
+			ErrInvalidMergeStrategy, c.DefaultMergeStrategy)
+	}
 	if c.MergeQueue != nil {
 		if err := validateMergeQueueConfig(c.MergeQueue); err != nil {
 			return err
@@ -221,6 +225,9 @@ func validateRigSettings(c *RigSettings) error {
 	}
 	return nil
 }
+
+// ErrInvalidMergeStrategy indicates an unknown merge strategy.
+var ErrInvalidMergeStrategy = errors.New("invalid merge strategy")
 
 // ErrInvalidOnConflict indicates an invalid on_conflict strategy.
 var ErrInvalidOnConflict = errors.New("invalid on_conflict strategy")
