@@ -123,9 +123,10 @@ func convoyTracksBead(beadsDir, convoyID, beadID string) bool {
 
 // ConvoyInfo holds convoy details for an issue's tracking convoy.
 type ConvoyInfo struct {
-	ID            string // Convoy bead ID (e.g., "hq-cv-abc")
-	Owned         bool   // true if convoy has gt:owned label
-	MergeStrategy string // "direct", "mr", "local", or "" (default = mr)
+	ID                string // Convoy bead ID (e.g., "hq-cv-abc")
+	Owned             bool   // true if convoy has gt:owned label
+	MergeStrategy     string // "direct", "mr", "local", "batch-pr", or "" (default = mr)
+	IntegrationBranch string // Integration branch for batch-pr convoys (e.g., "convoy/hq-cv-abc")
 }
 
 // IsOwnedDirect returns true if the convoy is owned with direct merge strategy.
@@ -190,6 +191,9 @@ func getConvoyInfoForIssue(issueID string) *ConvoyInfo {
 
 	// Parse merge strategy from description using typed accessor
 	info.MergeStrategy = convoyMergeFromFields(convoys[0].Description)
+
+	// Parse integration branch for batch-pr convoys (set by convoy launch, gt-3ya)
+	info.IntegrationBranch = beads.GetIntegrationBranchField(convoys[0].Description)
 
 	return info
 }
