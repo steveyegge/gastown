@@ -146,6 +146,7 @@ func TestIsTownLevelAddress(t *testing.T) {
 		{"mayor/", true},
 		{"deacon", true},
 		{"deacon/", true},
+		{"daemon", true},
 		{"overseer", true},
 		{"gastown/refinery", false},
 		{"gastown/polecats/Toast", false},
@@ -183,6 +184,7 @@ func TestAddressToSessionIDs(t *testing.T) {
 		{"mayor", []string{"hq-mayor"}},
 		{"mayor/", []string{"hq-mayor"}},
 		{"deacon", []string{"hq-deacon"}},
+		{"daemon", []string{"hq-deacon"}},
 
 		// Rig singletons - single session (no crew/polecat ambiguity)
 		{"gastown/refinery", []string{"gt-refinery"}},

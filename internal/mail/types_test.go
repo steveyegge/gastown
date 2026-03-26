@@ -16,6 +16,8 @@ func TestAddressToIdentity(t *testing.T) {
 		{"mayor/", "mayor/"},
 		{"deacon", "deacon/"},
 		{"deacon/", "deacon/"},
+		{"daemon", "deacon/"},
+		{"daemon/", "deacon/"},
 
 		// Rig-level agents: crew/ and polecats/ normalized to canonical form
 		{"gastown/polecats/Toast", "gastown/Toast"},
@@ -49,6 +51,8 @@ func TestIdentityToAddress(t *testing.T) {
 		{"mayor/", "mayor/"},
 		{"deacon", "deacon/"},
 		{"deacon/", "deacon/"},
+		{"daemon", "deacon/"},
+		{"daemon/", "deacon/"},
 
 		// Rig-level agents: crew/ and polecats/ normalized
 		{"gastown/polecats/Toast", "gastown/Toast"},
