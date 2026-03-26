@@ -163,13 +163,14 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
+		var crewMember string
 		switch identity.Role {
 		case session.RoleMayor:
-			theme = tmux.ResolveSessionTheme(townRoot, "", constants.RoleMayor)
+			theme = tmux.ResolveSessionTheme(townRoot, "", constants.RoleMayor, "")
 			worker = "Mayor"
 			role = constants.RoleMayor
 		case session.RoleDeacon:
-			theme = tmux.ResolveSessionTheme(townRoot, "", constants.RoleDeacon)
+			theme = tmux.ResolveSessionTheme(townRoot, "", constants.RoleDeacon, "")
 			worker = "Deacon"
 			role = constants.RoleDeacon
 		default:
@@ -188,12 +189,14 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 				worker = constants.RoleRefinery
 			case session.RoleCrew:
 				worker = identity.Name
+				crewMember = identity.Name
 			default:
 				worker = identity.Name
+				crewMember = identity.Name
 			}
 
-			// Use role-based theme resolution
-			theme = tmux.ResolveSessionTheme(townRoot, rig, role)
+			// Use role-based theme resolution (with per-member override)
+			theme = tmux.ResolveSessionTheme(townRoot, rig, role, crewMember)
 		}
 
 		// Resolve window tint from config.

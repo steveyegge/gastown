@@ -609,7 +609,7 @@ func (d *Daemon) applySessionTheme(sessionName string, parsed *ParsedIdentity) {
 		rigName = ""
 		worker = "Mayor"
 	}
-	theme := tmux.ResolveSessionTheme(d.config.TownRoot, rigName, role)
+	theme := tmux.ResolveSessionTheme(d.config.TownRoot, rigName, role, parsed.AgentName)
 	_ = d.tmux.ConfigureGasTownSession(sessionName, theme, rigName, worker, role)
 }
 

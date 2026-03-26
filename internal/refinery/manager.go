@@ -226,7 +226,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	_ = t.SetEnvironment(sessionID, "GT_RUN", runID)
 
 	// Apply theme (non-fatal: theming failure doesn't affect operation)
-	theme := tmux.ResolveSessionTheme(townRoot, m.rig.Name, "refinery")
+	theme := tmux.ResolveSessionTheme(townRoot, m.rig.Name, "refinery", "")
 	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, "refinery", "refinery")
 
 	// Accept startup dialogs (workspace trust + bypass permissions) if they appear.
