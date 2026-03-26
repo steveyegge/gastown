@@ -1171,8 +1171,8 @@ func updateAgentBeadState(townRoot, agent, state, _ string) { // reason unused b
 		return
 	}
 
-	// Use bd agent state command
-	cmd := exec.Command("bd", "agent", "state", beadID, state)
+	// bd has no "agent" subcommand (gt-eii); use bd update --set-metadata.
+	cmd := exec.Command("bd", "update", beadID, "--set-metadata", "agent_state="+state) //nolint:gosec // state is an internal enum value
 	cmd.Dir = townRoot
 	_ = cmd.Run() // Best effort
 }

@@ -416,22 +416,18 @@ func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
 }
 
 // UpdateAgentState updates the agent_state field in an agent bead.
-// The structured issues.agent_state column is authoritative for witness and
-// status views, while the description field keeps `bd show` and dashboards in
-// sync. Older/newer bd binaries do not reliably expose a dedicated
-// `bd agent state` subcommand, so write the column via `bd sql` directly.
-// Then sync the description field to match (gt-ulom).
+// Updates the description's agent_state field (gt-ulom), which is what
+// bd show and dashboards read. The `bd agent state` subcommand does not
+// exist in bd, so we update the description directly (gt-eii).
 func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 	defer func() { telemetry.RecordAgentStateChange(context.Background(), id, state, nil, retErr) }()
-	if err := b.updateAgentStateColumn(id, state); err != nil {
+	// Update the description's agent_state field.
+	// Use UpdateAgentDescriptionFields to keep bd show and dashboards in sync.
+	// (gt-eii: bd has no "agent" subcommand; direct description update is the
+	// correct mechanism since GetAgentBead reads state from the description.)
+	if err := b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{AgentState: &state}); err != nil {
 		return fmt.Errorf("updating agent state: %w", err)
 	}
-
-	// Sync the description's agent_state field with the column (gt-ulom).
-	// Without this, the description stays stale (e.g., "spawning" after the
-	// column transitions to "working"), causing bd show and dashboards to
-	// display incorrect state after idle polecat reuse via gt sling.
-	_ = b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{AgentState: &state})
 
 	return nil
 }
@@ -635,9 +631,9 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 	}
 
 	fields := ParseAgentFields(issue.Description)
-	// Prefer the structured agent_state column when present.
-	// Some writers (for example, `bd agent state`) update the DB column directly
-	// without rewriting the description text, so description-derived state can be stale.
+	// Prefer the structured agent_state column when present (e.g., set via bd sql).
+	// bd show --json does not currently expose this column, so this is a no-op in
+	// practice; description-derived state is the source of truth (gt-eii).
 	if issue.AgentState != "" {
 		fields.AgentState = issue.AgentState
 	}
