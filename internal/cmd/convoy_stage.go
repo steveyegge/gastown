@@ -45,9 +45,9 @@ func init() {
 
 // StageResult is the top-level JSON output for gt convoy stage --json.
 type StageResult struct {
-	Status           string          `json:"status"`              // "staged_ready", "staged_warnings", or "error"
-	ConvoyID         string          `json:"convoy_id"`           // empty if errors prevented creation
-	Restaged         bool            `json:"restaged"`            // true if an existing convoy was updated in place
+	Status           string          `json:"status"`                       // "staged_ready", "staged_warnings", or "error"
+	ConvoyID         string          `json:"convoy_id"`                    // empty if errors prevented creation
+	Restaged         bool            `json:"restaged"`                     // true if an existing convoy was updated in place
 	ValidationBeadID string          `json:"validation_bead_id,omitempty"` // capstone validation bead (epic input only)
 	Errors           []FindingJSON   `json:"errors"`
 	Warnings         []FindingJSON   `json:"warnings"`
@@ -1417,10 +1417,11 @@ func buildGatedJSON(gated []GatedTask, dag *ConvoyDAG) []GatedTaskJSON {
 
 // bdShowResult matches the JSON output of `bd show <id> --json`.
 type bdShowResult struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Status    string `json:"status"`
-	IssueType string `json:"issue_type"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Status      string `json:"status"`
+	IssueType   string `json:"issue_type"`
+	Description string `json:"description"`
 }
 
 // bdDepResult matches the JSON output of `bd dep list <id> --json`.

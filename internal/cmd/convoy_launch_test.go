@@ -798,3 +798,70 @@ esac
 		t.Fatalf("expected no deps for tracked beads, got %d", len(deps))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// primaryRigFromDAG tests
+// ---------------------------------------------------------------------------
+
+func TestPrimaryRigFromDAG_SingleRig(t *testing.T) {
+	t.Parallel()
+	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
+		"a": {ID: "a", Type: "task", Rig: "gastown"},
+		"b": {ID: "b", Type: "task", Rig: "gastown"},
+	}}
+
+	got := primaryRigFromDAG(dag)
+	if got != "gastown" {
+		t.Errorf("primaryRigFromDAG = %q, want %q", got, "gastown")
+	}
+}
+
+func TestPrimaryRigFromDAG_MajorityWins(t *testing.T) {
+	t.Parallel()
+	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
+		"a": {ID: "a", Type: "task", Rig: "gastown"},
+		"b": {ID: "b", Type: "task", Rig: "gastown"},
+		"c": {ID: "c", Type: "task", Rig: "beads"},
+	}}
+
+	got := primaryRigFromDAG(dag)
+	if got != "gastown" {
+		t.Errorf("primaryRigFromDAG = %q, want %q", got, "gastown")
+	}
+}
+
+func TestPrimaryRigFromDAG_SkipsNonSlingable(t *testing.T) {
+	t.Parallel()
+	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
+		"a":    {ID: "a", Type: "task", Rig: "beads"},
+		"epic": {ID: "epic", Type: "epic", Rig: "gastown"},
+	}}
+
+	// Epic is not slingable, so only "beads" counts.
+	got := primaryRigFromDAG(dag)
+	if got != "beads" {
+		t.Errorf("primaryRigFromDAG = %q, want %q", got, "beads")
+	}
+}
+
+func TestPrimaryRigFromDAG_NoNodes(t *testing.T) {
+	t.Parallel()
+	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{}}
+
+	got := primaryRigFromDAG(dag)
+	if got != "" {
+		t.Errorf("primaryRigFromDAG = %q, want empty", got)
+	}
+}
+
+func TestPrimaryRigFromDAG_NoRigAssigned(t *testing.T) {
+	t.Parallel()
+	dag := &ConvoyDAG{Nodes: map[string]*ConvoyDAGNode{
+		"a": {ID: "a", Type: "task", Rig: ""},
+	}}
+
+	got := primaryRigFromDAG(dag)
+	if got != "" {
+		t.Errorf("primaryRigFromDAG = %q, want empty", got)
+	}
+}
