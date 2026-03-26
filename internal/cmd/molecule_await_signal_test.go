@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -296,5 +298,43 @@ func TestBackoffWindowResumption(t *testing.T) {
 				t.Errorf("timeout = %v, want ~%v (diff: %v)", timeout, tt.wantApproxTime, diff)
 			}
 		})
+	}
+}
+
+// TestUpdateAgentHeartbeat_UsesBdUpdateNotBdAgent is a regression test for gt-eii.
+// updateAgentHeartbeat must NOT call `bd agent heartbeat` (which doesn't exist in bd).
+// It should call `bd update --set-metadata last_activity=...` instead.
+func TestUpdateAgentHeartbeat_UsesBdUpdateNotBdAgent(t *testing.T) {
+	// Create a temp bin dir with a bd stub that records its args.
+	binDir := t.TempDir()
+	argsFile := filepath.Join(binDir, "bd_args.txt")
+	stub := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" >> %q\n", argsFile)
+	stubPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(stubPath, []byte(stub), 0o755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+origPath)
+
+	beadsDir := t.TempDir()
+	err := updateAgentHeartbeat("gt-gastown-witness", beadsDir)
+	if err != nil {
+		t.Fatalf("updateAgentHeartbeat returned unexpected error: %v", err)
+	}
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("bd stub was not invoked (args file not created): %v", err)
+	}
+
+	args := strings.TrimSpace(string(raw))
+	// Must NOT call bd agent heartbeat
+	if strings.Contains(args, "\nagent\n") {
+		t.Errorf("updateAgentHeartbeat called `bd agent ...` which does not exist in bd (gt-eii regression):\n%s", args)
+	}
+	// Must use bd update with --set-metadata last_activity=
+	if !strings.Contains(args, "update") || !strings.Contains(args, "--set-metadata") || !strings.Contains(args, "last_activity=") {
+		t.Errorf("updateAgentHeartbeat did not call `bd update --set-metadata last_activity=...`:\n%s", args)
 	}
 }

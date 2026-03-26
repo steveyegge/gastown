@@ -2,6 +2,10 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -224,5 +228,40 @@ func TestDeaconStatusJSON_LastActionOmitEmpty(t *testing.T) {
 	hb := m["heartbeat"].(map[string]interface{})
 	if _, ok := hb["last_action"]; ok {
 		t.Error("last_action should be omitted when empty")
+	}
+}
+
+// TestUpdateAgentBeadState_UsesBdUpdateNotBdAgent is a regression test for gt-eii.
+// updateAgentBeadState must NOT call `bd agent state` (which doesn't exist in bd).
+// It should call `bd update --set-metadata agent_state=...` instead.
+func TestUpdateAgentBeadState_UsesBdUpdateNotBdAgent(t *testing.T) {
+	// Create a temp bin dir with a bd stub that records its args.
+	binDir := t.TempDir()
+	argsFile := filepath.Join(binDir, "bd_args.txt")
+	stub := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" >> %q\n", argsFile)
+	stubPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(stubPath, []byte(stub), 0o755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+origPath)
+
+	townRoot := t.TempDir()
+	updateAgentBeadState(townRoot, "gastown/polecats/chrome", "killed", "test reason")
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("bd stub was not invoked (args file not created): %v", err)
+	}
+
+	args := strings.TrimSpace(string(raw))
+	// Must NOT call bd agent state
+	if strings.Contains(args, "\nagent\n") {
+		t.Errorf("updateAgentBeadState called `bd agent ...` which does not exist in bd (gt-eii regression):\n%s", args)
+	}
+	// Must use bd update with --set-metadata
+	if !strings.Contains(args, "update") || !strings.Contains(args, "--set-metadata") || !strings.Contains(args, "agent_state=killed") {
+		t.Errorf("updateAgentBeadState did not call `bd update --set-metadata agent_state=killed`:\n%s", args)
 	}
 }

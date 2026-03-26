@@ -205,6 +205,10 @@ func TestGetAgentBead_FallsBackToDescriptionAgentState(t *testing.T) {
 	}
 }
 
+// TestUpdateAgentState_UsesSQLAndDoesNotCallMissingBDSubcommand verifies that
+// UpdateAgentState does NOT call the missing `bd agent state` subcommand and
+// DOES update the description field (gt-eii: SQL column path removed in favour
+// of description-only updates via UpdateAgentDescriptionFields).
 func TestUpdateAgentState_UsesSQLAndDoesNotCallMissingBDSubcommand(t *testing.T) {
 	tmpDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755); err != nil {
@@ -229,15 +233,15 @@ func TestUpdateAgentState_UsesSQLAndDoesNotCallMissingBDSubcommand(t *testing.T)
 	}
 	logOutput := string(logBytes)
 
-	wantSQL := "sql UPDATE issues SET agent_state = 'working' WHERE id = 'gt-gastown-polecat-nux'"
-	if !strings.Contains(logOutput, wantSQL) {
-		t.Fatalf("expected SQL agent_state update in log, got:\n%s", logOutput)
+	// gt-eii: SQL column path removed — no direct bd sql call expected.
+	if strings.Contains(logOutput, "sql UPDATE issues SET agent_state") {
+		t.Fatalf("unexpected SQL agent_state update (removed in gt-eii) in log:\n%s", logOutput)
 	}
 	if strings.Contains(logOutput, "agent state gt-gastown-polecat-nux working") {
 		t.Fatalf("unexpected deprecated bd agent state call in log:\n%s", logOutput)
 	}
 	if !strings.Contains(logOutput, "update gt-gastown-polecat-nux --description=") {
-		t.Fatalf("expected description sync update in log, got:\n%s", logOutput)
+		t.Fatalf("expected description update in log, got:\n%s", logOutput)
 	}
 }
 
@@ -333,4 +337,73 @@ func TestMergeAgentBeadSources(t *testing.T) {
 			t.Fatalf("len(merged) = %d, want 0", len(merged))
 		}
 	})
+}
+
+// TestUpdateAgentState_UsesDescriptionNotBdAgentState is a regression test for gt-eii.
+// UpdateAgentState must NOT call `bd agent state` (which doesn't exist in bd)
+// and instead use UpdateAgentDescriptionFields (i.e., bd update --description).
+func TestUpdateAgentState_UsesDescriptionNotBdAgentState(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script mock not supported on windows")
+	}
+
+	tmpDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	argsFile := filepath.Join(tmpDir, "bd_calls.txt")
+	showOutput := `[{"id":"gt-gastown-polecat-nux","title":"gt-gastown-polecat-nux","issue_type":"agent","labels":["gt:agent"],"description":"gt-gastown-polecat-nux\n\nrole_type: polecat\nrig: gastown\nagent_state: spawning\nhook_bead: null\ncleanup_status: null\nactive_mr: null\nnotification_level: null"}]`
+
+	// Mock bd that records all calls and serves show output.
+	// Returns exit code 1 if called with "agent" subcommand (regression guard).
+	script := `#!/bin/sh
+printf '%s\n' "$@" >> ` + argsFile + `
+printf '\n---\n' >> ` + argsFile + `
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    --*) ;;
+    *) cmd="$arg"; break ;;
+  esac
+done
+case "$cmd" in
+  agent)
+    # bd has no "agent" subcommand — fail to catch regressions
+    echo "Error: unknown command \"agent\" for \"bd\"" >&2
+    exit 1
+    ;;
+  version)
+    exit 0
+    ;;
+  show)
+    printf '%s\n' "$MOCK_BD_SHOW_OUTPUT"
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`
+	scriptPath := filepath.Join(t.TempDir(), "bd")
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write mock bd: %v", err)
+	}
+	t.Setenv("PATH", filepath.Dir(scriptPath)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("MOCK_BD_SHOW_OUTPUT", showOutput)
+
+	bd := NewIsolated(tmpDir)
+	err := bd.UpdateAgentState("gt-gastown-polecat-nux", "working")
+	if err != nil {
+		t.Fatalf("UpdateAgentState returned unexpected error: %v", err)
+	}
+
+	// Verify that bd was NOT called with "agent" subcommand.
+	calls, readErr := os.ReadFile(argsFile)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatalf("reading bd calls file: %v", readErr)
+	}
+	if strings.Contains(string(calls), "\nagent\n") {
+		t.Errorf("UpdateAgentState called `bd agent ...` which does not exist in bd (gt-eii regression):\n%s", calls)
+	}
 }
