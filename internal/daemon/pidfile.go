@@ -7,7 +7,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // PID file format: "PID\nNONCE"
@@ -16,8 +15,9 @@ import (
 // which guards against PID reuse without fragile ps command-line matching.
 
 // writePIDFile writes a PID file with a unique nonce for ownership verification.
-//nolint:unparam // nonce return value is used by tests (excluded from lint)
 // Returns the nonce written, which is only needed for testing.
+//
+//nolint:unparam // nonce return value is used by tests (excluded from lint)
 func writePIDFile(path string, pid int) (string, error) {
 	nonce, err := generateNonce()
 	if err != nil {
@@ -80,7 +80,7 @@ func verifyPIDOwnership(path string) (pid int, alive bool, err error) {
 		return pid, false, nil
 	}
 
-	if err := process.Signal(syscall.Signal(0)); err != nil {
+	if !isProcessAlive(process) {
 		// Process not running — stale PID file
 		return pid, false, nil
 	}

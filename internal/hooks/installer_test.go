@@ -261,6 +261,23 @@ func TestSyncForRole_JSONWhitespaceInsensitive(t *testing.T) {
 	}
 }
 
+func TestSubstituteGTBinary_JSONEscapesWindowsPath(t *testing.T) {
+	template, err := templateFS.ReadFile("templates/gemini/settings-interactive.json")
+	if err != nil {
+		t.Fatalf("reading template: %v", err)
+	}
+
+	got := substituteGTBinary(template, "settings.json", `C:\Program Files\Gastown\gt.exe`)
+
+	var parsed any
+	if err := json.Unmarshal(got, &parsed); err != nil {
+		t.Fatalf("substituted JSON should stay valid: %v", err)
+	}
+	if !bytes.Contains(got, []byte(`C:\\Program Files\\Gastown\\gt.exe`)) {
+		t.Fatalf("expected escaped Windows path in JSON output, got %q", string(got))
+	}
+}
+
 func TestSyncForRole_GeminiWithGTBinSubstitution(t *testing.T) {
 	dir := t.TempDir()
 
@@ -382,12 +399,11 @@ func TestInstallForRole_GeminiRoleAware(t *testing.T) {
 	}
 
 	got, _ := os.ReadFile(filepath.Join(dir, ".gemini", "settings.json"))
-	want, _ := templateFS.ReadFile("templates/gemini/settings-autonomous.json")
-	// Gemini templates contain {{GT_BIN}} which gets resolved at install time.
-	// Apply the same substitution to the expected content for comparison.
-	gtBin := resolveGTBinary()
-	wantResolved := strings.ReplaceAll(string(want), "{{GT_BIN}}", gtBin)
-	if string(got) != wantResolved {
+	want, err := ComputeExpectedTemplate("gemini", "settings.json", "witness")
+	if err != nil {
+		t.Fatalf("ComputeExpectedTemplate(gemini, witness): %v", err)
+	}
+	if !bytes.Equal(got, want) {
 		t.Error("gemini autonomous: content mismatch")
 	}
 }
