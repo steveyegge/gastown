@@ -847,6 +847,25 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			}
 		}
 
+		// 4. Batch-PR convoy: route MR to convoy's integration branch (gt-n9g).
+		// batch-pr convoys accumulate polecat work on an integration branch
+		// (created at convoy launch, gt-3ya). Each polecat MR targets that
+		// branch instead of main, so work accumulates for batch review.
+		if target == defaultBranch && convoyInfo != nil && convoyInfo.MergeStrategy == "batch-pr" {
+			intBranch := convoyInfo.IntegrationBranch
+			if intBranch == "" && convoyInfo.ID != "" {
+				// Primary path (getConvoyInfoFromIssue) doesn't carry integration branch.
+				// Fall back to full convoy bead lookup for the branch name.
+				if fullInfo := getConvoyInfoForIssue(issueID); fullInfo != nil {
+					intBranch = fullInfo.IntegrationBranch
+				}
+			}
+			if intBranch != "" {
+				target = intBranch
+				fmt.Printf("  Target branch: %s (batch-pr convoy %s)\n", target, convoyInfo.ID)
+			}
+		}
+
 		// Get source issue for priority inheritance
 		var priority int
 		if donePriority >= 0 {

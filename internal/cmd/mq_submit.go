@@ -202,6 +202,26 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
+
+		// Batch-PR convoy: route MR to convoy's integration branch (gt-n9g).
+		if target == defaultBranch {
+			convoyInfo := getConvoyInfoFromIssue(issueID, cwd)
+			if convoyInfo == nil {
+				convoyInfo = getConvoyInfoForIssue(issueID)
+			}
+			if convoyInfo != nil && convoyInfo.MergeStrategy == "batch-pr" {
+				intBranch := convoyInfo.IntegrationBranch
+				if intBranch == "" && convoyInfo.ID != "" {
+					if fullInfo := getConvoyInfoForIssue(issueID); fullInfo != nil {
+						intBranch = fullInfo.IntegrationBranch
+					}
+				}
+				if intBranch != "" {
+					target = intBranch
+					fmt.Printf("  Target branch: %s (batch-pr convoy %s)\n", target, convoyInfo.ID)
+				}
+			}
+		}
 	}
 
 	// Get source issue for priority inheritance

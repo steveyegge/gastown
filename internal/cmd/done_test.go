@@ -775,6 +775,13 @@ func TestConvoyMergeStrategyBranching(t *testing.T) {
 			wantMR:        false,
 			wantDirect:    false,
 		},
+		{
+			name:          "batch-pr strategy - push and MR (targets integration branch)",
+			mergeStrategy: "batch-pr",
+			wantPush:      true,
+			wantMR:        true,
+			wantDirect:    false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -792,7 +799,8 @@ func TestConvoyMergeStrategyBranching(t *testing.T) {
 				shouldPushDirect = true
 				shouldCreateMR = false
 			default:
-				// "mr" or empty = default behavior
+				// "mr", "batch-pr", or empty = default push+MR behavior
+				// (batch-pr differs only in target branch, not in push/MR flow)
 			}
 
 			if shouldPush != tt.wantPush {
@@ -880,6 +888,11 @@ func TestConvoyMergeFromFields(t *testing.T) {
 			description: "Convoy tracking 1 issues\nMerge: direct\nNotify: mayor/",
 			want:        "direct",
 		},
+		{
+			name:        "batch-pr strategy",
+			description: "Convoy tracking 5 issues\nMerge: batch-pr\nOwner: mayor/",
+			want:        "batch-pr",
+		},
 	}
 
 	for _, tt := range tests {
@@ -889,6 +902,114 @@ func TestConvoyMergeFromFields(t *testing.T) {
 				t.Errorf("convoyMergeFromFields() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestBatchPRTargetBranchRouting verifies that batch-pr convoys route MRs
+// to the convoy's integration branch instead of the default branch.
+func TestBatchPRTargetBranchRouting(t *testing.T) {
+	tests := []struct {
+		name              string
+		defaultBranch     string
+		convoyInfo        *ConvoyInfo
+		wantTarget        string
+		wantTargetChanged bool
+	}{
+		{
+			name:          "batch-pr with integration branch",
+			defaultBranch: "main",
+			convoyInfo: &ConvoyInfo{
+				ID:                "hq-cv-abc",
+				MergeStrategy:     "batch-pr",
+				IntegrationBranch: "convoy/hq-cv-abc",
+			},
+			wantTarget:        "convoy/hq-cv-abc",
+			wantTargetChanged: true,
+		},
+		{
+			name:          "batch-pr without integration branch",
+			defaultBranch: "main",
+			convoyInfo: &ConvoyInfo{
+				ID:            "hq-cv-xyz",
+				MergeStrategy: "batch-pr",
+			},
+			wantTarget:        "main",
+			wantTargetChanged: false,
+		},
+		{
+			name:          "mr strategy ignores integration branch",
+			defaultBranch: "main",
+			convoyInfo: &ConvoyInfo{
+				ID:                "hq-cv-abc",
+				MergeStrategy:     "mr",
+				IntegrationBranch: "convoy/hq-cv-abc",
+			},
+			wantTarget:        "main",
+			wantTargetChanged: false,
+		},
+		{
+			name:          "nil convoy info",
+			defaultBranch: "main",
+			convoyInfo:    nil,
+			wantTarget:    "main",
+		},
+		{
+			name:          "target already overridden skips batch-pr",
+			defaultBranch: "main",
+			convoyInfo: &ConvoyInfo{
+				ID:                "hq-cv-abc",
+				MergeStrategy:     "batch-pr",
+				IntegrationBranch: "convoy/hq-cv-abc",
+			},
+			// Simulating target already set to non-default by formula_vars
+			wantTarget:        "feat/my-branch",
+			wantTargetChanged: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the batch-pr target routing logic from runDone
+			target := tt.defaultBranch
+			if tt.name == "target already overridden skips batch-pr" {
+				target = "feat/my-branch" // pre-set by formula_vars
+			}
+
+			targetChanged := false
+			if target == tt.defaultBranch && tt.convoyInfo != nil && tt.convoyInfo.MergeStrategy == "batch-pr" {
+				intBranch := tt.convoyInfo.IntegrationBranch
+				if intBranch != "" {
+					target = intBranch
+					targetChanged = true
+				}
+			}
+
+			if target != tt.wantTarget {
+				t.Errorf("target = %q, want %q", target, tt.wantTarget)
+			}
+			if targetChanged != tt.wantTargetChanged {
+				t.Errorf("targetChanged = %v, want %v", targetChanged, tt.wantTargetChanged)
+			}
+		})
+	}
+}
+
+// TestConvoyInfoIntegrationBranch verifies that ConvoyInfo correctly stores
+// the integration branch field.
+func TestConvoyInfoIntegrationBranch(t *testing.T) {
+	info := &ConvoyInfo{
+		ID:                "hq-cv-abc",
+		MergeStrategy:     "batch-pr",
+		IntegrationBranch: "convoy/hq-cv-abc",
+	}
+
+	if info.IntegrationBranch != "convoy/hq-cv-abc" {
+		t.Errorf("IntegrationBranch = %q, want %q", info.IntegrationBranch, "convoy/hq-cv-abc")
+	}
+
+	// Verify IsOwnedDirect still works correctly
+	if info.IsOwnedDirect() {
+		t.Error("batch-pr convoy should not be IsOwnedDirect")
 	}
 }
 
