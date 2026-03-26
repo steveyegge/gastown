@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/steveyegge/gastown/internal/hookutil"
 )
@@ -150,7 +151,9 @@ func resolveAndSubstitute(provider, hooksFile, role string) ([]byte, error) {
 
 	if bytes.Contains(content, []byte("{{GT_BIN}}")) {
 		gtBin := resolveGTBinary()
-		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBin))
+		// Escape backslashes for JSON string context (required on Windows paths).
+		gtBinJSON := strings.ReplaceAll(gtBin, `\`, `\\`)
+		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBinJSON))
 	}
 
 	return content, nil

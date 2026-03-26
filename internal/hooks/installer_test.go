@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -230,12 +231,21 @@ func TestSyncForRole_JSONWhitespaceInsensitive(t *testing.T) {
 		t.Fatalf("reading created file: %v", err)
 	}
 
-	// Add extra whitespace — structurally identical JSON, different bytes
-	reformatted := strings.ReplaceAll(string(original), ":", " : ")
-	if string(original) == reformatted {
+	// Reformat with different whitespace by round-tripping through json.MarshalIndent.
+	// This changes indentation structure without corrupting string values (safe on Windows
+	// where strings.ReplaceAll(":", " : ") would corrupt drive letters like C: → C :).
+	var parsed interface{}
+	if err := json.Unmarshal(original, &parsed); err != nil {
+		t.Fatalf("parsing original JSON: %v", err)
+	}
+	reformatted, err := json.MarshalIndent(parsed, "", "    ")
+	if err != nil {
+		t.Fatalf("reformatting JSON: %v", err)
+	}
+	if string(original) == string(reformatted) {
 		t.Fatal("reformatted content should differ from original bytes")
 	}
-	if err := os.WriteFile(targetPath, []byte(reformatted), 0600); err != nil {
+	if err := os.WriteFile(targetPath, reformatted, 0600); err != nil {
 		t.Fatalf("writing reformatted file: %v", err)
 	}
 
@@ -265,9 +275,10 @@ func TestSyncForRole_GeminiWithGTBinSubstitution(t *testing.T) {
 	if strings.Contains(string(got), "{{GT_BIN}}") {
 		t.Error("{{GT_BIN}} placeholder was not substituted")
 	}
-	// Verify the resolved binary path is present
+	// Verify the resolved binary path is present (JSON-escaped for Windows compatibility).
 	gtBin := resolveGTBinary()
-	if !strings.Contains(string(got), gtBin) {
+	gtBinJSON := strings.ReplaceAll(gtBin, `\`, `\\`)
+	if !strings.Contains(string(got), gtBinJSON) {
 		t.Errorf("expected resolved gt binary %q in output", gtBin)
 	}
 }
@@ -372,9 +383,10 @@ func TestInstallForRole_GeminiRoleAware(t *testing.T) {
 	got, _ := os.ReadFile(filepath.Join(dir, ".gemini", "settings.json"))
 	want, _ := templateFS.ReadFile("templates/gemini/settings-autonomous.json")
 	// Gemini templates contain {{GT_BIN}} which gets resolved at install time.
-	// Apply the same substitution to the expected content for comparison.
+	// Apply the same substitution (with JSON escaping) to the expected content for comparison.
 	gtBin := resolveGTBinary()
-	wantResolved := strings.ReplaceAll(string(want), "{{GT_BIN}}", gtBin)
+	gtBinJSON := strings.ReplaceAll(gtBin, `\`, `\\`)
+	wantResolved := strings.ReplaceAll(string(want), "{{GT_BIN}}", gtBinJSON)
 	if string(got) != wantResolved {
 		t.Error("gemini autonomous: content mismatch")
 	}
