@@ -596,3 +596,83 @@ func TestDetectIntegrationBranch(t *testing.T) {
 		}
 	})
 }
+
+func TestGetPRURLField(t *testing.T) {
+	tests := []struct {
+		name string
+		desc string
+		want string
+	}{
+		{"empty", "", ""},
+		{"no field", "some description", ""},
+		{"present", "pr_url: https://github.com/org/repo/pull/42", "https://github.com/org/repo/pull/42"},
+		{"mixed with other fields", "owner: mayor/\npr_url: https://example.com/pr/1\nmerge: direct", "https://example.com/pr/1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := GetPRURLField(tt.desc); got != tt.want {
+				t.Errorf("GetPRURLField() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetPRNumberField(t *testing.T) {
+	tests := []struct {
+		name string
+		desc string
+		want string
+	}{
+		{"empty", "", ""},
+		{"no field", "description without pr number", ""},
+		{"present", "pr_number: 42", "42"},
+		{"mixed", "integration_branch: foo\npr_number: 99\nowner: me/", "99"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := GetPRNumberField(tt.desc); got != tt.want {
+				t.Errorf("GetPRNumberField() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAddPRURLField(t *testing.T) {
+	tests := []struct {
+		name string
+		desc string
+		url  string
+		want string
+	}{
+		{"empty desc", "", "https://github.com/org/repo/pull/1", "pr_url: https://github.com/org/repo/pull/1"},
+		{"adds to existing", "owner: me/", "https://example.com/pr", "pr_url: https://example.com/pr\nowner: me/"},
+		{"updates existing", "pr_url: old-url\nother: data", "new-url", "pr_url: new-url\nother: data"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := AddPRURLField(tt.desc, tt.url); got != tt.want {
+				t.Errorf("AddPRURLField() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAddPRNumberField(t *testing.T) {
+	tests := []struct {
+		name string
+		desc string
+		num  int
+		want string
+	}{
+		{"empty desc", "", 42, "pr_number: 42"},
+		{"adds to existing", "owner: me/", 7, "pr_number: 7\nowner: me/"},
+		{"updates existing", "pr_number: 1\nother: data", 99, "pr_number: 99\nother: data"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := AddPRNumberField(tt.desc, tt.num); got != tt.want {
+				t.Errorf("AddPRNumberField() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

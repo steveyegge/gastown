@@ -223,6 +223,119 @@ func TestFindRigWithRefinery_SkipsNonRigDirs(t *testing.T) {
 	}
 }
 
+func TestParseGitRemoteURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		url       string
+		wantOwner string
+		wantRepo  string
+		wantErr   bool
+	}{
+		{
+			name:      "HTTPS with .git suffix",
+			url:       "https://github.com/steveyegge/gastown.git",
+			wantOwner: "steveyegge",
+			wantRepo:  "gastown",
+		},
+		{
+			name:      "HTTPS without .git suffix",
+			url:       "https://github.com/steveyegge/gastown",
+			wantOwner: "steveyegge",
+			wantRepo:  "gastown",
+		},
+		{
+			name:      "SSH format",
+			url:       "git@github.com:steveyegge/gastown.git",
+			wantOwner: "steveyegge",
+			wantRepo:  "gastown",
+		},
+		{
+			name:      "SSH without .git suffix",
+			url:       "git@github.com:steveyegge/gastown",
+			wantOwner: "steveyegge",
+			wantRepo:  "gastown",
+		},
+		{
+			name:      "HTTPS with trailing whitespace",
+			url:       "  https://github.com/org/repo.git  ",
+			wantOwner: "org",
+			wantRepo:  "repo",
+		},
+		{
+			name:    "invalid URL",
+			url:     "not-a-url",
+			wantErr: true,
+		},
+		{
+			name:    "empty URL",
+			url:     "",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			owner, repo, err := parseGitRemoteURL(tt.url)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got owner=%q repo=%q", owner, repo)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if owner != tt.wantOwner {
+				t.Errorf("owner = %q, want %q", owner, tt.wantOwner)
+			}
+			if repo != tt.wantRepo {
+				t.Errorf("repo = %q, want %q", repo, tt.wantRepo)
+			}
+		})
+	}
+}
+
+func TestConvertDraftPR_MissingPRNumber(t *testing.T) {
+	err := convertDraftPR("no pr_number here", t.TempDir(), "hq-test", nopLogger)
+	if err == nil {
+		t.Error("expected error for missing pr_number")
+	}
+	if !strings.Contains(err.Error(), "no pr_number") {
+		t.Errorf("error should mention missing pr_number, got: %v", err)
+	}
+}
+
+func TestConvertDraftPR_InvalidPRNumber(t *testing.T) {
+	err := convertDraftPR("pr_number: abc", t.TempDir(), "hq-test", nopLogger)
+	if err == nil {
+		t.Error("expected error for invalid pr_number")
+	}
+	if !strings.Contains(err.Error(), "invalid pr_number") {
+		t.Errorf("error should mention invalid pr_number, got: %v", err)
+	}
+}
+
+func TestConvertDraftPR_MissingRig(t *testing.T) {
+	// townRoot with no rig directories
+	townRoot := t.TempDir()
+	err := convertDraftPR("pr_number: 42", townRoot, "hq-test", nopLogger)
+	if err == nil {
+		t.Error("expected error for missing rig")
+	}
+	if !strings.Contains(err.Error(), "cannot find rig") {
+		t.Errorf("error should mention missing rig, got: %v", err)
+	}
+}
+
+func TestNotifyConvoyOwner_NilFields(t *testing.T) {
+	// Should not panic with nil fields — just nudges crew/overseer.
+	// We can't easily verify the nudge was sent without a real gt binary,
+	// but we can verify it doesn't crash.
+	notifyConvoyOwner(nil, "", t.TempDir(), "hq-test", nopLogger, "false")
+}
+
+var nopLogger = func(format string, args ...interface{}) {}
+
 // initTestRepoWithBranch creates a temporary git repo with main and a named branch,
 // backed by a bare "origin" remote so fetch/pull operations work.
 func initTestRepoWithBranch(t *testing.T, branchName string) string {
