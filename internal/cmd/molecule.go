@@ -31,6 +31,7 @@ VIEWING YOUR WORK:
 
 WORKING ON STEPS:
   gt mol step done     Complete current step (auto-continues)
+  gt mol step fail     Mark step as failed and run formula rollback steps
 
 LIFECYCLE:
   gt mol attach        Attach molecule to your hook
@@ -252,6 +253,7 @@ func init() {
 
 	// Add step subcommand with its children
 	moleculeStepCmd.AddCommand(moleculeStepDoneCmd)
+	moleculeStepCmd.AddCommand(moleculeStepFailCmd)
 	moleculeCmd.AddCommand(moleculeStepCmd)
 
 	// Add subcommands (agent-specific operations only)

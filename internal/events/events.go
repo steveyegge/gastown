@@ -74,6 +74,12 @@ const (
 	TypeSchedulerDispatch       = "scheduler_dispatch"        // Bead dispatched from scheduler
 	TypeSchedulerDispatchFailed = "scheduler_dispatch_failed" // Bead dispatch failed (requeued)
 	TypeSchedulerCloseRetry     = "scheduler_close_retry"     // Context close needed last-resort attempt
+
+	// Rollback events (emitted by gt mol step fail)
+	TypeStepFailed      = "step_failed"      // A formula step was marked as failed
+	TypeRollbackStarted = "rollback_started" // Rollback sequence initiated after step failure
+	TypeRollbackStep    = "rollback_step"    // Wide event: one compensating action executed during rollback
+	TypeRollbackDone    = "rollback_done"    // Rollback sequence completed (all steps executed)
 )
 
 // EventsFile is the name of the raw events log.

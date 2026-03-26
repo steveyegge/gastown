@@ -1,0 +1,51 @@
+description = """
+Test formula for convoy rollback validation.
+
+This formula is used in automated tests to verify that rollback_steps are
+executed in reverse order when a workflow step fails (via gt mol step fail).
+
+The formula deliberately defines a failing step so tests can trigger rollback
+and verify event emission + reverse execution order.
+
+DO NOT use this formula in production workflows."""
+formula = "test-rollback-failure"
+version = 1
+
+[[steps]]
+id = "setup"
+title = "Setup: prepare environment"
+description = """
+Initialize the test environment.
+Creates a marker file to prove the step ran."""
+run = "echo 'setup ran' > /tmp/test-rollback-setup.txt"
+
+[[steps]]
+id = "work"
+title = "Work: perform main task (intentional failure)"
+needs = ["setup"]
+description = """
+This step is designed to fail in tests.
+When this step fails, rollback steps should run in reverse."""
+
+[[steps]]
+id = "finalize"
+title = "Finalize: complete the workflow"
+needs = ["work"]
+description = "This step should never run if 'work' fails."
+
+[[rollback_steps]]
+id = "undo-finalize"
+title = "Undo finalize (no-op: step never ran)"
+description = "Compensating action for the finalize step."
+
+[[rollback_steps]]
+id = "undo-work"
+title = "Undo work: clean up partial work"
+description = "Remove any partial artifacts from the work step."
+run = "rm -f /tmp/test-rollback-work-partial.txt && echo 'undo-work executed'"
+
+[[rollback_steps]]
+id = "undo-setup"
+title = "Undo setup: tear down environment"
+description = "Remove the setup marker file."
+run = "rm -f /tmp/test-rollback-setup.txt && echo 'undo-setup executed'"

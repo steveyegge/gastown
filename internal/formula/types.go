@@ -42,8 +42,9 @@ type Formula struct {
 	Synthesis *Synthesis        `toml:"synthesis"`
 
 	// Workflow-specific
-	Steps []Step           `toml:"steps"`
-	Vars  map[string]Var   `toml:"vars"`
+	Steps         []Step           `toml:"steps"`
+	Vars          map[string]Var   `toml:"vars"`
+	RollbackSteps []RollbackStep   `toml:"rollback_steps"` // Compensating actions run in reverse on step failure.
 
 	// Composition-specific
 	Extends []string      `toml:"extends"` // Parent formula names to inherit steps from.
@@ -113,6 +114,17 @@ type Synthesis struct {
 	Title       string   `toml:"title"`
 	Description string   `toml:"description"`
 	DependsOn   []string `toml:"depends_on"`
+}
+
+// RollbackStep represents a compensating action in a formula's rollback_steps list.
+// When a workflow step fails and gt mol step fail is invoked, the rollback steps
+// are executed in reverse order (last defined → first defined) to undo work already done.
+// A wide event is logged for each rollback step executed.
+type RollbackStep struct {
+	ID          string `toml:"id"`
+	Title       string `toml:"title"`
+	Description string `toml:"description"`
+	Run         string `toml:"run"` // Optional shell command to execute as the compensating action.
 }
 
 // Step represents a sequential step in a workflow formula.
