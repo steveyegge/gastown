@@ -220,7 +220,7 @@ func handleChangesRequested(ctx context.Context, hqBeads *beads.Beads, townRoot 
 		"## Review Comments\n%s",
 		convoy.ID, prNumber, prURL, integrationBranch, convoy.ID, commentSummary)
 
-	feedbackID, err := hqBeads.Create(beads.CreateOptions{
+	feedbackIssue, err := hqBeads.Create(beads.CreateOptions{
 		Title:       title,
 		Type:        "task",
 		Priority:    2,
@@ -230,6 +230,7 @@ func handleChangesRequested(ctx context.Context, hqBeads *beads.Beads, townRoot 
 		logger("ReviewMonitor: convoy %s: failed to create feedback bead: %v", convoy.ID, err)
 		return
 	}
+	feedbackID := feedbackIssue.ID
 	logger("ReviewMonitor: convoy %s: created feedback bead %s", convoy.ID, feedbackID)
 
 	// Dispatch the feedback bead to a rig for a polecat to pick up.
