@@ -25,6 +25,10 @@
       {
         "command": "gastown.loadSession",
         "title": "Gas Town: Load Previous Session"
+      },
+      {
+        "command": "gastown.getSessionId",
+        "title": "Gas Town: Get Session ID"
       }
     ],
     "configuration": {

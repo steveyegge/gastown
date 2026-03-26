@@ -10,6 +10,9 @@
  * - hook-emit           : Emit arbitrary event to .events.jsonl
  * - hook-mail-send      : Send inter-agent mail (same as Claude's mail hook)
  * - hook-mail-check     : Check mailbox for incoming messages
+ * - hook-nudge-check    : Drain pending nudges for a headless session
+ * - hook-nudge-pending  : Check nudge count without draining
+ * - hook-heartbeat      : Write liveness heartbeat for headless session
  * - seance-replay       : Load context from a previous session for recovery
  * - seance-list         : List discoverable sessions from .events.jsonl
  */
@@ -29,6 +32,9 @@ function townRoot(): string {
 const EVENTS_FILE = () => path.join(townRoot(), ".events.jsonl");
 const SESSIONS_DIR = () => path.join(townRoot(), "sessions");
 const MAIL_DIR = () => path.join(townRoot(), "mail");
+const NUDGE_QUEUE_DIR = () => path.join(townRoot(), ".runtime", "nudge_queue");
+const HEADLESS_SESSIONS_DIR = () => path.join(townRoot(), ".runtime", "sessions");
+const HEARTBEAT_DIR = () => path.join(townRoot(), ".runtime", "heartbeat");
 
 // ── Event helpers ─────────────────────────────────────────────────────────────
 
@@ -327,6 +333,106 @@ export function createServer(): McpServer {
       }
 
       return { content: [{ type: "text", text: output.join("\n") }] };
+    },
+  );
+
+  // ── hook-nudge-check ───────────────────────────────────────────────────
+  server.tool(
+    "hook-nudge-check",
+    "Check and drain the nudge queue for a headless session. Returns pending nudges and removes them from the queue. " +
+    "Headless agents (GHCP) should call this periodically or when prompted to check for incoming messages.",
+    {
+      sessionId: z.string().describe("Session ID to check (e.g. ghcp-1234567890-abc12)"),
+    },
+    async ({ sessionId }): Promise<CallToolResult> => {
+      const queueDir = path.join(NUDGE_QUEUE_DIR(), sessionId);
+      try {
+        await fs.access(queueDir);
+      } catch {
+        return { content: [{ type: "text", text: "No pending nudges." }] };
+      }
+      const files = (await fs.readdir(queueDir))
+        .filter((f) => f.endsWith(".json"))
+        .sort();
+      if (files.length === 0) {
+        return { content: [{ type: "text", text: "No pending nudges." }] };
+      }
+
+      const nudges: unknown[] = [];
+      for (const f of files) {
+        const filePath = path.join(queueDir, f);
+        try {
+          const raw = await fs.readFile(filePath, "utf-8");
+          const nudge = JSON.parse(raw);
+
+          // Skip expired nudges
+          if (nudge.expires_at && new Date(nudge.expires_at) < new Date()) {
+            await fs.unlink(filePath).catch(() => {});
+            continue;
+          }
+
+          // Claim the nudge (rename .json → .claimed to prevent double delivery)
+          const claimedPath = filePath.replace(".json", `.claimed.${Date.now()}`);
+          await fs.rename(filePath, claimedPath).catch(() => {});
+
+          // Clean up the claimed file after reading
+          await fs.unlink(claimedPath).catch(() => {});
+
+          nudges.push(nudge);
+        } catch {
+          // Skip corrupt files
+        }
+      }
+
+      if (nudges.length === 0) {
+        return { content: [{ type: "text", text: "No pending nudges (all expired)." }] };
+      }
+
+      return { content: [{ type: "text", text: JSON.stringify(nudges, null, 2) }] };
+    },
+  );
+
+  // ── hook-heartbeat ─────────────────────────────────────────────────────
+  server.tool(
+    "hook-heartbeat",
+    "Write a heartbeat file for a headless session so Gas Town's daemon and witness " +
+    "can detect session liveness. Call this periodically (e.g. every 60s) from a headless agent.",
+    {
+      sessionId: z.string().describe("Session ID for this headless session"),
+      status: z.enum(["active", "idle", "busy"]).optional().describe("Current agent status (default: active)"),
+    },
+    async ({ sessionId, status }): Promise<CallToolResult> => {
+      const dir = HEARTBEAT_DIR();
+      await fs.mkdir(dir, { recursive: true });
+      const hbPath = path.join(dir, `${sessionId}.json`);
+      const heartbeat = {
+        session_id: sessionId,
+        timestamp: new Date().toISOString(),
+        status: status ?? "active",
+        platform: "vscode-copilot",
+        pid: process.pid,
+      };
+      await fs.writeFile(hbPath, JSON.stringify(heartbeat) + "\n", "utf-8");
+      return { content: [{ type: "text", text: `Heartbeat written for ${sessionId}` }] };
+    },
+  );
+
+  // ── hook-nudge-pending ─────────────────────────────────────────────────
+  server.tool(
+    "hook-nudge-pending",
+    "Check if there are pending nudges without draining them. Useful for deciding whether to call hook-nudge-check.",
+    {
+      sessionId: z.string().describe("Session ID to check"),
+    },
+    async ({ sessionId }): Promise<CallToolResult> => {
+      const queueDir = path.join(NUDGE_QUEUE_DIR(), sessionId);
+      try {
+        await fs.access(queueDir);
+        const files = (await fs.readdir(queueDir)).filter((f) => f.endsWith(".json"));
+        return { content: [{ type: "text", text: `${files.length} pending nudge(s).` }] };
+      } catch {
+        return { content: [{ type: "text", text: "0 pending nudge(s)." }] };
+      }
     },
   );
 
