@@ -388,11 +388,11 @@ function _gastown_enabled {
 }
 
 function _gastown_ignored {
-    $dir = Get-Location
-    while ($dir.Path -ne [System.IO.Path]::GetPathRoot($dir.Path)) {
-        if (Test-Path (Join-Path $dir ".gastown-ignore")) { return $true }
-        $dir = Split-Path $dir -Parent
-        if (-not $dir) { break }
+    $dirPath = (Get-Location).Path
+    while ($dirPath -ne [System.IO.Path]::GetPathRoot($dirPath)) {
+        if (Test-Path (Join-Path $dirPath ".gastown-ignore")) { return $true }
+        $dirPath = Split-Path $dirPath -Parent
+        if (-not $dirPath) { break }
     }
     return $false
 }

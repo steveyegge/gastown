@@ -31,7 +31,7 @@ Flags:
 }
 
 # Resolve repo root (parent of scripts/)
-$RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$RepoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $RepoRoot
 
 try {

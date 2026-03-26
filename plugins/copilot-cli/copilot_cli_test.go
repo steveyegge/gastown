@@ -105,11 +105,11 @@ func TestSKILLMDContent(t *testing.T) {
 
 	// Verify commands match actual CLI (regression guard)
 	mustContain := []string{
-		"gt mail inbox",    // NOT "gt mail check" (that's for hooks)
-		"bd ready",         // standalone bd command
-		"bd update",        // standalone bd command
-		"gt done",          // completion signal
-		"gt prime",         // context recovery
+		"gt mail inbox", // NOT "gt mail check" (that's for hooks)
+		"bd ready",      // standalone bd command
+		"bd update",     // standalone bd command
+		"gt done",       // completion signal
+		"gt prime",      // context recovery
 	}
 	for _, cmd := range mustContain {
 		if !strings.Contains(content, cmd) {
@@ -119,10 +119,10 @@ func TestSKILLMDContent(t *testing.T) {
 
 	// Verify NO stale commands
 	stale := []string{
-		"gt mail check",     // Should be gt mail inbox for inbox viewing
-		"gt bd ready",       // bd is standalone, not gt subcommand
-		"gt bd update",      // bd is standalone
-		"gt bd close",       // bd is standalone
+		"gt mail check", // Should be gt mail inbox for inbox viewing
+		"gt bd ready",   // bd is standalone, not gt subcommand
+		"gt bd update",  // bd is standalone
+		"gt bd close",   // bd is standalone
 	}
 	for _, cmd := range stale {
 		if strings.Contains(content, cmd) {
@@ -170,8 +170,8 @@ func TestReferenceDocsExist(t *testing.T) {
 
 	refs := map[string][]string{
 		"polecat-lifecycle.md": {"WORKING", "IDLE", "DONE", "STUCK"},
-		"mail-protocol.md":    {"gt mail send", "gt mail inbox", "Nudge"},
-		"issue-workflow.md":   {"bd ready", "bd create", "bd update", "bd close"},
+		"mail-protocol.md":     {"gt mail send", "gt mail inbox", "Nudge"},
+		"issue-workflow.md":    {"bd ready", "bd create", "bd update", "bd close"},
 		"landing-the-plane.md": {"gt done", "git push", "MANDATORY"},
 	}
 

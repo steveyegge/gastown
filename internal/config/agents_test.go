@@ -1484,12 +1484,12 @@ func TestACPModes(t *testing.T) {
 	t.Cleanup(ResetRegistryForTesting)
 
 	tests := []struct {
-		name      string
-		rc        *RuntimeConfig
-		wantACP   bool
-		wantMode  string
-		wantCmd   string
-		wantArgs  []string
+		name     string
+		rc       *RuntimeConfig
+		wantACP  bool
+		wantMode string
+		wantCmd  string
+		wantArgs []string
 	}{
 		{
 			name: "native mode - claude-agent-acp",
