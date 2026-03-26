@@ -142,7 +142,7 @@ func (d *Daemon) handleDiskWarning(info *DiskUsageInfo) {
 		return
 	}
 
-	msg := fmt.Sprintf("Disk usage at %.1f%% — %.1f GB free of %.1f GB total. Run 'gt maintain --disk' to reclaim space.",
+	msg := fmt.Sprintf("Disk usage at %.1f%% — %.1f GB free of %.1f GB total. Run 'gt maintain disk' to reclaim space.",
 		info.UsedFraction*100,
 		float64(info.FreeBytes)/(1024*1024*1024),
 		float64(info.TotalBytes)/(1024*1024*1024),
@@ -176,10 +176,14 @@ func (d *Daemon) handleDiskCleanup(info *DiskUsageInfo) {
 	// Re-check usage after cleanup.
 	afterInfo, err := getDiskUsage(d.config.TownRoot)
 	if err == nil {
-		msg = fmt.Sprintf("Disk was at %.1f%%, after cleanup at %.1f%% (freed %s). Run 'gt maintain --disk' manually if needed.",
+		freed := uint64(0)
+		if afterInfo.FreeBytes > info.FreeBytes {
+			freed = afterInfo.FreeBytes - info.FreeBytes
+		}
+		msg = fmt.Sprintf("Disk was at %.1f%%, after cleanup at %.1f%% (freed %s). Run 'gt maintain disk' manually if needed.",
 			info.UsedFraction*100,
 			afterInfo.UsedFraction*100,
-			formatBytes(info.FreeBytes-afterInfo.FreeBytes),
+			formatBytes(freed),
 		)
 	}
 
@@ -216,10 +220,14 @@ func (d *Daemon) handleDiskEmergency(info *DiskUsageInfo) {
 	afterInfo, err := getDiskUsage(d.config.TownRoot)
 	afterMsg := msg
 	if err == nil {
+		freed := uint64(0)
+		if afterInfo.FreeBytes > info.FreeBytes {
+			freed = afterInfo.FreeBytes - info.FreeBytes
+		}
 		afterMsg = fmt.Sprintf("DISK EMERGENCY resolved from %.1f%% to %.1f%% (freed %s). Monitor closely.",
 			info.UsedFraction*100,
 			afterInfo.UsedFraction*100,
-			formatBytes(info.FreeBytes-afterInfo.FreeBytes),
+			formatBytes(freed),
 		)
 	}
 
@@ -232,12 +240,13 @@ func (d *Daemon) handleDiskEmergency(info *DiskUsageInfo) {
 	d.diskWatchdogState = diskWatchdogState{lastLevel: "emergency", lastAlertAt: time.Now()}
 }
 
-// runDiskMaintain calls gt maintain --disk [--emergency] for cleanup.
+// runDiskMaintain calls gt maintain disk [--emergency] for cleanup.
 func (d *Daemon) runDiskMaintain(emergency bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	args := []string{"maintain", "--disk", "--force"}
+	// "disk" is a subcommand of "maintain", not a flag.
+	args := []string{"maintain", "disk", "--force"}
 	if emergency {
 		args = append(args, "--emergency")
 	}
