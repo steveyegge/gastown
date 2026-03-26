@@ -245,6 +245,8 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	hookWorkDir := spawnInfo.ClonePath
 
 	// 4. Auto-convoy (if !NoConvoy)
+	// Resolve merge strategy cascade: convoy > CLI flag > rig default > "mr"
+	var existingConvoyMerge string
 	convoyID := ""
 	if !params.NoConvoy {
 		existingConvoy := isTrackedByConvoy(params.BeadID)
@@ -258,8 +260,13 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 			}
 		} else {
 			fmt.Printf("  %s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
+			// Read existing convoy's merge strategy for the cascade
+			if ci := getConvoyInfoForIssue(params.BeadID); ci != nil {
+				existingConvoyMerge = ci.MergeStrategy
+			}
 		}
 	}
+	effectiveMerge := resolveMergeStrategy(existingConvoyMerge, params.Merge, params.RigName, townRoot)
 
 	// 5. Cook formula (unless SkipCook)
 	formulaCooked := params.SkipCook
@@ -344,7 +351,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	// 9. Update agent hook_bead state
 	updateAgentHookBead(targetAgent, beadToHook, hookWorkDir, beadsDir)
 
-	// 10. Store fields in bead (dispatcher, args, attached_molecule, no_merge, mode)
+	// 10. Store fields in bead (dispatcher, args, attached_molecule, no_merge, mode, merge_strategy)
 	fieldUpdates := beadFieldUpdates{
 		Dispatcher:       actor,
 		Args:             params.Args,
@@ -354,6 +361,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		NoMerge:          params.NoMerge,
 		ReviewOnly:       params.ReviewOnly,
 		Mode:             params.Mode,
+		MergeStrategy:    effectiveMerge,
 		FormulaVars:      strings.Join(allVars, "\n"),
 	}
 	// Use beadToHook for the update target (may differ from beadID when formula-on-bead)

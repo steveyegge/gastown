@@ -247,6 +247,31 @@ func getBeadInfo(beadID string) (*beadInfo, error) {
 	return &infos[0], nil
 }
 
+// resolveMergeStrategy resolves the effective merge strategy using a cascade:
+//  1. Convoy --merge flag (from existing convoy tracking this bead)
+//  2. gt sling --merge CLI flag
+//  3. RigSettings.DefaultMergeStrategy (rig config)
+//  4. "mr" (hardcoded global default)
+//
+// First non-empty value wins. This ensures convoy-level policy takes precedence
+// over per-sling overrides, which take precedence over rig defaults.
+func resolveMergeStrategy(convoyMerge, cliMerge, rigName, townRoot string) string {
+	if convoyMerge != "" {
+		return convoyMerge
+	}
+	if cliMerge != "" {
+		return cliMerge
+	}
+	if townRoot != "" && rigName != "" {
+		rigPath := filepath.Join(townRoot, rigName)
+		settingsPath := config.RigSettingsPath(rigPath)
+		if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.DefaultMergeStrategy != "" {
+			return settings.DefaultMergeStrategy
+		}
+	}
+	return "mr"
+}
+
 // beadFieldUpdates holds all the fields that need to be stored in a bead's description.
 // This enables a single read-modify-write cycle instead of sequential independent updates,
 // eliminating the race condition where concurrent writers could overwrite each other's fields.

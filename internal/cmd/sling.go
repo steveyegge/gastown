@@ -756,6 +756,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 
 	// Auto-convoy: check if issue is already tracked by a convoy
 	// If not, create one for dashboard visibility (unless --no-convoy is set)
+	var existingConvoyMerge string
 	if !slingNoConvoy && formulaName == "" {
 		existingConvoy := isTrackedByConvoy(beadID)
 		if existingConvoy == "" {
@@ -783,8 +784,19 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 			}
 		} else {
 			fmt.Printf("%s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
+			// Read existing convoy's merge strategy for the cascade
+			if ci := getConvoyInfoForIssue(beadID); ci != nil {
+				existingConvoyMerge = ci.MergeStrategy
+			}
 		}
 	}
+
+	// Resolve merge strategy cascade: convoy > CLI --merge > rig default > "mr"
+	targetRigName := ""
+	if parts := strings.SplitN(targetAgent, "/", 2); len(parts) >= 1 {
+		targetRigName = parts[0]
+	}
+	effectiveMerge := resolveMergeStrategy(existingConvoyMerge, slingMerge, targetRigName, townRoot)
 
 	// Issue #288: Auto-apply mol-polecat-work when slinging bare bead to polecat.
 	// This ensures polecats get structured work guidance through formula-on-bead.
@@ -958,6 +970,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		AttachedFormula:  formulaName,
 		NoMerge:          slingNoMerge,
 		ReviewOnly:       slingReviewOnly,
+		MergeStrategy:    effectiveMerge,
 		FormulaVars:      strings.Join(slingVars, "\n"),
 	}
 	if err := storeFieldsInBead(beadID, fieldUpdates); err != nil {

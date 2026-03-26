@@ -236,3 +236,51 @@ func TestIsSlingConfigError(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveMergeStrategy verifies the merge strategy cascade:
+// convoy > CLI flag > rig default > "mr" fallback.
+func TestResolveMergeStrategy(t *testing.T) {
+	t.Parallel()
+
+	// Set up a temp rig with DefaultMergeStrategy = "batch-pr"
+	townRoot := t.TempDir()
+	rigName := "testrig"
+	settingsDir := filepath.Join(townRoot, rigName, "settings")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), []byte(`{
+		"type": "rig-settings",
+		"version": 1,
+		"default_merge_strategy": "batch-pr"
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		convoyMerge string
+		cliMerge    string
+		rigName     string
+		townRoot    string
+		want        string
+	}{
+		{"convoy wins over all", "direct", "mr", rigName, townRoot, "direct"},
+		{"cli wins over rig default", "", "local", rigName, townRoot, "local"},
+		{"rig default used when no flags", "", "", rigName, townRoot, "batch-pr"},
+		{"fallback to mr when nothing set", "", "", "nonexistent", townRoot, "mr"},
+		{"fallback when no townRoot", "", "", rigName, "", "mr"},
+		{"convoy wins even with rig default", "local", "", rigName, townRoot, "local"},
+		{"cli wins even without rig", "", "direct", "", "", "direct"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveMergeStrategy(tt.convoyMerge, tt.cliMerge, tt.rigName, tt.townRoot)
+			if got != tt.want {
+				t.Errorf("resolveMergeStrategy(%q, %q, %q, %q) = %q, want %q",
+					tt.convoyMerge, tt.cliMerge, tt.rigName, tt.townRoot, got, tt.want)
+			}
+		})
+	}
+}
