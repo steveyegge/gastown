@@ -469,6 +469,15 @@ type WitnessThresholds struct {
 	// DoneIntentRecentGrace is how recently a done-intent must have been created
 	// to be considered still in progress (default "30s").
 	DoneIntentRecentGrace string `json:"done_intent_recent_grace,omitempty"`
+
+	// IdlePromptGrace is how long a polecat must show the idle ❯ prompt before
+	// a nudge is sent (default "2m"). Short grace avoids false positives from
+	// inter-tool-call prompt flickers.
+	IdlePromptGrace string `json:"idle_prompt_grace,omitempty"`
+
+	// IdlePromptThreshold is how long after nudging we wait before classifying
+	// the polecat as confirmed-stuck and alerting the mayor (default "15m").
+	IdlePromptThreshold string `json:"idle_prompt_threshold,omitempty"`
 }
 
 // DefaultOperationalConfig returns an OperationalConfig with all defaults.

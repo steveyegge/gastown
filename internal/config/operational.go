@@ -111,6 +111,8 @@ const (
 	DefaultWitnessMaxBeadRespawns        = 3
 	DefaultWitnessDoneIntentStuckTimeout = 60 * time.Second
 	DefaultWitnessDoneIntentRecentGrace  = 30 * time.Second
+	DefaultWitnessIdlePromptGrace        = 2 * time.Minute
+	DefaultWitnessIdlePromptThreshold    = 15 * time.Minute
 )
 
 // LoadOperationalConfig loads operational config from a town root.
@@ -731,4 +733,22 @@ func (wt *WitnessThresholds) DoneIntentRecentGraceD() time.Duration {
 		return ParseDurationOrDefault(wt.DoneIntentRecentGrace, DefaultWitnessDoneIntentRecentGrace)
 	}
 	return DefaultWitnessDoneIntentRecentGrace
+}
+
+// IdlePromptGraceD returns the configured or default idle prompt grace period.
+// This is how long a polecat must be at the idle ❯ prompt before a nudge is sent.
+func (wt *WitnessThresholds) IdlePromptGraceD() time.Duration {
+	if wt != nil {
+		return ParseDurationOrDefault(wt.IdlePromptGrace, DefaultWitnessIdlePromptGrace)
+	}
+	return DefaultWitnessIdlePromptGrace
+}
+
+// IdlePromptThresholdD returns the configured or default idle prompt threshold.
+// This is how long after nudging before the polecat is classified as confirmed-stuck.
+func (wt *WitnessThresholds) IdlePromptThresholdD() time.Duration {
+	if wt != nil {
+		return ParseDurationOrDefault(wt.IdlePromptThreshold, DefaultWitnessIdlePromptThreshold)
+	}
+	return DefaultWitnessIdlePromptThreshold
 }

@@ -952,6 +952,12 @@ const (
 	ZombieSessionDeadActive ZombieClassification = "session-dead-active"
 	// ZombieAgentSelfReportedStuck: agent self-reported stuck via heartbeat v2 (gt-3vr5).
 	ZombieAgentSelfReportedStuck ZombieClassification = "agent-self-reported-stuck"
+	// ZombieAtIdlePromptNudged: polecat at idle ❯ prompt with hooked work; nudge sent (gas-xrp).
+	// Waiting to see if the nudge resolves the issue before escalating.
+	ZombieAtIdlePromptNudged ZombieClassification = "at-idle-prompt-nudged"
+	// ZombieAtIdlePrompt: polecat confirmed stuck at idle ❯ prompt after nudge + threshold (gas-xrp).
+	// Polecat was nudged but is still idle; mayor should investigate.
+	ZombieAtIdlePrompt ZombieClassification = "at-idle-prompt"
 )
 
 // ImpliesActiveWork returns true if this classification indicates the polecat
@@ -961,7 +967,8 @@ const (
 func (c ZombieClassification) ImpliesActiveWork() bool {
 	switch c {
 	case ZombieStuckInDone, ZombieAgentDeadInSession, ZombieBeadClosedStillRunning,
-		ZombieDoneIntentDead, ZombieSessionDeadActive, ZombieAgentSelfReportedStuck:
+		ZombieDoneIntentDead, ZombieSessionDeadActive, ZombieAgentSelfReportedStuck,
+		ZombieAtIdlePrompt, ZombieAtIdlePromptNudged:
 		return true
 	default:
 		return false
@@ -1230,6 +1237,13 @@ func detectZombieLiveSession(bd *BdCli, workDir, townRoot, rigName, polecatName,
 			zombie.Error = err
 			zombie.Action = fmt.Sprintf("restart-bead-closed-failed: %v", err)
 		}
+		return zombie, true
+	}
+
+	// Idle-prompt watchdog (gas-xrp): agent alive, session alive, but stuck at ❯ prompt
+	// with unfinished hooked work. Uses two-phase detection: nudge first, then notify
+	// mayor if still idle after IdlePromptThreshold.
+	if zombie, found := detectIdlePrompt(workDir, townRoot, rigName, polecatName, sessionName, snapHook, t, witCfg); found {
 		return zombie, true
 	}
 
