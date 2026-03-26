@@ -1,6 +1,9 @@
 package version
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
@@ -80,4 +83,68 @@ func TestCheckStaleBinary_NoCommit(t *testing.T) {
 	if info.BinaryCommit == "" && info.Error == nil {
 		t.Error("expected error when binary commit is empty")
 	}
+}
+
+func TestGetRepoRoot_PrefersSourceRepoEnv(t *testing.T) {
+	repoDir := makeTestGTRepo(t)
+	t.Setenv("GT_SOURCE_REPO", repoDir)
+	t.Setenv("GT_ROOT", "")
+	t.Setenv("HOME", t.TempDir())
+
+	root, err := GetRepoRoot()
+	if err != nil {
+		t.Fatalf("GetRepoRoot() error = %v", err)
+	}
+	if root != repoDir {
+		t.Fatalf("GetRepoRoot() = %q, want %q", root, repoDir)
+	}
+}
+
+func TestGetRepoRoot_UsesInstallMetadata(t *testing.T) {
+	repoDir := makeTestGTRepo(t)
+	homeDir := t.TempDir()
+	exePath := filepath.Join(homeDir, ".local", "bin", "gt")
+	if err := os.MkdirAll(filepath.Dir(exePath), 0o755); err != nil {
+		t.Fatalf("mkdir exe dir: %v", err)
+	}
+	if err := os.WriteFile(exePath, []byte("stub"), 0o755); err != nil {
+		t.Fatalf("write exe: %v", err)
+	}
+	if err := os.WriteFile(sourceRepoMetadataPath(exePath), []byte(repoDir+"\n"), 0o644); err != nil {
+		t.Fatalf("write repo metadata: %v", err)
+	}
+
+	oldExecutablePath := executablePath
+	executablePath = func() (string, error) { return exePath, nil }
+	t.Cleanup(func() { executablePath = oldExecutablePath })
+
+	t.Setenv("GT_SOURCE_REPO", "")
+	t.Setenv("GT_ROOT", "")
+	t.Setenv("HOME", homeDir)
+
+	root, err := GetRepoRoot()
+	if err != nil {
+		t.Fatalf("GetRepoRoot() error = %v", err)
+	}
+	if root != repoDir {
+		t.Fatalf("GetRepoRoot() = %q, want %q", root, repoDir)
+	}
+}
+
+func makeTestGTRepo(t *testing.T) string {
+	t.Helper()
+
+	repoDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoDir, "cmd", "gt"), 0o755); err != nil {
+		t.Fatalf("mkdir repo source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "cmd", "gt", "main.go"), []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+	cmd := exec.Command("git", "init", "-q")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	return repoDir
 }

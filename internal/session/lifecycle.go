@@ -291,7 +291,7 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (_ *StartResult, retErr error
 	// 14. Stream agent conversation events to VictoriaLogs (opt-in).
 	// Reads ~/.claude/projects/<hash>/<session>.jsonl and emits agent.event logs.
 	// Non-fatal: observability failures must never block agent startup.
-	if os.Getenv("GT_LOG_AGENT_OUTPUT") == "true" && os.Getenv("GT_OTEL_LOGS_URL") != "" {
+	if _, logsURL := telemetry.EffectiveURLsFromEnv(); os.Getenv("GT_LOG_AGENT_OUTPUT") == "true" && logsURL != "" {
 		if err := ActivateAgentLogging(cfg.SessionID, cfg.WorkDir, runID); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: agent log watcher setup failed for %s: %v\n", cfg.SessionID, err)
 		}

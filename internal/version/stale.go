@@ -14,7 +14,11 @@ import (
 var (
 	// Commit can be set from cmd package or read from build info
 	Commit = ""
+
+	executablePath = os.Executable
 )
+
+const sourceRepoMetadataSuffix = ".repo"
 
 // StaleBinaryInfo contains information about binary staleness.
 type StaleBinaryInfo struct {
@@ -136,6 +140,22 @@ func CheckStaleBinary(repoDir string) *StaleBinaryInfo {
 // Crew rigs also contain cmd/gt/main.go but have different HEADs,
 // so we prefer the gastown repo over CWD-based git toplevel detection.
 func GetRepoRoot() (string, error) {
+	// Explicit override for environments that know the canonical source repo.
+	if sourceRepo := os.Getenv("GT_SOURCE_REPO"); sourceRepo != "" {
+		if hasGtSource(sourceRepo) && isGitRepo(sourceRepo) {
+			return sourceRepo, nil
+		}
+	}
+
+	// Prefer metadata written next to the installed binary by make install /
+	// make safe-install. This avoids false stale-binary warnings when multiple
+	// local Gastown clones exist on one machine.
+	if exePath, err := executablePath(); err == nil {
+		if sourceRepo := repoRootFromMetadata(exePath); sourceRepo != "" {
+			return sourceRepo, nil
+		}
+	}
+
 	// Check if GT_ROOT environment variable is set (agents always have this)
 	if gtRoot := os.Getenv("GT_ROOT"); gtRoot != "" {
 		candidates := []string{
@@ -191,6 +211,28 @@ func isGitRepo(dir string) bool {
 func hasGtSource(dir string) bool {
 	_, err := os.Stat(dir + "/cmd/gt/main.go")
 	return err == nil
+}
+
+func sourceRepoMetadataPath(exePath string) string {
+	return exePath + sourceRepoMetadataSuffix
+}
+
+func repoRootFromMetadata(exePath string) string {
+	if exePath == "" {
+		return ""
+	}
+
+	data, err := os.ReadFile(sourceRepoMetadataPath(exePath))
+	if err != nil {
+		return ""
+	}
+
+	candidate := strings.TrimSpace(string(data))
+	if candidate == "" || !hasGtSource(candidate) || !isGitRepo(candidate) {
+		return ""
+	}
+
+	return candidate
 }
 
 // onlyBeadsChanges checks whether all commits between binaryCommit and HEAD

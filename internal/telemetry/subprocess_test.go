@@ -145,8 +145,8 @@ func TestOTELEnvForSubprocess_Disabled(t *testing.T) {
 }
 
 func TestOTELEnvForSubprocess_BothURLs(t *testing.T) {
-	t.Setenv(EnvMetricsURL, "http://localhost:8428/opentelemetry/api/v1/push")
-	t.Setenv(EnvLogsURL, "http://localhost:9428/insert/opentelemetry/v1/logs")
+	t.Setenv(EnvMetricsURL, "https://metrics.example.com/opentelemetry/api/v1/push")
+	t.Setenv(EnvLogsURL, "https://logs.example.com/insert/opentelemetry/v1/logs")
 	t.Setenv("GT_ROLE", "")
 	t.Setenv("GT_RIG", "")
 	t.Setenv("BD_ACTOR", "")
@@ -176,7 +176,7 @@ func TestOTELEnvForSubprocess_BothURLs(t *testing.T) {
 }
 
 func TestOTELEnvForSubprocess_NoLogsURL(t *testing.T) {
-	t.Setenv(EnvMetricsURL, "http://localhost:8428/opentelemetry/api/v1/push")
+	t.Setenv(EnvMetricsURL, "https://metrics.example.com/opentelemetry/api/v1/push")
 	t.Setenv(EnvLogsURL, "")
 	t.Setenv("GT_ROLE", "")
 	t.Setenv("GT_RIG", "")
@@ -193,7 +193,7 @@ func TestOTELEnvForSubprocess_NoLogsURL(t *testing.T) {
 }
 
 func TestOTELEnvForSubprocess_WithResourceAttrs(t *testing.T) {
-	t.Setenv(EnvMetricsURL, "http://localhost:8428/opentelemetry/api/v1/push")
+	t.Setenv(EnvMetricsURL, "https://metrics.example.com/opentelemetry/api/v1/push")
 	t.Setenv(EnvLogsURL, "")
 	t.Setenv("GT_ROLE", "mol/witness")
 	t.Setenv("GT_RIG", "mol")
@@ -229,8 +229,8 @@ func TestSetProcessOTELAttrs_Disabled(t *testing.T) {
 }
 
 func TestSetProcessOTELAttrs_Enabled(t *testing.T) {
-	metricsURL := "http://localhost:8428/opentelemetry/api/v1/push"
-	logsURL := "http://localhost:9428/insert/opentelemetry/v1/logs"
+	metricsURL := "https://metrics.example.com/opentelemetry/api/v1/push"
+	logsURL := "https://logs.example.com/insert/opentelemetry/v1/logs"
 	t.Setenv(EnvMetricsURL, metricsURL)
 	t.Setenv(EnvLogsURL, logsURL)
 	t.Setenv("GT_ROLE", "")
@@ -250,7 +250,7 @@ func TestSetProcessOTELAttrs_Enabled(t *testing.T) {
 }
 
 func TestSetProcessOTELAttrs_SetsResourceAttrs(t *testing.T) {
-	t.Setenv(EnvMetricsURL, "http://localhost:8428/opentelemetry/api/v1/push")
+	t.Setenv(EnvMetricsURL, "https://metrics.example.com/opentelemetry/api/v1/push")
 	t.Setenv(EnvLogsURL, "")
 	t.Setenv("GT_ROLE", "mol/witness")
 	t.Setenv("GT_RIG", "mol")

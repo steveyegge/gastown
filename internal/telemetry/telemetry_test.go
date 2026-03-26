@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"errors"
+	"net"
 	"sync"
 	"testing"
 )
@@ -15,11 +16,23 @@ func resetInitState(t *testing.T) {
 	initDone = false
 	globalProvider = nil
 	initMu.Unlock()
+	endpointProbeMu.Lock()
+	endpointProbeCache = make(map[string]string)
+	endpointProbeMu.Unlock()
+	originalDial := dialEndpoint
+	dialEndpoint = func(ctx context.Context, network, address string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, address)
+	}
 	t.Cleanup(func() {
 		initMu.Lock()
 		initDone = false
 		globalProvider = nil
 		initMu.Unlock()
+		endpointProbeMu.Lock()
+		endpointProbeCache = make(map[string]string)
+		endpointProbeMu.Unlock()
+		dialEndpoint = originalDial
 	})
 }
 
@@ -114,5 +127,55 @@ func TestProvider_Shutdown_ConcurrentSafe(t *testing.T) {
 
 	if called != 1 {
 		t.Errorf("expected shutdown fn called exactly once, called %d times", called)
+	}
+}
+
+func TestFilterUnavailableLoopbackEndpoint_SkipsClosedPort(t *testing.T) {
+	resetInitState(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	rawURL := "http://" + addr + "/v1/logs"
+	if got := filterUnavailableLoopbackEndpoint(rawURL); got != "" {
+		t.Fatalf("filterUnavailableLoopbackEndpoint(%q) = %q, want empty string", rawURL, got)
+	}
+}
+
+func TestFilterUnavailableLoopbackEndpoint_KeepsReachablePort(t *testing.T) {
+	resetInitState(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	rawURL := "http://" + ln.Addr().String() + "/v1/logs"
+	if got := filterUnavailableLoopbackEndpoint(rawURL); got != rawURL {
+		t.Fatalf("filterUnavailableLoopbackEndpoint(%q) = %q, want %q", rawURL, got, rawURL)
+	}
+}
+
+func TestEffectiveURLsFromEnv_DropsUnavailableLoopbackEndpoints(t *testing.T) {
+	resetInitState(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	t.Setenv(EnvMetricsURL, "http://"+addr+"/v1/metrics")
+	t.Setenv(EnvLogsURL, "http://"+addr+"/v1/logs")
+
+	metricsURL, logsURL := EffectiveURLsFromEnv()
+	if metricsURL != "" || logsURL != "" {
+		t.Fatalf("EffectiveURLsFromEnv() = (%q, %q), want empty endpoints", metricsURL, logsURL)
 	}
 }
