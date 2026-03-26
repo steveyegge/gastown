@@ -355,7 +355,7 @@ func isRepoLocalVerificationCommand(cmd string) bool {
 		if trimmed == "" {
 			continue
 		}
-		if filepath.IsAbs(trimmed) {
+		if filepath.IsAbs(trimmed) || strings.HasPrefix(trimmed, "/") {
 			return false
 		}
 		if trimmed == "./..." || trimmed == "../..." || strings.HasSuffix(trimmed, "/...") {
