@@ -390,6 +390,12 @@ func (d *Daemon) Run() error {
 		return refinery.HandleTerminalConvoy(ctx, townRoot, convoyID, d.logger.Printf, gtPath)
 	})
 
+	// Wire review poll handler: check PR review status for batch-pr convoys
+	// in awaiting_review state on each poll cycle.
+	d.convoyManager.SetReviewPollHandler(func(ctx context.Context) {
+		refinery.PollConvoyReviews(ctx, townRoot, d.logger.Printf, gtPath)
+	})
+
 	if err := d.convoyManager.Start(); err != nil {
 		d.logger.Printf("Warning: failed to start convoy manager: %v", err)
 	} else {

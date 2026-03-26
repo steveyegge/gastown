@@ -105,6 +105,11 @@ type ConvoyManager struct {
 	// completion (all tracked issues closed). The handler runs the gate suite
 	// on the integration branch and signals pass/fail for draft→ready conversion.
 	onTerminalConvoy func(ctx context.Context, convoyID string) error
+
+	// onReviewPoll is called on each review poll cycle to check PR review
+	// status for batch-pr convoys in awaiting_review state. The handler
+	// routes approved PRs to final merge and change-requested PRs to feedback.
+	onReviewPoll func(ctx context.Context)
 }
 
 // NewConvoyManager creates a new convoy manager.
@@ -143,16 +148,30 @@ func (m *ConvoyManager) SetTerminalConvoyHandler(h func(ctx context.Context, con
 	m.onTerminalConvoy = h
 }
 
-// Start begins the convoy manager goroutines (event poll + stranded scan).
+// SetReviewPollHandler sets the callback for PR review status polling.
+// When set, a goroutine polls at scanInterval for convoys in awaiting_review
+// state and checks their PR review status via the GitHub API.
+func (m *ConvoyManager) SetReviewPollHandler(h func(ctx context.Context)) {
+	m.onReviewPoll = h
+}
+
+// Start begins the convoy manager goroutines (event poll + stranded scan + review poll).
 // It is safe to call multiple times; subsequent calls are no-ops.
 func (m *ConvoyManager) Start() error {
 	if !m.started.CompareAndSwap(false, true) {
 		m.logger("Convoy: Start() already called, ignoring duplicate")
 		return nil
 	}
-	m.wg.Add(2)
+	goroutines := 2
+	if m.onReviewPoll != nil {
+		goroutines = 3
+	}
+	m.wg.Add(goroutines)
 	go m.runEventPoll()
 	go m.runStrandedScan()
+	if m.onReviewPoll != nil {
+		go m.runReviewPoll()
+	}
 	// Run a one-shot sweep to catch convoys that completed during any previous
 	// outage or while the daemon was stopped.
 	go m.runStartupSweep()
@@ -552,4 +571,22 @@ func (m *ConvoyManager) runStartupSweep() {
 	}
 	m.logger("Convoy: running startup sweep for stranded convoys")
 	m.scan()
+}
+
+// runReviewPoll periodically checks PR review status for batch-pr convoys
+// in awaiting_review state. Uses the same scan interval as the stranded scan.
+func (m *ConvoyManager) runReviewPoll() {
+	defer m.wg.Done()
+
+	ticker := time.NewTicker(m.scanInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			m.onReviewPoll(m.ctx)
+		}
+	}
 }
