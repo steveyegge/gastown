@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
@@ -98,6 +99,9 @@ type MergeQueueConfig struct {
 	// OnConflict is the strategy for handling conflicts: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
 
+	// VerificationMode controls whether pre-merge verification is advisory or strict.
+	VerificationMode string `json:"verification_mode"`
+
 	// RunTests controls whether to run tests before merging.
 	RunTests bool `json:"run_tests"`
 
@@ -161,6 +165,7 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 	return &MergeQueueConfig{
 		Enabled:                 true,
 		OnConflict:              "assign_back",
+		VerificationMode:        config.VerificationModeAdvisory,
 		RunTests:                true,
 		TestCommand:             "",
 		DeleteMergedBranches:    true,
@@ -288,75 +293,15 @@ func (e *Engineer) SetOutput(w io.Writer) {
 	e.output = w
 }
 
-// LoadConfig loads effective merge queue configuration for the rig.
+// LoadConfig loads merge queue configuration from layered rig settings,
+// falling back to the legacy rig-root config.json shape when needed.
 func (e *Engineer) LoadConfig() error {
-	rigCtx, err := reliability.LoadRigContext(e.rig.Path, e.workDir)
-	if err != nil {
-		return fmt.Errorf("loading effective rig settings: %w", err)
-	}
-	e.rigReliability = rigCtx
-	if rigCtx != nil {
-		if err := rigCtx.ValidateStrictPreconditions(); err != nil {
-			return err
-		}
-	}
-	if rigCtx == nil || rigCtx.Settings == nil || rigCtx.Settings.MergeQueue == nil {
-		return e.loadLegacyMergeQueueOverrides()
+	if mqCfg, err := config.LoadEffectiveMergeQueueConfig(e.rig.Path); err != nil {
+		return fmt.Errorf("loading effective merge queue config: %w", err)
+	} else if mqCfg != nil {
+		return e.applyConfigSettings(mqCfg)
 	}
 
-	mq := rigCtx.Settings.MergeQueue
-	e.config.Enabled = mq.Enabled
-	e.config.OnConflict = mq.OnConflict
-	e.config.RunTests = mq.IsRunTestsEnabled()
-	e.config.TestCommand = mq.TestCommand
-	e.config.DeleteMergedBranches = mq.IsDeleteMergedBranchesEnabled()
-	e.config.RetryFlakyTests = mq.RetryFlakyTests
-	e.config.MaxConcurrent = mq.MaxConcurrent
-	e.config.GatesParallel = mq.IsGatesParallelEnabled()
-
-	if mq.PollInterval != "" {
-		dur, err := time.ParseDuration(mq.PollInterval)
-		if err != nil {
-			return fmt.Errorf("invalid poll_interval %q: %w", mq.PollInterval, err)
-		}
-		e.config.PollInterval = dur
-	}
-	if mq.StaleClaimTimeout != "" {
-		dur, err := time.ParseDuration(mq.StaleClaimTimeout)
-		if err != nil {
-			return fmt.Errorf("invalid stale_claim_timeout %q: %w", mq.StaleClaimTimeout, err)
-		}
-		e.config.StaleClaimTimeout = dur
-	}
-	if len(mq.Gates) > 0 {
-		e.config.Gates = make(map[string]*GateConfig, len(mq.Gates))
-		for name, gate := range mq.Gates {
-			if gate == nil {
-				continue
-			}
-			converted := &GateConfig{Cmd: gate.Cmd}
-			if gate.Timeout != "" {
-				timeout, err := time.ParseDuration(gate.Timeout)
-				if err != nil {
-					return fmt.Errorf("invalid timeout for gate %q: %w", name, err)
-				}
-				converted.Timeout = timeout
-			}
-			switch gate.Phase {
-			case "", "pre-merge":
-				converted.Phase = GatePhasePreMerge
-			case "post-squash":
-				converted.Phase = GatePhasePostSquash
-			default:
-				return fmt.Errorf("gate %q has invalid phase %q", name, gate.Phase)
-			}
-			e.config.Gates[name] = converted
-		}
-	}
-	return e.loadLegacyMergeQueueOverrides()
-}
-
-func (e *Engineer) loadLegacyMergeQueueOverrides() error {
 	configPath := filepath.Join(e.rig.Path, "config.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -379,92 +324,7 @@ func (e *Engineer) loadLegacyMergeQueueOverrides() error {
 	var mqRaw struct {
 		Enabled              *bool                     `json:"enabled"`
 		OnConflict           *string                   `json:"on_conflict"`
-		RunTests             *bool                     `json:"run_tests"`
-		TestCommand          *string                   `json:"test_command"`
-		DeleteMergedBranches *bool                     `json:"delete_merged_branches"`
-		RetryFlakyTests      *int                      `json:"retry_flaky_tests"`
-		PollInterval         *string                   `json:"poll_interval"`
-		MaxConcurrent        *int                      `json:"max_concurrent"`
-		StaleClaimTimeout    *string                   `json:"stale_claim_timeout"`
-		Gates                map[string]*gateConfigRaw `json:"gates"`
-		GatesParallel        *bool                     `json:"gates_parallel"`
-		AutoPush             *bool                     `json:"auto_push"`
-	}
-	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
-		return fmt.Errorf("parsing merge_queue config: %w", err)
-	}
-
-	if mqRaw.Enabled != nil {
-		e.config.Enabled = *mqRaw.Enabled
-	}
-	if mqRaw.OnConflict != nil {
-		e.config.OnConflict = *mqRaw.OnConflict
-	}
-	if mqRaw.RunTests != nil {
-		e.config.RunTests = *mqRaw.RunTests
-	}
-	if mqRaw.TestCommand != nil {
-		e.config.TestCommand = *mqRaw.TestCommand
-	}
-	if mqRaw.DeleteMergedBranches != nil {
-		e.config.DeleteMergedBranches = *mqRaw.DeleteMergedBranches
-	}
-	if mqRaw.RetryFlakyTests != nil {
-		e.config.RetryFlakyTests = *mqRaw.RetryFlakyTests
-	}
-	if mqRaw.MaxConcurrent != nil {
-		e.config.MaxConcurrent = *mqRaw.MaxConcurrent
-	}
-	if mqRaw.PollInterval != nil {
-		dur, err := time.ParseDuration(*mqRaw.PollInterval)
-		if err != nil {
-			return fmt.Errorf("invalid poll_interval %q: %w", *mqRaw.PollInterval, err)
-		}
-		e.config.PollInterval = dur
-	}
-	if mqRaw.StaleClaimTimeout != nil {
-		dur, err := time.ParseDuration(*mqRaw.StaleClaimTimeout)
-		if err != nil {
-			return fmt.Errorf("invalid stale_claim_timeout %q: %w", *mqRaw.StaleClaimTimeout, err)
-		}
-		if dur <= 0 {
-			return fmt.Errorf("stale_claim_timeout must be positive, got %v", dur)
-		}
-		e.config.StaleClaimTimeout = dur
-	}
-	if mqRaw.Gates != nil {
-		e.config.Gates = make(map[string]*GateConfig, len(mqRaw.Gates))
-		for name, raw := range mqRaw.Gates {
-			gc := &GateConfig{Cmd: raw.Cmd}
-			if raw.Timeout != "" {
-				dur, err := time.ParseDuration(raw.Timeout)
-				if err != nil || dur <= 0 {
-					return fmt.Errorf("invalid timeout for gate %q: %v", name, err)
-				}
-				gc.Timeout = dur
-			}
-			switch raw.Phase {
-			case "", "pre-merge":
-				gc.Phase = GatePhasePreMerge
-			case "post-squash":
-				gc.Phase = GatePhasePostSquash
-			default:
-				return fmt.Errorf("gate %q has invalid phase %q", name, raw.Phase)
-			}
-			e.config.Gates[name] = gc
-		}
-	}
-	if mqRaw.GatesParallel != nil {
-		e.config.GatesParallel = *mqRaw.GatesParallel
-	}
-	if mqRaw.AutoPush != nil {
-		e.config.AutoPush = *mqRaw.AutoPush
-	}
-	return nil
-}
-
-// gateConfigRaw is the legacy JSON-friendly representation of a gate config
-// with timeout encoded as a duration string.
+		VerificationMode     *string                   `json:"verification_mode"`
 type gateConfigRaw struct {
 	Cmd     string `json:"cmd"`
 	Timeout string `json:"timeout"`
@@ -905,18 +765,28 @@ func (e *Engineer) runGates(ctx context.Context) ProcessResult {
 // Gates run in parallel if GatesParallel is true; otherwise sequentially.
 // Any single gate failure means overall failure.
 func (e *Engineer) runGatesForPhase(ctx context.Context, phase GatePhase) ProcessResult {
-	if len(e.config.Gates) == 0 {
+	gates, err := e.verificationGatesForPhase(phase)
+	if err != nil {
+		return ProcessResult{
+			Success:     false,
+			TestsFailed: true,
+			Error:       err.Error(),
+		}
+	}
+	if len(gates) == 0 {
 		return ProcessResult{Success: true}
 	}
 
-	gates := make([]verify.Gate, 0, len(e.config.Gates))
-	for name, gc := range e.config.Gates {
-		if gc == nil {
-			continue
-		}
-		gatePhase := verify.Phase(gc.Phase)
-		if gatePhase == "" {
-			gatePhase = verify.PhasePreMerge
+	parallel := e.config.GatesParallel && phase == GatePhasePreMerge
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Running %d %s gate(s) (parallel=%v)\n", len(gates), phase, parallel)
+	summary := verify.Run(ctx, e.workDir, gates, parallel, func(format string, args ...interface{}) {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] %s\n", fmt.Sprintf(format, args...))
+	})
+	if !summary.Success {
+		return ProcessResult{
+			Success:     false,
+			TestsFailed: true,
+			Error:       summary.Error,
 		}
 		gates = append(gates, verify.Gate{
 			Name:    name,
@@ -925,27 +795,38 @@ func (e *Engineer) runGatesForPhase(ctx context.Context, phase GatePhase) Proces
 			Phase:   gatePhase,
 		})
 	}
+	return ProcessResult{Success: true}
+}
 
-	summary := verify.RunPhase(ctx, e.workDir, gates, verify.Phase(phase), verify.RunOptions{
-		Parallel: e.config.GatesParallel && phase == GatePhasePreMerge,
-		Output:   e.output,
-	})
-	if !summary.Success {
-		var failures []string
-		for _, result := range summary.Results {
-			if !result.Success {
-				failures = append(failures, fmt.Sprintf("%s: %s", result.Name, result.Error))
-			}
-		}
-		return ProcessResult{
-			Success:     false,
-			TestsFailed: true,
-			Error:       fmt.Sprintf("quality gates failed: %s", strings.Join(failures, "; ")),
-		}
+func (e *Engineer) verificationGatesForPhase(phase GatePhase) ([]verify.Gate, error) {
+	if len(e.config.Gates) == 0 {
+		return nil, nil
 	}
 
-	_, _ = fmt.Fprintln(e.output, "[Engineer] All quality gates passed")
-	return ProcessResult{Success: true}
+	gates := make([]verify.Gate, 0, len(e.config.Gates))
+	for name, gate := range e.config.Gates {
+		if gate == nil {
+			return nil, fmt.Errorf("gate %q is null", name)
+		}
+		gatePhase := gate.Phase
+		if gatePhase == "" {
+			gatePhase = GatePhasePreMerge
+		}
+		if gatePhase != phase {
+			continue
+		}
+		gates = append(gates, verify.Gate{
+			Name:    name,
+			Cmd:     gate.Cmd,
+			Timeout: gate.Timeout,
+			Phase:   verify.Phase(gatePhase),
+		})
+	}
+
+	sort.Slice(gates, func(i, j int) bool {
+		return gates[i].Name < gates[j].Name
+	})
+	return gates, nil
 }
 
 // syncCrewWorkspaces pulls latest changes to all crew workspaces.
@@ -993,11 +874,7 @@ func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult 
 	// If the polecat already rebased onto the target and ran gates, and the target
 	// hasn't moved since, we can skip running gates entirely (~5s merge).
 	skipGates := false
-	if e.rigReliability != nil && e.rigReliability.Settings != nil &&
-		e.rigReliability.Settings.MergeQueue != nil && e.rigReliability.Settings.MergeQueue.IsStrictVerification() &&
-		mr.PreVerified {
-		_, _ = fmt.Fprintln(e.output, "[Engineer] Strict verification enabled — ignoring polecat pre-verified fast-path")
-	} else if mr.PreVerified && mr.PreVerifiedBase != "" {
+	if e.config.VerificationMode != config.VerificationModeStrict && mr.PreVerified && mr.PreVerifiedBase != "" {
 		_, _ = fmt.Fprintf(e.output, "  Pre-verified: yes (base=%s)\n", mr.PreVerifiedBase[:min(8, len(mr.PreVerifiedBase))])
 		// Check if target HEAD still matches the verified base
 		targetHead, err := e.git.Rev("origin/" + mr.Target)
@@ -1010,6 +887,8 @@ func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult 
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Pre-verification stale — target moved (%s → %s), running gates normally\n",
 				mr.PreVerifiedBase[:min(8, len(mr.PreVerifiedBase))], targetHead[:min(8, len(targetHead))])
 		}
+	} else if e.config.VerificationMode == config.VerificationModeStrict && mr.PreVerified {
+		_, _ = fmt.Fprintln(e.output, "[Engineer] Strict verification enabled — ignoring polecat pre-verification claim")
 	}
 
 	if e.rigReliability != nil && e.rigReliability.GitHubCI != nil && e.rigReliability.GitHubCI.IsRequired() && mr.CommitSHA != "" {

@@ -29,9 +29,13 @@ gt done $ARGUMENTS
 
 **Common usage:**
 - `gt done` — Submit completed work (default: --status COMPLETED)
-- `gt done --pre-verified` — Submit with pre-verification (you ran gates after rebase)
+- `gt done --pre-verified` — Submit with pre-verification in advisory mode only
 - `gt done --status ESCALATED` — Signal blocker, skip MR
 - `gt done --status DEFERRED` — Pause work, skip MR
+
+If the rig uses `merge_queue.verification_mode=strict`, `gt done` reruns the
+configured pre-merge gates before push/MR creation and blocks submission on any
+failure. `--pre-verified` is rejected in strict mode.
 
 **If the bead has nothing to implement** (already fixed, can't reproduce):
 ```bash
@@ -40,4 +44,6 @@ gt done
 ```
 
 This command pushes your branch, submits an MR to the merge queue, and transitions
-you to IDLE. The Refinery handles the actual merge. You are done after this.
+you to IDLE. The repo-local verifier configured in merge-queue settings, and
+declared by any repo contract in `.gastown/settings.json`, is the CI source of
+truth. The Refinery handles the actual merge. You are done after this.

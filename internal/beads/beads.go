@@ -1034,9 +1034,10 @@ func (b *Beads) FindLatestIssueByTitleAndAssignee(title, assignee string) (*Issu
 	return newest, nil
 }
 
-// FindLatestIssueByTitle finds the newest issue matching the given exact title.
-func (b *Beads) FindLatestIssueByTitle(title string) (*Issue, error) {
-	out, err := b.run("list", "--json", "--limit", "0", "--title", title)
+// FindLatestOpenIssueByTitleAndLabel finds the newest open issue matching the
+// exact title and label.
+func (b *Beads) FindLatestOpenIssueByTitleAndLabel(title, label string) (*Issue, error) {
+	out, err := b.run("list", "--json", "--limit", "0", "--title", title, "--label", label, "--status", "open")
 	if err != nil {
 		return nil, fmt.Errorf("bd list: %w", err)
 	}
@@ -1051,7 +1052,7 @@ func (b *Beads) FindLatestIssueByTitle(title string) (*Issue, error) {
 
 	var newest *Issue
 	for _, issue := range issues {
-		if issue.Title != title {
+		if issue.Title != title || !HasLabel(issue, label) {
 			continue
 		}
 		if newest == nil || issue.CreatedAt > newest.CreatedAt {

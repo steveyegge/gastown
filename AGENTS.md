@@ -136,3 +136,75 @@ gt mail inbox         # Check for messages
 ```
 
 <!-- end-gastown-agent-instructions -->
+
+<!-- gastown-quality-contract-v1 -->
+
+---
+
+## Quality Contract: What Every Polecat Must Deliver
+
+Gastown enforces a 10-layer quality system. **CI is the minimum bar, not the goal.**
+
+### Required: Test coverage rules
+
+Every PR that changes behavior must include tests. The Refinery's coverage gate rejects PRs below 60% total coverage.
+
+**Failure-mode tests (Layer 5)** — Use `//go:build failure` tag:
+
+```go
+//go:build failure
+
+package mypackage_test
+
+func TestMyFunc_TimeoutFromUpstream(t *testing.T) { ... }
+func TestMyFunc_MalformedInput(t *testing.T) { ... }
+func TestMyFunc_RetryIdempotency(t *testing.T) { ... }
+```
+
+Write failure-mode tests when your code:
+- Calls an external service (timeout, unavailable, bad response)
+- Parses input (malformed, empty, oversized)
+- Has retry logic (verify idempotency)
+- Handles auth (expired token, wrong credentials)
+- Writes state (partial write, interrupted)
+
+Run them locally: `./scripts/ci/verify.sh failure`
+
+**Fuzz tests (Layer 5)** — Required for parsers, validators, and auth handlers:
+
+```go
+func FuzzParseMyFormat(f *testing.F) {
+    f.Add([]byte("valid input"))
+    f.Fuzz(func(t *testing.T, b []byte) {
+        _, _ = ParseMyFormat(b) // must not panic
+    })
+}
+```
+
+Run locally: `./scripts/ci/verify.sh fuzz`
+
+### Required: CI entrypoints
+
+| Script | When | What |
+|--------|------|------|
+| `./scripts/ci/verify.sh pre-merge` | Before submitting with `gt done` | guard + build + unit + lint + coverage |
+| `./scripts/ci/verify.sh integration` | Refinery post-squash gate | integration tests on merged result |
+| `./scripts/ci/smoke.sh` | Post-merge (Witness triggers) | fast build + guard |
+| `./scripts/ci/release-check.sh` | Release pipeline | smoke + vuln scan + version check |
+
+### What the Refinery checks automatically
+
+The Refinery runs these gates before merging your branch:
+- `verify` (pre-merge): guard + build + unit + lint
+- `coverage` (pre-merge): total coverage ≥ 60%
+- `vuln` (pre-merge): `govulncheck ./...` — no known CVEs
+- `integration` (post-squash): integration tests on the merged result
+
+If any gate fails, the MR is rejected with `MERGE_FAILED` and you get a nudge.
+
+### What happens after merge
+
+The Witness runs `./scripts/ci/smoke.sh` after every merge. If it fails, a P0 bug bead is auto-created and escalated. You don't need to do anything — but if your merge caused it, the bead may be routed back to you.
+
+<!-- end-gastown-quality-contract -->
+

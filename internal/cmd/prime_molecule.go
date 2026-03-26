@@ -346,8 +346,8 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 	showFormulaStepsFull(constants.MolRefineryPatrol, ctx.TownRoot, ctx.Rig, cfg.ExtraVars)
 }
 
-// buildRefineryPatrolVars loads rig MQ settings and returns --var key=value
-// strings for the refinery patrol formula.
+// buildRefineryPatrolVars loads the effective rig verifier settings and repo
+// contract vars for the refinery patrol formula.
 func buildRefineryPatrolVars(ctx RoleContext) []string {
 	var vars []string
 	if ctx.TownRoot == "" || ctx.Rig == "" {

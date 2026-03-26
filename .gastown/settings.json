@@ -3,13 +3,26 @@
   "version": 1,
   "merge_queue": {
     "enabled": true,
-    "on_conflict": "assign_back",
+    "on_conflict": "auto_rebase",
     "verification_mode": "strict",
     "run_tests": true,
     "gates": {
       "verify": {
         "cmd": "./scripts/ci/verify.sh pre-merge",
         "timeout": "20m"
+      },
+      "coverage": {
+        "cmd": "./scripts/ci/verify.sh coverage",
+        "timeout": "10m"
+      },
+      "vuln": {
+        "cmd": "govulncheck ./...",
+        "timeout": "5m"
+      },
+      "integration": {
+        "cmd": "./scripts/ci/verify.sh integration",
+        "timeout": "30m",
+        "phase": "post-squash"
       }
     },
     "gates_parallel": true,

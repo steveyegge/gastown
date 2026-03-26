@@ -5,7 +5,19 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/verify"
 )
+
+func findGateByName(gates []verify.Gate, name string) (verify.Gate, bool) {
+	for _, gate := range gates {
+		if gate.Name == name {
+			return gate, true
+		}
+	}
+	return verify.Gate{}, false
+}
 
 func TestMainBranchTestInterval(t *testing.T) {
 	// Nil config returns default
@@ -173,8 +185,56 @@ func TestLoadRigGateConfig(t *testing.T) {
 		if len(cfg.Gates) != 3 {
 			t.Errorf("expected 3 gates, got %d", len(cfg.Gates))
 		}
-		if cfg.Gates["build"] != "go build ./..." {
-			t.Errorf("expected build gate 'go build ./...', got %q", cfg.Gates["build"])
+		buildGate, ok := findGateByName(cfg.Gates, "build")
+		if !ok {
+			t.Fatal("expected build gate")
+		}
+		if buildGate.Cmd != "go build ./..." {
+			t.Errorf("expected build gate 'go build ./...', got %q", buildGate.Cmd)
+		}
+	})
+
+	t.Run("layered settings prefer repo verifier", func(t *testing.T) {
+		dir := t.TempDir()
+		repoSettings := &config.RigSettings{
+			Type:    "rig-settings",
+			Version: config.CurrentRigSettingsVersion,
+			MergeQueue: &config.MergeQueueConfig{
+				Gates: map[string]*config.MergeQueueGateConfig{
+					"verify": {Cmd: "./scripts/ci/verify.sh"},
+				},
+			},
+		}
+		localSettings := &config.RigSettings{
+			Type:    "rig-settings",
+			Version: config.CurrentRigSettingsVersion,
+			MergeQueue: &config.MergeQueueConfig{
+				GatesParallel: configPtr(false),
+			},
+		}
+		if err := config.SaveRigSettings(filepath.Join(dir, "mayor", "rig", config.RepoSettingsPath), repoSettings); err != nil {
+			t.Fatal(err)
+		}
+		if err := config.SaveRigSettings(filepath.Join(dir, "settings", "config.json"), localSettings); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := loadRigGateConfig(dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg == nil {
+			t.Fatal("expected non-nil config")
+		}
+		verifyGate, ok := findGateByName(cfg.Gates, "verify")
+		if !ok {
+			t.Fatal("expected verify gate from repo settings")
+		}
+		if verifyGate.Cmd != "./scripts/ci/verify.sh" {
+			t.Fatalf("verify gate = %q, want repo verifier", verifyGate.Cmd)
+		}
+		if cfg.GatesParallel {
+			t.Fatal("expected local gates_parallel override to disable parallelism")
 		}
 	})
 
@@ -197,6 +257,10 @@ func TestLoadRigGateConfig(t *testing.T) {
 			t.Errorf("expected nil for no test commands, got %+v", cfg)
 		}
 	})
+}
+
+func configPtr(v bool) *bool {
+	return &v
 }
 
 func TestContains(t *testing.T) {

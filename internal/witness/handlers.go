@@ -98,6 +98,8 @@ type HandlerResult struct {
 	WispCreated   string // ID of created wisp (if any)
 	MailSent      string // Deprecated: was ID of sent mail. Notifications now use nudge.
 	Error         error
+	SmokeOutput   string // Output of post-merge smoke check (empty if not run or passed silently)
+	SmokeIncident string // Bead ID of auto-created P0 incident if smoke failed
 }
 
 // HandlePolecatDone processes a POLECAT_DONE message from a polecat.
@@ -391,9 +393,72 @@ func HandleMerged(bd *BdCli, workDir, rigName string, msg *mail.Message) *Handle
 		return result
 	}
 
+	// Run post-merge smoke check. On failure, an incident bead is auto-created.
+	smokeOut, incidentID, smokeErr := runPostMergeSmoke(bd, workDir, rigName, payload.PolecatName)
+	result.SmokeOutput = smokeOut
+	if smokeErr != nil {
+		result.SmokeIncident = incidentID
+		// Smoke failure is reported but does not block cleanup — the incident bead
+		// routes through the normal escalation system.
+		fmt.Fprintf(os.Stderr, "witness: post-merge smoke failed for %s (incident=%s): %v\n",
+			payload.PolecatName, incidentID, smokeErr)
+	}
+
 	cleanupStatus := getCleanupStatus(bd, workDir, rigName, payload.PolecatName)
 	handleMergedCleanupStatus(workDir, rigName, payload.PolecatName, cleanupStatus, wispID, result)
 	return result
+}
+
+// runPostMergeSmoke runs the repo's smoke command after a successful merge and
+// auto-creates a P0 incident bead if it fails. This is Layer 10 of the quality
+// system: post-merge health verification that runs without human intervention.
+//
+// The smoke command is read from repo_contract.smoke_command in .gastown/settings.json.
+// Falls back to ./scripts/ci/verify.sh smoke if not configured.
+func runPostMergeSmoke(bd *BdCli, workDir, rigName, polecatName string) (output string, incidentID string, err error) {
+	// Find the repo root: <town_root>/<rig_name>/mayor/rig
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		return "", "", fmt.Errorf("finding town root for smoke: %w", err)
+	}
+	repoRoot := filepath.Join(townRoot, rigName, "mayor", "rig")
+
+	// Load smoke command from repo contract; fall back to default.
+	smokeCmd := "./scripts/ci/verify.sh smoke"
+	if settings, loadErr := config.LoadRepoSettings(repoRoot); loadErr == nil && settings != nil {
+		if settings.RepoContract != nil && settings.RepoContract.SmokeCommand != "" {
+			smokeCmd = settings.RepoContract.SmokeCommand
+		}
+	}
+
+	out, runErr := util.ExecWithOutput(repoRoot, "sh", "-c", smokeCmd) //nolint:gosec // G204: command from repo-committed config
+	if runErr == nil {
+		return out, "", nil
+	}
+
+	// Smoke failed — auto-create a P0 incident bead.
+	title := fmt.Sprintf("post-merge smoke failure: %s", polecatName)
+	desc := fmt.Sprintf("Smoke check failed after merging polecat %s branch.\nCommand: %s\nOutput:\n%s", polecatName, smokeCmd, out)
+	jsonOut, bdErr := bd.Exec(workDir, "create",
+		"--json",
+		"--type", "bug",
+		"--priority", "0",
+		"--title", title,
+		"--description", desc,
+		"--label", fmt.Sprintf("post-merge-smoke,polecat:%s", polecatName),
+	)
+	if bdErr != nil {
+		return out, "", fmt.Errorf("smoke failed (%w) and incident bead creation also failed: %v", runErr, bdErr)
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	if jsonErr := json.Unmarshal([]byte(jsonOut), &created); jsonErr != nil || created.ID == "" {
+		return out, "", fmt.Errorf("smoke failed (%w); incident bead created but ID could not be parsed", runErr)
+	}
+
+	return out, created.ID, fmt.Errorf("smoke failed: %w", runErr)
 }
 
 // handleMergedCleanupStatus acknowledges merge completion for persistent polecats.

@@ -554,6 +554,322 @@ func TestMergeSettingsCommand(t *testing.T) {
 	})
 }
 
+func TestValidateStrictMergeQueueRequirements(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		cfg     *MergeQueueConfig
+		wantErr bool
+	}{
+		{
+			name: "strict with repo-local gate",
+			cfg: &MergeQueueConfig{
+				VerificationMode: VerificationModeStrict,
+				Gates: map[string]*MergeQueueGateConfig{
+					"verify": {Cmd: "./scripts/ci/verify.sh"},
+				},
+			},
+		},
+		{
+			name: "strict with make target",
+			cfg: &MergeQueueConfig{
+				VerificationMode: VerificationModeStrict,
+				Gates: map[string]*MergeQueueGateConfig{
+					"verify": {Cmd: "make ci-verify"},
+				},
+			},
+		},
+		{
+			name: "strict missing gates",
+			cfg: &MergeQueueConfig{
+				VerificationMode: VerificationModeStrict,
+			},
+			wantErr: true,
+		},
+		{
+			name: "strict with non-local command",
+			cfg: &MergeQueueConfig{
+				VerificationMode: VerificationModeStrict,
+				Gates: map[string]*MergeQueueGateConfig{
+					"verify": {Cmd: "go test ./..."},
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateStrictMergeQueueRequirements(tt.cfg)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateStrictMergeQueueRequirements() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestMergeSettingsCommand_MergesStrictFields(t *testing.T) {
+	t.Parallel()
+
+	repo := &MergeQueueConfig{
+		VerificationMode:                 VerificationModeAdvisory,
+		IntegrationBranchAutoLand:        boolPtr(false),
+		IntegrationBranchRefineryEnabled: boolPtr(true),
+		JudgmentEnabled:                  boolPtr(false),
+		ReviewDepth:                      "standard",
+		Gates: map[string]*MergeQueueGateConfig{
+			"verify": {Cmd: "./scripts/ci/verify.sh"},
+		},
+		GatesParallel: boolPtr(true),
+		AutoPush:      boolPtr(true),
+	}
+	local := &MergeQueueConfig{
+		VerificationMode:                 VerificationModeStrict,
+		IntegrationBranchAutoLand:        boolPtr(true),
+		IntegrationBranchRefineryEnabled: boolPtr(false),
+		JudgmentEnabled:                  boolPtr(true),
+		ReviewDepth:                      "deep",
+		Gates: map[string]*MergeQueueGateConfig{
+			"verify": {Cmd: "make ci-verify"},
+		},
+		GatesParallel: boolPtr(false),
+		AutoPush:      boolPtr(false),
+	}
+
+	merged := MergeSettingsCommand(repo, local)
+	if merged.GetVerificationMode() != VerificationModeStrict {
+		t.Fatalf("VerificationMode = %q, want %q", merged.GetVerificationMode(), VerificationModeStrict)
+	}
+	if merged.Gates["verify"].Cmd != "make ci-verify" {
+		t.Fatalf("verify gate = %q, want make ci-verify", merged.Gates["verify"].Cmd)
+	}
+	if merged.IsGatesParallelEnabled() {
+		t.Fatal("expected gates_parallel=false override")
+	}
+	if merged.IsAutoPushEnabled() {
+		t.Fatal("expected auto_push=false override")
+	}
+	if !merged.IsIntegrationBranchAutoLandEnabled() {
+		t.Fatal("expected integration_branch_auto_land=true override")
+	}
+	if merged.IsRefineryIntegrationEnabled() {
+		t.Fatal("expected integration_branch_refinery_enabled=false override")
+	}
+	if !merged.IsJudgmentEnabled() {
+		t.Fatal("expected judgment_enabled=true override")
+	}
+	if merged.GetReviewDepth() != "deep" {
+		t.Fatalf("review_depth = %q, want deep", merged.GetReviewDepth())
+	}
+}
+
+func TestLoadEffectiveMergeQueueConfig(t *testing.T) {
+	t.Parallel()
+
+	rigPath := t.TempDir()
+	repoSettingsPath := filepath.Join(rigPath, "mayor", "rig", RepoSettingsPath)
+	localSettingsPath := filepath.Join(rigPath, "settings", "config.json")
+
+	repoSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: CurrentRigSettingsVersion,
+		MergeQueue: &MergeQueueConfig{
+			VerificationMode: VerificationModeAdvisory,
+			Gates: map[string]*MergeQueueGateConfig{
+				"verify": {Cmd: "./scripts/ci/verify.sh"},
+			},
+			GatesParallel: boolPtr(true),
+		},
+	}
+	localSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: CurrentRigSettingsVersion,
+		MergeQueue: &MergeQueueConfig{
+			VerificationMode: VerificationModeStrict,
+			GatesParallel:    boolPtr(false),
+			AutoPush:         boolPtr(false),
+		},
+	}
+
+	if err := SaveRigSettings(repoSettingsPath, repoSettings); err != nil {
+		t.Fatalf("SaveRigSettings(repo): %v", err)
+	}
+	if err := SaveRigSettings(localSettingsPath, localSettings); err != nil {
+		t.Fatalf("SaveRigSettings(local): %v", err)
+	}
+
+	mq, err := LoadEffectiveMergeQueueConfig(rigPath)
+	if err != nil {
+		t.Fatalf("LoadEffectiveMergeQueueConfig: %v", err)
+	}
+	if mq == nil {
+		t.Fatal("expected merged merge_queue config")
+	}
+	if mq.GetVerificationMode() != VerificationModeStrict {
+		t.Fatalf("VerificationMode = %q, want %q", mq.GetVerificationMode(), VerificationModeStrict)
+	}
+	if mq.Gates["verify"].Cmd != "./scripts/ci/verify.sh" {
+		t.Fatalf("verify gate = %q, want repo-local verifier", mq.Gates["verify"].Cmd)
+	}
+	if mq.IsGatesParallelEnabled() {
+		t.Fatal("expected local gates_parallel=false override")
+	}
+	if mq.IsAutoPushEnabled() {
+		t.Fatal("expected local auto_push=false override")
+	}
+}
+
+func TestLoadEffectiveMergeQueueConfig_InjectsRepoContractGates(t *testing.T) {
+	t.Parallel()
+
+	rigPath := t.TempDir()
+	repoSettingsPath := filepath.Join(rigPath, "mayor", "rig", RepoSettingsPath)
+	localSettingsPath := filepath.Join(rigPath, "settings", "config.json")
+
+	repoSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: CurrentRigSettingsVersion,
+		RepoContract: &RepoContractConfig{
+			VerifyCommand: "./scripts/ci/verify.sh",
+			SmokeCommand:  "./scripts/ci/smoke.sh",
+		},
+	}
+	localSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: CurrentRigSettingsVersion,
+		MergeQueue: &MergeQueueConfig{
+			VerificationMode: VerificationModeStrict,
+		},
+	}
+
+	if err := SaveRigSettings(repoSettingsPath, repoSettings); err != nil {
+		t.Fatalf("SaveRigSettings(repo): %v", err)
+	}
+	if err := SaveRigSettings(localSettingsPath, localSettings); err != nil {
+		t.Fatalf("SaveRigSettings(local): %v", err)
+	}
+
+	mq, err := LoadEffectiveMergeQueueConfig(rigPath)
+	if err != nil {
+		t.Fatalf("LoadEffectiveMergeQueueConfig: %v", err)
+	}
+	if mq == nil {
+		t.Fatal("expected merge_queue config")
+	}
+	verifyGate := mq.Gates["verify"]
+	if verifyGate == nil {
+		t.Fatal("expected verify gate from repo contract")
+	}
+	if verifyGate.Cmd != "./scripts/ci/verify.sh" {
+		t.Fatalf("verify gate cmd = %q, want ./scripts/ci/verify.sh", verifyGate.Cmd)
+	}
+	if normalizeMergeQueueGatePhase(verifyGate.Phase) != MergeQueueGatePhasePreMerge {
+		t.Fatalf("verify gate phase = %q, want %q", normalizeMergeQueueGatePhase(verifyGate.Phase), MergeQueueGatePhasePreMerge)
+	}
+	smokeGate := mq.Gates["smoke"]
+	if smokeGate == nil {
+		t.Fatal("expected smoke gate from repo contract")
+	}
+	if smokeGate.Cmd != "./scripts/ci/smoke.sh" {
+		t.Fatalf("smoke gate cmd = %q, want ./scripts/ci/smoke.sh", smokeGate.Cmd)
+	}
+	if normalizeMergeQueueGatePhase(smokeGate.Phase) != MergeQueueGatePhasePostSquash {
+		t.Fatalf("smoke gate phase = %q, want %q", normalizeMergeQueueGatePhase(smokeGate.Phase), MergeQueueGatePhasePostSquash)
+	}
+}
+
+func TestLoadEffectiveRepoContract(t *testing.T) {
+	t.Parallel()
+
+	rigPath := t.TempDir()
+	repoSettingsPath := filepath.Join(rigPath, "mayor", "rig", RepoSettingsPath)
+	localSettingsPath := filepath.Join(rigPath, "settings", "config.json")
+	requiresSecurityScan := true
+	requiresE2E := true
+
+	repoSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: CurrentRigSettingsVersion,
+		RepoContract: &RepoContractConfig{
+			RepoType:             "backend-api",
+			EnforcementTier:      RepoContractTierStrong,
+			VerifyCommand:        "./scripts/ci/verify.sh",
+			RequiresSecurityScan: &requiresSecurityScan,
+			CriticalPaths:        []string{"ingest", "respond"},
+		},
+	}
+	localSettings := &RigSettings{
+		Type:    "rig-settings",
+		Version: CurrentRigSettingsVersion,
+		RepoContract: &RepoContractConfig{
+			EnforcementTier: RepoContractTierProduction,
+			E2ECommand:      "./scripts/ci/e2e.sh",
+			RequiresE2E:     &requiresE2E,
+			CriticalPaths:   []string{"recover-session"},
+		},
+	}
+
+	if err := SaveRigSettings(repoSettingsPath, repoSettings); err != nil {
+		t.Fatalf("SaveRigSettings(repo): %v", err)
+	}
+	if err := SaveRigSettings(localSettingsPath, localSettings); err != nil {
+		t.Fatalf("SaveRigSettings(local): %v", err)
+	}
+
+	contract, err := LoadEffectiveRepoContract(rigPath)
+	if err != nil {
+		t.Fatalf("LoadEffectiveRepoContract: %v", err)
+	}
+	if contract == nil {
+		t.Fatal("expected repo contract")
+	}
+	if contract.RepoType != "backend-api" {
+		t.Fatalf("RepoType = %q, want backend-api", contract.RepoType)
+	}
+	if contract.GetEnforcementTier() != RepoContractTierProduction {
+		t.Fatalf("EnforcementTier = %q, want %q", contract.GetEnforcementTier(), RepoContractTierProduction)
+	}
+	if contract.VerifyCommand != "./scripts/ci/verify.sh" {
+		t.Fatalf("VerifyCommand = %q, want ./scripts/ci/verify.sh", contract.VerifyCommand)
+	}
+	if contract.E2ECommand != "./scripts/ci/e2e.sh" {
+		t.Fatalf("E2ECommand = %q, want ./scripts/ci/e2e.sh", contract.E2ECommand)
+	}
+	if contract.RequiresSecurityScan == nil || !*contract.RequiresSecurityScan {
+		t.Fatal("expected RequiresSecurityScan=true")
+	}
+	if contract.RequiresE2E == nil || !*contract.RequiresE2E {
+		t.Fatal("expected RequiresE2E=true")
+	}
+	if got := strings.Join(contract.CriticalPaths, ","); got != "recover-session" {
+		t.Fatalf("CriticalPaths = %q, want recover-session", got)
+	}
+}
+
+func TestValidateRepoContractConfig(t *testing.T) {
+	t.Parallel()
+
+	if err := validateRepoContractConfig(&RepoContractConfig{
+		RepoType:        "worker",
+		EnforcementTier: RepoContractTierProduction,
+		VerifyCommand:   "./scripts/ci/verify.sh",
+		E2ECommand:      "make ci-e2e",
+	}); err != nil {
+		t.Fatalf("validateRepoContractConfig(valid): %v", err)
+	}
+
+	if err := validateRepoContractConfig(&RepoContractConfig{RepoType: "unknown"}); err == nil || !strings.Contains(err.Error(), "repo_contract.repo_type") {
+		t.Fatalf("expected repo_type validation error, got %v", err)
+	}
+
+	if err := validateRepoContractConfig(&RepoContractConfig{VerifyCommand: "/usr/local/bin/verify"}); err == nil || !strings.Contains(err.Error(), "repo_contract.verify_command") {
+		t.Fatalf("expected verify_command validation error, got %v", err)
+	}
+}
+
 func TestMayorConfigRoundTrip(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
