@@ -1144,7 +1144,18 @@ notifyWitness:
 			}
 		}
 
-		fmt.Printf("%s Polecat transitioned to IDLE — ready for new work\n", style.Bold.Render("✓"))
+		// Disposable polecat model: self-terminate after work completion.
+		// Fresh context windows per task reduce token waste and eliminate
+		// stale state bugs (hook_bead, idle management, reaper complexity).
+		// Schedule session kill with a short delay so gt done can return
+		// cleanly to Claude Code before the session dies.
+		fmt.Printf("%s Work complete — terminating session\n", style.Bold.Render("✓"))
+		sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
+		go func() {
+			time.Sleep(3 * time.Second)
+			t := tmux.NewTmux()
+			_ = t.KillSessionWithProcesses(sessionName)
+		}()
 	}
 
 	fmt.Println()
