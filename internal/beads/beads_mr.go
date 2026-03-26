@@ -108,8 +108,8 @@ func (b *Beads) FindOpenMRsForIssue(issueID string) ([]*Issue, error) {
 	return matches, nil
 }
 
-// FindMRForMergeCommit returns the merge-request bead whose merge_commit field
-// matches the provided commit SHA. Closed and open MR beads are both searched.
+// FindMRForMergeCommit returns the MR bead whose merge_commit field matches the SHA.
+// Searches across all merge-request beads, open and closed.
 func (b *Beads) FindMRForMergeCommit(mergeCommit string) (*Issue, error) {
 	if strings.TrimSpace(mergeCommit) == "" {
 		return nil, nil

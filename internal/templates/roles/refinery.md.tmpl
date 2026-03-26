@@ -45,7 +45,7 @@ queue for your rig, merging polecat work to its target branch one at a time with
 **CARDINAL RULE: You are a merge processor, NOT a developer.**
 - You NEVER write application code. You merge branches mechanically.
 - You do NOT explore polecat implementations or re-implement their fixes.
-- Your job: checkout branch → rebase → run the configured repo verifier → merge to target → push.
+- Your job: checkout branch → rebase → run tests → merge to target → push.
 - If tests fail due to the branch: reopen the source issue, notify witness (MERGE_FAILED), close MR, delete branch.
 - If tests fail due to pre-existing issues on the merge target: file a bead. Do NOT fix it yourself.
 - FORBIDDEN: Reading polecat code to "understand what they were trying to do."
@@ -212,14 +212,9 @@ git rebase origin/<rebase-target>
 ```
 If conflicts unresolvable: reopen source issue, notify witness (MERGE_FAILED), close MR, skip to loop-check.
 
-**run-tests**: The merge queue configuration is the source of truth. Run the
-configured repo-local verifier gates, not ad hoc commands. In strict mode,
-always rerun the configured gates on the exact code being merged and ignore any
-polecat `--pre-verified` claim.
-
-If the repo defines `.gastown/settings.json`, treat its repo contract as the
-canonical safety contract. The verifier, smoke, release, and e2e entrypoints
-named there override hand-written command guesses.
+**run-tests**: Run each configured command (skip empty ones):
+setup → typecheck → lint → build → test.
+Read `bd show <step-id>` for exact commands.
 
 **handle-failures**: **VERIFICATION GATE**
 ```

@@ -63,36 +63,40 @@ run_integration_tests() {
   go test -tags=integration -timeout=20m -v ./...
 }
 
-run_failure_tests() {
-  echo "[verify] failure-mode tests"
-  local args=("-tags=failure" "-timeout=10m" "-v" "./...")
-  if command -v gotestsum >/dev/null 2>&1 && [[ -n "${GASTOWN_VERIFY_JUNIT_FILE:-}" ]]; then
-    gotestsum --format testname --junitfile "${GASTOWN_VERIFY_JUNIT_FILE}" -- "${args[@]}"
-    return
-  fi
-  go test -tags=failure -timeout=10m -v ./...
-}
-
-run_fuzz_tests() {
-  echo "[verify] fuzz tests (30s)"
-  # Run all fuzz targets for a short duration to catch obvious panics.
-  # Corpus is not persisted here; use 'go test -fuzz=FuzzXxx -fuzztime=Xs' locally for deep runs.
-  go test -fuzz=. -fuzztime=30s ./... 2>&1 || true
-}
-
-run_coverage_check() {
-  echo "[verify] coverage check"
-  go test -coverprofile=coverage.out ./...
-  local pct
-  pct=$(go tool cover -func=coverage.out | awk '/^total:/{gsub(/%/,""); print $3}')
-  local floor="${GASTOWN_COVERAGE_FLOOR:-60}"
-  if awk "BEGIN{exit ($pct+0 >= $floor+0)}"; then
-    echo "[verify] coverage ${pct}% is below ${floor}% floor" >&2
-    exit 1
-  fi
-  echo "[verify] coverage ${pct}% (floor: ${floor}%)"
-}
-
+case "$MODE" in
+  guard)
+    run_guard_checks
+    ;;
+  guard-replace)
+    check_no_replace_directives
+    ;;
+  guard-issues-jsonl)
+    check_no_issues_jsonl
+    ;;
+  build)
+    build_gt
+    ;;
+  unit)
+    run_unit_tests
+    ;;
+  lint)
+    run_lint
+    ;;
+  pre-merge|full)
+    run_guard_checks
+    build_gt
+    run_unit_tests
+    run_lint
+    ;;
+  smoke)
+    run_guard_checks
+    build_gt
+    ;;
+  integration)
+    run_integration_tests
+    ;;
+  *)
+    echo "usage: $0 [guard|guard-replace|guard-issues-jsonl|build|unit|lint|pre-merge|smoke|integration|full]" >&2
     exit 2
     ;;
 esac

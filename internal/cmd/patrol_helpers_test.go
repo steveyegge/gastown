@@ -136,7 +136,6 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 		"delete_merged_branches":              "true",
 		"judgment_enabled":                    "false",
 		"review_depth":                        "standard",
-		"verification_mode":                   "advisory",
 	}
 
 	varMap := make(map[string]string)
@@ -362,9 +361,6 @@ func TestBuildRefineryPatrolVars_BoolFormat(t *testing.T) {
 	if got := varMap["build_command"]; got != "make build" {
 		t.Errorf("build_command = %q, want %q", got, "make build")
 	}
-	if got := varMap["verification_mode"]; got != "advisory" {
-		t.Errorf("verification_mode = %q, want %q", got, "advisory")
-	}
 }
 
 func TestBuildRefineryPatrolVars_DefaultBranchWithoutMQ(t *testing.T) {
@@ -403,70 +399,6 @@ func TestBuildRefineryPatrolVars_DefaultBranchWithoutMQ(t *testing.T) {
 	}
 	if got := varMap["target_branch"]; got != "gastown" {
 		t.Errorf("target_branch = %q, want %q (should read rig config even without MQ settings)", got, "gastown")
-	}
-}
-
-func TestBuildRefineryPatrolVars_RepoContract(t *testing.T) {
-	tmpDir := t.TempDir()
-	rigDir := filepath.Join(tmpDir, "testrig")
-	if err := os.MkdirAll(filepath.Join(rigDir, ".gastown"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	trueVal := true
-
-	settings := config.RigSettings{
-		Type:    "rig-settings",
-		Version: 1,
-		RepoContract: &config.RepoContractConfig{
-			RepoType:             "backend-api",
-			EnforcementTier:      config.RepoContractTierProduction,
-			VerifyCommand:        "./scripts/ci/verify.sh",
-			SmokeCommand:         "./scripts/ci/smoke.sh",
-			ReleaseCheckCommand:  "./scripts/ci/release-check.sh",
-			E2ECommand:           "./scripts/ci/e2e.sh",
-			PerfCommand:          "./scripts/ci/perf.sh",
-			RequiresMigrations:   &trueVal,
-			RequiresE2E:          &trueVal,
-			RequiresSecurityScan: &trueVal,
-			CriticalPaths:        []string{"ingest conversation", "answer request"},
-		},
-	}
-	data, _ := json.Marshal(settings)
-	if err := os.WriteFile(filepath.Join(rigDir, ".gastown", "settings.json"), data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx := RoleContext{
-		TownRoot: tmpDir,
-		Rig:      "testrig",
-	}
-	vars := buildRefineryPatrolVars(ctx)
-
-	varMap := make(map[string]string)
-	for _, v := range vars {
-		parts := splitFirstEquals(v)
-		if len(parts) == 2 {
-			varMap[parts[0]] = parts[1]
-		}
-	}
-
-	expected := map[string]string{
-		"repo_type":              "backend-api",
-		"enforcement_tier":       "production",
-		"verify_command":         "./scripts/ci/verify.sh",
-		"smoke_command":          "./scripts/ci/smoke.sh",
-		"release_check_command":  "./scripts/ci/release-check.sh",
-		"e2e_command":            "./scripts/ci/e2e.sh",
-		"perf_command":           "./scripts/ci/perf.sh",
-		"requires_migrations":    "true",
-		"requires_e2e":           "true",
-		"requires_security_scan": "true",
-		"critical_paths":         "ingest conversation, answer request",
-	}
-	for key, want := range expected {
-		if got := varMap[key]; got != want {
-			t.Errorf("%s = %q, want %q", key, got, want)
-		}
 	}
 }
 

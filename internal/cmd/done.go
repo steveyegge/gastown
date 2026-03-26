@@ -404,17 +404,6 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, rigName)); err == nil && rigCfg.DefaultBranch != "" {
 		defaultBranch = rigCfg.DefaultBranch
 	}
-	rigPath := filepath.Join(townRoot, rigName)
-	mergeQueueConfig, err := config.LoadEffectiveMergeQueueConfig(rigPath)
-	if err != nil {
-		return fmt.Errorf("loading merge queue settings: %w", err)
-	}
-	if mergeQueueConfig == nil {
-		mergeQueueConfig = config.DefaultMergeQueueConfig()
-	}
-	if exitType == ExitCompleted && mergeQueueConfig.IsStrictVerification() && donePreVerified {
-		return fmt.Errorf("--pre-verified is not allowed when merge_queue.verification_mode=%q", config.VerificationModeStrict)
-	}
 
 	// For COMPLETED, we need an issue ID and branch must not be the default branch
 	var mrID string
@@ -582,12 +571,6 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		convoyInfo = getConvoyInfoFromIssue(issueID, cwd)
 		if convoyInfo == nil {
 			convoyInfo = getConvoyInfoForIssue(issueID)
-		}
-
-		if shouldRunDoneStrictVerification(mergeQueueConfig, isNoMergeTask, convoyInfo) {
-			if err := runDoneStrictVerification(cmd.Context(), cwd, mergeQueueConfig); err != nil {
-				return err
-			}
 		}
 
 		// Handle "local" strategy: skip push and MR entirely
@@ -890,8 +873,9 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		// Only overrides if no explicit target was set above.
 		if target == defaultBranch {
 			refineryEnabled := true
-			if mergeQueueConfig != nil {
-				refineryEnabled = mergeQueueConfig.IsRefineryIntegrationEnabled()
+			settingsPath := filepath.Join(townRoot, rigName, "settings", "config.json")
+			if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.MergeQueue != nil {
+				refineryEnabled = settings.MergeQueue.IsRefineryIntegrationEnabled()
 			}
 			if refineryEnabled {
 				autoTarget, err := beads.DetectIntegrationBranch(bd, g, issueID)
@@ -1642,41 +1626,6 @@ func selfNukePolecat(roleInfo RoleInfo, _ string) error {
 	}
 
 	return nil
-}
-
-func shouldRunDoneStrictVerification(mq *config.MergeQueueConfig, isNoMergeTask bool, convoyInfo *ConvoyInfo) bool {
-	if mq == nil || !mq.IsStrictVerification() || isNoMergeTask {
-		return false
-	}
-	if convoyInfo != nil && convoyInfo.MergeStrategy == "local" {
-		return false
-	}
-	return true
-}
-
-func runDoneStrictVerification(ctx context.Context, workDir string, mq *config.MergeQueueConfig) error {
-	gates, err := verify.GatesForPhase(mq, verify.PhasePreMerge)
-	if err != nil {
-		return fmt.Errorf("loading strict verification gates: %w", err)
-	}
-	if len(gates) == 0 {
-		return fmt.Errorf("strict verification requires at least one pre-merge gate")
-	}
-
-	fmt.Printf("%s Strict verification: running %d pre-merge gate(s)\n", style.Bold.Render("→"), len(gates))
-	summary := verify.Run(ctx, workDir, gates, mq.IsGatesParallelEnabled(), func(format string, args ...interface{}) {
-		fmt.Printf("  %s\n", fmt.Sprintf(format, args...))
-	})
-	if summary.Success {
-		fmt.Printf("%s Strict verification passed\n", style.Bold.Render("✓"))
-		return nil
-	}
-
-	failures := verify.FailedGateNames(summary)
-	if len(failures) == 0 {
-		return fmt.Errorf("strict verification failed: %s", summary.Error)
-	}
-	return fmt.Errorf("strict verification failed for gate(s): %s\n%s", strings.Join(failures, ", "), summary.Error)
 }
 
 // isPolecatActor checks if a BD_ACTOR value represents a polecat.

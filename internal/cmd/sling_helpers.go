@@ -1081,87 +1081,9 @@ func isSlingConfigError(err error) bool {
 		strings.Contains(msg, "connection refused")
 }
 
-// appendVar appends a key=value var if value is non-empty.
-func appendVar(vars []string, key, value string) []string {
-	if strings.TrimSpace(value) == "" {
-		return vars
-	}
-	return append(vars, fmt.Sprintf("%s=%s", key, value))
-}
-
-// appendBoolPtrVar appends a key=value var if the pointer is non-nil.
-func appendBoolPtrVar(vars []string, key string, value *bool) []string {
-	if value == nil {
-		return vars
-	}
-	return append(vars, fmt.Sprintf("%s=%t", key, *value))
-}
-
-func gateCommand(mq *config.MergeQueueConfig, name string) string {
-	if mq == nil || mq.Gates == nil {
-		return ""
-	}
-	gate := mq.Gates[name]
-	if gate == nil {
-		return ""
-	}
-	return strings.TrimSpace(gate.Cmd)
-}
-
-func appendMergeQueuePromptVars(vars []string, mq *config.MergeQueueConfig) []string {
-	if mq == nil {
-		return vars
-	}
-
-	vars = append(vars, fmt.Sprintf("integration_branch_refinery_enabled=%t", mq.IsRefineryIntegrationEnabled()))
-	vars = append(vars, fmt.Sprintf("integration_branch_auto_land=%t", mq.IsIntegrationBranchAutoLandEnabled()))
-	vars = append(vars, fmt.Sprintf("run_tests=%t", mq.IsRunTestsEnabled()))
-	vars = append(vars, fmt.Sprintf("delete_merged_branches=%t", mq.IsDeleteMergedBranchesEnabled()))
-	vars = append(vars, fmt.Sprintf("judgment_enabled=%t", mq.IsJudgmentEnabled()))
-	vars = appendVar(vars, "review_depth", mq.GetReviewDepth())
-	vars = appendVar(vars, "verification_mode", mq.GetVerificationMode())
-	vars = appendVar(vars, "setup_command", mq.SetupCommand)
-	vars = appendVar(vars, "typecheck_command", mq.TypecheckCommand)
-	vars = appendVar(vars, "lint_command", mq.LintCommand)
-	vars = appendVar(vars, "test_command", mq.TestCommand)
-	vars = appendVar(vars, "build_command", mq.BuildCommand)
-	vars = appendVar(vars, "verify_gate_command", gateCommand(mq, "verify"))
-	vars = appendVar(vars, "smoke_gate_command", gateCommand(mq, "smoke"))
-	return vars
-}
-
-func appendRepoContractPromptVars(vars []string, contract *config.RepoContractConfig, mq *config.MergeQueueConfig) []string {
-	if contract == nil {
-		return vars
-	}
-
-	vars = appendVar(vars, "repo_type", contract.RepoType)
-	vars = appendVar(vars, "enforcement_tier", contract.GetEnforcementTier())
-	verifyCommand := contract.VerifyCommand
-	if verifyCommand == "" {
-		verifyCommand = gateCommand(mq, "verify")
-	}
-	smokeCommand := contract.SmokeCommand
-	if smokeCommand == "" {
-		smokeCommand = gateCommand(mq, "smoke")
-	}
-	vars = appendVar(vars, "verify_command", verifyCommand)
-	vars = appendVar(vars, "smoke_command", smokeCommand)
-	vars = appendVar(vars, "release_check_command", contract.ReleaseCheckCommand)
-	vars = appendVar(vars, "e2e_command", contract.E2ECommand)
-	vars = appendVar(vars, "perf_command", contract.PerfCommand)
-	vars = appendBoolPtrVar(vars, "requires_migrations", contract.RequiresMigrations)
-	vars = appendBoolPtrVar(vars, "requires_e2e", contract.RequiresE2E)
-	vars = appendBoolPtrVar(vars, "requires_security_scan", contract.RequiresSecurityScan)
-	if len(contract.CriticalPaths) > 0 {
-		vars = appendVar(vars, "critical_paths", strings.Join(contract.CriticalPaths, ", "))
-	}
-	return vars
-}
-
 // loadRigCommandVars reads rig settings and returns --var key=value strings
-// for the default branch, effective merge-queue verifier settings, and the
-// repo contract safety fields. Only non-empty values are included.
+// for all configured build pipeline commands (setup, typecheck, lint, test, build)
+// and the default branch (base_branch). Only non-empty values are included.
 //
 // Settings are resolved in priority order:
 //  1. Repository defaults: <rig>/mayor/rig/.gastown/settings.json (committed to git)

@@ -22,10 +22,6 @@ There is no confirmation.**
 
 **In both cases, you still run `{{ cmd }} done` at the end.**
 
-If the repo defines `.gastown/settings.json`, its repo contract is the source
-of truth for verifier, smoke, release, and e2e commands. Use those repo-local
-entrypoints instead of improvising ad hoc lint/test/build sequences.
-
 **Polecats do NOT:**
 - Push directly to main (`git push origin main` — WRONG)
 - Merge their own PRs (maintainer or Refinery does this)

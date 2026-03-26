@@ -1,28 +1,26 @@
 package verify
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sort"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/steveyegge/gastown/internal/config"
 )
 
-// Phase identifies when a verification gate runs.
+// Phase identifies where a gate runs in the merge pipeline.
 type Phase string
 
 const (
-	PhasePreMerge   Phase = Phase(config.MergeQueueGatePhasePreMerge)
-	PhasePostSquash Phase = Phase(config.MergeQueueGatePhasePostSquash)
+	PhasePreMerge   Phase = "pre-merge"
+	PhasePostSquash Phase = "post-squash"
 )
 
-// Gate defines a runnable verification command.
+// Gate defines a named verification command.
 type Gate struct {
 	Name    string
 	Cmd     string
@@ -39,195 +37,131 @@ type Result struct {
 	Elapsed time.Duration
 }
 
-// Summary captures the outcome of an entire verification run.
+// Summary aggregates a verification run.
 type Summary struct {
 	Success bool
 	Results []Result
-	Error   string
 }
 
-// GatesForPhase extracts and normalizes merge-queue gates for the requested phase.
-func GatesForPhase(mq *config.MergeQueueConfig, phase Phase) ([]Gate, error) {
-	if mq == nil || len(mq.Gates) == 0 {
-		return nil, nil
-	}
+// CommandFunc executes a shell command for a gate.
+type CommandFunc func(ctx context.Context, workDir string, env []string, command string) ([]byte, error)
 
-	gates := make([]Gate, 0, len(mq.Gates))
-	for name, gateCfg := range mq.Gates {
-		if gateCfg == nil {
-			return nil, fmt.Errorf("gate %q is null", name)
-		}
-		gatePhase := Phase(config.MergeQueueGatePhasePreMerge)
-		if gateCfg.Phase != "" {
-			gatePhase = Phase(gateCfg.Phase)
-		}
-		if gatePhase != phase {
-			continue
-		}
-
-		gate := Gate{
-			Name:  name,
-			Cmd:   gateCfg.Cmd,
-			Phase: gatePhase,
-		}
-		if gateCfg.Timeout != "" {
-			timeout, err := time.ParseDuration(gateCfg.Timeout)
-			if err != nil {
-				return nil, fmt.Errorf("invalid timeout for gate %q: %w", name, err)
-			}
-			gate.Timeout = timeout
-		}
-		gates = append(gates, gate)
-	}
-
-	sort.Slice(gates, func(i, j int) bool {
-		return gates[i].Name < gates[j].Name
-	})
-
-	return gates, nil
+// RunOptions tunes gate execution.
+type RunOptions struct {
+	Parallel bool
+	Env      []string
+	Output   io.Writer
+	Command  CommandFunc
 }
 
-// Run executes the provided gates in the given worktree.
-func Run(ctx context.Context, workDir string, gates []Gate, parallel bool, logf func(format string, args ...interface{})) Summary {
-	if len(gates) == 0 {
+// FilterPhase returns gates matching the given phase.
+func FilterPhase(gates []Gate, phase Phase) []Gate {
+	var filtered []Gate
+	for _, gate := range gates {
+		gatePhase := gate.Phase
+		if gatePhase == "" {
+			gatePhase = PhasePreMerge
+		}
+		if gatePhase == phase {
+			filtered = append(filtered, gate)
+		}
+	}
+	sort.Slice(filtered, func(i, j int) bool { return filtered[i].Name < filtered[j].Name })
+	return filtered
+}
+
+// RunPhase executes all gates for a phase and returns a summary.
+func RunPhase(ctx context.Context, workDir string, gates []Gate, phase Phase, opts RunOptions) Summary {
+	filtered := FilterPhase(gates, phase)
+	if len(filtered) == 0 {
 		return Summary{Success: true}
 	}
-
-	log := func(format string, args ...interface{}) {
-		if logf != nil {
-			logf(format, args...)
-		}
+	if opts.Command == nil {
+		opts.Command = defaultCommand
 	}
 
-	results := make([]Result, 0, len(gates))
-	if parallel {
-		results = make([]Result, len(gates))
+	summary := Summary{Success: true}
+	if opts.Output != nil {
+		_, _ = fmt.Fprintf(opts.Output, "[verify] running %d %s gate(s) (parallel=%v)\n", len(filtered), phase, opts.Parallel)
+	}
+
+	if opts.Parallel {
+		results := make([]Result, len(filtered))
 		var wg sync.WaitGroup
-		for i, gate := range gates {
+		for i, gate := range filtered {
 			wg.Add(1)
-			go func(idx int, gate Gate) {
+			go func(idx int, g Gate) {
 				defer wg.Done()
-				log("gate %q: starting (%s)", gate.Name, gate.Cmd)
-				results[idx] = runGate(ctx, workDir, gate)
+				results[idx] = runGate(ctx, workDir, opts, g)
 			}(i, gate)
 		}
 		wg.Wait()
+		summary.Results = results
 	} else {
-		for _, gate := range gates {
-			log("gate %q: starting (%s)", gate.Name, gate.Cmd)
-			result := runGate(ctx, workDir, gate)
-			results = append(results, result)
+		for _, gate := range filtered {
+			result := runGate(ctx, workDir, opts, gate)
+			summary.Results = append(summary.Results, result)
 			if !result.Success {
 				break
 			}
 		}
 	}
 
-	var failures []string
-	for _, result := range results {
-		if result.Success {
-			log("gate %q: passed (%v)", result.Name, result.Elapsed.Truncate(time.Millisecond))
-			continue
-		}
-		log("gate %q: FAILED (%v) - %s", result.Name, result.Elapsed.Truncate(time.Millisecond), result.Error)
-		failures = append(failures, fmt.Sprintf("%s: %s", result.Name, result.Error))
-	}
-
-	if len(failures) > 0 {
-		return Summary{
-			Success: false,
-			Results: results,
-			Error:   fmt.Sprintf("quality gates failed: %s", strings.Join(failures, "; ")),
-		}
-	}
-
-	log("all quality gates passed")
-	return Summary{Success: true, Results: results}
-}
-
-// FailedGateNames returns the names of failing gates in execution order.
-func FailedGateNames(summary Summary) []string {
-	var names []string
 	for _, result := range summary.Results {
 		if !result.Success {
-			names = append(names, result.Name)
+			summary.Success = false
+			break
 		}
 	}
-	return names
+	return summary
 }
 
-func runGate(ctx context.Context, workDir string, gate Gate) Result {
+func runGate(ctx context.Context, workDir string, opts RunOptions, gate Gate) Result {
+	if opts.Output != nil {
+		_, _ = fmt.Fprintf(opts.Output, "[verify] gate %q: %s\n", gate.Name, gate.Cmd)
+	}
 	start := time.Now()
-	if strings.TrimSpace(gate.Cmd) == "" {
-		return Result{
-			Name:    gate.Name,
-			Success: false,
-			Error:   "gate command is empty",
-			Elapsed: time.Since(start),
-		}
-	}
-
 	gateCtx := ctx
+	cancel := func() {}
 	if gate.Timeout > 0 {
-		var cancel context.CancelFunc
 		gateCtx, cancel = context.WithTimeout(ctx, gate.Timeout)
-		defer cancel()
 	}
+	defer cancel()
 
-	cmd := exec.CommandContext(gateCtx, "sh", "-c", gate.Cmd) //nolint:gosec // G204: trusted repo configuration
-	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "CI=true")
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	elapsed := time.Since(start)
-	if err == nil {
-		return Result{
-			Name:    gate.Name,
-			Success: true,
-			Elapsed: elapsed,
+	out, err := opts.Command(gateCtx, workDir, opts.Env, gate.Cmd)
+	result := Result{
+		Name:    gate.Name,
+		Success: err == nil,
+		Output:  strings.TrimSpace(string(out)),
+		Elapsed: time.Since(start),
+	}
+	if err != nil {
+		result.Error = err.Error()
+		if result.Output != "" {
+			result.Error = result.Error + ": " + truncateOutput(result.Output, 50)
 		}
 	}
-
-	output := strings.TrimSpace(strings.Join([]string{
-		stdout.String(),
-		stderr.String(),
-	}, "\n"))
-	output = tailOutput(output, 40, 2000)
-
-	errMsg := fmt.Sprintf("%v", err)
-	if gateCtx.Err() == context.DeadlineExceeded {
-		errMsg = fmt.Sprintf("timed out after %v", gate.Timeout)
+	if opts.Output != nil {
+		if result.Success {
+			_, _ = fmt.Fprintf(opts.Output, "[verify] gate %q passed (%v)\n", gate.Name, result.Elapsed.Truncate(time.Millisecond))
+		} else {
+			_, _ = fmt.Fprintf(opts.Output, "[verify] gate %q failed (%v): %s\n", gate.Name, result.Elapsed.Truncate(time.Millisecond), result.Error)
+		}
 	}
-	if output != "" {
-		errMsg = fmt.Sprintf("%s: %s", errMsg, output)
-	}
-
-	return Result{
-		Name:    gate.Name,
-		Success: false,
-		Error:   errMsg,
-		Output:  output,
-		Elapsed: elapsed,
-	}
+	return result
 }
 
-func tailOutput(output string, maxLines, maxBytes int) string {
-	output = strings.TrimSpace(output)
-	if output == "" {
-		return ""
-	}
+func defaultCommand(ctx context.Context, workDir string, env []string, command string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command) //nolint:gosec // trusted repo/operator config
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), env...)
+	return cmd.CombinedOutput()
+}
 
-	lines := strings.Split(output, "\n")
-	if len(lines) > maxLines {
-		lines = lines[len(lines)-maxLines:]
+func truncateOutput(s string, maxLines int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return strings.TrimSpace(s)
 	}
-	output = strings.Join(lines, "\n")
-	if len(output) > maxBytes {
-		output = output[len(output)-maxBytes:]
-	}
-	return strings.TrimSpace(output)
+	return strings.Join(lines[len(lines)-maxLines:], "\n")
 }

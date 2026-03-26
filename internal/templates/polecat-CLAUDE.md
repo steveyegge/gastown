@@ -182,7 +182,7 @@ Question: ..."
 
 When your work is done, follow this checklist — **step 4 is REQUIRED**:
 
-⚠️ **DO NOT commit if the repo verifier fails. Fix issues first.**
+⚠️ **DO NOT commit if lint or tests fail. Fix issues first.**
 
 ```
 [ ] 1. Run quality gates (ALL must pass):
@@ -194,24 +194,15 @@ When your work is done, follow this checklist — **step 4 is REQUIRED**:
 ```
 
 **Quality gates are not optional.** Worktrees may not trigger pre-commit hooks,
-so you MUST run the repo-local verifier before every commit.
+so you MUST run lint/format/tests manually before every commit.
 
 **Project-specific gates:** Read CLAUDE.md and AGENTS.md in the repo root for
-the project's definition of done. Many repos provide a canonical verifier such
-as `scripts/ci/verify.sh`, `make ci-verify`, or `npm run ci:verify`. Use that
-entrypoint instead of guessing with ad hoc commands. If AGENTS.md exists, its
-"Core rule" section defines what "done" means for this project.
+the project's definition of done. Many projects require a specific test harness
+(not just `go test` or `dotnet test`). If AGENTS.md exists, its "Core rule"
+section defines what "done" means for this project.
 
-If the repo defines a `.gastown/settings.json` repo contract, treat its verifier,
-smoke, release, and e2e entrypoints as the canonical safety contract for that
-repo. Do not invent alternative command sequences when a repo-local entrypoint
-already exists.
-
-In rigs with `merge_queue.verification_mode=strict`, `gt done` reruns the
-configured pre-merge gates and refuses submission on any failure. `--pre-verified`
-is invalid in strict mode. The `gt done` command then pushes your branch,
-creates an MR bead in the MQ, nukes your sandbox, and exits your session.
-**You are gone after `gt done`.**
+The `gt done` command pushes your branch, creates an MR bead in the MQ, nukes
+your sandbox, and exits your session. **You are gone after `gt done`.**
 
 ### Do NOT Push Directly to Main
 
