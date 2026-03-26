@@ -79,6 +79,8 @@ func (r *RigContext) RunVerificationPhase(ctx context.Context, phase verify.Phas
 
 // EnsureGitHubBranchCI waits for a workflow run for the branch SHA, dispatching
 // workflow_dispatch when push-triggered CI does not appear.
+// On failure, it fetches the failed step logs and returns them in the error so
+// the polecat nudge contains actionable output rather than just a run URL.
 func (r *RigContext) EnsureGitHubBranchCI(ctx context.Context, branch, sha string, out io.Writer) (*githubci.WorkflowRun, error) {
 	if r == nil || r.GitHubCI == nil || !r.GitHubCI.IsRequired() {
 		return nil, nil
@@ -87,11 +89,22 @@ func (r *RigContext) EnsureGitHubBranchCI(ctx context.Context, branch, sha strin
 	if err := client.CheckAuth(ctx); err != nil {
 		return nil, err
 	}
-	return client.EnsureBranchCI(ctx, githubci.EnsureOptions{
+	run, err := client.EnsureBranchCI(ctx, githubci.EnsureOptions{
 		RepoDir:  r.RepoRoot,
 		Workflow: r.GitHubCI.WorkflowName(),
 		Branch:   branch,
 		SHA:      sha,
 		Output:   out,
 	})
+	if err == nil {
+		return run, nil
+	}
+	// CI failed: fetch the failed step logs so the polecat can see what broke.
+	if run != nil && run.DatabaseID != 0 {
+		repo, _ := githubci.RepoFromRemoteURL(r.RemoteURL)
+		if logs := client.GetFailedStepLogs(ctx, repo, run.DatabaseID); logs != "" {
+			return nil, fmt.Errorf("github ci failed:\n%s\n(run: %s): %w", logs, run.URL, err)
+		}
+	}
+	return nil, err
 }

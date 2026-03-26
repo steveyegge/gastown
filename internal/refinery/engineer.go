@@ -1026,8 +1026,9 @@ func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult 
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Ensuring GitHub CI for %s@%s\n", mr.Branch, mr.CommitSHA[:min(8, len(mr.CommitSHA))])
 		if run, err := e.rigReliability.EnsureGitHubBranchCI(ctx, mr.Branch, mr.CommitSHA, e.output); err != nil {
 			return ProcessResult{
-				Success: false,
-				Error:   fmt.Sprintf("github ci assurance failed: %v", err),
+				Success:     false,
+				TestsFailed: true,
+				Error:       fmt.Sprintf("github ci assurance failed: %v", err),
 			}
 		} else if run != nil && run.URL != "" {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] GitHub CI passed: %s\n", run.URL)

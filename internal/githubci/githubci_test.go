@@ -98,6 +98,42 @@ func TestEnsureBranchCIDispatchesFallback(t *testing.T) {
 	}
 }
 
+func TestGetFailedStepLogs_Success(t *testing.T) {
+	logOutput := "step1\nstep2\nstep3 FAILED"
+	runner := &scriptedRunner{
+		t: t,
+		steps: []scriptStep{
+			{
+				match: "gh run view 99 --repo owner/repo --log-failed",
+				out:   logOutput,
+			},
+		},
+	}
+	client := NewWithRunner(runner)
+	got := client.GetFailedStepLogs(context.Background(), "owner/repo", 99)
+	if got != logOutput {
+		t.Fatalf("GetFailedStepLogs = %q, want %q", got, logOutput)
+	}
+}
+
+func TestGetFailedStepLogs_Error(t *testing.T) {
+	runner := &scriptedRunner{
+		t: t,
+		steps: []scriptStep{
+			{
+				match: "gh run view 99 --repo owner/repo --log-failed",
+				out:   "",
+				err:   fmt.Errorf("gh: not found"),
+			},
+		},
+	}
+	client := NewWithRunner(runner)
+	got := client.GetFailedStepLogs(context.Background(), "owner/repo", 99)
+	if got != "" {
+		t.Fatalf("expected empty string on error, got %q", got)
+	}
+}
+
 func TestRepoFromRemoteURL(t *testing.T) {
 	tests := map[string]string{
 		"git@github.com:owner/repo.git":       "owner/repo",

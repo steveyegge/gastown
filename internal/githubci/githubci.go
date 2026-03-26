@@ -263,6 +263,31 @@ func (c *Client) resolveRepo(ctx context.Context, opts EnsureOptions) (string, e
 	return repo, nil
 }
 
+// GetFailedStepLogs returns the log output of failed steps for a workflow run.
+// It calls `gh run view --log-failed` and tails the output so it fits in a nudge.
+// Returns empty string on any error (best-effort — non-fatal).
+func (c *Client) GetFailedStepLogs(ctx context.Context, repo string, runID int64) string {
+	out, err := c.runner.Run(ctx, "gh", "run", "view", fmt.Sprintf("%d", runID),
+		"--repo", repo, "--log-failed")
+	if err != nil || len(out) == 0 {
+		return ""
+	}
+	return tailLines(strings.TrimSpace(string(out)), 60, 3000)
+}
+
+// tailLines returns the last maxLines lines of s, capped at maxBytes.
+func tailLines(s string, maxLines, maxBytes int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	out := strings.Join(lines, "\n")
+	if len(out) > maxBytes {
+		out = out[len(out)-maxBytes:]
+	}
+	return strings.TrimSpace(out)
+}
+
 // ResolveOriginURL returns the origin URL for a git repo.
 func ResolveOriginURL(ctx context.Context, runner Runner, repoDir string) (string, error) {
 	out, err := runner.Run(ctx, "git", "-C", repoDir, "remote", "get-url", "origin")
