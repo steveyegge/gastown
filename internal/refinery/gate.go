@@ -6,9 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	gh "github.com/steveyegge/gastown/internal/github"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/util"
 )
@@ -209,33 +213,149 @@ func findRigWithRefinery(townRoot string) string {
 	return ""
 }
 
-// handleGatePass signals that gates passed for a convoy.
-// Updates the convoy bead notes and nudges for draft→ready conversion.
+// handleGatePass processes a successful gate run for a batch-pr convoy.
+// It converts the draft PR to ready-for-review, updates the convoy bead
+// status to awaiting_review, and notifies the convoy owner.
 func handleGatePass(hqBeads *beads.Beads, townRoot, convoyID, integrationBranch string, logger func(format string, args ...interface{}), gtPath string) error {
-	logger("Gate: convoy %s: gates PASSED on %s, signaling for draft→ready conversion", convoyID, integrationBranch)
-
-	// Update convoy bead description with gate pass status
-	notes := fmt.Sprintf("gates_passed: true\ngates_branch: %s\ngates_passed_at: %s",
-		integrationBranch, time.Now().UTC().Format(time.RFC3339))
+	logger("Gate: convoy %s: gates PASSED on %s, converting draft PR to ready-for-review", convoyID, integrationBranch)
 
 	convoyIssue, err := hqBeads.Show(convoyID)
-	if err == nil {
-		newDesc := convoyIssue.Description + "\n" + notes
-		if updateErr := hqBeads.Update(convoyID, beads.UpdateOptions{Description: &newDesc}); updateErr != nil {
-			logger("Gate: convoy %s: failed to update bead: %v", convoyID, updateErr)
+	if err != nil {
+		return fmt.Errorf("failed to read convoy %s: %w", convoyID, err)
+	}
+
+	// Step 1: Convert draft PR to ready-for-review.
+	if err := convertDraftPR(convoyIssue.Description, townRoot, convoyID, logger); err != nil {
+		// Non-fatal: PR conversion failure shouldn't block status update.
+		// The PR may already be non-draft or the token may lack permissions.
+		logger("Gate: convoy %s: draft→ready conversion failed: %v (continuing)", convoyID, err)
+	}
+
+	// Step 2: Update convoy bead description with gate pass + awaiting_review status.
+	notes := fmt.Sprintf("gates_passed: true\ngates_branch: %s\ngates_passed_at: %s\nconvoy_status: awaiting_review",
+		integrationBranch, time.Now().UTC().Format(time.RFC3339))
+	newDesc := convoyIssue.Description + "\n" + notes
+	if updateErr := hqBeads.Update(convoyID, beads.UpdateOptions{Description: &newDesc}); updateErr != nil {
+		logger("Gate: convoy %s: failed to update bead: %v", convoyID, updateErr)
+	}
+
+	// Step 3: Notify convoy owner that the PR is ready for review.
+	convoyFields := beads.ParseConvoyFields(&beads.Issue{Description: convoyIssue.Description})
+	prURL := beads.GetPRURLField(convoyIssue.Description)
+	notifyConvoyOwner(convoyFields, prURL, townRoot, convoyID, logger, gtPath)
+
+	return nil
+}
+
+// convertDraftPR converts a convoy's draft PR to ready-for-review using the
+// GitHub GraphQL API. Reads the PR number from the convoy bead description
+// and the owner/repo from the rig's git remote URL.
+func convertDraftPR(convoyDesc, townRoot, convoyID string, logger func(format string, args ...interface{})) error {
+	// Extract PR number from convoy bead description.
+	prNumStr := beads.GetPRNumberField(convoyDesc)
+	if prNumStr == "" {
+		return fmt.Errorf("convoy %s: no pr_number field in description", convoyID)
+	}
+	prNumber, err := strconv.Atoi(prNumStr)
+	if err != nil {
+		return fmt.Errorf("convoy %s: invalid pr_number %q: %w", convoyID, prNumStr, err)
+	}
+
+	// Determine owner/repo from rig config.
+	rigPath := findRigWithRefinery(townRoot)
+	if rigPath == "" {
+		return fmt.Errorf("convoy %s: cannot find rig with refinery", convoyID)
+	}
+	rigCfg, err := rig.LoadRigConfig(rigPath)
+	if err != nil {
+		return fmt.Errorf("convoy %s: load rig config: %w", convoyID, err)
+	}
+	owner, repo, err := parseGitRemoteURL(rigCfg.GitURL)
+	if err != nil {
+		return fmt.Errorf("convoy %s: parse git URL: %w", convoyID, err)
+	}
+
+	// Call GitHub API to convert draft to ready-for-review.
+	client, err := gh.NewClient()
+	if err != nil {
+		return fmt.Errorf("convoy %s: create github client: %w", convoyID, err)
+	}
+	if err := client.ConvertDraftToReady(context.Background(), owner, repo, prNumber); err != nil {
+		return fmt.Errorf("convoy %s: convert PR #%d to ready: %w", convoyID, prNumber, err)
+	}
+
+	logger("Gate: convoy %s: ✓ Draft PR #%d converted to ready-for-review", convoyID, prNumber)
+	return nil
+}
+
+// sshRemoteRegex matches git@host:owner/repo.git style remote URLs.
+var sshRemoteRegex = regexp.MustCompile(`^[\w.+-]+@([^:]+):([^/]+)/([^/]+?)(?:\.git)?$`)
+
+// parseGitRemoteURL extracts the owner and repo name from a git remote URL.
+// Supports both SSH (git@github.com:owner/repo.git) and HTTPS formats.
+func parseGitRemoteURL(remoteURL string) (owner, repo string, err error) {
+	remoteURL = strings.TrimSpace(remoteURL)
+
+	// SSH: git@github.com:owner/repo.git
+	if m := sshRemoteRegex.FindStringSubmatch(remoteURL); m != nil {
+		return m[2], m[3], nil
+	}
+
+	// HTTPS: https://github.com/owner/repo.git
+	u := strings.TrimSuffix(remoteURL, ".git")
+	for _, prefix := range []string{"https://", "http://"} {
+		if strings.HasPrefix(u, prefix) {
+			u = u[len(prefix):]
+			break
 		}
 	}
 
-	// Nudge the refinery about gate pass so Phase 4.3 can trigger draft→ready conversion.
-	nudgeMsg := fmt.Sprintf("GATE_PASSED: convoy=%s branch=%s", convoyID, integrationBranch)
-	nudgeCmd := exec.Command(gtPath, "nudge", "refinery", nudgeMsg)
-	nudgeCmd.Dir = townRoot
-	util.SetProcessGroup(nudgeCmd)
-	if err := nudgeCmd.Run(); err != nil {
-		logger("Gate: convoy %s: failed to nudge refinery about gate pass: %v", convoyID, err)
+	// Expect: host/owner/repo
+	parts := strings.SplitN(u, "/", 4)
+	if len(parts) < 3 {
+		return "", "", fmt.Errorf("cannot parse owner/repo from remote URL: %s", remoteURL)
+	}
+	return parts[1], parts[2], nil
+}
+
+// notifyConvoyOwner nudges the convoy owner and watchers that the PR is ready
+// for review. Uses nudges (zero Dolt overhead) rather than mail.
+func notifyConvoyOwner(fields *beads.ConvoyFields, prURL, townRoot, convoyID string, logger func(format string, args ...interface{}), gtPath string) {
+	msg := fmt.Sprintf("PR_READY_FOR_REVIEW: convoy=%s", convoyID)
+	if prURL != "" {
+		msg += " pr=" + prURL
 	}
 
-	return nil
+	// Collect unique addresses to nudge.
+	seen := make(map[string]bool)
+	var addrs []string
+	if fields != nil {
+		for _, addr := range fields.NotificationAddresses() {
+			if !seen[addr] {
+				addrs = append(addrs, addr)
+				seen[addr] = true
+			}
+		}
+		for _, addr := range fields.NudgeNotificationAddresses() {
+			if !seen[addr] {
+				addrs = append(addrs, addr)
+				seen[addr] = true
+			}
+		}
+	}
+	// Always include the overseer as fallback owner.
+	if !seen["crew/overseer"] {
+		addrs = append(addrs, "crew/overseer")
+	}
+
+	for _, addr := range addrs {
+		nudgeCmd := exec.Command(gtPath, "nudge", addr, msg)
+		nudgeCmd.Dir = townRoot
+		util.SetProcessGroup(nudgeCmd)
+		if err := nudgeCmd.Run(); err != nil {
+			logger("Gate: convoy %s: failed to nudge %s: %v", convoyID, addr, err)
+		}
+	}
 }
 
 // handleGateFailure records gate failure details on the convoy bead and creates
