@@ -6,7 +6,7 @@ func TestApplyRepoContractDefaults(t *testing.T) {
 	settings := &RigSettings{
 		Type:    "rig-settings",
 		Version: 1,
-		RepoContract: &RepoContract{
+		RepoContract: &RepoContractConfig{
 			VerifyCommand: "./scripts/ci/verify.sh pre-merge",
 			SmokeCommand:  "./scripts/ci/verify.sh smoke",
 		},
@@ -40,7 +40,7 @@ func TestValidateStrictRepoContract(t *testing.T) {
 					"verify": {Cmd: "/tmp/outside.sh", Phase: "pre-merge"},
 				},
 			},
-			RepoContract: &RepoContract{
+			RepoContract: &RepoContractConfig{
 				VerifyCommand: "/tmp/outside.sh",
 			},
 		}
@@ -58,7 +58,7 @@ func TestValidateStrictRepoContract(t *testing.T) {
 					"verify": {Cmd: "./scripts/ci/verify.sh", Phase: "pre-merge"},
 				},
 			},
-			RepoContract: &RepoContract{
+			RepoContract: &RepoContractConfig{
 				VerifyCommand: "./scripts/ci/verify.sh",
 			},
 		}

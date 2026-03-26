@@ -200,7 +200,7 @@ func TestLoadRigGateConfig(t *testing.T) {
 			Type:    "rig-settings",
 			Version: config.CurrentRigSettingsVersion,
 			MergeQueue: &config.MergeQueueConfig{
-				Gates: map[string]*config.MergeQueueGateConfig{
+				Gates: map[string]*config.VerificationGateConfig{
 					"verify": {Cmd: "./scripts/ci/verify.sh"},
 				},
 			},

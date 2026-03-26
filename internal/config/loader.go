@@ -304,7 +304,7 @@ func validateMergeQueueConfig(c *MergeQueueConfig) error {
 	return nil
 }
 
-dispatffunc validateStrictMergeQueueRequirements(c *MergeQueueConfig) error {
+func validateStrictMergeQueueRequirements(c *MergeQueueConfig) error {
 	if c == nil || !c.IsStrictVerification() {
 		return nil
 	}
@@ -516,16 +516,19 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 			autoPush := *local.AutoPush
 			result.AutoPush = &autoPush
 		}
-		}
 		if local.ReviewDepth != "" {
 			result.ReviewDepth = local.ReviewDepth
+		}
+		if local.JudgmentEnabled != nil {
+			value := *local.JudgmentEnabled
+			result.JudgmentEnabled = &value
 		}
 	}
 	return result
 }
 
-// MergeRepoContract merges a repo-sourced contract (floor) with local overrides.
-func MergeRepoContract(repo, local *RepoContractConfig) *RepoContractConfig {
+// mergeRepoContractConfig merges a repo-sourced RepoContractConfig (floor) with local overrides.
+func mergeRepoContractConfig(repo, local *RepoContractConfig) *RepoContractConfig {
 	if repo == nil && local == nil {
 		return nil
 	}
@@ -576,11 +579,11 @@ func MergeRepoContract(repo, local *RepoContractConfig) *RepoContractConfig {
 	return result
 }
 
-func cloneMergeQueueGateMap(src map[string]*MergeQueueGateConfig) map[string]*MergeQueueGateConfig {
+func cloneMergeQueueGateMap(src map[string]*VerificationGateConfig) map[string]*VerificationGateConfig {
 	if src == nil {
 		return nil
 	}
-	dst := make(map[string]*MergeQueueGateConfig, len(src))
+	dst := make(map[string]*VerificationGateConfig, len(src))
 	for name, gate := range src {
 		if gate == nil {
 			dst[name] = nil
@@ -590,6 +593,22 @@ func cloneMergeQueueGateMap(src map[string]*MergeQueueGateConfig) map[string]*Me
 		dst[name] = &copy
 	}
 	return dst
+}
+
+// repoContractToConfig converts the new RepoContract type to the legacy RepoContractConfig
+// used by loader.go's merge and validation logic.
+func repoContractToConfig(rc *RepoContract) *RepoContractConfig {
+	if rc == nil {
+		return nil
+	}
+	return &RepoContractConfig{
+		RepoType:            rc.RepoType,
+		VerifyCommand:       rc.VerifyCommand,
+		SmokeCommand:        rc.SmokeCommand,
+		ReleaseCheckCommand: rc.ReleaseCheckCommand,
+		E2ECommand:          rc.E2ECommand,
+		CriticalPaths:       append([]string(nil), rc.CriticalPaths...),
+	}
 }
 
 func cloneMergeQueueConfig(src *MergeQueueConfig) *MergeQueueConfig {
@@ -638,11 +657,11 @@ func applyRepoContractToMergeQueue(mq *MergeQueueConfig, contract *RepoContractC
 	}
 	result := cloneMergeQueueConfig(mq)
 	if result.Gates == nil {
-		result.Gates = make(map[string]*MergeQueueGateConfig)
+		result.Gates = make(map[string]*VerificationGateConfig)
 	}
 	if contract.VerifyCommand != "" {
 		if _, ok := result.Gates["verify"]; !ok {
-			result.Gates["verify"] = &MergeQueueGateConfig{
+			result.Gates["verify"] = &VerificationGateConfig{
 				Cmd:   contract.VerifyCommand,
 				Phase: MergeQueueGatePhasePreMerge,
 			}
@@ -650,7 +669,7 @@ func applyRepoContractToMergeQueue(mq *MergeQueueConfig, contract *RepoContractC
 	}
 	if contract.SmokeCommand != "" {
 		if _, ok := result.Gates["smoke"]; !ok {
-			result.Gates["smoke"] = &MergeQueueGateConfig{
+			result.Gates["smoke"] = &VerificationGateConfig{
 				Cmd:   contract.SmokeCommand,
 				Phase: MergeQueueGatePhasePostSquash,
 			}
@@ -694,7 +713,7 @@ func LoadEffectiveMergeQueueConfig(rigPath string) (*MergeQueueConfig, error) {
 		localContract = localSettings.RepoContract
 	}
 
-	mergedContract := MergeRepoContract(repoContract, localContract)
+	mergedContract := mergeRepoContractConfig(repoContract, localContract)
 	merged := applyRepoContractToMergeQueue(MergeSettingsCommand(repoMQ, localMQ), mergedContract)
 	if merged == nil {
 		return nil, nil
@@ -734,7 +753,7 @@ func LoadEffectiveRepoContract(rigPath string) (*RepoContractConfig, error) {
 		localContract = localSettings.RepoContract
 	}
 
-	merged := MergeRepoContract(repoContract, localContract)
+	merged := mergeRepoContractConfig(repoContract, localContract)
 	if err := validateRepoContractConfig(merged); err != nil {
 		return nil, err
 	}

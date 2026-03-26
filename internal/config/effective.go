@@ -55,56 +55,8 @@ func MergeRigSettings(repo, local *RigSettings) *RigSettings {
 		valueMergeQueue(repo),
 		valueMergeQueue(local),
 	)
-	result.RepoContract = MergeRepoContract(valueRepoContract(repo), valueRepoContract(local))
+	result.RepoContract = mergeRepoContractConfig(valueRepoContractConfig(repo), valueRepoContractConfig(local))
 	ApplyRepoContractDefaults(result)
-	return result
-}
-
-// MergeRepoContract overlays local repo-contract overrides on top of committed defaults.
-func MergeRepoContract(repo, local *RepoContract) *RepoContract {
-	if repo == nil && local == nil {
-		return nil
-	}
-
-	result := &RepoContract{}
-	if repo != nil {
-		*result = *repo
-		if len(repo.CriticalPaths) > 0 {
-			result.CriticalPaths = append([]string(nil), repo.CriticalPaths...)
-		}
-	}
-	if local != nil {
-		if local.RepoType != "" {
-			result.RepoType = local.RepoType
-		}
-		if local.VerifyCommand != "" {
-			result.VerifyCommand = local.VerifyCommand
-		}
-		if local.SmokeCommand != "" {
-			result.SmokeCommand = local.SmokeCommand
-		}
-		if local.ReleaseCheckCommand != "" {
-			result.ReleaseCheckCommand = local.ReleaseCheckCommand
-		}
-		if local.IntegrationCommand != "" {
-			result.IntegrationCommand = local.IntegrationCommand
-		}
-		if local.E2ECommand != "" {
-			result.E2ECommand = local.E2ECommand
-		}
-		if local.PerformanceCommand != "" {
-			result.PerformanceCommand = local.PerformanceCommand
-		}
-		if len(local.CriticalPaths) > 0 {
-			result.CriticalPaths = append([]string(nil), local.CriticalPaths...)
-		}
-		if local.GitHubCI != nil {
-			result.GitHubCI = &GitHubCIConfig{
-				Workflow: local.GitHubCI.Workflow,
-				Required: local.GitHubCI.Required,
-			}
-		}
-	}
 	return result
 }
 
@@ -183,22 +135,7 @@ func ValidateStrictRepoContract(settings *RigSettings) error {
 func EffectiveGitHubCIForRemote(settings *RigSettings, remoteURL string) *GitHubCIConfig {
 	isGitHub := strings.Contains(remoteURL, "github.com")
 	if !isGitHub {
-		if settings == nil || settings.RepoContract == nil {
-			return nil
-		}
-		return settings.RepoContract.GitHubCI
-	}
-
-	if settings != nil && settings.RepoContract != nil && settings.RepoContract.GitHubCI != nil {
-		cfg := *settings.RepoContract.GitHubCI
-		if strings.TrimSpace(cfg.Workflow) == "" {
-			cfg.Workflow = "CI"
-		}
-		if cfg.Required == nil && settings.MergeQueue != nil && settings.MergeQueue.IsStrictVerification() {
-			required := true
-			cfg.Required = &required
-		}
-		return &cfg
+		return nil
 	}
 
 	if settings != nil && settings.MergeQueue != nil && settings.MergeQueue.IsStrictVerification() {
@@ -282,7 +219,7 @@ func valueMergeQueue(settings *RigSettings) *MergeQueueConfig {
 	return settings.MergeQueue
 }
 
-func valueRepoContract(settings *RigSettings) *RepoContract {
+func valueRepoContractConfig(settings *RigSettings) *RepoContractConfig {
 	if settings == nil {
 		return nil
 	}

@@ -685,6 +685,9 @@ type RepoContractConfig struct {
 	// ReleaseCheckCommand is the canonical release/deploy gate entrypoint.
 	ReleaseCheckCommand string `json:"release_check_command,omitempty"`
 
+	// IntegrationCommand is the canonical integration test entrypoint.
+	IntegrationCommand string `json:"integration_command,omitempty"`
+
 	// E2ECommand is the canonical end-to-end test entrypoint.
 	E2ECommand string `json:"e2e_command,omitempty"`
 
@@ -1271,10 +1274,6 @@ type MergeQueueConfig struct {
 	// OnConflict specifies conflict resolution strategy: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
 
-	// VerificationMode controls whether merge-queue verification is advisory or strict.
-	// Empty values default to advisory for backward compatibility.
-	VerificationMode string `json:"verification_mode,omitempty"`
-
 	// RunTests controls whether to run tests before merging.
 	// Nil defaults to true (tests are run).
 	RunTests *bool `json:"run_tests,omitempty"`
@@ -1293,13 +1292,6 @@ type MergeQueueConfig struct {
 
 	// TypecheckCommand is the command to run for type checking (e.g., tsc --noEmit).
 	TypecheckCommand string `json:"typecheck_command,omitempty"`
-
-	// Gates defines named verification commands.
-	Gates map[string]*MergeQueueGateConfig `json:"gates,omitempty"`
-
-	// GatesParallel controls whether pre-merge gates run concurrently.
-	// Nil defaults to true.
-	GatesParallel *bool `json:"gates_parallel,omitempty"`
 
 	// AutoPush controls whether the refinery pushes merged results automatically.
 	// Nil defaults to true.
@@ -1484,29 +1476,6 @@ func (c *MergeQueueConfig) IsDeleteMergedBranchesEnabled() bool {
 	return *c.DeleteMergedBranches
 }
 
-// GetVerificationMode returns the configured verification mode.
-// Defaults to advisory for backward compatibility.
-func (c *MergeQueueConfig) GetVerificationMode() string {
-	if c == nil || c.VerificationMode == "" {
-		return VerificationModeAdvisory
-	}
-	return c.VerificationMode
-}
-
-// IsStrictVerification returns true when merge verification is fail-closed.
-func (c *MergeQueueConfig) IsStrictVerification() bool {
-	return c.GetVerificationMode() == VerificationModeStrict
-}
-
-// IsGatesParallelEnabled returns whether pre-merge gates may run concurrently.
-// Defaults to true to preserve the current merge-queue behavior.
-func (c *MergeQueueConfig) IsGatesParallelEnabled() bool {
-	if c == nil || c.GatesParallel == nil {
-		return true
-	}
-	return *c.GatesParallel
-}
-
 // IsJudgmentEnabled returns whether quality review is enabled for merges.
 // Nil-safe, defaults to false.
 func (c *MergeQueueConfig) IsJudgmentEnabled() bool {
@@ -1563,7 +1532,6 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 		IntegrationBranchPolecatEnabled:  boolPtr(true),
 		IntegrationBranchRefineryEnabled: boolPtr(true),
 		OnConflict:                       OnConflictAssignBack,
-		VerificationMode:                 VerificationModeAdvisory,
 		RunTests:                         boolPtr(true),
 		TestCommand:                      "",
 		GatesParallel:                    boolPtr(true),
@@ -1573,7 +1541,6 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 		PollInterval:                     "30s",
 		MaxConcurrent:                    1,
 		StaleClaimTimeout:                "30m",
-		GatesParallel:                    boolPtr(true),
 	}
 }
 

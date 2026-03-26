@@ -566,7 +566,7 @@ func TestValidateStrictMergeQueueRequirements(t *testing.T) {
 			name: "strict with repo-local gate",
 			cfg: &MergeQueueConfig{
 				VerificationMode: VerificationModeStrict,
-				Gates: map[string]*MergeQueueGateConfig{
+				Gates: map[string]*VerificationGateConfig{
 					"verify": {Cmd: "./scripts/ci/verify.sh"},
 				},
 			},
@@ -575,7 +575,7 @@ func TestValidateStrictMergeQueueRequirements(t *testing.T) {
 			name: "strict with make target",
 			cfg: &MergeQueueConfig{
 				VerificationMode: VerificationModeStrict,
-				Gates: map[string]*MergeQueueGateConfig{
+				Gates: map[string]*VerificationGateConfig{
 					"verify": {Cmd: "make ci-verify"},
 				},
 			},
@@ -591,7 +591,7 @@ func TestValidateStrictMergeQueueRequirements(t *testing.T) {
 			name: "strict with non-local command",
 			cfg: &MergeQueueConfig{
 				VerificationMode: VerificationModeStrict,
-				Gates: map[string]*MergeQueueGateConfig{
+				Gates: map[string]*VerificationGateConfig{
 					"verify": {Cmd: "go test ./..."},
 				},
 			},
@@ -620,7 +620,7 @@ func TestMergeSettingsCommand_MergesStrictFields(t *testing.T) {
 		IntegrationBranchRefineryEnabled: boolPtr(true),
 		JudgmentEnabled:                  boolPtr(false),
 		ReviewDepth:                      "standard",
-		Gates: map[string]*MergeQueueGateConfig{
+		Gates: map[string]*VerificationGateConfig{
 			"verify": {Cmd: "./scripts/ci/verify.sh"},
 		},
 		GatesParallel: boolPtr(true),
@@ -632,7 +632,7 @@ func TestMergeSettingsCommand_MergesStrictFields(t *testing.T) {
 		IntegrationBranchRefineryEnabled: boolPtr(false),
 		JudgmentEnabled:                  boolPtr(true),
 		ReviewDepth:                      "deep",
-		Gates: map[string]*MergeQueueGateConfig{
+		Gates: map[string]*VerificationGateConfig{
 			"verify": {Cmd: "make ci-verify"},
 		},
 		GatesParallel: boolPtr(false),
@@ -678,7 +678,7 @@ func TestLoadEffectiveMergeQueueConfig(t *testing.T) {
 		Version: CurrentRigSettingsVersion,
 		MergeQueue: &MergeQueueConfig{
 			VerificationMode: VerificationModeAdvisory,
-			Gates: map[string]*MergeQueueGateConfig{
+			Gates: map[string]*VerificationGateConfig{
 				"verify": {Cmd: "./scripts/ci/verify.sh"},
 			},
 			GatesParallel: boolPtr(true),

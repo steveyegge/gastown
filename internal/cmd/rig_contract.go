@@ -236,9 +236,8 @@ func buildRigContractScaffoldFiles(repoRoot string, plan repoContractScaffoldPla
 			VerificationMode: config.VerificationModeStrict,
 		},
 		RepoContract: &config.RepoContractConfig{
-			RepoType:        plan.RepoType,
-			EnforcementTier: plan.EnforcementTier,
-			VerifyCommand:   "./scripts/ci/verify.sh",
+			RepoType:      plan.RepoType,
+			VerifyCommand: "./scripts/ci/verify.sh",
 		},
 	}
 

@@ -13,7 +13,7 @@ func TestGatesForPhase(t *testing.T) {
 	t.Parallel()
 
 	mq := &config.MergeQueueConfig{
-		Gates: map[string]*config.MergeQueueGateConfig{
+		Gates: map[string]*config.VerificationGateConfig{
 			"post":   {Cmd: "echo post", Phase: config.MergeQueueGatePhasePostSquash},
 			"verify": {Cmd: "./scripts/ci/verify.sh", Timeout: "2s"},
 			"lint":   {Cmd: "make lint"},
