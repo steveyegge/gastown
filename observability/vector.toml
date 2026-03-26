@@ -1,0 +1,98 @@
+# Vector config — receives OTLP from otel-collector, ships to ClickHouse
+# Flow: agents → otel-collector:4318 → vector:4317 (gRPC) → clickhouse:8123
+
+[api]
+enabled = true
+address = "0.0.0.0:8686"
+
+# ── Sources ──────────────────────────────────────────────────────────────────
+
+[sources.otlp_grpc]
+type = "opentelemetry"
+grpc.address = "0.0.0.0:4317"
+http.address = "0.0.0.0:4319"
+
+# ── Transforms ───────────────────────────────────────────────────────────────
+
+[transforms.enrich]
+type = "remap"
+inputs = ["otlp_grpc.logs", "otlp_grpc.metrics", "otlp_grpc.traces"]
+source = '''
+# Normalise timestamp to ClickHouse DateTime64 format (YYYY-MM-DD HH:MM:SS.mmm)
+if !exists(.timestamp) {
+    .timestamp = now()
+}
+.timestamp = format_timestamp!(.timestamp, format: "%Y-%m-%d %H:%M:%S%.3f")
+
+# Pull WideEvent fields out of OTLP log body (body arrives as JSON string)
+if is_string(.message) {
+    parsed, err = parse_json(.message)
+    if err == null {
+        .action                = string(parsed.action) ?? ""
+        .agent_id              = string(parsed.agent_id) ?? string(parsed.agent_name) ?? ""
+        .agent_name            = string(parsed.agent_name) ?? ""
+        .agent_type            = string(parsed.agent_type) ?? ""
+        .args                  = string(parsed.args) ?? ""
+        .bead_id               = string(parsed.bead_id) ?? ""
+        .body                  = string(parsed.body) ?? ""
+        .cache_creation_tokens = to_int(parsed.cache_creation_tokens) ?? 0
+        .cache_read_tokens     = to_int(parsed.cache_read_tokens) ?? 0
+        .chat_id               = string(parsed.chat_id) ?? ""
+        .content               = string(parsed.content) ?? ""
+        .duration_ms           = to_float(parsed.duration_ms) ?? 0.0
+        .error                 = string(parsed.error) ?? ""
+        .event_type            = string(parsed.event_type) ?? ""
+        .exit_type             = string(parsed.exit_type) ?? ""
+        .file                  = string(parsed.file) ?? ""
+        .formula_name          = string(parsed.formula_name) ?? ""
+        .git_branch            = string(parsed.git_branch) ?? ""
+        .git_commit            = string(parsed.git_commit) ?? ""
+        .gt_actor              = string(parsed.gt_actor) ?? ""
+        .gt_agent              = string(parsed.gt_agent) ?? ""
+        .gt_prompt             = string(parsed.gt_prompt) ?? ""
+        .role                  = string(parsed.role) ?? ""
+        .rig                   = string(parsed.rig) ?? ""
+        .session_id            = string(parsed.session_id) ?? ""
+        .status                = string(parsed.status) ?? ""
+        .run_id                = string(parsed.run_id) ?? ""
+    }
+}
+
+# Drop all fields not in the ClickHouse schema
+del(.source_type)
+del(.message)
+del(.dropped_attributes_count)
+del(.severity)
+del(.severity_text)
+del(.severity_number)
+del(.observed_timestamp)
+del(.attributes)
+del(.resources)
+del(.trace_id)
+del(.span_id)
+del(.flags)
+del(.host)
+del(.service)
+'''
+
+# ── Sinks ─────────────────────────────────────────────────────────────────────
+
+[sinks.clickhouse_events]
+type = "clickhouse"
+inputs = ["enrich"]
+endpoint = "http://clickhouse:8123"
+database = "gastown"
+table = "events"
+auth.strategy = "basic"
+auth.user = "gastown"
+auth.password = "gastown"
+skip_unknown_fields = true
+
+[sinks.clickhouse_events.batch]
+max_bytes = 10485760   # 10 MiB
+timeout_secs = 5
+
+[sinks.debug_console]
+type = "console"
+inputs = ["enrich"]
+encoding.codec = "json"

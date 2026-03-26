@@ -36,5 +36,129 @@ services:
 
     # Exec into the container with: docker compose exec gastown zsh
 
+<<<<<<< Updated upstream
+=======
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: victoriametrics
+    volumes:
+      - victoriametrics-data:/victoria-metrics-data
+    ports:
+      - "8428:8428"
+    command:
+      - "-opentsdbHTTPListenAddr=:8428"
+
+  victorialogs:
+    image: victoriametrics/victoria-logs:latest
+    container_name: victorialogs
+    volumes:
+      - victorialogs-data:/victoria-logs-data
+    ports:
+      - "${VL_PORT:-9428}:9428"
+
+  # ── Observability stack ──────────────────────────────────────────────────────
+
+  vector:
+    image: timberio/vector:latest-alpine
+    container_name: gastown-vector
+    volumes:
+      - ./observability/vector.toml:/etc/vector/vector.toml:ro
+    command: ["--config", "/etc/vector/vector.toml"]
+    ports:
+      - "8686:8686"   # Vector API
+      - "4317:4317"   # OTLP gRPC ingest (from otel-collector)
+    depends_on:
+      - clickhouse
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: gastown-clickhouse
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-gastown}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-gastown}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-gastown}
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./observability/clickhouse-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # Native protocol
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: gastown-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD:-gastown}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - clickhouse
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: gastown-otel-collector
+    command: ["--config=/etc/otel/config.yaml"]
+    environment:
+      # base64(root@example.com:Complexpass#123) — override for non-default OO installs
+      GT_OO_AUTH: ${GT_OO_AUTH:-cm9vdEBleGFtcGxlLmNvbTpDb21wbGV4cGFzcyMxMjM=}
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4318:4318"   # OTLP HTTP (agents point GT_OTEL_LOGS_URL here)
+    depends_on:
+      - vector
+
+  flink-jobmanager:
+    # NOTE: Flink SQL jobs in observability/flink-jobs/ use the ClickHouse JDBC connector.
+    # The standard flink:latest image does NOT include this jar. Before running the SQL jobs,
+    # download flink-connector-jdbc + clickhouse-jdbc and place in /opt/flink/lib/:
+    #   https://repo1.maven.org/maven2/com/clickhouse/clickhouse-jdbc/
+    #   https://repo1.maven.org/maven2/org/apache/flink/flink-connector-jdbc/
+    image: flink:latest
+    container_name: gastown-flink-jobmanager
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
+    ports:
+      - "8081:8081"   # Flink Web UI
+    volumes:
+      - flink-data:/opt/flink/data
+      - ./observability/flink-jobs:/opt/flink/jobs:ro
+
+  flink-taskmanager:
+    image: flink:latest
+    container_name: gastown-flink-taskmanager
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager\ntaskmanager.numberOfTaskSlots: 4"
+    depends_on:
+      - flink-jobmanager
+
+  age-postgres:
+    image: apache/age:latest
+    container_name: gastown-age
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gastown}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gastown}
+      POSTGRES_DB: ${POSTGRES_DB:-gastown_graph}
+    volumes:
+      - age-data:/var/lib/postgresql/data
+      - ./observability/age-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+
+>>>>>>> Stashed changes
 volumes:
   agent-home:
