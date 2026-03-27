@@ -299,7 +299,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 			Issue:       opts.Issue,
 			Topic:       "assigned",
 			SessionName: sessionID,
-		}, m.rig.Path, beacon, "")
+		}, m.rig.Path, beacon, opts.Agent)
 		if err != nil {
 			return fmt.Errorf("building startup command: %w", err)
 		}

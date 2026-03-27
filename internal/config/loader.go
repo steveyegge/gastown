@@ -1729,6 +1729,17 @@ func ResolveAgentConfigByName(name, townRoot, rigPath string) *RuntimeConfig {
 	return lookupAgentConfigIfExists(name, townSettings, rigSettings)
 }
 
+// HasExplicitRoleAgent returns true if role_agents (rig or town level)
+// explicitly maps this role to a named agent. This distinguishes between
+// "role_agents says use claude-sonnet" and "no role_agents entry, falling
+// back to defaults". When an explicit mapping exists, the TOML start_command
+// should be skipped in favor of BuildStartupCommandFromConfig which honors
+// the model/settings from the mapped agent definition.
+func HasExplicitRoleAgent(role, townRoot, rigPath string) bool {
+	_, isRoleSpecific := ResolveRoleAgentName(role, townRoot, rigPath)
+	return isRoleSpecific
+}
+
 // lookupAgentConfig looks up an agent by name.
 // Checks rig-level custom agents first, then town's custom agents, then built-in presets from agents.go.
 // Falls back to DefaultRuntimeConfig() if no match is found.

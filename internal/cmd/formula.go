@@ -656,6 +656,9 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 		if legAgent != "" {
 			slingArgs = append(slingArgs, "--agent", legAgent)
 		}
+		if leg.ReviewOnly || f.ReviewOnly {
+			slingArgs = append(slingArgs, "--review-only")
+		}
 
 		slingCmd := exec.Command("gt", slingArgs...)
 		slingCmd.Stdout = os.Stdout

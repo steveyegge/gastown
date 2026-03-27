@@ -1,7 +1,7 @@
 +++
 name = "stuck-agent-dog"
 description = "Context-aware stuck/crashed agent detection and restart for polecats and deacons"
-version = 2
+version = 1
 
 [gate]
 type = "cooldown"
@@ -103,13 +103,6 @@ while IFS='|' read -r RIG PREFIX; do
   POLECAT_DIR="$TOWN_ROOT/$RIG/polecats"
   [ -d "$POLECAT_DIR" ] || continue
 
-  # Get tmux session prefix from rigs.json (e.g., "gastown" → "gt")
-  PREFIX=$(get_rig_prefix "$RIG")
-  if [ -z "$PREFIX" ]; then
-    echo "  WARN: No prefix found for rig $RIG, skipping"
-    continue
-  fi
-
   for PCAT_PATH in "$POLECAT_DIR"/*/; do
     [ -d "$PCAT_PATH" ] || continue
     PCAT_NAME=$(basename "$PCAT_PATH")
@@ -118,10 +111,9 @@ while IFS='|' read -r RIG PREFIX; do
 
     # Check if session exists
     if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-      # Session dead — check if it has hooked work via gt hook output
-      HOOK_LINE=$(gt hook "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
-        | grep -oE 'Hooked: [^ ]+' | head -1)
-      HOOK_BEAD=$(echo "$HOOK_LINE" | sed 's/Hooked: //')
+      # Session dead — check if it has hooked work
+      HOOK_BEAD=$(bd show "$RIG/polecats/$PCAT_NAME" --json 2>/dev/null \
+        | jq -r '.hook_bead // empty' 2>/dev/null)
 
       if [ -n "$HOOK_BEAD" ]; then
         # Check agent_state to avoid false alerts for intentional shutdowns
@@ -139,20 +131,22 @@ while IFS='|' read -r RIG PREFIX; do
         echo "  CRASHED: $SESSION_NAME (hook=$HOOK_BEAD)"
       fi
     else
-      # Session alive — check if the pane process (claude) is still running.
-      # NOTE: In Gas Town, the pane PID IS the claude process itself (not a
-      # parent shell). So we check if that PID is alive, not its children.
+      # Session alive — check for agent process liveness
+      # Capture last 5 lines of pane output to check for signs of life
+      PANE_OUTPUT=$(tmux capture-pane -t "$SESSION_NAME" -p -S -5 2>/dev/null || echo "")
+
+      # Check if agent process is running in the session
       PANE_PID=$(tmux list-panes -t "$SESSION_NAME" -F '#{pane_pid}' 2>/dev/null | head -1)
       if [ -n "$PANE_PID" ]; then
-        PROC_COMM=$(ps -o comm= -p "$PANE_PID" 2>/dev/null)
-        if [ -z "$PROC_COMM" ]; then
-          # Process dead but session alive — zombie session
-          HOOK_LINE=$(gt hook "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
-            | grep -oE 'Hooked: [^ ]+' | head -1)
-          HOOK_BEAD=$(echo "$HOOK_LINE" | sed 's/Hooked: //')
+        # Check if Claude or another agent process is a descendant
+        AGENT_ALIVE=$(pgrep -P "$PANE_PID" -f 'claude|node|anthropic' 2>/dev/null | head -1)
+        if [ -z "$AGENT_ALIVE" ]; then
+          # Agent process dead but session alive — zombie session
+          HOOK_BEAD=$(bd show "$RIG/polecats/$PCAT_NAME" --json 2>/dev/null \
+            | jq -r '.hook_bead // empty' 2>/dev/null)
           if [ -n "$HOOK_BEAD" ]; then
             STUCK+=("$SESSION_NAME|$RIG|$PCAT_NAME|$HOOK_BEAD|agent_dead")
-            echo "  ZOMBIE: $SESSION_NAME (pid=$PANE_PID dead, session alive, hook=$HOOK_BEAD)"
+            echo "  ZOMBIE: $SESSION_NAME (agent dead, session alive, hook=$HOOK_BEAD)"
           fi
         else
           HEALTHY=$((HEALTHY + 1))
@@ -183,31 +177,31 @@ if ! tmux has-session -t "$DEACON_SESSION" 2>/dev/null; then
   echo "  CRASHED: Deacon session is dead"
   DEACON_ISSUE="crashed"
 else
-  # Check if deacon process is alive (pane PID IS the claude process)
-  DEACON_PID=$(tmux list-panes -t "$DEACON_SESSION" -F '#{pane_pid}' 2>/dev/null | head -1)
-  DEACON_COMM=$(ps -o comm= -p "$DEACON_PID" 2>/dev/null)
-  if [ -z "$DEACON_COMM" ]; then
-    echo "  ZOMBIE: Deacon process dead (pid=$DEACON_PID), session alive"
-    DEACON_ISSUE="zombie"
-  else
-    echo "  Process alive: pid=$DEACON_PID comm=$DEACON_COMM"
-  fi
-
-  # Check deacon heartbeat file (if configured)
-  HEARTBEAT_FILE="$TOWN_ROOT/deacon/.deacon-heartbeat"
+  # Check deacon heartbeat file.
+  # heartbeat.json is the canonical file written by `gt deacon heartbeat` on every
+  # patrol cycle (start + mid-cycle checkpoint). .deacon-heartbeat is also kept in
+  # sync by WriteHeartbeat() for backward compatibility. Prefer heartbeat.json here
+  # as it is always written by the Go implementation.
+  #
+  # Threshold: 1200s (20m). The daemon nudges at 10m and logs STUCK at 15m;
+  # stuck-agent-dog fires at 20m to provide context-aware escalation without
+  # racing with the daemon or false-positiving during normal sleep/idle periods.
+  # Deacon patrol cycles take up to ~15 minutes total with heartbeat writes at
+  # start and mid-cycle, so max gap between writes is ~8 minutes + 60s sleep ≈ 9m.
+  HEARTBEAT_FILE="$TOWN_ROOT/deacon/heartbeat.json"
   if [ -f "$HEARTBEAT_FILE" ]; then
     HEARTBEAT_TIME=$(stat -f %m "$HEARTBEAT_FILE" 2>/dev/null || stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null)
     NOW=$(date +%s)
     HEARTBEAT_AGE=$(( NOW - HEARTBEAT_TIME ))
 
-    if [ "$HEARTBEAT_AGE" -gt 600 ]; then
-      echo "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, >10m threshold)"
+    if [ "$HEARTBEAT_AGE" -gt 1200 ]; then
+      echo "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, >20m threshold)"
       DEACON_ISSUE="stuck_heartbeat_${HEARTBEAT_AGE}s"
     else
       echo "  OK: Deacon heartbeat ${HEARTBEAT_AGE}s old"
     fi
   else
-    echo "  INFO: No heartbeat file (may not be configured)"
+    echo "  WARN: No heartbeat file found at $HEARTBEAT_FILE"
   fi
 fi
 ```

@@ -1,3 +1,5 @@
+review_only = true  # All legs are analysis-only — no code commits expected (gt-kvf)
+
 description = """
 Parallel implementation plan review via specialized analysts. Reviews a
 generated implementation plan for completeness, sequencing, risk, and scope

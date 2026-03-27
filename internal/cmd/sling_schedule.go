@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/scheduler/capacity"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -254,8 +255,16 @@ func resolveRigForBead(townRoot, beadID string) string {
 }
 
 // resolveFormula determines the formula name from user flags and rig settings.
-// It checks the rig's workflow.default_formula setting before falling back to
-// the hardcoded "mol-polecat-work" default.
+// Resolution order:
+//  1. Explicit --formula flag
+//  2. Rig property layers (wisp → bead → system default "mol-polecat-work")
+//  3. Rig settings file (workflow.default_formula in settings/config.json)
+//  4. Hardcoded fallback "mol-polecat-work"
+//
+// The property layers are the primary mechanism, supporting:
+//
+//	gt rig config set <rig> default_formula mol-evolve         # wisp layer
+//	gt rig config set <rig> default_formula mol-evolve --global # bead layer
 func resolveFormula(explicit string, hookRawBead bool, townRoot, rigName string) string {
 	if hookRawBead {
 		return ""
@@ -263,7 +272,17 @@ func resolveFormula(explicit string, hookRawBead bool, townRoot, rigName string)
 	if explicit != "" {
 		return explicit
 	}
-	// Check rig's default_formula setting (issue gt-boc).
+	// Check rig property layers: wisp → bead → system default (issue gt-y18).
+	if townRoot != "" && rigName != "" {
+		r := &rig.Rig{
+			Name: rigName,
+			Path: filepath.Join(townRoot, rigName),
+		}
+		if df := r.GetStringConfig("default_formula"); df != "" {
+			return df
+		}
+	}
+	// Fallback: check rig settings file (legacy path, issue gt-boc).
 	if townRoot != "" && rigName != "" {
 		rigPath := filepath.Join(townRoot, rigName)
 		if df := config.GetDefaultFormula(rigPath); df != "" {

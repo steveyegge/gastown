@@ -19,7 +19,7 @@ if [ -z "$RIG_JSON" ]; then
   exit 0
 fi
 
-declare -a ENABLED_RIGS=()
+declare -a ENABLED_RIGS
 while IFS= read -r REPO_PATH; do
   [ -z "$REPO_PATH" ] && continue
   [ ! -f "$REPO_PATH/.gitmodules" ] && continue
@@ -111,7 +111,7 @@ for REPO_PATH in "${ENABLED_RIGS[@]}"; do
         -m "chore: accumulated changes [skip ci]
 
 Auto-committed by submodule-commit plugin ($STAGED_COUNT file(s))." \
-        2>/dev/null && {
+        --author="Gas Town <gastown@local>" 2>/dev/null && {
           log "    Committed $STAGED_COUNT file(s)"
           TOTAL_COMMITTED=$((TOTAL_COMMITTED + 1))
           PARENT_CHANGED=true
@@ -147,7 +147,7 @@ Auto-committed by submodule-commit plugin ($STAGED_COUNT file(s))." \
         -m "chore: update submodule pointers [skip ci]
 
 Auto-committed by submodule-commit plugin." \
-        2>/dev/null && {
+        --author="Gas Town <gastown@local>" 2>/dev/null && {
           log "  Parent pointer updated"
           TOTAL_PARENT_UPDATED=$((TOTAL_PARENT_UPDATED + 1))
         } || log "  WARN: parent pointer commit failed"

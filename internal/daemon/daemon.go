@@ -1397,7 +1397,7 @@ func (d *Daemon) checkDeaconHeartbeat() {
 
 	// Session exists but heartbeat is stale - Deacon may be stuck.
 	// gt-p7k: Use two-tier response — nudge for stale (5-15 min),
-	// kill only for very stale (>= 15 min). The previous logic gated on
+	// escalate only for very stale (>= 15 min). The previous logic gated on
 	// IsVeryStale() (>= 15 min) then checked age > 10 min, making the
 	// nudge path unreachable (dead code). Now nudge fires for 5-15 min
 	// staleness, giving the Deacon a chance to respond before killing.
@@ -1449,6 +1449,16 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 	// Check rig operational state before auto-starting
 	if operational, reason := d.isRigOperational(rigName); !operational {
 		d.logger.Printf("Skipping witness auto-start for %s: %s", rigName, reason)
+		// Kill leftover witness session if rig is not operational (docked/parked).
+		// Without this, sessions started before the rig was docked survive until
+		// the next explicit 'gt rig dock' command. (hq-snx61)
+		name := session.WitnessSessionName(session.PrefixFor(rigName))
+		if exists, _ := d.tmux.HasSession(name); exists {
+			d.logger.Printf("Killing leftover witness %s (rig %s)", name, reason)
+			if err := d.tmux.KillSessionWithProcesses(name); err != nil {
+				d.logger.Printf("Error killing leftover witness %s: %v", name, err)
+			}
+		}
 		return
 	}
 
@@ -1498,6 +1508,16 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	// Check rig operational state before auto-starting
 	if operational, reason := d.isRigOperational(rigName); !operational {
 		d.logger.Printf("Skipping refinery auto-start for %s: %s", rigName, reason)
+		// Kill leftover refinery session if rig is not operational (docked/parked).
+		// Without this, sessions started before the rig was docked survive until
+		// the next explicit 'gt rig dock' command. (hq-snx61)
+		name := session.RefinerySessionName(session.PrefixFor(rigName))
+		if exists, _ := d.tmux.HasSession(name); exists {
+			d.logger.Printf("Killing leftover refinery %s (rig %s)", name, reason)
+			if err := d.tmux.KillSessionWithProcesses(name); err != nil {
+				d.logger.Printf("Error killing leftover refinery %s: %v", name, err)
+			}
+		}
 		return
 	}
 
@@ -2537,7 +2557,8 @@ func (d *Daemon) reapIdlePolecat(rigName, polecatName string, timeout time.Durat
 			// Agent bead lookup failed — polecat has no provable work.
 			// If heartbeat is stale enough (2x timeout), reap anyway to prevent
 			// indefinite API burn when bead infrastructure is degraded.
-			if staleDuration >= timeout*2 {
+			// But first check if the agent is actually running (GH#3342).
+			if staleDuration >= timeout*2 && !d.tmux.IsAgentRunning(sessionName) {
 				d.killIdlePolecat(rigName, polecatName, sessionName, staleDuration, timeout, "working-bead-lookup-failed")
 			}
 			return
@@ -2551,7 +2572,12 @@ func (d *Daemon) reapIdlePolecat(rigName, polecatName string, timeout time.Durat
 			return
 		}
 
-		// No hooked work + stale heartbeat = idle polecat
+		// No hooked work + stale heartbeat — but check if the agent process
+		// is still actively running before reaping. A failed gt sling rollback
+		// can clear the hook while the agent is still working (GH#3342).
+		if d.tmux.IsAgentRunning(sessionName) {
+			return
+		}
 		d.killIdlePolecat(rigName, polecatName, sessionName, staleDuration, timeout, "working-no-hook")
 	}
 }

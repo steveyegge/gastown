@@ -141,9 +141,21 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// from the shared bare repo (.repo.git) instead of falling back to mayor/rig.
 	// Falling back to mayor/rig causes the refinery to operate in the mayor's
 	// clone, which can interfere with mayor operations and confuse agents.
+	//
+	// Rigs using a standard .git clone (e.g. beads) never have a .repo.git bare
+	// repo, so the repair path is not applicable for them. Fall back to mayor/rig
+	// silently in that case — the fallback is correct and the warning would be noise.
 	refineryRigDir := filepath.Join(m.rig.Path, "refinery", "rig")
 	if _, err := os.Stat(refineryRigDir); os.IsNotExist(err) {
-		if repairErr := m.repairRefineryWorktree(refineryRigDir); repairErr != nil {
+		bareRepoPath := filepath.Join(m.rig.Path, ".repo.git")
+		_, bareErr := os.Stat(bareRepoPath)
+		standardGitPath := filepath.Join(m.rig.Path, ".git")
+		_, standardGitErr := os.Stat(standardGitPath)
+		if os.IsNotExist(bareErr) && standardGitErr == nil {
+			// Rig uses standard .git layout — worktree repair is not applicable.
+			// Fall back to mayor/rig silently; the fallback works correctly here.
+			refineryRigDir = filepath.Join(m.rig.Path, "mayor", "rig")
+		} else if repairErr := m.repairRefineryWorktree(refineryRigDir); repairErr != nil {
 			// Repair failed — fall back to mayor/rig as last resort.
 			_, _ = fmt.Fprintf(m.output, "⚠ Could not repair refinery worktree: %v (falling back to mayor/rig)\n", repairErr)
 			refineryRigDir = filepath.Join(m.rig.Path, "mayor", "rig")

@@ -98,7 +98,7 @@ func (c *Client) restRequest(ctx context.Context, method, path string, body any,
 	if err != nil {
 		return fmt.Errorf("github: %s %s: %w", method, path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -144,7 +144,7 @@ func (c *Client) graphqlRequest(ctx context.Context, query string, variables map
 	if err != nil {
 		return fmt.Errorf("github: graphql: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -358,13 +358,6 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 		RuntimeConfigDir: claudeConfigDir,
 		Agent:            s.agent,
 	}
-	if s.agent != "" {
-		cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(s.RigName, s.PolecatName, r.Path, "", s.agent)
-		if err != nil {
-			return "", err
-		}
-		startOpts.Command = cmd
-	}
 	if err := polecatSessMgr.Start(s.PolecatName, startOpts); err != nil {
 		return "", fmt.Errorf("starting session: %w", err)
 	}

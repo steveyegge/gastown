@@ -518,6 +518,31 @@ func TestEnsureGitignorePatterns_UpgradePreservesBroadPattern(t *testing.T) {
 	}
 }
 
+// TestGasTownLocalExcludePatterns_IncludesBeads verifies that the local exclude
+// patterns include .beads/ (defense-in-depth for gas-7vg) while the gitignore
+// patterns do NOT include .beads/ (regression guard).
+func TestGasTownLocalExcludePatterns_IncludesBeads(t *testing.T) {
+	localPatterns := gasTownLocalExcludePatterns()
+	found := false
+	for _, p := range localPatterns {
+		if p == ".beads/" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("gasTownLocalExcludePatterns() must include .beads/ (gas-7vg defense-in-depth)")
+	}
+
+	// Regression guard: .gitignore patterns must NOT include .beads/
+	gitignorePatterns := gasTownIgnorePatterns()
+	for _, p := range gitignorePatterns {
+		if p == ".beads/" {
+			t.Error("gasTownIgnorePatterns() must NOT include .beads/ - that breaks bd sync (see overlay.go)")
+		}
+	}
+}
+
 // Helper functions
 
 func containsLine(content, pattern string) bool {

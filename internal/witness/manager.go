@@ -315,9 +315,9 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOver
 			// Built-in role TOMLs hardcode "exec claude ..." which is wrong
 			// for non-Claude agents. Fall through to BuildStartupCommandFromConfig
 			// which uses the resolved agent's command and args.
-		} else if !isBuiltinClaudeStartCommand(roleConfig.StartCommand) {
-			// Custom (non-builtin) start_command with Claude agent: use TOML
-			// pattern with template expansion.
+		} else if !isBuiltinClaudeStartCommand(roleConfig.StartCommand) && !config.HasExplicitRoleAgent("witness", townRoot, rigPath) {
+			// Custom (non-builtin) start_command with Claude agent and no explicit
+			// role_agents mapping: use TOML pattern with template expansion.
 			cmd := beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness", session.PrefixFor(rigName))
 			if strings.HasPrefix(cmd, "exec ") {
 				cmd = "exec env -u CLAUDECODE NODE_OPTIONS='' " + strings.TrimPrefix(cmd, "exec ")

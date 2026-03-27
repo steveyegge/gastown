@@ -309,6 +309,14 @@ type DaemonThresholds struct {
 	// unlike dogs, they should not persist when idle.
 	PolecatIdleSessionTimeout string `json:"polecat_idle_session_timeout,omitempty"`
 
+	// PolecatSelfTerminate controls whether polecats kill their own session after
+	// gt done completes (default false). When true, polecats terminate 3 seconds
+	// after work submission instead of transitioning to IDLE. This gives fresh
+	// context windows per task, reduces token waste, and eliminates stale state
+	// issues at scale. Worktree reuse is preserved — ReuseIdlePolecat creates
+	// a fresh branch on the existing worktree.
+	PolecatSelfTerminate *bool `json:"polecat_self_terminate,omitempty"`
+
 	// StaleWorkingTimeout is how long a dog in state=working with no activity
 	// before considered stuck (default "2h").
 	StaleWorkingTimeout string `json:"stale_working_timeout,omitempty"`
@@ -842,6 +850,13 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 		return base + " -i " + quoteForShell(p)
 	}
 
+	// Gemini requires -i (--prompt-interactive) to auto-execute the prompt
+	// while staying in interactive mode. Positional args populate the input
+	// field but don't execute, and -p runs headless (exits after completion).
+	if resolved.Command == "gemini" {
+		return base + " -i " + quoteForShell(p)
+	}
+
 	// Quote the prompt for shell safety (positional arg for claude and others)
 	return base + " " + quoteForShell(p)
 }
@@ -857,7 +872,14 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 	}
 
 	if p != "" && resolved.PromptMode != "none" {
-		args = append(args, p)
+		switch resolved.Command {
+		case "opencode":
+			args = append(args, "--prompt", p)
+		case "copilot", "gemini":
+			args = append(args, "-i", p)
+		default:
+			args = append(args, p)
+		}
 	}
 
 	return args

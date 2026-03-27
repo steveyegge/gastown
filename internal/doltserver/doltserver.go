@@ -3077,14 +3077,31 @@ func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 		dbToRig[k] = v
 	}
 
+	// Group candidate database names by rig. When routes.jsonl and rigs.json
+	// use different prefixes for the same rig (e.g. "gas" vs "gt" both map to
+	// "gastown"), multiple databases may exist for the same rig. Processing
+	// them all causes oscillation: each one overwrites the other's
+	// dolt_database correction on every startup. (gas-ar0)
+	rigCandidates := make(map[string][]string) // rig -> candidate db names
 	for _, dbName := range databases {
 		rigName := dbName
 		if mapped, ok := dbToRig[dbName]; ok {
 			rigName = mapped
 		}
-		// Special case: "hq" database maps to "hq" rig (town-level)
 		if dbName == "hq" {
 			rigName = "hq"
+		}
+		rigCandidates[rigName] = append(rigCandidates[rigName], dbName)
+	}
+
+	for rigName, candidates := range rigCandidates {
+		// When multiple databases map to the same rig, choose one effective
+		// DB name: prefer whatever is already in metadata.json (if it's among
+		// the valid candidates) to avoid spurious mismatch warnings. Fall back
+		// to the first candidate (alphabetical, from os.ReadDir ordering).
+		dbName := candidates[0]
+		if len(candidates) > 1 {
+			dbName = pickDBForRig(townRoot, rigName, candidates)
 		}
 		// Pass dbName explicitly so EnsureMetadata writes the correct
 		// dolt_database value ("be") rather than the rig dir name ("beads_el").
@@ -3096,6 +3113,28 @@ func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 	}
 
 	return updated, errs
+}
+
+// pickDBForRig selects which database name to use for a rig when multiple
+// candidates exist. Prefers the value already in metadata.json to avoid
+// oscillating corrections between two valid aliases for the same rig.
+func pickDBForRig(townRoot, rigName string, candidates []string) string {
+	beadsDir := FindRigBeadsDir(townRoot, rigName)
+	if beadsDir != "" {
+		if data, err := os.ReadFile(filepath.Join(beadsDir, "metadata.json")); err == nil {
+			var meta map[string]interface{}
+			if json.Unmarshal(data, &meta) == nil {
+				if existingDB, _ := meta["dolt_database"].(string); existingDB != "" {
+					for _, c := range candidates {
+						if c == existingDB {
+							return c // Already correct — no repair needed
+						}
+					}
+				}
+			}
+		}
+	}
+	return candidates[0] // Default: first (alphabetical from os.ReadDir)
 }
 
 // buildDatabaseToRigMap loads routes.jsonl and builds a map from database name

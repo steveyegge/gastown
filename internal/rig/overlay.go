@@ -144,6 +144,20 @@ func EnsureGitignorePatterns(worktreePath string) error {
 	return nil
 }
 
+// gasTownLocalExcludePatterns returns the patterns to write to the worktree-local
+// .git/info/exclude file. This is a superset of gasTownIgnorePatterns() and
+// includes .beads/ — which is safe here because .git/info/exclude is per-worktree
+// and never committed to the repo (unlike .gitignore, where .beads/ must NOT appear
+// because Beads manages its own .beads/.gitignore via bd init).
+func gasTownLocalExcludePatterns() []string {
+	patterns := gasTownIgnorePatterns()
+	// .beads/ is excluded from gasTownIgnorePatterns() to avoid breaking bd sync
+	// (see EnsureGitignorePatterns comment). The local exclude file is safe to
+	// include it — it's per-worktree and invisible to `git status` without affecting
+	// the tracked .gitignore (gas-7vg defense-in-depth).
+	return append(patterns, ".beads/")
+}
+
 // EnsureLocalExcludePatterns writes the standard Gas Town ignore patterns to the
 // worktree-local git exclude file so the worktree stays clean without mutating a
 // tracked .gitignore.
@@ -165,7 +179,7 @@ func EnsureLocalExcludePatterns(worktreePath string) error {
 	}
 
 	var missing []string
-	for _, pattern := range gasTownIgnorePatterns() {
+	for _, pattern := range gasTownLocalExcludePatterns() {
 		found := false
 		for _, line := range strings.Split(existingContent, "\n") {
 			line = strings.TrimSpace(line)
