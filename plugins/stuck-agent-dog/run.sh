@@ -107,18 +107,14 @@ else
     log "  Process alive: pid=$DEACON_PID comm=$DEACON_COMM"
   fi
 
-  HEARTBEAT_FILE="$TOWN_ROOT/deacon/.deacon-heartbeat"
+  HEARTBEAT_FILE="$TOWN_ROOT/deacon/heartbeat.json"
   if [ -f "$HEARTBEAT_FILE" ]; then
-    if [ "$(uname)" = "Darwin" ]; then
-      HEARTBEAT_TIME=$(stat -f %m "$HEARTBEAT_FILE" 2>/dev/null)
-    else
-      HEARTBEAT_TIME=$(stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null)
-    fi
+    HEARTBEAT_TIME=$(stat -f %m "$HEARTBEAT_FILE" 2>/dev/null || stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null)
     NOW=$(date +%s)
     HEARTBEAT_AGE=$(( NOW - HEARTBEAT_TIME ))
 
-    if [ "$HEARTBEAT_AGE" -gt 600 ]; then
-      log "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old)"
+    if [ "$HEARTBEAT_AGE" -gt 1200 ]; then
+      log "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, >20m threshold)"
       DEACON_ISSUE="stuck_heartbeat_${HEARTBEAT_AGE}s"
     else
       log "  OK: Deacon heartbeat ${HEARTBEAT_AGE}s old"
