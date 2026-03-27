@@ -347,11 +347,11 @@ func createBatchConvoy(beadIDs []string, rigName string, owned bool, mergeStrate
 	}
 
 	// Add tracking relations for all beads, recording which succeed.
-	// Use --db to bypass route-based resolution for hq-cv- prefixed convoy ID.
+	// Run from townBeads (not townRoot) so bd finds routes.jsonl for cross-rig resolution.
 	var tracked []string
 	for _, beadID := range beadIDs {
-		depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks", "--db=" + townBeads}
-		if out, err := BdCmd(depArgs...).Dir(townRoot).WithAutoCommit().StripBeadsDir().CombinedOutput(); err != nil {
+		depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
+		if out, err := BdCmd(depArgs...).Dir(townBeads).WithAutoCommit().StripBeadsDir().CombinedOutput(); err != nil {
 			// Log but continue — partial tracking is better than no tracking
 			fmt.Printf("  Warning: could not track %s in convoy: %v\nOutput: %s\n", beadID, err, out)
 		} else {
@@ -415,12 +415,13 @@ func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy, baseB
 	}
 
 	// Add tracking relation: convoy tracks the issue.
-	// Use --db to bypass route-based resolution for the hq-cv- prefixed convoy ID.
-	// Use WithAutoCommit for the same reason as above.
-	depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks", "--db=" + townBeads}
-	if out, err := BdCmd(depArgs...).Dir(townRoot).WithAutoCommit().StripBeadsDir().CombinedOutput(); err != nil {
+	// Run from townBeads (not townRoot) so bd finds routes.jsonl for cross-rig
+	// resolution, matching convoy.go:731 pattern. StripBeadsDir prevents inherited
+	// BEADS_DIR from overriding Dir().
+	depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
+	if out, err := BdCmd(depArgs...).Dir(townBeads).WithAutoCommit().StripBeadsDir().CombinedOutput(); err != nil {
 		// Tracking failed — delete the orphan convoy to prevent accumulation
-		_ = BdCmd("close", convoyID, "-r", "tracking dep failed", "--db="+townBeads).Dir(townRoot).StripBeadsDir().Run()
+		_ = BdCmd("close", convoyID, "-r", "tracking dep failed").Dir(townBeads).StripBeadsDir().Run()
 		return "", fmt.Errorf("adding tracking relation for %s: %w\noutput: %s", beadID, err, out)
 	}
 

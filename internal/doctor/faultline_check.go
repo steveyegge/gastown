@@ -93,7 +93,7 @@ func (c *FaultlineReachableCheck) Run(ctx *CheckContext) *CheckResult {
 			FixHint: "Start faultline server: faultline start",
 		}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return &CheckResult{
