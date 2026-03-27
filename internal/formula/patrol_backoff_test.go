@@ -172,6 +172,63 @@ func TestPatrolFormulasHaveWispGC(t *testing.T) {
 	}
 }
 
+// TestPatrolFormulasUseDynamicBeadResolution verifies that patrol formulas
+// resolve their agent bead ID dynamically at runtime via `bd list`, rather
+// than hardcoding a prefix like `gt-<rig>-refinery`.
+//
+// Hardcoded IDs break when AgentBeadIDWithPrefix collapses the rig component
+// (prefix == rig), producing e.g. "cp-refinery" instead of "gt-cp-refinery".
+//
+// Regression test for hq-9xs.
+func TestPatrolFormulasUseDynamicBeadResolution(t *testing.T) {
+	patrolFormulas := []string{
+		"mol-witness-patrol.formula.toml",
+		"mol-refinery-patrol.formula.toml",
+	}
+
+	for _, name := range patrolFormulas {
+		t.Run(name, func(t *testing.T) {
+			content, err := formulasFS.ReadFile("formulas/" + name)
+			if err != nil {
+				t.Fatalf("reading %s: %v", name, err)
+			}
+
+			f, err := Parse(content)
+			if err != nil {
+				t.Fatalf("parsing %s: %v", name, err)
+			}
+
+			// Find the loop/exit step
+			var loopDesc string
+			for _, step := range f.Steps {
+				if step.ID == "loop-or-exit" || step.ID == "burn-or-loop" {
+					loopDesc = step.Description
+					break
+				}
+			}
+			if loopDesc == "" {
+				t.Fatalf("%s: loop step not found or has empty description", name)
+			}
+
+			// Must use dynamic resolution via bd list
+			if !strings.Contains(loopDesc, "bd list --type=agent") {
+				t.Errorf("%s loop step missing dynamic agent bead resolution (bd list --type=agent).\n"+
+					"Agent bead IDs must be resolved at runtime, not hardcoded.\n"+
+					"See hq-9xs.",
+					name)
+			}
+
+			// Must NOT hardcode gt-<rig> prefix pattern
+			if strings.Contains(loopDesc, "gt-<rig>") {
+				t.Errorf("%s loop step hardcodes gt-<rig> prefix.\n"+
+					"This breaks when AgentBeadIDWithPrefix collapses the ID (prefix == rig).\n"+
+					"See hq-9xs.",
+					name)
+			}
+		})
+	}
+}
+
 // TestDeaconPatrolHasHeartbeatSteps verifies the deacon patrol formula
 // includes heartbeat refresh steps to prevent the daemon from killing a
 // healthy Deacon mid-cycle.

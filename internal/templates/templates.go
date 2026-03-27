@@ -221,36 +221,48 @@ const polecatLifecycleMarker = "IDLE POLECAT HERESY"
 // This is the primary mechanism for polecats to learn about `gt done` and other
 // lifecycle commands — the file persists across compaction and session restarts.
 //
-// If the worktree already has a CLAUDE.md (e.g., tracked in the repo or
-// inherited from the town root), the polecat lifecycle instructions are
-// appended rather than skipping entirely — without them the agent will
-// finish work but never call `gt done`.
+// If the worktree already has a tracked CLAUDE.md (e.g., from the rig's repo),
+// polecat lifecycle instructions are written to CLAUDE.local.md instead. This
+// avoids creating uncommitted changes in the tracked CLAUDE.md, which the
+// gt done auto-save safety net would otherwise commit onto the polecat's branch,
+// polluting the PR diff with hundreds of lines of agent context.
+//
+// If no CLAUDE.md exists, the full template is written to CLAUDE.md.
 //
 // Returns (created bool, error).
 func CreatePolecatCLAUDEmd(worktreePath, rigName, polecatName string) (bool, error) {
 	claudePath := filepath.Join(worktreePath, "CLAUDE.md")
+	claudeLocalPath := filepath.Join(worktreePath, "CLAUDE.local.md")
 
 	// Render the polecat template with rig/name substitutions
 	content := polecatCLAUDEmd
 	content = strings.ReplaceAll(content, "{{rig}}", rigName)
 	content = strings.ReplaceAll(content, "{{name}}", polecatName)
 
-	existing, err := os.ReadFile(claudePath)
-	if err != nil && !os.IsNotExist(err) {
-		return false, err
-	}
-
-	if err == nil {
-		// File exists — check if it already has polecat lifecycle instructions
-		if strings.Contains(string(existing), polecatLifecycleMarker) {
-			return false, nil // Already has our instructions
+	// Check if lifecycle instructions are already present in either file.
+	for _, path := range []string{claudePath, claudeLocalPath} {
+		if existing, err := os.ReadFile(path); err == nil {
+			if strings.Contains(string(existing), polecatLifecycleMarker) {
+				return false, nil // Already has our instructions
+			}
 		}
-		// Append polecat lifecycle instructions to existing content
-		merged := string(existing) + "\n---\n\n" + content
-		return true, os.WriteFile(claudePath, []byte(merged), 0644)
 	}
 
-	// No file — write the full template
+	// If CLAUDE.md exists (tracked repo file), write to CLAUDE.local.md instead
+	// to avoid polluting the tracked file with polecat context. CLAUDE.local.md
+	// is gitignored in standard rig repos and is still loaded by Claude Code.
+	if _, err := os.Stat(claudePath); err == nil {
+		existingLocal, readErr := os.ReadFile(claudeLocalPath)
+		if readErr == nil {
+			// Append to existing CLAUDE.local.md
+			merged := string(existingLocal) + "\n---\n\n" + content
+			return true, os.WriteFile(claudeLocalPath, []byte(merged), 0644)
+		}
+		// Write new CLAUDE.local.md with just polecat context
+		return true, os.WriteFile(claudeLocalPath, []byte(content), 0644)
+	}
+
+	// No CLAUDE.md — write the full template there
 	return true, os.WriteFile(claudePath, []byte(content), 0644)
 }
 

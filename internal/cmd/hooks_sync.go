@@ -127,49 +127,23 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 			if loc.Rig != "" {
 				rigPath = filepath.Join(townRoot, loc.Rig)
 			}
-
-			// Use ResolveRoleAgentName to get the *configured* agent name
-			// without binary validation. ResolveRoleAgentConfig falls back
-			// to Claude when the configured agent's binary isn't in PATH,
-			// which would cause us to skip syncing the hook files. But hook
-			// files should be synced based on config, not binary availability.
+			// Use ResolveRoleAgentName + ResolveAgentConfigByName so hooks sync works
+			// even when the agent binary is not installed on this machine.
 			agentName, _ := config.ResolveRoleAgentName(loc.Role, townRoot, rigPath)
 			if agentName == "" || agentName == "claude" {
 				continue
 			}
-
-			preset := config.GetAgentPresetByName(agentName)
-			if preset == nil {
-				// Not a known preset — try the full resolution path
-				rc := config.ResolveRoleAgentConfig(loc.Role, townRoot, rigPath)
-				if rc == nil || rc.Hooks == nil || rc.Hooks.Provider == "" || rc.Hooks.Provider == "claude" {
-					continue
-				}
-				preset = config.GetAgentPresetByName(rc.Hooks.Provider)
+			rc := config.ResolveAgentConfigByName(agentName, townRoot, rigPath)
+			if rc == nil || rc.Hooks == nil || rc.Hooks.Provider == "" {
+				continue
+			}
+			// Claude targets are already handled by DiscoverTargets + syncTarget above.
+			if rc.Hooks.Provider == "claude" {
+				continue
 			}
 
-			// Get hooks config from the preset or resolved config
-			var hooksProvider string
-			var hooksDir, settingsFile string
+			preset := config.GetAgentPresetByName(rc.Hooks.Provider)
 			useSettingsDir := preset != nil && preset.HooksUseSettingsDir
-			if preset != nil {
-				// Use preset fields directly — RuntimeConfigFromPreset doesn't
-				// populate the Hooks field, so we'd incorrectly skip agents.
-				hooksProvider = preset.HooksProvider
-				hooksDir = preset.HooksDir
-				settingsFile = preset.HooksSettingsFile
-				if hooksProvider == "" {
-					continue
-				}
-			} else {
-				rc := config.ResolveRoleAgentConfig(loc.Role, townRoot, rigPath)
-				if rc == nil || rc.Hooks == nil || rc.Hooks.Provider == "" || rc.Hooks.Provider == "claude" {
-					continue
-				}
-				hooksProvider = rc.Hooks.Provider
-				hooksDir = rc.Hooks.Dir
-				settingsFile = rc.Hooks.SettingsFile
-			}
 
 			// Determine sync targets.
 			// - Town-level roles (mayor, deacon): the role dir IS the working directory.
@@ -184,7 +158,7 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 			}
 
 			for _, dir := range syncDirs {
-				targetPath := filepath.Join(dir, hooksDir, settingsFile)
+				targetPath := filepath.Join(dir, rc.Hooks.Dir, rc.Hooks.SettingsFile)
 				relPath, pathErr := filepath.Rel(townRoot, targetPath)
 				if pathErr != nil {
 					relPath = targetPath
@@ -192,18 +166,18 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 
 				if hooksSyncDryRun {
 					if _, statErr := os.Stat(targetPath); statErr == nil {
-						fmt.Printf("  %s %s %s\n", style.Warning.Render("~"), relPath, style.Dim.Render("(would check "+hooksProvider+")"))
+						fmt.Printf("  %s %s %s\n", style.Warning.Render("~"), relPath, style.Dim.Render("(would check "+rc.Hooks.Provider+")"))
 					} else {
-						fmt.Printf("  %s %s %s\n", style.Warning.Render("~"), relPath, style.Dim.Render("(would create "+hooksProvider+")"))
+						fmt.Printf("  %s %s %s\n", style.Warning.Render("~"), relPath, style.Dim.Render("(would create "+rc.Hooks.Provider+")"))
 						created++
 					}
 					continue
 				}
 
-				result, syncErr := hooks.SyncForRole(hooksProvider, dir, dir, loc.Role,
-					hooksDir, settingsFile, useSettingsDir)
+				result, syncErr := hooks.SyncForRole(rc.Hooks.Provider, dir, dir, loc.Role,
+					rc.Hooks.Dir, rc.Hooks.SettingsFile, useSettingsDir)
 				if syncErr != nil {
-					fmt.Printf("  %s %s (%s): %v\n", style.Error.Render("✖"), relPath, hooksProvider, syncErr)
+					fmt.Printf("  %s %s (%s): %v\n", style.Error.Render("✖"), relPath, rc.Hooks.Provider, syncErr)
 					errors++
 					failedTargets = append(failedTargets, relPath)
 					continue
@@ -211,13 +185,13 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 
 				switch result {
 				case hooks.SyncCreated:
-					fmt.Printf("  %s %s %s\n", style.Success.Render("✓"), relPath, style.Dim.Render("(created "+hooksProvider+")"))
+					fmt.Printf("  %s %s %s\n", style.Success.Render("✓"), relPath, style.Dim.Render("(created "+rc.Hooks.Provider+")"))
 					created++
 				case hooks.SyncUpdated:
-					fmt.Printf("  %s %s %s\n", style.Success.Render("✓"), relPath, style.Dim.Render("(updated "+hooksProvider+")"))
+					fmt.Printf("  %s %s %s\n", style.Success.Render("✓"), relPath, style.Dim.Render("(updated "+rc.Hooks.Provider+")"))
 					updated++
 				case hooks.SyncUnchanged:
-					fmt.Printf("  %s %s %s\n", style.Dim.Render("·"), relPath, style.Dim.Render("(unchanged "+hooksProvider+")"))
+					fmt.Printf("  %s %s %s\n", style.Dim.Render("·"), relPath, style.Dim.Render("(unchanged "+rc.Hooks.Provider+")"))
 					unchanged++
 				}
 			}

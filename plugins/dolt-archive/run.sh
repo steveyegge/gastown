@@ -13,10 +13,9 @@ set -euo pipefail
 DOLT_HOST="${DOLT_HOST:-127.0.0.1}"
 DOLT_PORT="${DOLT_PORT:-3307}"
 DOLT_USER="${DOLT_USER:-root}"
-TOWN_ROOT="${GT_TOWN_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-DOLT_DATA_DIR="${DOLT_DATA_DIR:-$TOWN_ROOT/.dolt-data}"
-JSONL_EXPORT_DIR="${TOWN_ROOT}/.dolt-archive/jsonl"
-BACKUP_REPO="${TOWN_ROOT}/.dolt-archive/git"
+DOLT_DATA_DIR="${DOLT_DATA_DIR:-$HOME/gt/.dolt-data}"
+JSONL_EXPORT_DIR="$HOME/gt/.dolt-archive/jsonl"
+BACKUP_REPO="$HOME/gt/.dolt-archive/git"
 DEFAULT_DBS="auto"
 SKIP_GIT=false
 SKIP_DOLT_PUSH=false
@@ -48,7 +47,7 @@ trap 'rm -f "$LOGFILE"' EXIT
 dolt_query() {
   local db="$1"
   local query="$2"
-  local args=(dolt --host="$DOLT_HOST" --port="$DOLT_PORT" --no-tls -u "$DOLT_USER" -p "")
+  local args=(dolt --host "$DOLT_HOST" --port "$DOLT_PORT" --no-tls -u "$DOLT_USER" -p "")
   if [[ -n "$db" ]]; then
     args+=(--use-db "$db")
   fi
@@ -59,29 +58,26 @@ dolt_query() {
 dolt_query_json() {
   local db="$1"
   local query="$2"
-  dolt --host="$DOLT_HOST" --port="$DOLT_PORT" --no-tls -u "$DOLT_USER" -p "" \
+  dolt --host "$DOLT_HOST" --port "$DOLT_PORT" --no-tls -u "$DOLT_USER" -p "" \
     --use-db "$db" sql -q "$query" --result-format json 2>>"$LOGFILE"
 }
 
-# --- Step 1: Discover databases ----------------------------------------------
+# --- Step 1: JSONL export ----------------------------------------------------
 
+# Auto-discover production databases or use the explicit list.
 if [[ "$DEFAULT_DBS" == "auto" ]]; then
-  log "Auto-discovering databases from Dolt server..."
-  DISCOVERED=$(dolt_query "" "SHOW DATABASES" | grep -vE '^(information_schema|mysql|dolt)$')
-  if [[ -z "$DISCOVERED" ]]; then
-    log "ERROR: No user databases found on Dolt server at $DOLT_HOST:$DOLT_PORT"
+  mapfile -t PROD_DBS < <(
+    dolt_query "" "SHOW DATABASES" \
+      | grep -v -E '^(information_schema|mysql|dolt_cluster)$' \
+      | grep -v -E '^(testdb_|beads_t|beads_pt|doctest_)'
+  )
+  if [[ ${#PROD_DBS[@]} -eq 0 ]]; then
+    log "ERROR: No production databases found via auto-discovery"
     exit 1
   fi
-  PROD_DBS=()
-  while IFS= read -r _db; do
-    [[ -n "$_db" ]] && PROD_DBS+=("$_db")
-  done <<< "$DISCOVERED"
-  log "Discovered ${#PROD_DBS[@]} databases: ${PROD_DBS[*]}"
 else
   IFS=',' read -ra PROD_DBS <<< "$DEFAULT_DBS"
 fi
-
-# --- Step 2: JSONL export ----------------------------------------------------
 
 log "Starting archive cycle (databases: ${PROD_DBS[*]})"
 mkdir -p "$JSONL_EXPORT_DIR"
@@ -121,19 +117,16 @@ done
 
 # Prune old exports (keep last 24 snapshots per DB)
 for DB in "${PROD_DBS[@]}"; do
-  ALL_SNAPS=()
-  while IFS= read -r f; do
-    ALL_SNAPS+=("$f")
-  done < <(ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null || true)
-  if (( ${#ALL_SNAPS[@]} > 24 )); then
-    printf '%s\n' "${ALL_SNAPS[@]:24}" | xargs rm -f
+  SNAPSHOTS=$(ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null | tail -n +25)
+  if [[ -n "$SNAPSHOTS" ]]; then
+    echo "$SNAPSHOTS" | xargs rm -f
     log "Pruned old $DB snapshots"
   fi
 done
 
 log "JSONL export: $EXPORTED succeeded, $EXPORT_FAILED failed"
 
-# --- Step 3: Git commit and push ---------------------------------------------
+# --- Step 2: Git commit and push ---------------------------------------------
 
 GIT_PUSHED=false
 
@@ -178,7 +171,7 @@ elif ! $SKIP_GIT; then
   log "No git backup repo at $BACKUP_REPO — skipping git push"
 fi
 
-# --- Step 4: Dolt native push ------------------------------------------------
+# --- Step 3: Dolt native push ------------------------------------------------
 
 DOLT_PUSHED=0
 DOLT_PUSH_FAILED=0
@@ -218,7 +211,7 @@ if ! $SKIP_DOLT_PUSH; then
   log "Dolt push: $DOLT_PUSHED succeeded, $DOLT_PUSH_FAILED failed"
 fi
 
-# --- Step 5: Report results --------------------------------------------------
+# --- Step 4: Report results --------------------------------------------------
 
 log ""
 log "=== Archive Cycle Complete ==="

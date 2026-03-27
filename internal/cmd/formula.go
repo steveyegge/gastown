@@ -409,6 +409,23 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 	}
 	townBeads := filepath.Join(townRoot, ".beads")
 
+	// Resolve the target rig's beads prefix and directory so convoy legs
+	// are created in the correct database. Legs need the rig prefix
+	// (not hq-) so polecats can resolve them via prefix routing.
+	rigPrefix := beads.GetPrefixForRig(townRoot, targetRig)
+	rigBeadsDir := townBeads // default to town beads
+	if rigPrefix != "hq" {
+		// Look up the rig's beads path from routes
+		routes, _ := beads.LoadRoutes(townBeads)
+		for _, r := range routes {
+			parts := strings.SplitN(r.Path, "/", 2)
+			if len(parts) > 0 && parts[0] == targetRig {
+				rigBeadsDir = filepath.Join(townRoot, r.Path, ".beads")
+				break
+			}
+		}
+	}
+
 	// Step 1: Create convoy bead
 	convoyID := fmt.Sprintf("hq-cv-%s", generateFormulaShortID())
 	convoyTitle := fmt.Sprintf("%s: %s", formulaName, f.Description)
@@ -488,7 +505,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 	// Step 2: Create leg beads and track them
 	legBeads := make(map[string]string) // leg.ID -> bead ID
 	for _, leg := range f.Legs {
-		legBeadID := fmt.Sprintf("hq-leg-%s", generateFormulaShortID())
+		legBeadID := fmt.Sprintf("%s-leg-%s", rigPrefix, generateFormulaShortID())
 
 		// Build leg description with prompt if available
 		legDesc := leg.Description
@@ -546,7 +563,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 
 		if err := BdCmd(legArgs...).
 			WithAutoCommit().
-			Dir(townBeads).
+			Dir(rigBeadsDir).
 			Stderr(os.Stderr).
 			Run(); err != nil {
 			fmt.Printf("%s Failed to create leg bead for %s: %v\n",
@@ -570,7 +587,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 	// Step 3: Create synthesis bead if defined
 	var synthesisBeadID string
 	if f.Synthesis != nil {
-		synthesisBeadID = fmt.Sprintf("hq-syn-%s", generateFormulaShortID())
+		synthesisBeadID = fmt.Sprintf("%s-syn-%s", rigPrefix, generateFormulaShortID())
 
 		synDesc := f.Synthesis.Description
 		if synDesc == "" {
@@ -590,7 +607,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 
 		if err := BdCmd(synArgs...).
 			WithAutoCommit().
-			Dir(townBeads).
+			Dir(rigBeadsDir).
 			Stderr(os.Stderr).
 			Run(); err != nil {
 			fmt.Printf("%s Failed to create synthesis bead: %v\n",

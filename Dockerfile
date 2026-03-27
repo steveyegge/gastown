@@ -31,7 +31,7 @@ RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/i
 RUN curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash
 
 # Set up directories
-RUN mkdir -p /app /gt && chown agent:agent /app /gt
+RUN mkdir -p /app /gt /gt/.dolt-data && chown -R agent:agent /app /gt
 
 # Environment setup for bash and zsh
 RUN echo 'export PATH="/app/gastown:$PATH"' >> /etc/profile.d/gastown.sh && \

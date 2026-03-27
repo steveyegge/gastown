@@ -1769,6 +1769,138 @@ func TestPollAllStores_HighWaterMark_NoReprocessing(t *testing.T) {
 	}
 }
 
+func TestPollAllStores_ReopenClearsCloseDedupAcrossPolls(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows")
+	}
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	issueID := fmt.Sprintf("gt-reclose-%d", time.Now().UnixNano())
+	issue := &beadsdk.Issue{
+		ID: issueID, Title: "Reclose Test", Status: beadsdk.StatusOpen,
+		Priority: 2, IssueType: beadsdk.TypeTask, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if err := store.CloseIssue(ctx, issue.ID, "done", "test", ""); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+
+	var logged []string
+	logger := func(format string, args ...interface{}) {
+		logged = append(logged, fmt.Sprintf(format, args...))
+	}
+
+	m := NewConvoyManager(t.TempDir(), logger, "gt", 10*time.Minute,
+		map[string]beadsdk.Storage{"hq": store}, nil, nil)
+	m.seeded.Store(true)
+	m.pollStoresSnapshot(m.stores)
+
+	firstCloseCount := 0
+	for _, s := range logged {
+		if strings.Contains(s, "close detected") && strings.Contains(s, issueID) {
+			firstCloseCount++
+		}
+	}
+	if firstCloseCount != 1 {
+		t.Fatalf("expected 1 close detection for %s on first close, got %d: %v", issueID, firstCloseCount, logged)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	if err := store.UpdateIssue(ctx, issue.ID, map[string]interface{}{"status": beadsdk.StatusOpen}, "test"); err != nil {
+		t.Fatalf("ReopenIssue via UpdateIssue: %v", err)
+	}
+
+	logged = nil
+	m.pollStoresSnapshot(m.stores)
+
+	if _, ok := m.processedCloses.Load(issueID); ok {
+		t.Fatalf("expected processedCloses entry for %s to be cleared after reopen", issueID)
+	}
+	for _, s := range logged {
+		if strings.Contains(s, "close detected") && strings.Contains(s, issueID) {
+			t.Fatalf("expected reopen poll not to log a close for %s, got: %v", issueID, logged)
+		}
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	if err := store.CloseIssue(ctx, issue.ID, "done again", "test", ""); err != nil {
+		t.Fatalf("CloseIssue again: %v", err)
+	}
+
+	logged = nil
+	m.pollStoresSnapshot(m.stores)
+
+	secondCloseCount := 0
+	for _, s := range logged {
+		if strings.Contains(s, "close detected") && strings.Contains(s, issueID) {
+			secondCloseCount++
+		}
+	}
+	if secondCloseCount != 1 {
+		t.Fatalf("expected 1 close detection for %s after reopen/reclose, got %d: %v", issueID, secondCloseCount, logged)
+	}
+}
+
+func TestPollAllStores_ReopenResetsPerCycleDedup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows")
+	}
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	issueID := fmt.Sprintf("gt-reclose-same-poll-%d", time.Now().UnixNano())
+	issue := &beadsdk.Issue{
+		ID: issueID, Title: "Reclose Same Poll Test", Status: beadsdk.StatusOpen,
+		Priority: 2, IssueType: beadsdk.TypeTask, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if err := store.CloseIssue(ctx, issue.ID, "done", "test", ""); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+
+	// Beads events use CURRENT_TIMESTAMP in Dolt, which is second precision.
+	// Space the lifecycle transitions across distinct seconds so the store's
+	// created_at ordering is deterministic within this single poll.
+	time.Sleep(1100 * time.Millisecond)
+	if err := store.UpdateIssue(ctx, issue.ID, map[string]interface{}{"status": beadsdk.StatusOpen}, "test"); err != nil {
+		t.Fatalf("ReopenIssue via UpdateIssue: %v", err)
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+	if err := store.CloseIssue(ctx, issue.ID, "done again", "test", ""); err != nil {
+		t.Fatalf("CloseIssue again: %v", err)
+	}
+
+	var logged []string
+	logger := func(format string, args ...interface{}) {
+		logged = append(logged, fmt.Sprintf(format, args...))
+	}
+
+	m := NewConvoyManager(t.TempDir(), logger, "gt", 10*time.Minute,
+		map[string]beadsdk.Storage{"hq": store}, nil, nil)
+	m.seeded.Store(true)
+	m.pollStoresSnapshot(m.stores)
+
+	closeCount := 0
+	for _, s := range logged {
+		if strings.Contains(s, "close detected") && strings.Contains(s, issueID) {
+			closeCount++
+		}
+	}
+	if closeCount != 2 {
+		t.Fatalf("expected 2 close detections for %s when close->reopen->close occurs in one poll, got %d: %v", issueID, closeCount, logged)
+	}
+}
+
 // TestPollAllStores_CrossStoreDedup verifies that a close event seen from
 // multiple stores is only processed once (GH #1798).
 func TestPollAllStores_CrossStoreDedup(t *testing.T) {

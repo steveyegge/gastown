@@ -230,8 +230,10 @@ func TestSyncForRole_JSONWhitespaceInsensitive(t *testing.T) {
 		t.Fatalf("reading created file: %v", err)
 	}
 
-	// Add extra whitespace — structurally identical JSON, different bytes
-	reformatted := strings.ReplaceAll(string(original), ":", " : ")
+	// Add extra whitespace — structurally identical JSON, different bytes.
+	// Use commas (not colons) since Windows paths contain "D:" which would
+	// corrupt the JSON value when colons are naively replaced.
+	reformatted := strings.ReplaceAll(string(original), ",", " , ")
 	if string(original) == reformatted {
 		t.Fatal("reformatted content should differ from original bytes")
 	}
@@ -265,9 +267,12 @@ func TestSyncForRole_GeminiWithGTBinSubstitution(t *testing.T) {
 	if strings.Contains(string(got), "{{GT_BIN}}") {
 		t.Error("{{GT_BIN}} placeholder was not substituted")
 	}
-	// Verify the resolved binary path is present
+	// Verify the resolved binary path is present.
+	// JSON settings files have backslashes escaped (Windows paths), so check
+	// for the JSON-encoded form of the path rather than the raw path.
 	gtBin := resolveGTBinary()
-	if !strings.Contains(string(got), gtBin) {
+	gtBinInFile := strings.ReplaceAll(gtBin, `\`, `\\`)
+	if !strings.Contains(string(got), gtBinInFile) {
 		t.Errorf("expected resolved gt binary %q in output", gtBin)
 	}
 }
@@ -372,9 +377,11 @@ func TestInstallForRole_GeminiRoleAware(t *testing.T) {
 	got, _ := os.ReadFile(filepath.Join(dir, ".gemini", "settings.json"))
 	want, _ := templateFS.ReadFile("templates/gemini/settings-autonomous.json")
 	// Gemini templates contain {{GT_BIN}} which gets resolved at install time.
-	// Apply the same substitution to the expected content for comparison.
+	// JSON settings files have backslashes escaped (Windows paths), so apply
+	// the same JSON-escaping used by resolveAndSubstitute for comparison.
 	gtBin := resolveGTBinary()
-	wantResolved := strings.ReplaceAll(string(want), "{{GT_BIN}}", gtBin)
+	gtBinJSON := strings.ReplaceAll(gtBin, `\`, `\\`)
+	wantResolved := strings.ReplaceAll(string(want), "{{GT_BIN}}", gtBinJSON)
 	if string(got) != wantResolved {
 		t.Error("gemini autonomous: content mismatch")
 	}

@@ -312,7 +312,7 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 	}
 	if currentHead != preHead {
 		rebaseCleanupAll(db, baseBranch, workBranch)
-		return fmt.Errorf("ABORT: main HEAD moved during rebase (%s → %s)", preHead[:8], currentHead[:8])
+		return fmt.Errorf("ABORT: main HEAD moved during rebase (%s → %s)", shortHash(preHead), shortHash(currentHead))
 	}
 
 	// Step 9: Swap branches — make compact-work the new main.

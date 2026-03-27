@@ -275,18 +275,28 @@ func calculateEventTimeout(idleCycles int) (time.Duration, error) {
 		if err != nil {
 			return 0, fmt.Errorf("invalid backoff-base: %w", err)
 		}
-		timeout := base
-		for i := 0; i < idleCycles; i++ {
-			timeout *= time.Duration(awaitEventBackoffMult)
-		}
+
+		var maxDur time.Duration
 		if awaitEventBackoffMax != "" {
-			maxDur, err := time.ParseDuration(awaitEventBackoffMax)
+			maxDur, err = time.ParseDuration(awaitEventBackoffMax)
 			if err != nil {
 				return 0, fmt.Errorf("invalid backoff-max: %w", err)
 			}
-			if timeout > maxDur {
-				timeout = maxDur
+		}
+
+		timeout := base
+		for i := 0; i < idleCycles; i++ {
+			// Cap early to prevent int64 overflow at high idle counts.
+			// time.Duration is int64 nanoseconds; multiplying repeatedly
+			// without a guard wraps negative around idle ~62+ (30s base,
+			// mult=2). Check before each multiply.
+			if maxDur > 0 && timeout >= maxDur {
+				return maxDur, nil
 			}
+			timeout *= time.Duration(awaitEventBackoffMult)
+		}
+		if maxDur > 0 && timeout > maxDur {
+			return maxDur, nil
 		}
 		return timeout, nil
 	}

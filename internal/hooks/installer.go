@@ -58,7 +58,7 @@ func InstallForRole(provider, settingsDir, workDir, role, hooksDir, hooksFile st
 		// Stale file detected — fall through to overwrite with current template
 	}
 
-	return writeTemplate(provider, role, hooksDir, hooksFile, targetPath)
+	return writeTemplate(provider, role, hooksFile, targetPath)
 }
 
 // needsUpgrade returns true if an existing hooks file contains stale patterns
@@ -150,14 +150,26 @@ func resolveAndSubstitute(provider, hooksFile, role string) ([]byte, error) {
 
 	if bytes.Contains(content, []byte("{{GT_BIN}}")) {
 		gtBin := resolveGTBinary()
-		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), []byte(gtBin))
+		gtBinBytes := []byte(gtBin)
+		if isSettingsFile(hooksFile) {
+			// JSON-encode the path so Windows backslashes are properly escaped.
+			// json.Marshal produces `"C:\\path\\gt.exe"` (with quotes); strip the quotes.
+			if encoded, err := json.Marshal(gtBin); err == nil {
+				gtBinBytes = encoded[1 : len(encoded)-1]
+			}
+		}
+		content = bytes.ReplaceAll(content, []byte("{{GT_BIN}}"), gtBinBytes)
 	}
 
 	return content, nil
 }
 
 // writeTemplate resolves a template, substitutes placeholders, and writes it to targetPath.
-func writeTemplate(provider, role, _, hooksFile, targetPath string) error {
+<<<<<<< HEAD
+func writeTemplate(provider, role, hooksDir, hooksFile, targetPath string) error {
+=======
+func writeTemplate(provider, role, hooksFile, targetPath string) error {
+>>>>>>> b0a01735 (fix(lint): remove unused hooksDir param from writeTemplate)
 	content, err := resolveAndSubstitute(provider, hooksFile, role)
 	if err != nil {
 		return err

@@ -4187,3 +4187,40 @@ func TestCleanStaleSocket_NoopWhenMissing(t *testing.T) {
 	// Should not panic or error when socket doesn't exist
 	cleanStaleSocket(filepath.Join(t.TempDir(), "nonexistent.sock"))
 }
+
+// =============================================================================
+// Thundering herd fix tests (gt-nkn)
+// =============================================================================
+
+func TestCountDoltDatabases(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Non-existent directory returns 1 (safe default).
+	if got := countDoltDatabases(filepath.Join(tmpDir, "noexist")); got != 1 {
+		t.Errorf("non-existent dir: got %d, want 1", got)
+	}
+
+	// Empty directory returns 1 (safe default).
+	empty := filepath.Join(tmpDir, "empty")
+	if err := os.MkdirAll(empty, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if got := countDoltDatabases(empty); got != 1 {
+		t.Errorf("empty dir: got %d, want 1", got)
+	}
+
+	// Directory with Dolt databases (subdirs containing .dolt).
+	dataDir := filepath.Join(tmpDir, "data")
+	for _, name := range []string{"hq", "gastown", "beads"} {
+		if err := os.MkdirAll(filepath.Join(dataDir, name, ".dolt"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A plain directory without .dolt should not be counted.
+	if err := os.MkdirAll(filepath.Join(dataDir, "notadb"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if got := countDoltDatabases(dataDir); got != 3 {
+		t.Errorf("dataDir with 3 dbs + 1 plain dir: got %d, want 3", got)
+	}
+}

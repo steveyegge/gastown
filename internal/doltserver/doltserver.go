@@ -484,6 +484,30 @@ func SaveState(townRoot string, state *State) error {
 	return util.AtomicWriteJSON(stateFile, state)
 }
 
+// countDoltDatabases counts the number of Dolt database directories in dataDir.
+// Each subdirectory containing a .dolt directory is considered a database.
+// Returns at least 1 so the caller never divides by zero.
+func countDoltDatabases(dataDir string) int {
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return 1
+	}
+	count := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		// A Dolt database directory contains a .dolt subdirectory.
+		if _, statErr := os.Stat(filepath.Join(dataDir, e.Name(), ".dolt")); statErr == nil {
+			count++
+		}
+	}
+	if count < 1 {
+		return 1
+	}
+	return count
+}
+
 // IsRunning checks if a Dolt server is running for the given town.
 // Returns (running, pid, error).
 // Checks both PID file AND port to detect externally-started servers.
@@ -1318,19 +1342,37 @@ func Start(townRoot string) error {
 		}
 	}
 	if !locked {
-		// Retry a few times with short waits (the holder may be finishing)
-		for i := 0; i < 6; i++ {
-			time.Sleep(500 * time.Millisecond)
+		// Scale the retry window by the number of databases: each database takes
+		// ~5s to initialize. Clamp between 15s and 120s to handle both small and
+		// large installs. (gt-nkn: fix thundering herd)
+		numDBs := countDoltDatabases(config.DataDir)
+		lockTimeout := time.Duration(numDBs) * 5 * time.Second
+		if lockTimeout < 15*time.Second {
+			lockTimeout = 15 * time.Second
+		}
+		if lockTimeout > 120*time.Second {
+			lockTimeout = 120 * time.Second
+		}
+		interval := 500 * time.Millisecond
+		deadline := time.Now().Add(lockTimeout)
+		for time.Now().Before(deadline) {
+			time.Sleep(interval)
 			locked, err = fileLock.TryLock()
 			if err == nil && locked {
 				break
 			}
 		}
 		if !locked {
-			// Still locked. POSIX flocks auto-release on process death, so if we
-			// can't get it, something is actively holding it. Remove the stale lock
-			// file and try one more time. (gt-tosjp)
-			fmt.Fprintf(os.Stderr, "Warning: dolt.lock held for >3s — removing stale lock\n")
+			// Still locked after the full timeout. Before force-removing the lock,
+			// check if Dolt is already running — the lock holder may have finished
+			// starting Dolt successfully. If so, return nil instead of spawning a
+			// duplicate server. (gt-nkn: fix thundering herd)
+			if already, _, _ := IsRunning(townRoot); already {
+				return nil
+			}
+			// POSIX flocks auto-release on process death. We timed out waiting,
+			// so forcibly remove the stale lock and retry once. (gt-tosjp)
+			fmt.Fprintf(os.Stderr, "Warning: dolt.lock held for >%s — removing stale lock\n", lockTimeout.Round(time.Second))
 			_ = os.Remove(lockFile)
 			fileLock = flock.New(lockFile)
 			locked, err = fileLock.TryLock()

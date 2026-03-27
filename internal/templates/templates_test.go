@@ -583,7 +583,7 @@ func TestCreatePolecatCLAUDEmd(t *testing.T) {
 	}
 }
 
-func TestCreatePolecatCLAUDEmd_AppendsToTownRootContent(t *testing.T) {
+func TestCreatePolecatCLAUDEmd_WritesToLocalWhenTrackedExists(t *testing.T) {
 	dir := t.TempDir()
 
 	// Write a CLAUDE.md with the exact town-root template content that gets
@@ -600,26 +600,34 @@ func TestCreatePolecatCLAUDEmd_AppendsToTownRootContent(t *testing.T) {
 		t.Fatalf("CreatePolecatCLAUDEmd() error = %v", err)
 	}
 	if !created {
-		t.Fatal("CreatePolecatCLAUDEmd() created = false, want true (should append lifecycle instructions)")
+		t.Fatal("CreatePolecatCLAUDEmd() created = false, want true (should write to CLAUDE.local.md)")
 	}
 
+	// CLAUDE.md must NOT be modified — it's a tracked file and modifying it
+	// creates uncommitted changes that the gt done safety net would commit onto
+	// the polecat's branch, polluting the PR diff.
 	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
 	if err != nil {
 		t.Fatalf("reading CLAUDE.md: %v", err)
 	}
-	content := string(data)
-
-	// Original content preserved
-	if !strings.Contains(content, "Dolt Server") {
-		t.Error("existing town-root CLAUDE.md content was not preserved")
+	if string(data) != existing {
+		t.Error("CLAUDE.md was modified — tracked file must not be touched when CLAUDE.local.md is used")
+	}
+	if strings.Contains(string(data), polecatLifecycleMarker) {
+		t.Error("polecat lifecycle marker written to tracked CLAUDE.md — should go to CLAUDE.local.md")
 	}
 
-	// Polecat lifecycle instructions appended
-	if !strings.Contains(content, "IDLE POLECAT HERESY") {
-		t.Error("polecat lifecycle instructions not appended")
+	// Polecat lifecycle instructions written to CLAUDE.local.md (gitignored)
+	localData, err := os.ReadFile(filepath.Join(dir, "CLAUDE.local.md"))
+	if err != nil {
+		t.Fatalf("reading CLAUDE.local.md: %v", err)
 	}
-	if !strings.Contains(content, "gt done") {
-		t.Fatal("gt done instructions not appended — polecats will not know to call it")
+	localContent := string(localData)
+	if !strings.Contains(localContent, "IDLE POLECAT HERESY") {
+		t.Error("polecat lifecycle instructions not written to CLAUDE.local.md")
+	}
+	if !strings.Contains(localContent, "gt done") {
+		t.Fatal("gt done instructions not in CLAUDE.local.md — polecats will not know to call it")
 	}
 }
 
@@ -654,16 +662,16 @@ func TestCreatePolecatCLAUDEmd_SkipsWhenAlreadyProvisioned(t *testing.T) {
 
 // TestCreatePolecatCLAUDEmd_ReusePath simulates the polecat reuse scenario:
 // 1. Worktree has tracked CLAUDE.md from repo (town-root Dolt content)
-// 2. CreatePolecatCLAUDEmd appends lifecycle instructions
-// 3. git reset --hard restores the tracked version (losing our append)
-// 4. CreatePolecatCLAUDEmd must re-append on the second call
+// 2. CreatePolecatCLAUDEmd writes lifecycle instructions to CLAUDE.local.md
+// 3. git reset --hard restores CLAUDE.md (CLAUDE.local.md unaffected — it's gitignored)
+// 4. Second CreatePolecatCLAUDEmd call is a no-op (CLAUDE.local.md still has the marker)
 //
-// This is the exact bug that caused polecats to never call gt done:
-// ReuseIdlePolecat runs git reset --hard + git clean -f, which nukes
-// the appended instructions, and then never re-provisioned them.
+// This is better than the old append-to-CLAUDE.md approach because git reset --hard
+// no longer loses the lifecycle instructions.
 func TestCreatePolecatCLAUDEmd_ReusePath(t *testing.T) {
 	dir := t.TempDir()
 	claudePath := filepath.Join(dir, "CLAUDE.md")
+	claudeLocalPath := filepath.Join(dir, "CLAUDE.local.md")
 
 	// Step 1: Simulate tracked CLAUDE.md from repo (town-root content)
 	townRoot := TownRootCLAUDEmd()
@@ -671,52 +679,97 @@ func TestCreatePolecatCLAUDEmd_ReusePath(t *testing.T) {
 		t.Fatalf("writing tracked CLAUDE.md: %v", err)
 	}
 
-	// Step 2: First provision — appends lifecycle instructions
+	// Step 2: First provision — writes lifecycle instructions to CLAUDE.local.md
 	created, err := CreatePolecatCLAUDEmd(dir, "greenplace", "furiosa")
 	if err != nil {
 		t.Fatalf("first CreatePolecatCLAUDEmd() error = %v", err)
 	}
 	if !created {
-		t.Fatal("first call should append to existing file")
+		t.Fatal("first call should create CLAUDE.local.md")
 	}
 
-	data, _ := os.ReadFile(claudePath)
-	if !strings.Contains(string(data), polecatLifecycleMarker) {
-		t.Fatal("lifecycle marker not found after first provision")
+	// Lifecycle instructions are in CLAUDE.local.md, not CLAUDE.md
+	localData, _ := os.ReadFile(claudeLocalPath)
+	if !strings.Contains(string(localData), polecatLifecycleMarker) {
+		t.Fatal("lifecycle marker not found in CLAUDE.local.md after first provision")
+	}
+	claudeData, _ := os.ReadFile(claudePath)
+	if strings.Contains(string(claudeData), polecatLifecycleMarker) {
+		t.Fatal("lifecycle marker written to tracked CLAUDE.md — must not modify tracked file")
 	}
 
-	// Step 3: Simulate git reset --hard (restores tracked version without our append)
+	// Step 3: Simulate git reset --hard (restores tracked CLAUDE.md, but CLAUDE.local.md
+	// is gitignored/untracked so it survives the reset)
 	if err := os.WriteFile(claudePath, []byte(townRoot), 0644); err != nil {
 		t.Fatalf("simulating git reset --hard: %v", err)
 	}
 
-	// Verify the reset removed our instructions
-	data, _ = os.ReadFile(claudePath)
-	if strings.Contains(string(data), polecatLifecycleMarker) {
-		t.Fatal("git reset simulation should have removed lifecycle marker")
+	// CLAUDE.local.md still has the lifecycle marker (survived git reset)
+	localData, _ = os.ReadFile(claudeLocalPath)
+	if !strings.Contains(string(localData), polecatLifecycleMarker) {
+		t.Fatal("CLAUDE.local.md lifecycle marker lost — should survive git reset --hard")
 	}
 
-	// Step 4: Second provision (reuse path) — must re-append
+	// Step 4: Second provision — no-op since CLAUDE.local.md already has the marker
 	created, err = CreatePolecatCLAUDEmd(dir, "greenplace", "furiosa")
 	if err != nil {
 		t.Fatalf("second CreatePolecatCLAUDEmd() error = %v", err)
 	}
+	if created {
+		t.Fatal("second call should be a no-op (lifecycle instructions still in CLAUDE.local.md)")
+	}
+
+	// Both CLAUDE.md (unchanged) and CLAUDE.local.md (with lifecycle) should be intact
+	claudeData, _ = os.ReadFile(claudePath)
+	if !strings.Contains(string(claudeData), "Dolt Server") {
+		t.Error("town-root content in CLAUDE.md was lost")
+	}
+	localData, _ = os.ReadFile(claudeLocalPath)
+	if !strings.Contains(string(localData), "gt done") {
+		t.Fatal("gt done instructions not found in CLAUDE.local.md")
+	}
+}
+
+// TestCreatePolecatCLAUDEmd_GitCleanRemovesLocal simulates git clean -f removing
+// the untracked CLAUDE.local.md. On re-provision, the function must recreate it.
+func TestCreatePolecatCLAUDEmd_GitCleanRemovesLocal(t *testing.T) {
+	dir := t.TempDir()
+	claudePath := filepath.Join(dir, "CLAUDE.md")
+	claudeLocalPath := filepath.Join(dir, "CLAUDE.local.md")
+
+	// Tracked CLAUDE.md exists
+	townRoot := TownRootCLAUDEmd()
+	if err := os.WriteFile(claudePath, []byte(townRoot), 0644); err != nil {
+		t.Fatalf("writing tracked CLAUDE.md: %v", err)
+	}
+
+	// First provision: writes to CLAUDE.local.md
+	if _, err := CreatePolecatCLAUDEmd(dir, "greenplace", "nux"); err != nil {
+		t.Fatalf("first provision: %v", err)
+	}
+
+	// Simulate git clean -f removing the untracked CLAUDE.local.md
+	if err := os.Remove(claudeLocalPath); err != nil {
+		t.Fatalf("simulating git clean -f: %v", err)
+	}
+
+	// Second provision: CLAUDE.local.md is gone, must recreate it
+	created, err := CreatePolecatCLAUDEmd(dir, "greenplace", "nux")
+	if err != nil {
+		t.Fatalf("second provision: %v", err)
+	}
 	if !created {
-		t.Fatal("second call should re-append after git reset removed our instructions")
+		t.Fatal("should recreate CLAUDE.local.md after git clean removed it")
 	}
 
-	data, _ = os.ReadFile(claudePath)
-	content := string(data)
-
-	// Both original and appended content should be present
-	if !strings.Contains(content, "Dolt Server") {
-		t.Error("town-root content lost after re-provision")
+	localData, _ := os.ReadFile(claudeLocalPath)
+	if !strings.Contains(string(localData), polecatLifecycleMarker) {
+		t.Fatal("lifecycle marker not in recreated CLAUDE.local.md")
 	}
-	if !strings.Contains(content, polecatLifecycleMarker) {
-		t.Fatal("lifecycle marker not found after re-provision")
-	}
-	if !strings.Contains(content, "gt done") {
-		t.Fatal("gt done instructions not found after re-provision")
+	// CLAUDE.md must still be unmodified
+	claudeData, _ := os.ReadFile(claudePath)
+	if string(claudeData) != townRoot {
+		t.Error("tracked CLAUDE.md was modified")
 	}
 }
 
