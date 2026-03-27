@@ -238,6 +238,8 @@ func printEvent(e townlog.Event) {
 		typeStr = style.Dim.Render("[nudge]")
 	case townlog.EventHandoff:
 		typeStr = style.Bold.Render("[handoff]")
+	case townlog.EventHandoffNoPersist:
+		typeStr = style.Error.Render("[handoff-NOPERSIST]")
 	case townlog.EventDone:
 		typeStr = style.Success.Render("[done]")
 	case townlog.EventCrash:
@@ -287,6 +289,11 @@ func formatEventDetail(e townlog.Event) string {
 			return fmt.Sprintf("handed off (%s)", e.Context)
 		}
 		return "handed off"
+	case townlog.EventHandoffNoPersist:
+		if e.Context != "" {
+			return fmt.Sprintf("handoff FAILED (%s)", e.Context)
+		}
+		return "handoff FAILED (no persist)"
 	case townlog.EventDone:
 		if e.Context != "" {
 			return fmt.Sprintf("completed %s", e.Context)
@@ -437,6 +444,17 @@ func LogNudge(townRoot, agent, message string) error {
 // LogHandoff logs a handoff event.
 func LogHandoff(townRoot, agent, context string) error {
 	return LogEventWithRoot(townRoot, townlog.EventHandoff, agent, context)
+}
+
+// LogHandoffNoPersist logs a failed handoff where Dolt persistence failed.
+// Creates a distinct marker in town.log so crash recovery can identify
+// handoffs that were attempted but never persisted to Dolt.
+func LogHandoffNoPersist(townRoot, agent, context string, persistErr error) error {
+	msg := context
+	if persistErr != nil {
+		msg = fmt.Sprintf("%s — error: %v", context, persistErr)
+	}
+	return LogEventWithRoot(townRoot, townlog.EventHandoffNoPersist, agent, msg)
 }
 
 // LogDone logs a done event.

@@ -235,3 +235,48 @@ func TestTruncate(t *testing.T) {
 		})
 	}
 }
+
+func TestEventHandoffNoPersist_Format(t *testing.T) {
+	e := Event{
+		Type:    EventHandoffNoPersist,
+		Agent:   "gastown/crew/max",
+		Context: "session cycling — error: connection refused",
+	}
+	line := formatLogLine(e)
+	if !strings.Contains(line, "[handoff-NOPERSIST]") {
+		t.Errorf("expected [handoff-NOPERSIST] in log line, got: %s", line)
+	}
+	if !strings.Contains(line, "handoff FAILED") {
+		t.Errorf("expected 'handoff FAILED' in log line, got: %s", line)
+	}
+}
+
+func TestEventHandoffNoPersist_NoContext(t *testing.T) {
+	e := Event{
+		Type:  EventHandoffNoPersist,
+		Agent: "mayor",
+	}
+	line := formatLogLine(e)
+	if !strings.Contains(line, "handoff FAILED (Dolt persistence)") {
+		t.Errorf("expected default detail, got: %s", line)
+	}
+}
+
+func TestEventHandoffNoPersist_ParseRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "town.log")
+	logger := &Logger{logPath: logPath}
+
+	if err := logger.Log(EventHandoffNoPersist, "gastown/crew/max", "test failure"); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := strings.TrimSpace(string(data))
+	if !strings.Contains(line, "[handoff-NOPERSIST]") {
+		t.Errorf("expected [handoff-NOPERSIST] in written log, got: %s", line)
+	}
+}

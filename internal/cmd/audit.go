@@ -380,6 +380,8 @@ func formatTownlogSummary(e townlog.Event) string {
 		return "Completed work"
 	case townlog.EventHandoff:
 		return "Handed off session"
+	case townlog.EventHandoffNoPersist:
+		return "Handoff FAILED (Dolt persistence)"
 	case townlog.EventCrash:
 		if e.Context != "" {
 			return fmt.Sprintf("Crashed: %s", e.Context)

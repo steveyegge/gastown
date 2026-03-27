@@ -267,15 +267,10 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	// Handing off ourselves - print feedback then respawn
 	fmt.Printf("%s Handing off %s...\n", style.Bold.Render("🤝"), currentSession)
 
-	// Log handoff event (both townlog and events feed)
-	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
-		agent := sessionToGTRole(currentSession)
-		if agent == "" {
-			agent = currentSession
-		}
-		_ = LogHandoff(townRoot, agent, handoffSubject)
-		// Also log to activity feed
-		_ = events.LogFeed(events.TypeHandoff, agent, events.HandoffPayload(handoffSubject, true))
+	// Resolve agent identity once for both success and failure paths.
+	agent := sessionToGTRole(currentSession)
+	if agent == "" {
+		agent = currentSession
 	}
 
 	// Dry run mode - show what would happen (BEFORE any side effects)
@@ -297,12 +292,27 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 
 	// Send handoff mail to self (defaults applied inside sendHandoffMail).
 	// The mail is auto-hooked so the next session picks it up.
+	// CRITICAL: Mail must persist to Dolt BEFORE logging to town.log.
+	// If Dolt is down, we must NOT log a false handoff to town.log.
 	beadID, err := sendHandoffMail(handoffSubject, handoffMessage)
 	if err != nil {
-		style.PrintWarning("could not send handoff mail: %v", err)
-		// Continue anyway - the respawn is more important
-	} else {
-		fmt.Printf("%s Sent handoff mail %s (auto-hooked)\n", style.Bold.Render("📬"), beadID)
+		// Handoff persistence failure is fatal — do not silently continue.
+		// A silent failure causes the next session to find an empty hook,
+		// losing all handoff context.
+		if townRoot, trErr := workspace.FindFromCwd(); trErr == nil && townRoot != "" {
+			_ = LogHandoffNoPersist(townRoot, agent, handoffSubject, err)
+		}
+		fmt.Fprintf(os.Stderr, "The session was NOT respawned. Fix the issue and retry 'gt handoff'.\n")
+		return fmt.Errorf("handoff mail failed to persist (Dolt may be down): %w", err)
+	}
+	fmt.Printf("%s Sent handoff mail %s (auto-hooked)\n", style.Bold.Render("📬"), beadID)
+
+	// Log handoff event AFTER Dolt persistence succeeds.
+	// Previously this logged BEFORE sendHandoffMail, causing false entries
+	// in town.log when Dolt was down.
+	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		_ = LogHandoff(townRoot, agent, handoffSubject)
+		_ = events.LogFeed(events.TypeHandoff, agent, events.HandoffPayload(handoffSubject, true))
 	}
 
 	// NOTE: reportAgentState("stopped") removed (gt-zecmc)
@@ -498,14 +508,22 @@ func runHandoffCycle() error {
 	// Close any in-progress molecule steps before cycling (gt-e26g).
 	cleanupMoleculeOnHandoff()
 
-	// Send handoff mail to self (auto-hooked for successor)
+	// Send handoff mail to self (auto-hooked for successor).
+	// Fatal on failure — same rationale as runHandoff: silent failure causes
+	// the next session to find an empty hook and lose all context.
 	beadID, err := sendHandoffMail(subject, message)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "handoff --cycle: could not send mail: %v\n", err)
-		// Continue — respawn is more important than mail
-	} else {
-		fmt.Fprintf(os.Stderr, "handoff --cycle: saved state to %s\n", beadID)
+		agent := sessionToGTRole(currentSession)
+		if agent == "" {
+			agent = currentSession
+		}
+		if townRoot, trErr := workspace.FindFromCwd(); trErr == nil && townRoot != "" {
+			_ = LogHandoffNoPersist(townRoot, agent, subject, err)
+		}
+		fmt.Fprintf(os.Stderr, "The session was NOT respawned. Fix the issue and retry.\n")
+		return fmt.Errorf("handoff --cycle: mail failed to persist: %w", err)
 	}
+	fmt.Fprintf(os.Stderr, "handoff --cycle: saved state to %s\n", beadID)
 
 	// Write handoff marker so post-cycle prime knows it's post-handoff.
 	// Format: "session_id\nreason" — the reason enables isCompactResume()
@@ -525,7 +543,7 @@ func runHandoffCycle() error {
 	// Record handoff time for cooldown enforcement (gt-058d).
 	recordHandoffTime()
 
-	// Log cycle event
+	// Log cycle event AFTER persistence succeeds.
 	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
 		agent := sessionToGTRole(currentSession)
 		if agent == "" {
