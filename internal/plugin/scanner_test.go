@@ -850,6 +850,46 @@ version = 1
 	}
 }
 
+func TestParsePluginMD_YAMLDelimiterError(t *testing.T) {
+	content := []byte(`---
+name = "broken"
+description = "Uses YAML delimiters"
+version = 1
+---
+
+# Broken Plugin
+`)
+	_, err := parsePluginMD(content, "/test/path", LocationTown, "")
+	if err == nil {
+		t.Fatal("expected error for YAML-style delimiters")
+	}
+	if !strings.Contains(err.Error(), "YAML-style '---'") {
+		t.Errorf("expected helpful error about YAML delimiters, got: %v", err)
+	}
+}
+
+func TestParsePluginMD_IntervalInsteadOfDuration(t *testing.T) {
+	content := []byte(`+++
+name = "bad-gate"
+description = "Uses interval instead of duration"
+version = 1
+
+[gate]
+type = "cooldown"
+interval = "24h"
++++
+
+# Bad Gate Plugin
+`)
+	_, err := parsePluginMD(content, "/test/path", LocationTown, "")
+	if err == nil {
+		t.Fatal("expected error for 'interval' instead of 'duration'")
+	}
+	if !strings.Contains(err.Error(), "interval") || !strings.Contains(err.Error(), "duration") {
+		t.Errorf("expected helpful error about interval vs duration, got: %v", err)
+	}
+}
+
 func TestFormatMailBody_WithoutRunScript(t *testing.T) {
 	p := &Plugin{
 		Name:         "test-plugin",

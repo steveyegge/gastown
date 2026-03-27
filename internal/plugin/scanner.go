@@ -163,6 +163,10 @@ func parsePluginMD(content []byte, pluginDir string, location Location, rigName 
 	const delimiter = "+++"
 	start := strings.Index(str, delimiter)
 	if start == -1 {
+		// Check for common mistake: YAML-style --- instead of TOML +++
+		if strings.HasPrefix(strings.TrimSpace(str), "---") {
+			return nil, fmt.Errorf("plugin.md uses YAML-style '---' delimiters, but TOML '+++' delimiters are required")
+		}
 		return nil, fmt.Errorf("missing TOML frontmatter (no opening +++)")
 	}
 
@@ -186,6 +190,18 @@ func parsePluginMD(content []byte, pluginDir string, location Location, rigName 
 	// Validate required fields
 	if fm.Name == "" {
 		return nil, fmt.Errorf("missing required field: name")
+	}
+
+	// Validate gate configuration
+	if fm.Gate != nil {
+		if fm.Gate.Type == GateCooldown && fm.Gate.Duration == "" {
+			// Check for common mistake: "interval" instead of "duration"
+			// by looking at the raw frontmatter
+			if strings.Contains(frontmatter, "interval") {
+				return nil, fmt.Errorf("gate uses 'interval' but the correct field is 'duration' (e.g., duration = \"24h\")")
+			}
+			fmt.Fprintf(os.Stderr, "Warning: plugin %q has cooldown gate with no duration — will run on every patrol cycle\n", fm.Name)
+		}
 	}
 
 	plugin := &Plugin{
