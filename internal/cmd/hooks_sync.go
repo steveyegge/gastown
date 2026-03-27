@@ -153,13 +153,14 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 			var hooksDir, settingsFile string
 			useSettingsDir := preset != nil && preset.HooksUseSettingsDir
 			if preset != nil {
-				rc := config.RuntimeConfigFromPreset(config.AgentPreset(agentName))
-				if rc == nil || rc.Hooks == nil {
+				// Use preset fields directly — RuntimeConfigFromPreset doesn't
+				// populate the Hooks field, so we'd incorrectly skip agents.
+				hooksProvider = preset.HooksProvider
+				hooksDir = preset.HooksDir
+				settingsFile = preset.HooksSettingsFile
+				if hooksProvider == "" {
 					continue
 				}
-				hooksProvider = rc.Hooks.Provider
-				hooksDir = rc.Hooks.Dir
-				settingsFile = rc.Hooks.SettingsFile
 			} else {
 				rc := config.ResolveRoleAgentConfig(loc.Role, townRoot, rigPath)
 				if rc == nil || rc.Hooks == nil || rc.Hooks.Provider == "" || rc.Hooks.Provider == "claude" {
