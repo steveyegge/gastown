@@ -3,6 +3,7 @@ package daemon
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -237,15 +238,27 @@ func (d *Daemon) dispatchPlugins(mgr *dog.Manager, sm *dog.SessionManager, rigsC
 		return
 	}
 
+	// Sort by cooldown duration descending so long-cooldown plugins (e.g. evolve 24h)
+	// get dispatched before short-cooldown ones (e.g. github-sheriff 5m).
+	// Without this, map iteration order causes short-cooldown plugins to starve
+	// long-cooldown ones by consuming all idle dogs every cycle.
+	cooldownPlugins := make([]*plugin.Plugin, 0)
+	for _, p := range plugins {
+		if p.Gate != nil && p.Gate.Type == plugin.GateCooldown {
+			cooldownPlugins = append(cooldownPlugins, p)
+		}
+	}
+	sort.Slice(cooldownPlugins, func(i, j int) bool {
+		di, _ := time.ParseDuration(cooldownPlugins[i].Gate.Duration)
+		dj, _ := time.ParseDuration(cooldownPlugins[j].Gate.Duration)
+		return di > dj // Longest cooldown first
+	})
+
 	recorder := plugin.NewRecorder(d.config.TownRoot)
 	router := mail.NewRouterWithTownRoot(d.config.TownRoot, d.config.TownRoot)
 	failedDogs := make(map[string]bool) // Track dogs that failed session start
 
-	for _, p := range plugins {
-		// Only dispatch plugins with cooldown gates.
-		if p.Gate == nil || p.Gate.Type != plugin.GateCooldown {
-			continue
-		}
+	for _, p := range cooldownPlugins {
 
 		// Evaluate cooldown: skip if plugin ran recently.
 		if p.Gate.Duration != "" {
