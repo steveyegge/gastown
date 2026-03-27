@@ -1344,9 +1344,10 @@ func (d *Daemon) checkDeaconHeartbeat() {
 				return
 			}
 			// Grace period expired without any heartbeat - Deacon failed to start
-			// Detection only: stuck-agent-dog plugin handles context-aware restart
+			// Stuck-agent-dog: kill and restart
 			d.logger.Printf("STUCK DEACON: started %s ago but hasn't written heartbeat (session: %s)",
 				timeSinceStart.Round(time.Minute), sessionName)
+			d.restartStuckDeacon(sessionName, fmt.Sprintf("no heartbeat after %s", timeSinceStart.Round(time.Minute)))
 			return
 		}
 
@@ -1359,9 +1360,10 @@ func (d *Daemon) checkDeaconHeartbeat() {
 				return
 			}
 			// Grace period expired but heartbeat still from before start
-			// Detection only: stuck-agent-dog plugin handles context-aware restart
+			// Stuck-agent-dog: kill and restart
 			d.logger.Printf("STUCK DEACON: started %s ago but heartbeat still pre-restart (session: %s)",
 				timeSinceStart.Round(time.Minute), sessionName)
+			d.restartStuckDeacon(sessionName, fmt.Sprintf("heartbeat pre-restart after %s", timeSinceStart.Round(time.Minute)))
 			return
 		}
 
@@ -1398,22 +1400,83 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	}
 
 	// Session exists but heartbeat is stale - Deacon may be stuck.
-	// gt-p7k: Use two-tier response — nudge for stale (5-20 min),
-	// escalate only for very stale (>= 20 min). The previous logic gated on
-	// IsVeryStale() (>= 15 min) then checked age > 10 min, making the
-	// nudge path unreachable (dead code). Now nudge fires for 5-20 min
-	// staleness, giving the Deacon a chance to respond before killing.
-	// Kill threshold must be > backoff-max (15m) to avoid false positive
-	// kills during legitimate await-signal sleep.
+	// Two-tier response: nudge for stale (5-20 min), kill and restart
+	// only for very stale (>= 20 min). Kill threshold must be > backoff-max
+	// to avoid false positive kills during legitimate await-signal sleep.
 	if hb.IsVeryStale() {
-		// Detection only: stuck-agent-dog plugin handles context-aware restart
+		// Stuck-agent-dog: kill and restart
 		d.logger.Printf("STUCK DEACON: heartbeat stale for %s, session %s needs restart", age.Round(time.Minute), sessionName)
+		d.restartStuckDeacon(sessionName, fmt.Sprintf("heartbeat stale for %s", age.Round(time.Minute)))
 	} else {
 		// Stale but not very stale (5-20 min) - nudge to wake up
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
 		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
 			d.logger.Printf("Error nudging stuck Deacon: %v", err)
 		}
+	}
+}
+
+
+// restartStuckDeacon kills a stuck Deacon session and respawns it.
+// Uses RestartTracker for exponential backoff and crash-loop prevention.
+// Notifies via gt-notify (zero token cost) if the notify script exists.
+func (d *Daemon) restartStuckDeacon(sessionName, reason string) {
+	const agentID = "deacon"
+
+	// Check restart tracker before acting
+	if d.restartTracker != nil {
+		if d.restartTracker.IsInCrashLoop(agentID) {
+			d.logger.Printf("Stuck-agent-dog: Deacon in crash loop, not restarting (use 'gt daemon clear-backoff deacon')")
+			d.notifySlack("admin", "critical", fmt.Sprintf("Deacon crash loop detected — manual intervention required. Reason: %s", reason))
+			return
+		}
+		if !d.restartTracker.CanRestart(agentID) {
+			remaining := d.restartTracker.GetBackoffRemaining(agentID)
+			d.logger.Printf("Stuck-agent-dog: Deacon restart in backoff, %s remaining", remaining.Round(time.Second))
+			return
+		}
+	}
+
+	// Kill the stuck session
+	d.logger.Printf("Stuck-agent-dog: killing stuck Deacon session %s (reason: %s)", sessionName, reason)
+	if err := d.tmux.KillSession(sessionName); err != nil {
+		d.logger.Printf("Stuck-agent-dog: error killing session %s: %v", sessionName, err)
+		// Continue — session may already be dead
+	}
+
+	// Brief pause for tmux cleanup
+	time.Sleep(2 * time.Second)
+
+	// Respawn via ensureDeaconRunning (which uses deacon.Manager)
+	d.ensureDeaconRunning()
+
+	// Verify it came back
+	hasSession, err := d.tmux.HasSession(sessionName)
+	if err != nil || !hasSession {
+		d.logger.Printf("Stuck-agent-dog: FAILED to respawn Deacon after kill")
+		d.notifySlack("admin", "critical", fmt.Sprintf("Deacon restart FAILED — session did not respawn. Reason: %s", reason))
+		return
+	}
+
+	d.logger.Printf("Stuck-agent-dog: Deacon restarted successfully")
+	d.notifySlack("admin", "high", fmt.Sprintf("Deacon was stuck (%s) — auto-restarted successfully", reason))
+}
+
+// notifySlack sends a notification via gt-notify (zero token cost).
+// Channel: "admin" or "status". Priority: "critical", "high", "info", "success".
+// Silently fails if gt-notify is not found — notification is best-effort.
+func (d *Daemon) notifySlack(channel, priority, message string) {
+	notifyBin := filepath.Join(d.config.TownRoot, "bin", "gt-notify")
+	if _, err := os.Stat(notifyBin); err != nil {
+		d.logger.Printf("Stuck-agent-dog: gt-notify not found at %s, skipping notification", notifyBin)
+		return
+	}
+
+	//nolint:gosec // G204: args are constructed internally
+	cmd := exec.Command(notifyBin, "--channel", channel, "--priority", priority, message)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PATH=%s:%s", filepath.Join(d.config.TownRoot, "bin"), os.Getenv("PATH")))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		d.logger.Printf("Stuck-agent-dog: gt-notify failed: %v (output: %s)", err, string(output))
 	}
 }
 
