@@ -667,8 +667,10 @@ func (c *CustomTypesCheck) Run(ctx *CheckContext) *CheckResult {
 	// Parse configured types, filtering out bd "Note:" messages that may appear in stdout
 	configuredTypes := parseConfigOutput(output)
 	configuredSet := make(map[string]bool)
-	for _, t := range strings.Split(configuredTypes, ",") {
-		configuredSet[strings.TrimSpace(t)] = true
+	if configuredTypes != "" {
+		for _, t := range strings.Split(configuredTypes, ",") {
+			configuredSet[strings.TrimSpace(t)] = true
+		}
 	}
 
 	// Check for missing required types
@@ -709,7 +711,7 @@ func (c *CustomTypesCheck) Run(ctx *CheckContext) *CheckResult {
 func parseConfigOutput(output []byte) string {
 	for _, line := range strings.Split(string(output), "\n") {
 		line = strings.TrimSpace(line)
-		if line != "" && !strings.HasPrefix(line, "Note:") {
+		if line != "" && !strings.HasPrefix(line, "Note:") && !strings.Contains(line, "(not set)") {
 			return line
 		}
 	}
@@ -787,8 +789,10 @@ func (c *CustomStatusesCheck) Run(ctx *CheckContext) *CheckResult {
 
 	configuredStatuses := parseConfigOutput(output)
 	configuredSet := make(map[string]bool)
-	for _, s := range strings.Split(configuredStatuses, ",") {
-		configuredSet[strings.TrimSpace(s)] = true
+	if configuredStatuses != "" {
+		for _, s := range strings.Split(configuredStatuses, ",") {
+			configuredSet[strings.TrimSpace(s)] = true
+		}
 	}
 
 	var missing []string
@@ -831,8 +835,8 @@ func (c *CustomStatusesCheck) Fix(ctx *CheckContext) error {
 
 	// Build merged set
 	statusSet := make(map[string]bool)
-	if existing := strings.TrimSpace(string(existingOutput)); existing != "" {
-		for _, s := range strings.Split(parseConfigOutput(existingOutput), ",") {
+	if existing := parseConfigOutput(existingOutput); existing != "" {
+		for _, s := range strings.Split(existing, ",") {
 			s = strings.TrimSpace(s)
 			if s != "" {
 				statusSet[s] = true
