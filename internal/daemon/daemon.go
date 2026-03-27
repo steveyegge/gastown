@@ -1211,6 +1211,26 @@ func (d *Daemon) ensureBootRunning() {
 		return
 	}
 
+	// Idle check: run gt-idle-check to see if the system needs waking.
+	// If idle (all rigs parked, no polecats, deacon alive), skip the expensive
+	// Claude Boot session and use degraded mechanical triage instead.
+	// This saves ~480 Claude sessions/day when Gas Town is not in active use.
+	idleCheckBin := filepath.Join(d.config.TownRoot, "bin", "gt-idle-check")
+	if _, err := os.Stat(idleCheckBin); err == nil {
+		//nolint:gosec // G204: path is constructed from config
+		cmd := exec.Command(idleCheckBin)
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PATH=%s:%s",
+			filepath.Join(d.config.TownRoot, "bin"), os.Getenv("PATH")))
+		if output, err := cmd.CombinedOutput(); err == nil {
+			// Exit 0 = idle, use degraded triage (zero tokens)
+			d.runDegradedBootTriage(b)
+			return
+		} else {
+			// Exit 1 = needs waking, proceed to full Claude Boot
+			d.logger.Printf("Idle check: waking — %s", strings.TrimSpace(string(output)))
+		}
+	}
+
 	// Spawn Boot in a fresh tmux session
 	d.logger.Println("Spawning Boot for triage...")
 	if err := b.Spawn(""); err != nil {
