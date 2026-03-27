@@ -801,6 +801,55 @@ wrapper = ["exitbox", "run", "--"]
 	}
 }
 
+func TestScanner_SkipsDisabledPlugins(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create an active plugin
+	activeDir := filepath.Join(tmpDir, "plugins", "active-plugin")
+	if err := os.MkdirAll(activeDir, 0755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(activeDir, "plugin.md"), []byte(`+++
+name = "active-plugin"
+description = "Active"
+version = 1
++++
+
+# Active
+`), 0644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	// Create a .disabled plugin
+	disabledDir := filepath.Join(tmpDir, "plugins", "broken-plugin.disabled")
+	if err := os.MkdirAll(disabledDir, 0755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(disabledDir, "plugin.md"), []byte(`+++
+name = "broken-plugin"
+description = "Disabled"
+version = 1
++++
+
+# Disabled
+`), 0644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	scanner := NewScanner(tmpDir, nil)
+	plugins, err := scanner.DiscoverAll()
+	if err != nil {
+		t.Fatalf("DiscoverAll failed: %v", err)
+	}
+
+	if len(plugins) != 1 {
+		t.Errorf("expected 1 plugin (disabled skipped), got %d", len(plugins))
+	}
+	if len(plugins) > 0 && plugins[0].Name != "active-plugin" {
+		t.Errorf("expected 'active-plugin', got %q", plugins[0].Name)
+	}
+}
+
 func TestFormatMailBody_WithoutRunScript(t *testing.T) {
 	p := &Plugin{
 		Name:         "test-plugin",

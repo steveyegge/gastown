@@ -100,6 +100,9 @@ func (s *Scanner) scanDirectory(dir string, location Location, rigName string) (
 		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
+		if strings.HasSuffix(entry.Name(), ".disabled") {
+			continue
+		}
 
 		pluginDir := filepath.Join(dir, entry.Name())
 		plugin, err := s.loadPlugin(pluginDir, location, rigName)
