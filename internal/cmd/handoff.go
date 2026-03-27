@@ -864,7 +864,12 @@ func buildRestartCommandWithOpts(sessionName string, opts buildRestartCommandOpt
 	// Note: runtimeCmd starts with the command name (e.g., "claude --settings ..."),
 	// not "exec claude" — the "exec" prefix is added later in the Sprintf.
 	if opts.ContinueSession {
-		runtimeCmd = strings.Replace(runtimeCmd, "claude ", "claude --continue ", 1)
+		// Handle both Unix ("claude ") and Windows ("claude.exe ") binary names
+		if n := strings.Replace(runtimeCmd, "claude.exe ", "claude.exe --continue ", 1); n != runtimeCmd {
+			runtimeCmd = n
+		} else {
+			runtimeCmd = strings.Replace(runtimeCmd, "claude ", "claude --continue ", 1)
+		}
 	}
 
 	// Build environment variables map — role vars first, then Claude vars.

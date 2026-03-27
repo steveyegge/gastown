@@ -130,6 +130,7 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 	// delete_merged_branches=true, judgment_enabled=false, review_depth="standard"
 	// merge_strategy is omitted when not explicitly set (formula default "direct" applies)
 	// New commands (setup, typecheck, lint, build) default to empty = omitted
+	// judgment_enabled defaults to false, review_depth defaults to "standard"
 	expected := map[string]string{
 		"integration_branch_refinery_enabled": "true",
 		"integration_branch_auto_land":        "false",

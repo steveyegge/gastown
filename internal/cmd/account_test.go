@@ -78,6 +78,9 @@ func setTestHome(t *testing.T, fakeHome string) {
 
 func TestAccountSwitch(t *testing.T) {
 	t.Run("switch between accounts", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlink tests require elevated privileges on Windows")
+		}
 		townRoot, accountsDir := setupTestTownForAccount(t)
 
 		// Create fake home directory for ~/.claude
@@ -150,6 +153,9 @@ func TestAccountSwitch(t *testing.T) {
 	})
 
 	t.Run("already on target account", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlink tests require elevated privileges on Windows")
+		}
 		townRoot, accountsDir := setupTestTownForAccount(t)
 
 		fakeHome := t.TempDir()
@@ -237,6 +243,9 @@ func TestAccountSwitch(t *testing.T) {
 	})
 
 	t.Run("real directory gets moved", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlink tests require elevated privileges on Windows")
+		}
 		townRoot, accountsDir := setupTestTownForAccount(t)
 
 		fakeHome := t.TempDir()

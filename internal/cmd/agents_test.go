@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -547,6 +548,9 @@ func TestBuildMenuAction_TestSocket(t *testing.T) {
 // active gt-test-* sockets. This test creates a temporary tmux server on a
 // gt-test-* socket, verifies discovery, then cleans up.
 func TestFindTestSockets_Integration(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("tmux socket discovery unreliable on Windows")
+	}
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not available")
 	}

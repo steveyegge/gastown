@@ -338,6 +338,14 @@ func TestRunHooksSyncNonClaudeAgent(t *testing.T) {
 	// Configure crew role to use opencode
 	townSettings := config.NewTownSettings()
 	townSettings.RoleAgents = map[string]string{"crew": "opencode"}
+	// Register opencode as a custom agent so resolution bypasses binary validation.
+	// fillRuntimeDefaults will auto-fill hooks config from the opencode preset.
+	townSettings.Agents = map[string]*config.RuntimeConfig{
+		"opencode": {
+			Provider: "opencode",
+			Command:  "opencode",
+		},
+	}
 	settingsDir := filepath.Join(townRoot, "settings")
 	if err := os.MkdirAll(settingsDir, 0755); err != nil {
 		t.Fatal(err)
