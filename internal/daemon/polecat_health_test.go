@@ -384,13 +384,34 @@ func TestCheckPolecatHealth_SkipsNukedPolecat(t *testing.T) {
 // given paneCommand (e.g., "claude" or "codex") so IsAgentRunning returns true.
 func writeFakeTmuxWithAgent(t *testing.T, dir, paneCommand string) {
 	t.Helper()
-	script := fmt.Sprintf("#!/bin/sh\n"+
-		"case \"$1\" in\n"+
-		"  has-session) exit 0;;\n"+
-		"  display-message) echo '%s';;\n"+
-		"  kill-session) exit 0;;\n"+
-		"  *) exit 1;;\n"+
-		"esac\n", paneCommand)
+	script := fmt.Sprintf(`#!/bin/sh
+cmd=""
+skip_next=0
+for arg in "$@"; do
+	if [ "$skip_next" -eq 1 ]; then
+		skip_next=0
+		continue
+	fi
+	case "$arg" in
+		-u)
+			continue
+			;;
+		-L)
+			skip_next=1
+			continue
+			;;
+	esac
+	cmd="$arg"
+	break
+done
+
+case "$cmd" in
+	has-session) exit 0;;
+	display-message) echo '%s';;
+	kill-session) exit 0;;
+	*) exit 1;;
+esac
+`, paneCommand)
 	if err := os.WriteFile(filepath.Join(dir, "tmux"), []byte(script), 0755); err != nil {
 		t.Fatalf("writing fake tmux: %v", err)
 	}
