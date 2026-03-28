@@ -1,26 +1,33 @@
 #!/bin/sh
 set -e
 
-# --- SSH key: generate on first run, persists in volume ---
-SSH_DIR="/gt/.ssh"
-if [ ! -f "$SSH_DIR/id_ed25519" ]; then
-    mkdir -p "$SSH_DIR" && chmod 700 "$SSH_DIR"
-    ssh-keygen -t ed25519 -C "gastown-server" -f "$SSH_DIR/id_ed25519" -N ""
-    echo ""
-    echo "========================================="
-    echo "ADD THIS PUBLIC KEY TO GITHUB:"
-    echo "========================================="
-    cat "$SSH_DIR/id_ed25519.pub"
-    echo "========================================="
-    echo ""
-fi
+# --- GitHub App auth (justintanner-gt[bot]) ---
+if [ -n "$GH_APP_PEM" ]; then
+    # Write PEM from base64-encoded env var (secret) to file
+    GH_APP_PEM_FILE="/gt/.github-app.pem"
+    printf '%s' "$GH_APP_PEM" | base64 -d > "$GH_APP_PEM_FILE"
+    chmod 600 "$GH_APP_PEM_FILE"
+    export GH_APP_PEM_FILE
 
-# Symlink SSH keys to home so git/ssh find them
-mkdir -p ~/.ssh && chmod 700 ~/.ssh
-ln -sf "$SSH_DIR/id_ed25519" ~/.ssh/id_ed25519
-ln -sf "$SSH_DIR/id_ed25519.pub" ~/.ssh/id_ed25519.pub
-ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
-git config --global url."git@github.com:".insteadOf "https://github.com/"
+    gh_app_refresh() {
+        TOKEN=$(/app/gastown/scripts/gh-app-token.sh) || return 1
+        printf '%s\n' "$TOKEN" | gh auth login --with-token 2>/dev/null
+        # Set up git HTTPS credentials using the app token
+        git config --global credential.helper store
+        printf 'https://x-access-token:%s@github.com\n' "$TOKEN" > ~/.git-credentials
+        echo "GitHub App token refreshed ($(date +%H:%M:%S))"
+    }
+
+    # Persist gh CLI auth on the workspace volume
+    mkdir -p /gt/.config/gh ~/.config
+    ln -sfn /gt/.config/gh ~/.config/gh
+
+    # Initial auth
+    gh_app_refresh
+
+    # Refresh token every 50 minutes in background
+    (while true; do sleep 3000; gh_app_refresh; done) &
+fi
 
 # --- Git/Dolt identity ---
 if [ -n "$GIT_USER" ] && [ -n "$GIT_EMAIL" ]; then
@@ -33,22 +40,27 @@ fi
 
 # --- Workspace init or refresh ---
 if [ ! -f /gt/mayor/town.json ]; then
+    # First run: block on full install (dashboard will run in setup mode)
     echo "Initializing Gas Town workspace at /gt..."
     /app/gastown/gt install /gt --git
 else
-    echo "Refreshing Gas Town workspace at /gt..."
-    /app/gastown/gt install /gt --git --force
+    # Subsequent runs: refresh in background so dashboard starts fast
+    echo "Refreshing Gas Town workspace at /gt (background)..."
+    /app/gastown/gt install /gt --git --force &
 fi
 
+# --- Gas Town shell + doctor setup (background to not delay health check) ---
+(
+    /app/gastown/gt shell install
+    /app/gastown/gt enable
+    /app/gastown/gt dolt start || true
+    /app/gastown/gt doctor --fix || true
+) &
+
 # --- Write .env for nakedapi from env vars ---
+# Automatically forwards all *_API_KEY env vars (no entrypoint edits needed for new keys)
 if [ -d /gt/nakedapi/refinery/rig ]; then
-    cat > /gt/nakedapi/refinery/rig/.env << ENVFILE
-OPENAI_API_KEY=${OPENAI_API_KEY:-}
-KIE_API_KEY=${KIE_API_KEY:-}
-XAI_API_KEY=${XAI_API_KEY:-}
-FAL_API_KEY=${FAL_API_KEY:-}
-KIMI_CODING_API_KEY=${KIMI_CODING_API_KEY:-}
-ENVFILE
+    env | grep '_API_KEY=' | sort > /gt/nakedapi/refinery/rig/.env
 fi
 
 # --- Pull latest nakedapi ---
@@ -59,7 +71,7 @@ if [ -d /gt/nakedapi/refinery/rig/.git ]; then
     cd /gt
 fi
 
-# --- Start daemon in background (production) ---
+# --- Start daemon in background ---
 if [ -f /gt/mayor/town.json ]; then
     /app/gastown/gt daemon run &
     echo "Daemon started in background (PID $!)"

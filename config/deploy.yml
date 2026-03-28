@@ -22,8 +22,10 @@ registry:
 
 env:
   clear:
-    GIT_USER: "Gastown Bot"
-    GIT_EMAIL: "work@jwtanner.com"
+    GIT_USER: "justintanner-gt[bot]"
+    GIT_EMAIL: "justintanner-gt[bot]@users.noreply.github.com"
+    GH_APP_ID: "3209605"
+    GH_APP_INSTALLATION_ID: "119659593"
     TERM: "xterm-256color"
   secret:
     - OPENAI_API_KEY
@@ -31,6 +33,10 @@ env:
     - XAI_API_KEY
     - FAL_API_KEY
     - KIMI_CODING_API_KEY
+    - FIREWORKS_AI_API_KEY
+    - DASHBOARD_USER
+    - DASHBOARD_PASS
+    - GH_APP_PEM
 
 builder:
   arch: amd64

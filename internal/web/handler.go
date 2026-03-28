@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"html/template"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -488,5 +490,31 @@ func NewDashboardMux(fetcher ConvoyFetcher, webCfg *config.WebTimeoutsConfig) (h
 	})
 	mux.Handle("/", convoyHandler)
 
-	return mux, nil
+	return basicAuthMiddleware(mux), nil
+}
+
+// basicAuthMiddleware wraps a handler with HTTP Basic Auth when
+// DASHBOARD_USER and DASHBOARD_PASS env vars are set. The /up health
+// check endpoint is excluded so kamal-proxy can still probe it.
+func basicAuthMiddleware(next http.Handler) http.Handler {
+	user := os.Getenv("DASHBOARD_USER")
+	pass := os.Getenv("DASHBOARD_PASS")
+	if user == "" || pass == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/up" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		u, p, ok := r.BasicAuth()
+		if !ok ||
+			subtle.ConstantTimeCompare([]byte(u), []byte(user)) != 1 ||
+			subtle.ConstantTimeCompare([]byte(p), []byte(pass)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Gastown Dashboard"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
