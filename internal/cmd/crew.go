@@ -185,11 +185,14 @@ var crewStatusCmd = &cobra.Command{
 	Long: `Show detailed status for crew workspace(s).
 
 Displays session state, git status, branch info, and mail inbox status.
-If no name given, shows status for all crew workers.
+If no name given, shows status for all crew workers across all rigs.
 
 Examples:
-  gt crew status                  # Status of all crew workers
+  gt crew status                  # Status of all crew workers across all rigs
+  gt crew status beads            # Status of all crew workers in beads
+  gt crew status --rig beads      # Status of all crew workers in beads
   gt crew status dave             # Status of specific worker
+  gt crew status beads/dave       # Status of specific worker in beads
   gt crew status --json           # JSON output`,
 	RunE: runCrewStatus,
 }

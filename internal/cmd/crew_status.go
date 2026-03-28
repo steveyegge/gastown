@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -50,38 +51,111 @@ func runCrewStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	crewMgr, r, err := getCrewManagerForMember(crewRig, targetName)
-	if err != nil {
-		return err
-	}
+	t := tmux.NewTmux()
+	var items []CrewStatusItem
 
-	var workers []*crew.CrewWorker
-
-	if targetName != "" {
-		// Specific worker
-		worker, err := crewMgr.Get(targetName)
+	if targetName == "" && crewRig == "" {
+		rigs, err := getAllRigs()
 		if err != nil {
-			if err == crew.ErrCrewNotFound {
-				return fmt.Errorf("crew workspace '%s' not found", targetName)
+			return err
+		}
+
+		for _, r := range rigs {
+			rigItems, err := listCrewStatusItems(r, t)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to list crew workers in %s: %v\n", r.Name, err)
+				continue
 			}
-			return fmt.Errorf("getting crew worker: %w", err)
+			items = append(items, rigItems...)
 		}
-		workers = []*crew.CrewWorker{worker}
 	} else {
-		// All workers
-		workers, err = crewMgr.List()
+		crewMgr, r, err := getCrewManagerForMember(crewRig, targetName)
 		if err != nil {
-			return fmt.Errorf("listing crew workers: %w", err)
+			return err
 		}
+
+		var workers []*crew.CrewWorker
+
+		if targetName != "" {
+			// Specific worker
+			worker, err := crewMgr.Get(targetName)
+			if err != nil {
+				if err == crew.ErrCrewNotFound {
+					return fmt.Errorf("crew workspace '%s' not found", targetName)
+				}
+				return fmt.Errorf("getting crew worker: %w", err)
+			}
+			workers = []*crew.CrewWorker{worker}
+		} else {
+			// All workers
+			workers, err = crewMgr.List()
+			if err != nil {
+				return fmt.Errorf("listing crew workers: %w", err)
+			}
+		}
+
+		items = append(items, buildCrewStatusItems(r, workers, t)...)
 	}
 
-	if len(workers) == 0 {
+	if len(items) == 0 {
 		fmt.Println("No crew workspaces found.")
 		return nil
 	}
 
-	t := tmux.NewTmux()
-	var items []CrewStatusItem
+	if crewJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(items)
+	}
+
+	// Text output
+	for i, item := range items {
+		if i > 0 {
+			fmt.Println()
+		}
+
+		sessionStatus := style.Dim.Render("○ stopped")
+		if item.HasSession {
+			sessionStatus = style.Bold.Render("● running")
+		}
+
+		fmt.Printf("%s %s/%s\n", sessionStatus, item.Rig, item.Name)
+		fmt.Printf("  Path:   %s\n", item.Path)
+		fmt.Printf("  Branch: %s\n", item.Branch)
+
+		if item.GitClean {
+			fmt.Printf("  Git:    %s\n", style.Dim.Render("clean"))
+		} else {
+			fmt.Printf("  Git:    %s\n", style.Bold.Render("dirty"))
+			if len(item.GitModified) > 0 {
+				fmt.Printf("          Modified: %s\n", strings.Join(item.GitModified, ", "))
+			}
+			if len(item.GitUntracked) > 0 {
+				fmt.Printf("          Untracked: %s\n", strings.Join(item.GitUntracked, ", "))
+			}
+		}
+
+		if item.MailUnread > 0 {
+			fmt.Printf("  Mail:   %d unread / %d total\n", item.MailUnread, item.MailTotal)
+		} else {
+			fmt.Printf("  Mail:   %s\n", style.Dim.Render(fmt.Sprintf("%d messages", item.MailTotal)))
+		}
+	}
+
+	return nil
+}
+
+func listCrewStatusItems(r *rig.Rig, t *tmux.Tmux) ([]CrewStatusItem, error) {
+	crewMgr := crew.NewManager(r, git.NewGit(r.Path))
+	workers, err := crewMgr.List()
+	if err != nil {
+		return nil, fmt.Errorf("listing crew workers: %w", err)
+	}
+	return buildCrewStatusItems(r, workers, t), nil
+}
+
+func buildCrewStatusItems(r *rig.Rig, workers []*crew.CrewWorker, t *tmux.Tmux) []CrewStatusItem {
+	items := make([]CrewStatusItem, 0, len(workers))
 
 	for _, w := range workers {
 		sessionID := crewSessionName(r.Name, w.Name)
@@ -128,45 +202,5 @@ func runCrewStatus(cmd *cobra.Command, args []string) error {
 		items = append(items, item)
 	}
 
-	if crewJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(items)
-	}
-
-	// Text output
-	for i, item := range items {
-		if i > 0 {
-			fmt.Println()
-		}
-
-		sessionStatus := style.Dim.Render("○ stopped")
-		if item.HasSession {
-			sessionStatus = style.Bold.Render("● running")
-		}
-
-		fmt.Printf("%s %s/%s\n", sessionStatus, item.Rig, item.Name)
-		fmt.Printf("  Path:   %s\n", item.Path)
-		fmt.Printf("  Branch: %s\n", item.Branch)
-
-		if item.GitClean {
-			fmt.Printf("  Git:    %s\n", style.Dim.Render("clean"))
-		} else {
-			fmt.Printf("  Git:    %s\n", style.Bold.Render("dirty"))
-			if len(item.GitModified) > 0 {
-				fmt.Printf("          Modified: %s\n", strings.Join(item.GitModified, ", "))
-			}
-			if len(item.GitUntracked) > 0 {
-				fmt.Printf("          Untracked: %s\n", strings.Join(item.GitUntracked, ", "))
-			}
-		}
-
-		if item.MailUnread > 0 {
-			fmt.Printf("  Mail:   %d unread / %d total\n", item.MailUnread, item.MailTotal)
-		} else {
-			fmt.Printf("  Mail:   %s\n", style.Dim.Render(fmt.Sprintf("%d messages", item.MailTotal)))
-		}
-	}
-
-	return nil
+	return items
 }
