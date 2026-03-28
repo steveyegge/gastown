@@ -264,6 +264,17 @@ func runSlingFormula(ctx context.Context, args []string) error {
 		prompt = fmt.Sprintf("Formula %s slung. Run `"+cli.Name()+" hook` to see your hook, then execute the steps.", formulaName)
 	}
 	t := tmux.NewTmux()
+
+	// Dog sessions discover hooked work automatically via their sessionStart
+	// hook (gt prime --hook), so no nudge is needed. Critically, the targetPane
+	// for delayed dog sessions resolves to the CALLER's pane (the dispatcher),
+	// not the dog's pane — so NudgePane would inject text into the wrong
+	// session, interrupting the caller. (gt-ect)
+	if delayedDogInfo != nil {
+		fmt.Printf("%s Dog session started, will discover work via gt prime\n", style.Dim.Render("○"))
+		return nil
+	}
+
 	if err := t.NudgePane(targetPane, prompt); err != nil {
 		// Graceful fallback for no-tmux mode
 		fmt.Printf("%s Could not nudge (no tmux?): %v\n", style.Dim.Render("○"), err)
