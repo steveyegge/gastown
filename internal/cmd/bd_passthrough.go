@@ -319,22 +319,23 @@ func extractRigFlag(args []string) (string, []string) {
 	return rigName, filtered
 }
 
-// resolveRigDir resolves a rig name to its working directory for bd commands.
-// Tries common rig layouts: <rig>/mayor/rig (standard) and <rig> (fallback).
+// resolveRigDir resolves a rig name to the directory containing its .beads
+// database. Checks candidates in order, returning the first that has a .beads
+// subdirectory so bd can discover the database.
 func resolveRigDir(rigName string) string {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return ""
 	}
-	// Standard layout: <townRoot>/<rigName>/mayor/rig
-	candidate := townRoot + "/" + rigName + "/mayor/rig"
-	if fi, err := os.Stat(candidate); err == nil && fi.IsDir() {
-		return candidate
+	candidates := []string{
+		townRoot + "/" + rigName + "/mayor/rig",
+		townRoot + "/" + rigName,
 	}
-	// Fallback: <townRoot>/<rigName>
-	candidate = townRoot + "/" + rigName
-	if fi, err := os.Stat(candidate); err == nil && fi.IsDir() {
-		return candidate
+	for _, dir := range candidates {
+		beadsDir := dir + "/.beads"
+		if fi, err := os.Stat(beadsDir); err == nil && fi.IsDir() {
+			return dir
+		}
 	}
 	return ""
 }
