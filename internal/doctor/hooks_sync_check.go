@@ -99,23 +99,28 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 			if loc.Rig != "" {
 				rigPath = filepath.Join(ctx.TownRoot, loc.Rig)
 			}
-			// Use ResolveRoleAgentName + ResolveAgentConfigByName so the check works
-			// even when the agent binary is not installed on this machine.
+			// Use ResolveRoleAgentName (not ResolveRoleAgentConfig) so that checks are
+			// based on the *configured* agent, not the *resolved* one.
+			// ResolveRoleAgentConfig falls back to claude when the agent binary is not
+			// found in PATH (e.g., in CI), which would silently skip non-Claude targets.
 			agentName, _ := config.ResolveRoleAgentName(loc.Role, ctx.TownRoot, rigPath)
-			if agentName == "" || agentName == "claude" {
+			if agentName == "" {
 				continue
 			}
-			rc := config.ResolveAgentConfigByName(agentName, ctx.TownRoot, rigPath)
-			if rc == nil || rc.Hooks == nil || rc.Hooks.Provider == "" {
+			preset := config.GetAgentPresetByName(agentName)
+			if preset == nil || preset.HooksDir == "" || preset.HooksSettingsFile == "" {
 				continue
+			}
+			hooksProvider := preset.HooksProvider
+			if hooksProvider == "" {
+				hooksProvider = agentName
 			}
 			// Claude targets are handled by Loop 1.
-			if rc.Hooks.Provider == "claude" {
+			if hooksProvider == "claude" {
 				continue
 			}
 
-			preset := config.GetAgentPresetByName(rc.Hooks.Provider)
-			useSettingsDir := preset != nil && preset.HooksUseSettingsDir
+			useSettingsDir := preset.HooksUseSettingsDir
 
 			var checkDirs []string
 			if loc.Rig == "" || useSettingsDir {
@@ -126,11 +131,11 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 
 			for _, dir := range checkDirs {
 				totalTargets++
-				targetPath := filepath.Join(dir, rc.Hooks.Dir, rc.Hooks.SettingsFile)
+				targetPath := filepath.Join(dir, preset.HooksDir, preset.HooksSettingsFile)
 
-				expected, err := hooks.ComputeExpectedTemplate(rc.Hooks.Provider, rc.Hooks.SettingsFile, loc.Role)
+				expected, err := hooks.ComputeExpectedTemplate(hooksProvider, preset.HooksSettingsFile, loc.Role)
 				if err != nil {
-					details = append(details, fmt.Sprintf("%s (%s): error computing template: %v", targetPath, rc.Hooks.Provider, err))
+					details = append(details, fmt.Sprintf("%s (%s): error computing template: %v", targetPath, hooksProvider, err))
 					continue
 				}
 
@@ -138,17 +143,17 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 				if readErr != nil {
 					// File missing
 					c.templateOutOfSync = append(c.templateOutOfSync, templateTarget{
-						path: targetPath, dir: dir, provider: rc.Hooks.Provider,
-						role: loc.Role, hooksDir: rc.Hooks.Dir,
-						settingsFile: rc.Hooks.SettingsFile, useSettingsDir: useSettingsDir,
+						path: targetPath, dir: dir, provider: hooksProvider,
+						role: loc.Role, hooksDir: preset.HooksDir,
+						settingsFile: preset.HooksSettingsFile, useSettingsDir: useSettingsDir,
 					})
-					details = append(details, fmt.Sprintf("%s (%s): missing", targetPath, rc.Hooks.Provider))
+					details = append(details, fmt.Sprintf("%s (%s): missing", targetPath, hooksProvider))
 					continue
 				}
 
 				// Compare: structural for JSON, byte-exact for other files.
 				inSync := false
-				if filepath.Ext(rc.Hooks.SettingsFile) == ".json" {
+				if filepath.Ext(preset.HooksSettingsFile) == ".json" {
 					inSync = hooks.TemplateContentEqual(expected, actual)
 				} else {
 					inSync = bytes.Equal(expected, actual)
@@ -156,11 +161,11 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 
 				if !inSync {
 					c.templateOutOfSync = append(c.templateOutOfSync, templateTarget{
-						path: targetPath, dir: dir, provider: rc.Hooks.Provider,
-						role: loc.Role, hooksDir: rc.Hooks.Dir,
-						settingsFile: rc.Hooks.SettingsFile, useSettingsDir: useSettingsDir,
+						path: targetPath, dir: dir, provider: hooksProvider,
+						role: loc.Role, hooksDir: preset.HooksDir,
+						settingsFile: preset.HooksSettingsFile, useSettingsDir: useSettingsDir,
 					})
-					details = append(details, fmt.Sprintf("%s (%s): out of sync", targetPath, rc.Hooks.Provider))
+					details = append(details, fmt.Sprintf("%s (%s): out of sync", targetPath, hooksProvider))
 				}
 			}
 		}

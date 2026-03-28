@@ -394,7 +394,7 @@ func (m *Manager) getCleanupStatusFromBead(name string) CleanupStatus {
 
 // checkCleanupStatus validates the cleanup status against removal safety rules.
 // Returns an error if removal should be blocked based on the status.
-// force=true: allow has_uncommitted, block has_stash and has_unpushed
+// force=true: allow has_uncommitted and has_unpushed, block has_stash
 // force=false: block all non-clean statuses
 func (m *Manager) checkCleanupStatus(name string, status CleanupStatus, force bool) error {
 	// Clean status is always safe
@@ -1020,15 +1020,15 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (_ *Polecat, retE
 }
 
 // Remove deletes a polecat worktree.
-// If force is true, removes even with uncommitted changes (but not stashes/unpushed).
-// Use nuclear=true to bypass ALL safety checks.
+// If force is true, removes even with uncommitted changes and unpushed commits.
+// Stashes still block removal with force (use nuclear=true to bypass all checks).
 func (m *Manager) Remove(name string, force bool) error {
 	return m.RemoveWithOptions(name, force, false, false)
 }
 
 // RemoveWithOptions deletes a polecat worktree with explicit control over safety checks.
-// force=true: bypass uncommitted changes check (legacy behavior)
-// nuclear=true: bypass ALL safety checks including stashes and unpushed commits
+// force=true: bypass uncommitted changes and unpushed commits check
+// nuclear=true: bypass ALL safety checks including stashes
 // selfNuke=true: bypass cwd-in-worktree check (for polecat deleting its own worktree)
 //
 // ZFC #10: Uses cleanup_status from agent bead if available (polecat self-report),
@@ -1067,10 +1067,10 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) 
 			polecatGit := git.NewGit(clonePath)
 			status, err := polecatGit.CheckUncommittedWork()
 			if err == nil && !status.Clean() {
-				// For backward compatibility: force only bypasses uncommitted changes, not stashes/unpushed
 				if force {
-					// Force mode: allow uncommitted changes but still block on stashes/unpushed
-					if status.StashCount > 0 || status.UnpushedCommits > 0 {
+					// Force mode: bypass uncommitted changes and unpushed commits.
+					// Only block on stashes, which represent intentional work-in-progress.
+					if status.StashCount > 0 {
 						return &UncommittedWorkError{PolecatName: name, Status: status}
 					}
 				} else {

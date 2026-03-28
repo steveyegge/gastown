@@ -1,11 +1,15 @@
+// Emergency stop (gt estop / gt thaw) — pause and resume agent work.
+//
+// Original implementation by outdoorsea (PR #3237). Cherry-picked for
+// manual-only operation: no daemon auto-trigger.
 package cmd
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -229,9 +233,9 @@ var exemptSessions = map[string]bool{
 	session.OverseerSessionName(): true,
 }
 
-// freezeAllSessions sends SIGTSTP to all Gas Town agent sessions.
-// Mayor and overseer sessions are exempt. If rigFilter is non-empty,
-// only sessions for that rig are frozen. Returns count of frozen sessions.
+// freezeAllSessions sends SIGTSTP to all Gas Town agent sessions via
+// process-group signaling. Mayor and overseer sessions are exempt.
+// If rigFilter is non-empty, only sessions for that rig are frozen.
 func freezeAllSessions(t *tmux.Tmux, townRoot string, rigFilter string) int {
 	sessions := collectGTSessions(t, townRoot)
 	frozen := 0
@@ -247,12 +251,11 @@ func freezeAllSessions(t *tmux.Tmux, townRoot string, rigFilter string) int {
 			continue
 		}
 
-		// Per-rig filter: skip sessions that don't belong to this rig
 		if rigFilter != "" && !isRigSession(sess, rigPrefix) {
 			continue
 		}
 
-		if err := signalSession(t, sess, "TSTP"); err != nil {
+		if err := signalSessionGroup(t, sess, syscall.SIGTSTP); err != nil {
 			fmt.Printf("   %s %s: %v\n", style.Warning.Render("!"), sess, err)
 			continue
 		}
@@ -281,7 +284,7 @@ func thawAllSessions(t *tmux.Tmux, townRoot string, rigFilter string) int {
 		if rigFilter != "" && !isRigSession(sess, rigPrefix) {
 			continue
 		}
-		if err := signalSession(t, sess, "CONT"); err != nil {
+		if err := signalSessionGroup(t, sess, syscall.SIGCONT); err != nil {
 			continue
 		}
 		thawed++
@@ -321,40 +324,25 @@ func isRigSession(name, rigPrefix string) bool {
 	return strings.HasPrefix(name, rigPrefix+"-") || name == rigPrefix
 }
 
-// signalSession sends a signal to all processes in a tmux session.
-func signalSession(t *tmux.Tmux, sessionName, signal string) error {
-	pid, err := t.GetPanePID(sessionName)
+// signalSessionGroup sends a signal to the process group of a tmux session's
+// pane process. This uses process-group signaling (kill(-pgid, sig)) instead
+// of recursive pgrep, which is both safer and catches all descendants.
+func signalSessionGroup(t *tmux.Tmux, sessionName string, sig syscall.Signal) error {
+	pidStr, err := t.GetPanePID(sessionName)
 	if err != nil {
 		return fmt.Errorf("no PID: %w", err)
 	}
 
-	// Signal the pane process and its entire process group
-	// This catches child processes (node, claude, etc.)
-	descendants := getAllSessionDescendants(pid)
-	for _, dpid := range descendants {
-		_ = exec.Command("kill", "-"+signal, dpid).Run()
-	}
-	// Signal the pane process itself
-	_ = exec.Command("kill", "-"+signal, pid).Run()
-	return nil
-}
-
-// getAllSessionDescendants returns all descendant PIDs of a process.
-func getAllSessionDescendants(pid string) []string {
-	out, err := exec.Command("pgrep", "-P", pid).Output()
+	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
-		return nil
+		return fmt.Errorf("invalid PID %q: %w", pidStr, err)
 	}
-	var pids []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			pids = append(pids, line)
-			// Recurse for grandchildren
-			pids = append(pids, getAllSessionDescendants(line)...)
-		}
-	}
-	return pids
+
+	// Signal the entire process group. The pane's shell is typically the
+	// process group leader, so -pid sends the signal to all processes in
+	// the group (shell, claude, node, etc.) without needing to walk the
+	// process tree.
+	return syscall.Kill(-pid, sig)
 }
 
 // collectGTSessions returns all Gas Town tmux sessions.
@@ -397,10 +385,6 @@ func isGTSession(name string, rigPrefixes map[string]bool) bool {
 	return false
 }
 
-// discoverRigsForEstop finds all rigs — reuses the discoverRigs from up.go
-// which is in the same package.
-// (discoverRigs is already defined in up.go)
-
 // addEstopToStatus checks for E-stop and prints a banner if active.
 // Called from gt status to surface E-stop state.
 func addEstopToStatus(townRoot string) {
@@ -434,12 +418,4 @@ func addEstopToStatus(townRoot string) {
 	if len(entries) > 0 {
 		fmt.Println()
 	}
-}
-
-// ESTOPBannerPath returns the path and existence of the ESTOP file.
-// Exported for use by the daemon heartbeat loop and agent hooks.
-func ESTOPBannerPath(townRoot string) (string, bool) {
-	p := filepath.Join(townRoot, estop.FileName)
-	_, err := os.Stat(p)
-	return p, err == nil
 }

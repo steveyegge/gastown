@@ -303,6 +303,16 @@ func TestRunHooksSyncNonClaudeAgent(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
+	// Put a dummy opencode binary on PATH so agent resolution doesn't fall back to claude.
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "opencode"), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
 	townRoot := filepath.Join(tmpDir, "town")
 
 	// Scaffold workspace: mayor, deacon, and a rig with a crew worktree

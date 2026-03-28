@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -40,7 +41,9 @@ func writeFakeTestBD(t *testing.T, dir, descState, dbState, hookBead, updatedAt 
 	// JSON matches the structure that getAgentBeadInfo expects from bd show --json
 	bdJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent"],"description":"%s","hook_bead":"%s","agent_state":"%s","updated_at":"%s"}]`,
 		desc, hookBead, dbState, updatedAt)
-	script := "#!/bin/sh\necho '" + bdJSON + "'\n"
+	// Return agent bead JSON for "show", empty array for "list" (so
+	// hasAssignedOpenWork doesn't false-positive on the agent bead).
+	script := "#!/bin/sh\nif [ \"$1\" = \"list\" ]; then echo '[]'; exit 0; fi\necho '" + bdJSON + "'\n"
 	path := filepath.Join(dir, "bd")
 	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
 		t.Fatalf("writing fake bd: %v", err)
@@ -58,6 +61,7 @@ func writeFakeBDWithHookBead(t *testing.T, dir, agentState, hookBeadID, hookBead
 		agentState, hookBeadID, agentState, updatedAt)
 	hookJSON := fmt.Sprintf(`[{"id":"%s","status":"%s"}]`, hookBeadID, hookBeadStatus)
 	script := fmt.Sprintf("#!/bin/sh\n"+
+		"if [ \"$1\" = \"list\" ]; then echo '[]'; exit 0; fi\n"+
 		"case \"$2\" in\n"+
 		"  gt-myr-polecat-mycat) echo '%s';;\n"+
 		"  %s) echo '%s';;\n"+
@@ -384,11 +388,13 @@ func TestCheckPolecatHealth_SkipsNukedPolecat(t *testing.T) {
 // given paneCommand (e.g., "claude" or "codex") so IsAgentRunning returns true.
 func writeFakeTmuxWithAgent(t *testing.T, dir, paneCommand string) {
 	t.Helper()
+	// Use $* glob matching (not $1) because tmux.run() prepends -u (and
+	// optionally -L <socket>) before the subcommand.
 	script := fmt.Sprintf("#!/bin/sh\n"+
-		"case \"$1\" in\n"+
-		"  has-session) exit 0;;\n"+
-		"  display-message) echo '%s';;\n"+
-		"  kill-session) exit 0;;\n"+
+		"case \"$*\" in\n"+
+		"  *has-session*) exit 0;;\n"+
+		"  *display-message*) echo '%s';;\n"+
+		"  *kill-session*) exit 0;;\n"+
 		"  *) exit 1;;\n"+
 		"esac\n", paneCommand)
 	if err := os.WriteFile(filepath.Join(dir, "tmux"), []byte(script), 0755); err != nil {
@@ -413,6 +419,13 @@ func TestReapIdlePolecat_SkipsActiveAgent(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test uses Unix shell script mocks for tmux and bd")
 	}
+	// Register "myr" prefix so session name resolves to "myr-mycat"
+	old := session.DefaultRegistry()
+	reg := session.NewPrefixRegistry()
+	reg.Register("myr", "myr")
+	session.SetDefaultRegistry(reg)
+	defer session.SetDefaultRegistry(old)
+
 	binDir := t.TempDir()
 	// Fake tmux: session alive, agent (codex) running in pane
 	writeFakeTmuxWithAgent(t, binDir, "codex")
@@ -457,6 +470,13 @@ func TestReapIdlePolecat_ReapsIdleNoHook(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test uses Unix shell script mocks for tmux and bd")
 	}
+	// Register "myr" prefix so session name resolves to "myr-mycat"
+	old := session.DefaultRegistry()
+	reg := session.NewPrefixRegistry()
+	reg.Register("myr", "myr")
+	session.SetDefaultRegistry(reg)
+	defer session.SetDefaultRegistry(old)
+
 	binDir := t.TempDir()
 	// Fake tmux: session alive, but only a shell running (no agent)
 	writeFakeTmuxIdleSession(t, binDir)
@@ -471,13 +491,14 @@ func TestReapIdlePolecat_ReapsIdleNoHook(t *testing.T) {
 	d := &Daemon{
 		config: &Config{TownRoot: townRoot},
 		logger: log.New(&logBuf, "", 0),
-		tmux:   tmux.NewTmux(),
+		tmux:   tmux.NewTmuxWithSocket(""),
 		bdPath: bdPath,
 	}
 
-	// Write a stale heartbeat
-	hbPath := filepath.Join(townRoot, "heartbeats", "myr-mycat.json")
-	_ = os.MkdirAll(filepath.Dir(hbPath), 0755)
+	// Write a stale heartbeat (working state, 20 minutes old) so the reaper considers it
+	polecat.TouchSessionHeartbeatWithState(townRoot, "myr-mycat", polecat.HeartbeatWorking, "", "")
+	// Backdate the heartbeat to make it stale
+	hbPath := filepath.Join(townRoot, ".runtime", "heartbeats", "myr-mycat.json")
 	staleHB := polecat.SessionHeartbeat{
 		Timestamp: time.Now().UTC().Add(-20 * time.Minute),
 		State:     polecat.HeartbeatWorking,

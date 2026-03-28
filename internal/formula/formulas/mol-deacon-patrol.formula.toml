@@ -500,11 +500,14 @@ gt rig status <rig>
 # Check the Status: line - if DOCKED or PARKED, skip entirely
 ```
 
-DOCKED rigs are globally shut down - do NOT:
+DOCKED rigs are intentionally offline (Mayor or human docked them). Do NOT:
 - Check their witness/refinery status
 - Send health pings
 - Attempt restarts
-Simply skip them and move to the next rig.
+- Undock the rig (NEVER run `gt rig undock`)
+- Escalate or send mail about a docked rig being offline
+- "Restore" a docked rig to operational status
+A docked rig is NOT broken. It is off on purpose. Skip it entirely.
 
 **IMPORTANT: Idle Town Protocol**
 Before sending health check nudges, check if the town is idle:

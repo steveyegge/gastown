@@ -390,6 +390,103 @@ func TestSaveCreatesDirectory(t *testing.T) {
 	}
 }
 
+// --- Swap tracking tests ---
+
+func TestRecordSwap(t *testing.T) {
+	state := &config.QuotaState{
+		Accounts: make(map[string]config.AccountQuotaState),
+	}
+
+	// Record a swap
+	RecordSwap(state, "/home/user/.claude-accounts/clh", "dev1")
+
+	if len(state.ActiveSwaps) != 1 {
+		t.Fatalf("expected 1 active swap, got %d", len(state.ActiveSwaps))
+	}
+	if state.ActiveSwaps["/home/user/.claude-accounts/clh"] != "dev1" {
+		t.Errorf("expected dev1, got %s", state.ActiveSwaps["/home/user/.claude-accounts/clh"])
+	}
+
+	// Record another swap (overwrites)
+	RecordSwap(state, "/home/user/.claude-accounts/clh", "dev2")
+	if state.ActiveSwaps["/home/user/.claude-accounts/clh"] != "dev2" {
+		t.Errorf("expected dev2 after overwrite, got %s", state.ActiveSwaps["/home/user/.claude-accounts/clh"])
+	}
+}
+
+func TestClearSwap(t *testing.T) {
+	state := &config.QuotaState{
+		Accounts: make(map[string]config.AccountQuotaState),
+		ActiveSwaps: map[string]string{
+			"/home/user/.claude-accounts/clh": "dev1",
+			"/home/user/.claude-accounts/xyz": "dev2",
+		},
+	}
+
+	ClearSwap(state, "/home/user/.claude-accounts/clh")
+
+	if len(state.ActiveSwaps) != 1 {
+		t.Fatalf("expected 1 active swap after clear, got %d", len(state.ActiveSwaps))
+	}
+	if _, ok := state.ActiveSwaps["/home/user/.claude-accounts/clh"]; ok {
+		t.Error("expected clh swap to be cleared")
+	}
+}
+
+func TestResolveSwapSourceDirs(t *testing.T) {
+	activeSwaps := map[string]string{
+		"/home/user/.claude-accounts/clh": "dev1",
+		"/home/user/.claude-accounts/xyz": "dev2",
+		"/home/user/.claude-accounts/abc": "unknown", // not in accounts
+	}
+	accounts := map[string]config.Account{
+		"dev1": {ConfigDir: "/home/user/.claude-accounts/dev1"},
+		"dev2": {ConfigDir: "/home/user/.claude-accounts/dev2"},
+	}
+
+	resolved := ResolveSwapSourceDirs(activeSwaps, accounts)
+
+	if len(resolved) != 2 {
+		t.Fatalf("expected 2 resolved, got %d", len(resolved))
+	}
+	if resolved["/home/user/.claude-accounts/clh"] != "/home/user/.claude-accounts/dev1" {
+		t.Errorf("clh should resolve to dev1's dir, got %s", resolved["/home/user/.claude-accounts/clh"])
+	}
+	if resolved["/home/user/.claude-accounts/xyz"] != "/home/user/.claude-accounts/dev2" {
+		t.Errorf("xyz should resolve to dev2's dir, got %s", resolved["/home/user/.claude-accounts/xyz"])
+	}
+}
+
+func TestActiveSwaps_PersistsThroughSaveLoad(t *testing.T) {
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+
+	state := &config.QuotaState{
+		Accounts: map[string]config.AccountQuotaState{
+			"dev1": {Status: config.QuotaStatusAvailable},
+		},
+		ActiveSwaps: map[string]string{
+			"/home/user/.claude-accounts/clh": "dev1",
+		},
+	}
+
+	if err := mgr.Save(state); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
+	loaded, err := mgr.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if len(loaded.ActiveSwaps) != 1 {
+		t.Fatalf("expected 1 active swap after load, got %d", len(loaded.ActiveSwaps))
+	}
+	if loaded.ActiveSwaps["/home/user/.claude-accounts/clh"] != "dev1" {
+		t.Errorf("expected dev1, got %s", loaded.ActiveSwaps["/home/user/.claude-accounts/clh"])
+	}
+}
+
 // --- ParseResetTime tests ---
 
 func TestParseResetTime_SimpleAMPM(t *testing.T) {

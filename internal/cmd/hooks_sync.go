@@ -127,23 +127,33 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 			if loc.Rig != "" {
 				rigPath = filepath.Join(townRoot, loc.Rig)
 			}
-			// Use ResolveRoleAgentName + ResolveAgentConfigByName so hooks sync works
-			// even when the agent binary is not installed on this machine.
+
+			// Use ResolveRoleAgentName (not ResolveRoleAgentConfig) so that hooks are
+			// installed based on the *configured* agent, not the *resolved* one.
+			// ResolveRoleAgentConfig falls back to claude when the agent binary is not
+			// found in PATH (e.g., in CI or on a fresh machine), which would silently
+			// skip creating opencode/gemini/etc. plugin files.
 			agentName, _ := config.ResolveRoleAgentName(loc.Role, townRoot, rigPath)
-			if agentName == "" || agentName == "claude" {
-				continue
-			}
-			rc := config.ResolveAgentConfigByName(agentName, townRoot, rigPath)
-			if rc == nil || rc.Hooks == nil || rc.Hooks.Provider == "" {
-				continue
-			}
-			// Claude targets are already handled by DiscoverTargets + syncTarget above.
-			if rc.Hooks.Provider == "claude" {
+			if agentName == "" {
 				continue
 			}
 
-			preset := config.GetAgentPresetByName(rc.Hooks.Provider)
-			useSettingsDir := preset != nil && preset.HooksUseSettingsDir
+			preset := config.GetAgentPresetByName(agentName)
+			if preset == nil || preset.HooksDir == "" || preset.HooksSettingsFile == "" {
+				continue
+			}
+
+			hooksProvider := preset.HooksProvider
+			if hooksProvider == "" {
+				hooksProvider = agentName
+			}
+
+			// Claude targets are already handled by DiscoverTargets + syncTarget above.
+			if hooksProvider == "claude" {
+				continue
+			}
+
+			useSettingsDir := preset.HooksUseSettingsDir
 
 			// Determine sync targets.
 			// - Town-level roles (mayor, deacon): the role dir IS the working directory.
@@ -158,7 +168,7 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 			}
 
 			for _, dir := range syncDirs {
-				targetPath := filepath.Join(dir, rc.Hooks.Dir, rc.Hooks.SettingsFile)
+				targetPath := filepath.Join(dir, preset.HooksDir, preset.HooksSettingsFile)
 				relPath, pathErr := filepath.Rel(townRoot, targetPath)
 				if pathErr != nil {
 					relPath = targetPath
@@ -166,18 +176,18 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 
 				if hooksSyncDryRun {
 					if _, statErr := os.Stat(targetPath); statErr == nil {
-						fmt.Printf("  %s %s %s\n", style.Warning.Render("~"), relPath, style.Dim.Render("(would check "+rc.Hooks.Provider+")"))
+						fmt.Printf("  %s %s %s\n", style.Warning.Render("~"), relPath, style.Dim.Render("(would check "+hooksProvider+")"))
 					} else {
-						fmt.Printf("  %s %s %s\n", style.Warning.Render("~"), relPath, style.Dim.Render("(would create "+rc.Hooks.Provider+")"))
+						fmt.Printf("  %s %s %s\n", style.Warning.Render("~"), relPath, style.Dim.Render("(would create "+hooksProvider+")"))
 						created++
 					}
 					continue
 				}
 
-				result, syncErr := hooks.SyncForRole(rc.Hooks.Provider, dir, dir, loc.Role,
-					rc.Hooks.Dir, rc.Hooks.SettingsFile, useSettingsDir)
+				result, syncErr := hooks.SyncForRole(hooksProvider, dir, dir, loc.Role,
+					preset.HooksDir, preset.HooksSettingsFile, useSettingsDir)
 				if syncErr != nil {
-					fmt.Printf("  %s %s (%s): %v\n", style.Error.Render("✖"), relPath, rc.Hooks.Provider, syncErr)
+					fmt.Printf("  %s %s (%s): %v\n", style.Error.Render("✖"), relPath, hooksProvider, syncErr)
 					errors++
 					failedTargets = append(failedTargets, relPath)
 					continue
@@ -185,13 +195,13 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 
 				switch result {
 				case hooks.SyncCreated:
-					fmt.Printf("  %s %s %s\n", style.Success.Render("✓"), relPath, style.Dim.Render("(created "+rc.Hooks.Provider+")"))
+					fmt.Printf("  %s %s %s\n", style.Success.Render("✓"), relPath, style.Dim.Render("(created "+hooksProvider+")"))
 					created++
 				case hooks.SyncUpdated:
-					fmt.Printf("  %s %s %s\n", style.Success.Render("✓"), relPath, style.Dim.Render("(updated "+rc.Hooks.Provider+")"))
+					fmt.Printf("  %s %s %s\n", style.Success.Render("✓"), relPath, style.Dim.Render("(updated "+hooksProvider+")"))
 					updated++
 				case hooks.SyncUnchanged:
-					fmt.Printf("  %s %s %s\n", style.Dim.Render("·"), relPath, style.Dim.Render("(unchanged "+rc.Hooks.Provider+")"))
+					fmt.Printf("  %s %s %s\n", style.Dim.Render("·"), relPath, style.Dim.Render("(unchanged "+hooksProvider+")"))
 					unchanged++
 				}
 			}

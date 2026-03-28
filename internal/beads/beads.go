@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	beadsdk "github.com/steveyegge/beads"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/telemetry"
 )
@@ -299,11 +300,20 @@ type UpdateOptions struct {
 }
 
 // Beads wraps bd CLI operations for a working directory.
+// When store is non-nil, methods with in-process implementations use the
+// beadsdk.Storage directly instead of shelling out to the bd CLI. This
+// eliminates ~600ms of subprocess overhead per operation.
 type Beads struct {
 	workDir    string
 	beadsDir   string // Optional BEADS_DIR override for cross-database access
 	isolated   bool   // If true, suppress inherited beads env vars (for test isolation)
 	serverPort int    // If set, pass --server-port to bd init and GT_DOLT_PORT to env
+
+	// store is an optional in-process beadsdk.Storage. When set, methods
+	// bypass the bd subprocess and use the store directly. Follows the
+	// pattern in internal/daemon/convoy_manager.go. Callers are responsible
+	// for closing the store.
+	store beadsdk.Storage
 
 	// Lazy-cached town root for routing resolution.
 	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
@@ -660,6 +670,9 @@ func stripEnvPrefixes(environ []string, prefixes ...string) []string {
 // wisps table (where ephemeral issues live in beads v0.59+). Without this,
 // "bd list" only searches the issues table and misses wisps entirely.
 func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
+	if b.store != nil && !opts.Ephemeral {
+		return b.storeList(opts)
+	}
 	if opts.Ephemeral {
 		return b.listEphemeral(opts)
 	}
@@ -967,6 +980,10 @@ func (b *Beads) GetAssignedIssue(assignee string) (*Issue, error) {
 
 // Ready returns issues that are ready to work (not blocked).
 func (b *Beads) Ready() ([]*Issue, error) {
+	if b.store != nil {
+		return b.storeReady()
+	}
+
 	out, err := b.run("ready", "--json")
 	if err != nil {
 		return nil, err
@@ -985,6 +1002,13 @@ func (b *Beads) Ready() ([]*Issue, error) {
 // (blocked_issues_cache), handling all blocking types, transitive propagation,
 // and conditional-blocks resolution.
 func (b *Beads) ReadyForMol(moleculeID string) ([]*Issue, error) {
+	if b.store != nil {
+		return b.storeReadyWithFilter(beadsdk.WorkFilter{
+			ParentID: &moleculeID,
+			Limit:    100,
+		})
+	}
+
 	out, err := b.run("ready", "--mol", moleculeID, "--json", "-n", "100")
 	if err != nil {
 		return nil, err
@@ -1002,6 +1026,13 @@ func (b *Beads) ReadyForMol(moleculeID string) ([]*Issue, error) {
 // Uses bd ready --label flag for server-side filtering.
 // The issueType is converted to a gt:<type> label (e.g., "molecule" -> "gt:molecule").
 func (b *Beads) ReadyWithType(issueType string) ([]*Issue, error) {
+	if b.store != nil {
+		return b.storeReadyWithFilter(beadsdk.WorkFilter{
+			Labels: []string{"gt:" + issueType},
+			Limit:  100,
+		})
+	}
+
 	out, err := b.run("ready", "--json", "--label", "gt:"+issueType, "-n", "100")
 	if err != nil {
 		return nil, err
@@ -1023,6 +1054,10 @@ func (b *Beads) Show(id string) (*Issue, error) {
 	if targetDir != b.getResolvedBeadsDir() {
 		target := NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
 		return target.Show(id)
+	}
+
+	if b.store != nil {
+		return b.storeShow(id)
 	}
 
 	out, err := b.run("show", id, "--json")
@@ -1080,6 +1115,10 @@ func (b *Beads) ShowMultiple(ids []string) (map[string]*Issue, error) {
 		return make(map[string]*Issue), nil
 	}
 
+	if b.store != nil {
+		return b.storeShowMultiple(ids)
+	}
+
 	// bd show supports multiple IDs
 	args := append([]string{"show", "--json"}, ids...)
 	out, err := b.run(args...)
@@ -1102,6 +1141,10 @@ func (b *Beads) ShowMultiple(ids []string) (map[string]*Issue, error) {
 
 // Blocked returns issues that are blocked by dependencies.
 func (b *Beads) Blocked() ([]*Issue, error) {
+	if b.store != nil {
+		return b.storeBlocked()
+	}
+
 	out, err := b.run("blocked", "--json")
 	if err != nil {
 		return nil, err
@@ -1122,6 +1165,10 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	// Guard against flag-like titles (gt-e0kx5: --help garbage beads)
 	if IsFlagLikeTitle(opts.Title) {
 		return nil, fmt.Errorf("refusing to create bead: %w (got %q)", ErrFlagTitle, opts.Title)
+	}
+
+	if b.store != nil && !opts.Ephemeral {
+		return b.storeCreate(opts)
 	}
 
 	args := []string{"create", "--json"}
@@ -1240,6 +1287,10 @@ type SearchOptions struct {
 
 // Search searches issues by text query across title, description, and ID.
 func (b *Beads) Search(opts SearchOptions) ([]*Issue, error) {
+	if b.store != nil {
+		return b.storeSearch(opts)
+	}
+
 	args := []string{"search", "--json"}
 
 	if opts.Query != "" {
@@ -1340,6 +1391,10 @@ func normalizeBugTitle(title string) string {
 
 // Update updates an existing issue.
 func (b *Beads) Update(id string, opts UpdateOptions) error {
+	if b.store != nil {
+		return b.storeUpdate(id, opts)
+	}
+
 	args := []string{"update", id}
 
 	if opts.Title != nil {
@@ -1383,6 +1438,10 @@ func (b *Beads) Close(ids ...string) error {
 		return nil
 	}
 
+	if b.store != nil {
+		return b.storeClose("", runtime.SessionIDFromEnv(), ids...)
+	}
+
 	args := append([]string{"close"}, ids...)
 
 	// Pass session ID for work attribution if available
@@ -1400,6 +1459,10 @@ func (b *Beads) Close(ids ...string) error {
 func (b *Beads) CloseWithReason(reason string, ids ...string) error {
 	if len(ids) == 0 {
 		return nil
+	}
+
+	if b.store != nil {
+		return b.storeClose(reason, runtime.SessionIDFromEnv(), ids...)
 	}
 
 	args := append([]string{"close"}, ids...)
@@ -1420,6 +1483,15 @@ func (b *Beads) CloseWithReason(reason string, ids ...string) error {
 func (b *Beads) ForceCloseWithReason(reason string, ids ...string) error {
 	if len(ids) == 0 {
 		return nil
+	}
+
+	// In-process store close doesn't enforce dependency checks (no --force
+	// needed). Note: this means the store path bypasses the dependency
+	// validation that the CLI's --force flag overrides. Callers relying on
+	// ForceCloseWithReason (e.g., gt done nuking polecat wisps) are already
+	// accepting that deps may remain dangling, so this is intentional.
+	if b.store != nil {
+		return b.storeClose(reason, runtime.SessionIDFromEnv(), ids...)
 	}
 
 	args := append([]string{"close"}, ids...)
@@ -1444,6 +1516,19 @@ func (b *Beads) Release(id string) error {
 // ReleaseWithReason moves an in_progress issue back to open status with a reason.
 // The reason is added as a note to the issue for tracking purposes.
 func (b *Beads) ReleaseWithReason(id, reason string) error {
+	if b.store != nil {
+		updates := map[string]interface{}{
+			"status":   "open",
+			"assignee": "",
+		}
+		if reason != "" {
+			updates["notes"] = "Released: " + reason
+		}
+		ctx, cancel := storeCtx()
+		defer cancel()
+		return b.store.UpdateIssue(ctx, id, updates, b.getActor())
+	}
+
 	args := []string{"update", id, "--status=open", "--assignee="}
 
 	// Add reason as a note if provided
@@ -1457,12 +1542,20 @@ func (b *Beads) ReleaseWithReason(id, reason string) error {
 
 // AddDependency adds a dependency: issue depends on dependsOn.
 func (b *Beads) AddDependency(issue, dependsOn string) error {
+	if b.store != nil {
+		return b.storeAddDependency(issue, dependsOn)
+	}
+
 	_, err := b.run("dep", "add", issue, dependsOn)
 	return err
 }
 
 // RemoveDependency removes a dependency.
 func (b *Beads) RemoveDependency(issue, dependsOn string) error {
+	if b.store != nil {
+		return b.storeRemoveDependency(issue, dependsOn)
+	}
+
 	_, err := b.run("dep", "remove", issue, dependsOn)
 	return err
 }

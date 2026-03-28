@@ -92,6 +92,12 @@ for DB in "${PROD_DBS[@]}"; do
 
   log "Exporting $DB..."
 
+  # Skip databases without an issues table (e.g. gastown config DB)
+  if ! dolt_query "$DB" "SHOW TABLES LIKE 'issues'" 2>/dev/null | grep -q 'issues'; then
+    log "  $DB: skipped (no issues table)"
+    continue
+  fi
+
   # Export via Dolt SQL (reliable for all databases with an issues table)
   if dolt_query_json "$DB" "SELECT * FROM issues ORDER BY id" > "$EXPORT_FILE" 2>/dev/null && [[ -s "$EXPORT_FILE" ]]; then
     LINE_COUNT=$(wc -l < "$EXPORT_FILE" | tr -d ' ')

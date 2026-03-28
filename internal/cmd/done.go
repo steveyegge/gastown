@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -756,17 +757,50 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				fmt.Printf("  Branch: %s\n", branch)
 				fmt.Printf("  Issue: %s\n", issueID)
 				fmt.Println()
-				fmt.Printf("%s\n", style.Dim.Render("Work stays on feature branch for human review."))
+
+				// When merge_strategy=pr, create a GitHub PR for human review
+				// instead of just leaving the branch on origin (gas-rfi).
+				var prURL string
+				noMergeSettingsPath := filepath.Join(townRoot, rigName, "settings", "config.json")
+				if noMergeSettings, noMergeSettingsErr := config.LoadRigSettings(noMergeSettingsPath); noMergeSettingsErr == nil &&
+					noMergeSettings.MergeQueue != nil && noMergeSettings.MergeQueue.MergeStrategy == "pr" {
+					issueTitle := sourceIssueForNoMerge.Title
+					prTitle := fmt.Sprintf("%s (%s)", issueTitle, issueID)
+					if issueTitle == "" {
+						prTitle = issueID
+					}
+					prBody := fmt.Sprintf("## Summary\n\nPolecat branch ready for human review.\n\n- **Issue**: %s\n- **Branch**: %s\n\n---\n*Created by gt done (no_merge=true, merge_strategy=pr)*", issueID, branch)
+					ghCmd := exec.CommandContext(context.Background(), "gh", "pr", "create",
+						"--base", defaultBranch,
+						"--head", branch,
+						"--title", prTitle,
+						"--body", prBody,
+					)
+					ghCmd.Dir = cwd
+					prOutput, prErr := ghCmd.Output()
+					if prErr != nil {
+						style.PrintWarning("could not create GitHub PR: %v", prErr)
+					} else {
+						prURL = strings.TrimSpace(string(prOutput))
+						fmt.Printf("%s GitHub PR created: %s\n", style.Bold.Render("✓"), prURL)
+					}
+				} else {
+					fmt.Printf("%s\n", style.Dim.Render("Work stays on feature branch for human review."))
+				}
 
 				// Mail dispatcher with READY_FOR_REVIEW
 				if dispatcher := attachmentFields.DispatchedBy; dispatcher != "" {
 					townRouter := mail.NewRouter(townRoot)
 					defer townRouter.WaitPendingNotifications()
+					reviewBody := fmt.Sprintf("Branch: %s\nIssue: %s\nReady for review.", branch, issueID)
+					if prURL != "" {
+						reviewBody = fmt.Sprintf("Branch: %s\nIssue: %s\nPR: %s\nReady for review.", branch, issueID, prURL)
+					}
 					reviewMsg := &mail.Message{
 						To:      dispatcher,
 						From:    detectSender(),
 						Subject: fmt.Sprintf("READY_FOR_REVIEW: %s", issueID),
-						Body:    fmt.Sprintf("Branch: %s\nIssue: %s\nReady for review.", branch, issueID),
+						Body:    reviewBody,
 					}
 					if err := townRouter.Send(reviewMsg); err != nil {
 						style.PrintWarning("could not notify dispatcher: %v", err)

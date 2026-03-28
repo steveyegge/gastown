@@ -429,18 +429,19 @@ func (b *Beads) UpdateAgentState(id string, state string) (retErr error) {
 	// Update agent state using bd set-state command (bd 0.62.0+).
 	// Use runWithRouting so bd can resolve cross-prefix agent beads (e.g., wa-*
 	// agent beads from hq context) via routes.jsonl instead of BEADS_DIR.
+	// Best-effort: agent beads are ephemeral (wisps, not in the SQL issues table),
+	// so set-state fails with FK violation on child_counters → issues. When this
+	// happens, fall through to UpdateAgentDescriptionFields which works on wisps
+	// and is the authoritative read path for agent state. (gt-4ao)
 	_, err := b.runWithRouting("set-state", id, "agent_state="+state)
 	if err != nil {
-		return fmt.Errorf("updating agent state: %w", err)
+		_ = err // Log but don't fail — description field update below is the fallback.
 	}
 
-	// Sync the description's agent_state field with the column (gt-ulom).
-	// Without this, the description stays stale (e.g., "spawning" after the
-	// column transitions to "working"), causing bd show and dashboards to
-	// display incorrect state after idle polecat reuse via gt sling.
-	_ = b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{AgentState: &state})
-
-	return nil
+	// Sync the description's agent_state field (gt-ulom).
+	// This is also the primary fallback when set-state fails on ephemeral
+	// agent beads (gt-4ao).
+	return b.UpdateAgentDescriptionFields(id, AgentFieldUpdates{AgentState: &state})
 }
 
 // SetHookBead and ClearHookBead removed (hq-l6mm5).

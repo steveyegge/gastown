@@ -128,7 +128,6 @@ func TestStampLoop_EndToEnd(t *testing.T) {
 // TestStampLoop_SelfStampFails verifies the yearbook rule (author != subject).
 // Not parallel: mutates package-level wlStamp* globals.
 func TestStampLoop_SelfStampFails(t *testing.T) {
-
 	// Save/restore globals
 	origQ, origR, origC := wlStampQuality, wlStampReliability, wlStampCreativity
 	origSev, origType, origCtx := wlStampSeverity, wlStampType, wlStampContextType

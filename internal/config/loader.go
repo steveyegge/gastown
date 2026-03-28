@@ -364,6 +364,9 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 		if local.StaleClaimTimeout != "" {
 			result.StaleClaimTimeout = local.StaleClaimTimeout
 		}
+		if local.MergeStrategy != "" {
+			result.MergeStrategy = local.MergeStrategy
+		}
 	}
 	return result
 }

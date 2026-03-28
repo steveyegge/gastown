@@ -18,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -237,6 +238,13 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)
 		return fmt.Errorf("waiting for refinery to start: %w", err)
+	}
+
+	// Start nudge-queue poller (gt-dgf). Claude's UserPromptSubmit hook only
+	// drains when the agent submits a prompt. Idle agents never submit, so
+	// queued nudges deadlock. The poller breaks the cycle by polling every 10s.
+	if _, pollerErr := nudge.StartPoller(townRoot, sessionID); pollerErr != nil {
+		log.Printf("warning: could not start nudge poller for %s: %v", sessionID, pollerErr)
 	}
 
 	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)

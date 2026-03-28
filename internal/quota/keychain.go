@@ -277,6 +277,52 @@ func validateTokenHTTP(token string) error {
 	return nil
 }
 
+// SyncSwappedTokens propagates fresh tokens from source accounts to target
+// keychain entries that were swapped during quota rotation.
+//
+// When rotation swaps account X's token into config dir Y's keychain entry,
+// later re-authentication of account X writes the fresh token to X's own
+// keychain entry — not Y's. This function reads each source account's current
+// token and writes it to the target's keychain entry if they differ.
+//
+// swapDirs maps target config dir → source config dir (already resolved from
+// account handles via ResolveSwapSourceDirs).
+//
+// Returns the number of keychain entries updated.
+func SyncSwappedTokens(swapDirs map[string]string) int {
+	updated := 0
+	for targetConfigDir, sourceConfigDir := range swapDirs {
+		targetSvc := KeychainServiceName(targetConfigDir)
+		sourceSvc := KeychainServiceName(sourceConfigDir)
+
+		if targetSvc == sourceSvc {
+			continue // same keychain entry, nothing to sync
+		}
+
+		// Read current tokens from both keychain entries
+		targetToken, err := ReadKeychainToken(targetSvc)
+		if err != nil {
+			continue // target entry doesn't exist or can't be read
+		}
+		sourceToken, err := ReadKeychainToken(sourceSvc)
+		if err != nil {
+			continue // source entry doesn't exist or can't be read
+		}
+
+		// If tokens match, no sync needed
+		if targetToken == sourceToken {
+			continue
+		}
+
+		// Source has a different (presumably fresher) token — propagate it
+		if err := WriteKeychainToken(targetSvc, "claude-code", sourceToken); err != nil {
+			continue // best-effort
+		}
+		updated++
+	}
+	return updated
+}
+
 // expandTilde expands a leading ~/ to the user's home directory.
 func expandTilde(path string) string {
 	if strings.HasPrefix(path, "~/") {

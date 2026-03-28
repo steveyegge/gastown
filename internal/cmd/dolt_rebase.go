@@ -281,30 +281,7 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  %s Rebase executed successfully\n", style.Bold.Render("✓"))
 
-	// Step 7: Verify integrity — row counts must match pre-flight.
-	postCounts, err := flattenGetRowCounts(db, dbName)
-	if err != nil {
-		// Rebase succeeded but we can't verify — this is concerning.
-		fmt.Printf("  %s WARNING: could not verify row counts after rebase: %v\n",
-			style.Bold.Render("!"), err)
-		fmt.Printf("  Proceeding with branch swap — data should be intact\n")
-	} else {
-		for table, preCount := range preCounts {
-			postCount, ok := postCounts[table]
-			if !ok {
-				// Abort — don't swap branches with missing tables.
-				rebaseCleanupAll(db, baseBranch, workBranch)
-				return fmt.Errorf("integrity FAIL: table %q missing after rebase", table)
-			}
-			if preCount != postCount {
-				rebaseCleanupAll(db, baseBranch, workBranch)
-				return fmt.Errorf("integrity FAIL: %q pre=%d post=%d", table, preCount, postCount)
-			}
-		}
-		fmt.Printf("  %s Integrity verified (%d tables match)\n", style.Bold.Render("✓"), len(preCounts))
-	}
-
-	// Step 8: Concurrency check — verify main hasn't moved.
+	// Step 7: Concurrency check — verify main hasn't moved.
 	currentHead, err := flattenGetHead(db, dbName)
 	if err != nil {
 		rebaseCleanupAll(db, baseBranch, workBranch)
@@ -315,7 +292,7 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ABORT: main HEAD moved during rebase (%s → %s)", shortHash(preHead), shortHash(currentHead))
 	}
 
-	// Step 9: Swap branches — make compact-work the new main.
+	// Step 8: Swap branches — make compact-work the new main.
 	// We're already on compact-work from the rebase.
 	if _, err := db.ExecContext(ctx, "CALL DOLT_BRANCH('-D', 'main')"); err != nil {
 		// Can't delete main — leave compact-work in place for manual recovery.
@@ -331,6 +308,35 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("checkout new main: %w", err)
 	}
 	fmt.Printf("  Branch swap complete — compact-work is now main\n")
+
+	// Step 9: Verify integrity — row counts must match pre-flight.
+	// This runs AFTER the branch swap so we're reading from the new main,
+	// not from compact-work (which may have different table visibility during rebase).
+	postCounts, err := flattenGetRowCounts(db, dbName)
+	if err != nil {
+		fmt.Printf("  %s WARNING: could not verify row counts after rebase: %v\n",
+			style.Bold.Render("!"), err)
+		fmt.Printf("  Branch swap already complete — verify manually with 'gt dolt status'\n")
+	} else {
+		integrityOK := true
+		for table, preCount := range preCounts {
+			postCount, ok := postCounts[table]
+			if !ok {
+				fmt.Printf("  %s INTEGRITY WARNING: table %q missing after rebase (was %d rows)\n",
+					style.Bold.Render("!"), table, preCount)
+				integrityOK = false
+			} else if preCount != postCount {
+				fmt.Printf("  %s INTEGRITY WARNING: %q row count changed: pre=%d post=%d\n",
+					style.Bold.Render("!"), table, preCount, postCount)
+				integrityOK = false
+			}
+		}
+		if integrityOK {
+			fmt.Printf("  %s Integrity verified (%d tables match)\n", style.Bold.Render("✓"), len(preCounts))
+		} else {
+			fmt.Printf("  %s Some integrity checks failed — review above warnings\n", style.Bold.Render("!"))
+		}
+	}
 
 	// Verify final state.
 	var finalCount int

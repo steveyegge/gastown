@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	beadsdk "github.com/steveyegge/beads"
 	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/runtime"
@@ -31,12 +32,19 @@ var (
 )
 
 // Mailbox manages messages for an identity via beads.
+// When store is non-nil, beads-mode methods use the in-process beadsdk.Storage
+// directly instead of shelling out to the bd CLI.
 type Mailbox struct {
 	identity string // beads identity (e.g., "gastown/polecats/Toast")
 	workDir  string // directory to run bd commands in
 	beadsDir string // explicit .beads directory path (set via BEADS_DIR)
 	path     string // for legacy JSONL mode (crew workers)
 	legacy   bool   // true = use JSONL files, false = use beads
+
+	// store is an optional in-process beadsdk.Storage. When set, beads-mode
+	// methods bypass the bd subprocess and use the store directly.
+	// Callers are responsible for closing the store.
+	store beadsdk.Storage
 }
 
 // NewMailbox creates a mailbox for the given JSONL path (legacy mode).
@@ -136,6 +144,11 @@ func (m *Mailbox) listBeads() ([]*Message, error) {
 // memory footprint under concurrent agent load. A separate CC query fetches
 // messages where this identity is CC'd.
 func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
+	// Use in-process store when available
+	if m.store != nil {
+		return m.storeListFromDir()
+	}
+
 	identities := m.identityVariants()
 
 	if err := beads.EnsureCustomTypes(beadsDir); err != nil {
@@ -467,6 +480,10 @@ func (m *Mailbox) getBeads(id string) (*Message, error) {
 
 // getFromDir retrieves a message from a beads directory.
 func (m *Mailbox) getFromDir(id, beadsDir string) (*Message, error) {
+	if m.store != nil {
+		return m.storeGetFromDir(id)
+	}
+
 	args := []string{"show", id, "--json"}
 
 	ctx, cancel := bdReadCtx()
@@ -531,6 +548,10 @@ func (m *Mailbox) markReadBeads(id string) error {
 
 // closeInDir closes a message in a specific beads directory.
 func (m *Mailbox) closeInDir(id, beadsDir string) error {
+	if m.store != nil {
+		return m.storeCloseInDir(id)
+	}
+
 	args := []string{"close", id}
 	// Pass session ID for work attribution if available
 	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
@@ -593,6 +614,10 @@ func (m *Mailbox) MarkReadOnly(id string) error {
 }
 
 func (m *Mailbox) markReadOnlyBeads(id string) error {
+	if m.store != nil {
+		return m.storeMarkReadOnly(id)
+	}
+
 	// Add "read" label to mark as read without closing
 	args := []string{"label", "add", id, "read"}
 	primary := beads.ResolveBeadsDirForID(m.beadsDir, id)
@@ -634,6 +659,10 @@ func (m *Mailbox) MarkUnreadOnly(id string) error {
 }
 
 func (m *Mailbox) markUnreadOnlyBeads(id string) error {
+	if m.store != nil {
+		return m.storeMarkUnreadOnly(id)
+	}
+
 	// Remove "read" label to mark as unread
 	args := []string{"label", "remove", id, "read"}
 	primary := beads.ResolveBeadsDirForID(m.beadsDir, id)
@@ -680,6 +709,10 @@ func (m *Mailbox) MarkUnread(id string) error {
 }
 
 func (m *Mailbox) markUnreadBeads(id string) error {
+	if m.store != nil {
+		return m.storeMarkUnread(id)
+	}
+
 	args := []string{"reopen", id}
 	primary := beads.ResolveBeadsDirForID(m.beadsDir, id)
 
