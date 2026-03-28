@@ -155,14 +155,23 @@ func (m *Manager) StartTMUX(agentOverride string) error {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
+	// Resolve account config dir so the mayor session inherits CLAUDE_CONFIG_DIR.
+	// Priority: accounts.json default → GT_ACCOUNT env var → CLAUDE_CONFIG_DIR env var.
+	accountsPath := filepath.Join(m.townRoot, "mayor", "accounts.json")
+	claudeConfigDir, _, _ := config.ResolveAccountConfigDir(accountsPath, "")
+	if claudeConfigDir == "" {
+		claudeConfigDir = os.Getenv("CLAUDE_CONFIG_DIR")
+	}
+
 	// Use unified session lifecycle for config → settings → command → create → env → theme → wait.
 	theme := tmux.ResolveSessionTheme(m.townRoot, "", "mayor")
 	_, err = session.StartSession(t, session.SessionConfig{
-		SessionID: sessionID,
-		WorkDir:   mayorDir,
-		Role:      "mayor",
-		TownRoot:  m.townRoot,
-		AgentName: "Mayor",
+		SessionID:        sessionID,
+		WorkDir:          mayorDir,
+		Role:             "mayor",
+		TownRoot:         m.townRoot,
+		AgentName:        "Mayor",
+		RuntimeConfigDir: claudeConfigDir,
 		Beacon: session.BeaconConfig{
 			Recipient: "mayor",
 			Sender:    "human",
