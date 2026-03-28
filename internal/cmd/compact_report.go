@@ -200,20 +200,20 @@ func buildReport(dateStr string, result *compactResult, activeWisps []*compactIs
 
 	// Tally deleted by category
 	for _, d := range result.Deleted {
-		cat := wispTypeToCategory(d.WispType)
+		cat := wispTypeToCategory(d.WispType, d.Title)
 		report.Categories[cat].Deleted++
 	}
 
 	// Tally promoted by category
 	for _, p := range result.Promoted {
-		cat := wispTypeToCategory(p.WispType)
+		cat := wispTypeToCategory(p.WispType, p.Title)
 		report.Categories[cat].Promoted++
 		report.Promotions = append(report.Promotions, p)
 	}
 
 	// Tally active wisps by category
 	for _, w := range activeWisps {
-		cat := wispTypeToCategory(w.WispType)
+		cat := wispTypeToCategory(w.WispType, w.Title)
 		report.Categories[cat].Active++
 	}
 
@@ -221,9 +221,12 @@ func buildReport(dateStr string, result *compactResult, activeWisps []*compactIs
 }
 
 // wispTypeToCategory maps a wisp_type string to its display category.
-func wispTypeToCategory(wispType string) string {
+func wispTypeToCategory(wispType, title string) string {
 	if cat, ok := wispCategoryMap[wispType]; ok {
 		return cat
+	}
+	if wispType == "" && strings.Contains(strings.ToLower(title), "patrol") {
+		return "Patrols"
 	}
 	return "Untyped"
 }
