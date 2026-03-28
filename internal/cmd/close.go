@@ -76,12 +76,22 @@ func runClose(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Build bd close command with all args passed through
+	// Build bd close command with all args passed through.
+	// Route to the correct rig database via prefix resolution — bd no longer
+	// does cross-rig routing internally (removed in beads v0.62). We resolve
+	// the bead's prefix to the owning rig's directory and strip BEADS_DIR so
+	// bd discovers the database from the working directory.
 	bdArgs := append([]string{"close"}, convertedArgs...)
 	bdCmd := exec.Command("bd", bdArgs...)
 	bdCmd.Stdin = os.Stdin
 	bdCmd.Stdout = os.Stdout
 	bdCmd.Stderr = os.Stderr
+	if beadIDs := extractBeadIDs(convertedArgs); len(beadIDs) > 0 {
+		if dir := resolveBeadDir(beadIDs[0]); dir != "" && dir != "." {
+			bdCmd.Dir = dir
+			bdCmd.Env = filterEnvKey(os.Environ(), "BEADS_DIR")
+		}
+	}
 	if err := bdCmd.Run(); err != nil {
 		return err
 	}
@@ -134,8 +144,13 @@ func closeChildren(parentID string, visited map[string]bool, depth int) error {
 	visited[parentID] = true
 
 	// Query children via bd children --json.
-	// Output is a JSON array of issue objects; childBead extracts only id+status.
-	out, err := exec.Command("bd", "children", parentID, "--json").Output()
+	// Route to the correct rig database via prefix resolution.
+	childCmd := exec.Command("bd", "children", parentID, "--json")
+	if dir := resolveBeadDir(parentID); dir != "" && dir != "." {
+		childCmd.Dir = dir
+		childCmd.Env = filterEnvKey(os.Environ(), "BEADS_DIR")
+	}
+	out, err := childCmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() != 0 {
 			fmt.Fprintf(os.Stderr, "Warning: bd children %s failed: %v\n", parentID, err)
@@ -171,16 +186,20 @@ func closeChildren(parentID string, visited map[string]bool, depth int) error {
 
 	reason := fmt.Sprintf("Parent %s closed (cascade)", parentID)
 
-	bdArgs := []string{"close"}
-	bdArgs = append(bdArgs, childIDs...)
-	bdArgs = append(bdArgs, "--reason", reason, "--force")
+	closeArgs := []string{"close"}
+	closeArgs = append(closeArgs, childIDs...)
+	closeArgs = append(closeArgs, "--reason", reason, "--force")
 
 	fmt.Fprintf(os.Stderr, "Cascade: closing %d children of %s\n", len(childIDs), parentID)
 
-	bdCmd := exec.Command("bd", bdArgs...)
-	bdCmd.Stdout = os.Stdout
-	bdCmd.Stderr = os.Stderr
-	return bdCmd.Run()
+	closeBd := exec.Command("bd", closeArgs...)
+	closeBd.Stdout = os.Stdout
+	closeBd.Stderr = os.Stderr
+	if dir := resolveBeadDir(parentID); dir != "" && dir != "." {
+		closeBd.Dir = dir
+		closeBd.Env = filterEnvKey(os.Environ(), "BEADS_DIR")
+	}
+	return closeBd.Run()
 }
 
 // extractBeadIDs extracts bead IDs from raw args, skipping flags and flag values.

@@ -29,18 +29,29 @@ import (
 )
 
 // resolveBeadDir returns the directory to run bd commands for a given bead ID.
-// Uses prefix-based routing to find the correct rig directory.
-// Falls back to rigs.json prefix mapping, then town root.
-func resolveBeadDir(_ string) string {
-	// Always return town root. bd's own prefix routing (routes.jsonl at town
-	// level) handles dispatching to the correct rig database. Returning the
-	// rig path caused bd to discover rig-local .beads/ with broken nested
-	// routing, leading to "bead not found" errors for valid sc-/st-/etc IDs.
+// Uses prefix-based routing (routes.jsonl) to resolve the correct rig's .beads
+// directory and returns its parent as the working directory for bd.
+//
+// Background: beads v0.62 removed built-in multi-rig routing from bd — all bd
+// commands now operate on the local database only. Cross-rig resolution must
+// happen in gt before invoking bd, by setting the correct working directory
+// (and stripping BEADS_DIR). This function reads routes.jsonl from the town-level
+// .beads directory and resolves the bead's prefix to the owning rig.
+//
+// PR #3166 (steveyegge/gastown) will replace bd shell-outs with the Go module
+// Storage API, making this function unnecessary. Until then, this is the
+// routing bridge between gt and the routing-free bd CLI.
+func resolveBeadDir(beadID string) string {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return "."
 	}
-	return townRoot
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	resolved := beads.ResolveBeadsDirForID(townBeadsDir, beadID)
+	// Return the parent of the .beads directory so bd discovers it naturally.
+	// For town-level beads this returns townRoot; for rig beads it returns
+	// the rig's mayor/rig directory (e.g., gastown/mayor/rig).
+	return filepath.Dir(resolved)
 }
 
 // resolveBeadDirFromRigsJSON looks up the rig directory from rigs.json using prefix.
