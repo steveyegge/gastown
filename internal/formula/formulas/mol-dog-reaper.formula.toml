@@ -181,7 +181,13 @@ Generate summary and signal completion.
 gt escalate "Reaper anomalies detected" -s MEDIUM -m "<anomaly details>"
 ```
 
-**Exit criteria:** Report generated, anomalies escalated if any."""
+**3. Return to kennel:**
+```bash
+gt dog done
+```
+This clears your work assignment and auto-terminates your session.
+
+**Exit criteria:** Report generated, anomalies escalated if any, `gt dog done` called."""
 
 [vars]
 [vars.max_age]

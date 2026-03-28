@@ -168,7 +168,13 @@ Orphans: {{orphan_count}}
 Status: COMPLETE"
 ```
 
-**Exit criteria:** Report sent, dog returned to kennel."""
+**4. Return to kennel:**
+```bash
+gt dog done
+```
+This clears your work assignment and auto-terminates your session.
+
+**Exit criteria:** Report sent, `gt dog done` called."""
 
 [vars]
 [vars.port]
