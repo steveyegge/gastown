@@ -72,7 +72,13 @@ func BdSupportsAllowStaleWithEnv(env []string) bool {
 	if env != nil {
 		cmd.Env = env
 	}
-	supported := cmd.Run() == nil
+	var combinedOut bytes.Buffer
+	cmd.Stdout = &combinedOut
+	cmd.Stderr = &combinedOut
+	_ = cmd.Run()
+	// bd v0.60+ exits 0 even on unknown flags, printing the error to stderr.
+	// Check output for "unknown flag" to detect lack of support.
+	supported := !strings.Contains(combinedOut.String(), "unknown flag")
 
 	bdAllowStaleMu.Lock()
 	if bdAllowStalePath != bdPath {
