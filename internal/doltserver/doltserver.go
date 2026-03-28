@@ -1721,6 +1721,47 @@ func cleanStaleSocket(socketPath string) {
 	// If lsof succeeds (exit 0), a process is using it — leave it alone.
 }
 
+// drainConnectionsBeforeStop waits for active queries to complete before SIGTERM,
+// reducing the nbs_manifest race window in Dolt's NomsBlockStore.Close() (gt-9bxzs).
+//
+// Dolt panics (Fatalf) when SIGTERM arrives while a goroutine is mid-write on an
+// nbs_manifest temp file. By waiting until no queries are in-flight, we shrink
+// the window where SIGTERM hits live storage I/O. Non-fatal: if the drain times
+// out or the server is unreachable, we proceed with SIGTERM anyway.
+func drainConnectionsBeforeStop(config *Config) {
+	dsn := fmt.Sprintf("%s@tcp(%s:%d)/?timeout=3s&readTimeout=5s&writeTimeout=5s",
+		config.User, config.EffectiveHost(), config.Port)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	db.SetConnMaxLifetime(5 * time.Second)
+	db.SetMaxOpenConns(1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Poll until only 1 connection remains (ours) or the drain window expires.
+	// INFORMATION_SCHEMA.PROCESSLIST counts all server connections including ours.
+	for {
+		select {
+		case <-ctx.Done():
+			return // Drain window expired — proceed with SIGTERM
+		default:
+		}
+		var count int
+		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.PROCESSLIST").Scan(&count); err != nil {
+			return // Server unreachable — proceed with SIGTERM
+		}
+		if count <= 1 {
+			// Only our drain connection remains — safe to send SIGTERM
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // Stop stops the Dolt SQL server.
 // Works for both servers started via gt dolt start AND externally-started servers.
 func Stop(townRoot string) error {
@@ -1737,6 +1778,13 @@ func Stop(townRoot string) error {
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return fmt.Errorf("finding process: %w", err)
+	}
+
+	// Drain active connections before sending SIGTERM to reduce the nbs_manifest
+	// race window inside Dolt's NomsBlockStore.Close(). Non-fatal: proceeds even
+	// if drain times out (10s max). Skipped for remote servers (no local PID).
+	if !config.IsRemote() {
+		drainConnectionsBeforeStop(config)
 	}
 
 	// Send SIGTERM for graceful shutdown
