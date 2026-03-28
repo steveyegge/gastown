@@ -96,14 +96,6 @@
         "switchyard",
         "rally_tavern"
       ]
-    },
-    "estop_auto_trigger": {
-      "enabled": true,
-      "dolt_failure_threshold": 3,
-      "probe_interval": "30s",
-      "cooldown": "5m",
-      "disk_usage_percent": 95,
-      "disk_check_interval": "60s"
     }
   },
   "type": "daemon-patrol-config",
