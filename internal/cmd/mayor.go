@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/mayor"
@@ -251,6 +252,18 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 			startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "", townRoot, "", beacon, mayorAgentOverride)
 			if err != nil {
 				return fmt.Errorf("building startup command: %w", err)
+			}
+
+			// Resolve CLAUDE_CONFIG_DIR and prepend it so the respawned process
+			// uses the correct account (mirrors what StartTMUX does).
+			accountsPath := constants.MayorAccountsPath(townRoot)
+			claudeConfigDir, _, _ := config.ResolveAccountConfigDir(accountsPath, "")
+			if claudeConfigDir == "" {
+				claudeConfigDir = os.Getenv("CLAUDE_CONFIG_DIR")
+			}
+			if claudeConfigDir != "" {
+				startupCmd = config.PrependEnv(startupCmd, map[string]string{"CLAUDE_CONFIG_DIR": claudeConfigDir})
+				_ = t.SetEnvironment(sessionID, "CLAUDE_CONFIG_DIR", claudeConfigDir)
 			}
 
 			// Set remain-on-exit so the pane survives process death during respawn.
