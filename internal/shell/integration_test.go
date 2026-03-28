@@ -130,3 +130,21 @@ func TestUpdateRCFile(t *testing.T) {
 		t.Errorf("RC file has %d start markers, want 1", startCount)
 	}
 }
+
+func TestShellHookScript_EnsuresCanonicalBinPaths(t *testing.T) {
+	if !strings.Contains(shellHookScript, `_gastown_prepend_path "$HOME/.local/bin"`) {
+		t.Error("shell hook should prepend ~/.local/bin to PATH")
+	}
+	if !strings.Contains(shellHookScript, `_gastown_prepend_path "$HOME/go/bin"`) {
+		t.Error("shell hook should prepend ~/go/bin to PATH")
+	}
+	if !strings.Contains(shellHookScript, "_gastown_ensure_path") {
+		t.Error("shell hook should call _gastown_ensure_path")
+	}
+}
+
+func TestShellHookScript_AvoidsDuplicatePathEntries(t *testing.T) {
+	if !strings.Contains(shellHookScript, `case ":$PATH:" in`) {
+		t.Error("shell hook should guard against duplicate PATH entries")
+	}
+}

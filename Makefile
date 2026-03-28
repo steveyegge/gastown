@@ -106,6 +106,16 @@ install: check-up-to-date build
 		fi; \
 	done
 	@echo "Installed $(BINARY) to $(INSTALL_DIR)/$(BINARY)"
+	@resolved_gt=$$(command -v $(BINARY) 2>/dev/null || true); \
+	if [ "$$resolved_gt" != "$(INSTALL_DIR)/$(BINARY)" ]; then \
+		echo "WARNING: PATH still resolves gt to $${resolved_gt:-<not found>} instead of $(INSTALL_DIR)/$(BINARY)"; \
+		case "$$resolved_gt" in \
+			/usr/local/bin/$(BINARY)|/opt/homebrew/bin/$(BINARY)) \
+				echo "Homebrew gt is shadowing the canonical source install." ;; \
+		esac; \
+		echo "Run: $(INSTALL_DIR)/$(BINARY) shell install"; \
+		echo '  or prepend export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH" to your shell rc and open a new shell.'; \
+	fi
 	@# Restart daemon so it picks up the new binary.
 	@# A stale daemon is a recurring source of bugs (wrong session prefixes, etc.)
 	@if $(INSTALL_DIR)/$(BINARY) daemon status >/dev/null 2>&1; then \

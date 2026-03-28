@@ -158,10 +158,12 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// Infrastructure prerequisites — these must pass before any check that
 	// shells out to bd/dolt or queries the database. Order matters:
 	// 1. gt binary freshness
-	// 2. bd binary exists
-	// 3. dolt binary exists
-	// 4. Dolt server is reachable (everything downstream depends on this)
+	// 2. canonical ~/.local/bin/gt wins on PATH
+	// 3. bd binary exists
+	// 4. dolt binary exists
+	// 5. Dolt server is reachable (everything downstream depends on this)
 	d.Register(doctor.NewStaleBinaryCheck())
+	d.Register(doctor.NewGTBinaryShadowCheck())
 	d.Register(doctor.NewBeadsBinaryCheck())
 	d.Register(doctor.NewDoltBinaryCheck())
 	d.Register(doctor.NewDoltServerReachableCheck())
@@ -185,7 +187,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewOverlayHealthCheck())
 	d.Register(doctor.NewPrefixConflictCheck())
 	d.Register(doctor.NewRigNameMismatchCheck())
-	d.Register(doctor.NewRigConfigSyncCheck()) // Check all registered rigs have config.json
+	d.Register(doctor.NewRigConfigSyncCheck())      // Check all registered rigs have config.json
 	d.Register(doctor.NewStaleDoltPortCheck())      // Check for stale Dolt port files
 	d.Register(doctor.NewStaleSQLServerInfoCheck()) // Check for stale sql-server.info files (GH#2770)
 	d.Register(doctor.NewPrefixMismatchCheck())

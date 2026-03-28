@@ -156,6 +156,22 @@ var shellHookScript = `#!/bin/bash
 # Installed by: gt install --shell
 # Location: ~/.config/gastown/shell-hook.sh
 
+_gastown_prepend_path() {
+    local dir="$1"
+    [[ -z "$dir" ]] && return 0
+    [[ -d "$dir" ]] || return 0
+    case ":$PATH:" in
+        *":$dir:"*) ;;
+        *) PATH="$dir${PATH:+:$PATH}" ;;
+    esac
+}
+
+_gastown_ensure_path() {
+    _gastown_prepend_path "$HOME/.local/bin"
+    _gastown_prepend_path "$HOME/go/bin"
+    export PATH
+}
+
 _gastown_enabled() {
     [[ -n "$GASTOWN_DISABLED" ]] && return 1
     [[ -n "$GASTOWN_ENABLED" ]] && return 0
@@ -281,6 +297,8 @@ _gastown_hook() {
 
     return $previous_exit_status
 }
+
+_gastown_ensure_path
 
 _gastown_chpwd_hook() {
     _GASTOWN_OFFER_ADD=1

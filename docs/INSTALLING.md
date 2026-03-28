@@ -85,21 +85,26 @@ tmux -V           # (Optional) Should show 3.0 or higher
 
 ```bash
 # Install Gas Town CLI
-go install github.com/steveyegge/gastown/cmd/gt@latest
+git clone https://github.com/steveyegge/gastown.git
+cd gastown
+make install
 
 # Install Beads (issue tracker)
 go install github.com/steveyegge/beads/cmd/bd@latest
+
+# Ensure source installs win over older Homebrew / go-install copies
+~/.local/bin/gt shell install
 
 # Verify installation
 gt version
 bd version
 ```
 
-If `gt` is not found, ensure `$GOPATH/bin` (usually `~/go/bin`) is in your PATH:
+If `gt` is still not found or a different older binary wins, ensure `~/.local/bin` is at the front of your PATH:
 
 ```bash
 # Add to ~/.bashrc, ~/.zshrc, or equivalent
-export PATH="$PATH:$HOME/go/bin"
+export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
 ```
 
 ### Step 2: Create Your Workspace
@@ -295,7 +300,8 @@ bd doctor                  # Run beads health check
 To update Gas Town and Beads:
 
 ```bash
-go install github.com/steveyegge/gastown/cmd/gt@latest
+git -C ~/path/to/gastown pull --ff-only
+make -C ~/path/to/gastown install
 go install github.com/steveyegge/beads/cmd/bd@latest
 gt doctor --fix            # Fix any post-update issues
 ```

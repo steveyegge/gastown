@@ -121,6 +121,7 @@ func upgradeDoctor(townRoot string) upgradeResult {
 	d.RegisterAll(doctor.WorkspaceChecks()...)
 	d.Register(doctor.NewGlobalStateCheck())
 	d.Register(doctor.NewStaleBinaryCheck())
+	d.Register(doctor.NewGTBinaryShadowCheck())
 	d.Register(doctor.NewBeadsBinaryCheck())
 	d.Register(doctor.NewDoltBinaryCheck())
 	d.Register(doctor.NewDoltServerReachableCheck())

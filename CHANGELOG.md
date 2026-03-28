@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Source install PATH shadowing** — shell integration now prepends
+  `~/.local/bin`, `gt doctor` warns when a canonical source install is still
+  shadowed on PATH, and `make install` emits a post-install warning when an
+  older `gt` would still win.
+
 ## [0.12.1] - 2026-03-15
 
 ### Added
