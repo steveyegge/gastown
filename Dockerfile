@@ -24,19 +24,11 @@ RUN apt-get update && apt-get install -y \
 # Install Go from official tarball (apt golang-go is too old)
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" | tar -C /usr/local -xz
-ENV PATH="/app/gastown:/usr/local/go/bin:/home/agent/go/bin:${PATH}"
+ENV PATH="/app/gastown:/usr/local/go/bin:/home/agent/go/bin:/home/agent/bin:${PATH}"
 
 # Install beads (bd) and dolt
 RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
 RUN curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash
-
-# Node.js 22 LTS (for nakedapi builds)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-
-# pnpm via corepack (matches nakedapi packageManager field)
-RUN corepack enable && corepack prepare pnpm@10.30.3 --activate
 
 # Set up directories
 RUN mkdir -p /app /gt /gt/.dolt-data && chown -R agent:agent /app /gt

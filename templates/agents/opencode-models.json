@@ -50,6 +50,16 @@
         "description": "Big Pickle experimental",
         "ready_delay_ms": 12000
       }
+    },
+    "fireworks": {
+      "kimi-k2p5": {
+        "description": "Kimi 2.5 via Fireworks AI (fast inference)",
+        "ready_delay_ms": 4000
+      },
+      "kimi-k2p5-fast": {
+        "description": "Kimi 2.5 Fast via Fireworks AI (~200 tok/s)",
+        "ready_delay_ms": 3000
+      }
     }
   },
   "notes": {

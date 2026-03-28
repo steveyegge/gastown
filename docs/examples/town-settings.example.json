@@ -51,9 +51,9 @@
             },
             "prompt_mode": "none"
         },
-        "sonnet-via-opencode": {
+        "kimi-k2.5-fast": {
             "command": "opencode",
-            "args": ["-m", "openrouter/anthropic/claude-sonnet-4.5"],
+            "args": ["-m", "fireworks/kimi-k2p5-fast"],
             "env": {
                 "OPENCODE_PERMISSION": "{\"*\":\"allow\"}"
             },

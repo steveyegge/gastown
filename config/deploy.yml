@@ -15,7 +15,7 @@ servers:
         interval: 10
         timeout: 5
     options:
-      memory: 8g
+      memory: 32g
 
 registry:
   server: localhost:5555
@@ -32,7 +32,6 @@ env:
     - KIE_API_KEY
     - XAI_API_KEY
     - FAL_API_KEY
-    - KIMI_CODING_API_KEY
     - FIREWORKS_AI_API_KEY
     - DASHBOARD_USER
     - DASHBOARD_PASS

@@ -387,6 +387,9 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		"VERTEX_REGION_CLAUDE_4_0_SONNET",
 		"VERTEX_REGION_CLAUDE_4_1_OPUS",
 
+		// Fireworks AI (for OpenCode + Kimi models)
+		"FIREWORKS_AI_API_KEY",
+
 		// Proxy / network
 		"HTTP_PROXY",
 		"HTTPS_PROXY",

@@ -42,11 +42,15 @@ fi
 if [ ! -f /gt/mayor/town.json ]; then
     # First run: block on full install (dashboard will run in setup mode)
     echo "Initializing Gas Town workspace at /gt..."
-    /app/gastown/gt install /gt --git
+    /app/gastown/gt install /gt --git --wrappers
+    
+    # Configure agents
+    echo "Configuring agents..."
+    /app/gastown/gt config agent set opencode "gt-opencode -m fireworks/kimi-k2p5-fast"
 else
     # Subsequent runs: refresh in background so dashboard starts fast
     echo "Refreshing Gas Town workspace at /gt (background)..."
-    /app/gastown/gt install /gt --git --force &
+    /app/gastown/gt install /gt --git --wrappers --force &
 fi
 
 # --- Gas Town shell + doctor setup (background to not delay health check) ---

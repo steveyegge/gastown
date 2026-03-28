@@ -1279,3 +1279,35 @@ func TestClaudeConfigDir_EnvVar(t *testing.T) {
 		t.Errorf("ClaudeConfigDir() = %q, want %q", got, customDir)
 	}
 }
+
+func TestAgentEnv_PassthroughAPIKeys(t *testing.T) {
+	keys := map[string]string{
+		"FIREWORKS_AI_API_KEY": "fw-test-key-123",
+	}
+
+	for key, val := range keys {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, val)
+			env := AgentEnv(AgentEnvConfig{
+				Role:     "mayor",
+				TownRoot: "/town",
+			})
+			assertEnv(t, env, key, val)
+		})
+	}
+}
+
+func TestAgentEnv_PassthroughAPIKeys_NotSetWhenEmpty(t *testing.T) {
+	for _, key := range []string{
+		"FIREWORKS_AI_API_KEY",
+	} {
+		t.Run(key, func(t *testing.T) {
+			// Don't set the env var — it should not appear in the result.
+			env := AgentEnv(AgentEnvConfig{
+				Role:     "mayor",
+				TownRoot: "/town",
+			})
+			assertNotSet(t, env, key)
+		})
+	}
+}
