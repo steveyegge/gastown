@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -211,6 +212,9 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if !started {
+		if msg := readDaemonStartupFailure(townRoot, daemonCmd.Process.Pid); msg != "" {
+			return fmt.Errorf("daemon failed to start: %s", msg)
+		}
 		return fmt.Errorf("daemon failed to start (check logs with 'gt daemon logs')")
 	}
 
@@ -308,6 +312,24 @@ func getBinaryModTime() (time.Time, error) {
 		return time.Time{}, err
 	}
 	return info.ModTime(), nil
+}
+
+func readDaemonStartupFailure(townRoot string, pid int) string {
+	logFile := filepath.Join(townRoot, "daemon", "daemon.log")
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		return ""
+	}
+
+	prefix := fmt.Sprintf("Daemon startup failed (PID %d): ", pid)
+	lines := strings.Split(string(data), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if idx := strings.Index(line, prefix); idx >= 0 {
+			return strings.TrimSpace(line[idx+len(prefix):])
+		}
+	}
+	return ""
 }
 
 func runDaemonLogs(cmd *cobra.Command, args []string) error {

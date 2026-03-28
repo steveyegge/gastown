@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Daemon beads compatibility guard** — `gt daemon run` now fail-fast checks
+  workspace beads schema compatibility before Convoy polling starts, and
+  `gt daemon start` surfaces the startup mismatch directly instead of only
+  telling operators to inspect logs.
+
 ## [0.12.1] - 2026-03-15
 
 ### Added
