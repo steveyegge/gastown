@@ -1,0 +1,52 @@
+service: gastown
+image: justintanner/gastown
+primary_role: daemon
+
+servers:
+  daemon:
+    hosts:
+      - 65.21.88.38
+    proxy:
+      host: superlzy.com
+      app_port: 8080
+      ssl: true
+      healthcheck:
+        path: /up
+        interval: 10
+        timeout: 5
+    options:
+      memory: 8g
+
+registry:
+  server: localhost:5555
+
+env:
+  clear:
+    GIT_USER: "Gastown Bot"
+    GIT_EMAIL: "work@jwtanner.com"
+    TERM: "xterm-256color"
+  secret:
+    - OPENAI_API_KEY
+    - KIE_API_KEY
+    - XAI_API_KEY
+    - FAL_API_KEY
+    - KIMI_CODING_API_KEY
+
+builder:
+  arch: amd64
+
+volumes:
+  - gastown-workspace:/gt
+  - claude-config:/home/agent/.claude
+
+aliases:
+  shell: app exec --interactive --reuse "bash"
+  logs: app exec --reuse "tail -100 /gt/daemon/daemon.log"
+  status: app exec --reuse "gt status"
+  dolt-status: app exec --reuse "gt dolt status"
+  polecats: app exec --reuse "gt polecat list --all"
+  crew: app exec --reuse "gt crew list --all"
+  health: app exec --reuse "gt health"
+  convoys: app exec --reuse "gt convoy list"
+  mail: app exec --reuse "gt mail inbox"
+  rigs: app exec --reuse "gt rig list"

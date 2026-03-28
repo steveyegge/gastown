@@ -30,6 +30,14 @@ ENV PATH="/app/gastown:/usr/local/go/bin:/home/agent/go/bin:${PATH}"
 RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
 RUN curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash
 
+# Node.js 22 LTS (for nakedapi builds)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# pnpm via corepack (matches nakedapi packageManager field)
+RUN corepack enable && corepack prepare pnpm@10.30.3 --activate
+
 # Set up directories
 RUN mkdir -p /app /gt /gt/.dolt-data && chown -R agent:agent /app /gt
 
@@ -52,5 +60,9 @@ RUN chmod +x /app/docker-entrypoint.sh
 
 WORKDIR /gt
 
+EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=5s --start-period=90s --retries=3 \
+  CMD curl -fsS http://localhost:8080/up || exit 1
+
 ENTRYPOINT ["tini", "--", "/app/docker-entrypoint.sh"]
-CMD ["sleep", "infinity"]
+CMD ["gt", "dashboard", "--bind", "0.0.0.0", "--port", "8080"]

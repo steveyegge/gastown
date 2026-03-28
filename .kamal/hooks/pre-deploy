@@ -1,0 +1,9 @@
+#!/bin/sh
+# Gracefully shut down Gas Town before Kamal deploys a new container.
+# Runs locally before deploy — uses kamal to exec gt down on the server.
+
+set -e
+
+echo "==> Gracefully shutting down Gas Town..."
+kamal app exec --reuse "gt down --all" 2>/dev/null || true
+echo "==> Gas Town shutdown complete, proceeding with deploy."
