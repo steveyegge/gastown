@@ -98,7 +98,9 @@ func runPatrolDigest(cmd *cobra.Command, args []string) error {
 		}
 		targetDate = parsed
 	} else if patrolDigestYesterday {
-		targetDate = time.Now().AddDate(0, 0, -1)
+		// Use UTC: Dolt stores timestamps in UTC, so date comparisons
+		// must use UTC dates to avoid evening PDT mismatches (gt-ty4).
+		targetDate = time.Now().UTC().AddDate(0, 0, -1)
 	} else {
 		return fmt.Errorf("specify --yesterday or --date YYYY-MM-DD")
 	}
@@ -212,7 +214,8 @@ func queryPatrolDigests(targetDate time.Time) ([]PatrolCycleEntry, error) {
 		return nil, fmt.Errorf("parsing issue list: %w", err)
 	}
 
-	targetDay := targetDate.Format("2006-01-02")
+	// Compare dates in UTC: Dolt stores timestamps in UTC (gt-ty4).
+	targetDay := targetDate.UTC().Format("2006-01-02")
 	var patrolDigests []PatrolCycleEntry
 
 	for _, issue := range issues {
@@ -226,8 +229,8 @@ func queryPatrolDigests(targetDate time.Time) ([]PatrolCycleEntry, error) {
 			continue
 		}
 
-		// Check if created on target date
-		if issue.CreatedAt.Format("2006-01-02") != targetDay {
+		// Check if created on target date (both in UTC)
+		if issue.CreatedAt.UTC().Format("2006-01-02") != targetDay {
 			continue
 		}
 

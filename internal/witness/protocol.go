@@ -106,6 +106,7 @@ type PolecatDonePayload struct {
 	Branch      string
 	Gate        string // Gate ID when Exit is PHASE_COMPLETE
 	MRFailed    bool   // True when MR bead creation was attempted but failed
+	PushFailed  bool   // True when branch push to origin failed (gas-556)
 }
 
 // HelpCategory classifies the nature of a help request for routing.

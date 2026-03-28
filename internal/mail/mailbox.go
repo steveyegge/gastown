@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	beadsdk "github.com/steveyegge/beads"
 	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/runtime"
@@ -31,12 +32,19 @@ var (
 )
 
 // Mailbox manages messages for an identity via beads.
+// When store is non-nil, beads-mode methods use the in-process beadsdk.Storage
+// directly instead of shelling out to the bd CLI.
 type Mailbox struct {
 	identity string // beads identity (e.g., "gastown/polecats/Toast")
 	workDir  string // directory to run bd commands in
 	beadsDir string // explicit .beads directory path (set via BEADS_DIR)
 	path     string // for legacy JSONL mode (crew workers)
 	legacy   bool   // true = use JSONL files, false = use beads
+
+	// store is an optional in-process beadsdk.Storage. When set, beads-mode
+	// methods bypass the bd subprocess and use the store directly.
+	// Callers are responsible for closing the store.
+	store beadsdk.Storage
 }
 
 // NewMailbox creates a mailbox for the given JSONL path (legacy mode).
@@ -136,6 +144,11 @@ func (m *Mailbox) listBeads() ([]*Message, error) {
 // memory footprint under concurrent agent load. A separate CC query fetches
 // messages where this identity is CC'd.
 func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
+	// Use in-process store when available
+	if m.store != nil {
+		return m.storeListFromDir()
+	}
+
 	identities := m.identityVariants()
 
 	if err := beads.EnsureCustomTypes(beadsDir); err != nil {
@@ -454,11 +467,23 @@ func (m *Mailbox) Get(id string) (*Message, error) {
 
 func (m *Mailbox) getBeads(id string) (*Message, error) {
 	// Resolve correct beadsDir based on bead ID prefix (GH#2423)
-	return m.getFromDir(id, beads.ResolveBeadsDirForID(m.beadsDir, id))
+	primary := beads.ResolveBeadsDirForID(m.beadsDir, id)
+	msg, err := m.getFromDir(id, primary)
+	if errors.Is(err, ErrMessageNotFound) && primary != m.beadsDir {
+		// Cross-rig bead IDs (e.g. ne-*) may live in the home DB when created
+		// via the mail router (which always uses town beads). Fall back to
+		// m.beadsDir before giving up. See ne-bgr.
+		return m.getFromDir(id, m.beadsDir)
+	}
+	return msg, err
 }
 
 // getFromDir retrieves a message from a beads directory.
 func (m *Mailbox) getFromDir(id, beadsDir string) (*Message, error) {
+	if m.store != nil {
+		return m.storeGetFromDir(id)
+	}
+
 	args := []string{"show", id, "--json"}
 
 	ctx, cancel := bdReadCtx()
@@ -510,11 +535,23 @@ func (m *Mailbox) MarkRead(id string) error {
 
 func (m *Mailbox) markReadBeads(id string) error {
 	// Resolve correct beadsDir based on bead ID prefix (GH#2423)
-	return m.closeInDir(id, beads.ResolveBeadsDirForID(m.beadsDir, id))
+	primary := beads.ResolveBeadsDirForID(m.beadsDir, id)
+	err := m.closeInDir(id, primary)
+	if errors.Is(err, ErrMessageNotFound) && primary != m.beadsDir {
+		// Cross-rig bead IDs (e.g. ne-*) may live in the home DB when created
+		// via the mail router (which always uses town beads). Fall back to
+		// m.beadsDir before giving up. See ne-bgr.
+		return m.closeInDir(id, m.beadsDir)
+	}
+	return err
 }
 
 // closeInDir closes a message in a specific beads directory.
 func (m *Mailbox) closeInDir(id, beadsDir string) error {
+	if m.store != nil {
+		return m.storeCloseInDir(id)
+	}
+
 	args := []string{"close", id}
 	// Pass session ID for work attribution if available
 	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
@@ -577,14 +614,32 @@ func (m *Mailbox) MarkReadOnly(id string) error {
 }
 
 func (m *Mailbox) markReadOnlyBeads(id string) error {
+	if m.store != nil {
+		return m.storeMarkReadOnly(id)
+	}
+
 	// Add "read" label to mark as read without closing
 	args := []string{"label", "add", id, "read"}
+	primary := beads.ResolveBeadsDirForID(m.beadsDir, id)
 
 	ctx, cancel := bdWriteCtx()
 	defer cancel()
-	_, err := runBdCommand(ctx, args, m.workDir, beads.ResolveBeadsDirForID(m.beadsDir, id))
+	_, err := runBdCommand(ctx, args, m.workDir, primary)
 	if err != nil {
 		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
+			if primary != m.beadsDir {
+				// Cross-rig bead IDs (e.g. ne-*) may live in the home DB. See ne-bgr.
+				ctx2, cancel2 := bdWriteCtx()
+				defer cancel2()
+				_, err2 := runBdCommand(ctx2, args, m.workDir, m.beadsDir)
+				if err2 != nil {
+					if bdErr2, ok := err2.(*bdError); ok && bdErr2.ContainsError("not found") {
+						return ErrMessageNotFound
+					}
+					return err2
+				}
+				return nil
+			}
 			return ErrMessageNotFound
 		}
 		return err
@@ -604,14 +659,35 @@ func (m *Mailbox) MarkUnreadOnly(id string) error {
 }
 
 func (m *Mailbox) markUnreadOnlyBeads(id string) error {
+	if m.store != nil {
+		return m.storeMarkUnreadOnly(id)
+	}
+
 	// Remove "read" label to mark as unread
 	args := []string{"label", "remove", id, "read"}
+	primary := beads.ResolveBeadsDirForID(m.beadsDir, id)
 
 	ctx, cancel := bdWriteCtx()
 	defer cancel()
-	_, err := runBdCommand(ctx, args, m.workDir, beads.ResolveBeadsDirForID(m.beadsDir, id))
+	_, err := runBdCommand(ctx, args, m.workDir, primary)
 	if err != nil {
 		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
+			if primary != m.beadsDir {
+				// Cross-rig bead IDs (e.g. ne-*) may live in the home DB. See ne-bgr.
+				ctx2, cancel2 := bdWriteCtx()
+				defer cancel2()
+				_, err2 := runBdCommand(ctx2, args, m.workDir, m.beadsDir)
+				if err2 != nil {
+					if bdErr2, ok := err2.(*bdError); ok && bdErr2.ContainsError("not found") {
+						return ErrMessageNotFound
+					}
+					if bdErr2, ok := err2.(*bdError); ok && bdErr2.ContainsError("does not have label") {
+						return nil
+					}
+					return err2
+				}
+				return nil
+			}
 			return ErrMessageNotFound
 		}
 		// Ignore error if label doesn't exist
@@ -633,13 +709,31 @@ func (m *Mailbox) MarkUnread(id string) error {
 }
 
 func (m *Mailbox) markUnreadBeads(id string) error {
+	if m.store != nil {
+		return m.storeMarkUnread(id)
+	}
+
 	args := []string{"reopen", id}
+	primary := beads.ResolveBeadsDirForID(m.beadsDir, id)
 
 	ctx, cancel := bdWriteCtx()
 	defer cancel()
-	_, err := runBdCommand(ctx, args, m.workDir, beads.ResolveBeadsDirForID(m.beadsDir, id))
+	_, err := runBdCommand(ctx, args, m.workDir, primary)
 	if err != nil {
 		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
+			if primary != m.beadsDir {
+				// Cross-rig bead IDs (e.g. ne-*) may live in the home DB. See ne-bgr.
+				ctx2, cancel2 := bdWriteCtx()
+				defer cancel2()
+				_, err2 := runBdCommand(ctx2, args, m.workDir, m.beadsDir)
+				if err2 != nil {
+					if bdErr2, ok := err2.(*bdError); ok && bdErr2.ContainsError("not found") {
+						return ErrMessageNotFound
+					}
+					return err2
+				}
+				return nil
+			}
 			return ErrMessageNotFound
 		}
 		return err

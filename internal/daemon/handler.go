@@ -300,6 +300,18 @@ func (d *Daemon) dispatchPlugins(mgr *dog.Manager, sm *dog.SessionManager, rigsC
 		}
 
 		d.logger.Printf("Handler: dispatched plugin %s to dog %s", p.Name, idleDog.Name)
+
+		// Record the dispatch immediately so the cooldown gate is satisfied
+		// for the next 1h regardless of what the dog does. Dogs create their
+		// own completion beads but don't reliably use the label convention the
+		// gate requires, causing infinite re-dispatch loops.
+		if _, err := recorder.RecordRun(plugin.PluginRunRecord{
+			PluginName: p.Name,
+			Result:     plugin.ResultSuccess,
+			Body:       fmt.Sprintf("Dispatched to dog %s", idleDog.Name),
+		}); err != nil {
+			d.logger.Printf("Handler: failed to record dispatch for plugin %s: %v", p.Name, err)
+		}
 	}
 }
 

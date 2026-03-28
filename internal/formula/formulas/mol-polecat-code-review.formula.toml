@@ -1,3 +1,5 @@
+review_only = true  # Analysis-only — findings filed as beads, no code commits (gt-kvf)
+
 description = """
 Review code and file beads for issues found.
 

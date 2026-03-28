@@ -1139,6 +1139,9 @@ func loadRigCommandVars(townRoot, rig string) []string {
 	if mq.BuildCommand != "" {
 		vars = append(vars, fmt.Sprintf("build_command=%s", mq.BuildCommand))
 	}
+	if mq.MergeStrategy != "" {
+		vars = append(vars, fmt.Sprintf("merge_strategy=%s", mq.MergeStrategy))
+	}
 	return vars
 }
 

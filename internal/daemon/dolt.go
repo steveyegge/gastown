@@ -757,6 +757,41 @@ func IsDoltUnhealthy(townRoot string) bool {
 	return err == nil
 }
 
+// writeDaemonDoltConfig writes a Dolt config.yaml to configPath using the
+// daemon's DoltServerConfig. Unlike CLI flags, config.yaml can set
+// read_timeout_millis and write_timeout_millis, which prevents CLOSE_WAIT
+// accumulation when clients disconnect without completing their SQL sessions.
+func writeDaemonDoltConfig(cfg *DoltServerConfig, configPath string) error {
+	hostLine := ""
+	if cfg.Host != "" {
+		hostLine = fmt.Sprintf("\n  host: %s", cfg.Host)
+	}
+	content := fmt.Sprintf(`# Dolt SQL server configuration — managed by Gas Town daemon
+# Do not edit manually; overwritten on each daemon-managed server start.
+
+log_level: info
+
+listener:
+  port: %d%s
+  read_timeout_millis: 30000
+  write_timeout_millis: 30000
+  max_connections: 1000
+
+data_dir: %q
+
+behavior:
+  dolt_transaction_commit: false
+  auto_gc_behavior:
+    enable: true
+    archive_level: 1
+`,
+		cfg.Port,
+		hostLine,
+		cfg.DataDir,
+	)
+	return os.WriteFile(configPath, []byte(content), 0600)
+}
+
 // Start starts the Dolt SQL server.
 func (m *DoltServerManager) Start() error {
 	m.mu.Lock()
@@ -789,12 +824,19 @@ func (m *DoltServerManager) startLocked() error {
 		return fmt.Errorf("dolt not found in PATH: %w", err)
 	}
 
+	// Write config.yaml with timeouts before starting. CLI flags like --port
+	// silently override the config file but cannot set timeout fields, so we
+	// use --config instead. This prevents CLOSE_WAIT accumulation that occurs
+	// when Dolt uses its 8-hour default read/write timeouts. (gt-ch5)
+	configPath := filepath.Join(m.config.DataDir, "config.yaml")
+	if err := writeDaemonDoltConfig(m.config, configPath); err != nil {
+		m.logger("Warning: failed to write Dolt config.yaml: %v", err)
+	}
+
 	// Build command arguments
 	args := []string{
 		"sql-server",
-		"--host", m.config.Host,
-		"--port", strconv.Itoa(m.config.Port),
-		"--data-dir", m.config.DataDir,
+		"--config", configPath,
 	}
 
 	// Open log file

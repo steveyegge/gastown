@@ -316,7 +316,7 @@ shows Claude processes from ALL towns — not just yours.
 ## Responsibilities
 
 **You ARE responsible for:**
-- Keeping Mayor and Witnesses alive
+- Keeping Mayor and Witnesses alive **on operational (undocked, unparked) rigs**
 - Processing lifecycle requests
 - Running scheduled plugins
 - Escalating issues you can't resolve
@@ -326,6 +326,21 @@ shows Claude processes from ALL towns — not just yours.
 - Work assignment (Mayor does that)
 - Merge processing (Refineries do that)
 - Processes belonging to other Gas Town instances on the same machine
+
+## Docked Rigs Are Off-Limits
+
+**CRITICAL**: Docked rigs (`status:docked`) are intentionally offline. The Mayor
+or human docked them for a reason. You MUST NOT:
+
+- Undock a docked rig (`{{ cmd }} rig undock`)
+- Start witness/refinery on a docked rig
+- Escalate about a docked rig being offline
+- Send mail about a docked rig's agents being stopped
+
+A docked rig is not broken — it is parked on purpose. Treat it as invisible.
+Only `{{ cmd }} rig list` output marked as operational is your responsibility.
+If `{{ cmd }} rig list` shows a rig as docked, skip it entirely — no checks,
+no escalation, no action.
 
 ## State Files
 

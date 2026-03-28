@@ -14,6 +14,14 @@ import (
 	"github.com/steveyegge/gastown/internal/reaper"
 )
 
+// shortHash returns at most 8 characters of a hash for display.
+func shortHash(hash string) string {
+	if len(hash) > 8 {
+		return hash[:8]
+	}
+	return hash
+}
+
 const (
 	defaultCompactorDogInterval = 24 * time.Hour
 	// defaultCompactorCommitThreshold is the minimum commit count before compaction triggers.
@@ -280,7 +288,7 @@ func (d *Daemon) compactDatabase(dbName string) error {
 	if err != nil {
 		return fmt.Errorf("find root commit: %w", err)
 	}
-	d.logger.Printf("compactor_dog: %s: root commit=%s", dbName, rootHash[:8])
+	d.logger.Printf("compactor_dog: %s: root commit=%s", dbName, shortHash(rootHash))
 
 	// Step 3: USE database for session-scoped operations.
 	ctx, cancel := context.WithTimeout(context.Background(), compactorQueryTimeout)
@@ -294,7 +302,7 @@ func (d *Daemon) compactDatabase(dbName string) error {
 	if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_RESET('--soft', '%s')", rootHash)); err != nil {
 		return fmt.Errorf("soft reset to root: %w", err)
 	}
-	d.logger.Printf("compactor_dog: %s: soft-reset to root %s", dbName, rootHash[:8])
+	d.logger.Printf("compactor_dog: %s: soft-reset to root %s", dbName, shortHash(rootHash))
 
 	// Step 5: Commit all data as a single commit.
 	commitMsg := fmt.Sprintf("compaction: flatten %s history to single commit", dbName)
@@ -403,7 +411,7 @@ func (d *Daemon) surgicalRebaseOnce(dbName string, keepRecent int) error {
 		return fmt.Errorf("pre-flight row counts: %w", err)
 	}
 	d.logger.Printf("compactor_dog: %s: surgical rebase pre-flight HEAD=%s, tables=%d, keep_recent=%d",
-		dbName, preHead[:8], len(preCounts), keepRecent)
+		dbName, shortHash(preHead), len(preCounts), keepRecent)
 
 	rootHash, err := d.compactorGetRootCommit(db, dbName)
 	if err != nil {
@@ -515,7 +523,7 @@ func (d *Daemon) surgicalRebaseOnce(dbName string, keepRecent int) error {
 	}
 	if currentHead != preHead {
 		d.surgicalCleanup(db, baseBranch, workBranch)
-		return fmt.Errorf("concurrency abort: main HEAD moved from %s to %s", preHead[:8], currentHead[:8])
+		return fmt.Errorf("concurrency abort: main HEAD moved from %s to %s", shortHash(preHead), shortHash(currentHead))
 	}
 
 	// Step 8: Swap branches — make compact-work the new main.

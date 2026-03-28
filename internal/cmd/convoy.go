@@ -912,6 +912,13 @@ func runConvoyCheck(cmd *cobra.Command, args []string) error {
 // and closes the convoy if so. Returns (true, nil) if the convoy was closed or
 // would be closed (dry-run), (false, nil) if not ready, or (false, err) on failure.
 func closeConvoyIfComplete(townBeads, convoyID, title string, tracked []trackedIssueInfo, dryRun bool) (bool, error) {
+	// If no tracked issues were resolved, skip auto-close. A 0/0 result means
+	// cross-rig tracking resolution failed — not that all issues are done.
+	// Treating 0/0 as "complete" caused false 🚚 Convoy landed notifications. (GH#3xxx)
+	if len(tracked) == 0 {
+		return false, nil
+	}
+
 	allClosed := true
 	openCount := 0
 	for _, t := range tracked {
@@ -932,9 +939,6 @@ func closeConvoyIfComplete(townBeads, convoyID, title string, tracked []trackedI
 	}
 
 	reason := "All tracked issues completed"
-	if len(tracked) == 0 {
-		reason = "Empty convoy (0 tracked issues) — auto-closed as definitionally complete"
-	}
 	closeArgs := []string{"close", convoyID, "-r", reason}
 	closeCmd := exec.Command("bd", closeArgs...)
 	closeCmd.Dir = townBeads

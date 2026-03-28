@@ -654,6 +654,7 @@ func applyExpandRule(steps []Step, rule *ExpandRule, searchPaths []string) ([]St
 			ID:          expandPlaceholders(tmpl.ID, rule.Target, targetStep),
 			Title:       expandPlaceholders(tmpl.Title, rule.Target, targetStep),
 			Description: expandPlaceholders(tmpl.Description, rule.Target, targetStep),
+			Acceptance:  expandPlaceholders(tmpl.Acceptance, rule.Target, targetStep),
 		}
 		if len(tmpl.Needs) == 0 {
 			// First expanded step inherits the target's own needs.

@@ -101,6 +101,17 @@ func CheckStaleBinary(repoDir string) *StaleBinaryInfo {
 	// Compare commits using prefix matching (handles short vs full hash)
 	// Use the shorter of the two commit lengths for comparison
 	if !commitsMatch(info.BinaryCommit, info.RepoCommit) {
+		// Verify the binary commit exists in the found repo. GetRepoRoot may
+		// find a different clone (e.g., mayor/rig) than the one the binary was
+		// built from (e.g., crew/woodhouse). If the binary commit isn't in the
+		// repo's object store, we can't determine staleness — skip.
+		verifyCmd := exec.Command("git", "cat-file", "-t", info.BinaryCommit)
+		verifyCmd.Dir = repoDir
+		if err := verifyCmd.Run(); err != nil {
+			// Binary commit not in this repo — different clones, can't compare
+			return info
+		}
+
 		// Check if all commits between binary and HEAD only touch .beads/ files
 		// (e.g., bd backup commits). These don't affect the binary and should not
 		// trigger a stale warning. (GH#2596)

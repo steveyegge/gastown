@@ -28,6 +28,7 @@ import (
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/feed"
+	"github.com/steveyegge/gastown/internal/estop"
 	gitpkg "github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/polecat"
@@ -537,6 +538,18 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("Main branch test ticker started (interval %v)", interval)
 	}
 
+	// Start quota dog ticker if configured.
+	// Scans for rate-limited sessions and automatically rotates credentials.
+	var quotaDogTicker *time.Ticker
+	var quotaDogChan <-chan time.Time
+	if d.isPatrolActive("quota_dog") {
+		interval := quotaDogInterval(d.patrolConfig)
+		quotaDogTicker = time.NewTicker(interval)
+		quotaDogChan = quotaDogTicker.C
+		defer quotaDogTicker.Stop()
+		d.logger.Printf("Quota dog ticker started (interval %v)", interval)
+	}
+
 	// Note: PATCH-010 uses per-session hooks in deacon/manager.go (SetAutoRespawnHook).
 	// Global pane-died hooks don't fire reliably in tmux 3.2a, so we rely on the
 	// per-session approach which has been tested to work for continuous recovery.
@@ -638,6 +651,13 @@ func (d *Daemon) Run() error {
 				d.runMainBranchTests()
 			}
 
+		case <-quotaDogChan:
+			// Quota dog — scans for rate-limited sessions and automatically
+			// rotates credentials to available accounts via keychain swap.
+			if !d.isShutdownInProgress() {
+				d.runQuotaDog()
+			}
+
 		case <-timer.C:
 			d.heartbeat(state)
 
@@ -668,6 +688,15 @@ func (d *Daemon) heartbeat(state *State) {
 	// The shutdown.lock file is created by gt down before terminating sessions.
 	if d.isShutdownInProgress() {
 		d.logger.Println("Shutdown in progress, skipping heartbeat")
+		return
+	}
+
+	// Skip agent management if E-stop is active.
+	// The daemon stays alive (to maintain Dolt, etc.) but does NOT
+	// restart any agents. This prevents fighting the E-stop by auto-spawning
+	// sessions that were intentionally frozen.
+	if estop.IsActive(d.config.TownRoot) {
+		d.logger.Println("E-STOP active, skipping agent management")
 		return
 	}
 
@@ -1139,8 +1168,8 @@ func (d *Daemon) checkDeaconHeartbeat() {
 
 	age := hb.Age()
 
-	// If heartbeat is fresh, nothing to do
-	if !hb.IsVeryStale() {
+	// If heartbeat is fresh (< 5 min), nothing to do
+	if hb.IsFresh() {
 		return
 	}
 
@@ -1159,14 +1188,19 @@ func (d *Daemon) checkDeaconHeartbeat() {
 		return
 	}
 
-	// Session exists but heartbeat is stale - Deacon is stuck
-	// PATCH-002: Reduced from 30m to 10m for faster recovery.
-	// Must be > backoff-max (5m) to avoid false positive kills during legitimate sleep.
-	if age > 10*time.Minute {
+	// Session exists but heartbeat is stale - Deacon may be stuck.
+	// gt-p7k: Use two-tier response — nudge for stale (5-15 min),
+	// escalate only for very stale (>= 15 min). The previous logic gated on
+	// IsVeryStale() (>= 15 min) then checked age > 10 min, making the
+	// nudge path unreachable (dead code). Now nudge fires for 5-15 min
+	// staleness, giving the Deacon a chance to respond before killing.
+	// Kill threshold must be > backoff-max (5m) to avoid false positive
+	// kills during legitimate await-signal sleep.
+	if hb.IsVeryStale() {
 		// Detection only: stuck-agent-dog plugin handles context-aware restart
 		d.logger.Printf("STUCK DEACON: heartbeat stale for %s, session %s needs restart", age.Round(time.Minute), sessionName)
 	} else {
-		// Stuck but not critically - nudge to wake up
+		// Stale but not very stale (5-15 min) - nudge to wake up
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
 		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
 			d.logger.Printf("Error nudging stuck Deacon: %v", err)
@@ -1208,6 +1242,16 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 	// Check rig operational state before auto-starting
 	if operational, reason := d.isRigOperational(rigName); !operational {
 		d.logger.Printf("Skipping witness auto-start for %s: %s", rigName, reason)
+		// Kill leftover witness session if rig is not operational (docked/parked).
+		// Without this, sessions started before the rig was docked survive until
+		// the next explicit 'gt rig dock' command. (hq-snx61)
+		name := session.WitnessSessionName(session.PrefixFor(rigName))
+		if exists, _ := d.tmux.HasSession(name); exists {
+			d.logger.Printf("Killing leftover witness %s (rig %s)", name, reason)
+			if err := d.tmux.KillSessionWithProcesses(name); err != nil {
+				d.logger.Printf("Error killing leftover witness %s: %v", name, err)
+			}
+		}
 		return
 	}
 
@@ -1257,6 +1301,16 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	// Check rig operational state before auto-starting
 	if operational, reason := d.isRigOperational(rigName); !operational {
 		d.logger.Printf("Skipping refinery auto-start for %s: %s", rigName, reason)
+		// Kill leftover refinery session if rig is not operational (docked/parked).
+		// Without this, sessions started before the rig was docked survive until
+		// the next explicit 'gt rig dock' command. (hq-snx61)
+		name := session.RefinerySessionName(session.PrefixFor(rigName))
+		if exists, _ := d.tmux.HasSession(name); exists {
+			d.logger.Printf("Killing leftover refinery %s (rig %s)", name, reason)
+			if err := d.tmux.KillSessionWithProcesses(name); err != nil {
+				d.logger.Printf("Error killing leftover refinery %s: %v", name, err)
+			}
+		}
 		return
 	}
 
@@ -2267,6 +2321,29 @@ func (d *Daemon) isBeadClosed(beadID string) bool {
 	return issues[0].Status == "closed"
 }
 
+// hasAssignedOpenWork checks if any work bead is assigned to the given polecat
+// with a non-terminal status (hooked, in_progress, or open). This is the
+// authoritative source of polecat work — the sling code sets status=hooked +
+// assignee on the work bead, but no longer maintains the agent bead's hook_bead
+// field (updateAgentHookBead is a no-op). Without this fallback, the idle reaper
+// kills working polecats whose agent bead hook_bead is stale.
+func (d *Daemon) hasAssignedOpenWork(rigName, assignee string) bool {
+	for _, status := range []string{"hooked", "in_progress", "open"} {
+		cmd := exec.Command(d.bdPath, "list", "--rig="+rigName, "--assignee="+assignee, "--status="+status, "--json") //nolint:gosec // G204: args are constructed internally
+		cmd.Dir = d.config.TownRoot
+		cmd.Env = os.Environ()
+		output, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+		var issues []json.RawMessage
+		if json.Unmarshal(output, &issues) == nil && len(issues) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // notifyWitnessOfCrashedPolecat notifies the witness when a polecat crash is detected.
 // The stuck-agent-dog plugin handles context-aware restart decisions.
 func (d *Daemon) notifyWitnessOfCrashedPolecat(rigName, polecatName, hookBead string) {
@@ -2361,7 +2438,8 @@ func (d *Daemon) reapIdlePolecat(rigName, polecatName string, timeout time.Durat
 			// Agent bead lookup failed — polecat has no provable work.
 			// If heartbeat is stale enough (2x timeout), reap anyway to prevent
 			// indefinite API burn when bead infrastructure is degraded.
-			if staleDuration >= timeout*2 {
+			// But first check if the agent is actually running (GH#3342).
+			if staleDuration >= timeout*2 && !d.tmux.IsAgentRunning(sessionName) {
 				d.killIdlePolecat(rigName, polecatName, sessionName, staleDuration, timeout, "working-bead-lookup-failed")
 			}
 			return
@@ -2375,7 +2453,23 @@ func (d *Daemon) reapIdlePolecat(rigName, polecatName string, timeout time.Durat
 			return
 		}
 
-		// No hooked work + stale heartbeat = idle polecat
+		// Fallback: agent bead hook_bead may be stale (updateAgentHookBead is a
+		// no-op since the sling code declared work bead assignee as authoritative).
+		// Before killing, check if any work bead is assigned to this polecat with
+		// a non-terminal status. This prevents the reaper from killing polecats
+		// whose agent bead hook_bead points to a closed bead from a previous swarm
+		// while the polecat is actively working on a newly-slung bead.
+		assignee := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+		if d.hasAssignedOpenWork(rigName, assignee) {
+			return
+		}
+
+		// No hooked work + stale heartbeat — but check if the agent process
+		// is still actively running before reaping. A failed gt sling rollback
+		// can clear the hook while the agent is still working (GH#3342).
+		if d.tmux.IsAgentRunning(sessionName) {
+			return
+		}
 		d.killIdlePolecat(rigName, polecatName, sessionName, staleDuration, timeout, "working-no-hook")
 	}
 }

@@ -992,8 +992,28 @@ func (g *Git) IsEmpty() (bool, error) {
 }
 
 // RemoteBranchExists checks if a branch exists on the remote.
+// NOTE: For named remotes with a separate pushurl, this checks the fetch URL.
+// Use PushRemoteBranchExists to verify branches that were pushed.
 func (g *Git) RemoteBranchExists(remote, branch string) (bool, error) {
 	out, err := g.run("ls-remote", "--heads", remote, branch)
+	if err != nil {
+		return false, err
+	}
+	return out != "", nil
+}
+
+// PushRemoteBranchExists checks if a branch exists on the push target of a remote.
+// With a fork-based or local-bare-repo workflow (pushurl configured), pushes go to
+// the push URL but ls-remote resolves the fetch URL. This method queries the push
+// URL directly so verification matches where the branch was actually pushed.
+// Falls back to RemoteBranchExists when no custom push URL is configured.
+func (g *Git) PushRemoteBranchExists(remote, branch string) (bool, error) {
+	fetchURL, fetchErr := g.RemoteURL(remote)
+	pushURL, pushErr := g.GetPushURL(remote)
+	if fetchErr != nil || pushErr != nil || pushURL == fetchURL {
+		return g.RemoteBranchExists(remote, branch)
+	}
+	out, err := g.run("ls-remote", "--heads", pushURL, branch)
 	if err != nil {
 		return false, err
 	}
@@ -1185,10 +1205,10 @@ func (g *Git) submoduleReferencePath() string {
 }
 
 // isValidSubmoduleReference checks if a path is suitable as a --reference
-// for git submodule update. It must have .gitmodules and not be a shallow clone
-// (git rejects shallow repos as references).
+// for git submodule update. It must have a tracked .gitmodules and not be a
+// shallow clone (git rejects shallow repos as references).
 func isValidSubmoduleReference(repoPath string) bool {
-	if _, err := os.Stat(filepath.Join(repoPath, ".gitmodules")); err != nil {
+	if !hasTrackedGitmodules(repoPath) {
 		return false
 	}
 	// Check if shallow — git rev-parse --is-shallow-repository
@@ -1540,8 +1560,15 @@ func isGasTownRuntimePath(path string) bool {
 // CleanExcludingRuntime returns true if the only uncommitted changes are Gas Town
 // runtime artifacts (.beads/, .claude/, .runtime/, .logs/, __pycache__/).
 // Used by gt done to avoid blocking completion on toolchain-managed files.
+//
+// Note: UnpushedCommits is intentionally NOT checked here. This function only
+// evaluates whether uncommitted *file* changes are runtime artifacts. Unpushed
+// commits represent committed (but not yet pushed) work and are handled separately
+// by the CommitsAhead check in gt done. Including UnpushedCommits here caused
+// gt done to block when polecats committed their work and called gt done with
+// only infrastructure files untracked (gas-7vg).
 func (s *UncommittedWorkStatus) CleanExcludingRuntime() bool {
-	if s.StashCount > 0 || s.UnpushedCommits > 0 {
+	if s.StashCount > 0 {
 		return false
 	}
 
@@ -1615,10 +1642,20 @@ func (g *Git) CheckUncommittedWork() (*UncommittedWorkStatus, error) {
 func (g *Git) BranchPushedToRemote(localBranch, remote string) (bool, int, error) {
 	remoteBranch := remote + "/" + localBranch
 
+	// Resolve the push URL: with a split fetch/push configuration (e.g.,
+	// polecats pushing to a local bare repo), ls-remote against the remote
+	// name resolves the fetch URL (GitHub) not the push target.
+	lsTarget := remote
+	if fetchURL, ferr := g.RemoteURL(remote); ferr == nil {
+		if pushURL, perr := g.GetPushURL(remote); perr == nil && pushURL != fetchURL {
+			lsTarget = pushURL
+		}
+	}
+
 	// Check if the remote branch exists via ls-remote and save the output.
 	// The output contains the SHA which we reuse in the fallback path below,
 	// avoiding a redundant second ls-remote call.
-	lsOut, err := g.run("ls-remote", "--heads", remote, localBranch)
+	lsOut, err := g.run("ls-remote", "--heads", lsTarget, localBranch)
 	if err != nil {
 		return false, 0, fmt.Errorf("checking remote branch: %w", err)
 	}
@@ -1786,8 +1823,7 @@ type SubmoduleChange struct {
 // to share git objects from a local clone instead of fetching from remote.
 // This makes submodule init near-instant for large submodules (e.g. 655MB gitlabhq).
 func InitSubmodules(repoPath string, referencePath ...string) error {
-	gitmodules := filepath.Join(repoPath, ".gitmodules")
-	if _, err := os.Stat(gitmodules); os.IsNotExist(err) {
+	if !hasTrackedGitmodules(repoPath) {
 		return nil
 	}
 
@@ -1796,8 +1832,7 @@ func InitSubmodules(repoPath string, referencePath ...string) error {
 	// Use --reference to share objects from a local clone (avoids remote fetch)
 	if len(referencePath) > 0 && referencePath[0] != "" {
 		refPath := referencePath[0]
-		refModules := filepath.Join(refPath, ".gitmodules")
-		if _, err := os.Stat(refModules); err == nil {
+		if hasTrackedGitmodules(refPath) {
 			args = append(args, "--reference", refPath)
 		}
 	}
@@ -1809,6 +1844,21 @@ func InitSubmodules(repoPath string, referencePath ...string) error {
 		return fmt.Errorf("initializing submodules: %s", strings.TrimSpace(stderr.String()))
 	}
 	return nil
+}
+
+// hasTrackedGitmodules checks whether .gitmodules exists on disk AND is tracked
+// by git. After a submodule-to-monorepo migration, .gitmodules may linger as an
+// untracked file (e.g., in a stale mayor/rig clone or bare repo worktree) even
+// though it has been removed from the repository. Checking only os.Stat would
+// incorrectly trigger submodule init on these stale artifacts.
+func hasTrackedGitmodules(repoPath string) bool {
+	gitmodules := filepath.Join(repoPath, ".gitmodules")
+	if _, err := os.Stat(gitmodules); os.IsNotExist(err) {
+		return false
+	}
+	// Verify .gitmodules is actually tracked in the index.
+	cmd := exec.Command("git", "-C", repoPath, "ls-files", "--error-unmatch", ".gitmodules")
+	return cmd.Run() == nil
 }
 
 // InitSparseCheckout initializes sparse checkout with cone mode and configures

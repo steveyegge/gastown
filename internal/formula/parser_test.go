@@ -676,6 +676,231 @@ func TestResolve_NoExtends(t *testing.T) {
 	}
 }
 
+// TestParse_ExpansionWithAcceptance verifies that expansion templates can define
+// acceptance criteria and that they propagate to generated steps.
+func TestParse_ExpansionWithAcceptance(t *testing.T) {
+	data := []byte(`
+description = "Expansion with acceptance"
+formula = "test-acceptance-expansion"
+type = "expansion"
+version = 1
+
+[[template]]
+id = "{target}.step-a"
+title = "Step A"
+description = "Do A"
+acceptance = "A is done"
+
+[[template]]
+id = "{target}.step-b"
+title = "Step B"
+description = "Do B for {target.title}"
+needs = ["{target}.step-a"]
+acceptance = "B is done for {target.title}"
+`)
+
+	f, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(f.Template) != 2 {
+		t.Fatalf("len(Template) = %d, want 2", len(f.Template))
+	}
+	if f.Template[0].Acceptance != "A is done" {
+		t.Errorf("Template[0].Acceptance = %q, want %q", f.Template[0].Acceptance, "A is done")
+	}
+	if f.Template[1].Acceptance != "B is done for {target.title}" {
+		t.Errorf("Template[1].Acceptance = %q, want %q", f.Template[1].Acceptance, "B is done for {target.title}")
+	}
+
+	// Now test that acceptance propagates through expansion.
+	workflow := []byte(`
+description = "Test workflow"
+formula = "test-wf"
+type = "workflow"
+version = 1
+
+[[steps]]
+id = "prep"
+title = "Prepare"
+description = "Prepare things"
+
+[[steps]]
+id = "work"
+title = "Do the work"
+description = "Main work"
+needs = ["prep"]
+
+[[steps]]
+id = "finish"
+title = "Finish"
+description = "Wrap up"
+needs = ["work"]
+`)
+
+	wf, err := Parse(workflow)
+	if err != nil {
+		t.Fatalf("Parse workflow: %v", err)
+	}
+
+	// Manually apply expansion to test acceptance propagation.
+	expanded, err := applyExpandRule(wf.Steps, &ExpandRule{Target: "work", With: "test-acceptance-expansion"}, nil)
+	if err != nil {
+		// The expansion formula isn't embedded, so load from parsed data.
+		// Use a temp dir approach instead.
+		dir := t.TempDir()
+		if writeErr := os.WriteFile(filepath.Join(dir, "test-acceptance-expansion.formula.toml"), data, 0644); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+		expanded, err = applyExpandRule(wf.Steps, &ExpandRule{Target: "work", With: "test-acceptance-expansion"}, []string{dir})
+		if err != nil {
+			t.Fatalf("applyExpandRule: %v", err)
+		}
+	}
+
+	// Should be: prep, work.step-a, work.step-b, finish
+	wantIDs := []string{"prep", "work.step-a", "work.step-b", "finish"}
+	if len(expanded) != len(wantIDs) {
+		t.Fatalf("got %d steps, want %d", len(expanded), len(wantIDs))
+	}
+	for i, want := range wantIDs {
+		if expanded[i].ID != want {
+			t.Errorf("step[%d].ID = %q, want %q", i, expanded[i].ID, want)
+		}
+	}
+
+	// Check acceptance was propagated and placeholders expanded.
+	stepA := expanded[1]
+	if stepA.Acceptance != "A is done" {
+		t.Errorf("work.step-a.Acceptance = %q, want %q", stepA.Acceptance, "A is done")
+	}
+	stepB := expanded[2]
+	if stepB.Acceptance != "B is done for Do the work" {
+		t.Errorf("work.step-b.Acceptance = %q, want %q", stepB.Acceptance, "B is done for Do the work")
+	}
+}
+
+// TestResolve_TDDCycle verifies the tdd-cycle expansion formula parses and validates.
+func TestResolve_TDDCycle(t *testing.T) {
+	data, err := GetEmbeddedFormulaContent("tdd-cycle")
+	if err != nil {
+		t.Fatalf("GetEmbeddedFormulaContent: %v", err)
+	}
+
+	f, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if f.Type != TypeExpansion {
+		t.Errorf("Type = %q, want %q", f.Type, TypeExpansion)
+	}
+	if len(f.Template) != 5 {
+		t.Fatalf("len(Template) = %d, want 5", len(f.Template))
+	}
+
+	// Verify template IDs follow the {target}.* pattern.
+	wantSuffixes := []string{".write-tests", ".verify-red", ".implement", ".verify-green", ".refactor"}
+	for i, want := range wantSuffixes {
+		if !strings.HasSuffix(f.Template[i].ID, want) {
+			t.Errorf("Template[%d].ID = %q, want suffix %q", i, f.Template[i].ID, want)
+		}
+	}
+
+	// Verify hard-gate steps have acceptance criteria.
+	for _, tmpl := range f.Template {
+		if tmpl.Acceptance == "" {
+			t.Errorf("Template %q has no acceptance criteria", tmpl.ID)
+		}
+	}
+}
+
+// TestResolve_MonorepoTDD verifies mol-polecat-work-monorepo-tdd resolves correctly:
+// the implement step is expanded into 5 TDD sub-steps.
+func TestResolve_MonorepoTDD(t *testing.T) {
+	data, err := GetEmbeddedFormulaContent("mol-polecat-work-monorepo-tdd")
+	if err != nil {
+		t.Fatalf("GetEmbeddedFormulaContent: %v", err)
+	}
+
+	f, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	resolved, err := Resolve(f, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	// mol-polecat-work-monorepo has 10 steps. Expanding "implement" with tdd-cycle
+	// (5 template steps) replaces 1 step with 5 → 14 total steps.
+	// Original: load-context, branch-setup, implement, self-review, build-check,
+	//           commit-changes, push-and-create-pr, validate-ci, handle-ai-reviews, submit-and-exit
+	// After: load-context, branch-setup, implement.write-tests, implement.verify-red,
+	//        implement.implement, implement.verify-green, implement.refactor,
+	//        self-review, build-check, commit-changes, push-and-create-pr,
+	//        validate-ci, handle-ai-reviews, submit-and-exit
+
+	// Check that expanded TDD steps exist.
+	tddStepIDs := []string{
+		"implement.write-tests",
+		"implement.verify-red",
+		"implement.implement",
+		"implement.verify-green",
+		"implement.refactor",
+	}
+
+	resolvedIDs := stepIDs(resolved)
+	for _, want := range tddStepIDs {
+		found := false
+		for _, got := range resolvedIDs {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing expected step %q in resolved formula; got %v", want, resolvedIDs)
+		}
+	}
+
+	// The first TDD step should depend on branch-setup (inheriting implement's needs).
+	writeTests := resolved.GetStep("implement.write-tests")
+	if writeTests == nil {
+		t.Fatal("implement.write-tests step not found")
+	}
+	if len(writeTests.Needs) != 1 || writeTests.Needs[0] != "branch-setup" {
+		t.Errorf("implement.write-tests.Needs = %v, want [branch-setup]", writeTests.Needs)
+	}
+
+	// self-review should depend on implement.refactor (the last TDD step).
+	selfReview := resolved.GetStep("self-review")
+	if selfReview == nil {
+		t.Fatal("self-review step not found")
+	}
+	if len(selfReview.Needs) != 1 || selfReview.Needs[0] != "implement.refactor" {
+		t.Errorf("self-review.Needs = %v, want [implement.refactor]", selfReview.Needs)
+	}
+
+	// Verify hard-gate steps have acceptance criteria propagated.
+	verifyRed := resolved.GetStep("implement.verify-red")
+	if verifyRed == nil {
+		t.Fatal("implement.verify-red step not found")
+	}
+	if verifyRed.Acceptance == "" {
+		t.Error("implement.verify-red should have acceptance criteria")
+	}
+
+	verifyGreen := resolved.GetStep("implement.verify-green")
+	if verifyGreen == nil {
+		t.Fatal("implement.verify-green step not found")
+	}
+	if verifyGreen.Acceptance == "" {
+		t.Error("implement.verify-green should have acceptance criteria")
+	}
+}
+
 // stepIDs returns the IDs of all steps in a formula for test diagnostics.
 func stepIDs(f *Formula) []string {
 	ids := make([]string, len(f.Steps))

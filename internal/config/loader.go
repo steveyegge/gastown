@@ -340,6 +340,9 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 		if local.Enabled {
 			result.Enabled = local.Enabled
 		}
+		if local.MergeStrategy != "" {
+			result.MergeStrategy = local.MergeStrategy
+		}
 		if local.OnConflict != "" {
 			result.OnConflict = local.OnConflict
 		}
@@ -360,6 +363,9 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 		}
 		if local.StaleClaimTimeout != "" {
 			result.StaleClaimTimeout = local.StaleClaimTimeout
+		}
+		if local.MergeStrategy != "" {
+			result.MergeStrategy = local.MergeStrategy
 		}
 	}
 	return result
@@ -1696,6 +1702,45 @@ func ResolveRoleAgentName(role, townRoot, rigPath string) (agentName string, isR
 		return townSettings.DefaultAgent, false
 	}
 	return "claude", false
+}
+
+// ResolveAgentConfigByName looks up an agent's RuntimeConfig by name without requiring
+// the agent binary to be installed. Checks custom agents first, then built-in presets.
+// Returns nil if the agent name is unknown. Used by hooks sync, which needs the preset's
+// hooks metadata regardless of whether the binary is installed on this machine.
+func ResolveAgentConfigByName(name, townRoot, rigPath string) *RuntimeConfig {
+	resolveConfigMu.Lock()
+	defer resolveConfigMu.Unlock()
+
+	var rigSettings *RigSettings
+	if rigPath != "" {
+		if rs, err := LoadRigSettings(RigSettingsPath(rigPath)); err == nil {
+			rigSettings = rs
+		}
+	}
+
+	townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		townSettings = NewTownSettings()
+	}
+
+	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
+	if rigPath != "" {
+		_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
+	}
+
+	return lookupAgentConfigIfExists(name, townSettings, rigSettings)
+}
+
+// HasExplicitRoleAgent returns true if role_agents (rig or town level)
+// explicitly maps this role to a named agent. This distinguishes between
+// "role_agents says use claude-sonnet" and "no role_agents entry, falling
+// back to defaults". When an explicit mapping exists, the TOML start_command
+// should be skipped in favor of BuildStartupCommandFromConfig which honors
+// the model/settings from the mapped agent definition.
+func HasExplicitRoleAgent(role, townRoot, rigPath string) bool {
+	_, isRoleSpecific := ResolveRoleAgentName(role, townRoot, rigPath)
+	return isRoleSpecific
 }
 
 // lookupAgentConfig looks up an agent by name.

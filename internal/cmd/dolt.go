@@ -944,6 +944,23 @@ func runDoltCleanup(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// BALK: If orphans are a large fraction of all databases, something is likely
+	// wrong with the orphan detection (e.g., metadata files not found). Refuse to
+	// proceed without --force to prevent accidentally dropping production databases. (gt-xvh)
+	allDBs, _ := doltserver.ListDatabases(townRoot)
+	if len(allDBs) > 0 && !doltCleanupForce {
+		orphanRatio := float64(len(orphans)) / float64(len(allDBs))
+		if orphanRatio > 0.5 && len(orphans) > 3 {
+			fmt.Printf("\n%s %d of %d databases (%.0f%%) flagged as orphans — this is suspicious.\n",
+				style.Bold.Render("!"), len(orphans), len(allDBs), orphanRatio*100)
+			fmt.Printf("  This usually means metadata.json files are missing or incorrect,\n")
+			fmt.Printf("  not that the databases are actually orphaned.\n\n")
+			fmt.Printf("  To proceed anyway: gt dolt cleanup --force\n")
+			fmt.Printf("  To diagnose: gt dolt list   (check owner column for mismatches)\n")
+			return fmt.Errorf("refusing to clean %d/%d databases without --force (safety check, gt-xvh)", len(orphans), len(allDBs))
+		}
+	}
+
 	// BALK: If there are too many orphans, SQL-based cleanup will take hours
 	// because each DROP DATABASE is a separate query against an overloaded server.
 	// Force the user to stop the server and clean the filesystem directly.

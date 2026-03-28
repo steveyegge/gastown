@@ -212,7 +212,7 @@ func collectGitCommits(townRoot, actor string, since time.Time) ([]AuditEntry, e
 			Type:      "commit",
 			Actor:     author,
 			Summary:   subject,
-			ID:        hash[:8],
+			ID:        shortHash(hash),
 		})
 	}
 

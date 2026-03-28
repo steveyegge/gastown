@@ -3016,6 +3016,9 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme *Theme, rig, worker
 	if err := t.SetAgentsBinding(session); err != nil {
 		return fmt.Errorf("setting agents binding: %w", err)
 	}
+	if err := t.SetRigMenuBinding(session); err != nil {
+		return fmt.Errorf("setting rig menu binding: %w", err)
+	}
 	if err := t.SetCycleBindings(session); err != nil {
 		return fmt.Errorf("setting cycle bindings: %w", err)
 	}
@@ -3166,7 +3169,8 @@ func (t *Tmux) isGTBinding(table, key string) bool {
 	}
 	// Unguarded form: direct GT commands set by EnsureBindingsOnSocket.
 	return strings.Contains(output, "gt agents menu") ||
-		strings.Contains(output, "gt feed --window")
+		strings.Contains(output, "gt feed --window") ||
+		strings.Contains(output, "gt rig menu")
 }
 
 // isGTBindingWithClient checks if the given key has a GT binding that includes
@@ -3362,11 +3366,13 @@ func (t *Tmux) SetCycleBindings(session string) error {
 // See: https://github.com/steveyegge/gastown/issues/13
 // See: https://github.com/steveyegge/gastown/issues/1548
 func (t *Tmux) SetFeedBinding(session string) error {
-	// Skip if already configured — preserves user's original fallback from first call
-	if t.isGTBinding("prefix", "a") {
+	pattern := sessionPrefixPattern()
+	// Skip if already configured with the current rig prefix pattern.
+	// Must re-bind if the pattern is stale (e.g., after gt rig add adds a new prefix).
+	if t.isGTBinding("prefix", "a") && t.isGTBindingCurrent("prefix", "a", pattern) {
 		return nil
 	}
-	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
+	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", pattern)
 	fallback := t.getKeyBinding("prefix", "a")
 	if fallback == "" {
 		// No prior binding — do nothing in non-GT sessions
@@ -3388,11 +3394,13 @@ func (t *Tmux) SetFeedBinding(session string) error {
 // press is silently ignored.
 // See: https://github.com/steveyegge/gastown/issues/1548
 func (t *Tmux) SetAgentsBinding(session string) error {
-	// Skip if already configured — preserves user's original fallback from first call
-	if t.isGTBinding("prefix", "g") {
+	pattern := sessionPrefixPattern()
+	// Skip if already configured with the current rig prefix pattern.
+	// Must re-bind if the pattern is stale (e.g., after gt rig add adds a new prefix).
+	if t.isGTBinding("prefix", "g") && t.isGTBindingCurrent("prefix", "g", pattern) {
 		return nil
 	}
-	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
+	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", pattern)
 	fallback := t.getKeyBinding("prefix", "g")
 	if fallback == "" {
 		// No prior binding — do nothing in non-GT sessions
@@ -3401,6 +3409,25 @@ func (t *Tmux) SetAgentsBinding(session string) error {
 	_, err := t.run("bind-key", "-T", "prefix", "g",
 		"if-shell", ifShell,
 		"run-shell 'gt agents menu'",
+		fallback)
+	return err
+}
+
+// SetRigMenuBinding configures C-b r to open the rig menu popup.
+// This runs `gt rig menu` which displays a tmux display-menu with all rigs
+// and per-rig actions (start, stop, park, etc.).
+func (t *Tmux) SetRigMenuBinding(session string) error {
+	if t.isGTBinding("prefix", "r") {
+		return nil
+	}
+	ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
+	fallback := t.getKeyBinding("prefix", "r")
+	if fallback == "" {
+		fallback = ":"
+	}
+	_, err := t.run("bind-key", "-T", "prefix", "r",
+		"if-shell", ifShell,
+		"run-shell 'gt rig menu'",
 		fallback)
 	return err
 }
@@ -3467,6 +3494,25 @@ func EnsureBindingsOnSocket(socket, townSocket string) error {
 			_, _ = t.run("bind-key", "-T", "prefix", "a",
 				"if-shell", ifShell,
 				"run-shell '"+feedCmd+"'",
+				fallback)
+		}
+	}
+
+	// Rig menu binding (prefix + r)
+	rigMenuCmd := "gt rig menu"
+	if townSocket != "" {
+		rigMenuCmd = fmt.Sprintf("GT_TOWN_SOCKET=%s gt rig menu", townSocket)
+	}
+	if !t.isGTBinding("prefix", "r") {
+		ifShell := fmt.Sprintf("echo '#{session_name}' | grep -Eq '%s'", sessionPrefixPattern())
+		fallback := t.getKeyBinding("prefix", "r")
+		if fallback == "" || fallback == ":" {
+			_, _ = t.run("bind-key", "-T", "prefix", "r",
+				"run-shell", rigMenuCmd)
+		} else {
+			_, _ = t.run("bind-key", "-T", "prefix", "r",
+				"if-shell", ifShell,
+				"run-shell '"+rigMenuCmd+"'",
 				fallback)
 		}
 	}

@@ -222,6 +222,8 @@ func (dm *dogMol) discoverSteps() {
 			dm.stepIDs["sync"] = child.ID
 		case strings.Contains(titleLower, "offsite"):
 			dm.stepIDs["offsite"] = child.ID
+		case strings.Contains(titleLower, "rotat"):
+			dm.stepIDs["rotate"] = child.ID
 		}
 	}
 }

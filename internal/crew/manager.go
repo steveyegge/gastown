@@ -878,14 +878,16 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 			_ = t.AcceptStartupDialogs(sessionID)
 		}
 
-		// Start background nudge-queue poller for agents that lack turn-boundary
-		// drain hooks (e.g., Gemini, Codex). Claude drains its queue via
-		// UserPromptSubmit hook so it doesn't need the poller.
-		if preset != nil && !preset.HasTurnBoundaryDrain {
-			if _, pollerErr := nudge.StartPoller(townRoot, sessionID); pollerErr != nil {
-				// Non-fatal — nudges may be delayed but the agent still works.
-				style.PrintWarning("could not start nudge poller for %s: %v", name, pollerErr)
-			}
+		// Start background nudge-queue poller for ALL agents (gt-dgf).
+		// Claude drains its queue via UserPromptSubmit hook, but that hook only
+		// fires when the agent submits a prompt. Idle agents (waiting at prompt
+		// for work) never submit, so queued nudges deadlock: agent waits for
+		// nudge, nudge waits for agent input. The poller breaks this cycle by
+		// polling every 10s and delivering when idle. Drain() is atomic so the
+		// poller and UserPromptSubmit hook coexist safely.
+		if _, pollerErr := nudge.StartPoller(townRoot, sessionID); pollerErr != nil {
+			// Non-fatal — nudges may be delayed but the agent still works.
+			style.PrintWarning("could not start nudge poller for %s: %v", name, pollerErr)
 		}
 	}
 

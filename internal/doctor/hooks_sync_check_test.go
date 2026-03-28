@@ -16,6 +16,23 @@ func scaffoldWorkspace(t *testing.T, roleAgents map[string]string) string {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
+	// Put dummy binaries for non-Claude role agents on PATH so agent
+	// resolution doesn't fall back to claude when the binary is missing.
+	if len(roleAgents) > 0 {
+		binDir := filepath.Join(tmpDir, "bin")
+		if err := os.MkdirAll(binDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		for _, agent := range roleAgents {
+			if agent != "" && agent != "claude" {
+				if err := os.WriteFile(filepath.Join(binDir, agent), []byte("#!/bin/sh\n"), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
+
 	townRoot := filepath.Join(tmpDir, "town")
 
 	// Required workspace structure

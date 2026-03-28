@@ -238,7 +238,7 @@ func runOrphans(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Found %d orphaned commit(s):\n\n", style.Warning.Render("⚠"), len(filtered))
 		for _, o := range filtered {
 			age := formatAge(o.Date)
-			fmt.Printf("  %s %s\n", style.Bold.Render(o.SHA[:8]), o.Subject)
+			fmt.Printf("  %s %s\n", style.Bold.Render(shortHash(o.SHA)), o.Subject)
 			fmt.Printf("    %s by %s\n\n", style.Dim.Render(age), o.Author)
 		}
 		fmt.Printf("%s\n", style.Dim.Render("To recover a commit:"))
@@ -604,7 +604,7 @@ func runOrphansKill(cmd *cobra.Command, args []string) error {
 	if len(filteredCommits) > 0 {
 		fmt.Printf("%s Found %d orphaned commit(s) to remove:\n\n", style.Warning.Render("⚠"), len(filteredCommits))
 		for _, o := range filteredCommits {
-			fmt.Printf("  %s %s\n", style.Bold.Render(o.SHA[:8]), o.Subject)
+			fmt.Printf("  %s %s\n", style.Bold.Render(shortHash(o.SHA)), o.Subject)
 			fmt.Printf("    %s by %s\n\n", style.Dim.Render(formatAge(o.Date)), o.Author)
 		}
 	} else if len(commitOrphans) > 0 {

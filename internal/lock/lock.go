@@ -220,17 +220,24 @@ func (l *Lock) write(sessionID string) error {
 	return nil
 }
 
-// FindAllLocks scans a directory tree for agent.lock files.
+// FindAllLocks scans for agent.lock files, skipping large internal
+// directories (.dolt-data, .git) that are extremely slow to walk on
+// Docker bind mounts (macOS VirtioFS).
 // Returns a map of worker directory -> LockInfo.
 func FindAllLocks(root string) (map[string]*LockInfo, error) {
 	locks := make(map[string]*LockInfo)
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // Skip errors
+			return nil
 		}
 
+		// Skip large internal directories that never contain agent locks.
 		if info.IsDir() {
+			name := info.Name()
+			if name == ".dolt-data" || name == ".dolt-backup" || name == ".git" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
