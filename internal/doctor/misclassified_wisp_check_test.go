@@ -15,21 +15,34 @@ import (
 func TestFixWorkDir_HQ(t *testing.T) {
 	townRoot := t.TempDir()
 
-	check := NewCheckMisclassifiedWisps()
-	// Inject a misplaced ephemeral with rigName "hq" (as Dolt path would produce).
-	check.misclassified = []misclassifiedWisp{
-		{rigName: "hq", id: "hq-test-event", title: "test event", reason: "ephemeral bead in issues table"},
-	}
-
-	ctx := &CheckContext{TownRoot: townRoot}
-	// Fix will fail (no bd binary in test), but we can verify the workDir
-	// derivation by checking that it does NOT try to use townRoot/hq.
-	_ = check.Fix(ctx)
-
-	// The key assertion: "hq" should resolve to townRoot, not townRoot/hq.
+	got := resolveMisclassifiedWispWorkDir(townRoot, misclassifiedWisp{rigName: "hq"})
 	hqPath := filepath.Join(townRoot, "hq")
 	if hqPath == townRoot {
 		t.Fatal("test setup error: townRoot should not end in /hq")
+	}
+	if got != townRoot {
+		t.Fatalf("resolveMisclassifiedWispWorkDir(%q, hq) = %q, want %q", townRoot, got, townRoot)
+	}
+}
+
+func TestFixWorkDir_RoutedRig(t *testing.T) {
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix":"hq-","path":"."}
+{"prefix":"sw-","path":"sallaWork/mayor/rig"}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	want := filepath.Join(townRoot, "sallaWork/mayor/rig")
+	got := resolveMisclassifiedWispWorkDir(townRoot, misclassifiedWisp{rigName: "sw"})
+	if got != want {
+		t.Fatalf("resolveMisclassifiedWispWorkDir(%q, sw) = %q, want %q", townRoot, got, want)
 	}
 }
 

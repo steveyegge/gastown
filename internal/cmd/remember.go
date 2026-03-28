@@ -15,10 +15,27 @@ import (
 
 const memoryKeyPrefix = "memory."
 
+// validMemoryTypes are the recognized memory type categories.
+// Typed memories are stored as memory.<type>.<key> in the kv store.
+// Legacy untyped memories (memory.<key>) are treated as "general".
+var validMemoryTypes = map[string]string{
+	"feedback":  "Guidance or corrections from users — behavioral rules for future work",
+	"project":   "Ongoing work context, goals, deadlines, decisions",
+	"user":      "Info about the user's role, preferences, expertise",
+	"reference": "Pointers to external resources (URLs, tools, dashboards)",
+	"general":   "Uncategorized memories (default)",
+}
+
+// memoryTypeOrder defines the injection priority during gt prime.
+// Feedback first (behavioral corrections), then user context, then the rest.
+var memoryTypeOrder = []string{"feedback", "user", "project", "reference", "general"}
+
 var rememberKey string
+var rememberType string
 
 func init() {
 	rememberCmd.Flags().StringVar(&rememberKey, "key", "", "Explicit key slug (default: auto-generated from content)")
+	rememberCmd.Flags().StringVar(&rememberType, "type", "", "Memory type: feedback, project, user, reference (default: general)")
 	rememberCmd.GroupID = GroupWork
 	rootCmd.AddCommand(rememberCmd)
 }
@@ -34,10 +51,17 @@ This replaces filesystem-based MEMORY.md with bead-backed storage.
 The key is auto-generated from the content if not specified.
 Use --key to provide an explicit slug for easy retrieval.
 
+Memory types help organize memories and prioritize injection:
+  feedback   Guidance or corrections from users
+  project    Ongoing work context, goals, deadlines
+  user       Info about the user's role and preferences
+  reference  Pointers to external resources
+
 Examples:
   gt remember "Refinery uses worktree, cannot checkout main"
-  gt remember --key refinery-worktree "Refinery uses worktree, cannot checkout main"
-  gt remember "Always use --stdin for multi-line mail"`,
+  gt remember --type feedback "Don't mock the database in integration tests"
+  gt remember --type user --key senior-go-dev "User has 10 years Go experience"
+  gt remember --key refinery-worktree "Refinery uses worktree, cannot checkout main"`,
 	Args: cobra.ExactArgs(1),
 	RunE: runRemember,
 }
@@ -48,6 +72,17 @@ func runRemember(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("memory content cannot be empty")
 	}
 
+	// Validate --type if provided
+	memType := strings.ToLower(strings.TrimSpace(rememberType))
+	if memType != "" {
+		if _, ok := validMemoryTypes[memType]; !ok {
+			return fmt.Errorf("invalid memory type %q — valid types: feedback, project, user, reference", memType)
+		}
+	}
+	if memType == "" {
+		memType = "general"
+	}
+
 	key := rememberKey
 	if key == "" {
 		key = autoKey(content)
@@ -56,7 +91,7 @@ func runRemember(cmd *cobra.Command, args []string) error {
 	// Sanitize key: lowercase, hyphens instead of spaces, strip dots
 	key = sanitizeKey(key)
 
-	fullKey := memoryKeyPrefix + key
+	fullKey := memoryKeyPrefix + memType + "." + key
 
 	// Check if key already exists
 	existing, _ := bdKvGet(fullKey)
@@ -69,8 +104,32 @@ func runRemember(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("storing memory: %w", err)
 	}
 
-	fmt.Printf("%s %s memory: %s\n", style.Success.Render("✓"), verb, style.Bold.Render(key))
+	displayKey := key
+	if memType != "general" {
+		displayKey = memType + "/" + key
+	}
+	fmt.Printf("%s %s memory: %s\n", style.Success.Render("✓"), verb, style.Bold.Render(displayKey))
 	return nil
+}
+
+// parseMemoryKey extracts the type and short key from a full kv key.
+// Handles both typed keys (memory.<type>.<key>) and legacy keys (memory.<key>).
+func parseMemoryKey(kvKey string) (memType, shortKey string) {
+	rest := strings.TrimPrefix(kvKey, memoryKeyPrefix)
+	if rest == "" {
+		return "general", ""
+	}
+
+	// Check if first segment is a known type
+	if dotIdx := strings.Index(rest, "."); dotIdx > 0 {
+		candidate := rest[:dotIdx]
+		if _, ok := validMemoryTypes[candidate]; ok {
+			return candidate, rest[dotIdx+1:]
+		}
+	}
+
+	// Legacy untyped memory
+	return "general", rest
 }
 
 // autoKey generates a short key from content using first few meaningful words.

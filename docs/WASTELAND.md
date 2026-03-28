@@ -56,6 +56,12 @@ your rig handle and the destination for your fork of the commons database.
 
 ## Joining the Wasteland
 
+Before joining the wasteland, ensure your dolt is authenticated:
+
+```
+dolt login
+```
+
 From your Gas Town workspace directory:
 
 ```bash

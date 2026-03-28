@@ -25,6 +25,14 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
+// shortSHA returns at most 8 characters of a SHA for display.
+func shortSHA(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
+}
+
 // DefaultStaleClaimTimeout is the default duration after which a claimed MR
 // is considered abandoned and eligible for re-claim. This is conservative
 // to avoid re-claiming MRs that are legitimately processing long test suites.
@@ -47,6 +55,21 @@ func isClaimStale(updatedAt string, timeout time.Duration) (stale bool, parseErr
 }
 
 // GateConfig defines a single quality gate command.
+// GatePhase controls when a gate runs in the merge pipeline.
+type GatePhase string
+
+const (
+	// GatePhasePreMerge runs the gate before the squash merge (default).
+	// The gate validates the source branch on the target baseline.
+	GatePhasePreMerge GatePhase = "pre-merge"
+
+	// GatePhasePostSquash runs the gate after the squash merge but before push.
+	// The gate validates the actual combined code, catching issues that only
+	// manifest in the merged result (broken imports, boot failures, missing
+	// templates). On failure, the merge is reset.
+	GatePhasePostSquash GatePhase = "post-squash"
+)
+
 type GateConfig struct {
 	// Cmd is the shell command to execute.
 	Cmd string `json:"cmd"`
@@ -54,6 +77,12 @@ type GateConfig struct {
 	// Timeout is the maximum time the gate command may run.
 	// Zero means no timeout (inherits context deadline).
 	Timeout time.Duration `json:"timeout"`
+
+	// Phase controls when this gate runs: "pre-merge" (default) or "post-squash".
+	// Pre-merge gates run before the squash merge on the source branch.
+	// Post-squash gates run after the squash merge on the combined result,
+	// before pushing. On post-squash failure, the merge is reset.
+	Phase GatePhase `json:"phase"`
 }
 
 // GateResult holds the outcome of a single gate execution.
@@ -124,6 +153,12 @@ type MergeQueueConfig struct {
 	// before escalation to Mayor.
 	MaxRetryCount int `json:"max_retry_count"`
 
+	// AutoPush controls whether the refinery pushes to origin after merging.
+	// When false, the refinery merges locally but does not push — the user
+	// or a separate process handles pushing. Useful to avoid triggering
+	// CI/CD builds (e.g. Vercel) on every merge.
+	AutoPush bool `json:"auto_push"`
+
 	// Batch holds configuration for the batch-then-bisect merge queue.
 	// When nil or MaxBatchSize <= 1, batching is disabled and MRs process sequentially.
 	Batch *BatchConfig `json:"batch,omitempty"`
@@ -145,6 +180,7 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 		StaleClaimWarningAfter:  2 * time.Hour,
 		StaleClaimCriticalAfter: 6 * time.Hour,
 		MaxRetryCount:           5,
+		AutoPush:                true,
 	}
 }
 
@@ -298,6 +334,7 @@ func (e *Engineer) LoadConfig() error {
 		StaleClaimTimeout    *string                    `json:"stale_claim_timeout"`
 		Gates                map[string]*gateConfigRaw  `json:"gates"`
 		GatesParallel        *bool                      `json:"gates_parallel"`
+		AutoPush             *bool                      `json:"auto_push"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -359,11 +396,22 @@ func (e *Engineer) LoadConfig() error {
 				}
 				gc.Timeout = dur
 			}
+			switch raw.Phase {
+			case "", "pre-merge":
+				gc.Phase = GatePhasePreMerge
+			case "post-squash":
+				gc.Phase = GatePhasePostSquash
+			default:
+				return fmt.Errorf("gate %q has invalid phase %q: must be \"pre-merge\" or \"post-squash\"", name, raw.Phase)
+			}
 			e.config.Gates[name] = gc
 		}
 	}
 	if mqRaw.GatesParallel != nil {
 		e.config.GatesParallel = *mqRaw.GatesParallel
+	}
+	if mqRaw.AutoPush != nil {
+		e.config.AutoPush = *mqRaw.AutoPush
 	}
 
 	return nil
@@ -374,6 +422,7 @@ func (e *Engineer) LoadConfig() error {
 type gateConfigRaw struct {
 	Cmd     string `json:"cmd"`
 	Timeout string `json:"timeout"`
+	Phase   string `json:"phase"`
 }
 
 // Config returns the current merge queue configuration.
@@ -390,10 +439,23 @@ type ProcessResult struct {
 	TestsFailed    bool
 	SlotTimeout    bool // Merge slot contention timeout (distinct from build/test failure)
 	BranchNotFound bool // Source branch no longer exists (e.g. cleaned up after cherry-pick)
+	NoMerge        bool // Source issue has no_merge flag — intentionally blocked, not a failure
 }
 
 // doMerge performs the actual git merge operation.
 func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue string, skipGates ...bool) ProcessResult {
+	// GH#2778: Check no_merge flag on source issue before merging. The polecat
+	// normally skips MR creation when no_merge is set, but if an MR is created
+	// manually (e.g., gh pr create) the refinery would otherwise auto-merge it.
+	if sourceIssue != "" {
+		if si, err := e.beads.Show(sourceIssue); err == nil && si != nil {
+			if af := beads.ParseAttachmentFields(si); af != nil && af.NoMerge {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Source issue %s has no_merge=true — skipping merge\n", sourceIssue)
+				return ProcessResult{NoMerge: true, Error: "no_merge flag set on source issue"}
+			}
+		}
+	}
+
 	// Step 1: Verify source branch exists locally (shared .repo.git with polecats)
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Checking local branch %s...\n", branch)
 	exists, err := e.git.BranchExists(branch)
@@ -465,7 +527,7 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 			if sc.NewSHA == "" {
 				continue // Submodule removed, nothing to push
 			}
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Pushing submodule %s (commit %s)...\n", sc.Path, sc.NewSHA[:8])
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Pushing submodule %s (commit %s)...\n", sc.Path, shortSHA(sc.NewSHA))
 			if pushErr := e.git.PushSubmoduleCommit(sc.Path, sc.NewSHA, "origin"); pushErr != nil {
 				return ProcessResult{
 					Success: false,
@@ -535,6 +597,19 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		}
 	}
 
+	// Step 5.5: Run post-squash gates on the merged result.
+	// These validate the actual combined code before it goes anywhere.
+	// On failure, reset the merge to undo the local squash commit.
+	if !shouldSkipGates {
+		postResult := e.runGatesForPhase(ctx, GatePhasePostSquash)
+		if !postResult.Success {
+			if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after post-squash gate failure: %v\n", target, resetErr)
+			}
+			return postResult
+		}
+	}
+
 	// Step 6: Get the merge commit SHA
 	mergeCommit, err := e.git.Rev("HEAD")
 	if err != nil {
@@ -544,54 +619,58 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		}
 	}
 
-	// Step 7: Acquire merge slot before push to serialize writes to the default branch.
-	// Only serialize pushes to the rig's default branch (typically main).
-	// Integration-branch and feature-branch pushes don't need serialization.
-	var pushHolder string
-	if target == e.rig.DefaultBranch() {
-		var slotErr error
-		pushHolder, slotErr = e.acquireMainPushSlot(ctx)
-		if slotErr != nil {
-			// Reset the checked-out target branch to origin to undo the local squash commit.
-			// ResetHard is required because target is the current branch (checked out in Step 2).
-			if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
-				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after slot failure: %v\n", target, resetErr)
-			}
-			// Only classify as SlotTimeout for actual contention (retries exhausted).
-			// Infrastructure errors (beads down, permission errors) should surface
-			// through the normal failure/notification path for operator visibility.
-			return ProcessResult{
-				Success:     false,
-				SlotTimeout: errors.Is(slotErr, errMergeSlotTimeout),
-				Error:       fmt.Sprintf("failed to acquire merge slot before push: %v", slotErr),
-			}
-		}
-		defer func() {
-			// pushHolder is empty when the self-conflict bypass fires — conflict-resolution
-			// owns the slot, so we must not release it here.
-			if pushHolder != "" {
-				if releaseErr := e.mergeSlotRelease(pushHolder); releaseErr != nil {
-					_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to release merge slot for push (%s): %v\n", pushHolder, releaseErr)
+	// Step 7-8: Push to origin (when auto_push is enabled).
+	if e.config.AutoPush {
+		// Acquire merge slot before push to serialize writes to the default branch.
+		// Only serialize pushes to the rig's default branch (typically main).
+		// Integration-branch and feature-branch pushes don't need serialization.
+		var pushHolder string
+		if target == e.rig.DefaultBranch() {
+			var slotErr error
+			pushHolder, slotErr = e.acquireMainPushSlot(ctx)
+			if slotErr != nil {
+				// Reset the checked-out target branch to origin to undo the local squash commit.
+				// ResetHard is required because target is the current branch (checked out in Step 2).
+				if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
+					_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after slot failure: %v\n", target, resetErr)
+				}
+				// Only classify as SlotTimeout for actual contention (retries exhausted).
+				// Infrastructure errors (beads down, permission errors) should surface
+				// through the normal failure/notification path for operator visibility.
+				return ProcessResult{
+					Success:     false,
+					SlotTimeout: errors.Is(slotErr, errMergeSlotTimeout),
+					Error:       fmt.Sprintf("failed to acquire merge slot before push: %v", slotErr),
 				}
 			}
-		}()
+			defer func() {
+				// pushHolder is empty when the self-conflict bypass fires — conflict-resolution
+				// owns the slot, so we must not release it here.
+				if pushHolder != "" {
+					if releaseErr := e.mergeSlotRelease(pushHolder); releaseErr != nil {
+						_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to release merge slot for push (%s): %v\n", pushHolder, releaseErr)
+					}
+				}
+			}()
+		}
+
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Pushing to origin/%s...\n", target)
+		if err := e.git.Push("origin", target, false); err != nil {
+			// Reset the checked-out target branch to undo the local squash commit.
+			// Without this, the next retry could see stale local state from the failed push.
+			if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after push failure: %v\n", target, resetErr)
+			}
+			return ProcessResult{
+				Success: false,
+				Error:   fmt.Sprintf("failed to push to origin: %v", err),
+			}
+		}
+	} else {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Auto-push disabled, skipping push to origin/%s\n", target)
 	}
 
-	// Step 8: Push to origin
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Pushing to origin/%s...\n", target)
-	if err := e.git.Push("origin", target, false); err != nil {
-		// Reset the checked-out target branch to undo the local squash commit.
-		// Without this, the next retry could see stale local state from the failed push.
-		if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after push failure: %v\n", target, resetErr)
-		}
-		return ProcessResult{
-			Success: false,
-			Error:   fmt.Sprintf("failed to push to origin: %v", err),
-		}
-	}
-
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Successfully merged: %s\n", mergeCommit[:8])
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Successfully merged: %s\n", shortSHA(mergeCommit))
 	return ProcessResult{
 		Success:     true,
 		MergeCommit: mergeCommit,
@@ -771,11 +850,26 @@ func (e *Engineer) runGate(ctx context.Context, name string, gate *GateConfig) G
 	}
 }
 
-// runGates executes all configured quality gates and returns a ProcessResult.
+// runGates executes all pre-merge gates (backward-compatible entry point).
+func (e *Engineer) runGates(ctx context.Context) ProcessResult {
+	return e.runGatesForPhase(ctx, GatePhasePreMerge)
+}
+
+// runGatesForPhase executes gates matching the given phase.
 // Gates run in parallel if GatesParallel is true; otherwise sequentially.
 // Any single gate failure means overall failure.
-func (e *Engineer) runGates(ctx context.Context) ProcessResult {
-	gates := e.config.Gates
+func (e *Engineer) runGatesForPhase(ctx context.Context, phase GatePhase) ProcessResult {
+	// Filter gates for this phase. Empty phase is treated as pre-merge (default).
+	gates := make(map[string]*GateConfig)
+	for name, gc := range e.config.Gates {
+		gatePhase := gc.Phase
+		if gatePhase == "" {
+			gatePhase = GatePhasePreMerge
+		}
+		if gatePhase == phase {
+			gates[name] = gc
+		}
+	}
 	if len(gates) == 0 {
 		return ProcessResult{Success: true}
 	}
@@ -787,11 +881,12 @@ func (e *Engineer) runGates(ctx context.Context) ProcessResult {
 	}
 	sort.Strings(names)
 
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Running %d quality gate(s) (parallel=%v)\n", len(names), e.config.GatesParallel)
+	parallel := e.config.GatesParallel && phase == GatePhasePreMerge // post-squash always sequential
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Running %d %s gate(s) (parallel=%v)\n", len(names), phase, parallel)
 
 	var results []GateResult
 
-	if e.config.GatesParallel {
+	if parallel {
 		results = make([]GateResult, len(names))
 		var wg sync.WaitGroup
 		for i, name := range names {
@@ -1024,10 +1119,26 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 		return
 	}
 
-	// Branch-not-found means the remote branch was cleaned up before we could process it
-	// (e.g. cherry-picked to target directly). Skip polecat nudge — the polecat is gone.
+	// No-merge is intentional — the source issue has no_merge=true. Not a failure.
+	// No polecat or mayor notification needed; the MR is simply dequeued.
+	if result.NoMerge {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] MR %s: no_merge flag set on source issue, dequeued\n", mr.ID)
+		return
+	}
+
+	// Branch-not-found: the remote branch doesn't exist. This can mean either
+	// the branch was cleanly cherry-picked to target, OR the polecat's work was
+	// lost (e.g., worktree in /tmp wiped by reboot before gt done pushed).
+	// Escalate to mayor so lost work can be re-dispatched (gas-556).
 	if result.BranchNotFound {
-		_, _ = fmt.Fprintf(e.output, "[Engineer] MR %s: branch %s no longer exists, skipping (queue continues)\n", mr.ID, mr.Branch)
+		_, _ = fmt.Fprintf(e.output, "[Engineer] MR %s: branch %s not found on remote — escalating to mayor (possible work loss)\n", mr.ID, mr.Branch)
+		mayorMsg := fmt.Sprintf("BRANCH_MISSING: MR %s branch=%s issue=%s worker=%s — branch not on origin, work may be lost; re-dispatch if needed",
+			mr.ID, mr.Branch, mr.SourceIssue, mr.Worker)
+		mayorCmd := exec.Command("gt", "nudge", "mayor/", mayorMsg)
+		mayorCmd.Dir = e.workDir
+		if err := mayorCmd.Run(); err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to nudge mayor about missing branch: %v\n", err)
+		}
 		return
 	}
 
@@ -1182,7 +1293,7 @@ The Refinery will automatically retry the merge after you force-push.`,
 		mr.Branch,
 		mr.ID,
 		mr.Branch,
-		mr.Target, mainSHA[:8],
+		mr.Target, shortSHA(mainSHA),
 		mr.SourceIssue,
 		retryCount,
 		mr.Branch,
@@ -1336,6 +1447,11 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 			continue // Skip issues without MR fields
 		}
 
+		// Filter by rig — wisps are shared across all rigs (GH#2718).
+		if fields.Rig != "" && !strings.EqualFold(fields.Rig, e.rig.Name) {
+			continue
+		}
+
 		// Skip if already assigned, unless claim is stale (allows re-claim after crash).
 		// NOTE: Only one refinery runs per rig (enforced by ErrAlreadyRunning in
 		// manager.go), so concurrent re-claim race conditions are not a concern.
@@ -1392,6 +1508,11 @@ func (e *Engineer) ListBlockedMRs() ([]*MRInfo, error) {
 			continue
 		}
 
+		// Filter by rig — wisps are shared across all rigs (GH#2718).
+		if fields.Rig != "" && !strings.EqualFold(fields.Rig, e.rig.Name) {
+			continue
+		}
+
 		mr := issueToMRInfo(issue, fields)
 		mr.BlockedBy = blockedBy
 		mrs = append(mrs, mr)
@@ -1426,6 +1547,11 @@ func (e *Engineer) ListAllOpenMRs() ([]*MRInfo, error) {
 			continue
 		}
 
+		// Filter by rig — wisps are shared across all rigs (GH#2718).
+		if fields.Rig != "" && !strings.EqualFold(fields.Rig, e.rig.Name) {
+			continue
+		}
+
 		mr := issueToMRInfo(issue, fields)
 
 		// Check branch existence (local + remote tracking refs)
@@ -1451,7 +1577,17 @@ func (e *Engineer) ListQueueAnomalies(now time.Time) ([]*MRAnomaly, error) {
 		return nil, fmt.Errorf("querying beads for merge-requests: %w", err)
 	}
 
-	return detectQueueAnomalies(issues, now, e.config.StaleClaimWarningAfter, func(branch string) (bool, bool, error) {
+	// Filter by rig — wisps are shared across all rigs (GH#2718).
+	filtered := make([]*beads.Issue, 0, len(issues))
+	for _, issue := range issues {
+		fields := beads.ParseMRFields(issue)
+		if fields != nil && fields.Rig != "" && !strings.EqualFold(fields.Rig, e.rig.Name) {
+			continue
+		}
+		filtered = append(filtered, issue)
+	}
+
+	return detectQueueAnomalies(filtered, now, e.config.StaleClaimWarningAfter, func(branch string) (bool, bool, error) {
 		localExists, err := e.git.BranchExists(branch)
 		if err != nil {
 			return false, false, err

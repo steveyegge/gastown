@@ -359,6 +359,9 @@ func TestEnsureCustomTypes(t *testing.T) {
 
 func TestEnsureCustomTypes_VerifyPersistence(t *testing.T) {
 	t.Run("sentinel not written when db verify fails", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("test uses Unix shell script mock for bd")
+		}
 		// Install a mock bd that succeeds on "config set" but returns empty
 		// on "config get types.custom" — simulating a silent write failure.
 		binDir := t.TempDir()

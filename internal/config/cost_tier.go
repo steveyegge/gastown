@@ -36,10 +36,8 @@ func IsValidTier(tier string) bool {
 // These are the only roles that ApplyCostTier modifies — any other custom RoleAgents
 // entries (e.g., user-defined roles or non-Claude agents for non-tier roles) are preserved.
 //
-// Excluded roles: "dog" (watchdog/monitoring utility — always uses Haiku via early return
-// in resolveRoleAgentConfigCore) and "boot" (deacon bootstrap sub-role — transient,
-// always uses default agent).
-var TierManagedRoles = []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew"}
+// "boot" and "dog" are utility roles that should always use the cheapest model.
+var TierManagedRoles = []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew", "boot", "dog"}
 
 // CostTierRoleAgents returns the role_agents mapping for a given tier.
 // All tiers explicitly map every tier-managed role. Standard tier maps all roles
@@ -49,6 +47,7 @@ func CostTierRoleAgents(tier CostTier) map[string]string {
 	switch tier {
 	case TierStandard:
 		// Explicit mapping for all managed roles — empty value means "use default (opus)"
+		// Boot and dog are utility roles — always haiku even on standard tier
 		return map[string]string{
 			"mayor":    "",
 			"deacon":   "",
@@ -56,6 +55,8 @@ func CostTierRoleAgents(tier CostTier) map[string]string {
 			"refinery": "",
 			"polecat":  "",
 			"crew":     "",
+			"boot":     "claude-haiku",
+			"dog":      "claude-haiku",
 		}
 	case TierEconomy:
 		return map[string]string{
@@ -65,6 +66,8 @@ func CostTierRoleAgents(tier CostTier) map[string]string {
 			"refinery": "claude-sonnet",
 			"polecat":  "", // use default (opus)
 			"crew":     "", // use default (opus)
+			"boot":     "claude-haiku",
+			"dog":      "claude-haiku",
 		}
 	case TierBudget:
 		return map[string]string{
@@ -74,6 +77,8 @@ func CostTierRoleAgents(tier CostTier) map[string]string {
 			"refinery": "claude-haiku",
 			"polecat":  "claude-sonnet",
 			"crew":     "claude-sonnet",
+			"boot":     "claude-haiku",
+			"dog":      "claude-haiku",
 		}
 	default:
 		return nil
@@ -224,7 +229,7 @@ func FormatTierRoleTable(tier CostTier) string {
 		return ""
 	}
 
-	roles := []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew"}
+	roles := []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew", "boot", "dog"}
 	var lines []string
 	for _, role := range roles {
 		agent := roleAgents[role]

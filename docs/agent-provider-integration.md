@@ -166,9 +166,51 @@ Every field from the `AgentPresetInfo` struct in `internal/config/agents.go`:
 }
 ```
 
-### Activating the preset
+### Built-in preset: GitHub Copilot CLI
 
-Once the JSON file exists, configure a rig (or the whole town) to use it:
+`copilot` ships as a built-in preset — no JSON file needed. It uses the `--yolo` flag for
+autonomous mode and flag-style session resume. Copilot CLI supports full executable lifecycle
+hooks via `.github/hooks/gastown.json`:
+
+```json
+{
+  "name": "copilot",
+  "command": "copilot",
+  "args": ["--yolo"],
+  "process_names": ["copilot"],
+  "resume_flag": "--resume",
+  "resume_style": "flag",
+  "ready_delay_ms": 5000,
+  "hooks_provider": "copilot",
+  "hooks_dir": ".github/hooks",
+  "hooks_settings_file": "gastown.json",
+  "instructions_file": "AGENTS.md"
+}
+```
+
+Gas Town provisions `.github/hooks/gastown.json` in the agent's working directory with the
+standard lifecycle hooks (`sessionStart`, `userPromptSubmitted`, `preToolUse`, `sessionEnd`).
+This is the same hook events as Claude Code, just in Copilot's JSON format.
+
+> **Note on readiness detection**: Copilot CLI doesn't emit a detectable prompt prefix, so
+> Gas Town uses a 5-second delay instead of prompt-based detection. Sessions take slightly
+> longer to become ready than Claude.
+
+> **Enterprise requirement**: Copilot CLI must be enabled at two levels before use:
+> 1. Enterprise → Settings → AI controls → Copilot → **"Copilot in the CLI" = Enabled**
+> 2. Org → Settings → Copilot → Policies → **"Copilot in the CLI" = Enabled**
+>
+> Users also need a Copilot seat assigned. See [GitHub Copilot in the CLI](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line).
+
+To activate:
+```bash
+gt config default-agent copilot        # Set as town default
+gt start --agent copilot               # Or pass per-command
+```
+
+### Activating a custom preset
+
+Once a JSON file exists, configure a rig (or the whole town) to use it:
 
 ```json
 // In ~/gt/<rig>/settings/config.json
@@ -347,7 +389,7 @@ delivery mechanism adapts to the agent's plugin API.
 If your agent doesn't support executable hooks but reads an instructions/context
 file, Gas Town can install a markdown file with startup instructions.
 
-Reference: `internal/copilot/plugin/gastown-instructions.md`
+Reference: `internal/hooks/templates/copilot/copilot-instructions.md`
 
 ```markdown
 # Gas Town Agent Context
@@ -365,6 +407,10 @@ This loads your full role context, mail, and pending work.
 
 Set `hooks_informational: true` in the preset. Gas Town will then send
 `gt prime` via tmux nudge as a fallback (since hooks won't run automatically).
+
+> **Note**: GitHub Copilot CLI previously used Pattern C, but now supports full
+> executable lifecycle hooks (Pattern B equivalent, using its own JSON format).
+> See the built-in Copilot preset section above for current configuration.
 
 ### How Gas Town chooses the fallback strategy
 

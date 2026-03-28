@@ -10,7 +10,10 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
@@ -73,6 +76,7 @@ var (
 	handoffCycle      bool
 	handoffReason     string
 	handoffNoGitCheck bool
+	handoffYes        bool
 )
 
 func init() {
@@ -86,6 +90,7 @@ func init() {
 	handoffCmd.Flags().BoolVar(&handoffCycle, "cycle", false, "Auto-cycle session (for PreCompact hooks that want full session replacement)")
 	handoffCmd.Flags().StringVar(&handoffReason, "reason", "", "Reason for handoff (e.g., 'compaction', 'idle')")
 	handoffCmd.Flags().BoolVar(&handoffNoGitCheck, "no-git-check", false, "Skip git workspace cleanliness check")
+	handoffCmd.Flags().BoolVarP(&handoffYes, "yes", "y", false, "Skip confirmation prompt (for automation and scripting)")
 	rootCmd.AddCommand(handoffCmd)
 }
 
@@ -152,6 +157,16 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		doneCmd.Stdout = os.Stdout
 		doneCmd.Stderr = os.Stderr
 		return doneCmd.Run()
+	}
+
+	// Prompt for confirmation unless --yes/-y was passed or stdin is not a TTY.
+	// Only interactive (human) sessions get prompted; agent automation proceeds
+	// without blocking on stdin (gas-6z0).
+	if !handoffYes && !handoffDryRun && term.IsTerminal(int(os.Stdin.Fd())) {
+		if !promptYesNo("Ready to hand off? This will restart the session.") {
+			fmt.Println("Handoff canceled.")
+			return nil
+		}
 	}
 
 	// Enforce minimum handoff cooldown to prevent tight restart loops (gt-058d).
@@ -790,6 +805,17 @@ func buildRestartCommandWithOpts(sessionName string, opts buildRestartCommandOpt
 		} else {
 			beacon = "Your account was rotated to avoid a rate limit. Continue your previous task."
 		}
+	} else if isPatrolRole(simpleRole) {
+		// Patrol roles (refinery, witness, deacon) must re-enter their patrol
+		// loop on handoff, not "wait for instructions." Without this, idle
+		// patrol agents cycle through handoff→prime→no-work→handoff burning
+		// CPU and tokens indefinitely. The patrol instruction ensures they
+		// reach the await-event idle state in their burn-or-loop step.
+		beacon = session.BuildStartupPrompt(session.BeaconConfig{
+			Recipient: identity.BeaconAddress(),
+			Sender:    "self",
+			Topic:     "patrol",
+		}, "Run `"+cli.Name()+" prime --hook` and begin patrol.")
 	} else {
 		beacon = session.FormatStartupBeacon(session.BeaconConfig{
 			Recipient: identity.BeaconAddress(),
@@ -1327,9 +1353,18 @@ func looksLikeBeadID(s string) bool {
 	}
 
 	// Check rest starts with alphanumeric and contains only alphanumeric, dots, hyphens
-	first := rest[0]
-	if !((first >= 'a' && first <= 'z') || (first >= '0' && first <= '9')) {
-		return false
+	for i, c := range rest {
+		if i == 0 {
+			// First char must be alphanumeric
+			if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+				return false
+			}
+		} else {
+			// Subsequent chars: alphanumeric, dots, hyphens
+			if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '-') {
+				return false
+			}
+		}
 	}
 
 	return true
@@ -1637,4 +1672,15 @@ func recordHandoffTime() {
 	_ = os.MkdirAll(runtimeDir, 0755)
 	tsPath := filepath.Join(runtimeDir, constants.FileLastHandoffTS)
 	_ = os.WriteFile(tsPath, []byte(fmt.Sprintf("%d", time.Now().Unix())), 0644)
+}
+
+// isPatrolRole returns true if the role runs a patrol loop (refinery, witness, deacon).
+// Patrol roles must re-enter their patrol molecule on handoff rather than
+// "waiting for instructions," which leads to idle CPU burn.
+func isPatrolRole(role string) bool {
+	switch role {
+	case "refinery", "witness", "deacon":
+		return true
+	}
+	return false
 }

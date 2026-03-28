@@ -102,6 +102,16 @@ type TownSettings struct {
 	// These were previously hardcoded as Go constants throughout the codebase.
 	// All values are optional — omitted values use compiled-in defaults.
 	Operational *OperationalConfig `json:"operational,omitempty"`
+
+	// DisabledPatrols lists patrol names to disable at the town level.
+	// This provides a simple way to turn off individual daemon patrol dogs
+	// without editing mayor/daemon.json. Patrol names match the keys used
+	// in daemon.json patrols section (e.g., "deacon", "witness", "refinery",
+	// "doctor_dog", "compactor_dog", "checkpoint_dog", "wisp_reaper",
+	// "dolt_remotes", "dolt_backup", "jsonl_git_backup", "scheduled_maintenance",
+	// "main_branch_test", "handler").
+	// Example: ["doctor_dog", "compactor_dog"]
+	DisabledPatrols []string `json:"disabled_patrols,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
@@ -298,6 +308,14 @@ type DaemonThresholds struct {
 	// is killed to prevent API slot burn (default "15m"). Polecats are ephemeral workers;
 	// unlike dogs, they should not persist when idle.
 	PolecatIdleSessionTimeout string `json:"polecat_idle_session_timeout,omitempty"`
+
+	// PolecatSelfTerminate controls whether polecats kill their own session after
+	// gt done completes (default false). When true, polecats terminate 3 seconds
+	// after work submission instead of transitioning to IDLE. This gives fresh
+	// context windows per task, reduces token waste, and eliminates stale state
+	// issues at scale. Worktree reuse is preserved — ReuseIdlePolecat creates
+	// a fresh branch on the existing worktree.
+	PolecatSelfTerminate *bool `json:"polecat_self_terminate,omitempty"`
 
 	// StaleWorkingTimeout is how long a dog in state=working with no activity
 	// before considered stuck (default "2h").
@@ -832,6 +850,13 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 		return base + " -i " + quoteForShell(p)
 	}
 
+	// Gemini requires -i (--prompt-interactive) to auto-execute the prompt
+	// while staying in interactive mode. Positional args populate the input
+	// field but don't execute, and -p runs headless (exits after completion).
+	if resolved.Command == "gemini" {
+		return base + " -i " + quoteForShell(p)
+	}
+
 	// Quote the prompt for shell safety (positional arg for claude and others)
 	return base + " " + quoteForShell(p)
 }
@@ -847,7 +872,14 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 	}
 
 	if p != "" && resolved.PromptMode != "none" {
-		args = append(args, p)
+		switch resolved.Command {
+		case "opencode":
+			args = append(args, "--prompt", p)
+		case "copilot", "gemini":
+			args = append(args, "-i", p)
+		default:
+			args = append(args, p)
+		}
 	}
 
 	return args
@@ -1104,6 +1136,9 @@ func quoteForShell(s string) string {
 
 // ThemeConfig represents tmux theme settings for a rig.
 type ThemeConfig struct {
+	// Disabled skips tmux status/window theming for this rig.
+	Disabled bool `json:"disabled,omitempty"`
+
 	// Name picks from the default palette (e.g., "ocean", "forest").
 	// If empty, a theme is auto-assigned based on rig name.
 	Name string `json:"name,omitempty"`
@@ -1112,8 +1147,13 @@ type ThemeConfig struct {
 	Custom *CustomTheme `json:"custom,omitempty"`
 
 	// RoleThemes overrides themes for specific roles in this rig.
-	// Keys: "witness", "refinery", "crew", "polecat"
+	// Keys: "witness", "refinery", "crew", "polecat".
+	// A value of "none" disables tmux theming for that role.
 	RoleThemes map[string]string `json:"role_themes,omitempty"`
+
+	// WindowTint controls window background (window-style) coloring for this rig.
+	// If nil, falls back to town-level window tint config.
+	WindowTint *WindowTint `json:"window_tint,omitempty"`
 }
 
 // CustomTheme allows specifying exact colors for the status bar.
@@ -1124,9 +1164,46 @@ type CustomTheme struct {
 
 // TownThemeConfig represents global theme settings (mayor/config.json).
 type TownThemeConfig struct {
+	// Disabled skips tmux status/window theming for all sessions unless a rig
+	// theme overrides it.
+	Disabled bool `json:"disabled,omitempty"`
+
+	// Name picks from the default palette when no role-specific override exists.
+	Name string `json:"name,omitempty"`
+
+	// Custom overrides the palette with specific colors when no role-specific
+	// override exists.
+	Custom *CustomTheme `json:"custom,omitempty"`
+
 	// RoleDefaults sets default themes for roles across all rigs.
-	// Keys: "witness", "refinery", "crew", "polecat"
+	// Keys: "mayor", "deacon", "witness", "refinery", "crew", "polecat".
+	// A value of "none" disables tmux theming for that role.
 	RoleDefaults map[string]string `json:"role_defaults,omitempty"`
+
+	// WindowTint controls window background (window-style) coloring globally.
+	// Per-rig WindowTint in ThemeConfig takes precedence over this.
+	WindowTint *WindowTint `json:"window_tint,omitempty"`
+}
+
+// WindowTint controls window background (window-style) coloring.
+// Mirrors status bar theme customization: palette name, custom colors, per-role overrides.
+// When Enabled is nil or true, window backgrounds are tinted.
+// When Enabled is false, window backgrounds use terminal defaults.
+type WindowTint struct {
+	// Enabled controls whether window tinting is active.
+	// nil or true = enabled, false = disabled (window uses terminal default).
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Name picks a palette theme for the window background.
+	// If empty, falls back to the session's status bar theme colors.
+	Name string `json:"name,omitempty"`
+
+	// Custom overrides the palette with specific window background colors.
+	Custom *CustomTheme `json:"custom,omitempty"`
+
+	// RoleTints overrides window tint themes for specific roles.
+	// Keys: "witness", "refinery", "crew", "polecat"
+	RoleTints map[string]string `json:"role_tints,omitempty"`
 }
 
 // BuiltinRoleThemes returns the default themes for each role.
@@ -1167,6 +1244,10 @@ type MergeQueueConfig struct {
 	// Nil defaults to false (manual landing required).
 	IntegrationBranchAutoLand *bool `json:"integration_branch_auto_land,omitempty"`
 
+	// MergeStrategy controls how the refinery lands approved work: "direct" (default)
+	// merges directly to the base branch, "pr" creates a GitHub pull request.
+	MergeStrategy string `json:"merge_strategy,omitempty"`
+
 	// OnConflict specifies conflict resolution strategy: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
 
@@ -1205,6 +1286,17 @@ type MergeQueueConfig struct {
 	// StaleClaimTimeout is how long a claimed MR can go without updates before
 	// being considered abandoned and eligible for re-claim (e.g., "30m").
 	StaleClaimTimeout string `json:"stale_claim_timeout,omitempty"`
+
+	// JudgmentEnabled controls whether the refinery performs quality review
+	// before merging. When true, the refinery patrol's quality-review step
+	// evaluates the diff for correctness, security, and code quality.
+	// Nil defaults to false (no quality review).
+	JudgmentEnabled *bool `json:"judgment_enabled,omitempty"`
+
+	// ReviewDepth controls the thoroughness of quality review when judgment
+	// is enabled. Valid values: "quick", "standard", "deep".
+	// Nil defaults to "standard".
+	ReviewDepth string `json:"review_depth,omitempty"`
 }
 
 // OnConflict strategy constants.
@@ -1257,6 +1349,24 @@ func (c *MergeQueueConfig) IsDeleteMergedBranchesEnabled() bool {
 		return true
 	}
 	return *c.DeleteMergedBranches
+}
+
+// IsJudgmentEnabled returns whether quality review is enabled for merges.
+// Nil-safe, defaults to false.
+func (c *MergeQueueConfig) IsJudgmentEnabled() bool {
+	if c.JudgmentEnabled == nil {
+		return false
+	}
+	return *c.JudgmentEnabled
+}
+
+// GetReviewDepth returns the configured review depth.
+// Nil-safe, defaults to "standard".
+func (c *MergeQueueConfig) GetReviewDepth() string {
+	if c.ReviewDepth == "" {
+		return "standard"
+	}
+	return c.ReviewDepth
 }
 
 // boolPtr returns a pointer to a bool value.
@@ -1336,6 +1446,17 @@ func DefaultAccountsConfigDir() (string, error) {
 type QuotaState struct {
 	Version  int                          `json:"version"`  // schema version
 	Accounts map[string]AccountQuotaState `json:"accounts"` // handle -> quota state
+
+	// ActiveSwaps tracks keychain swap mappings from quota rotation.
+	// Key: target config dir (where the swapped token was written)
+	// Value: source account handle (whose token was swapped in)
+	//
+	// When a session is rotated, its config dir's keychain entry gets
+	// overwritten with the source account's token. If the source account
+	// later re-authenticates, the fresh token goes to the source's own
+	// keychain entry — not the target's. SyncSwappedTokens uses this map
+	// to propagate fresh tokens to all target keychain entries.
+	ActiveSwaps map[string]string `json:"active_swaps,omitempty"` // targetConfigDir -> sourceAccountHandle
 }
 
 // AccountQuotaStatus is the rate-limit status of an account.

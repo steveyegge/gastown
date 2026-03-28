@@ -311,21 +311,27 @@ func calculateEffectiveTimeout(idleCycles int) (time.Duration, error) {
 			return 0, fmt.Errorf("invalid backoff-base: %w", err)
 		}
 
-		// Apply exponential backoff: base * multiplier^idleCycles
-		timeout := base
-		for i := 0; i < idleCycles; i++ {
-			timeout *= time.Duration(awaitSignalBackoffMult)
-		}
-
-		// Apply max cap if specified
+		// Apply exponential backoff: base * multiplier^idleCycles, capped at max.
+		// Parse max first so we can cap early inside the loop and prevent
+		// int64 overflow — time.Duration wraps negative around idle ~62+.
+		var maxDur time.Duration
 		if awaitSignalBackoffMax != "" {
-			maxDur, err := time.ParseDuration(awaitSignalBackoffMax)
+			maxDur, err = time.ParseDuration(awaitSignalBackoffMax)
 			if err != nil {
 				return 0, fmt.Errorf("invalid backoff-max: %w", err)
 			}
-			if timeout > maxDur {
-				timeout = maxDur
+		}
+
+		timeout := base
+		for i := 0; i < idleCycles; i++ {
+			// Cap early to prevent int64 overflow at high idle counts.
+			if maxDur > 0 && timeout >= maxDur {
+				return maxDur, nil
 			}
+			timeout *= time.Duration(awaitSignalBackoffMult)
+		}
+		if maxDur > 0 && timeout > maxDur {
+			return maxDur, nil
 		}
 
 		return timeout, nil

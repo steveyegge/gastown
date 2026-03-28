@@ -75,6 +75,27 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "0.12.1",
+		Date:    "2026-03-15",
+		Changes: []string{
+			"NEW: Agent Client Protocol (ACP) for structured agent communication",
+			"NEW: gt mountain — stage, label, and launch epic work in one command",
+			"NEW: gt assign — one-shot bead creation + hook for direct agent assignment",
+			"NEW: convoy --from-epic flag stages epic children into waves",
+			"NEW: Typed memories (--type feedback/project/user/reference)",
+			"NEW: Repo-sourced rig settings via .gastown/settings.json",
+			"NEW: Prior attempt context injected when re-dispatching polecats",
+			"CHANGED: Reaper fast-tracks plugin receipt cleanup (1h instead of 7d)",
+			"FIX: Idle patrol agents no longer burn CPU/tokens in restart loops",
+			"FIX: Compactor-dog false positives on concurrent writes",
+			"FIX: Dolt server stability (socket cleanup, ownership, restart race)",
+			"FIX: Cross-rig wisp contamination in MQ list",
+			"FIX: Non-Claude agent support (Gemini/Codex liveness, nudge startup)",
+			"FIX: Session prefix parsing (hq- collision, rig-level fallback)",
+			"FIX: Witness notifies Mayor on polecat completion",
+		},
+	},
+	{
 		Version: "0.12.0",
 		Date:    "2026-03-11",
 		Changes: []string{

@@ -958,6 +958,9 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 	fmt.Fprintf(w, "%s %s\n", style.Bold.Render("Town:"), status.Name)
 	fmt.Fprintf(w, "%s\n\n", style.Dim.Render(status.Location))
 
+	// E-stop banner (if active)
+	addEstopToStatus(status.Location)
+
 	// Overseer info
 	if status.Overseer != nil {
 		overseerDisplay := status.Overseer.Name

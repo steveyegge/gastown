@@ -555,7 +555,7 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 
 	// Apply Deacon theme (non-fatal: theming failure doesn't affect operation)
 	// Note: ConfigureGasTownSession includes cycle bindings
-	theme := tmux.DeaconTheme()
+	theme := tmux.ResolveSessionTheme(townRoot, "", "deacon")
 	_ = t.ConfigureGasTownSession(sessionName, theme, "", "Deacon", "health-check")
 
 	// Wait for Claude to start
@@ -1171,8 +1171,8 @@ func updateAgentBeadState(townRoot, agent, state, _ string) { // reason unused b
 		return
 	}
 
-	// Use bd agent state command
-	cmd := exec.Command("bd", "agent", "state", beadID, state)
+	// Use bd set-state command (bd 0.62.0+)
+	cmd := exec.Command("bd", "set-state", beadID, "agent_state="+state)
 	cmd.Dir = townRoot
 	_ = cmd.Run() // Best effort
 }
@@ -1360,15 +1360,19 @@ func runDeaconCleanupOrphans(cmd *cobra.Command, args []string) error {
 	// Report results
 	var terminated, escalated, unkillable int
 	for _, r := range results {
+		town := r.Process.TownRoot
+		if town == "" {
+			town = "unknown"
+		}
 		switch r.Signal {
 		case "SIGTERM":
-			fmt.Printf("  %s Sent SIGTERM to PID %d (%s)\n", style.Bold.Render("→"), r.Process.PID, r.Process.Cmd)
+			fmt.Printf("  %s Sent SIGTERM to PID %d (%s) town=%s\n", style.Bold.Render("→"), r.Process.PID, r.Process.Cmd, town)
 			terminated++
 		case "SIGKILL":
-			fmt.Printf("  %s Escalated to SIGKILL for PID %d (%s)\n", style.Bold.Render("!"), r.Process.PID, r.Process.Cmd)
+			fmt.Printf("  %s Escalated to SIGKILL for PID %d (%s) town=%s\n", style.Bold.Render("!"), r.Process.PID, r.Process.Cmd, town)
 			escalated++
 		case "UNKILLABLE":
-			fmt.Printf("  %s WARNING: PID %d (%s) survived SIGKILL\n", style.Bold.Render("⚠"), r.Process.PID, r.Process.Cmd)
+			fmt.Printf("  %s WARNING: PID %d (%s) survived SIGKILL town=%s\n", style.Bold.Render("⚠"), r.Process.PID, r.Process.Cmd, town)
 			unkillable++
 		}
 	}
@@ -1406,8 +1410,12 @@ func runDeaconZombieScan(cmd *cobra.Command, args []string) error {
 	if zombieScanDryRun {
 		for _, z := range zombies {
 			ageStr := fmt.Sprintf("%dm", z.Age/60)
-			fmt.Printf("  %s PID %d (%s) TTY=%s age=%s\n",
-				style.Dim.Render("→"), z.PID, z.Cmd, z.TTY, ageStr)
+			town := z.TownRoot
+			if town == "" {
+				town = "unknown"
+			}
+			fmt.Printf("  %s PID %d (%s) TTY=%s age=%s town=%s\n",
+				style.Dim.Render("→"), z.PID, z.Cmd, z.TTY, ageStr, town)
 		}
 		fmt.Printf("%s Dry run - no processes killed\n", style.Dim.Render("○"))
 		return nil
@@ -1422,18 +1430,22 @@ func runDeaconZombieScan(cmd *cobra.Command, args []string) error {
 	// Report results
 	var terminated, escalated, unkillable int
 	for _, r := range results {
+		town := r.Process.TownRoot
+		if town == "" {
+			town = "unknown"
+		}
 		switch r.Signal {
 		case "SIGTERM":
-			fmt.Printf("  %s Sent SIGTERM to PID %d (%s) TTY=%s\n",
-				style.Bold.Render("→"), r.Process.PID, r.Process.Cmd, r.Process.TTY)
+			fmt.Printf("  %s Sent SIGTERM to PID %d (%s) TTY=%s town=%s\n",
+				style.Bold.Render("→"), r.Process.PID, r.Process.Cmd, r.Process.TTY, town)
 			terminated++
 		case "SIGKILL":
-			fmt.Printf("  %s Escalated to SIGKILL for PID %d (%s)\n",
-				style.Bold.Render("!"), r.Process.PID, r.Process.Cmd)
+			fmt.Printf("  %s Escalated to SIGKILL for PID %d (%s) town=%s\n",
+				style.Bold.Render("!"), r.Process.PID, r.Process.Cmd, town)
 			escalated++
 		case "UNKILLABLE":
-			fmt.Printf("  %s WARNING: PID %d (%s) survived SIGKILL\n",
-				style.Bold.Render("⚠"), r.Process.PID, r.Process.Cmd)
+			fmt.Printf("  %s WARNING: PID %d (%s) survived SIGKILL town=%s\n",
+				style.Bold.Render("⚠"), r.Process.PID, r.Process.Cmd, town)
 			unkillable++
 		}
 	}

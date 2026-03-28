@@ -9,6 +9,20 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 )
 
+// buildPrefixSet builds a set of all known rig prefixes from rigs.json.
+// This maps prefix→true for efficient lookup. (gt-85w7)
+func buildPrefixSet(registeredRigs map[string]bool, townRoot string) map[string]bool {
+	prefixes := make(map[string]bool)
+	for rigName := range registeredRigs {
+		prefixes[rigName] = true // rig name itself is always valid
+		prefix := config.GetRigPrefix(townRoot, rigName)
+		if prefix != "" {
+			prefixes[prefix] = true
+		}
+	}
+	return prefixes
+}
+
 // StaleRuntimeFilesCheck detects stale PID files and wisp configs for rigs
 // that are no longer registered. These can cause the daemon to incorrectly
 // think agents are running or try to start agents for removed rigs.
@@ -54,6 +68,10 @@ func (c *StaleRuntimeFilesCheck) Run(ctx *CheckContext) *CheckResult {
 		registeredRigs[rigName] = true
 	}
 
+	// Build prefix set that includes both rig names and their beads prefixes.
+	// Some rigs use prefix as DB/PID name (e.g., "lc" for laneassist). (gt-85w7)
+	knownPrefixes := buildPrefixSet(registeredRigs, ctx.TownRoot)
+
 	var details []string
 
 	// Check PID files in .runtime/pids/
@@ -71,8 +89,8 @@ func (c *StaleRuntimeFilesCheck) Run(ctx *CheckContext) *CheckResult {
 				// Town-level agents (hq, gt) are always valid
 				continue
 			}
-			// Check if this rig is registered
-			if !isRegisteredPrefix(rigPrefix, registeredRigs) {
+			// Check if this rig is registered (by name or prefix)
+			if !knownPrefixes[rigPrefix] {
 				c.stalePIDFiles = append(c.stalePIDFiles, filepath.Join(pidsDir, name))
 				details = append(details, fmt.Sprintf("Stale PID file for unregistered rig: %s", name))
 			}
@@ -157,10 +175,3 @@ func extractRigPrefix(filename string) string {
 	return name
 }
 
-// isRegisteredPrefix checks if a prefix belongs to a registered rig.
-func isRegisteredPrefix(prefix string, registeredRigs map[string]bool) bool {
-	// Check if any registered rig has this prefix
-	// We need to load the rigs config to get prefixes
-	// For now, just check if the prefix matches a rig name directly
-	return registeredRigs[prefix]
-}

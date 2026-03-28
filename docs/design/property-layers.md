@@ -345,6 +345,8 @@ bd update role-deacon --add-label=patrol:muted --remove-label=patrol:active
 | Type | Storage | Example |
 |------|---------|---------|
 | **Static config** | TOML files | Daemon tick interval |
+| **Role directives** | Markdown files | Operator behavioral policy per role |
+| **Formula overlays** | TOML files | Per-step formula modifications |
 | **Operational state** | Beads (events + labels) | Patrol muted |
 | **Runtime flags** | Marker files | `.deacon-disabled` |
 
@@ -352,8 +354,61 @@ bd update role-deacon --add-label=patrol:muted --remove-label=patrol:active
 
 For Boot triage and degraded mode details, see [Watchdog Chain](watchdog-chain.md).
 
+## Role Directives and Formula Overlays
+
+Directives and overlays extend the property layer model to agent behavior.
+They follow the same rig > town > system precedence as other config.
+
+### Directives (Behavioral Policy)
+
+Per-role Markdown files that modify agent behavior at prime time:
+
+```
+SYSTEM LAYER:   Embedded role template (compiled in)
+                        │ if directive exists
+                        ▼
+TOWN LAYER:     ~/gt/directives/<role>.md
+                        │ concatenated with
+                        ▼
+RIG LAYER:      ~/gt/<rig>/directives/<role>.md
+```
+
+Both town and rig directives concatenate. Rig content appears last and wins
+conflicts (same as CSS specificity — later rules override earlier ones).
+
+### Overlays (Formula Modifications)
+
+Per-formula TOML files that modify individual steps:
+
+```
+SYSTEM LAYER:   Embedded formula (compiled in)
+                        │ if overlay exists
+                        ▼
+TOWN LAYER:     ~/gt/formula-overlays/<formula>.toml
+                        │ rig replaces town entirely
+                        ▼
+RIG LAYER:      ~/gt/<rig>/formula-overlays/<formula>.toml
+```
+
+Unlike directives, overlays use **full replacement** at the rig level — if a
+rig overlay exists, the town overlay is ignored entirely. This prevents
+conflicting step modifications from merging unpredictably.
+
+### Precedence Summary
+
+| Config Type | Town + Rig Interaction | Rationale |
+|-------------|----------------------|-----------|
+| Rig properties | First non-nil wins (override) | Standard config lookup |
+| Integer properties | Values stack (additive) | Allows adjustments |
+| Role directives | Concatenate (rig last) | Additive policy; rig gets last word |
+| Formula overlays | Rig replaces town | Step mods can conflict; full replacement is safer |
+
+See [directives-and-overlays.md](directives-and-overlays.md) for the full
+reference with TOML format, examples, and `gt doctor` integration.
+
 ## Related Documents
 
 - `~/gt/docs/hop/PROPERTY-LAYERS.md` - Strategic architecture
 - `wisp-architecture.md` - Wisp system design
 - `agent-as-bead.md` - Agent identity beads (similar pattern)
+- [directives-and-overlays.md](directives-and-overlays.md) - Full reference

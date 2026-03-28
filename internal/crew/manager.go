@@ -204,6 +204,10 @@ func (m *Manager) addLocked(name string, createBranch bool) (*CrewWorker, error)
 		return nil, fmt.Errorf("creating crew dir: %w", err)
 	}
 
+	if m.rig.GitURL == "" {
+		return nil, fmt.Errorf("rig %q has no git URL configured — crew workspaces require a clonable repository (set git_url in rigs.json or re-add the rig with a remote URL)", m.rig.Name)
+	}
+
 	// Clone the rig repo on the configured default branch.
 	// CloneBranch ensures the crew lands on the rig's default_branch even when
 	// it differs from the remote's HEAD. Falls back gracefully for new/empty repos.
@@ -844,7 +848,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	}
 
 	// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
-	theme := tmux.AssignTheme(m.rig.Name)
+	theme := tmux.ResolveSessionTheme(townRoot, m.rig.Name, "crew")
 	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, name, "crew")
 
 	// Set up C-b n/p keybindings for crew session cycling (non-fatal)
@@ -874,14 +878,16 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 			_ = t.AcceptStartupDialogs(sessionID)
 		}
 
-		// Start background nudge-queue poller for agents that lack turn-boundary
-		// drain hooks (e.g., Gemini, Codex). Claude drains its queue via
-		// UserPromptSubmit hook so it doesn't need the poller.
-		if preset != nil && !preset.HasTurnBoundaryDrain {
-			if _, pollerErr := nudge.StartPoller(townRoot, sessionID); pollerErr != nil {
-				// Non-fatal — nudges may be delayed but the agent still works.
-				style.PrintWarning("could not start nudge poller for %s: %v", name, pollerErr)
-			}
+		// Start background nudge-queue poller for ALL agents (gt-dgf).
+		// Claude drains its queue via UserPromptSubmit hook, but that hook only
+		// fires when the agent submits a prompt. Idle agents (waiting at prompt
+		// for work) never submit, so queued nudges deadlock: agent waits for
+		// nudge, nudge waits for agent input. The poller breaks this cycle by
+		// polling every 10s and delivering when idle. Drain() is atomic so the
+		// poller and UserPromptSubmit hook coexist safely.
+		if _, pollerErr := nudge.StartPoller(townRoot, sessionID); pollerErr != nil {
+			// Non-fatal — nudges may be delayed but the agent still works.
+			style.PrintWarning("could not start nudge poller for %s: %v", name, pollerErr)
 		}
 	}
 

@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -226,7 +227,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	}
 
 	// Apply Gas Town theming (non-fatal: theming failure doesn't affect operation)
-	theme := tmux.AssignTheme(m.rig.Name)
+	theme := tmux.ResolveSessionTheme(townRoot, m.rig.Name, "witness")
 	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, "witness", "witness")
 
 	// Wait for Claude to start - fatal if Claude fails to launch
@@ -244,6 +245,13 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Track PID for defense-in-depth orphan cleanup (non-fatal)
 	if err := session.TrackSessionPID(townRoot, sessionID, t); err != nil {
 		log.Printf("warning: tracking session PID for %s: %v", sessionID, err)
+	}
+
+	// Start nudge-queue poller (gt-dgf). Claude's UserPromptSubmit hook only
+	// drains when the agent submits a prompt. Idle agents never submit, so
+	// queued nudges deadlock. The poller breaks the cycle by polling every 10s.
+	if _, pollerErr := nudge.StartPoller(townRoot, sessionID); pollerErr != nil {
+		log.Printf("warning: could not start nudge poller for %s: %v", sessionID, pollerErr)
 	}
 
 	_ = runtime.RunStartupFallback(t, sessionID, "witness", runtimeConfig)
@@ -309,17 +317,15 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOver
 		roleConfig = nil
 	}
 	if roleConfig != nil && roleConfig.StartCommand != "" {
-		// Use the TOML start_command for custom (non-Claude) commands that
-		// need template expansion (e.g., "exec run --town {town} --rig {rig}").
-		// For Claude agents, skip the TOML shortcut and fall through to
-		// BuildStartupCommandFromConfig which resolves model flags from
-		// role_agents (e.g., --model sonnet[1m]). The built-in TOML
-		// start_command ("exec claude --dangerously-skip-permissions") strips
-		// these flags, breaking per-role model selection.
 		rc := config.ResolveRoleAgentConfig("witness", townRoot, rigPath)
-		if !config.IsResolvedAgentClaude(rc) || !isBuiltinClaudeStartCommand(roleConfig.StartCommand) {
-			// Non-Claude agent OR custom start_command: use TOML pattern
-			// with template expansion.
+		if !config.IsResolvedAgentClaude(rc) {
+			// Non-Claude agent: skip TOML start_command entirely.
+			// Built-in role TOMLs hardcode "exec claude ..." which is wrong
+			// for non-Claude agents. Fall through to BuildStartupCommandFromConfig
+			// which uses the resolved agent's command and args.
+		} else if !isBuiltinClaudeStartCommand(roleConfig.StartCommand) && !config.HasExplicitRoleAgent("witness", townRoot, rigPath) {
+			// Custom (non-builtin) start_command with Claude agent and no explicit
+			// role_agents mapping: use TOML pattern with template expansion.
 			cmd := beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness", session.PrefixFor(rigName))
 			if strings.HasPrefix(cmd, "exec ") {
 				cmd = "exec env -u CLAUDECODE NODE_OPTIONS='' " + strings.TrimPrefix(cmd, "exec ")
@@ -328,8 +334,9 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, sessionName, agentOver
 			}
 			return cmd, nil
 		}
-		// Claude agent with built-in start_command: fall through to
-		// BuildStartupCommandFromConfig for proper model flag resolution.
+		// Non-Claude agent OR Claude with built-in start_command: fall
+		// through to BuildStartupCommandFromConfig for proper agent and
+		// model flag resolution.
 	}
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
 		Recipient: session.BeaconRecipient("witness", "", rigName),

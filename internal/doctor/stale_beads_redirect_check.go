@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -309,6 +310,11 @@ func cleanStaleBeadsFiles(beadsDir string) error {
 		return fmt.Errorf("no redirect file found - refusing to clean")
 	}
 
+	// Check if metadata.json declares a dolt_database — if so, preserve it.
+	// Removing it would disconnect the rig from its database and make the
+	// prefix-named DB appear orphaned. (gt-85w7)
+	preserveMetadata := metadataHasDoltDB(beadsDir)
+
 	// Remove files matching stale patterns
 	for _, pattern := range staleFilePatterns {
 		matches, err := filepath.Glob(filepath.Join(beadsDir, pattern))
@@ -316,6 +322,9 @@ func cleanStaleBeadsFiles(beadsDir string) error {
 			continue
 		}
 		for _, match := range matches {
+			if preserveMetadata && filepath.Base(match) == "metadata.json" {
+				continue
+			}
 			if err := os.RemoveAll(match); err != nil {
 				return fmt.Errorf("removing %s: %w", filepath.Base(match), err)
 			}
@@ -331,6 +340,23 @@ func cleanStaleBeadsFiles(beadsDir string) error {
 	}
 
 	return nil
+}
+
+// metadataHasDoltDB checks if a .beads/metadata.json declares a dolt_database.
+// This is used to protect metadata.json from stale-file cleanup when the
+// directory has a redirect alongside valid DB configuration (tracked beads case).
+func metadataHasDoltDB(beadsDir string) bool {
+	data, err := os.ReadFile(filepath.Join(beadsDir, "metadata.json"))
+	if err != nil {
+		return false
+	}
+	var meta struct {
+		DoltDatabase string `json:"dolt_database"`
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return false
+	}
+	return meta.DoltDatabase != ""
 }
 
 // verifyRedirectTopology checks that all worktrees in a rig have correct redirects.

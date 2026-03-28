@@ -40,6 +40,16 @@ func getAgentConfigDir(agent string) string {
 // Commands is the registry of available commands.
 var Commands = []Command{
 	{
+		Name:        "done",
+		Description: "Signal work complete and submit to merge queue",
+		AgentFields: map[string][]Field{
+			"claude": {
+				{"allowed-tools", "Bash(gt done:*), Bash(git status:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(bd close:*)"},
+				{"argument-hint", "[--status COMPLETED|ESCALATED|DEFERRED] [--pre-verified]"},
+			},
+		},
+	},
+	{
 		Name:        "handoff",
 		Description: "Hand off to fresh session, work continues from hook",
 		AgentFields: map[string][]Field{

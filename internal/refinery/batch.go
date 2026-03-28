@@ -120,7 +120,9 @@ func (e *Engineer) BuildRebaseStack(ctx context.Context, batch []*MRInfo, target
 		// Check branch exists
 		exists, brErr := e.git.BranchExists(mr.Branch)
 		if brErr != nil || !exists {
-			_, _ = fmt.Fprintf(e.output, "[Batch] MR %s: branch %s not found, skipping\n", mr.ID, mr.Branch)
+			// Branch not found — escalate to mayor (gas-556)
+			_, _ = fmt.Fprintf(e.output, "[Batch] MR %s: branch %s not found, escalating to mayor\n", mr.ID, mr.Branch)
+			e.HandleMRInfoFailure(mr, ProcessResult{BranchNotFound: true})
 			conflicts = append(conflicts, mr)
 			continue
 		}
@@ -292,15 +294,20 @@ func (e *Engineer) processSingleMR(ctx context.Context, mr *MRInfo, target strin
 	if processResult.Success {
 		result.Merged = []*MRInfo{mr}
 		result.MergeCommit = processResult.MergeCommit
+		// GH#2321: Run post-merge cleanup (close beads, delete branch, nudge mayor)
+		e.HandleMRInfoSuccess(mr, processResult)
 	} else if processResult.Conflict {
 		result.Conflicts = []*MRInfo{mr}
 	} else if processResult.TestsFailed {
 		result.Culprits = []*MRInfo{mr}
 	} else if processResult.BranchNotFound {
-		// Branch was cleaned up before we could process it (e.g. cherry-picked to target).
-		// Treat as a skip: log and move on rather than halting the queue.
-		_, _ = fmt.Fprintf(e.output, "[Batch] MR %s: branch %s not found, skipping\n", mr.ID, mr.Branch)
+		// Branch not found on remote — escalate to mayor via HandleMRInfoFailure (gas-556).
+		e.HandleMRInfoFailure(mr, processResult)
 		result.Conflicts = []*MRInfo{mr}
+	} else if processResult.NoMerge {
+		// Source issue has no_merge flag — intentionally blocked. Dequeue silently.
+		_, _ = fmt.Fprintf(e.output, "[Batch] MR %s: no_merge flag set, dequeuing\n", mr.ID)
+		e.HandleMRInfoFailure(mr, processResult)
 	} else {
 		result.Error = fmt.Errorf("merge failed: %s", processResult.Error)
 	}
@@ -389,10 +396,20 @@ func (e *Engineer) fastForwardBatch(ctx context.Context, stacked []*MRInfo, targ
 	for i, mr := range stacked {
 		ids[i] = mr.ID
 	}
-	_, _ = fmt.Fprintf(e.output, "[Batch] Successfully merged batch: %s (commit %s)\n", strings.Join(ids, ", "), tipSHA[:8])
+	_, _ = fmt.Fprintf(e.output, "[Batch] Successfully merged batch: %s (commit %s)\n", strings.Join(ids, ", "), shortSHA(tipSHA))
 
 	result.Merged = stacked
 	result.MergeCommit = tipSHA
+
+	// GH#2321: Run post-merge cleanup for each merged MR — close source beads,
+	// delete branches, nudge mayor, and check convoy completion.
+	// HandleMRInfoSuccess was previously dead code (never called), causing task
+	// beads to remain open after successful merges.
+	for _, mr := range stacked {
+		mergeResult := ProcessResult{Success: true, MergeCommit: tipSHA}
+		e.HandleMRInfoSuccess(mr, mergeResult)
+	}
+
 	return result
 }
 

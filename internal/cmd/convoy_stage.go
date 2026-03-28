@@ -29,10 +29,14 @@ var convoyStageLaunch bool
 // or falls back to "Staged: N beads across M rigs".
 var convoyStageTitle string
 
+// convoyStageNoValidate disables automatic validation bead creation for epic input.
+var convoyStageNoValidate bool
+
 func init() {
 	convoyStageCmd.Flags().BoolVar(&convoyStageJSON, "json", false, "Output machine-readable JSON")
 	convoyStageCmd.Flags().BoolVar(&convoyStageLaunch, "launch", false, "Launch the convoy immediately after staging (transition to open)")
 	convoyStageCmd.Flags().StringVar(&convoyStageTitle, "title", "", "Human-readable title for the convoy (default: derived from epic title or auto-generated)")
+	convoyStageCmd.Flags().BoolVar(&convoyStageNoValidate, "no-validate", false, "Skip automatic validation bead creation (epic input only)")
 }
 
 // ---------------------------------------------------------------------------
@@ -41,14 +45,15 @@ func init() {
 
 // StageResult is the top-level JSON output for gt convoy stage --json.
 type StageResult struct {
-	Status   string          `json:"status"`    // "staged_ready", "staged_warnings", or "error"
-	ConvoyID string          `json:"convoy_id"` // empty if errors prevented creation
-	Restaged bool            `json:"restaged"`  // true if an existing convoy was updated in place
-	Errors   []FindingJSON   `json:"errors"`
-	Warnings []FindingJSON   `json:"warnings"`
-	Waves    []WaveJSON      `json:"waves"`
-	Gated    []GatedTaskJSON `json:"gated,omitempty"` // tasks blocked by open non-slingable nodes
-	Tree     []TreeNodeJSON  `json:"tree"`
+	Status           string          `json:"status"`              // "staged_ready", "staged_warnings", or "error"
+	ConvoyID         string          `json:"convoy_id"`           // empty if errors prevented creation
+	Restaged         bool            `json:"restaged"`            // true if an existing convoy was updated in place
+	ValidationBeadID string          `json:"validation_bead_id,omitempty"` // capstone validation bead (epic input only)
+	Errors           []FindingJSON   `json:"errors"`
+	Warnings         []FindingJSON   `json:"warnings"`
+	Waves            []WaveJSON      `json:"waves"`
+	Gated            []GatedTaskJSON `json:"gated,omitempty"` // tasks blocked by open non-slingable nodes
+	Tree             []TreeNodeJSON  `json:"tree"`
 }
 
 // GatedTaskJSON is the JSON representation of a task gated by non-slingable blockers.
@@ -308,6 +313,20 @@ func runConvoyStage(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Step 11a: Append validation bead as final wave (epic input only).
+	if input.Kind == StageInputEpic && !convoyStageNoValidate {
+		epicID := input.IDs[0]
+		var validationID string
+		waves, validationID, err = appendValidationWave(dag, waves, epicID)
+		if err != nil {
+			return fmt.Errorf("creating validation bead: %w", err)
+		}
+		if validationID != "" && !convoyStageJSON {
+			blockerCount := len(dag.Nodes[validationID].BlockedBy)
+			fmt.Printf("Validation bead created: %s (blocked by %d tasks, formula: mol-validate-prd)\n", validationID, blockerCount)
+		}
+	}
+
 	// Step 11b: Add gated task warnings and recalculate status.
 	for _, g := range gated {
 		warns = append(warns, StagingFinding{
@@ -404,6 +423,16 @@ func runConvoyStageJSON(dag *ConvoyDAG, input *StageInput, errs, warns []Staging
 		return err
 	}
 
+	// Append validation bead as final wave (epic input only).
+	var validationBeadID string
+	if input.Kind == StageInputEpic && !convoyStageNoValidate {
+		epicID := input.IDs[0]
+		waves, validationBeadID, err = appendValidationWave(dag, waves, epicID)
+		if err != nil {
+			return fmt.Errorf("creating validation bead: %w", err)
+		}
+	}
+
 	// Add gated task warnings and recalculate status.
 	for _, g := range gated {
 		warns = append(warns, StagingFinding{
@@ -420,6 +449,7 @@ func runConvoyStageJSON(dag *ConvoyDAG, input *StageInput, errs, warns []Staging
 	}
 
 	result.Status = status
+	result.ValidationBeadID = validationBeadID
 	result.Waves = buildWavesJSON(waves, dag)
 	result.Gated = buildGatedJSON(gated, dag)
 
@@ -1014,6 +1044,102 @@ func computeWaves(dag *ConvoyDAG) ([]Wave, []GatedTask, error) {
 	}
 
 	return waves, nil, nil
+}
+
+// appendValidationWave creates a validation bead blocked by all slingable beads
+// in the DAG and appends it as the final wave. The validation bead uses the
+// mol-validate-prd formula to ensure every swarm epic gets mandatory capstone
+// validation. Returns the updated waves and the validation bead ID.
+// Only called for epic input when --no-validate is not set.
+func appendValidationWave(dag *ConvoyDAG, waves []Wave, epicID string) ([]Wave, string, error) {
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return waves, "", err
+	}
+
+	// Collect all slingable bead IDs (these will block the validation bead).
+	var slingableIDs []string
+	for _, node := range dag.Nodes {
+		if isSlingableType(node.Type) {
+			slingableIDs = append(slingableIDs, node.ID)
+		}
+	}
+	sort.Strings(slingableIDs)
+
+	if len(slingableIDs) == 0 {
+		return waves, "", nil // nothing to validate
+	}
+
+	// Generate a validation bead ID.
+	validationID := fmt.Sprintf("hq-%s", generateShortID())
+
+	// Build the description with epic context and formula reference.
+	description := fmt.Sprintf(
+		"Capstone validation for epic %s. "+
+			"Run mol-validate-prd formula to validate PRD success criteria.\n\n"+
+			"formula: mol-validate-prd\nepic_id: %s",
+		epicID, epicID,
+	)
+
+	// Create the validation bead in town beads.
+	createArgs := []string{
+		"create",
+		"--type=task",
+		"--id=" + validationID,
+		"--title=Validate: PRD success criteria",
+		"--description=" + description,
+	}
+	if beads.NeedsForceForID(validationID) {
+		createArgs = append(createArgs, "--force")
+	}
+	if out, err := BdCmd(createArgs...).Dir(townBeads).WithAutoCommit().CombinedOutput(); err != nil {
+		return waves, "", fmt.Errorf("bd create validation bead: %w\noutput: %s", err, out)
+	}
+
+	// Set the validation bead as a child of the epic.
+	if out, err := BdCmd("dep", "add", epicID, validationID, "--type=parent-child").
+		Dir(townBeads).WithAutoCommit().StripBeadsDir().
+		CombinedOutput(); err != nil {
+		return waves, "", fmt.Errorf("bd dep add parent-child %s %s: %w\noutput: %s", epicID, validationID, err, out)
+	}
+
+	// Add blocking edges: every slingable bead blocks the validation bead.
+	for _, beadID := range slingableIDs {
+		if out, err := BdCmd("dep", "add", beadID, validationID, "--type=blocks").
+			Dir(townBeads).WithAutoCommit().StripBeadsDir().
+			CombinedOutput(); err != nil {
+			return waves, "", fmt.Errorf("bd dep add blocks %s → %s: %w\noutput: %s", beadID, validationID, err, out)
+		}
+	}
+
+	// Add the validation bead to the DAG.
+	dag.Nodes[validationID] = &ConvoyDAGNode{
+		ID:        validationID,
+		Title:     "Validate: PRD success criteria",
+		Type:      "task",
+		Status:    "open",
+		BlockedBy: slingableIDs,
+		Parent:    epicID,
+	}
+
+	// Update the Blocks field of each slingable node.
+	for _, beadID := range slingableIDs {
+		if node, ok := dag.Nodes[beadID]; ok {
+			node.Blocks = append(node.Blocks, validationID)
+		}
+	}
+
+	// Append as the final wave.
+	nextWaveNum := 1
+	if len(waves) > 0 {
+		nextWaveNum = waves[len(waves)-1].Number + 1
+	}
+	waves = append(waves, Wave{
+		Number: nextWaveNum,
+		Tasks:  []string{validationID},
+	})
+
+	return waves, validationID, nil
 }
 
 // BeadInfo represents raw bead data from bd show output.

@@ -298,6 +298,12 @@ func TestResolveProcessNames(t *testing.T) {
 			want:      []string{"codex"},
 		},
 		{
+			name:      "built-in preset through gt wrapper command",
+			agentName: "codex",
+			command:   "gt-codex",
+			want:      []string{"codex"},
+		},
+		{
 			name:      "unknown agent with known command",
 			agentName: "my-custom-agent",
 			command:   "claude",
@@ -1035,6 +1041,9 @@ func TestCopilotAgentPreset(t *testing.T) {
 	if info.ResumeFlag != "--resume" {
 		t.Errorf("copilot ResumeFlag = %q, want --resume", info.ResumeFlag)
 	}
+	if info.ContinueFlag != "--continue" {
+		t.Errorf("copilot ContinueFlag = %q, want --continue", info.ContinueFlag)
+	}
 	if info.ResumeStyle != "flag" {
 		t.Errorf("copilot ResumeStyle = %q, want flag", info.ResumeStyle)
 	}
@@ -1045,6 +1054,16 @@ func TestCopilotAgentPreset(t *testing.T) {
 
 	if info.SupportsForkSession {
 		t.Error("copilot should not support fork session")
+	}
+
+	// GA: COPILOT_HOME overrides config directory
+	if info.ConfigDirEnv != "COPILOT_HOME" {
+		t.Errorf("copilot ConfigDirEnv = %q, want COPILOT_HOME", info.ConfigDirEnv)
+	}
+
+	// GA: no detectable prompt prefix — uses delay-based readiness
+	if info.ReadyPromptPrefix != "" {
+		t.Errorf("copilot ReadyPromptPrefix = %q, want empty (GA has no ❯ prompt)", info.ReadyPromptPrefix)
 	}
 
 	if info.NonInteractive == nil {
@@ -1125,8 +1144,8 @@ func TestCopilotProviderDefaults(t *testing.T) {
 	}
 
 	configEnv := defaultConfigDirEnv("copilot")
-	if configEnv != "" {
-		t.Errorf("defaultConfigDirEnv(copilot) = %q, want empty", configEnv)
+	if configEnv != "COPILOT_HOME" {
+		t.Errorf("defaultConfigDirEnv(copilot) = %q, want COPILOT_HOME", configEnv)
 	}
 
 	provider := defaultHooksProvider("copilot")
@@ -1157,8 +1176,8 @@ func TestCopilotProviderDefaults(t *testing.T) {
 	}
 
 	prefix := defaultReadyPromptPrefix("copilot")
-	if prefix != "❯ " {
-		t.Errorf("defaultReadyPromptPrefix(copilot) = %q, want \"❯ \"", prefix)
+	if prefix != "" {
+		t.Errorf("defaultReadyPromptPrefix(copilot) = %q, want empty (GA has no ❯ prompt)", prefix)
 	}
 
 	delay := defaultReadyDelayMs("copilot")
@@ -1192,6 +1211,21 @@ func TestCopilotRuntimeConfigFromPreset(t *testing.T) {
 	}
 }
 
+func TestCodexRuntimeConfigHasPromptDetection(t *testing.T) {
+	t.Parallel()
+
+	rc := RuntimeConfigFromPreset(AgentCodex)
+	if rc == nil {
+		t.Fatal("RuntimeConfigFromPreset(codex) returned nil")
+	}
+	if rc.Tmux == nil {
+		t.Fatal("RuntimeConfigFromPreset(codex).Tmux returned nil")
+	}
+	if rc.Tmux.ReadyPromptPrefix != "› " {
+		t.Errorf("RuntimeConfigFromPreset(codex).Tmux.ReadyPromptPrefix = %q, want %q", rc.Tmux.ReadyPromptPrefix, "› ")
+	}
+}
+
 func TestPiProviderDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -1201,8 +1235,8 @@ func TestPiProviderDefaults(t *testing.T) {
 	if result.Tmux == nil {
 		t.Fatal("fillRuntimeDefaults(pi) should auto-fill Tmux")
 	}
-	if result.Tmux.ReadyDelayMs != 3000 {
-		t.Errorf("Tmux.ReadyDelayMs = %d, want 3000", result.Tmux.ReadyDelayMs)
+	if result.Tmux.ReadyDelayMs != 8000 {
+		t.Errorf("Tmux.ReadyDelayMs = %d, want 8000", result.Tmux.ReadyDelayMs)
 	}
 	wantNames := []string{"pi", "node", "bun"}
 	if len(result.Tmux.ProcessNames) != len(wantNames) {
@@ -1449,12 +1483,12 @@ func TestACPModes(t *testing.T) {
 	t.Cleanup(ResetRegistryForTesting)
 
 	tests := []struct {
-		name      string
-		rc        *RuntimeConfig
-		wantACP   bool
-		wantMode  string
-		wantCmd   string
-		wantArgs  []string
+		name     string
+		rc       *RuntimeConfig
+		wantACP  bool
+		wantMode string
+		wantCmd  string
+		wantArgs []string
 	}{
 		{
 			name: "native mode - claude-agent-acp",

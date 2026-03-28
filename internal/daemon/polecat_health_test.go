@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -38,12 +41,37 @@ func writeFakeTestBD(t *testing.T, dir, descState, dbState, hookBead, updatedAt 
 	// JSON matches the structure that getAgentBeadInfo expects from bd show --json
 	bdJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent"],"description":"%s","hook_bead":"%s","agent_state":"%s","updated_at":"%s"}]`,
 		desc, hookBead, dbState, updatedAt)
-	script := "#!/bin/sh\necho '" + bdJSON + "'\n"
+	// Return agent bead JSON for "show", empty array for "list" (so
+	// hasAssignedOpenWork doesn't false-positive on the agent bead).
+	script := "#!/bin/sh\nif [ \"$1\" = \"list\" ]; then echo '[]'; exit 0; fi\necho '" + bdJSON + "'\n"
 	path := filepath.Join(dir, "bd")
 	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
 		t.Fatalf("writing fake bd: %v", err)
 	}
 	return path
+}
+
+// writeFakeBDWithHookBead creates a shell script in dir named "bd" that returns
+// different JSON based on the bead ID: the agent bead in one state, and the hook
+// bead (work bead) in a separate state. Used to test cases where the agent and hook
+// beads have independent lifecycles (e.g., agent done/nuked while hook_bead open).
+func writeFakeBDWithHookBead(t *testing.T, dir, agentState, hookBeadID, hookBeadStatus, updatedAt string) string {
+	t.Helper()
+	agentJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent"],"description":"agent_state: %s","hook_bead":"%s","agent_state":"%s","updated_at":"%s"}]`,
+		agentState, hookBeadID, agentState, updatedAt)
+	hookJSON := fmt.Sprintf(`[{"id":"%s","status":"%s"}]`, hookBeadID, hookBeadStatus)
+	script := fmt.Sprintf("#!/bin/sh\n"+
+		"if [ \"$1\" = \"list\" ]; then echo '[]'; exit 0; fi\n"+
+		"case \"$2\" in\n"+
+		"  gt-myr-polecat-mycat) echo '%s';;\n"+
+		"  %s) echo '%s';;\n"+
+		"  *) echo '[]'; exit 1;;\n"+
+		"esac\n", agentJSON, hookBeadID, hookJSON)
+	bdPath := filepath.Join(dir, "bd")
+	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
+		t.Fatalf("writing fake bd: %v", err)
+	}
+	return bdPath
 }
 
 // TestCheckPolecatHealth_SkipsSpawning verifies that checkPolecatHealth does NOT
@@ -197,22 +225,7 @@ func TestCheckPolecatHealth_SkipsClosedHookBead(t *testing.T) {
 	binDir := t.TempDir()
 	writeFakeTestTmux(t, binDir)
 	recentTime := time.Now().UTC().Format(time.RFC3339)
-
-	// Create a bd script that returns different JSON based on the bead ID:
-	// - Agent bead: working state with hook_bead set
-	// - Hook bead: status=closed (work completed normally)
-	agentJSON := fmt.Sprintf(`[{"id":"gt-myr-polecat-mycat","issue_type":"agent","labels":["gt:agent"],"description":"agent_state: working","hook_bead":"fe-xyz","agent_state":"working","updated_at":"%s"}]`, recentTime)
-	hookJSON := `[{"id":"fe-xyz","status":"closed"}]`
-	script := fmt.Sprintf("#!/bin/sh\n"+
-		"case \"$2\" in\n"+
-		"  gt-myr-polecat-mycat) echo '%s';;\n"+
-		"  fe-xyz) echo '%s';;\n"+
-		"  *) echo '[]'; exit 1;;\n"+
-		"esac\n", agentJSON, hookJSON)
-	bdPath := filepath.Join(binDir, "bd")
-	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
-		t.Fatalf("writing fake bd: %v", err)
-	}
+	bdPath := writeFakeBDWithHookBead(t, binDir, "working", "fe-xyz", "closed", recentTime)
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
@@ -289,5 +302,217 @@ func TestCheckPolecatHealth_NotifiesWitnessOnCrash(t *testing.T) {
 	}
 	if !strings.Contains(invocations, "myr/witness") {
 		t.Errorf("expected witness address myr/witness, got: %q", invocations)
+	}
+}
+
+// TestCheckPolecatHealth_SkipsDonePolecat verifies that checkPolecatHealth does
+// NOT fire CRASH DETECTED when a polecat has agent_state=done (completed normally)
+// even if its hook_bead is still open. This is the race-window regression test for
+// bug #2795 part 2: between gt done setting agent_state=done and the hook_bead
+// being closed, the daemon heartbeat fires on the dead session + open hook_bead
+// combination, causing repeated false CRASHED_POLECAT alerts to the witness.
+func TestCheckPolecatHealth_SkipsDonePolecat(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+	binDir := t.TempDir()
+	writeFakeTestTmux(t, binDir)
+	recentTime := time.Now().UTC().Format(time.RFC3339)
+	bdPath := writeFakeBDWithHookBead(t, binDir, "done", "gt-xyz", "open", recentTime)
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	var logBuf strings.Builder
+	d := &Daemon{
+		config: &Config{TownRoot: t.TempDir()},
+		logger: log.New(&logBuf, "", 0),
+		tmux:   tmux.NewTmux(),
+		bdPath: bdPath,
+	}
+
+	d.checkPolecatHealth("myr", "mycat")
+
+	got := logBuf.String()
+	if !strings.Contains(got, "Skipping crash detection") {
+		t.Errorf("expected skip log message, got: %q", got)
+	}
+	if !strings.Contains(got, "agent_state=done") {
+		t.Errorf("expected agent_state=done in skip log, got: %q", got)
+	}
+	if strings.Contains(got, "CRASH DETECTED") {
+		t.Errorf("done polecat with open hook_bead must not trigger CRASH DETECTED, got: %q", got)
+	}
+}
+
+// TestCheckPolecatHealth_SkipsNukedPolecat verifies that checkPolecatHealth does
+// NOT fire CRASH DETECTED when a polecat has been nuked (agent_state=nuked) even
+// if its hook_bead (work bead) is still open. This is the regression test for
+// bug #2795: `gt polecat nuke --force` sets agent_state=nuked on the agent bead
+// but leaves the work bead open, causing repeated false RECOVERY_NEEDED alerts
+// on every heartbeat cycle.
+func TestCheckPolecatHealth_SkipsNukedPolecat(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+	binDir := t.TempDir()
+	writeFakeTestTmux(t, binDir)
+	recentTime := time.Now().UTC().Format(time.RFC3339)
+	bdPath := writeFakeBDWithHookBead(t, binDir, "nuked", "gt-xyz", "open", recentTime)
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	var logBuf strings.Builder
+	d := &Daemon{
+		config: &Config{TownRoot: t.TempDir()},
+		logger: log.New(&logBuf, "", 0),
+		tmux:   tmux.NewTmux(),
+		bdPath: bdPath,
+	}
+
+	d.checkPolecatHealth("myr", "mycat")
+
+	got := logBuf.String()
+	if !strings.Contains(got, "Skipping crash detection") {
+		t.Errorf("expected skip log message, got: %q", got)
+	}
+	if !strings.Contains(got, "agent_state=nuked") {
+		t.Errorf("expected agent_state=nuked in skip log, got: %q", got)
+	}
+	if strings.Contains(got, "CRASH DETECTED") {
+		t.Errorf("nuked polecat must not trigger CRASH DETECTED, got: %q", got)
+	}
+}
+
+// writeFakeTmuxWithAgent creates a shell script that simulates a live tmux session
+// with an agent process running. has-session succeeds, display-message returns the
+// given paneCommand (e.g., "claude" or "codex") so IsAgentRunning returns true.
+func writeFakeTmuxWithAgent(t *testing.T, dir, paneCommand string) {
+	t.Helper()
+	// Use $* glob matching (not $1) because tmux.run() prepends -u (and
+	// optionally -L <socket>) before the subcommand.
+	script := fmt.Sprintf("#!/bin/sh\n"+
+		"case \"$*\" in\n"+
+		"  *has-session*) exit 0;;\n"+
+		"  *display-message*) echo '%s';;\n"+
+		"  *kill-session*) exit 0;;\n"+
+		"  *) exit 1;;\n"+
+		"esac\n", paneCommand)
+	if err := os.WriteFile(filepath.Join(dir, "tmux"), []byte(script), 0755); err != nil {
+		t.Fatalf("writing fake tmux: %v", err)
+	}
+}
+
+// writeFakeTmuxIdleSession creates a shell script that simulates a live tmux session
+// with NO agent process running (idle shell). has-session succeeds, display-message
+// returns "bash" so IsAgentRunning returns false.
+func writeFakeTmuxIdleSession(t *testing.T, dir string) {
+	t.Helper()
+	writeFakeTmuxWithAgent(t, dir, "bash")
+}
+
+// TestReapIdlePolecat_SkipsActiveAgent verifies that reapIdlePolecat does NOT kill
+// a polecat whose hook_bead is missing but whose agent process is still running.
+// This is the regression test for GH#3342: a failed gt sling rollback can clear
+// the hook while the agent is actively working, causing the daemon to incorrectly
+// reap the session.
+func TestReapIdlePolecat_SkipsActiveAgent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+	// Register "myr" prefix so session name resolves to "myr-mycat"
+	old := session.DefaultRegistry()
+	reg := session.NewPrefixRegistry()
+	reg.Register("myr", "myr")
+	session.SetDefaultRegistry(reg)
+	defer session.SetDefaultRegistry(old)
+
+	binDir := t.TempDir()
+	// Fake tmux: session alive, agent (codex) running in pane
+	writeFakeTmuxWithAgent(t, binDir, "codex")
+	// Fake bd: agent bead exists but hook_bead is empty (cleared by failed sling)
+	recentTime := time.Now().UTC().Format(time.RFC3339)
+	bdPath := writeFakeTestBD(t, binDir, "working", "working", "", recentTime)
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	townRoot := t.TempDir()
+	var logBuf strings.Builder
+	d := &Daemon{
+		config: &Config{TownRoot: townRoot},
+		logger: log.New(&logBuf, "", 0),
+		tmux:   tmux.NewTmux(),
+		bdPath: bdPath,
+	}
+
+	// Write a stale heartbeat (working state, 20 minutes old) so the reaper considers it
+	polecat.TouchSessionHeartbeatWithState(townRoot, "myr-mycat", polecat.HeartbeatWorking, "", "")
+	// Backdate the heartbeat to make it stale
+	hbPath := filepath.Join(townRoot, "heartbeats", "myr-mycat.json")
+	staleHB := polecat.SessionHeartbeat{
+		Timestamp: time.Now().UTC().Add(-20 * time.Minute),
+		State:     polecat.HeartbeatWorking,
+	}
+	data, _ := json.Marshal(staleHB)
+	_ = os.WriteFile(hbPath, data, 0644)
+
+	d.reapIdlePolecat("myr", "mycat", 15*time.Minute)
+
+	got := logBuf.String()
+	if strings.Contains(got, "Reaping idle polecat") {
+		t.Errorf("must NOT reap polecat with active agent process (GH#3342), got: %q", got)
+	}
+}
+
+// TestReapIdlePolecat_ReapsIdleNoHook verifies that reapIdlePolecat DOES kill
+// a polecat whose hook_bead is missing AND whose agent process is NOT running
+// (idle shell). This ensures the GH#3342 fix doesn't prevent legitimate reaping.
+func TestReapIdlePolecat_ReapsIdleNoHook(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+	// Register "myr" prefix so session name resolves to "myr-mycat"
+	old := session.DefaultRegistry()
+	reg := session.NewPrefixRegistry()
+	reg.Register("myr", "myr")
+	session.SetDefaultRegistry(reg)
+	defer session.SetDefaultRegistry(old)
+
+	binDir := t.TempDir()
+	// Fake tmux: session alive, but only a shell running (no agent)
+	writeFakeTmuxIdleSession(t, binDir)
+	// Fake bd: agent bead exists but hook_bead is empty
+	recentTime := time.Now().UTC().Format(time.RFC3339)
+	bdPath := writeFakeTestBD(t, binDir, "working", "working", "", recentTime)
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	townRoot := t.TempDir()
+	var logBuf strings.Builder
+	d := &Daemon{
+		config: &Config{TownRoot: townRoot},
+		logger: log.New(&logBuf, "", 0),
+		tmux:   tmux.NewTmuxWithSocket(""),
+		bdPath: bdPath,
+	}
+
+	// Write a stale heartbeat (working state, 20 minutes old) so the reaper considers it
+	polecat.TouchSessionHeartbeatWithState(townRoot, "myr-mycat", polecat.HeartbeatWorking, "", "")
+	// Backdate the heartbeat to make it stale
+	hbPath := filepath.Join(townRoot, ".runtime", "heartbeats", "myr-mycat.json")
+	staleHB := polecat.SessionHeartbeat{
+		Timestamp: time.Now().UTC().Add(-20 * time.Minute),
+		State:     polecat.HeartbeatWorking,
+	}
+	data, _ := json.Marshal(staleHB)
+	_ = os.WriteFile(hbPath, data, 0644)
+
+	d.reapIdlePolecat("myr", "mycat", 15*time.Minute)
+
+	got := logBuf.String()
+	if !strings.Contains(got, "Reaping idle polecat") {
+		t.Errorf("expected idle polecat with no agent to be reaped, got: %q", got)
+	}
+	if !strings.Contains(got, "working-no-hook") {
+		t.Errorf("expected working-no-hook reason, got: %q", got)
 	}
 }

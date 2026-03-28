@@ -36,6 +36,7 @@ type SlingParams struct {
 	HookRawBead bool    // --hook-raw-bead
 	NoBoot     bool     // --no-boot
 	Mode       string   // --ralph: "" (normal) or "ralph"
+	ReviewOnly bool     // --review-only: review and report back only, no merge/commit/push
 
 	// Execution behavior (set by caller, not serialized to queue)
 	SkipCook         bool   // Batch optimization: formula already cooked
@@ -318,6 +319,14 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	result.AttachedMolecule = attachedMoleculeID
 
 	// 7. Hook bead with retry
+	// Acquire per-assignee lock to serialize concurrent hook writes (issue #3114).
+	assigneeUnlock, assigneeLockErr := tryAcquireSlingAssigneeLock(townRoot, targetAgent)
+	if assigneeLockErr != nil {
+		cleanupSpawnedPolecat(spawnInfo, params.RigName, convoyID)
+		result.ErrMsg = "assignee lock failed"
+		return result, fmt.Errorf("serializing hook write for %s: %w", targetAgent, assigneeLockErr)
+	}
+	defer assigneeUnlock()
 	hookDir := beads.ResolveHookDir(townRoot, beadToHook, hookWorkDir)
 	if err := hookBeadWithRetry(beadToHook, targetAgent, hookDir); err != nil {
 		// Clean up orphaned polecat to avoid leaving spawned-but-unhookable polecats
@@ -343,6 +352,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 		AttachedMolecule: attachedMoleculeID,
 		AttachedFormula:  params.FormulaName,
 		NoMerge:          params.NoMerge,
+		ReviewOnly:       params.ReviewOnly,
 		Mode:             params.Mode,
 		FormulaVars:      strings.Join(allVars, "\n"),
 	}

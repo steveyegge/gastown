@@ -24,8 +24,12 @@ func TestDashboardCmd_FlagsExist(t *testing.T) {
 	if bindFlag == nil {
 		t.Fatal("--bind flag should exist")
 	}
-	if bindFlag.DefValue != "127.0.0.1" {
-		t.Errorf("--bind default should be 127.0.0.1, got %s", bindFlag.DefValue)
+	wantBind := "127.0.0.1"
+	if os.Getenv("IS_SANDBOX") != "" {
+		wantBind = "0.0.0.0"
+	}
+	if bindFlag.DefValue != wantBind {
+		t.Errorf("--bind default should be %s, got %s", wantBind, bindFlag.DefValue)
 	}
 
 	openFlag := dashboardCmd.Flags().Lookup("open")

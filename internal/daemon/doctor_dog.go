@@ -86,7 +86,7 @@ func doctorDogDatabases(config *DaemonPatrolConfig) []string {
 			return config.Patrols.DoctorDog.Databases
 		}
 	}
-	return []string{"hq", "bd", "gt", "sky", "wy", "beads_hop"}
+	return []string{"hq", "gt", "mo"}
 }
 
 // runDoctorDog pours a mol-dog-doctor molecule for agent execution.
@@ -94,7 +94,7 @@ func doctorDogDatabases(config *DaemonPatrolConfig) []string {
 // execute the formula steps (probe, inspect, report). This follows ZFC:
 // daemons schedule, agents decide and act.
 func (d *Daemon) runDoctorDog() {
-	if !IsPatrolEnabled(d.patrolConfig, "doctor_dog") {
+	if !d.isPatrolActive("doctor_dog") {
 		return
 	}
 

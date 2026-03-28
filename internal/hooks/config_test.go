@@ -884,6 +884,156 @@ func TestDiscoverTargets_RoleNames(t *testing.T) {
 	}
 }
 
+func TestDiscoverTargets_ReturnsOnlyClaude(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "deacon"), 0755)
+
+	// Create a rig with crew members that have both Claude and Gemini settings.
+	// DiscoverTargets should only return Claude targets; non-Claude agents are
+	// discovered via DiscoverRoleLocations instead.
+	os.MkdirAll(filepath.Join(tmpDir, "rig1", "crew", "alice"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "rig1", "witness"), 0755)
+
+	// Install gemini settings (should NOT appear in DiscoverTargets results)
+	geminiDir := filepath.Join(tmpDir, "rig1", "crew", "alice", ".gemini")
+	os.MkdirAll(geminiDir, 0755)
+	os.WriteFile(filepath.Join(geminiDir, "settings.json"), []byte(`{"hooks":{}}`), 0644)
+
+	targets, err := DiscoverTargets(tmpDir)
+	if err != nil {
+		t.Fatalf("DiscoverTargets failed: %v", err)
+	}
+
+	for _, tgt := range targets {
+		if tgt.Provider == "gemini" {
+			t.Errorf("DiscoverTargets should not return gemini targets, got: %s", tgt.DisplayKey())
+		}
+	}
+}
+
+func TestDiscoverRoleLocations(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "deacon"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "rig1", "crew", "alice"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "rig1", "polecats", "toast"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "rig1", "witness"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "rig1", "refinery"), 0755)
+
+	locations, err := DiscoverRoleLocations(tmpDir)
+	if err != nil {
+		t.Fatalf("DiscoverRoleLocations failed: %v", err)
+	}
+
+	// Build lookup by role+rig
+	type key struct{ rig, role string }
+	found := make(map[key]RoleLocation)
+	for _, loc := range locations {
+		found[key{loc.Rig, loc.Role}] = loc
+	}
+
+	expected := []struct {
+		rig, role string
+	}{
+		{"", "mayor"},
+		{"", "deacon"},
+		{"rig1", "crew"},
+		{"rig1", "polecat"},
+		{"rig1", "witness"},
+		{"rig1", "refinery"},
+	}
+
+	for _, e := range expected {
+		loc, ok := found[key{e.rig, e.role}]
+		if !ok {
+			t.Errorf("expected location rig=%q role=%q not found", e.rig, e.role)
+			continue
+		}
+		if loc.Dir == "" {
+			t.Errorf("location rig=%q role=%q has empty Dir", e.rig, e.role)
+		}
+	}
+
+	if len(locations) != len(expected) {
+		t.Errorf("expected %d locations, got %d", len(expected), len(locations))
+	}
+}
+
+func TestDiscoverRoleLocations_SkipsNonRigs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a directory that isn't a rig (no crew/witness/polecats/refinery subdirs)
+	os.MkdirAll(filepath.Join(tmpDir, "notarig", "something"), 0755)
+	// Hidden dirs should be skipped
+	os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, ".hidden", "crew"), 0755)
+
+	locations, err := DiscoverRoleLocations(tmpDir)
+	if err != nil {
+		t.Fatalf("DiscoverRoleLocations failed: %v", err)
+	}
+
+	for _, loc := range locations {
+		if loc.Rig == "notarig" || loc.Rig == ".beads" || loc.Rig == ".hidden" {
+			t.Errorf("unexpected location found: rig=%q role=%q", loc.Rig, loc.Role)
+		}
+	}
+}
+
+func TestDiscoverWorktrees(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create worktree subdirectories
+	os.MkdirAll(filepath.Join(tmpDir, "alice"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "bob"), 0755)
+	// Hidden dirs should be skipped
+	os.MkdirAll(filepath.Join(tmpDir, ".claude"), 0755)
+	// Files should be skipped
+	os.WriteFile(filepath.Join(tmpDir, "state.json"), []byte("{}"), 0644)
+
+	dirs := DiscoverWorktrees(tmpDir)
+
+	if len(dirs) != 2 {
+		t.Errorf("expected 2 worktrees, got %d: %v", len(dirs), dirs)
+	}
+
+	names := make(map[string]bool)
+	for _, d := range dirs {
+		names[filepath.Base(d)] = true
+	}
+	if !names["alice"] || !names["bob"] {
+		t.Errorf("expected alice and bob, got %v", names)
+	}
+	if names[".claude"] {
+		t.Error("hidden directory should be skipped")
+	}
+}
+
+func TestDiscoverWorktrees_EmptyDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	dirs := DiscoverWorktrees(tmpDir)
+	if len(dirs) != 0 {
+		t.Errorf("expected 0 worktrees, got %d", len(dirs))
+	}
+}
+
+func TestDiscoverWorktrees_InvalidDir(t *testing.T) {
+	dirs := DiscoverWorktrees("/nonexistent/path/that/does/not/exist")
+	if dirs != nil {
+		t.Errorf("expected nil for invalid dir, got %v", dirs)
+	}
+}
+
+func TestDiscoverRoleLocations_ReadError(t *testing.T) {
+	_, err := DiscoverRoleLocations("/nonexistent/path/that/does/not/exist")
+	if err == nil {
+		t.Error("expected error for nonexistent directory")
+	}
+}
+
 func TestTargetDisplayKey(t *testing.T) {
 	tests := []struct {
 		target   Target

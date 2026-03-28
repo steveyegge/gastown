@@ -154,6 +154,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			NoConvoy:         slingNoConvoy,
 			Owned:            slingOwned,
 			NoMerge:          slingNoMerge,
+			ReviewOnly:       slingReviewOnly,
 			Force:            slingForce,
 			HookRawBead:      slingHookRawBead,
 			NoBoot:           slingNoBoot,

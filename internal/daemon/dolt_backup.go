@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -32,7 +33,12 @@ func doltBackupInterval(config *DaemonPatrolConfig) time.Duration {
 // syncDoltBackups syncs each production database to its configured backup location.
 // Non-fatal: errors are logged but don't stop the daemon.
 func (d *Daemon) syncDoltBackups() {
-	if !IsPatrolEnabled(d.patrolConfig, "dolt_backup") {
+	// Dolt backup uses iCloud Drive for offsite sync — only available on macOS.
+	// On Linux this generates HIGH priority escalation spam every ~15 minutes.
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	if !d.isPatrolActive("dolt_backup") {
 		return
 	}
 

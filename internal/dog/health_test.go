@@ -150,7 +150,7 @@ func TestHealth_Zombie_AgentDead(t *testing.T) {
 // Hung
 // =============================================================================
 
-func TestHealth_Hung_NotAutoCleared(t *testing.T) {
+func TestHealth_Hung_ReportOnly(t *testing.T) {
 	m, _ := testManager(t)
 	now := time.Now()
 	setupDogWithState(t, m, "alpha", &DogState{
@@ -164,16 +164,49 @@ func TestHealth_Hung_NotAutoCleared(t *testing.T) {
 	hc := NewHealthChecker(m, mc)
 
 	d, _ := m.Get("alpha")
-	r := hc.Check(d, 30*time.Minute, true) // autoClear=true but hung dogs are never auto-cleared
+	r := hc.Check(d, 30*time.Minute, false) // autoClear=false: report only
 
 	if !r.NeedsAttention {
 		t.Error("hung dog should need attention")
 	}
 	if r.AutoCleared {
-		t.Error("hung dog should NOT be auto-cleared (ZFC)")
+		t.Error("hung dog should NOT be auto-cleared when autoClear=false")
 	}
 	if r.SessionStatus != "agent-hung" {
 		t.Errorf("session_status = %q, want 'agent-hung'", r.SessionStatus)
+	}
+}
+
+func TestHealth_Hung_AutoCleared(t *testing.T) {
+	m, _ := testManager(t)
+	now := time.Now()
+	setupDogWithState(t, m, "alpha", &DogState{
+		Name: "alpha", State: StateWorking, Work: "task-1",
+		WorkStartedAt: now.Add(-2 * time.Hour), LastActive: now,
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	mc := newMockChecker()
+	mc.healthResults["hq-dog-alpha"] = tmux.AgentHung
+	hc := NewHealthChecker(m, mc)
+
+	d, _ := m.Get("alpha")
+	r := hc.Check(d, 30*time.Minute, true) // autoClear=true: kill and reclaim
+
+	if !r.NeedsAttention {
+		t.Error("hung dog should need attention")
+	}
+	if !r.AutoCleared {
+		t.Error("hung dog should be auto-cleared when autoClear=true")
+	}
+	if len(mc.killedSessions) != 1 || mc.killedSessions[0] != "hq-dog-alpha" {
+		t.Errorf("killedSessions = %v, want [hq-dog-alpha]", mc.killedSessions)
+	}
+
+	// Verify state was cleared
+	d2, _ := m.Get("alpha")
+	if d2.State != StateIdle {
+		t.Errorf("state = %q, want idle after auto-clear", d2.State)
 	}
 }
 
@@ -267,6 +300,32 @@ func TestHealth_Orphan_IdleWithSession(t *testing.T) {
 	}
 	if r.SessionStatus != "orphan" {
 		t.Errorf("session_status = %q, want 'orphan'", r.SessionStatus)
+	}
+}
+
+func TestHealth_Orphan_AutoCleared(t *testing.T) {
+	m, _ := testManager(t)
+	now := time.Now()
+	setupDogWithState(t, m, "alpha", &DogState{
+		Name: "alpha", State: StateIdle, LastActive: now,
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	mc := newMockChecker()
+	mc.sessionsAlive["hq-dog-alpha"] = true
+	hc := NewHealthChecker(m, mc)
+
+	d, _ := m.Get("alpha")
+	r := hc.Check(d, 30*time.Minute, true) // autoClear=true: kill orphan session
+
+	if !r.NeedsAttention {
+		t.Error("orphan session should need attention")
+	}
+	if !r.AutoCleared {
+		t.Error("orphan session should be auto-cleared when autoClear=true")
+	}
+	if len(mc.killedSessions) != 1 || mc.killedSessions[0] != "hq-dog-alpha" {
+		t.Errorf("killedSessions = %v, want [hq-dog-alpha]", mc.killedSessions)
 	}
 }
 

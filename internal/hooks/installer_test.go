@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -86,6 +87,199 @@ func TestInstallForRole_SkipsExisting(t *testing.T) {
 	got, _ := os.ReadFile(hooksPath)
 	if string(got) != "custom" {
 		t.Error("existing file was overwritten")
+	}
+}
+
+func TestInstallForRole_UpgradesStaleExportPath(t *testing.T) {
+	dir := t.TempDir()
+	hooksPath := filepath.Join(dir, ".opencode/plugins", "gastown.js")
+	os.MkdirAll(filepath.Dir(hooksPath), 0755)
+
+	// Write a stale file with the legacy "export PATH=" pattern
+	os.WriteFile(hooksPath, []byte(`export PATH=/usr/local/bin:$PATH && gt hook`), 0644)
+
+	err := InstallForRole("opencode", dir, dir, "crew", ".opencode/plugins", "gastown.js", false)
+	if err != nil {
+		t.Fatalf("InstallForRole: %v", err)
+	}
+
+	got, _ := os.ReadFile(hooksPath)
+	if strings.Contains(string(got), "export PATH=") {
+		t.Error("stale export PATH pattern was not upgraded")
+	}
+	// Should now match the current template
+	template, _ := templateFS.ReadFile("templates/opencode/gastown.js")
+	if string(got) != string(template) {
+		t.Error("upgraded file does not match current template")
+	}
+}
+
+func TestSyncForRole_UpdatesStaleContent(t *testing.T) {
+	dir := t.TempDir()
+	hooksPath := filepath.Join(dir, ".opencode/plugins", "gastown.js")
+	os.MkdirAll(filepath.Dir(hooksPath), 0755)
+	os.WriteFile(hooksPath, []byte("stale-content"), 0644)
+
+	result, err := SyncForRole("opencode", dir, dir, "crew", ".opencode/plugins", "gastown.js", false)
+	if err != nil {
+		t.Fatalf("SyncForRole: %v", err)
+	}
+	if result != SyncUpdated {
+		t.Errorf("expected SyncUpdated, got %d", result)
+	}
+
+	got, _ := os.ReadFile(hooksPath)
+	if string(got) == "stale-content" {
+		t.Error("stale file was not updated")
+	}
+
+	// Should match the template
+	template, _ := templateFS.ReadFile("templates/opencode/gastown.js")
+	if string(got) != string(template) {
+		t.Error("updated file does not match current template")
+	}
+}
+
+func TestSyncForRole_SkipsMatchingContent(t *testing.T) {
+	dir := t.TempDir()
+	hooksPath := filepath.Join(dir, ".opencode/plugins", "gastown.js")
+	os.MkdirAll(filepath.Dir(hooksPath), 0755)
+
+	// Write the actual template content — should report unchanged
+	template, _ := templateFS.ReadFile("templates/opencode/gastown.js")
+	os.WriteFile(hooksPath, template, 0644)
+
+	result, err := SyncForRole("opencode", dir, dir, "crew", ".opencode/plugins", "gastown.js", false)
+	if err != nil {
+		t.Fatalf("SyncForRole: %v", err)
+	}
+	if result != SyncUnchanged {
+		t.Errorf("expected SyncUnchanged, got %d", result)
+	}
+}
+
+func TestSyncForRole_CreatesNewFile(t *testing.T) {
+	dir := t.TempDir()
+	hooksPath := filepath.Join(dir, ".opencode/plugins", "gastown.js")
+
+	result, err := SyncForRole("opencode", dir, dir, "polecat", ".opencode/plugins", "gastown.js", false)
+	if err != nil {
+		t.Fatalf("SyncForRole: %v", err)
+	}
+	if result != SyncCreated {
+		t.Errorf("expected SyncCreated, got %d", result)
+	}
+
+	if _, err := os.Stat(hooksPath); os.IsNotExist(err) {
+		t.Error("file was not created")
+	}
+}
+
+func TestSyncForRole_EmptyProvider(t *testing.T) {
+	dir := t.TempDir()
+	result, err := SyncForRole("", dir, dir, "crew", ".opencode/plugins", "gastown.js", false)
+	if err != nil {
+		t.Fatalf("expected nil error for empty provider, got: %v", err)
+	}
+	if result != SyncUnchanged {
+		t.Errorf("expected SyncUnchanged for empty provider, got %d", result)
+	}
+}
+
+func TestSyncForRole_InvalidProvider(t *testing.T) {
+	dir := t.TempDir()
+	_, err := SyncForRole("nonexistent-provider", dir, dir, "crew", ".test", "settings.json", false)
+	if err == nil {
+		t.Error("expected error for invalid provider")
+	}
+}
+
+func TestSyncForRole_WriteError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not support read-only directories reliably")
+	}
+
+	dir := t.TempDir()
+	// Create a read-only parent to prevent MkdirAll from creating the hooks dir
+	readOnlyDir := filepath.Join(dir, "readonly")
+	os.MkdirAll(readOnlyDir, 0755)
+	os.Chmod(readOnlyDir, 0444)
+	defer os.Chmod(readOnlyDir, 0755) // cleanup
+
+	_, err := SyncForRole("opencode", readOnlyDir, readOnlyDir, "crew", ".opencode/plugins", "gastown.js", false)
+	if err == nil {
+		t.Error("expected error when directory is read-only")
+	}
+}
+
+func TestSyncForRole_JSONWhitespaceInsensitive(t *testing.T) {
+	dir := t.TempDir()
+
+	// First, create the file via SyncForRole
+	result, err := SyncForRole("gemini", dir, dir, "crew", ".gemini", "settings.json", false)
+	if err != nil {
+		t.Fatalf("initial SyncForRole: %v", err)
+	}
+	if result != SyncCreated {
+		t.Fatalf("expected SyncCreated, got %d", result)
+	}
+
+	// Read the canonical file, reformat with different whitespace
+	targetPath := filepath.Join(dir, ".gemini", "settings.json")
+	original, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("reading created file: %v", err)
+	}
+
+	// Reformat with different whitespace by round-tripping through json.MarshalIndent.
+	// This changes indentation structure without corrupting string values (safe on Windows
+	// where strings.ReplaceAll(":", " : ") would corrupt drive letters like C: → C :).
+	var parsed interface{}
+	if err := json.Unmarshal(original, &parsed); err != nil {
+		t.Fatalf("parsing original JSON: %v", err)
+	}
+	reformatted, err := json.MarshalIndent(parsed, "", "    ")
+	if err != nil {
+		t.Fatalf("reformatting JSON: %v", err)
+	}
+	if string(original) == string(reformatted) {
+		t.Fatal("reformatted content should differ from original bytes")
+	}
+	if err := os.WriteFile(targetPath, reformatted, 0600); err != nil {
+		t.Fatalf("writing reformatted file: %v", err)
+	}
+
+	// SyncForRole should treat this as unchanged (structurally equal JSON)
+	result, err = SyncForRole("gemini", dir, dir, "crew", ".gemini", "settings.json", false)
+	if err != nil {
+		t.Fatalf("SyncForRole after reformat: %v", err)
+	}
+	if result != SyncUnchanged {
+		t.Errorf("expected SyncUnchanged for whitespace-only JSON difference, got %d", result)
+	}
+}
+
+func TestSyncForRole_GeminiWithGTBinSubstitution(t *testing.T) {
+	dir := t.TempDir()
+
+	result, err := SyncForRole("gemini", dir, dir, "witness", ".gemini", "settings.json", false)
+	if err != nil {
+		t.Fatalf("SyncForRole: %v", err)
+	}
+	if result != SyncCreated {
+		t.Errorf("expected SyncCreated, got %d", result)
+	}
+
+	got, _ := os.ReadFile(filepath.Join(dir, ".gemini", "settings.json"))
+	// Verify {{GT_BIN}} was substituted (should not appear in output)
+	if strings.Contains(string(got), "{{GT_BIN}}") {
+		t.Error("{{GT_BIN}} placeholder was not substituted")
+	}
+	// Verify the resolved binary path is present (JSON-escaped for Windows compatibility).
+	gtBin := resolveGTBinary()
+	gtBinJSON := strings.ReplaceAll(gtBin, `\`, `\\`)
+	if !strings.Contains(string(got), gtBinJSON) {
+		t.Errorf("expected resolved gt binary %q in output", gtBin)
 	}
 }
 
@@ -189,9 +383,10 @@ func TestInstallForRole_GeminiRoleAware(t *testing.T) {
 	got, _ := os.ReadFile(filepath.Join(dir, ".gemini", "settings.json"))
 	want, _ := templateFS.ReadFile("templates/gemini/settings-autonomous.json")
 	// Gemini templates contain {{GT_BIN}} which gets resolved at install time.
-	// Apply the same substitution to the expected content for comparison.
+	// Apply the same substitution (with JSON escaping) to the expected content for comparison.
 	gtBin := resolveGTBinary()
-	wantResolved := strings.ReplaceAll(string(want), "{{GT_BIN}}", gtBin)
+	gtBinJSON := strings.ReplaceAll(gtBin, `\`, `\\`)
+	wantResolved := strings.ReplaceAll(string(want), "{{GT_BIN}}", gtBinJSON)
 	if string(got) != wantResolved {
 		t.Error("gemini autonomous: content mismatch")
 	}
@@ -253,5 +448,70 @@ func TestInstallForRole_CopilotRoleAware(t *testing.T) {
 	want, _ = templateFS.ReadFile("templates/copilot/gastown-interactive.json")
 	if string(got) != string(want) {
 		t.Error("copilot interactive: content mismatch")
+	}
+}
+
+func TestComputeExpectedTemplate_Gemini(t *testing.T) {
+	// Autonomous role should get settings-autonomous.json template
+	content, err := ComputeExpectedTemplate("gemini", "settings.json", "witness")
+	if err != nil {
+		t.Fatalf("ComputeExpectedTemplate: %v", err)
+	}
+
+	// Should contain resolved gt binary path, not {{GT_BIN}}
+	if strings.Contains(string(content), "{{GT_BIN}}") {
+		t.Error("expected {{GT_BIN}} to be resolved")
+	}
+
+	// Should contain GT_HOOK_SOURCE=compact (from autonomous template)
+	if !strings.Contains(string(content), "GT_HOOK_SOURCE=compact") {
+		t.Error("expected GT_HOOK_SOURCE=compact in autonomous template")
+	}
+
+	// Interactive role should get settings-interactive.json template
+	interactiveContent, err := ComputeExpectedTemplate("gemini", "settings.json", "crew")
+	if err != nil {
+		t.Fatalf("ComputeExpectedTemplate(crew): %v", err)
+	}
+
+	// Interactive template should NOT contain GT_HOOK_SOURCE=compact
+	if strings.Contains(string(interactiveContent), "GT_HOOK_SOURCE=compact") {
+		t.Error("interactive template should not contain GT_HOOK_SOURCE=compact")
+	}
+}
+
+func TestTemplateContentEqual(t *testing.T) {
+	// Same JSON, different formatting
+	a := []byte(`{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"test"}]}]}}`)
+	b := []byte(`{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test"
+          }
+        ]
+      }
+    ]
+  }
+}`)
+
+	if !TemplateContentEqual(a, b) {
+		t.Error("expected structurally equal JSON to match")
+	}
+
+	// Different content
+	c := []byte(`{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"different"}]}]}}`)
+	if TemplateContentEqual(a, c) {
+		t.Error("expected different JSON to not match")
+	}
+
+	// Invalid JSON
+	invalid := []byte(`not json`)
+	if TemplateContentEqual(a, invalid) {
+		t.Error("expected invalid JSON to not match")
 	}
 }

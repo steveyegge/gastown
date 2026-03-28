@@ -8,7 +8,7 @@ import (
 
 // RigsJSONCheck verifies that rigs.json exists and the PrefixRegistry is populated.
 // A missing rigs.json causes silent failures in session name parsing, crew cycling,
-// nudge routing, and session-hygiene (which killed 7 sessions due to this).
+// and nudge routing.
 type RigsJSONCheck struct {
 	FixableCheck
 	canonicalPath string
@@ -120,7 +120,7 @@ func (c *RigsJSONCheck) Run(ctx *CheckContext) *CheckResult {
 		Details: []string{
 			fmt.Sprintf("Canonical: %s (MISSING)", c.canonicalPath),
 			fmt.Sprintf("Fallback: %s (MISSING)", c.fallbackPath),
-			"Session cycling, nudge routing, and session-hygiene will fail silently",
+			"Session cycling and nudge routing will fail silently",
 		},
 		FixHint: "Restore rigs.json or run 'gt rig list' to regenerate",
 	}

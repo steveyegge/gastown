@@ -5,7 +5,7 @@ version = 1
 
 [gate]
 type = "cooldown"
-duration = "5m"
+duration = "2h"
 
 [tracking]
 labels = ["plugin:github-sheriff", "category:ci-monitoring"]
@@ -42,26 +42,15 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Detect the repo from the first rig's git remote. Dogs run from the kennel
-(not a rig clone), so scan GT_ROOT for rigs with git clones:
+Detect the repo from the rig's git remote. Fall back to explicit config if
+detection fails:
 
 ```bash
-REPO=""
-
-# Find the first rig with a git clone (refinery/rig/ is the canonical clone)
-if [ -n "$GT_ROOT" ]; then
-  for RIG_DIR in "$GT_ROOT"/*/; do
-    CLONE="$RIG_DIR/refinery/rig"
-    if [ -d "$CLONE/.git" ] || git -C "$CLONE" rev-parse --git-dir >/dev/null 2>&1; then
-      REPO=$(git -C "$CLONE" remote get-url origin 2>/dev/null \
-        | sed -E 's|.*github\.com[:/]||; s|\.git$||')
-      [ -n "$REPO" ] && break
-    fi
-  done
-fi
+REPO=$(git -C "$GT_RIG_ROOT" remote get-url origin 2>/dev/null \
+  | sed -E 's|.*github\.com[:/]||; s|\.git$||')
 
 if [ -z "$REPO" ]; then
-  echo "SKIP: could not detect GitHub repo from any rig"
+  echo "SKIP: could not detect GitHub repo from rig remote"
   exit 0
 fi
 ```
@@ -74,9 +63,10 @@ Fetch all open PRs in a single GraphQL call via `gh`. This returns additions,
 deletions, mergeable status, and CI check results without per-PR API overhead:
 
 ```bash
+SINCE=$(date -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -v-7d +%Y-%m-%dT%H:%M:%SZ)
 PRS=$(gh pr list --repo "$REPO" --state open \
-  --json number,title,author,additions,deletions,mergeable,statusCheckRollup,url \
-  --limit 100)
+  --json number,title,author,additions,deletions,mergeable,statusCheckRollup,url,updatedAt \
+  --limit 100 | jq --arg since "$SINCE" '[.[] | select(.updatedAt >= $since)]')
 
 PR_COUNT=$(echo "$PRS" | jq length)
 if [ "$PR_COUNT" -eq 0 ]; then
@@ -155,13 +145,26 @@ fi
 
 ### Step 3: Deduplicate CI failures against existing beads
 
-For each failure, check if a bead already exists:
+For each failure, check if a bead already exists. Use `--rig` to ensure we
+query the same rig where beads are created:
 
 ```bash
+# Derive rig name from GT_RIG_ROOT path (e.g., /home/user/gt/gastown → gastown)
+RIG_NAME=$(basename "$(dirname "$(dirname "$GT_RIG_ROOT")")" 2>/dev/null)
+RIG_FLAG=""
+[ -n "$RIG_NAME" ] && RIG_FLAG="--rig $RIG_NAME"
+
 CREATED=0
 SKIPPED=0
 
-EXISTING=$(bd list --label ci-failure --status open --json 2>/dev/null || echo "[]")
+# Only create CI failure beads for repos we own — skip upstream noise
+REPO_OWNER=$(echo "$REPO" | cut -d'/' -f1)
+if [ "$REPO_OWNER" != "athosmartins" ]; then
+  echo "Skipping CI failure beads for upstream repo $REPO (not athosmartins)"
+  SKIPPED=${#FAILURES[@]}
+else
+
+EXISTING=$(bd list --label ci-failure --status open $RIG_FLAG --json 2>/dev/null || echo "[]")
 
 for F in "${FAILURES[@]}"; do
   IFS='|' read -r PR_NUM PR_TITLE CHECK_NAME CHECK_URL <<< "$F"
@@ -182,6 +185,7 @@ Check: $CHECK_URL"
   BEAD_ID=$(bd create "$BEAD_TITLE" -t task -p 2 \
     -d "$DESCRIPTION" \
     -l ci-failure \
+    $RIG_FLAG \
     --json 2>/dev/null | jq -r '.id // empty')
 
   if [ -n "$BEAD_ID" ]; then
@@ -192,6 +196,7 @@ Check: $CHECK_URL"
       2>/dev/null || true
   fi
 done
+fi # end athosmartins owner check
 ```
 
 ## Record Result

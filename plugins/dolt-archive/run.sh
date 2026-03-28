@@ -16,7 +16,7 @@ DOLT_USER="${DOLT_USER:-root}"
 DOLT_DATA_DIR="${DOLT_DATA_DIR:-$HOME/gt/.dolt-data}"
 JSONL_EXPORT_DIR="$HOME/gt/.dolt-archive/jsonl"
 BACKUP_REPO="$HOME/gt/.dolt-archive/git"
-DEFAULT_DBS="hq,bd,gt"
+DEFAULT_DBS="auto"
 SKIP_GIT=false
 SKIP_DOLT_PUSH=false
 
@@ -64,7 +64,20 @@ dolt_query_json() {
 
 # --- Step 1: JSONL export ----------------------------------------------------
 
-IFS=',' read -ra PROD_DBS <<< "$DEFAULT_DBS"
+# Auto-discover production databases or use the explicit list.
+if [[ "$DEFAULT_DBS" == "auto" ]]; then
+  mapfile -t PROD_DBS < <(
+    dolt_query "" "SHOW DATABASES" \
+      | grep -v -E '^(information_schema|mysql|dolt_cluster)$' \
+      | grep -v -E '^(testdb_|beads_t|beads_pt|doctest_)'
+  )
+  if [[ ${#PROD_DBS[@]} -eq 0 ]]; then
+    log "ERROR: No production databases found via auto-discovery"
+    exit 1
+  fi
+else
+  IFS=',' read -ra PROD_DBS <<< "$DEFAULT_DBS"
+fi
 
 log "Starting archive cycle (databases: ${PROD_DBS[*]})"
 mkdir -p "$JSONL_EXPORT_DIR"
@@ -79,26 +92,23 @@ for DB in "${PROD_DBS[@]}"; do
 
   log "Exporting $DB..."
 
-  # Try bd export first (native beads export)
-  if bd export --db "$DB" --format jsonl > "$EXPORT_FILE" 2>/dev/null; then
+  # Skip databases without an issues table (e.g. gastown config DB)
+  if ! dolt_query "$DB" "SHOW TABLES LIKE 'issues'" 2>/dev/null | grep -q 'issues'; then
+    log "  $DB: skipped (no issues table)"
+    continue
+  fi
+
+  # Export via Dolt SQL (reliable for all databases with an issues table)
+  if dolt_query_json "$DB" "SELECT * FROM issues ORDER BY id" > "$EXPORT_FILE" 2>/dev/null && [[ -s "$EXPORT_FILE" ]]; then
     LINE_COUNT=$(wc -l < "$EXPORT_FILE" | tr -d ' ')
-    FILE_SIZE=$(du -h "$EXPORT_FILE" | cut -f1)
-    log "  $DB: $LINE_COUNT issues exported ($FILE_SIZE) [bd export]"
+    log "  $DB: exported via SQL ($LINE_COUNT lines)"
     ln -sf "$(basename "$EXPORT_FILE")" "$LATEST_LINK"
     EXPORTED=$((EXPORTED + 1))
   else
-    # Fallback: query Dolt directly for issues table
-    if dolt_query_json "$DB" "SELECT * FROM issues ORDER BY id" > "$EXPORT_FILE" 2>/dev/null && [[ -s "$EXPORT_FILE" ]]; then
-      LINE_COUNT=$(wc -l < "$EXPORT_FILE" | tr -d ' ')
-      log "  $DB: exported via SQL ($LINE_COUNT lines)"
-      ln -sf "$(basename "$EXPORT_FILE")" "$LATEST_LINK"
-      EXPORTED=$((EXPORTED + 1))
-    else
-      log "  WARN: $DB export failed"
-      rm -f "$EXPORT_FILE"
-      EXPORT_FAILED=$((EXPORT_FAILED + 1))
-      EXPORT_ERRORS="${EXPORT_ERRORS}${DB} "
-    fi
+    log "  WARN: $DB export failed"
+    rm -f "$EXPORT_FILE"
+    EXPORT_FAILED=$((EXPORT_FAILED + 1))
+    EXPORT_ERRORS="${EXPORT_ERRORS}${DB} "
   fi
 done
 
@@ -175,7 +185,7 @@ if ! $SKIP_DOLT_PUSH; then
       continue
     fi
 
-    REMOTES=$(cd "$DB_DIR" && dolt remote -v 2>/dev/null | grep -v "^$" | head -5)
+    REMOTES=$(cd "$DB_DIR" && { dolt remote -v 2>/dev/null | grep -v "^$" | head -5 || true; })
     if [[ -z "$REMOTES" ]]; then
       log "  $DB: no remotes configured, skipping"
       continue
@@ -184,7 +194,7 @@ if ! $SKIP_DOLT_PUSH; then
     log "  $DB: pushing to remotes..."
     cd "$DB_DIR"
 
-    for REMOTE_NAME in $(dolt remote -v 2>/dev/null | awk '{print $1}' | sort -u); do
+    for REMOTE_NAME in $(dolt remote -v 2>/dev/null | awk '{print $1}' | sort -u || true); do
       if timeout 120 dolt push "$REMOTE_NAME" main 2>/dev/null; then
         log "    $REMOTE_NAME: pushed"
         DOLT_PUSHED=$((DOLT_PUSHED + 1))

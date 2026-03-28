@@ -172,7 +172,7 @@ func checkServerHealth(townRoot string) *ServerHealth {
 }
 
 func checkDatabaseHealth(port int) []DatabaseHealth {
-	productionDBs := []string{"hq", "bd", "gt"}
+	productionDBs := []string{"hq", "gt", "mo"}
 	var results []DatabaseHealth
 
 	for _, dbName := range productionDBs {
@@ -208,7 +208,7 @@ func checkDatabaseHealth(port int) []DatabaseHealth {
 }
 
 func checkPollution(port int) []PollutionRecord {
-	productionDBs := []string{"hq", "bd", "gt"}
+	productionDBs := []string{"hq", "gt", "mo"}
 	var records []PollutionRecord
 
 	// Known pollution patterns to check in the issues table.

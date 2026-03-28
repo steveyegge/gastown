@@ -310,6 +310,31 @@ func TestWriteHeartbeat_CreatesDirectory(t *testing.T) {
 	}
 }
 
+func TestWriteHeartbeat_TouchesLegacyFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "deacon-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	hb := &Heartbeat{Cycle: 1}
+	if err := WriteHeartbeat(tmpDir, hb); err != nil {
+		t.Fatalf("WriteHeartbeat error: %v", err)
+	}
+
+	// Legacy .deacon-heartbeat should also exist so shell scripts (stuck-agent-dog)
+	// that check this file's mtime get accurate data.
+	legacyFile := filepath.Join(tmpDir, "deacon", ".deacon-heartbeat")
+	info, err := os.Stat(legacyFile)
+	if err != nil {
+		t.Errorf(".deacon-heartbeat not created: %v", err)
+		return
+	}
+	if time.Since(info.ModTime()) > time.Minute {
+		t.Error(".deacon-heartbeat mtime should be recent")
+	}
+}
+
 func TestWriteHeartbeat_SetsTimestamp(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "deacon-test-*")
 	if err != nil {

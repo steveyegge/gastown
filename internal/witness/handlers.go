@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -196,11 +197,30 @@ func HandlePolecatDoneFromBead(bd *BdCli, workDir, rigName, polecatName string, 
 		MRID:        fields.MRID,
 		Branch:      fields.Branch,
 		MRFailed:    fields.MRFailed,
+		PushFailed:  fields.PushFailed,
 	}
 
 	if payload.Exit == "PHASE_COMPLETE" {
 		result.Handled = true
 		result.Action = fmt.Sprintf("phase-complete for %s - session recycled, awaiting gate", polecatName)
+		return result
+	}
+
+	// Push failed: branch never reached origin (gas-556). Report recovery needed.
+	if payload.PushFailed {
+		result.Handled = true
+		result.Action = fmt.Sprintf("push-failed-recovery-needed for %s (branch=%s issue=%s) — branch not on origin, worktree may be at risk",
+			polecatName, payload.Branch, payload.IssueID)
+		townRoot, _ := workspace.Find(workDir)
+		if townRoot != "" {
+			mayorMsg := fmt.Sprintf("PUSH_FAILED: polecat=%s branch=%s issue=%s — branch not on origin, possible work loss",
+				polecatName, payload.Branch, payload.IssueID)
+			mayorSession := session.MayorSessionName()
+			t := tmux.NewTmux()
+			if running, err := t.HasSession(mayorSession); err == nil && running {
+				_ = t.NudgeSession(mayorSession, mayorMsg)
+			}
+		}
 		return result
 	}
 
@@ -215,9 +235,18 @@ func HandlePolecatDoneFromBead(bd *BdCli, workDir, rigName, polecatName string, 
 	}
 
 	if hasPendingMR {
-		return handlePolecatDonePendingMR(bd, workDir, rigName, payload, result)
+		result = handlePolecatDonePendingMR(bd, workDir, rigName, payload, result)
+	} else {
+		result = handlePolecatDoneNoMR(workDir, rigName, payload, result)
 	}
-	return handlePolecatDoneNoMR(workDir, rigName, payload, result)
+
+	// Notify Mayor that a slot is open regardless of MR status.
+	// Mirror HandlePolecatDone behavior — polecat is idle, Mayor should sling next bead. (GH#2727)
+	if result.Handled {
+		notifyMayorSlotOpen(workDir, rigName, polecatName, payload.Exit)
+	}
+
+	return result
 }
 
 // TransitionPolecatToIdle sets a polecat's agent_state to idle after the witness
@@ -671,7 +700,8 @@ func nudgeRefinery(townRoot, rigName string) error {
 // notifyMayorSlotOpen nudges the Mayor that a polecat slot is now open.
 // This is critical for pipeline throughput: without it, the Mayor sits idle
 // even when open beads exist, because it never learns about the completion.
-// Uses nudge (not mail) per communication hygiene. (GH#2727)
+// Prefers nudge per communication hygiene, falls back to mail if nudge
+// can't reach the Mayor (e.g., ACP session, no tmux). (GH#2727)
 func notifyMayorSlotOpen(workDir, rigName, polecatName, exitType string) {
 	townRoot, _ := workspace.Find(workDir)
 	if townRoot == "" {
@@ -686,15 +716,23 @@ func notifyMayorSlotOpen(workDir, rigName, polecatName, exitType string) {
 		"exit=" + exitType,
 	})
 
-	// Belt-and-suspenders: also nudge the Mayor's tmux session directly.
-	// This handles cases where the Mayor is at the Claude prompt rather
-	// than in an await-event loop.
+	// Try nudge first — lightweight, no Dolt commit.
 	mayorSession := session.MayorSessionName()
 	t := tmux.NewTmux()
 	if running, err := t.HasSession(mayorSession); err == nil && running {
 		msg := fmt.Sprintf("SLOT_OPEN: %s/%s completed (exit=%s) — slot available. Run `gt polecat list` to verify and sling next bead.", rigName, polecatName, exitType)
-		_ = t.NudgeSession(mayorSession, msg)
+		if err := t.NudgeSession(mayorSession, msg); err == nil {
+			return // Nudge delivered — no mail needed.
+		}
 	}
+
+	// Nudge failed or Mayor not in tmux (e.g., ACP/Claude Code session).
+	// Fall back to mail so the completion is not silently lost.
+	subject := fmt.Sprintf("SLOT_OPEN: %s/%s completed (exit=%s)", rigName, polecatName, exitType)
+	body := fmt.Sprintf("Polecat %s/%s finished (exit=%s). Slot available for next bead.", rigName, polecatName, exitType)
+	cmd := exec.Command("gt", "mail", "send", "mayor/", "-s", subject, "-m", body)
+	cmd.Dir = townRoot
+	_ = cmd.Run()
 }
 
 // RecoveryPayload contains data for RECOVERY_NEEDED escalation.
@@ -1310,6 +1348,15 @@ func detectZombieDeadSession(bd *BdCli, workDir, townRoot, rigName, polecatName,
 		return ZombieResult{}, false
 	}
 
+	// GH#2795: A "done" or "nuked" polecat with a dead session has completed
+	// or been intentionally stopped. The dead session is expected — the hook
+	// bead may not be "closed" yet (refinery queue, manual cleanup), but the
+	// polecat is not a zombie. Without this check, isZombieState returns true
+	// on every patrol cycle (hookBead != ""), flooding the mayor inbox.
+	if typedState == beads.AgentStateDone || typedState == beads.AgentStateNuked {
+		return ZombieResult{}, false
+	}
+
 	// GH#2036: Spawning polecats have hook_bead assigned but no tmux session yet.
 	// This is expected during worktree creation and session startup. Skip zombie
 	// detection if the polecat has been spawning for less than SpawnGracePeriod.
@@ -1322,12 +1369,18 @@ func detectZombieDeadSession(bd *BdCli, workDir, townRoot, rigName, polecatName,
 		// Spawning for too long — fall through to zombie handling
 	}
 
-	// A polecat whose hook bead is already CLOSED completed its work
-	// successfully. The dead session is expected (gt done kills it).
+	// A polecat whose hook bead is already CLOSED (or reaped) completed its
+	// work successfully. The dead session is expected (gt done kills it).
 	// Don't flag as zombie or trigger re-dispatch. (gt-sy8)
 	// gt-dsgp: Don't nuke — sandbox preserved for reuse.
-	if snapHook != "" && getBeadStatus(bd, workDir, snapHook) == "closed" {
-		return ZombieResult{}, false
+	// gt-qbh: Treat missing beads (empty status) as closed. Wisp beads get
+	// reaped after completion, so getBeadStatus returns "" for reaped wisps.
+	// A missing bead is not evidence of a crash.
+	if snapHook != "" {
+		hookStatus := getBeadStatus(bd, workDir, snapHook)
+		if hookStatus == "closed" || hookStatus == "" {
+			return ZombieResult{}, false
+		}
 	}
 
 	// TOCTOU guard: verify session wasn't recreated since detection.
@@ -1470,10 +1523,12 @@ const SpawnGracePeriod = 5 * time.Minute
 
 // StalledResult represents a single stalled polecat detection.
 type StalledResult struct {
-	PolecatName string // e.g., "alpha"
-	StallType   string // "startup-stall", "unknown-prompt"
-	Action      string // "auto-dismissed", "escalated"
-	Error       error
+	PolecatName   string // e.g., "alpha"
+	StallType     string // "startup-stall", "unknown-prompt"
+	Action        string // "auto-dismissed", "escalated"
+	AgentState    string // Agent state from beads (e.g., "idle", "working")
+	HasHookedWork bool   // Whether this polecat has hooked work assigned
+	Error         error
 }
 
 // DetectStalledPolecatsResult holds aggregate results.
@@ -1608,6 +1663,7 @@ type CompletionDiscovery struct {
 	MRID           string
 	Branch         string
 	MRFailed       bool
+	PushFailed     bool   // True when branch push to origin failed (gas-556)
 	CompletionTime string
 	Action         string // What was done: "merge-ready-sent", "acknowledged-idle", "phase-complete"
 	WispCreated    string // ID of cleanup wisp if created
@@ -1677,6 +1733,7 @@ func DiscoverCompletions(bd *BdCli, workDir, rigName string, router *mail.Router
 			MRID:           fields.MRID,
 			Branch:         fields.Branch,
 			MRFailed:       fields.MRFailed,
+			PushFailed:     fields.PushFailed,
 			CompletionTime: fields.CompletionTime,
 		}
 
@@ -1688,6 +1745,7 @@ func DiscoverCompletions(bd *BdCli, workDir, rigName string, router *mail.Router
 			MRID:        fields.MRID,
 			Branch:      fields.Branch,
 			MRFailed:    fields.MRFailed,
+			PushFailed:  fields.PushFailed,
 		}
 
 		// Route based on exit type and MR presence
@@ -1711,6 +1769,26 @@ func DiscoverCompletions(bd *BdCli, workDir, rigName string, router *mail.Router
 func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *PolecatDonePayload, discovery *CompletionDiscovery) {
 	if payload.Exit == string(ExitTypePhaseComplete) {
 		discovery.Action = "phase-complete"
+		return
+	}
+
+	// Push failed: branch never reached origin. Work is committed locally only.
+	// The polecat's worktree may be in /tmp and lost on reboot. Escalate so the
+	// witness agent can investigate and trigger recovery (gas-556).
+	if payload.PushFailed {
+		discovery.Action = fmt.Sprintf("push-failed-recovery-needed (branch=%s issue=%s) — branch not on origin, worktree may be at risk",
+			payload.Branch, payload.IssueID)
+		// Notify mayor so a new polecat can be dispatched if work is lost.
+		townRoot, _ := workspace.Find(workDir)
+		if townRoot != "" {
+			mayorMsg := fmt.Sprintf("PUSH_FAILED: polecat=%s branch=%s issue=%s — branch not on origin, possible work loss",
+				payload.PolecatName, payload.Branch, payload.IssueID)
+			mayorSession := session.MayorSessionName()
+			t := tmux.NewTmux()
+			if running, err := t.HasSession(mayorSession); err == nil && running {
+				_ = t.NudgeSession(mayorSession, mayorMsg)
+			}
+		}
 		return
 	}
 

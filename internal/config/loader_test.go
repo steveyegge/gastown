@@ -561,6 +561,12 @@ func TestMayorConfigRoundTrip(t *testing.T) {
 
 	original := NewMayorConfig()
 	original.Theme = &TownThemeConfig{
+		Disabled: true,
+		Name:     "forest",
+		Custom: &CustomTheme{
+			BG: "#111111",
+			FG: "#eeeeee",
+		},
 		RoleDefaults: map[string]string{
 			"witness": "rust",
 		},
@@ -583,6 +589,15 @@ func TestMayorConfigRoundTrip(t *testing.T) {
 	}
 	if loaded.Theme == nil || loaded.Theme.RoleDefaults["witness"] != "rust" {
 		t.Error("Theme.RoleDefaults not preserved")
+	}
+	if loaded.Theme == nil || !loaded.Theme.Disabled {
+		t.Error("Theme.Disabled not preserved")
+	}
+	if loaded.Theme == nil || loaded.Theme.Name != "forest" {
+		t.Error("Theme.Name not preserved")
+	}
+	if loaded.Theme == nil || loaded.Theme.Custom == nil || loaded.Theme.Custom.BG != "#111111" || loaded.Theme.Custom.FG != "#eeeeee" {
+		t.Error("Theme.Custom not preserved")
 	}
 }
 
@@ -3212,7 +3227,7 @@ func TestFillRuntimeDefaults(t *testing.T) {
 		}
 	})
 
-	t.Run("nil nested structs remain nil except auto-filled Hooks", func(t *testing.T) {
+	t.Run("nil nested structs are auto-filled from preset for known agents", func(t *testing.T) {
 		t.Parallel()
 		input := &RuntimeConfig{
 			Command: "claude",
@@ -3221,22 +3236,30 @@ func TestFillRuntimeDefaults(t *testing.T) {
 
 		result := fillRuntimeDefaults(input)
 
-		// Nil nested structs should remain nil (not get zero-value structs)
-		if result.Session != nil {
-			t.Error("Session should remain nil when input has nil Session")
-		}
 		// Hooks is auto-filled for known agents (claude, opencode) to ensure
-		// EnsureSettingsForRole creates the correct settings files
+		// EnsureSettingsForRole creates the correct settings files.
 		if result.Hooks == nil {
 			t.Error("Hooks should be auto-filled for claude command")
 		} else if result.Hooks.Provider != "claude" {
 			t.Errorf("Hooks.Provider = %q, want %q", result.Hooks.Provider, "claude")
 		}
-		if result.Tmux != nil {
-			t.Error("Tmux should remain nil when input has nil Tmux")
+		// Session is auto-filled from preset so handoffs can propagate GT_SESSION_ID_ENV.
+		if result.Session == nil {
+			t.Error("Session should be auto-filled for claude command")
+		} else if result.Session.SessionIDEnv != "CLAUDE_SESSION_ID" {
+			t.Errorf("Session.SessionIDEnv = %q, want CLAUDE_SESSION_ID", result.Session.SessionIDEnv)
 		}
-		if result.Instructions != nil {
-			t.Error("Instructions should remain nil when input has nil Instructions")
+		// Tmux is auto-filled from preset so WaitForRuntimeReady uses prompt detection.
+		if result.Tmux == nil {
+			t.Error("Tmux should be auto-filled for claude command")
+		} else if result.Tmux.ReadyPromptPrefix != "❯ " {
+			t.Errorf("Tmux.ReadyPromptPrefix = %q, want \"❯ \"", result.Tmux.ReadyPromptPrefix)
+		}
+		// Instructions is auto-filled from preset when nil.
+		if result.Instructions == nil {
+			t.Error("Instructions should be auto-filled for claude command")
+		} else if result.Instructions.File != "CLAUDE.md" {
+			t.Errorf("Instructions.File = %q, want CLAUDE.md", result.Instructions.File)
 		}
 	})
 
@@ -3298,11 +3321,11 @@ func TestFillRuntimeDefaults(t *testing.T) {
 				t.Errorf("Tmux.ProcessNames[%d] = %q, want %q", i, result.Tmux.ProcessNames[i], want)
 			}
 		}
-		if result.Tmux.ReadyDelayMs != 3000 {
-			t.Errorf("Tmux.ReadyDelayMs = %d, want 3000", result.Tmux.ReadyDelayMs)
+		if result.Tmux.ReadyDelayMs != 8000 {
+			t.Errorf("Tmux.ReadyDelayMs = %d, want 8000", result.Tmux.ReadyDelayMs)
 		}
 
-		// PromptMode should default to "arg" for pi
+		// PromptMode should be "arg" for pi (from preset)
 		if result.PromptMode != "arg" {
 			t.Errorf("PromptMode = %q, want arg", result.PromptMode)
 		}
@@ -3345,6 +3368,177 @@ func TestFillRuntimeDefaults(t *testing.T) {
 		}
 		if result.Tmux.ReadyDelayMs != 5000 {
 			t.Errorf("Tmux.ReadyDelayMs = %d, want 5000 (user-specified)", result.Tmux.ReadyDelayMs)
+		}
+	})
+
+	t.Run("custom claude agent inherits Session and Tmux from preset", func(t *testing.T) {
+		t.Parallel()
+		// Simulates: gt config agent set claude-opus 'claude --model claude-opus-4-6'
+		input := &RuntimeConfig{
+			Command: "claude",
+			Args:    []string{"--dangerously-skip-permissions", "--model", "claude-opus-4-6"},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		if result.Session == nil {
+			t.Fatal("Session should be auto-filled for claude command")
+		}
+		if result.Session.SessionIDEnv != "CLAUDE_SESSION_ID" {
+			t.Errorf("Session.SessionIDEnv = %q, want CLAUDE_SESSION_ID", result.Session.SessionIDEnv)
+		}
+		if result.Tmux == nil {
+			t.Fatal("Tmux should be auto-filled for claude command")
+		}
+		if result.Tmux.ReadyPromptPrefix != "❯ " {
+			t.Errorf("Tmux.ReadyPromptPrefix = %q, want \"❯ \"", result.Tmux.ReadyPromptPrefix)
+		}
+		found := false
+		for _, n := range result.Tmux.ProcessNames {
+			if n == "claude" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Tmux.ProcessNames = %v, want to contain \"claude\"", result.Tmux.ProcessNames)
+		}
+		if len(result.Args) < 2 || result.Args[len(result.Args)-1] != "claude-opus-4-6" {
+			t.Errorf("Args should be preserved: got %v", result.Args)
+		}
+	})
+
+	t.Run("explicit Session config is not overridden by preset", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "claude",
+			Session: &RuntimeSessionConfig{
+				SessionIDEnv: "MY_CUSTOM_SESSION_ID",
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		if result.Session.SessionIDEnv != "MY_CUSTOM_SESSION_ID" {
+			t.Errorf("Session.SessionIDEnv = %q, want MY_CUSTOM_SESSION_ID (user-specified)", result.Session.SessionIDEnv)
+		}
+	})
+
+	t.Run("explicit Tmux config is not overridden by preset", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "claude",
+			Tmux: &RuntimeTmuxConfig{
+				ProcessNames: []string{"my-claude-wrapper"},
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		if len(result.Tmux.ProcessNames) != 1 || result.Tmux.ProcessNames[0] != "my-claude-wrapper" {
+			t.Errorf("Tmux.ProcessNames = %v, want [my-claude-wrapper] (user-specified)", result.Tmux.ProcessNames)
+		}
+	})
+}
+
+// TestFillRuntimeDefaultsPresetMerging verifies preset defaults are merged
+// into custom agent configs based on the Provider field or inferred command name.
+func TestFillRuntimeDefaultsPresetMerging(t *testing.T) {
+	t.Parallel()
+
+	t.Run("custom agent with provider=gemini gets session defaults", func(t *testing.T) {
+		t.Parallel()
+		// Custom agent using a different binary but declaring gemini as provider
+		input := &RuntimeConfig{
+			Provider: "gemini",
+			Command:  "gemini-custom",
+			Args:     []string{"--fast-mode"},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Session should be auto-filled from gemini preset
+		if result.Session == nil {
+			t.Fatal("Session should be auto-filled from gemini preset")
+		}
+		if result.Session.SessionIDEnv != "GEMINI_SESSION_ID" {
+			t.Errorf("Session.SessionIDEnv = %q, want GEMINI_SESSION_ID", result.Session.SessionIDEnv)
+		}
+		// Tmux should be auto-filled from gemini preset
+		if result.Tmux == nil {
+			t.Fatal("Tmux should be auto-filled from gemini preset")
+		}
+		found := false
+		for _, name := range result.Tmux.ProcessNames {
+			if name == "gemini" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Tmux.ProcessNames should contain 'gemini', got %v", result.Tmux.ProcessNames)
+		}
+		// User-specified Args should be preserved
+		if len(result.Args) != 1 || result.Args[0] != "--fast-mode" {
+			t.Errorf("Args should be preserved: got %v", result.Args)
+		}
+	})
+
+	t.Run("custom agent infers preset from command name", func(t *testing.T) {
+		t.Parallel()
+		// No provider set, but command matches a known preset
+		input := &RuntimeConfig{
+			Command: "gemini",
+			Args:    []string{"--approval-mode", "custom"},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Should get gemini preset defaults
+		if result.Session == nil {
+			t.Fatal("Session should be auto-filled from gemini preset (inferred from command)")
+		}
+		if result.Session.SessionIDEnv != "GEMINI_SESSION_ID" {
+			t.Errorf("Session.SessionIDEnv = %q, want GEMINI_SESSION_ID", result.Session.SessionIDEnv)
+		}
+		// Args should be preserved (user override)
+		if len(result.Args) != 2 || result.Args[0] != "--approval-mode" {
+			t.Errorf("Args should be preserved: got %v", result.Args)
+		}
+	})
+
+	t.Run("preset defaults not applied when fields already set", func(t *testing.T) {
+		t.Parallel()
+		// All fields explicitly set — preset should not override
+		input := &RuntimeConfig{
+			Provider: "claude",
+			Command:  "custom-claude",
+			Session: &RuntimeSessionConfig{
+				SessionIDEnv: "MY_SESSION_ID",
+			},
+			Tmux: &RuntimeTmuxConfig{
+				ProcessNames: []string{"my-process"},
+			},
+			Instructions: &RuntimeInstructionsConfig{
+				File: "MY.md",
+			},
+			PromptMode: "none",
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// User-set fields should not be overridden by preset
+		if result.Session.SessionIDEnv != "MY_SESSION_ID" {
+			t.Errorf("Session.SessionIDEnv overridden: got %q, want MY_SESSION_ID", result.Session.SessionIDEnv)
+		}
+		if len(result.Tmux.ProcessNames) != 1 || result.Tmux.ProcessNames[0] != "my-process" {
+			t.Errorf("Tmux.ProcessNames overridden: got %v, want [my-process]", result.Tmux.ProcessNames)
+		}
+		if result.Instructions.File != "MY.md" {
+			t.Errorf("Instructions.File overridden: got %q, want MY.md", result.Instructions.File)
+		}
+		if result.PromptMode != "none" {
+			t.Errorf("PromptMode overridden: got %q, want none", result.PromptMode)
 		}
 	})
 }
@@ -5233,5 +5427,162 @@ func TestBuildStartupCommandWithAgentOverride_ExecWrapper(t *testing.T) {
 	// The wrapper + agent command should appear as a contiguous sequence
 	if !strings.Contains(cmd, "daytona exec furiosa-ws -- claude") {
 		t.Errorf("expected wrapper immediately before claude command, got: %q", cmd)
+	}
+}
+
+// --- Tests for GH#3153: --agent override skips --settings flag ---
+
+func TestWithRoleSettingsFlag_IdempotencyGuard(t *testing.T) {
+	t.Parallel()
+	rigPath := "/fake/town/myrig"
+	rc := &RuntimeConfig{
+		Command: "claude",
+		Args:    []string{"--dangerously-skip-permissions", "--settings", "/already/set/.claude/settings.json"},
+	}
+
+	before := len(rc.Args)
+	result := withRoleSettingsFlag(rc, "polecat", rigPath)
+
+	if len(result.Args) != before {
+		t.Errorf("idempotency guard failed: expected %d args, got %d — Args = %v", before, len(result.Args), result.Args)
+	}
+	count := 0
+	for _, arg := range result.Args {
+		if arg == "--settings" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 --settings flag, got %d — Args = %v", count, result.Args)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_SettingsFlagForClaudeOverride(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	townSettings.Agents["claude-sonnet"] = &RuntimeConfig{
+		Command: "claude",
+		Args:    []string{"--model", "sonnet", "--dangerously-skip-permissions"},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": "testrig/polecats/toast"},
+		rigPath,
+		"",
+		"claude-sonnet",
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	if !strings.Contains(cmd, "--settings") {
+		t.Errorf("Claude override on polecat role should include --settings, got: %q", cmd)
+	}
+	expectedPath := filepath.Join(rigPath, "polecats", ".claude", "settings.json")
+	if !strings.Contains(cmd, expectedPath) {
+		t.Errorf("expected settings path %q in command, got: %q", expectedPath, cmd)
+	}
+}
+
+func TestBuildPolecatStartupCommandWithAgentOverride_IncludesSettingsFlag(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	townSettings.Agents["claude-sonnet"] = &RuntimeConfig{
+		Command: "claude",
+		Args:    []string{"--model", "sonnet", "--dangerously-skip-permissions"},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildPolecatStartupCommandWithAgentOverride("testrig", "toast", rigPath, "", "claude-sonnet")
+	if err != nil {
+		t.Fatalf("BuildPolecatStartupCommandWithAgentOverride: %v", err)
+	}
+
+	if !strings.Contains(cmd, "--settings") {
+		t.Errorf("polecat with Claude override must get --settings for hooks to fire, got: %q", cmd)
+	}
+	expectedPath := filepath.Join(rigPath, "polecats", ".claude", "settings.json")
+	if !strings.Contains(cmd, expectedPath) {
+		t.Errorf("expected settings path %q in command, got: %q", expectedPath, cmd)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_NoSettingsFlagForNonClaude(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": "testrig/polecats/toast"},
+		rigPath,
+		"",
+		"gemini",
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	if strings.Contains(cmd, "--settings") {
+		t.Errorf("non-Claude override (gemini) should NOT get --settings, got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_NoDoubleSettingsOnNonOverridePath(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	// No override — ResolveRoleAgentConfig already adds --settings for polecat role.
+	// The new withRoleSettingsFlag call in BuildStartupCommandWithAgentOverride should
+	// be a no-op (idempotency guard), not double-add.
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": "testrig/polecats/toast"},
+		rigPath,
+		"",
+		"", // no override
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	count := strings.Count(cmd, "--settings")
+	if count > 1 {
+		t.Errorf("expected at most 1 --settings flag (idempotency guard), got %d — cmd: %q", count, cmd)
+	}
+	if count == 0 {
+		t.Errorf("default Claude agent on polecat role should still get --settings, got: %q", cmd)
 	}
 }

@@ -33,7 +33,8 @@ Commands:
   gt config agent get <name>         Show agent configuration
   gt config agent set <name> <cmd>   Set custom agent command
   gt config agent remove <name>      Remove custom agent
-  gt config default-agent [name]     Get or set default agent`,
+  gt config default-agent [name]     Get or set default agent
+  gt config default-agent list       List available agents`,
 }
 
 // Agent subcommands
@@ -79,10 +80,16 @@ to all rigs in the town.
 The command can include arguments. Use quotes if the command or
 arguments contain spaces.
 
+The provider preset is inferred from the command binary name when it
+matches a known preset (e.g., "gemini", "claude"). Use --provider to
+set it explicitly for custom binary names. The provider controls
+session handling, tmux detection, hooks, and other runtime defaults.
+
 Examples:
   gt config agent set claude-glm \"claude-glm --model glm-4\"
   gt config agent set gemini-custom gemini --approval-mode yolo
-  gt config agent set claude \"claude-glm\"  # Override built-in claude`,
+  gt config agent set claude \"claude-glm\"  # Override built-in claude
+  gt config agent set my-bot my-bot-cli --provider claude  # Use Claude defaults`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigAgentSet,
 }
@@ -194,13 +201,33 @@ The default agent is used when a rig doesn't specify its own agent
 setting. Can be a built-in preset (claude, gemini, codex) or a
 custom agent name.
 
+Use 'gt config default-agent list' to see all available agents.
+
 Examples:
   gt config default-agent           # Show current default
+  gt config default-agent list      # List available agents
   gt config default-agent claude    # Set to claude
   gt config default-agent gemini    # Set to gemini
   gt config default-agent my-custom # Set to custom agent`,
 	RunE: runConfigDefaultAgent,
 }
+
+var configDefaultAgentListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List available agents",
+	Long: `List all available agents that can be set as the default.
+
+Shows all built-in agent presets and any custom agents defined in
+your town settings. Equivalent to 'gt config agent list'.
+
+Examples:
+  gt config default-agent list           # Text output
+  gt config default-agent list --json    # JSON output`,
+	RunE: runConfigAgentList,
+}
+
+// Flags for default-agent list
+var configDefaultAgentListJSON bool
 
 var configAgentEmailDomainCmd = &cobra.Command{
 	Use:   "agent-email-domain [domain]",
@@ -225,7 +252,8 @@ Examples:
 
 // Flags
 var (
-	configAgentListJSON bool
+	configAgentListJSON    bool
+	configAgentSetProvider string
 )
 
 // AgentListItem represents an agent in list output.
@@ -298,7 +326,8 @@ func runConfigAgentList(cmd *cobra.Command, args []string) error {
 		return items[i].Name < items[j].Name
 	})
 
-	if configAgentListJSON {
+	jsonOutput, _ := cmd.Flags().GetBool("json")
+	if jsonOutput {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(items)
@@ -420,10 +449,24 @@ func runConfigAgentSet(cmd *cobra.Command, args []string) error {
 		townSettings.Agents = make(map[string]*config.RuntimeConfig)
 	}
 
+	// Determine the provider: use --provider flag if given, otherwise infer
+	// from the command binary name if it matches a known preset.
+	provider := configAgentSetProvider
+	if provider == "" {
+		cmdBase := parts[0]
+		if idx := strings.LastIndexByte(cmdBase, '/'); idx >= 0 {
+			cmdBase = cmdBase[idx+1:]
+		}
+		if config.IsKnownPreset(cmdBase) {
+			provider = cmdBase
+		}
+	}
+
 	// Create or update the agent
 	townSettings.Agents[name] = &config.RuntimeConfig{
-		Command: parts[0],
-		Args:    parts[1:],
+		Provider: provider,
+		Command:  parts[0],
+		Args:     parts[1:],
 	}
 
 	// Save settings
@@ -533,7 +576,7 @@ func runConfigDefaultAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	if !isValid {
-		return fmt.Errorf("agent '%s' not found (use 'gt config agent list' to see available agents)", name)
+		return fmt.Errorf("agent '%s' not found (use 'gt config default-agent list' to see available agents)", name)
 	}
 
 	// Set default
@@ -1214,6 +1257,8 @@ func parseBool(s string) (bool, error) {
 func init() {
 	// Add flags
 	configAgentListCmd.Flags().BoolVar(&configAgentListJSON, "json", false, "Output as JSON")
+	configDefaultAgentListCmd.Flags().BoolVar(&configDefaultAgentListJSON, "json", false, "Output as JSON")
+	configAgentSetCmd.Flags().StringVar(&configAgentSetProvider, "provider", "", "Agent provider preset (e.g. claude, gemini, codex); inferred from command name if not set")
 
 	// Add agent subcommands
 	configAgentCmd := &cobra.Command{
@@ -1229,6 +1274,9 @@ config values such as the default AI model or provider.`,
 	configAgentCmd.AddCommand(configAgentGetCmd)
 	configAgentCmd.AddCommand(configAgentSetCmd)
 	configAgentCmd.AddCommand(configAgentRemoveCmd)
+
+	// Add default-agent subcommands
+	configDefaultAgentCmd.AddCommand(configDefaultAgentListCmd)
 
 	// Add subcommands to config
 	configCmd.AddCommand(configAgentCmd)

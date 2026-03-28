@@ -185,15 +185,30 @@ func (r *Router) expandAnnounce(announceName string) (*config.AnnounceConfig, er
 	}, ErrUnknownAnnounce)
 }
 
-// detectTownRoot finds the town root using workspace.Find.
-// This ensures consistent detection with the rest of the codebase,
-// supporting both primary (mayor/town.json) and secondary (mayor/) markers.
+// detectTownRoot finds the town root directory.
+//
+// Uses workspace.Find which correctly handles nested workspaces by always
+// searching to the filesystem root and returning the outermost workspace.
+// Falls back to GT_TOWN_ROOT/GT_ROOT env vars when workspace.Find cannot
+// locate a workspace (e.g., running from outside any workspace).
 func detectTownRoot(startDir string) string {
+	// workspace.Find handles nested workspaces correctly: it always searches
+	// to the filesystem root and returns the outermost mayor/town.json match.
 	townRoot, err := workspace.Find(startDir)
-	if err != nil {
-		return ""
+	if err == nil && townRoot != "" {
+		return townRoot
 	}
-	return townRoot
+
+	// Fallback: try GT_TOWN_ROOT or GT_ROOT env vars when workspace detection
+	// fails (e.g., running from outside any workspace directory).
+	for _, envName := range []string{"GT_TOWN_ROOT", "GT_ROOT"} {
+		if envRoot := os.Getenv(envName); envRoot != "" {
+			if ok, _ := workspace.IsWorkspace(envRoot); ok {
+				return envRoot
+			}
+		}
+	}
+	return ""
 }
 
 // resolveBeadsDir returns the correct .beads directory for mail delivery.
@@ -729,7 +744,7 @@ func (r *Router) queryAgents(descContains string) []*agentBead {
 // queryAgentsInDir queries agent beads in a specific beads directory with optional description filtering.
 // Queries both the issues and wisps tables, merging results.
 func (r *Router) queryAgentsInDir(beadsDir, descContains string) ([]*agentBead, error) {
-	args := []string{"list", "--label=gt:agent", "--json", "--limit=0"}
+	args := []string{"list", "--label=gt:agent", "--json", "--flat", "--limit=0"}
 
 	if descContains != "" {
 		args = append(args, "--desc-contains="+descContains)
@@ -945,6 +960,7 @@ func (r *Router) validateRecipient(identity string) error {
 	}
 
 	// Query agents from rig-level beads via routes.jsonl
+	var routeQueryErr error
 	if r.townRoot != "" {
 		townBeadsDir := filepath.Join(r.townRoot, ".beads")
 		routes, err := beads.LoadRoutes(townBeadsDir)
@@ -968,7 +984,7 @@ func (r *Router) validateRecipient(identity string) error {
 				}
 			}
 			if len(queryErrors) > 0 {
-				return fmt.Errorf("no agent found (query errors: %s)", strings.Join(queryErrors, "; "))
+				routeQueryErr = fmt.Errorf("no agent found (query errors: %s)", strings.Join(queryErrors, "; "))
 			}
 		}
 	}
@@ -977,6 +993,10 @@ func (r *Router) validateRecipient(identity string) error {
 	// (e.g., Dolt DB reset) even though the agent's workspace directory exists.
 	if r.townRoot != "" && r.validateAgentWorkspace(identity) {
 		return nil
+	}
+
+	if routeQueryErr != nil {
+		return routeQueryErr
 	}
 
 	return fmt.Errorf("no agent found")
@@ -1005,6 +1025,10 @@ func (r *Router) validateAgentWorkspace(identity string) bool {
 			}
 		}
 	case 3:
+		// Explicit role paths: rig/crew/<name> or rig/polecats/<name>
+		if parts[1] == "crew" || parts[1] == "polecats" {
+			return dirExists(filepath.Join(r.townRoot, parts[0], parts[1], parts[2]))
+		}
 		// Dog addresses: deacon/dogs/<name>
 		if dirExists(filepath.Join(r.townRoot, parts[0], parts[1], parts[2])) {
 			return true

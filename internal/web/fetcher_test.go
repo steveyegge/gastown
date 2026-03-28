@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -840,5 +841,58 @@ func TestFetchMayor_UsesResolvedRuntime(t *testing.T) {
 	}
 	if status.LastActivity == "" {
 		t.Fatal("expected LastActivity to be populated")
+	}
+}
+
+// TestFetchHealth_DeaconHeartbeatFieldName verifies that FetchHealth reads the
+// "timestamp" field written by heartbeat.go, not the old "last_heartbeat" field
+// that caused dashboard to always show "no timestamp". (GH#2989)
+func TestFetchHealth_DeaconHeartbeatFieldName(t *testing.T) {
+	townRoot := t.TempDir()
+	deaconDir := filepath.Join(townRoot, "deacon")
+	if err := os.MkdirAll(deaconDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write heartbeat.json using the field name heartbeat.go actually writes.
+	now := time.Now().UTC().Truncate(time.Second)
+	heartbeatJSON := fmt.Sprintf(`{"timestamp":%q,"cycle":42,"healthy_agents":3,"unhealthy_agents":1}`,
+		now.Format(time.RFC3339))
+	if err := os.WriteFile(filepath.Join(deaconDir, "heartbeat.json"), []byte(heartbeatJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &LiveConvoyFetcher{
+		townRoot:                townRoot,
+		heartbeatFreshThreshold: 5 * time.Minute,
+	}
+
+	health, err := f.FetchHealth()
+	if err != nil {
+		t.Fatalf("FetchHealth: %v", err)
+	}
+
+	// DeaconHeartbeat must NOT be "no timestamp" — the field was read correctly.
+	if health.DeaconHeartbeat == "no timestamp" {
+		t.Fatal("DeaconHeartbeat = \"no timestamp\": JSON field name mismatch (GH#2989)")
+	}
+	if health.DeaconHeartbeat == "no heartbeat" {
+		t.Fatal("DeaconHeartbeat = \"no heartbeat\": heartbeat file was not read")
+	}
+
+	// Cycle and agent counts should be populated.
+	if health.DeaconCycle != 42 {
+		t.Errorf("DeaconCycle = %d, want 42", health.DeaconCycle)
+	}
+	if health.HealthyAgents != 3 {
+		t.Errorf("HealthyAgents = %d, want 3", health.HealthyAgents)
+	}
+	if health.UnhealthyAgents != 1 {
+		t.Errorf("UnhealthyAgents = %d, want 1", health.UnhealthyAgents)
+	}
+
+	// Heartbeat should be considered fresh (written just now).
+	if !health.HeartbeatFresh {
+		t.Error("HeartbeatFresh = false for a just-written heartbeat")
 	}
 }

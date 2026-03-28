@@ -60,7 +60,7 @@ source of truth.
 | setup_command | (empty) | Setup/install command (e.g., `pnpm install`). Empty = skip. |
 | typecheck_command | (empty) | Type check command (e.g., `tsc --noEmit`). Empty = skip. |
 | lint_command | (empty) | Lint command (e.g., `eslint .`). Empty = skip. |
-| test_command | go test ./... | Test command to run (if run_tests is true) |
+| test_command | (empty) | Test command to run (if run_tests is true). Empty = skip. |
 | build_command | (empty) | Build command (e.g., `go build ./...`). Empty = skip. |
 | target_branch | main | Default target branch for merges |
 | delete_merged_branches | true | Whether to delete source branches after merge |
@@ -119,8 +119,8 @@ description = "Lint command (e.g., eslint .). Empty = skip."
 default = ""
 
 [vars.test_command]
-description = "Test command to run (if run_tests is true)"
-default = "go test ./..."
+description = "Test command to run (if run_tests is true). Empty = skip."
+default = ""
 
 [vars.build_command]
 description = "Build command (e.g., go build ./...). Empty = skip."
@@ -341,12 +341,16 @@ id = "run-tests"
 title = "Run quality checks and tests"
 needs = ["process-branch"]
 description = """
+**⚠ FIRST CHECK: If run_tests = "false", skip this ENTIRE step. Proceed directly to the next step. Do not run any quality checks or tests.**
+
 **Config: run_tests = {{run_tests}}**
 **Config: test_command = {{test_command}}**
 **Config: setup_command = {{setup_command}}**
 **Config: typecheck_command = {{typecheck_command}}**
 **Config: lint_command = {{lint_command}}**
 **Config: build_command = {{build_command}}**
+
+If run_tests is "false": STOP HERE. Skip everything below and proceed to the next step.
 
 **1. Run quality checks (skip any that are not configured):**
 
@@ -370,10 +374,6 @@ Proceed to handle-failures step. Track which specific check failed
 (setup/typecheck/lint/build) for the failure diagnosis.
 
 **3. Run the test suite:**
-
-If run_tests = "false": Skip this step entirely. Proceed to handle-failures.
-
-If run_tests = "true":
 
 ```bash
 {{test_command}}            # Run tests (configured per-rig)
@@ -608,30 +608,40 @@ gh pr view <polecat-branch> --json url,state -q '.url + " " + .state'
 
 If the PR was not created or is in an unexpected state, debug and retry.
 
-**Step 1.75 (pr only): WAIT FOR REQUIRED CHECKS AND MERGE (CRITICAL)**
+**Step 1.6 (pr only): WAIT FOR CI CHECKS TO PASS**
 
-Defense-in-depth: the refinery MUST NOT merge until GitHub confirms all required
-checks have passed. This prevents merging while E2E or other slow checks are still
-running.
+⚠️ **DO NOT PROCEED until CI passes. DO NOT send MERGED until the PR is actually merged.**
 
 ```bash
-# Wait for all required status checks to pass (blocks until complete)
-gh pr checks $PR_URL --required --watch --fail-fast
+# Get the repo URL for gh commands
+REPO_URL=$(git remote get-url origin | sed 's/.*github.com[:/]\\(.*\\)\\.git/\\1/')
+
+# Wait for CI checks (timeout 15 minutes)
+gh pr checks <polecat-branch> --repo "$REPO_URL" --watch --fail-fast
 ```
 
-**If checks pass** (exit code 0): Merge the PR.
-
+**If CI checks FAIL:**
+Do NOT merge. Send FIX_NEEDED back to the polecat:
 ```bash
-gh pr merge $PR_URL --squash --delete-branch
+FAILURE_OUTPUT=$(gh pr checks <polecat-branch> --repo "$REPO_URL" 2>&1)
+gt mail send <rig>/witness -s "FIX_NEEDED <polecat-name>" -m "Branch: <branch>
+Issue: <issue-id>
+PR: ${PR_URL}
+Failure-Type: ci-checks
+Error: $FAILURE_OUTPUT
+Attempt-Number: 1"
+```
+Then skip to Step 4 (archive mail) and continue patrol.
+
+**If CI checks PASS:**
+Merge the PR:
+```bash
+gh pr merge <polecat-branch> --repo "$REPO_URL" --merge --delete-branch
 ```
 
-**If checks fail** (non-zero exit): DO NOT merge. Skip to handle-failures step.
-- Send FIX_NEEDED to the polecat with the failing check details
-- Do NOT send MERGED notification
-- Do NOT close the MR bead
-- Do NOT archive the MERGE_READY mail
+If merge fails (conflict, branch protection), debug and retry.
 
-⚠️ **STOP HERE - DO NOT PROCEED UNTIL STEPS 1.5, 1.75, AND 2-3 COMPLETE**
+⚠️ **STOP HERE - DO NOT PROCEED UNTIL THE PR IS ACTUALLY MERGED ON GITHUB**
 
 **Step 2: Send MERGED Notification (REQUIRED - DO THIS IMMEDIATELY)**
 
@@ -652,8 +662,8 @@ PR: ${PR_URL}
 Merged-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
-Note: In PR mode, "MERGED" means "PR created and ready for review/merge".
-The actual merge happens when the PR is merged on GitHub (by maintainer or CI).
+Note: In PR mode, MERGED is only sent AFTER `gh pr merge` succeeds — the PR
+is actually merged on GitHub before the witness is notified.
 
 This signals the Witness to nuke the polecat worktree. WITHOUT THIS NOTIFICATION,
 POLECAT WORKTREES ACCUMULATE INDEFINITELY AND THE LIFECYCLE BREAKS.
@@ -690,8 +700,6 @@ git branch -d temp
 ```
 
 **VERIFICATION GATE**: You CANNOT proceed to loop-check without:
-- [x] Required GitHub checks passed (if merge_strategy=pr, verified via `gh pr checks --required`)
-- [x] PR merged via `gh pr merge` (if merge_strategy=pr)
 - [x] MERGED mail sent to witness (with PR URL if merge_strategy=pr)
 - [x] Post-merge cleanup completed (MR closed, source issue closed, branch deleted)
 - [x] MERGE_READY mail archived
@@ -872,10 +880,16 @@ End of patrol cycle decision. Use the signals from context-check to decide.
 
 **If you decide to continue patrolling:**
 
-Use await-event to subscribe to the refinery event channel with exponential backoff:
+Resolve your agent bead ID for this patrol cycle. You MUST replace `<YOUR_RIG>` below with your actual rig name (e.g., `beads`, `town`) before running:
+```bash
+bd list --type=agent --desc-contains="role_type: refinery" --json | jq -r '.[] | select(.status != "closed") | select(.description | test("(?m)^\\\\s*rig: <YOUR_RIG>\\\\s*$")) | .id'
+```
+This must return exactly one bead ID. If it returns zero results, STOP and report an error — verify you substituted `<YOUR_RIG>` correctly. If it returns multiple results, STOP and report an error — manual disambiguation is required. Use the single resolved bead ID as YOUR_AGENT_BEAD in the commands below.
+
+Then use await-event to subscribe to the refinery event channel with exponential backoff:
 
 ```bash
-gt mol step await-event --channel refinery --agent-bead gt-<rig>-refinery \
+gt mol step await-event --channel refinery --agent-bead YOUR_AGENT_BEAD \
   --backoff-base 30s --backoff-mult 2 --backoff-max 5m --cleanup
 ```
 

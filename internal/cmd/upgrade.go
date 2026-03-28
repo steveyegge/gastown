@@ -143,10 +143,18 @@ func upgradeDoctor(townRoot string) upgradeResult {
 	d.Register(doctor.NewStaleTaskDispatchCheck())
 	d.Register(doctor.NewHooksSyncCheck())
 	d.Register(doctor.NewStaleDoltPortCheck())
+	d.Register(doctor.NewStaleSQLServerInfoCheck())
 	d.Register(doctor.NewSparseCheckoutCheck())
 	d.Register(doctor.NewPrimingCheck())
 	d.Register(doctor.NewLifecycleHygieneCheck())
 	d.Register(doctor.NewWorktreeGitdirCheck())
+
+	// Identity bead repair: backfill missing rig, agent, and role beads (GH#2766).
+	// Previously omitted from upgrade, leaving identity gaps that gt doctor --fix
+	// could repair but gt upgrade would not.
+	d.Register(doctor.NewAgentBeadsCheck())
+	d.Register(doctor.NewRigBeadsCheck())
+	d.Register(doctor.NewRoleBeadsCheck())
 
 	var report *doctor.Report
 	if upgradeDryRun {

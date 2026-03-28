@@ -50,14 +50,26 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
 
 ```json
 {
-  "theme": "desert",
+  "theme": {
+    "disabled": false,
+    "name": "forest",
+    "custom": {
+      "bg": "#111111",
+      "fg": "#eeeeee"
+    },
+    "role_themes": {
+      "witness": "rust",
+      "refinery": "plum",
+      "crew": "none"
+    }
+  },
   "merge_queue": {
     "enabled": true,
     "run_tests": true,
     "setup_command": "",
     "typecheck_command": "",
     "lint_command": "",
-    "test_command": "go test ./...",
+    "test_command": "",
     "build_command": "",
     "on_conflict": "assign_back",
     "delete_merged_branches": true,
@@ -72,6 +84,46 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
 }
 ```
 
+**Theme fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `disabled` | `bool` | `false` | Disable tmux status/window theming for the rig |
+| `name` | `string` | auto-assigned by rig name | Use a named built-in palette theme |
+| `custom.bg` | `string` | unset | Custom tmux background color |
+| `custom.fg` | `string` | unset | Custom tmux foreground color |
+| `role_themes` | `map[string]string` | unset | Per-role overrides for `witness`, `refinery`, `crew`, `polecat`; use `"none"` to disable theming for a role |
+
+Theme resolution:
+- No `theme` config: auto-assign a built-in palette theme by rig name
+- `disabled: true`: skip both `status-style` and `window-style`
+- `name`: use that built-in theme
+- `custom`: use exact `{bg, fg}` colors
+- `role_themes`: override role-specific sessions within the rig
+
+Town-level role defaults live in `mayor/config.json` under:
+
+```json
+{
+  "theme": {
+    "disabled": false,
+    "name": "forest",
+    "custom": {
+      "bg": "#111111",
+      "fg": "#eeeeee"
+    },
+    "role_defaults": {
+      "mayor": "forest",
+      "deacon": "plum",
+      "witness": "rust",
+      "crew": "none"
+    }
+  }
+}
+```
+
+`role_defaults` supports `mayor`, `deacon`, `witness`, `refinery`, `crew`, and `polecat`.
+
 **Merge queue fields:**
 
 | Field | Type | Default | Description |
@@ -81,7 +133,7 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
 | `setup_command` | `string` | `""` | Setup/install command (e.g., `pnpm install`) |
 | `typecheck_command` | `string` | `""` | Type check command (e.g., `tsc --noEmit`) |
 | `lint_command` | `string` | `""` | Lint command (e.g., `eslint .`) |
-| `test_command` | `string` | `"go test ./..."` | Test command to run |
+| `test_command` | `string` | `""` | Test command to run. Empty = skip. |
 | `build_command` | `string` | `""` | Build command (e.g., `go build ./...`) |
 | `on_conflict` | `string` | `"assign_back"` | Conflict strategy: `assign_back` or `auto_rebase` |
 | `delete_merged_branches` | `bool` | `true` | Delete source branches after merging |
@@ -404,7 +456,13 @@ gt config agent remove <name>     # Remove custom agent (built-ins protected)
 gt config default-agent [name]    # Get or set town default agent
 ```
 
-**Built-in agents**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`
+**Built-in agents**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`, `opencode`, `copilot`
+
+> **Note on GitHub Copilot**: The `copilot` preset uses executable lifecycle hooks in
+> `.github/hooks/gastown.json` (`sessionStart`, `userPromptSubmitted`, `preToolUse`,
+> `sessionEnd`) — the same lifecycle events as Claude Code, in Copilot's JSON format.
+> Copilot uses a 5-second ready delay instead of prompt-based detection. Requires a
+> Copilot seat and org-level CLI policy enabled.
 
 **Custom agents**: Define per-town via CLI or JSON:
 ```bash

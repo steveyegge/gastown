@@ -1,0 +1,75 @@
+description = """
+Auto-commit WIP changes in active polecat worktrees to prevent data loss.
+
+When a polecat session crashes (context limit, API error, OOM), any uncommitted
+work is lost. The Checkpoint Dog periodically scans active polecat worktrees
+and creates WIP checkpoint commits for dirty working trees.
+
+## ZFC Exemption
+
+This formula is used for **observability tracking only** — the Go code in
+checkpoint_dog.go is the executor. The checkpoint dog is exempt from
+agent-driven formula execution (ZFC) because:
+
+1. Operations are git commands (add, reset, commit) requiring filesystem access
+2. Must check tmux session liveness before checkpointing
+3. Must iterate across all rigs and polecat worktrees
+4. Runtime directory exclusion requires precise git staging control
+
+The daemon pours this molecule, executes the Go code, and closes/fails each
+step for observability.
+
+## Dog Contract
+
+The daemon:
+1. Scans all active polecat worktrees across all rigs
+2. For each dirty worktree with a live tmux session, creates a WIP commit
+3. Reports summary of checkpoints created
+
+## Safety
+
+- Only checkpoints worktrees with live tmux sessions (dead sessions skipped)
+- Excludes runtime directories (.claude/, .beads/, .runtime/, __pycache__/)
+- WIP commits are squashed by gt done before push
+- Refinery squash-merges anyway, so WIP commits never reach main"""
+formula = "mol-dog-checkpoint"
+version = 1
+
+[squash]
+trigger = "on_complete"
+template_type = "work"
+include_metrics = true
+
+[[steps]]
+id = "scan"
+title = "Scan polecat worktrees for dirty state"
+description = """
+Iterate all known rigs and their polecat worktrees.
+
+For each polecat:
+1. Check tmux session is alive (skip dead sessions)
+2. Run git status --porcelain to detect changes
+
+**Exit criteria:** All active worktrees inspected."""
+
+[[steps]]
+id = "checkpoint"
+title = "Checkpoint dirty worktrees"
+needs = ["scan"]
+description = """
+For each dirty worktree with a live session:
+1. git add -A (stage everything)
+2. git reset HEAD -- .claude/ .beads/ .runtime/ __pycache__/ (unstage runtime dirs)
+3. git diff --cached --quiet (skip if nothing staged after exclusions)
+4. git commit -m "WIP: checkpoint (auto)"
+
+**Exit criteria:** All dirty worktrees checkpointed."""
+
+[[steps]]
+id = "report"
+title = "Report checkpoint summary"
+needs = ["checkpoint"]
+description = """
+Log summary: worktrees scanned, checkpoints created.
+
+**Exit criteria:** Summary logged."""

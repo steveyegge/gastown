@@ -178,6 +178,12 @@ func runSlingFormula(ctx context.Context, args []string) error {
 
 	// Step 3: Hook the wisp bead with retry and verification.
 	// See: https://github.com/steveyegge/gastown/issues/148
+	// Acquire per-assignee lock to serialize concurrent hook writes (issue #3114).
+	assigneeUnlock, assigneeLockErr := tryAcquireSlingAssigneeLock(townRoot, targetAgent)
+	if assigneeLockErr != nil {
+		return fmt.Errorf("serializing hook write for %s: %w", targetAgent, assigneeLockErr)
+	}
+	defer assigneeUnlock()
 	hookDir := beads.ResolveHookDir(townRoot, wispRootID, "")
 	if err := hookBeadWithRetry(wispRootID, targetAgent, hookDir); err != nil {
 		return err

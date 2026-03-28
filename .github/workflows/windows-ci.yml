@@ -20,7 +20,7 @@ jobs:
           cache: false
 
       - name: Cache Go modules
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
           path: ~/go/pkg/mod
           key: gomod-windows-${{ hashFiles('go.sum') }}
@@ -31,7 +31,7 @@ jobs:
           echo "$(go env GOPATH)/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install ICU4C (MSYS2)
-        uses: msys2/setup-msys2@4f806de0a5a7294ffabaff804b38a9b435a73bda # v2.30.0
+        uses: msys2/setup-msys2@cafece8e6baf9247cf9b1bf95097b0b983cc558d # v2.31.0
         with:
           path-type: inherit
           msystem: UCRT64

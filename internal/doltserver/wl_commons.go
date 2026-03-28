@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,13 @@ type WLCommonsStore interface {
 	ClaimWanted(wantedID, rigHandle string) error
 	SubmitCompletion(completionID, wantedID, rigHandle, evidence string) error
 	QueryWanted(wantedID string) (*WantedItem, error)
+	QueryWantedFull(wantedID string) (*WantedItem, error)
+	InsertStamp(stamp *StampRecord) error
+	QueryLastStampForSubject(subject string) (*StampRecord, error)
+	QueryStampsForSubject(subject string) ([]StampRecord, error)
+	QueryBadges(handle string) ([]BadgeRecord, error)
+	QueryAllSubjects() ([]string, error)
+	UpsertLeaderboard(entry *LeaderboardEntry) error
 }
 
 // WLCommons implements WLCommonsStore using the real Dolt server.
@@ -47,21 +55,45 @@ func (w *WLCommons) SubmitCompletion(completionID, wantedID, rigHandle, evidence
 func (w *WLCommons) QueryWanted(wantedID string) (*WantedItem, error) {
 	return QueryWanted(w.townRoot, wantedID)
 }
+func (w *WLCommons) QueryWantedFull(wantedID string) (*WantedItem, error) {
+	return QueryWantedFull(w.townRoot, wantedID)
+}
+func (w *WLCommons) InsertStamp(stamp *StampRecord) error {
+	return InsertStamp(w.townRoot, stamp)
+}
+func (w *WLCommons) QueryLastStampForSubject(subject string) (*StampRecord, error) {
+	return QueryLastStampForSubject(w.townRoot, subject)
+}
+func (w *WLCommons) QueryStampsForSubject(subject string) ([]StampRecord, error) {
+	return QueryStampsForSubject(w.townRoot, subject)
+}
+func (w *WLCommons) QueryBadges(handle string) ([]BadgeRecord, error) {
+	return QueryBadges(w.townRoot, handle)
+}
+func (w *WLCommons) QueryAllSubjects() ([]string, error) {
+	return QueryAllSubjects(w.townRoot)
+}
+func (w *WLCommons) UpsertLeaderboard(entry *LeaderboardEntry) error {
+	return UpsertLeaderboard(w.townRoot, entry)
+}
 
 // WantedItem represents a row in the wanted table.
 type WantedItem struct {
-	ID              string
-	Title           string
-	Description     string
-	Project         string
-	Type            string
-	Priority        int
-	Tags            []string
-	PostedBy        string
-	ClaimedBy       string
-	Status          string
-	EffortLevel     string
-	SandboxRequired bool
+	ID              string   `json:"id"`
+	Title           string   `json:"title"`
+	Description     string   `json:"description,omitempty"`
+	Project         string   `json:"project,omitempty"`
+	Type            string   `json:"type,omitempty"`
+	Priority        int      `json:"priority"`
+	Tags            []string `json:"tags,omitempty"`
+	PostedBy        string   `json:"posted_by,omitempty"`
+	ClaimedBy       string   `json:"claimed_by,omitempty"`
+	Status          string   `json:"status"`
+	EffortLevel     string   `json:"effort_level,omitempty"`
+	EvidenceURL     string   `json:"evidence_url,omitempty"`
+	SandboxRequired bool     `json:"sandbox_required,omitempty"`
+	CreatedAt       string   `json:"created_at,omitempty"`
+	UpdatedAt       string   `json:"updated_at,omitempty"`
 }
 
 // isNothingToCommit returns true if the error indicates DOLT_COMMIT found no
@@ -184,14 +216,21 @@ CREATE TABLE IF NOT EXISTS stamps (
     severity VARCHAR(16) DEFAULT 'leaf',
     context_id VARCHAR(64),
     context_type VARCHAR(32),
+    stamp_type VARCHAR(32),
+    pilot_cohort VARCHAR(64),
     skill_tags JSON,
     message TEXT,
     prev_stamp_hash VARCHAR(64),
+    stamp_index INT,
     block_hash VARCHAR(64),
     hop_uri VARCHAR(512),
     created_at TIMESTAMP,
-    CHECK (NOT(author = subject))
+    CHECK (NOT(author = subject)),
+    CHECK (stamp_type IS NULL OR stamp_type IN ('work', 'mentoring', 'peer_review', 'endorsement', 'boot_block'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_stamps_stamp_type ON stamps (stamp_type);
+CREATE INDEX IF NOT EXISTS idx_stamps_pilot_cohort ON stamps (pilot_cohort);
 
 CREATE TABLE IF NOT EXISTS badges (
     id VARCHAR(64) PRIMARY KEY,
@@ -199,6 +238,18 @@ CREATE TABLE IF NOT EXISTS badges (
     badge_type VARCHAR(64),
     awarded_at TIMESTAMP,
     evidence TEXT
+);
+
+CREATE TABLE IF NOT EXISTS leaderboard (
+    handle VARCHAR(255) PRIMARY KEY,
+    display_name VARCHAR(255),
+    tier VARCHAR(32),
+    stamp_count INT DEFAULT 0,
+    avg_quality FLOAT DEFAULT 0,
+    cluster_breadth INT DEFAULT 0,
+    top_skills JSON,
+    badges JSON,
+    computed_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS chain_meta (
@@ -374,6 +425,48 @@ func QueryWanted(townRoot, wantedID string) (*WantedItem, error) {
 	return item, nil
 }
 
+// QueryWantedFull fetches all fields of a wanted item by ID. Returns nil if not found.
+func QueryWantedFull(townRoot, wantedID string) (*WantedItem, error) {
+	query := fmt.Sprintf(`USE %s; SELECT id, title, COALESCE(description, '') as description, COALESCE(project, '') as project, COALESCE(type, '') as type, priority, COALESCE(tags, JSON_ARRAY()) as tags, COALESCE(posted_by, '') as posted_by, COALESCE(claimed_by, '') as claimed_by, status, COALESCE(effort_level, '') as effort_level, COALESCE(evidence_url, '') as evidence_url, COALESCE(sandbox_required, 0) as sandbox_required, COALESCE(CAST(created_at AS CHAR), '') as created_at, COALESCE(CAST(updated_at AS CHAR), '') as updated_at FROM wanted WHERE id='%s';`,
+		WLCommonsDB, EscapeSQL(wantedID))
+
+	output, err := doltSQLQuery(townRoot, query)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := parseSimpleCSV(output)
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("wanted item %q not found", wantedID)
+	}
+
+	row := rows[0]
+	item := &WantedItem{
+		ID:          row["id"],
+		Title:       row["title"],
+		Description: row["description"],
+		Project:     row["project"],
+		Type:        row["type"],
+		PostedBy:    row["posted_by"],
+		ClaimedBy:   row["claimed_by"],
+		Status:      row["status"],
+		EffortLevel: row["effort_level"],
+		EvidenceURL: row["evidence_url"],
+		CreatedAt:   row["created_at"],
+		UpdatedAt:   row["updated_at"],
+	}
+	if p := row["priority"]; p != "" {
+		_, _ = fmt.Sscanf(p, "%d", &item.Priority)
+	}
+	if row["sandbox_required"] == "1" {
+		item.SandboxRequired = true
+	}
+	if tagsJSON := row["tags"]; tagsJSON != "" && tagsJSON != "[]" {
+		_ = json.Unmarshal([]byte(tagsJSON), &item.Tags)
+	}
+	return item, nil
+}
+
 // doltSQLQuery executes a SQL query and returns the raw CSV output.
 func doltSQLQuery(townRoot, query string) (string, error) {
 	config := DefaultConfig(townRoot)
@@ -442,4 +535,122 @@ func parseCSVLine(line string) []string {
 	}
 	fields = append(fields, field.String())
 	return fields
+}
+
+// StampRecord represents a row in the stamps table.
+type StampRecord struct {
+	ID            string
+	Author        string
+	Subject       string
+	Valence       string // JSON string
+	Confidence    float64
+	Severity      string
+	ContextID     string
+	ContextType   string
+	StampType     string
+	PilotCohort   string
+	SkillTags     string // JSON array string
+	Message       string
+	PrevStampHash string
+	StampIndex    int
+	CreatedAt     string
+}
+
+// InsertStamp inserts a new stamp record into the wl-commons stamps table.
+func InsertStamp(townRoot string, s *StampRecord) error {
+	if s.ID == "" {
+		return fmt.Errorf("stamp ID cannot be empty")
+	}
+	if s.Author == "" || s.Subject == "" {
+		return fmt.Errorf("stamp author and subject are required")
+	}
+	if s.Author == s.Subject {
+		return fmt.Errorf("stamp author cannot equal subject")
+	}
+
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	if s.CreatedAt != "" {
+		now = s.CreatedAt
+	}
+
+	contextID := "NULL"
+	if s.ContextID != "" {
+		contextID = fmt.Sprintf("'%s'", EscapeSQL(s.ContextID))
+	}
+	contextType := "NULL"
+	if s.ContextType != "" {
+		contextType = fmt.Sprintf("'%s'", EscapeSQL(s.ContextType))
+	}
+	stampType := "NULL"
+	if s.StampType != "" {
+		stampType = fmt.Sprintf("'%s'", EscapeSQL(s.StampType))
+	}
+	pilotCohort := "NULL"
+	if s.PilotCohort != "" {
+		pilotCohort = fmt.Sprintf("'%s'", EscapeSQL(s.PilotCohort))
+	}
+	skillTags := "NULL"
+	if s.SkillTags != "" {
+		skillTags = fmt.Sprintf("'%s'", EscapeSQL(s.SkillTags))
+	}
+	message := "NULL"
+	if s.Message != "" {
+		message = fmt.Sprintf("'%s'", EscapeSQL(s.Message))
+	}
+	prevHash := "NULL"
+	if s.PrevStampHash != "" {
+		prevHash = fmt.Sprintf("'%s'", EscapeSQL(s.PrevStampHash))
+	}
+	stampIdx := "NULL"
+	if s.StampIndex >= 0 {
+		stampIdx = fmt.Sprintf("%d", s.StampIndex)
+	}
+
+	script := fmt.Sprintf(`USE %s;
+
+INSERT INTO stamps (id, author, subject, valence, confidence, severity, context_id, context_type, stamp_type, pilot_cohort, skill_tags, message, prev_stamp_hash, stamp_index, created_at)
+VALUES ('%s', '%s', '%s', '%s', %f, '%s', %s, %s, %s, %s, %s, %s, %s, %s, '%s');
+
+CALL DOLT_ADD('-A');
+CALL DOLT_COMMIT('-m', 'wl stamp: %s stamps %s');
+`,
+		WLCommonsDB,
+		EscapeSQL(s.ID), EscapeSQL(s.Author), EscapeSQL(s.Subject),
+		EscapeSQL(s.Valence), s.Confidence, EscapeSQL(s.Severity),
+		contextID, contextType, stampType, pilotCohort, skillTags, message,
+		prevHash, stampIdx, now,
+		EscapeSQL(s.Author), EscapeSQL(s.Subject))
+
+	return doltSQLScriptWithRetry(townRoot, script)
+}
+
+// QueryLastStampForSubject fetches the most recent stamp for a subject rig,
+// used to compute passbook chain linkage (prev_stamp_hash and stamp_index).
+// Returns nil (not an error) if no stamps exist for the subject.
+func QueryLastStampForSubject(townRoot, subject string) (*StampRecord, error) {
+	query := fmt.Sprintf(`USE %s; SELECT id, COALESCE(stamp_index, -1) as stamp_index FROM stamps WHERE subject='%s' ORDER BY stamp_index DESC, created_at DESC LIMIT 1;`,
+		WLCommonsDB, EscapeSQL(subject))
+
+	output, err := doltSQLQuery(townRoot, query)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := parseSimpleCSV(output)
+	if len(rows) == 0 {
+		return nil, nil
+	}
+
+	row := rows[0]
+	idx := 0
+	if v, ok := row["stamp_index"]; ok && v != "-1" && v != "" {
+		fmt.Sscanf(v, "%d", &idx)
+	} else {
+		idx = -1
+	}
+
+	return &StampRecord{
+		ID:         row["id"],
+		StampIndex: idx,
+	}, nil
 }

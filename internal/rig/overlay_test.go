@@ -400,7 +400,7 @@ func TestEnsureGitignorePatterns_AllPatternsPresent(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create existing .gitignore with all required patterns.
-	existing := ".runtime/\n.claude/\n.beads/\n.logs/\n__pycache__/\nstate.json\n"
+	existing := ".runtime/\n.claude/\n.beads/\n.logs/\n__pycache__/\nstate.json\nCLAUDE.md\nCLAUDE.local.md\n"
 	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(existing), 0644); err != nil {
 		t.Fatalf("Failed to create .gitignore: %v", err)
 	}
@@ -430,7 +430,7 @@ func TestEnsureGitignorePatterns_NarrowPatternPresent(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create .gitignore with the exact required patterns
-	existing := ".runtime/\n.claude/\n.logs/\n__pycache__/\nstate.json\n"
+	existing := ".runtime/\n.claude/\n.logs/\n__pycache__/\nstate.json\nCLAUDE.md\nCLAUDE.local.md\n"
 	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(existing), 0644); err != nil {
 		t.Fatalf("Failed to create .gitignore: %v", err)
 	}
@@ -515,6 +515,31 @@ func TestEnsureGitignorePatterns_UpgradePreservesBroadPattern(t *testing.T) {
 	}
 	if !containsLine(string(content), ".claude/") {
 		t.Error(".claude/ should be preserved")
+	}
+}
+
+// TestGasTownLocalExcludePatterns_IncludesBeads verifies that the local exclude
+// patterns include .beads/ (defense-in-depth for gas-7vg) while the gitignore
+// patterns do NOT include .beads/ (regression guard).
+func TestGasTownLocalExcludePatterns_IncludesBeads(t *testing.T) {
+	localPatterns := gasTownLocalExcludePatterns()
+	found := false
+	for _, p := range localPatterns {
+		if p == ".beads/" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("gasTownLocalExcludePatterns() must include .beads/ (gas-7vg defense-in-depth)")
+	}
+
+	// Regression guard: .gitignore patterns must NOT include .beads/
+	gitignorePatterns := gasTownIgnorePatterns()
+	for _, p := range gitignorePatterns {
+		if p == ".beads/" {
+			t.Error("gasTownIgnorePatterns() must NOT include .beads/ - that breaks bd sync (see overlay.go)")
+		}
 	}
 }
 

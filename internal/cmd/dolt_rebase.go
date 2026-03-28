@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"strconv"
-	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -121,14 +121,10 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Record pre-flight row counts and table schemas.
+	// Record pre-flight row counts.
 	preCounts, err := flattenGetRowCounts(db, dbName)
 	if err != nil {
 		return fmt.Errorf("recording row counts: %w", err)
-	}
-	preSchemas, err := rebaseGetTableSchemas(db, dbName)
-	if err != nil {
-		return fmt.Errorf("recording table schemas: %w", err)
 	}
 	fmt.Printf("  Tables: %d\n", len(preCounts))
 	for table, count := range preCounts {
@@ -195,24 +191,19 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Rebase plan: %d commits\n", totalPlan)
 
 	// Calculate how many to squash: everything except first (must stay pick) and last N.
-	// Dolt returns MIN/MAX as decimal strings (e.g. "1.00") via []uint8 byte slices,
-	// which cannot be scanned directly into int or float64. Scan as string, parse, cast.
+	// Dolt returns rebase_order as DECIMAL — the MySQL driver delivers it as
+	// []uint8 (e.g. "1.00") which cannot be scanned directly into int.
+	// Scan as string, parse to float, then truncate to int.
 	var minOrderStr, maxOrderStr string
 	if err := db.QueryRowContext(ctx, "SELECT MIN(rebase_order), MAX(rebase_order) FROM dolt_rebase").Scan(&minOrderStr, &maxOrderStr); err != nil {
 		rebaseAbortAndCleanup(db, baseBranch, workBranch)
 		return fmt.Errorf("getting rebase order range: %w", err)
 	}
-	minOrderF, err := strconv.ParseFloat(minOrderStr, 64)
+	minOrder, maxOrder, err := parseRebaseOrderRange(minOrderStr, maxOrderStr)
 	if err != nil {
 		rebaseAbortAndCleanup(db, baseBranch, workBranch)
-		return fmt.Errorf("parsing min rebase_order %q: %w", minOrderStr, err)
+		return fmt.Errorf("parsing rebase order range: %w", err)
 	}
-	maxOrderF, err := strconv.ParseFloat(maxOrderStr, 64)
-	if err != nil {
-		rebaseAbortAndCleanup(db, baseBranch, workBranch)
-		return fmt.Errorf("parsing max rebase_order %q: %w", maxOrderStr, err)
-	}
-	minOrder, maxOrder := int(minOrderF), int(maxOrderF)
 
 	squashThreshold := maxOrder - doltRebaseKeepRecent
 	toSquash := 0
@@ -240,9 +231,13 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 		defer rows.Close()
 
 		for rows.Next() {
-			var order int
+			var orderStr string
 			var action, hash, msg string
-			if err := rows.Scan(&order, &action, &hash, &msg); err != nil {
+			if err := rows.Scan(&orderStr, &action, &hash, &msg); err != nil {
+				continue
+			}
+			order, err := parseRebaseOrder(orderStr)
+			if err != nil {
 				continue
 			}
 			marker := "pick"
@@ -286,127 +281,62 @@ func runDoltRebase(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  %s Rebase executed successfully\n", style.Bold.Render("✓"))
 
-	// Step 7: Verify integrity and repair tables dropped by squash.
-	// Dolt's squash is lossy — it can drop tables whose DDL was in squashed
-	// commits. We detect missing tables and restore them from 'main' (which
-	// still exists at this point) before the branch swap.
-	if _, err := db.ExecContext(ctx, fmt.Sprintf("USE `%s`", dbName)); err != nil {
-		fmt.Printf("  %s WARNING: could not re-select database after rebase: %v\n",
-			style.Bold.Render("!"), err)
-	}
-	postCounts, err := flattenGetRowCounts(db, dbName)
+	// Step 7: Concurrency check — verify main hasn't moved.
+	currentHead, err := flattenGetHead(db, dbName)
 	if err != nil {
-		fmt.Printf("  %s WARNING: could not verify row counts after rebase: %v\n",
-			style.Bold.Render("!"), err)
-		fmt.Printf("  Proceeding with branch swap — data should be intact\n")
-	} else {
-		var restoredTables []string
-		var droppedEmpty []string
-		for table, preCount := range preCounts {
-			postCount, ok := postCounts[table]
-			if !ok {
-				// Table missing after squash. Try direct query first (stale info_schema).
-				var directCount int
-				directErr := db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `%s`.`%s`", dbName, table)).Scan(&directCount)
-				if directErr == nil {
-					// Table exists, just not in information_schema.
-					postCount = directCount
-				} else if preCount == 0 {
-					// Empty table dropped by squash — recreate from saved schema.
-					ddl, hasDDL := preSchemas[table]
-					if hasDDL {
-						if _, createErr := db.ExecContext(ctx, ddl); createErr != nil {
-							fmt.Printf("  %s Could not recreate empty table %q: %v\n",
-								style.Bold.Render("!"), table, createErr)
-							droppedEmpty = append(droppedEmpty, table)
-						} else {
-							restoredTables = append(restoredTables, table)
-						}
-					} else {
-						droppedEmpty = append(droppedEmpty, table)
-					}
-					continue
-				} else {
-					// Non-empty table genuinely lost — restore from main branch.
-					ddl, hasDDL := preSchemas[table]
-					if !hasDDL {
-						rebaseCleanupAll(db, baseBranch, workBranch)
-						return fmt.Errorf("integrity FAIL: table %q (%d rows) dropped by squash, no schema to restore", table, preCount)
-					}
-					if restoreErr := rebaseRestoreTable(db, ctx, dbName, table, ddl, preHead); restoreErr != nil {
-						rebaseCleanupAll(db, baseBranch, workBranch)
-						return fmt.Errorf("integrity FAIL: table %q (%d rows) dropped by squash, restore failed: %w", table, preCount, restoreErr)
-					}
-					// Verify restored count.
-					if verifyErr := db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `%s`.`%s`", dbName, table)).Scan(&postCount); verifyErr != nil {
-						rebaseCleanupAll(db, baseBranch, workBranch)
-						return fmt.Errorf("integrity FAIL: restored table %q but cannot verify: %w", table, verifyErr)
-					}
-					restoredTables = append(restoredTables, table)
-				}
-			}
-			if preCount != postCount {
-				rebaseCleanupAll(db, baseBranch, workBranch)
-				return fmt.Errorf("integrity FAIL: %q pre=%d post=%d — abort to prevent data loss", table, preCount, postCount)
-			}
-		}
-		if len(restoredTables) > 0 {
-			fmt.Printf("  %s Restored %d tables dropped by squash: %v\n",
-				style.Bold.Render("!"), len(restoredTables), restoredTables)
-			// Commit the restored tables so they're part of the rebased history.
-			if _, commitErr := db.ExecContext(ctx, `CALL DOLT_COMMIT('-Am', 'chore: restore tables dropped by rebase squash')`); commitErr != nil {
-				fmt.Printf("  %s WARNING: could not commit restored tables: %v\n",
-					style.Bold.Render("!"), commitErr)
-			}
-		}
-		if len(droppedEmpty) > 0 {
-			fmt.Printf("  %s %d empty tables could not be restored (no schema): %v\n",
-				style.Bold.Render("!"), len(droppedEmpty), droppedEmpty)
-		}
-		fmt.Printf("  %s Integrity verified (%d tables, %d restored)\n",
-			style.Bold.Render("✓"), len(preCounts), len(restoredTables))
-	}
-
-	// Step 8: Concurrency check — warn if main has moved during rebase.
-	// In a live system, agents/apps may write to the DB during compaction.
-	// Since integrity is already verified, we proceed with a warning —
-	// the few writes that landed on main during the rebase window will be
-	// lost (overwritten by the hard-reset). This is acceptable for a
-	// compaction operation that typically takes 10-30 seconds.
-	var currentHead string
-	mainLogQuery := fmt.Sprintf("SELECT commit_hash FROM `%s/main`.dolt_log ORDER BY date DESC LIMIT 1", dbName)
-	if err := db.QueryRowContext(ctx, mainLogQuery).Scan(&currentHead); err != nil {
 		rebaseCleanupAll(db, baseBranch, workBranch)
 		return fmt.Errorf("concurrency check: %w", err)
 	}
 	if currentHead != preHead {
 		rebaseCleanupAll(db, baseBranch, workBranch)
-		return fmt.Errorf("ABORT: main HEAD moved during rebase (%s → %s) — stop all writers before compacting", preHead[:8], currentHead[:8])
+		return fmt.Errorf("ABORT: main HEAD moved during rebase (%s → %s)", shortHash(preHead), shortHash(currentHead))
 	}
-	fmt.Printf("  %s No concurrent writes detected\n", style.Bold.Render("✓"))
 
-	// Step 9: Swap branches — move main to compact-work's tip.
-	// Can't delete+rename main (it's the default branch). Instead, checkout
-	// main and hard-reset it to compact-work's HEAD.
-	// First, get compact-work's tip commit.
-	var workTip string
-	if err := db.QueryRowContext(ctx, fmt.Sprintf("SELECT commit_hash FROM `%s/%s`.dolt_log ORDER BY date DESC LIMIT 1", dbName, workBranch)).Scan(&workTip); err != nil {
-		rebaseCleanupAll(db, baseBranch, workBranch)
-		return fmt.Errorf("get compact-work tip: %w", err)
+	// Step 8: Swap branches — make compact-work the new main.
+	// We're already on compact-work from the rebase.
+	if _, err := db.ExecContext(ctx, "CALL DOLT_BRANCH('-D', 'main')"); err != nil {
+		// Can't delete main — leave compact-work in place for manual recovery.
+		return fmt.Errorf("delete old main: %w (compact-work branch preserved for manual recovery)", err)
 	}
-	// Checkout main and reset to compact-work's tip.
-	if _, err := db.ExecContext(ctx, "CALL DOLT_CHECKOUT('main')"); err != nil {
-		rebaseCleanupAll(db, baseBranch, workBranch)
-		return fmt.Errorf("checkout main for swap: %w", err)
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-m', '%s', 'main')", workBranch)); err != nil {
+		return fmt.Errorf("rename work branch to main: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_RESET('--hard', '%s')", workTip)); err != nil {
-		rebaseCleanupAll(db, baseBranch, workBranch)
-		return fmt.Errorf("reset main to compact-work tip: %w", err)
-	}
-	// Clean up temporary branches.
-	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", workBranch))
+	// Delete the base branch.
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", baseBranch))
-	fmt.Printf("  Branch swap complete — main reset to compacted history\n")
+	// Checkout main.
+	if _, err := db.ExecContext(ctx, "CALL DOLT_CHECKOUT('main')"); err != nil {
+		return fmt.Errorf("checkout new main: %w", err)
+	}
+	fmt.Printf("  Branch swap complete — compact-work is now main\n")
+
+	// Step 9: Verify integrity — row counts must match pre-flight.
+	// This runs AFTER the branch swap so we're reading from the new main,
+	// not from compact-work (which may have different table visibility during rebase).
+	postCounts, err := flattenGetRowCounts(db, dbName)
+	if err != nil {
+		fmt.Printf("  %s WARNING: could not verify row counts after rebase: %v\n",
+			style.Bold.Render("!"), err)
+		fmt.Printf("  Branch swap already complete — verify manually with 'gt dolt status'\n")
+	} else {
+		integrityOK := true
+		for table, preCount := range preCounts {
+			postCount, ok := postCounts[table]
+			if !ok {
+				fmt.Printf("  %s INTEGRITY WARNING: table %q missing after rebase (was %d rows)\n",
+					style.Bold.Render("!"), table, preCount)
+				integrityOK = false
+			} else if preCount != postCount {
+				fmt.Printf("  %s INTEGRITY WARNING: %q row count changed: pre=%d post=%d\n",
+					style.Bold.Render("!"), table, preCount, postCount)
+				integrityOK = false
+			}
+		}
+		if integrityOK {
+			fmt.Printf("  %s Integrity verified (%d tables match)\n", style.Bold.Render("✓"), len(preCounts))
+		} else {
+			fmt.Printf("  %s Some integrity checks failed — review above warnings\n", style.Bold.Render("!"))
+		}
+	}
 
 	// Verify final state.
 	var finalCount int
@@ -446,134 +376,32 @@ func rebaseCleanupAll(db *sql.DB, baseBranch, workBranch string) {
 	rebaseCleanup(db, baseBranch, workBranch)
 }
 
+// parseRebaseOrder converts a rebase_order value (returned by Dolt as DECIMAL
+// string, e.g. "1.00") to an int.
+func parseRebaseOrder(s string) (int, error) {
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid rebase_order %q: %w", s, err)
+	}
+	return int(math.Round(f)), nil
+}
+
+// parseRebaseOrderRange parses min/max rebase_order strings to ints.
+func parseRebaseOrderRange(minStr, maxStr string) (int, int, error) {
+	minVal, err := parseRebaseOrder(minStr)
+	if err != nil {
+		return 0, 0, err
+	}
+	maxVal, err := parseRebaseOrder(maxStr)
+	if err != nil {
+		return 0, 0, err
+	}
+	return minVal, maxVal, nil
+}
+
 // rebaseCleanupBase cleans up only the base branch (work branch not yet created).
 func rebaseCleanupBase(db *sql.DB, baseBranch string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_BRANCH('-D', '%s')", baseBranch))
-}
-
-// rebaseGetTableSchemas captures SHOW CREATE TABLE for all user tables.
-func rebaseGetTableSchemas(db *sql.DB, dbName string) (map[string]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Filter to BASE TABLE only — views return 4 columns from SHOW CREATE TABLE
-	// and don't need to be restored (they're recreated from their definition).
-	query := fmt.Sprintf("SELECT table_name FROM information_schema.tables WHERE table_schema = '%s' AND table_name NOT LIKE 'dolt_%%' AND table_type = 'BASE TABLE'", dbName)
-	rows, err := db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var tables []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		tables = append(tables, name)
-	}
-
-	schemas := make(map[string]string, len(tables))
-	for _, table := range tables {
-		// SHOW CREATE TABLE returns 2 columns for base tables (Table, Create Table)
-		// but 4 for views (View, Create View, charset, collation). Dolt's
-		// information_schema sometimes misreports views as BASE TABLE, so we
-		// handle both cases by scanning all columns dynamically.
-		showRows, err := db.QueryContext(ctx, fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", dbName, table))
-		if err != nil {
-			return nil, fmt.Errorf("schema for %s: %w", table, err)
-		}
-		cols, err := showRows.Columns()
-		if err != nil {
-			showRows.Close()
-			return nil, fmt.Errorf("schema columns for %s: %w", table, err)
-		}
-		if !showRows.Next() {
-			showRows.Close()
-			return nil, fmt.Errorf("schema for %s: no rows returned", table)
-		}
-		vals := make([]sql.NullString, len(cols))
-		ptrs := make([]interface{}, len(cols))
-		for i := range vals {
-			ptrs[i] = &vals[i]
-		}
-		if err := showRows.Scan(ptrs...); err != nil {
-			showRows.Close()
-			return nil, fmt.Errorf("schema for %s: %w", table, err)
-		}
-		showRows.Close()
-		// DDL is always in the second column regardless of column count.
-		if len(vals) >= 2 && vals[1].Valid {
-			schemas[table] = vals[1].String
-		}
-	}
-	return schemas, nil
-}
-
-// rebaseRestoreTable recreates a table dropped by squash and copies data from
-// main. Checks out main to read data (AS OF and revision syntax don't work
-// for tables that don't exist on the current branch), then switches back.
-func rebaseRestoreTable(db *sql.DB, ctx context.Context, dbName, table, ddl, _ string) error {
-	// Switch to main to read original data.
-	if _, err := db.ExecContext(ctx, "CALL DOLT_CHECKOUT('main')"); err != nil {
-		return fmt.Errorf("checkout main: %w", err)
-	}
-
-	// Read all rows from main.
-	rows, err := db.QueryContext(ctx, fmt.Sprintf("SELECT * FROM `%s`.`%s`", dbName, table))
-	if err != nil {
-		_, _ = db.ExecContext(ctx, "CALL DOLT_CHECKOUT('compact-work')")
-		return fmt.Errorf("read from main: %w", err)
-	}
-	cols, err := rows.Columns()
-	if err != nil {
-		rows.Close()
-		_, _ = db.ExecContext(ctx, "CALL DOLT_CHECKOUT('compact-work')")
-		return fmt.Errorf("get columns: %w", err)
-	}
-	var allRows [][]interface{}
-	for rows.Next() {
-		vals := make([]interface{}, len(cols))
-		ptrs := make([]interface{}, len(cols))
-		for i := range vals {
-			ptrs[i] = &vals[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
-			rows.Close()
-			_, _ = db.ExecContext(ctx, "CALL DOLT_CHECKOUT('compact-work')")
-			return fmt.Errorf("scan row: %w", err)
-		}
-		allRows = append(allRows, vals)
-	}
-	rows.Close()
-
-	// Switch back to compact-work.
-	if _, err := db.ExecContext(ctx, "CALL DOLT_CHECKOUT('compact-work')"); err != nil {
-		return fmt.Errorf("checkout compact-work: %w", err)
-	}
-
-	// Recreate the table.
-	createStmt := strings.Replace(ddl, "CREATE TABLE `"+table+"`", "CREATE TABLE IF NOT EXISTS `"+table+"`", 1)
-	if _, err := db.ExecContext(ctx, createStmt); err != nil {
-		return fmt.Errorf("recreate table: %w", err)
-	}
-
-	// Insert data.
-	if len(allRows) > 0 {
-		placeholders := make([]string, len(cols))
-		for i := range placeholders {
-			placeholders[i] = "?"
-		}
-		insertSQL := fmt.Sprintf("INSERT INTO `%s`.`%s` VALUES (%s)", dbName, table, strings.Join(placeholders, ","))
-		for _, row := range allRows {
-			if _, err := db.ExecContext(ctx, insertSQL, row...); err != nil {
-				return fmt.Errorf("insert row: %w", err)
-			}
-		}
-	}
-
-	return nil
 }

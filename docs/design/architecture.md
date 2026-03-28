@@ -105,10 +105,18 @@ Each agent bead references its role bead via the `role_bead` field.
 ├── settings/                   Town-level settings
 │   ├── config.json             Town settings (agents, themes)
 │   └── escalation.json         Escalation routes and contacts
+├── directives/                 Town-level role directives (operator policy)
+│   └── <role>.md               Markdown injected at prime time
+├── formula-overlays/           Town-level formula overlays
+│   └── <formula>.toml          TOML step overrides (replace/append/skip)
 ├── config/
 │   └── messaging.json          Mail lists, queues, channels
 └── <rig>/                      Project container (NOT a git clone)
     ├── config.json             Rig identity and beads prefix
+    ├── directives/             Rig-level role directives (overrides town)
+    │   └── <role>.md
+    ├── formula-overlays/       Rig-level formula overlays (full precedence)
+    │   └── <formula>.toml
     ├── mayor/rig/              Canonical clone (beads live here, NOT an agent)
     │   └── .beads/             Rig-level beads (redirected to Dolt)
     ├── refinery/               Refinery agent home
@@ -318,9 +326,56 @@ are NOT embedded (and require `gt doctor` or `gt upgrade` to update):
 - Claude Code hooks (`.claude/settings.json` managed sections)
 - Dolt schema (migrations run on first `bd` command after upgrade)
 
+## Role Directives and Formula Overlays
+
+Operators can customize agent behavior at the town or rig level without
+modifying the Go binary or embedded templates. This follows the property layer
+model (rig > town > system) and the hooks override precedent.
+
+### Role Directives
+
+Per-role Markdown files injected during `gt prime`, after the role template but
+before context files and handoff content. Operator policy that overrides formula
+instructions where they conflict.
+
+```
+~/gt/directives/<role>.md              # Town-level (all rigs)
+~/gt/<rig>/directives/<role>.md        # Rig-level
+```
+
+Both levels concatenate (rig content appears last and wins conflicts).
+Implemented in `internal/config/directives.go` (`LoadRoleDirective`),
+integrated via `outputRoleDirectives()` in `internal/cmd/prime_output.go`.
+
+### Formula Overlays
+
+Per-formula TOML files that modify individual steps. Applied post-parse before
+rendering in `showFormulaStepsFull()`.
+
+```
+~/gt/formula-overlays/<formula>.toml   # Town-level
+~/gt/<rig>/formula-overlays/<formula>.toml  # Rig-level (full precedence)
+```
+
+Rig-level overlays fully replace town-level (not merged). Three override modes:
+
+| Mode | Effect |
+|------|--------|
+| `replace` | Swap the step description entirely |
+| `append` | Add text after the existing step description |
+| `skip` | Remove the step (dependents inherit its needs) |
+
+Implemented in `internal/formula/overlay.go` (`LoadFormulaOverlay`,
+`ApplyOverlays`). `gt doctor` validates overlay step IDs against current
+formula definitions and can auto-fix stale references.
+
+See [directives-and-overlays.md](directives-and-overlays.md) for the full
+reference with examples and design rationale.
+
 ## See Also
 
 - [dolt-storage.md](dolt-storage.md) - Dolt storage architecture
 - [reference.md](../reference.md) - Command reference
+- [directives-and-overlays.md](directives-and-overlays.md) - Directives and overlays reference
 - [molecules.md](../concepts/molecules.md) - Workflow molecules
 - [identity.md](../concepts/identity.md) - Agent identity and BD_ACTOR

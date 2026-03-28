@@ -48,8 +48,9 @@ var costsCmd = &cobra.Command{
 	Short:   "Show costs for running Claude sessions",
 	Long: `Display costs for Claude Code sessions in Gas Town.
 
-Costs are calculated from Claude Code transcript files at ~/.claude/projects/
-by summing token usage from assistant messages and applying model-specific pricing.
+Costs are calculated from Claude Code transcript files in
+$CLAUDE_CONFIG_DIR/projects/ (defaults to ~/.claude/projects/) by summing
+token usage from assistant messages and applying model-specific pricing.
 
 Examples:
   gt costs              # Live costs from running sessions
@@ -72,7 +73,8 @@ var costsRecordCmd = &cobra.Command{
 	Long: `Record the final cost of a session to a local log file.
 
 This command is intended to be called from a Claude Code Stop hook.
-It reads token usage from the Claude Code transcript file (~/.claude/projects/...)
+It reads token usage from the Claude Code transcript file
+($CLAUDE_CONFIG_DIR/projects/... or ~/.claude/projects/...)
 and calculates the cost based on model pricing, then appends it to
 ~/.gt/costs.jsonl. This is a simple append operation that never fails
 due to database availability.
@@ -674,9 +676,10 @@ func extractCost(content string) float64 {
 }
 
 // getClaudeProjectDir returns the Claude Code project directory for a working directory.
-// Claude Code stores transcripts in ~/.claude/projects/<path-with-dashes-instead-of-slashes>/
+// Claude Code stores transcripts in <config-dir>/projects/<path-with-dashes-instead-of-slashes>/
+// Respects CLAUDE_CONFIG_DIR env var, falling back to ~/.claude.
 func getClaudeProjectDir(workDir string) (string, error) {
-	home, err := os.UserHomeDir()
+	configDir, err := config.ClaudeConfigDir()
 	if err != nil {
 		return "", err
 	}
@@ -684,7 +687,7 @@ func getClaudeProjectDir(workDir string) (string, error) {
 	// Convert path to Claude's directory naming: replace / with -
 	// Keep leading slash - it becomes a leading dash in Claude's encoding
 	projectName := strings.ReplaceAll(workDir, "/", "-")
-	return filepath.Join(home, ".claude", "projects", projectName), nil
+	return filepath.Join(configDir, "projects", projectName), nil
 }
 
 // findLatestTranscript finds the most recently modified .jsonl file in a directory.

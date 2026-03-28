@@ -206,7 +206,7 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 						Message:  message,
 						Priority: nudgePriorityFlag,
 					}})
-					return t.NudgeSession(sessionName, formatted)
+					return t.NudgeSessionWithOpts(sessionName, formatted, tmux.NudgeOpts{TownRoot: townRoot})
 				}
 				// Ensure a nudge-poller is running so the queue actually drains.
 				// The poller is normally started by gt crew start, but if the
@@ -230,7 +230,7 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 				Message:  message,
 				Priority: nudgePriorityFlag,
 			}})
-			return t.NudgeSession(sessionName, formatted)
+			return t.NudgeSessionWithOpts(sessionName, formatted, tmux.NudgeOpts{TownRoot: townRoot})
 		}
 		// Terminal errors (session gone, no server) — propagate, don't queue.
 		// Queueing a nudge for a dead session means it will never be delivered.
@@ -253,7 +253,7 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 				Message:  message,
 				Priority: nudgePriorityFlag,
 			}})
-			return t.NudgeSession(sessionName, formatted)
+			return t.NudgeSessionWithOpts(sessionName, formatted, tmux.NudgeOpts{TownRoot: townRoot})
 		}
 		// Run watcher synchronously: polls for idle over a longer window.
 		// The UserPromptSubmit hook drains the queue on agent input, but an
@@ -265,7 +265,7 @@ func deliverNudge(t *tmux.Tmux, sessionName, message, sender string) error {
 		return nil
 
 	default: // NudgeModeImmediate
-		opts := tmux.NudgeOpts{}
+		opts := tmux.NudgeOpts{TownRoot: townRoot}
 		// Check if the target agent uses Escape as cancel (e.g., Gemini CLI).
 		// For these agents, skip the Escape keystroke to avoid canceling
 		// in-flight generation. (GH#gt-wasn)
@@ -322,7 +322,7 @@ func watchAndDeliver(t *tmux.Tmux, townRoot, sessionName string) {
 				return
 			}
 			formatted := nudge.FormatForInjection(drained)
-			if err := t.NudgeSession(sessionName, formatted); err != nil {
+			if err := t.NudgeSessionWithOpts(sessionName, formatted, tmux.NudgeOpts{TownRoot: townRoot}); err != nil {
 				fmt.Fprintf(os.Stderr, "idle-watcher: delivery for %s failed: %v\n", sessionName, err)
 			}
 			return

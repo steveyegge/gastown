@@ -201,7 +201,9 @@ COMMANDS:
   close     Close a convoy (verifies all items done, or use --force)
   land      Land an owned convoy (cleanup worktrees, close convoy)
   status    Show convoy progress, tracked issues, and active workers
-  list      List convoys (the dashboard view)`,
+  list      List convoys (the dashboard view)
+  watch     Subscribe to convoy completion notifications
+  unwatch   Unsubscribe from convoy completion notifications`,
 }
 
 var convoyCreateCmd = &cobra.Command{
@@ -440,6 +442,16 @@ func getTownBeadsDir() (string, error) {
 // "exit status 1". BEADS_DIR is stripped from the subprocess environment to
 // prevent stale overrides from interfering with bd's workspace detection.
 func runBdJSON(dir string, args ...string) ([]byte, error) {
+	// Strip --allow-stale if bd doesn't support it (version mismatch).
+	if !beads.BdSupportsAllowStale() {
+		filtered := make([]string, 0, len(args))
+		for _, a := range args {
+			if a != "--allow-stale" {
+				filtered = append(filtered, a)
+			}
+		}
+		args = filtered
+	}
 	cmd := exec.Command("bd", args...)
 	cmd.Dir = dir
 	// Strip BEADS_DIR so bd discovers the correct database from cmd.Dir
@@ -468,7 +480,7 @@ func runBdJSON(dir string, args ...string) ([]byte, error) {
 // depType filters by dependency type (e.g., "tracks", "blocks"); empty means all types.
 //
 // Returns deduplicated, unwrapped issue IDs (external:prefix:id → id).
-func bdDepListRawIDs(dir, issueID, direction, depType string) ([]string, error) { //nolint:unparam // depType kept for API generality; callers currently only use "tracks"
+func bdDepListRawIDs(dir, issueID, direction, depType string) ([]string, error) {
 	// Determine query columns based on direction.
 	// "down": issueID depends on targets → SELECT depends_on_id WHERE issue_id = ?
 	// "up":   issueID is depended on → SELECT issue_id WHERE depends_on_id = ?
@@ -707,9 +719,9 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 
 	// Notify address is stored in description (line 166-168) and read from there
 
-	// Run dep add from town root (parent of .beads) so bd routes correctly
-	// across rigs via routes.jsonl. Running from .beads breaks cross-rig routing.
-	townRoot := filepath.Dir(townBeads)
+	// Run dep add from town root so bd routes correctly across rigs via
+	// routes.jsonl. getTownBeadsDir() already returns the town root.
+	// StripBeadsDir prevents inherited BEADS_DIR from overriding routing.
 
 	// Add 'tracks' relations for each tracked issue
 	trackedCount := 0
@@ -718,7 +730,7 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		var depStderr bytes.Buffer
 		if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
 			WithAutoCommit().
-			Dir(townRoot).
+			Dir(townBeads).
 			StripBeadsDir().
 			Stderr(&depStderr).
 			Run(); err != nil {
@@ -827,16 +839,15 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Reopened convoy %s\n", style.Bold.Render("↺"), convoyID)
 	}
 
-	// Run dep add from town root (parent of .beads) so bd routes correctly
-	// across rigs via routes.jsonl. Running from .beads breaks cross-rig routing.
-	townRoot := filepath.Dir(townBeads)
+	// Run dep add from town root so bd routes correctly across rigs via
+	// routes.jsonl. getTownBeadsDir() already returns the town root.
 
 	// Add 'tracks' relations for each issue
 	addedCount := 0
 	for _, issueID := range issuesToAdd {
 		var depStderr bytes.Buffer
 		if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
-			Dir(townRoot).
+			Dir(townBeads).
 			WithAutoCommit().
 			StripBeadsDir().
 			Stderr(&depStderr).
@@ -897,6 +908,50 @@ func runConvoyCheck(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// closeConvoyIfComplete checks whether all tracked issues in a convoy are resolved
+// and closes the convoy if so. Returns (true, nil) if the convoy was closed or
+// would be closed (dry-run), (false, nil) if not ready, or (false, err) on failure.
+func closeConvoyIfComplete(townBeads, convoyID, title string, tracked []trackedIssueInfo, dryRun bool) (bool, error) {
+	// If no tracked issues were resolved, skip auto-close. A 0/0 result means
+	// cross-rig tracking resolution failed — not that all issues are done.
+	// Treating 0/0 as "complete" caused false 🚚 Convoy landed notifications. (GH#3xxx)
+	if len(tracked) == 0 {
+		return false, nil
+	}
+
+	allClosed := true
+	openCount := 0
+	for _, t := range tracked {
+		if t.Status != "closed" && t.Status != "tombstone" {
+			allClosed = false
+			openCount++
+		}
+	}
+
+	if !allClosed {
+		fmt.Printf("%s Convoy %s has %d open issue(s) remaining\n", style.Dim.Render("○"), convoyID, openCount)
+		return false, nil
+	}
+
+	if dryRun {
+		fmt.Printf("%s Would auto-close convoy 🚚 %s: %s\n", style.Warning.Render("⚠"), convoyID, title)
+		return true, nil
+	}
+
+	reason := "All tracked issues completed"
+	closeArgs := []string{"close", convoyID, "-r", reason}
+	closeCmd := exec.Command("bd", closeArgs...)
+	closeCmd.Dir = townBeads
+
+	if err := closeCmd.Run(); err != nil {
+		return false, fmt.Errorf("closing convoy: %w", err)
+	}
+
+	fmt.Printf("%s Auto-closed convoy 🚚 %s: %s\n", style.Bold.Render("✓"), convoyID, title)
+	notifyConvoyCompletion(townBeads, convoyID, title)
+	return true, nil
+}
+
 // checkSingleConvoy checks a specific convoy and closes it if all tracked issues are complete.
 func checkSingleConvoy(townBeads, convoyID string, dryRun bool) error {
 	// Get convoy details
@@ -946,47 +1001,9 @@ func checkSingleConvoy(townBeads, convoyID string, dryRun bool) error {
 	if err != nil {
 		return fmt.Errorf("checking convoy %s: %w", convoyID, err)
 	}
-	// A convoy with 0 tracked issues is definitionally complete
-	// (tracking deps were likely lost). Treat as all-closed.
-	allClosed := true
-	openCount := 0
-	for _, t := range tracked {
-		if t.Status != "closed" && t.Status != "tombstone" {
-			allClosed = false
-			openCount++
-		}
-	}
 
-	if !allClosed {
-		fmt.Printf("%s Convoy %s has %d open issue(s) remaining\n", style.Dim.Render("○"), convoyID, openCount)
-		return nil
-	}
-
-	// All tracked issues are complete (or convoy is empty) - close the convoy
-	if dryRun {
-		fmt.Printf("%s Would auto-close convoy 🚚 %s: %s\n", style.Warning.Render("⚠"), convoyID, convoy.Title)
-		return nil
-	}
-
-	// Actually close the convoy
-	reason := "All tracked issues completed"
-	if len(tracked) == 0 {
-		reason = "Empty convoy (0 tracked issues) — auto-closed as definitionally complete"
-	}
-	closeArgs := []string{"close", convoyID, "-r", reason}
-	closeCmd := exec.Command("bd", closeArgs...)
-	closeCmd.Dir = townBeads
-
-	if err := closeCmd.Run(); err != nil {
-		return fmt.Errorf("closing convoy: %w", err)
-	}
-
-	fmt.Printf("%s Auto-closed convoy 🚚 %s: %s\n", style.Bold.Render("✓"), convoyID, convoy.Title)
-
-	// Send completion notification
-	notifyConvoyCompletion(townBeads, convoyID, convoy.Title)
-
-	return nil
+	_, err = closeConvoyIfComplete(townBeads, convoyID, convoy.Title, tracked, dryRun)
+	return err
 }
 
 func runConvoyClose(cmd *cobra.Command, args []string) error {
@@ -1528,7 +1545,6 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 		// Town-level beads (hq- prefix with path=".") are excluded because
 		// they can't be dispatched via gt sling -- they're handled by the deacon.
 		// Non-slingable types (epics, convoys, etc.) are also excluded.
-		townRoot := filepath.Dir(townBeads)
 
 		// Batch-check scheduling status for all tracked issues (single DB query).
 		var trackedIDs []string
@@ -1540,7 +1556,7 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 		var readyIssues []string
 		for _, t := range tracked {
 			if isReadyIssue(t, scheduledSet) {
-				if !isSlingableBead(townRoot, t.ID) {
+				if !isSlingableBead(townBeads, t.ID) {
 					continue
 				}
 				if !convoyops.IsSlingableType(t.IssueType) {
@@ -1675,41 +1691,13 @@ func checkAndCloseCompletedConvoys(townBeads string, dryRun bool) ([]struct{ ID,
 			style.PrintWarning("skipping convoy %s: %v", convoy.ID, err)
 			continue
 		}
-		// A convoy with 0 tracked issues is definitionally complete
-		// (tracking deps were likely lost). Close it.
-		allClosed := true
-		for _, t := range tracked {
-			if t.Status != "closed" && t.Status != "tombstone" {
-				allClosed = false
-				break
-			}
+		ready, err := closeConvoyIfComplete(townBeads, convoy.ID, convoy.Title, tracked, dryRun)
+		if err != nil {
+			style.PrintWarning("couldn't close convoy %s: %v", convoy.ID, err)
+			continue
 		}
-
-		if allClosed {
-			if dryRun {
-				// In dry-run mode, just record what would be closed
-				closed = append(closed, struct{ ID, Title string }{convoy.ID, convoy.Title})
-				continue
-			}
-
-			// Close the convoy
-			reason := "All tracked issues completed"
-			if len(tracked) == 0 {
-				reason = "Empty convoy (0 tracked issues) — auto-closed as definitionally complete"
-			}
-			closeArgs := []string{"close", convoy.ID, "-r", reason}
-			closeCmd := exec.Command("bd", closeArgs...)
-			closeCmd.Dir = townBeads
-
-			if err := closeCmd.Run(); err != nil {
-				style.PrintWarning("couldn't close convoy %s: %v", convoy.ID, err)
-				continue
-			}
-
+		if ready {
 			closed = append(closed, struct{ ID, Title string }{convoy.ID, convoy.Title})
-
-			// Check if convoy has notify address and send notification
-			notifyConvoyCompletion(townBeads, convoy.ID, convoy.Title)
 		}
 	}
 
@@ -1748,6 +1736,15 @@ func notifyConvoyCompletion(townBeads, convoyID, title string) {
 		}
 	}
 
+	// Send nudge notifications to nudge watchers
+	for _, addr := range fields.NudgeNotificationAddresses() {
+		nudgeMsg := fmt.Sprintf("🚚 Convoy landed: %s — Convoy %s has completed. All tracked issues are now closed.", title, convoyID)
+		nudgeCmd := exec.Command("gt", "nudge", addr, "-m", nudgeMsg)
+		if err := nudgeCmd.Run(); err != nil {
+			style.PrintWarning("could not nudge %s: %v", addr, err)
+		}
+	}
+
 	// Push notification to active Mayor session if configured
 	notifyMayorSession(townBeads, convoyID, title)
 }
@@ -1755,8 +1752,7 @@ func notifyConvoyCompletion(townBeads, convoyID, title string) {
 // notifyMayorSession pushes a convoy completion notification into the active
 // Mayor session via nudge, if convoy.notify_on_complete is enabled.
 func notifyMayorSession(townBeads, convoyID, title string) {
-	townRoot := filepath.Dir(townBeads) // townBeads = townRoot/.beads
-	settingsPath := config.TownSettingsPath(townRoot)
+	settingsPath := config.TownSettingsPath(townBeads)
 	settings, err := config.LoadOrCreateTownSettings(settingsPath)
 	if err != nil {
 		return
@@ -2225,19 +2221,26 @@ func applyFreshIssueDetails(dep *trackedDependency, details *issueDetails) {
 // getTrackedIssues gets issues tracked by a convoy with fresh cross-rig details.
 // Returns issue details including status, type, and worker info.
 //
-// Uses bd dep list to query tracked dependencies. If dep list returns empty
-// (e.g., cross-database deps where the JOIN fails — see GH #2624), falls back
-// to bd show and extracts tracked dependencies from the convoy's dependencies
-// array. Then fetches fresh issue details via bd show with prefix routing.
+// Prefers raw SQL query against the dependencies table (bdDepListRawIDs) which
+// avoids the JOIN with the issues table that silently drops cross-database
+// dependencies (see GH #2624, #2832). Falls back to bd dep list and bd show
+// for older bd versions that don't support bd sql.
+// Then fetches fresh issue details via bd show with prefix routing.
 func getTrackedIssues(townBeads, convoyID string) ([]trackedIssueInfo, error) {
-	// Try bd dep list first — the standard dependency query path.
-	trackedIDs, err := bdDepListTracked(townBeads, convoyID)
+	// Prefer raw SQL — works for cross-database deps where tracked beads
+	// live in different Dolt databases. Falls back to bd dep list if bd sql
+	// is not available (older bd versions).
+	trackedIDs, err := bdDepListRawIDs(townBeads, convoyID, "down", "tracks")
 	if err != nil {
-		return nil, fmt.Errorf("querying tracked issues for %s: %w", convoyID, err)
+		// bd sql not supported (older bd) — fall back to bd dep list.
+		trackedIDs, err = bdDepListTracked(townBeads, convoyID)
+		if err != nil {
+			return nil, fmt.Errorf("querying tracked issues for %s: %w", convoyID, err)
+		}
 	}
 
-	// Fallback: when dep list returns empty (common for cross-database deps),
-	// parse tracked dependencies from bd show output.
+	// Fallback: when dep queries return empty (common for cross-database deps
+	// on older bd where the JOIN fails), try parsing from bd show output.
 	if len(trackedIDs) == 0 {
 		trackedIDs, err = bdShowTrackedDeps(townBeads, convoyID)
 		if err != nil {
@@ -2302,8 +2305,11 @@ func getTrackedIssues(townBeads, convoyID string) ([]trackedIssueInfo, error) {
 
 // bdDepListTracked runs `bd dep list <convoyID> --direction=down --type=tracks --json`
 // and returns the tracked issue IDs (unwrapped from external: prefixes).
+// Uses --allow-stale for consistency with sling's other bd calls (verifyBeadExists,
+// bdShowBead) — without it, a jsonl write that straddles a second boundary causes
+// "database out of sync" errors in CI and fast-turnaround production workflows.
 func bdDepListTracked(dir, convoyID string) ([]string, error) {
-	out, err := runBdJSON(dir, "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
+	out, err := runBdJSON(dir, "dep", "list", convoyID, "--direction=down", "--type=tracks", "--allow-stale", "--json")
 	if err != nil {
 		return nil, err
 	}
@@ -2398,9 +2404,8 @@ func (issue issueDetailsJSON) toIssueDetails() *issueDetails {
 // rigName: name of the rig (e.g., "claycantrell")
 // issueID: the issue ID to look up
 func getExternalIssueDetails(townBeads, rigName, issueID string) *issueDetails {
-	// Resolve rig directory path: town parent + rig name
-	townParent := filepath.Dir(townBeads)
-	rigDir := filepath.Join(townParent, rigName)
+	// Resolve rig directory path: townBeads is the town root
+	rigDir := filepath.Join(townBeads, rigName)
 
 	// Check if rig directory exists
 	if _, err := os.Stat(rigDir); os.IsNotExist(err) {
@@ -2472,7 +2477,14 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 	args := append([]string{"show"}, issueIDs...)
 	args = append(args, "--json")
 
+	// Run from town root so bd's prefix routing (routes.jsonl) can dispatch
+	// to the correct rig database for cross-rig bead lookups. (GH#2960)
+	townRoot, _ := workspace.FindFromCwdOrError()
 	showCmd := exec.Command("bd", args...)
+	if townRoot != "" {
+		showCmd.Dir = townRoot
+		showCmd.Env = stripEnvKey(os.Environ(), "BEADS_DIR")
+	}
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout
 
@@ -2502,8 +2514,16 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 // getIssueDetails fetches issue details by trying to show it via bd.
 // Prefer getIssueDetailsBatch for multiple issues to avoid N+1 subprocess calls.
 func getIssueDetails(issueID string) *issueDetails {
-	// Use bd show with routing - it should find the issue in the right rig
+	// Use bd show with routing - resolve from town root so bd's prefix
+	// routing (routes.jsonl) can dispatch to the correct rig database.
+	// Without Dir + StripBeadsDir, bd inherits CWD/BEADS_DIR which may
+	// point to a rig that doesn't contain the target bead. (GH#2960)
+	townRoot, _ := workspace.FindFromCwdOrError()
 	showCmd := exec.Command("bd", "show", issueID, "--json")
+	if townRoot != "" {
+		showCmd.Dir = townRoot
+		showCmd.Env = stripEnvKey(os.Environ(), "BEADS_DIR")
+	}
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout
 

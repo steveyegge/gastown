@@ -1,13 +1,17 @@
 package daemon
 
 import (
+	"encoding/json"
 	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
 )
 
@@ -462,5 +466,111 @@ func TestSyncWorkspace_DirtyTreeAutoStash(t *testing.T) {
 	// No sync failures should have been recorded (pull succeeded)
 	if got := d.getSyncFailures(workDir); got != 0 {
 		t.Errorf("expected 0 sync failures after successful sync, got %d", got)
+	}
+}
+
+// TestGetStartCommand_NonClaudeAgentBypassesToml verifies GH #2417:
+// when a non-Claude agent is configured as default_agent or role_agents[witness],
+// the daemon's getStartCommand must NOT use the hardcoded "exec claude" start_command
+// from the built-in role TOMLs.
+func TestGetStartCommand_NonClaudeAgentBypassesToml(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create settings dir and town config.json with gemini as default_agent.
+	settingsDir := filepath.Join(townRoot, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	townSettings := config.NewTownSettings()
+	townSettings.DefaultAgent = "gemini"
+	settingsJSON, err := json.Marshal(townSettings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), settingsJSON, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create mayor dir (required for TownRoot to be valid).
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &Daemon{
+		config: &Config{TownRoot: townRoot},
+		logger: log.New(io.Discard, "", 0),
+	}
+
+	// roleConfig with the builtin TOML start_command — this is what the daemon
+	// sees at runtime when the built-in role TOML is loaded.
+	roleConfig := &beads.RoleConfig{
+		StartCommand: "exec claude --dangerously-skip-permissions",
+	}
+	parsed := &ParsedIdentity{
+		RoleType: "witness",
+		RigName:  "",
+	}
+
+	startCmd := d.getStartCommand(roleConfig, parsed)
+
+	// The result must NOT start with "exec claude" — that would mean the TOML
+	// start_command was used, bypassing the configured non-Claude agent.
+	if strings.Contains(startCmd, "claude --dangerously-skip-permissions") {
+		t.Errorf("getStartCommand returned hardcoded Claude TOML command for non-Claude default_agent: %q", startCmd)
+	}
+
+	// The result should reference the gemini binary (the resolved agent).
+	if !strings.Contains(startCmd, "gemini") {
+		t.Errorf("getStartCommand should use gemini (the configured default_agent), got: %q", startCmd)
+	}
+}
+
+// TestGetStartCommand_ClaudeAgentFallsThrough verifies that when Claude is the
+// resolved agent, getStartCommand falls through to BuildStartupCommandFromConfig
+// (not the literal TOML string) for proper model flag and beacon injection.
+func TestGetStartCommand_ClaudeAgentFallsThrough(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Default town settings — claude is the default agent.
+	settingsDir := filepath.Join(townRoot, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	townSettings := config.NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	settingsJSON, err := json.Marshal(townSettings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), settingsJSON, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &Daemon{
+		config: &Config{TownRoot: townRoot},
+		logger: log.New(io.Discard, "", 0),
+	}
+
+	roleConfig := &beads.RoleConfig{
+		StartCommand: "exec claude --dangerously-skip-permissions",
+	}
+	parsed := &ParsedIdentity{
+		RoleType: "witness",
+		RigName:  "",
+	}
+
+	startCmd := d.getStartCommand(roleConfig, parsed)
+
+	// Result should still reference claude.
+	if !strings.Contains(startCmd, "claude") {
+		t.Errorf("getStartCommand should produce a claude command for claude default_agent, got: %q", startCmd)
+	}
+	// The literal TOML string should NOT be returned verbatim — the fall-through
+	// path adds beacon injection and model flags.
+	if startCmd == "exec claude --dangerously-skip-permissions" {
+		t.Errorf("getStartCommand returned literal TOML start_command verbatim — beacon injection was skipped: %q", startCmd)
 	}
 }

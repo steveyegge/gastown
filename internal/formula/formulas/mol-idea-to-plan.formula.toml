@@ -27,7 +27,7 @@ They'll pour this formula and it takes over from there.
       ↓
 [create-beads]   Agent converts the refined plan into beads with dependencies
       ↓
-[verify-beads 1-3] 3 sequential passes comparing plan to beads, filling gaps
+[verify-beads]   3 sequential passes comparing plan to beads, filling gaps
 ```
 
 ## Human Gate
@@ -389,9 +389,7 @@ gt sling --prompt="Review an implementation plan for PRD alignment (round 3).
 
 Read the PRD: .prd-reviews/{{review_id}}/prd-draft.md
 Read the plan: .designs/<design-id>/design-doc.md
-Read prior changes:
-- .plan-reviews/{{review_id}}/prd-align-round-1.md
-- .plan-reviews/{{review_id}}/prd-align-round-2.md
+Read prior changes: .plan-reviews/{{review_id}}/prd-align-round-1.md and round-2.md
 
 Walk through every USER STORY and SCENARIO in the PRD. For each, trace the
 end-to-end user journey through the plan. Verify every step in the scenario
@@ -412,9 +410,7 @@ gt sling --prompt="Review an implementation plan for PRD alignment (round 3).
 
 Read the PRD: .prd-reviews/{{review_id}}/prd-draft.md
 Read the plan: .designs/<design-id>/design-doc.md
-Read prior changes:
-- .plan-reviews/{{review_id}}/prd-align-round-1.md
-- .plan-reviews/{{review_id}}/prd-align-round-2.md
+Read prior changes: .plan-reviews/{{review_id}}/prd-align-round-1.md and round-2.md
 
 Check every OPEN QUESTION from the PRD (both the original Open Questions section
 and any questions raised in the Clarifications from Human Review section).
@@ -610,9 +606,7 @@ Polecat A — **testability**:
 gt sling --prompt="Review an implementation plan for testability.
 
 Read the plan: .designs/<design-id>/design-doc.md
-Read prior review changes:
-- .plan-reviews/{{review_id}}/review-round-1.md
-- .plan-reviews/{{review_id}}/review-round-2.md
+Read prior review changes: .plan-reviews/{{review_id}}/review-round-1.md and round-2.md
 
 For each task/phase in the plan, check:
 - Does it have clear acceptance criteria? (How do we know it's done?)

@@ -2,9 +2,13 @@ package nudge
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 func TestPollerPidFile(t *testing.T) {
@@ -136,5 +140,44 @@ func TestPollerAlive_LiveProcess(t *testing.T) {
 	}
 	if pid != myPid {
 		t.Errorf("pollerAlive() pid = %d, want %d", pid, myPid)
+	}
+}
+
+func TestBuildPollerCommand_UsesDetachedProcessGroup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process group management is not supported on Windows")
+	}
+	townRoot := t.TempDir()
+	cmd := buildPollerCommand("/tmp/fake-gt", townRoot, "gt-gastown-crew-bear")
+
+	if got, want := cmd.Dir, townRoot; got != want {
+		t.Fatalf("cmd.Dir = %q, want %q", got, want)
+	}
+	if got, want := cmd.Path, "/tmp/fake-gt"; got != want {
+		t.Fatalf("cmd.Path = %q, want %q", got, want)
+	}
+	if len(cmd.Args) != 3 || cmd.Args[1] != "nudge-poller" || cmd.Args[2] != "gt-gastown-crew-bear" {
+		t.Fatalf("cmd.Args = %#v, want poller invocation", cmd.Args)
+	}
+	if cmd.Cancel != nil {
+		t.Fatal("buildPollerCommand() installed cmd.Cancel; detached pollers must leave it nil")
+	}
+	if cmd.Stdout != nil || cmd.Stderr != nil {
+		t.Fatal("buildPollerCommand() should discard stdout/stderr")
+	}
+	if cmd.SysProcAttr == nil {
+		t.Fatal("buildPollerCommand() did not configure SysProcAttr")
+	}
+}
+
+func TestSetProcessGroup_InstallsCancelHook(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SetProcessGroup is a no-op on Windows")
+	}
+	cmd := exec.Command("true")
+	util.SetProcessGroup(cmd)
+
+	if cmd.Cancel == nil {
+		t.Fatal("SetProcessGroup() should install a cancel hook")
 	}
 }

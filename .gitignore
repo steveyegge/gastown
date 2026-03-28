@@ -22,10 +22,12 @@ Thumbs.db
 # Claude Code local state (but track commands/skills)
 .claude/
 !.claude/commands/
+!.claude/skills/
 
 # Test
 coverage.out
 *.test
+internal/events/*/
 
 # Local config
 config.toml

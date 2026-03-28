@@ -67,7 +67,17 @@ func WriteHeartbeat(townRoot string, hb *Heartbeat) error {
 		return err
 	}
 
-	return os.WriteFile(hbFile, data, 0600)
+	if err := os.WriteFile(hbFile, data, 0600); err != nil {
+		return err
+	}
+
+	// Also touch .deacon-heartbeat for backward compatibility with shell scripts
+	// that check this file's mtime for liveness detection (stuck-agent-dog).
+	// These scripts predate heartbeat.json and check mtime, not file contents.
+	legacyFile := filepath.Join(filepath.Dir(hbFile), ".deacon-heartbeat")
+	_ = os.WriteFile(legacyFile, []byte(""), 0644) //nolint:gosec // G306: world-readable liveness file is intentional
+
+	return nil
 }
 
 // ReadHeartbeat reads the Deacon heartbeat from disk.

@@ -168,14 +168,15 @@ func (c *RigConfigSyncCheck) Run(ctx *CheckContext) *CheckResult {
 
 		// Check if Dolt database exists (only for server mode)
 		if metadata.DoltMode == "server" {
-			// Database name should match the prefix
-			expectedDBName := configPrefix
-			if expectedDBName == "" {
-				expectedDBName = metadata.DoltDatabase // fallback to what's in metadata
-			}
+			// Database name should match the rig directory name (rigName), not the beads
+			// prefix. This is the convention established by doltserver.EnsureMetadata:
+			// the Dolt database identifier is the rig's directory name so that rigs
+			// with short prefixes (e.g. "ts" for trading_scripts) don't collide and
+			// bd can always locate the right database without extra config.
+			expectedDBName := rigName
 
 			if expectedDBName != "" {
-				// Check if database name matches prefix
+				// Check if database name matches the rig directory name
 				if metadata.DoltDatabase != expectedDBName {
 					c.dbNameMismatches = append(c.dbNameMismatches, dbMismatch{
 						rigName:    rigName,
@@ -184,7 +185,7 @@ func (c *RigConfigSyncCheck) Run(ctx *CheckContext) *CheckResult {
 						expectedDB: expectedDBName,
 					})
 					details = append(details, fmt.Sprintf(
-						"Rig %s database name mismatch: metadata has '%s', should be '%s' (prefix)",
+						"Rig %s database name mismatch: metadata has '%s', should be '%s' (rig name)",
 						rigName, metadata.DoltDatabase, expectedDBName))
 				}
 
@@ -343,7 +344,7 @@ func (c *RigConfigSyncCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	// Fix database name mismatches - rename database to match prefix
+	// Fix database name mismatches - rename database to match rig directory name
 	renamedDBs := false
 	for _, mismatch := range c.dbNameMismatches {
 		rigPath := filepath.Join(ctx.TownRoot, mismatch.rigName)
@@ -360,7 +361,7 @@ func (c *RigConfigSyncCheck) Fix(ctx *CheckContext) error {
 			return fmt.Errorf("could not parse metadata.json for %s: %w", mismatch.rigName, err)
 		}
 
-		// Update database name to match prefix
+		// Update database name to match rig directory name
 		metadata["dolt_database"] = mismatch.expectedDB
 
 		// Write updated metadata

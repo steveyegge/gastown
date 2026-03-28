@@ -486,6 +486,23 @@ source_issue: gt-pqr`,
 				SourceIssue: "gt-pqr",
 			},
 		},
+		{
+			name: "commit_sha field (GH#3032)",
+			issue: &Issue{
+				Description: `branch: polecat/nux/es-ixjt@mmw5d6mv
+target: main
+source_issue: es-ixjt
+rig: gastown
+commit_sha: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2`,
+			},
+			wantFields: &MRFields{
+				Branch:      "polecat/nux/es-ixjt@mmw5d6mv",
+				Target:      "main",
+				SourceIssue: "es-ixjt",
+				Rig:         "gastown",
+				CommitSHA:   "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -517,6 +534,9 @@ source_issue: gt-pqr`,
 			}
 			if fields.Rig != tt.wantFields.Rig {
 				t.Errorf("Rig = %q, want %q", fields.Rig, tt.wantFields.Rig)
+			}
+			if fields.CommitSHA != tt.wantFields.CommitSHA {
+				t.Errorf("CommitSHA = %q, want %q", fields.CommitSHA, tt.wantFields.CommitSHA)
 			}
 			if fields.MergeCommit != tt.wantFields.MergeCommit {
 				t.Errorf("MergeCommit = %q, want %q", fields.MergeCommit, tt.wantFields.MergeCommit)
@@ -585,6 +605,21 @@ worker: Toast`,
 			},
 			want: `merge_commit: deadbeef
 close_reason: rejected`,
+		},
+		{
+			name: "with commit_sha (GH#3032)",
+			fields: &MRFields{
+				Branch:      "polecat/nux/es-ixjt@mmw5d6mv",
+				Target:      "main",
+				SourceIssue: "es-ixjt",
+				Rig:         "gastown",
+				CommitSHA:   "a1b2c3d4",
+			},
+			want: `branch: polecat/nux/es-ixjt@mmw5d6mv
+target: main
+source_issue: es-ixjt
+rig: gastown
+commit_sha: a1b2c3d4`,
 		},
 	}
 

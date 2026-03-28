@@ -116,11 +116,15 @@ while IFS='|' read -r RIG PREFIX; do
         | jq -r '.hook_bead // empty' 2>/dev/null)
 
       if [ -n "$HOOK_BEAD" ]; then
-        # Check agent_state to avoid interfering with active spawning
+        # Check agent_state to avoid false alerts for intentional shutdowns
         AGENT_STATE=$(bd show "$RIG/polecats/$PCAT_NAME" --json 2>/dev/null \
           | jq -r '.agent_state // empty' 2>/dev/null)
         if [ "$AGENT_STATE" = "spawning" ]; then
           echo "  SKIP $SESSION_NAME: agent_state=spawning (sling in progress)"
+          continue
+        fi
+        if [ "$AGENT_STATE" = "done" ] || [ "$AGENT_STATE" = "nuked" ]; then
+          echo "  SKIP $SESSION_NAME: agent_state=$AGENT_STATE (intentional shutdown, not a crash)"
           continue
         fi
         CRASHED+=("$SESSION_NAME|$RIG|$PCAT_NAME|$HOOK_BEAD")
@@ -173,21 +177,31 @@ if ! tmux has-session -t "$DEACON_SESSION" 2>/dev/null; then
   echo "  CRASHED: Deacon session is dead"
   DEACON_ISSUE="crashed"
 else
-  # Check deacon heartbeat file
-  HEARTBEAT_FILE="$TOWN_ROOT/deacon/.deacon-heartbeat"
+  # Check deacon heartbeat file.
+  # heartbeat.json is the canonical file written by `gt deacon heartbeat` on every
+  # patrol cycle (start + mid-cycle checkpoint). .deacon-heartbeat is also kept in
+  # sync by WriteHeartbeat() for backward compatibility. Prefer heartbeat.json here
+  # as it is always written by the Go implementation.
+  #
+  # Threshold: 1200s (20m). The daemon nudges at 10m and logs STUCK at 15m;
+  # stuck-agent-dog fires at 20m to provide context-aware escalation without
+  # racing with the daemon or false-positiving during normal sleep/idle periods.
+  # Deacon patrol cycles take up to ~15 minutes total with heartbeat writes at
+  # start and mid-cycle, so max gap between writes is ~8 minutes + 60s sleep ≈ 9m.
+  HEARTBEAT_FILE="$TOWN_ROOT/deacon/heartbeat.json"
   if [ -f "$HEARTBEAT_FILE" ]; then
     HEARTBEAT_TIME=$(stat -f %m "$HEARTBEAT_FILE" 2>/dev/null || stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null)
     NOW=$(date +%s)
     HEARTBEAT_AGE=$(( NOW - HEARTBEAT_TIME ))
 
-    if [ "$HEARTBEAT_AGE" -gt 600 ]; then
-      echo "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, >10m threshold)"
+    if [ "$HEARTBEAT_AGE" -gt 1200 ]; then
+      echo "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, >20m threshold)"
       DEACON_ISSUE="stuck_heartbeat_${HEARTBEAT_AGE}s"
     else
       echo "  OK: Deacon heartbeat ${HEARTBEAT_AGE}s old"
     fi
   else
-    echo "  WARN: No heartbeat file found"
+    echo "  WARN: No heartbeat file found at $HEARTBEAT_FILE"
   fi
 fi
 ```
