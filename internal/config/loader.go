@@ -367,6 +367,9 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 		if local.MergeStrategy != "" {
 			result.MergeStrategy = local.MergeStrategy
 		}
+		if local.RequireReview != nil {
+			result.RequireReview = local.RequireReview
+		}
 	}
 	return result
 }

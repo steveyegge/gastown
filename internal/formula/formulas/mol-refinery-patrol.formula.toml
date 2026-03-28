@@ -67,6 +67,7 @@ source of truth.
 | judgment_enabled | false | Enable quality review for merges (true/false) |
 | review_depth | standard | Review depth: quick, standard, or deep |
 | merge_strategy | direct | Merge strategy: 'direct' (ff-only merge+push) or 'pr' (GitHub PR) |
+| require_review | false | Require at least one approving GitHub review before merging (pr mode only) |
 
 ## Target Resolution Rule
 
@@ -145,6 +146,10 @@ default = "standard"
 [vars.merge_strategy]
 description = "Merge strategy: 'direct' (ff-only merge + push) or 'pr' (create GitHub PR). Default: direct."
 default = "direct"
+
+[vars.require_review]
+description = "Require at least one approving GitHub review before merging (only applies when merge_strategy=pr)."
+default = "false"
 
 [[steps]]
 id = "inbox-check"
@@ -533,6 +538,7 @@ Merge and push. CRITICAL: Notifications come IMMEDIATELY after push.
 **Config: target_branch = {{target_branch}}**
 **Config: delete_merged_branches = {{delete_merged_branches}}**
 **Config: merge_strategy = {{merge_strategy}}**
+**Config: require_review = {{require_review}}**
 
 **Step 1: Merge (strategy-dependent)**
 
@@ -634,7 +640,24 @@ Attempt-Number: 1"
 Then skip to Step 4 (archive mail) and continue patrol.
 
 **If CI checks PASS:**
-Merge the PR:
+
+**Step 1.7 (pr only): CHECK FOR APPROVING REVIEWS (if require_review = true)**
+
+If require_review = "true", you MUST verify at least one approving review exists
+before merging. Do NOT merge PRs with zero approving reviews.
+
+```bash
+REVIEW_DECISION=$(gh pr view <polecat-branch> --repo "$REPO_URL" --json reviewDecision -q '.reviewDecision')
+```
+
+If REVIEW_DECISION is not "APPROVED":
+- Do NOT merge.
+- Skip to Step 4 (archive mail) and continue patrol. The PR stays open awaiting review.
+- On the next patrol cycle, re-check this PR for reviews.
+
+If require_review = "false" (default), skip this check and proceed to merge.
+
+**Merge the PR:**
 ```bash
 gh pr merge <polecat-branch> --repo "$REPO_URL" --merge --delete-branch
 ```

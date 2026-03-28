@@ -1248,6 +1248,11 @@ type MergeQueueConfig struct {
 	// merges directly to the base branch, "pr" creates a GitHub pull request.
 	MergeStrategy string `json:"merge_strategy,omitempty"`
 
+	// RequireReview controls whether the refinery requires at least one approving
+	// GitHub review before merging a PR. Only meaningful when merge_strategy="pr".
+	// Nil defaults to false (no review required).
+	RequireReview *bool `json:"require_review,omitempty"`
+
 	// OnConflict specifies conflict resolution strategy: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
 
@@ -1358,6 +1363,15 @@ func (c *MergeQueueConfig) IsJudgmentEnabled() bool {
 		return false
 	}
 	return *c.JudgmentEnabled
+}
+
+// IsRequireReviewEnabled returns whether PR reviews are required before merging.
+// Nil-safe, defaults to false.
+func (c *MergeQueueConfig) IsRequireReviewEnabled() bool {
+	if c.RequireReview == nil {
+		return false
+	}
+	return *c.RequireReview
 }
 
 // GetReviewDepth returns the configured review depth.
