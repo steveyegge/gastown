@@ -239,14 +239,19 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		return a
 	}
 
-	// Create agent bead in the issues table. Agent beads are durable
-	// identities that must survive wisp GC (GH#2768).
-	out, err := b.run(buildArgs()...)
+	// Create agent bead in the target database. Use a routed Beads instance
+	// when the bead's prefix routes to a different rig than our own database.
+	// Without this, agent beads for rig polecats (e.g., be-beads-polecat-rust)
+	// would be created in the wrong database, failing type validation.
+	target := b
+	if targetDir != b.getResolvedBeadsDir() {
+		target = NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
+	}
+
+	out, err := target.run(buildArgs()...)
 	if err != nil {
-		out, err = b.run(buildArgs()...)
+		out, err = target.run(buildArgs()...)
 		if err != nil {
-			// Both bd create attempts failed. Dolt server is required —
-			// no JSONL fallback. Surface the error directly.
 			return nil, fmt.Errorf("creating %s: bd create failed: %w", id, err)
 		}
 	}
@@ -263,7 +268,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// The fallback query (status=hooked + assignee) is unreliable for
 	// cross-database scenarios. Restoring per hq-gfg.
 	if fields != nil && fields.HookBead != "" {
-		if _, slotErr := b.run("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
+		if _, slotErr := target.run("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
 			// Non-fatal: fallback query may still find the work bead
 		}
 	}
