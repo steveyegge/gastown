@@ -744,7 +744,35 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 					if issueTitle == "" {
 						prTitle = issueID
 					}
-					prBody := fmt.Sprintf("## Summary\n\nPolecat branch ready for human review.\n\n- **Issue**: %s\n- **Branch**: %s\n\n---\n*Created by gt done (no_merge=true, merge_strategy=pr)*", issueID, branch)
+					// Build PR body from bead description + diff stat
+					var prBodyBuilder strings.Builder
+					prBodyBuilder.WriteString("## Summary\n\n")
+					if sourceIssueForNoMerge.Description != "" {
+						// Strip attachment metadata lines from description
+						descLines := strings.Split(sourceIssueForNoMerge.Description, "\n")
+						var cleanDesc []string
+						for _, line := range descLines {
+							trimmed := strings.TrimSpace(line)
+							if strings.HasPrefix(trimmed, "attached_") || strings.HasPrefix(trimmed, "dispatched_by:") || strings.HasPrefix(trimmed, "formula_vars:") {
+								continue
+							}
+							cleanDesc = append(cleanDesc, line)
+						}
+						desc := strings.TrimSpace(strings.Join(cleanDesc, "\n"))
+						if desc != "" {
+							prBodyBuilder.WriteString(desc)
+							prBodyBuilder.WriteString("\n\n")
+						}
+					}
+					// Add diff stat for quick review context
+					if diffStat, diffErr := g.DiffStat(defaultBranch + "..." + branch); diffErr == nil && diffStat != "" {
+						prBodyBuilder.WriteString("## Changes\n\n```\n")
+						prBodyBuilder.WriteString(diffStat)
+						prBodyBuilder.WriteString("```\n\n")
+					}
+					prBodyBuilder.WriteString("---\n")
+					prBodyBuilder.WriteString(fmt.Sprintf("*Polecat: %s | Issue: %s*\n", worker, issueID))
+					prBody := prBodyBuilder.String()
 					ghCmd := exec.CommandContext(context.Background(), "gh", "pr", "create",
 						"--base", defaultBranch,
 						"--head", branch,

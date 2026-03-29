@@ -1348,6 +1348,11 @@ func (g *Git) BranchCreatedDate(branch string) (string, error) {
 }
 
 // CommitsAhead returns the number of commits that branch has ahead of base.
+// DiffStat returns the --stat output for a diff range (e.g., "main...feature").
+func (g *Git) DiffStat(rangeSpec string) (string, error) {
+	return g.run("diff", "--stat", rangeSpec)
+}
+
 // For example, CommitsAhead("main", "feature") returns how many commits
 // are on feature that are not on main.
 func (g *Git) CommitsAhead(base, branch string) (int, error) {
