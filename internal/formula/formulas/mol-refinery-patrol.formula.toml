@@ -176,7 +176,7 @@ default = "false"
 
 [vars.rig]
 description = "Name of the rig this refinery belongs to (e.g., gastown, laser)"
-default = "UNSET_RIG"
+default = ""
 
 [vars.prefix]
 description = "Beads prefix for this rig (e.g., gt for gastown, la for laser)"
@@ -981,16 +981,16 @@ End of patrol cycle decision. Use the signals from context-check to decide.
 
 **If you decide to continue patrolling:**
 
-Resolve your agent bead ID for this patrol cycle. You MUST replace `<YOUR_RIG>` below with your actual rig name (e.g., `beads`, `town`) before running:
+Verify your agent bead exists before subscribing:
 ```bash
-bd list --type=agent --desc-contains="role_type: refinery" --json | jq -r '.[] | select(.status != "closed") | select(.description | test("(?m)^\\\\s*rig: <YOUR_RIG>\\\\s*$")) | .id'
+bd list --type=agent --desc-contains="role_type: refinery" --json | jq -r '.[] | select(.status != "closed") | select(.description | test("(?m)^\\\\s*rig: {{rig}}\\\\s*$")) | .id'
 ```
-This must return exactly one bead ID. If it returns zero results, STOP and report an error — verify you substituted `<YOUR_RIG>` correctly. If it returns multiple results, STOP and report an error — manual disambiguation is required. Use the single resolved bead ID as YOUR_AGENT_BEAD in the commands below.
+This must return exactly one bead ID. If it returns zero results, STOP and report an error. If it returns multiple results, STOP and report an error — manual disambiguation is required.
 
 Then use await-event to subscribe to the refinery event channel with exponential backoff:
 
 ```bash
-gt mol step await-event --channel refinery --agent-bead YOUR_AGENT_BEAD \
+gt mol step await-event --channel refinery --agent-bead {{prefix}}-{{rig}}-refinery \
   --backoff-base 30s --backoff-mult 2 --backoff-max 15m --cleanup
 ```
 
@@ -1014,7 +1014,7 @@ This command:
 **On event received** (refinery-specific activity):
 Reset the idle counter and start next patrol cycle:
 ```bash
-gt agent state YOUR_AGENT_BEAD --set idle=0
+gt agent state {{prefix}}-{{rig}}-refinery --set idle=0
 ```
 
 **On timeout** (no events):

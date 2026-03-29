@@ -76,9 +76,9 @@ func TestBuildRefineryPatrolVars_MissingSettings(t *testing.T) {
 		Rig:      "testrig",
 	}
 	vars := buildRefineryPatrolVars(ctx)
-	// target_branch should always be present (falls back to "main" without rig config)
-	if len(vars) != 1 {
-		t.Errorf("expected 1 var (target_branch) when settings file missing, got %v", vars)
+	// target_branch + rig + prefix should always be present
+	if len(vars) != 3 {
+		t.Errorf("expected 3 vars (target_branch, rig, prefix) when settings file missing, got %v", vars)
 	}
 	varMap := make(map[string]string)
 	for _, v := range vars {
@@ -89,6 +89,12 @@ func TestBuildRefineryPatrolVars_MissingSettings(t *testing.T) {
 	}
 	if got := varMap["target_branch"]; got != "main" {
 		t.Errorf("target_branch = %q, want %q", got, "main")
+	}
+	if got := varMap["rig"]; got != "testrig" {
+		t.Errorf("rig = %q, want %q", got, "testrig")
+	}
+	if got := varMap["prefix"]; got != "gt" {
+		t.Errorf("prefix = %q, want %q (default fallback)", got, "gt")
 	}
 }
 
@@ -115,9 +121,9 @@ func TestBuildRefineryPatrolVars_NilMergeQueue(t *testing.T) {
 		Rig:      "testrig",
 	}
 	vars := buildRefineryPatrolVars(ctx)
-	// target_branch should always be present (falls back to "main" without rig config)
-	if len(vars) != 1 {
-		t.Errorf("expected 1 var (target_branch) when merge_queue is nil, got %v", vars)
+	// target_branch + rig + prefix should always be present
+	if len(vars) != 3 {
+		t.Errorf("expected 3 vars (target_branch, rig, prefix) when merge_queue is nil, got %v", vars)
 	}
 	varMap := make(map[string]string)
 	for _, v := range vars {
@@ -169,6 +175,7 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 	// merge_strategy is omitted when not explicitly set (formula default "direct" applies)
 	// New commands (setup, typecheck, lint, build) default to empty = omitted
 	// judgment_enabled defaults to false, review_depth defaults to "standard"
+	// rig and prefix are always injected (gt-bn0v)
 	expected := map[string]string{
 		"integration_branch_refinery_enabled": "true",
 		"integration_branch_auto_land":        "false",
@@ -178,6 +185,8 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 		"judgment_enabled":                    "false",
 		"review_depth":                        "standard",
 		"require_review":                      "false",
+		"rig":                                 "testrig",
+		"prefix":                              "gt",
 	}
 
 	varMap := make(map[string]string)
@@ -428,9 +437,9 @@ func TestBuildRefineryPatrolVars_DefaultBranchWithoutMQ(t *testing.T) {
 	}
 	vars := buildRefineryPatrolVars(ctx)
 
-	// target_branch must be "gastown" even without merge_queue settings
-	if len(vars) != 1 {
-		t.Errorf("expected 1 var (target_branch), got %d: %v", len(vars), vars)
+	// target_branch + rig + prefix must be present even without merge_queue settings
+	if len(vars) != 3 {
+		t.Errorf("expected 3 vars (target_branch, rig, prefix), got %d: %v", len(vars), vars)
 	}
 	varMap := make(map[string]string)
 	for _, v := range vars {

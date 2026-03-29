@@ -383,6 +383,12 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 	}
 	vars = append(vars, fmt.Sprintf("target_branch=%s", defaultBranch))
 
+	// Inject rig name and prefix so formula templates can construct agent bead IDs
+	// without hardcoding the "gt" prefix (gt-bn0v).
+	vars = append(vars, fmt.Sprintf("rig=%s", ctx.Rig))
+	prefix := beads.GetPrefixForRig(ctx.TownRoot, ctx.Rig)
+	vars = append(vars, fmt.Sprintf("prefix=%s", prefix))
+
 	// MQ-specific vars: try settings/config.json first (legacy format), then
 	// fall back to the layered rig config (bead labels / wisp layer).
 	settingsPath := filepath.Join(rigPath, "settings", "config.json")
