@@ -951,9 +951,9 @@ exit 0
 	}
 }
 
-// TestCreateAutoConvoy_DepFailCleansUpOrphan verifies that when the dep add
-// fails, the convoy is closed to prevent orphans.
-func TestCreateAutoConvoy_DepFailCleansUpOrphan(t *testing.T) {
+// TestCreateAutoConvoy_DepFailContinues verifies that tracking failures are
+// non-fatal until convoy tracking moves to the Go API layer.
+func TestCreateAutoConvoy_DepFailContinues(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows")
 	}
@@ -973,9 +973,6 @@ case "$cmd" in
   dep)
     exit 1
     ;;
-  close)
-    exit 0
-    ;;
 esac
 exit 0
 `
@@ -985,25 +982,28 @@ exit 0
 		t.Fatalf("rewrite bd stub: %v", err)
 	}
 
-	_, err := createAutoConvoy("gt-aaa", "My task", false, "", "")
-	if err == nil {
-		t.Fatal("expected error when dep add fails, got nil")
+	convoyID, err := createAutoConvoy("gt-aaa", "My task", false, "", "")
+	if err != nil {
+		t.Fatalf("expected nil error when dep add fails, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "tracking relation") {
-		t.Errorf("error should mention tracking relation, got: %v", err)
+	if !strings.HasPrefix(convoyID, "hq-cv-") {
+		t.Fatalf("convoy ID %q should have hq-cv- prefix", convoyID)
 	}
 
-	// Verify close was called (orphan cleanup)
+	// Verify create and dep add ran, but close did not.
 	logBytes, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
 	logContent := string(logBytes)
-	if !strings.Contains(logContent, "CMD:close") {
-		t.Errorf("expected close command for orphan cleanup:\n%s", logContent)
+	if !strings.Contains(logContent, "CMD:create") {
+		t.Errorf("expected create command in log:\n%s", logContent)
 	}
-	if !strings.Contains(logContent, "tracking dep failed") {
-		t.Errorf("close should include 'tracking dep failed' reason:\n%s", logContent)
+	if !strings.Contains(logContent, "CMD:dep add") {
+		t.Errorf("expected dep add command in log:\n%s", logContent)
+	}
+	if strings.Contains(logContent, "CMD:close") {
+		t.Errorf("did not expect close command after non-fatal dep failure:\n%s", logContent)
 	}
 }
 
