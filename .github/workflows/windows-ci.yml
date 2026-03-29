@@ -45,8 +45,15 @@ jobs:
 
       - name: Install Dolt
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $release = Invoke-RestMethod 'https://api.github.com/repos/dolthub/dolt/releases/latest'
+          $headers = @{
+            Authorization        = "Bearer $env:GH_TOKEN"
+            Accept               = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $release = Invoke-RestMethod -Headers $headers 'https://api.github.com/repos/dolthub/dolt/releases/latest'
           $asset = $release.assets | Where-Object { $_.name -like 'dolt-windows-amd64.zip' }
           $zip = "$env:RUNNER_TEMP\dolt.zip"
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip

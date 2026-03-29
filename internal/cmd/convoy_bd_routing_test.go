@@ -93,6 +93,7 @@ func TestRunConvoyList_UsesTownRootAndStripsBeadsDir(t *testing.T) {
 	scriptBody := fmt.Sprintf(`
 # Allow-stale version probe is exempt from BEADS_DIR check.
 if [ "$*" = "--allow-stale version" ]; then
+  echo "bd version 0.62.0"
   exit 0
 fi
 
@@ -166,6 +167,7 @@ func TestRunConvoyStatus_UsesTownRootAndStripsBeadsDir(t *testing.T) {
 	scriptBody := fmt.Sprintf(`
 # Allow-stale version probe is exempt from BEADS_DIR check.
 if [ "$*" = "--allow-stale version" ]; then
+  echo "bd version 0.62.0"
   exit 0
 fi
 
