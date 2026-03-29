@@ -66,7 +66,10 @@ dolt_query_json() {
 
 # Auto-discover production databases or use the explicit list.
 if [[ "$DEFAULT_DBS" == "auto" ]]; then
-  mapfile -t PROD_DBS < <(
+  PROD_DBS=()
+  while IFS= read -r _db; do
+    [[ -n "$_db" ]] && PROD_DBS+=("$_db")
+  done < <(
     dolt_query "" "SHOW DATABASES" \
       | grep -v -E '^(information_schema|mysql|dolt_cluster)$' \
       | grep -v -E '^(testdb_|beads_t|beads_pt|doctest_)'
