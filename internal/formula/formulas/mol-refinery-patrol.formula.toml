@@ -176,7 +176,7 @@ default = "false"
 
 [vars.rig]
 description = "Name of the rig this refinery belongs to (e.g., gastown, laser)"
-default = ""
+default = "UNSET_RIG"
 
 [vars.prefix]
 description = "Beads prefix for this rig (e.g., gt for gastown, la for laser)"
