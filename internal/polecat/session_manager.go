@@ -304,6 +304,12 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 			return fmt.Errorf("building startup command: %w", err)
 		}
 	}
+	// Pre-seed onboarding in the runtime config dir so Claude Code doesn't show
+	// the first-run wizard. This covers the --account flag path (gt-1ob follow-up).
+	if opts.RuntimeConfigDir != "" {
+		ensureOnboardingComplete(opts.RuntimeConfigDir)
+	}
+
 	// Prepend runtime config dir env if needed
 	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
 		command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: opts.RuntimeConfigDir})
@@ -855,4 +861,37 @@ func (m *SessionManager) hookIssue(issueID, agentID, workDir string) error {
 	}
 	fmt.Printf("✓ Hooked issue %s to %s\n", issueID, agentID)
 	return nil
+}
+
+// ensureOnboardingComplete writes minimal .claude.json flags so Claude Code
+// skips the first-run setup wizard. Only writes if .claude.json is missing or
+// doesn't already have hasCompletedOnboarding set.
+func ensureOnboardingComplete(configDir string) {
+	claudeJSON := filepath.Join(configDir, ".claude.json")
+
+	if data, err := os.ReadFile(claudeJSON); err == nil {
+		var existing map[string]interface{}
+		if json.Unmarshal(data, &existing) == nil {
+			if completed, ok := existing["hasCompletedOnboarding"].(bool); ok && completed {
+				return
+			}
+			existing["hasCompletedOnboarding"] = true
+			if _, ok := existing["numStartups"]; !ok {
+				existing["numStartups"] = float64(1)
+			}
+			if updated, err := json.MarshalIndent(existing, "", "  "); err == nil {
+				_ = os.WriteFile(claudeJSON, updated, 0600)
+			}
+			return
+		}
+	}
+
+	_ = os.MkdirAll(configDir, 0755)
+	seed := map[string]interface{}{
+		"hasCompletedOnboarding": true,
+		"numStartups":           1,
+	}
+	if data, err := json.MarshalIndent(seed, "", "  "); err == nil {
+		_ = os.WriteFile(claudeJSON, data, 0600)
+	}
 }
