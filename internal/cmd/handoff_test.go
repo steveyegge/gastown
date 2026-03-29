@@ -468,6 +468,10 @@ func TestHandoffPolecatEnvCheck(t *testing.T) {
 			// paths fail predictably instead of triggering real side effects.
 			t.Setenv("TMUX", "")
 			t.Setenv("TMUX_PANE", "")
+			// Keep this test independent of the caller's PATH. Integration jobs
+			// install gt into GOPATH/bin, which would otherwise turn the polecat
+			// redirect into a real nested gt done invocation and hang the test.
+			t.Setenv("PATH", t.TempDir())
 
 			// Reset flags to avoid interference
 			origMessage := handoffMessage

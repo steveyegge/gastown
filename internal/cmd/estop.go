@@ -7,9 +7,7 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -233,8 +231,8 @@ var exemptSessions = map[string]bool{
 	session.OverseerSessionName(): true,
 }
 
-// freezeAllSessions sends SIGTSTP to all Gas Town agent sessions via
-// process-group signaling. Mayor and overseer sessions are exempt.
+// freezeAllSessions sends the platform pause signal to all Gas Town agent
+// sessions. Mayor and overseer sessions are exempt.
 // If rigFilter is non-empty, only sessions for that rig are frozen.
 func freezeAllSessions(t *tmux.Tmux, townRoot string, rigFilter string) int {
 	sessions := collectGTSessions(t, townRoot)
@@ -255,7 +253,7 @@ func freezeAllSessions(t *tmux.Tmux, townRoot string, rigFilter string) int {
 			continue
 		}
 
-		if err := signalSessionGroup(t, sess, syscall.SIGTSTP); err != nil {
+		if err := freezeSessionGroup(t, sess); err != nil {
 			fmt.Printf("   %s %s: %v\n", style.Warning.Render("!"), sess, err)
 			continue
 		}
@@ -266,7 +264,7 @@ func freezeAllSessions(t *tmux.Tmux, townRoot string, rigFilter string) int {
 	return frozen
 }
 
-// thawAllSessions sends SIGCONT to all Gas Town agent sessions.
+// thawAllSessions sends the platform resume signal to all Gas Town agent sessions.
 // If rigFilter is non-empty, only sessions for that rig are thawed.
 func thawAllSessions(t *tmux.Tmux, townRoot string, rigFilter string) int {
 	sessions := collectGTSessions(t, townRoot)
@@ -284,7 +282,7 @@ func thawAllSessions(t *tmux.Tmux, townRoot string, rigFilter string) int {
 		if rigFilter != "" && !isRigSession(sess, rigPrefix) {
 			continue
 		}
-		if err := signalSessionGroup(t, sess, syscall.SIGCONT); err != nil {
+		if err := thawSessionGroup(t, sess); err != nil {
 			continue
 		}
 		thawed++
@@ -322,27 +320,6 @@ func nudgeAllSessions(t *tmux.Tmux, townRoot string, rigFilter string) int {
 // isRigSession checks if a session name belongs to a specific rig prefix.
 func isRigSession(name, rigPrefix string) bool {
 	return strings.HasPrefix(name, rigPrefix+"-") || name == rigPrefix
-}
-
-// signalSessionGroup sends a signal to the process group of a tmux session's
-// pane process. This uses process-group signaling (kill(-pgid, sig)) instead
-// of recursive pgrep, which is both safer and catches all descendants.
-func signalSessionGroup(t *tmux.Tmux, sessionName string, sig syscall.Signal) error {
-	pidStr, err := t.GetPanePID(sessionName)
-	if err != nil {
-		return fmt.Errorf("no PID: %w", err)
-	}
-
-	pid, err := strconv.Atoi(pidStr)
-	if err != nil {
-		return fmt.Errorf("invalid PID %q: %w", pidStr, err)
-	}
-
-	// Signal the entire process group. The pane's shell is typically the
-	// process group leader, so -pid sends the signal to all processes in
-	// the group (shell, claude, node, etc.) without needing to walk the
-	// process tree.
-	return syscall.Kill(-pid, sig)
 }
 
 // collectGTSessions returns all Gas Town tmux sessions.
