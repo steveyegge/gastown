@@ -56,9 +56,9 @@ func runTapList(cmd *cobra.Command, args []string) error {
 		{
 			name:        "dangerous-command",
 			kind:        "guard",
-			description: "Block rm -rf, force push, hard reset, etc.",
+			description: "Block sudo, package installs, rm -rf, force push, hard reset, etc.",
 			event:       "PreToolUse",
-			matchers:    []string{"Bash(rm -rf /*)", "Bash(git push --force*)", "Bash(git push -f*)"},
+			matchers:    []string{"Bash(sudo *)", "Bash(apt install*)", "Bash(dnf install*)", "Bash(brew install*)", "Bash(rm -rf /*)", "Bash(git push --force*)", "Bash(git push -f*)"},
 			implemented: true,
 		},
 	}

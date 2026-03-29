@@ -32,6 +32,69 @@
             "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow"
           }
         ]
+      },
+      {
+        "matcher": "Bash(sudo *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(apt install*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(apt-get install*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(dnf install*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(yum install*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(pacman -S*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(brew install*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
       }
     ],
     "SessionStart": [

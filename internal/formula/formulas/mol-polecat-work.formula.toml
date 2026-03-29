@@ -202,6 +202,9 @@ Do the actual implementation work.
 - Make atomic, focused commits
 - Keep changes scoped to the assigned issue
 - Don't gold-plate or scope-creep
+- **NEVER run `sudo` or install system packages** (apt, dnf, yum, pacman, brew install,
+  pip install --system, npm install -g). Use the tools already in your workspace.
+  If a dependency is missing, file a bead — do not modify the host OS.
 
 **Persist findings as you go (CRITICAL for session survival):**
 Your session can die at any time (context limit, crash, SIGKILL). Code changes

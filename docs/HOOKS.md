@@ -154,7 +154,7 @@ The registry (`~/gt/hooks/registry.toml`) defines 7 hooks, 5 enabled by default:
 | mail-check | UserPromptSubmit | Yes | all |
 | costs-record | Stop | Yes | crew, polecat, witness, refinery |
 | clone-guard | PreToolUse | No | crew, polecat |
-| dangerous-command-guard | PreToolUse | No | crew, polecat |
+| dangerous-command-guard | PreToolUse | Yes | crew, polecat |
 
 Additional hooks exist in settings.json files but are not yet in the registry:
 
