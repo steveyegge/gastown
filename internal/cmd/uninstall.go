@@ -142,8 +142,9 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Printf("%s Gas Town has been uninstalled\n", style.Success.Render("✓"))
 	fmt.Println()
-	fmt.Println("To reinstall, run:")
-	fmt.Printf("  %s\n", style.Dim.Render("go install github.com/steveyegge/gastown/cmd/gt@latest"))
+	fmt.Println("To reinstall, choose one path:")
+	fmt.Printf("  %s\n", style.Dim.Render("brew install gastown"))
+	fmt.Printf("  %s\n", style.Dim.Render("git clone https://github.com/steveyegge/gastown.git && cd gastown && make install"))
 	fmt.Printf("  %s\n", style.Dim.Render("gt install ~/gt --shell"))
 
 	return nil

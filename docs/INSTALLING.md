@@ -1,321 +1,298 @@
 # Installing Gas Town
 
-Complete setup guide for Gas Town multi-agent orchestrator.
+Gas Town now has one canonical install story for end users and one canonical
+story for contributors:
 
-## Prerequisites
+- End users on macOS/Linux: use Homebrew and keep using Homebrew for upgrades.
+- Contributors and local source builds: clone the repo and use `make install`.
+- Optional npm installs are available, but they are not the canonical upgrade path
+  and may lag Homebrew or GitHub releases.
+- Avoid `go install github.com/steveyegge/gastown/cmd/gt@latest` for `gt` itself.
+  It drops a binary into `~/go/bin`, which is the shadowing/stale-binary path that
+  this guide is trying to prevent.
 
-### Required
+## Choose One Install Channel
 
-| Tool | Version | Check | Install |
-|------|---------|-------|---------|
-| **Go** | 1.24+ | `go version` | See [golang.org](https://go.dev/doc/install) |
-| **Git** | 2.20+ | `git --version` | See below |
-| **Dolt** | >= 1.82.4 | `dolt version` | See [dolthub/dolt](https://github.com/dolthub/dolt?tab=readme-ov-file#installation) |
-| **Beads** | >= 0.55.4 | `bd version` | `go install github.com/steveyegge/beads/cmd/bd@latest` |
+| Channel | Use this when | Install | Upgrade | Notes |
+|---------|---------------|---------|---------|-------|
+| **Homebrew** | You want the standard end-user path on macOS/Linux | `brew install gastown` | `brew upgrade gastown` | Recommended. Current Homebrew formula pulls in `bd` and `dolt` transitively. |
+| **Source / dev build** | You are working from a local checkout or hacking on Gas Town itself | `git clone ... && cd gastown && make install` | `git pull --ff-only && make install` | Canonical source path. Installs `gt` to `~/.local/bin/gt` and removes stale `~/go/bin/gt` and `~/bin/gt`. |
+| **npm** | You specifically want the Node-distributed CLI | `npm install -g @gastown/gt` | `npm update -g @gastown/gt` | Optional convenience path. May lag other release channels and does not manage `bd` or `dolt` for you. |
+| **Windows / manual build** | You are on Windows or want to manage binaries yourself | `go build -o gt.exe ./cmd/gt` | Rebuild from the updated checkout | Treat this like the source path and make sure the resulting binary is the one your shell resolves. |
 
-### Optional (for Full Stack Mode)
+## Required Tools
 
-| Tool | Version | Check | Install |
-|------|---------|-------|---------|
-| **tmux** | 3.0+ | `tmux -V` | See below |
-| **Claude Code** (default) | latest | `claude --version` | See [claude.ai/claude-code](https://claude.ai/claude-code) |
-| **Codex CLI** (optional) | latest | `codex --version` | See [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli) |
-| **OpenCode CLI** (optional) | latest | `opencode --version` | See [opencode.ai](https://opencode.ai) |
-| **GitHub Copilot CLI** (optional) | latest | `copilot --version` | See [cli.github.com](https://cli.github.com) (requires Copilot seat) |
+| Tool | Minimum | Needed for | Notes |
+|------|---------|------------|-------|
+| **Homebrew** | latest | Homebrew install path | Recommended distribution channel on macOS/Linux |
+| **Go** | 1.25+ | Source/dev builds, Windows/manual builds, manual `bd` installs | Not required if Homebrew is managing your binaries |
+| **Git** | 2.25+ | Worktree support, rig management | Required for real-world use |
+| **Dolt** | 1.82.4+ | Town and beads storage | Homebrew installs it transitively with `gastown` today |
+| **beads (bd)** | 0.57.0+ | All normal installs unless you intentionally use `gt install --no-beads` | Homebrew installs it transitively with `gastown` today |
+| **tmux** | 3.0+ | Full stack mode | Optional but recommended |
+| **sqlite3** | latest | Convoy database queries | Usually preinstalled on macOS/Linux |
 
-## Installing Prerequisites
+Optional runtimes for actual agent work:
 
-### macOS
+- Claude Code CLI (default)
+- Codex CLI
+- OpenCode CLI
+- GitHub Copilot CLI
+
+## Homebrew Install
+
+This is the canonical end-user path on macOS/Linux.
 
 ```bash
-# Install Homebrew if needed
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install gastown
 
-# Required
-brew install go git
-# Install Dolt: see https://github.com/dolthub/dolt?tab=readme-ov-file#installation
-
-# Optional (for full stack mode)
-brew install tmux
+gt version
+bd version
+dolt version
 ```
 
-### Linux (Debian/Ubuntu)
+When you want a newer community release:
 
 ```bash
-# Required
-sudo apt update
-sudo apt install -y git
-
-# Install Go (apt version may be outdated, use official installer)
-wget https://go.dev/dl/go1.24.12.linux-amd64.tar.gz
-sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.24.12.linux-amd64.tar.gz
-echo 'export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin' >> ~/.bashrc
-source ~/.bashrc
-
-# Install Dolt: see https://github.com/dolthub/dolt?tab=readme-ov-file#installation
-
-# Optional (for full stack mode)
-sudo apt install -y tmux
+brew upgrade gastown
 ```
 
-### Linux (Fedora/RHEL)
+## Source / Dev Install
+
+This is the canonical path when you are working from a checkout.
 
 ```bash
-# Required
-sudo dnf install -y git golang
-# Install Dolt: see https://github.com/dolthub/dolt?tab=readme-ov-file#installation
+git clone https://github.com/steveyegge/gastown.git
+cd gastown
+make install
 
-# Optional
-sudo dnf install -y tmux
-```
+# Ensure the canonical source-install location is on PATH
+export PATH="$HOME/.local/bin:$PATH"
 
-### Verify Prerequisites
+# Install beads yourself if you want it before the first gt install,
+# or let gt install auto-install it later if Go is available.
+GOBIN="$HOME/.local/bin" go install github.com/steveyegge/beads/cmd/bd@latest
 
-```bash
-# Check all prerequisites
-go version        # Should show go1.24 or higher
-git --version     # Should show 2.20 or higher
-dolt version      # Should show 1.82.4 or higher
-tmux -V           # (Optional) Should show 3.0 or higher
-```
-
-## Installing Gas Town
-
-### Step 1: Install the Binaries
-
-```bash
-# Install Gas Town CLI
-go install github.com/steveyegge/gastown/cmd/gt@latest
-
-# Install Beads (issue tracker)
-go install github.com/steveyegge/beads/cmd/bd@latest
-
-# Verify installation
 gt version
 bd version
 ```
 
-If `gt` is not found, ensure `$GOPATH/bin` (usually `~/go/bin`) is in your PATH:
+`make install` is intentionally different from `go install`:
+
+- It writes `gt` to `~/.local/bin/gt`.
+- It removes stale `~/go/bin/gt` and `~/bin/gt` copies that can shadow the
+  binary you meant to run.
+- It preserves the expected local-dev workflow used by `gt stale`, `gt doctor`,
+  and the source tree itself.
+
+To upgrade a source install:
 
 ```bash
-# Add to ~/.bashrc, ~/.zshrc, or equivalent
-export PATH="$PATH:$HOME/go/bin"
+git pull --ff-only
+make install
 ```
 
-### Step 2: Create Your Workspace
+## npm Install
+
+The npm package is supported, but it is not the canonical upgrade story.
+Use it when you explicitly want the Node-distributed CLI.
 
 ```bash
-# Create a Gas Town workspace (HQ)
-gt install ~/gt --shell
-
-# This creates:
-#   ~/gt/
-#   ├── CLAUDE.md          # Identity anchor (run gt prime)
-#   ├── mayor/             # Mayor config and state
-#   ├── rigs/              # Project containers (initially empty)
-#   └── .beads/            # Town-level issue tracking
+npm install -g @gastown/gt
 ```
 
-### Step 3: Add a Project (Rig)
+You still need `bd` and `dolt` available. One simple path is:
 
 ```bash
-# Add your first project
-gt rig add myproject https://github.com/you/repo.git
-
-# This clones the repo and sets up:
-#   ~/gt/myproject/
-#   ├── .beads/            # Project issue tracking
-#   ├── mayor/rig/         # Mayor's clone (canonical)
-#   ├── refinery/rig/      # Merge queue processor
-#   ├── witness/           # Worker monitor
-#   └── polecats/          # Worker clones (created on demand)
+GOBIN="$HOME/.local/bin" go install github.com/steveyegge/beads/cmd/bd@latest
 ```
 
-### Step 4: Verify Installation
+To upgrade:
 
 ```bash
+npm update -g @gastown/gt
+```
+
+## Windows / Manual Build
+
+Gas Town can be built directly from a checkout on Windows:
+
+```bash
+git clone https://github.com/steveyegge/gastown.git
+cd gastown
+go build -o gt.exe ./cmd/gt
+```
+
+Put `gt.exe` somewhere stable and make sure that directory is on `PATH`.
+When you upgrade, rebuild from the updated checkout and verify the resolved path
+again.
+
+## PATH and Shadowing
+
+Gas Town will run whichever `gt` comes first on `PATH`, not whichever one you
+installed most recently.
+
+Common locations:
+
+- Homebrew: `/usr/local/bin/gt` or `/opt/homebrew/bin/gt`
+- Source/dev install: `~/.local/bin/gt`
+- Old `go install` copy: `~/go/bin/gt`
+- Manual helper copy: `~/bin/gt`
+
+After every install, upgrade, or channel switch, verify the active binary:
+
+```bash
+command -v gt
+which -a gt    # or: type -a gt
+gt version
+bd version
+```
+
+On Windows, use:
+
+```powershell
+where.exe gt
+gt version
+```
+
+If the wrong binary is winning:
+
+- Remove or rename the stale copy that appears earlier on `PATH`.
+- Update your shell config so the intended directory comes first.
+- Restart the shell or run `hash -r` / `rehash`.
+- Run `gt doctor` after the switch.
+
+## Create Your Workspace
+
+Once `gt` resolves to the binary you intend to use:
+
+```bash
+gt install ~/gt --shell --git
 cd ~/gt
 
-gt enable              # enable Gas Town system-wide
-gt git-init            # initialize a git repo for your HQ
-gt up                  # Start all services. Use gt down or gt shutdown for stopping. 
-
-gt doctor              # Run health checks
-gt status              # Show workspace status
+gt rig add myproject https://github.com/you/repo.git
+gt doctor
+gt status
 ```
 
-### Step 5: Configure Agents (Optional)
+That creates:
 
-Gas Town supports built-in runtimes (`claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`, `opencode`, `copilot`) plus custom agent aliases.
+```text
+~/gt/
+├── CLAUDE.md
+├── mayor/
+├── rigs/
+└── .beads/
+```
+
+## First Steps After Install
 
 ```bash
-# List available agents
 gt config agent list
-
-# Create an alias (aliases can encode model/thinking flags)
-gt config agent set codex-low "codex --thinking low"
-gt config agent set claude-haiku "claude --model haiku --dangerously-skip-permissions"
-
-# Set the town default agent (used when a rig doesn't specify one)
-gt config default-agent codex-low
-```
-
-You can also override the agent per command without changing defaults:
-
-```bash
-gt start --agent codex-low
-gt sling gt-abc12 myproject --agent claude-haiku
-```
-
-## Minimal Mode vs Full Stack Mode
-
-Gas Town supports two operational modes:
-
-### Minimal Mode (No Daemon)
-
-Run individual runtime instances manually. Gas Town only tracks state.
-
-```bash
-# Create and assign work
-gt convoy create "Fix bugs" gt-abc12
-gt sling gt-abc12 myproject
-
-# Run runtime manually
-cd ~/gt/myproject/polecats/<worker>
-claude --resume          # Claude Code
-# or: codex              # Codex CLI
-
-# Check progress
-gt convoy list
-```
-
-**When to use**: Testing, simple workflows, or when you prefer manual control.
-
-### Full Stack Mode (With Daemon)
-
-Agents run in tmux sessions. Daemon manages lifecycle automatically.
-
-```bash
-# Start the daemon
-gt daemon start
-
-# Create and assign work (workers spawn automatically)
-gt convoy create "Feature X" gt-abc12 gt-def34
-gt sling gt-abc12 myproject
-gt sling gt-def34 myproject
-
-# Monitor on dashboard
-gt convoy list
-
-# Attach to any agent session
 gt mayor attach
-gt witness attach myproject
 ```
 
-**When to use**: Production workflows with multiple concurrent agents.
+If you want tmux-managed agents and background patrols:
 
-### Choosing Roles
+```bash
+gt daemon start
+gt up
+```
 
-Gas Town is modular. Enable only what you need:
+## Updating
 
-| Configuration | Roles | Use Case |
-|--------------|-------|----------|
-| **Polecats only** | Workers | Manual spawning, no monitoring |
-| **+ Witness** | + Monitor | Automatic lifecycle, stuck detection |
-| **+ Refinery** | + Merge queue | MR review, code integration |
-| **+ Mayor** | + Coordinator | Cross-project coordination |
+Pick the command that matches the channel you chose originally:
+
+```bash
+# Homebrew
+brew upgrade gastown
+
+# Source / dev build
+git pull --ff-only
+make install
+
+# npm
+npm update -g @gastown/gt
+```
+
+Then always verify the active binary and repair any post-upgrade state:
+
+```bash
+command -v gt
+which -a gt  # or: type -a gt
+gt version
+gt doctor --fix
+```
 
 ## Troubleshooting
 
 ### `gt: command not found`
 
-Your Go bin directory is not in PATH:
+For source/dev installs, ensure `~/.local/bin` is on `PATH`:
 
 ```bash
-# Add to your shell config (~/.bashrc, ~/.zshrc)
-export PATH="$PATH:$HOME/go/bin"
-source ~/.bashrc  # or restart terminal
+export PATH="$HOME/.local/bin:$PATH"
+source ~/.zshrc  # or ~/.bashrc
 ```
+
+If you used npm, ensure your npm global bin directory is on `PATH`.
 
 ### `bd: command not found`
 
-Beads CLI not installed:
+If you are on Homebrew, reinstall or repair the Homebrew package:
 
 ```bash
-go install github.com/steveyegge/beads/cmd/bd@latest
+brew reinstall gastown
+```
+
+Otherwise install `bd` into the same canonical local bin directory used by the
+source/dev path:
+
+```bash
+GOBIN="$HOME/.local/bin" go install github.com/steveyegge/beads/cmd/bd@latest
 ```
 
 ### `gt doctor` shows errors
-
-Run with `--fix` to auto-repair common issues:
 
 ```bash
 gt doctor --fix
 ```
 
-For persistent issues, check specific errors:
-
-```bash
-gt doctor --verbose
-```
+If the report still looks wrong after an install or upgrade, double-check the
+resolved `gt` path first. Many "upgrade didn't work" reports are actually PATH
+shadowing.
 
 ### Daemon not starting
 
-Check if tmux is installed and working:
-
 ```bash
-tmux -V                    # Should show version
-tmux new-session -d -s test && tmux kill-session -t test  # Quick test
+tmux -V
+tmux new-session -d -s test && tmux kill-session -t test
 ```
 
 ### Git authentication issues
 
-Ensure SSH keys or credentials are configured:
-
 ```bash
-# Test SSH access
 ssh -T git@github.com
-
-# Or configure credential helper
 git config --global credential.helper cache
-```
-
-### Beads issues
-
-If experiencing beads problems:
-
-```bash
-cd ~/gt/myproject/mayor/rig
-bd status                  # Check database health
-bd doctor                  # Run beads health check
-```
-
-## Updating
-
-To update Gas Town and Beads:
-
-```bash
-go install github.com/steveyegge/gastown/cmd/gt@latest
-go install github.com/steveyegge/beads/cmd/bd@latest
-gt doctor --fix            # Fix any post-update issues
 ```
 
 ## Uninstalling
 
-```bash
-# Remove binaries
-rm $(which gt) $(which bd)
+Use the built-in cleanup path instead of manually deleting random files:
 
-# Remove workspace (CAUTION: deletes all work)
-rm -rf ~/gt
+```bash
+gt uninstall
+```
+
+If you also want to remove the workspace:
+
+```bash
+gt uninstall --workspace
 ```
 
 ## Next Steps
 
-After installation:
-
-1. **Read the README** - Core concepts and workflows
-2. **Try a simple workflow** - `bd create "Test task"` then `gt convoy create "Test" <bead-id>`
-3. **Explore docs** - `docs/reference.md` for command reference
-4. **Run doctor regularly** - `gt doctor` catches problems early
-5. **Join the Wasteland** - `gt wl join hop/wl-commons` to browse and claim federated work (see [WASTELAND.md](WASTELAND.md))
+1. Read the [README](../README.md) for concepts and workflows.
+2. Use [docs/reference.md](reference.md) for command reference.
+3. Run `gt doctor` after upgrades or channel switches.
+4. Use `gt wl join hop/wl-commons` if you want to explore the Wasteland federation.

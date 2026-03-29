@@ -23,12 +23,12 @@ func CheckBeadsVersion() error {
 		case deps.BeadsOK:
 			cachedVersionCheckResult = nil
 		case deps.BeadsUnknown:
-			cachedVersionCheckResult = fmt.Errorf("beads (bd) version could not be determined\n\nTry reinstalling: go install %s", deps.BeadsInstallPath)
+			cachedVersionCheckResult = fmt.Errorf("beads (bd) version could not be determined\n\nTry reinstalling: %s", deps.BeadsInstallCommand())
 		case deps.BeadsNotFound:
-			cachedVersionCheckResult = fmt.Errorf("beads (bd) not found in PATH\n\nInstall with: go install %s", deps.BeadsInstallPath)
+			cachedVersionCheckResult = fmt.Errorf("beads (bd) not found in PATH\n\nInstall with: %s", deps.BeadsInstallCommand())
 		case deps.BeadsTooOld:
-			cachedVersionCheckResult = fmt.Errorf("beads %s is required, but %s is installed\n\nUpgrade: go install %s",
-				deps.MinBeadsVersion, version, deps.BeadsInstallPath)
+			cachedVersionCheckResult = fmt.Errorf("beads %s is required, but %s is installed\n\nUpgrade: %s",
+				deps.MinBeadsVersion, version, deps.BeadsInstallCommand())
 		}
 	})
 	return cachedVersionCheckResult

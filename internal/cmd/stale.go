@@ -128,7 +128,7 @@ func outputStaleText(output StaleOutput) error {
 			fmt.Printf("  %s repo is not on main branch\n", style.Warning.Render("⚠"))
 		}
 		if output.SafeToRebuild {
-			fmt.Printf("\n  Safe to rebuild: run 'make build && make install'\n")
+			fmt.Printf("\n  Safe to rebuild: run 'make install'\n")
 		} else {
 			fmt.Printf("\n  %s NOT safe for automated rebuild (forward=%v, main=%v)\n",
 				style.Error.Render("✗"), output.Forward, output.OnMainBranch)

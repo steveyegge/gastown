@@ -19,6 +19,9 @@ const MinBeadsVersion = "0.57.0"
 // BeadsInstallPath is the go install path for beads.
 const BeadsInstallPath = "github.com/steveyegge/beads/cmd/bd@latest"
 
+// BeadsInstallBinDir is the canonical local bin directory used for source/dev installs.
+const BeadsInstallBinDir = "~/.local/bin"
+
 // BeadsStatus represents the state of the beads installation.
 type BeadsStatus int
 
@@ -75,13 +78,13 @@ func EnsureBeads(autoInstall bool) error {
 
 	case BeadsNotFound:
 		if !autoInstall {
-			return fmt.Errorf("beads (bd) not found in PATH\n\nInstall with: go install %s", BeadsInstallPath)
+			return fmt.Errorf("beads (bd) not found in PATH\n\nInstall with: %s", BeadsInstallCommand())
 		}
 		return installBeads()
 
 	case BeadsTooOld:
-		return fmt.Errorf("beads version %s is too old (minimum: %s)\n\nUpgrade with: go install %s",
-			version, MinBeadsVersion, BeadsInstallPath)
+		return fmt.Errorf("beads version %s is too old (minimum: %s)\n\nUpgrade with: %s",
+			version, MinBeadsVersion, BeadsInstallCommand())
 
 	case BeadsUnknown:
 		// Found bd but couldn't determine version - proceed with warning
@@ -107,7 +110,7 @@ func installBeads() error {
 	// Verify installation
 	status, version := CheckBeads()
 	if status == BeadsNotFound {
-		return fmt.Errorf("beads installed but not in PATH - ensure $GOPATH/bin is in your PATH")
+		return fmt.Errorf("beads installed but not in PATH - ensure %s is in your PATH", BeadsInstallBinDir)
 	}
 	if status == BeadsTooOld {
 		return fmt.Errorf("installed beads %s but minimum required is %s", version, MinBeadsVersion)
@@ -115,6 +118,11 @@ func installBeads() error {
 
 	fmt.Printf("   ✓ Installed beads %s\n", version)
 	return nil
+}
+
+// BeadsInstallCommand returns the canonical shell command for installing bd.
+func BeadsInstallCommand() string {
+	return fmt.Sprintf(`GOBIN="$HOME/.local/bin" go install %s`, BeadsInstallPath)
 }
 
 // appendGOBIN returns env with GOBIN set to ~/.local/bin so that

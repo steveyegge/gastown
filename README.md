@@ -122,46 +122,64 @@ Federated work coordination network linking Gas Towns through DoltHub. Rigs post
 
 ### Prerequisites
 
-- **Go 1.25+** - [go.dev/dl](https://go.dev/dl/)
+- **Homebrew** - recommended end-user install/upgrade path on macOS/Linux; current `brew install gastown` pulls in `bd` and `dolt`
+- **Go 1.25+** - [go.dev/dl](https://go.dev/dl/) (required for source/dev installs and Windows/manual builds)
 - **Git 2.25+** - for worktree support
 - **Dolt 1.82.4+** - [github.com/dolthub/dolt](https://github.com/dolthub/dolt)
-- **beads (bd) 0.55.4+** - [github.com/steveyegge/beads](https://github.com/steveyegge/beads)
+- **beads (bd) 0.57.0+** - [github.com/steveyegge/beads](https://github.com/steveyegge/beads)
 - **sqlite3** - for convoy database queries (usually pre-installed on macOS/Linux)
 - **tmux 3.0+** - recommended for full experience
 - **Claude Code CLI** (default runtime) - [claude.ai/code](https://claude.ai/code)
 - **Codex CLI** (optional runtime) - [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli)
 - **GitHub Copilot CLI** (optional runtime) - [cli.github.com](https://cli.github.com) (requires Copilot seat)
 
-### Setup (Docker-Compose below)
+### Setup (choose one install channel)
+
+For most users on macOS/Linux, Homebrew is the canonical install and upgrade path:
+use `brew install gastown` and keep using `brew upgrade gastown`.
+
+If you are working from a local checkout, use `make install`. It installs `gt` to
+`~/.local/bin` and removes stale `~/go/bin/gt` and `~/bin/gt` copies that often
+shadow the intended binary. Avoid `go install github.com/steveyegge/gastown/cmd/gt@latest`
+for `gt` itself; that is the path that causes the doc drift and shadowing problems
+described in [docs/INSTALLING.md](docs/INSTALLING.md).
 
 ```bash
-# Install Gas Town
-$ brew install gastown                                    # Homebrew (recommended)
-$ npm install -g @gastown/gt                              # npm
-$ go install github.com/steveyegge/gastown/cmd/gt@latest  # From source (macOS/Linux)
+# Homebrew: canonical end-user install / upgrade path
+$ brew install gastown
+$ brew upgrade gastown
 
-# Windows (or if go install fails): clone and build manually
+# Source / dev install from a checkout
 $ git clone https://github.com/steveyegge/gastown.git && cd gastown
-$ go build -o gt.exe ./cmd/gt
-$ mv gt.exe $HOME/go/bin/  # or add gastown to PATH
+$ make install
+$ export PATH="$HOME/.local/bin:$PATH"
 
-# If using go install, add Go binaries to PATH (add to ~/.zshrc or ~/.bashrc)
-export PATH="$PATH:$HOME/go/bin"
+# Optional npm distribution (convenient, but may lag Homebrew / GitHub releases)
+$ npm install -g @gastown/gt
+
+# Verify the active binary after installing or switching channels
+$ command -v gt
+$ which -a gt  # or: type -a gt
+$ gt version
+$ bd version
 
 # Create workspace with git initialization
-gt install ~/gt --git
+$ gt install ~/gt --shell --git
 cd ~/gt
 
 # Add your first project
-gt rig add myproject https://github.com/you/repo.git
+$ gt rig add myproject https://github.com/you/repo.git
 
 # Create your crew workspace
-gt crew add yourname --rig myproject
+$ gt crew add yourname --rig myproject
 cd myproject/crew/yourname
 
 # Start the Mayor session (your main interface)
-gt mayor attach
+$ gt mayor attach
 ```
+
+Windows users should follow the source/manual build path from a checkout and
+ensure the resulting `gt.exe` is on `PATH`.
 
 ### Docker Compose
 
