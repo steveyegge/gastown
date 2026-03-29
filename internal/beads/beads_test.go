@@ -134,26 +134,34 @@ func writeAllowStaleBDStub(t *testing.T, dir string, supportsAllowStale bool) {
 	if runtime.GOOS == "windows" {
 		scriptPath = filepath.Join(dir, "bd.bat")
 		exitCode := "1"
+		outputLine := "echo unknown flag: --allow-stale 1>&2"
 		if supportsAllowStale {
 			exitCode = "0"
+			outputLine = "echo bd version 0.62.0"
 		}
 		script = fmt.Sprintf(`@echo off
 setlocal enableextensions
-if "%%1"=="--allow-stale" exit /b %s
+if "%%1"=="--allow-stale" (
+  %s
+  exit /b %s
+)
 exit /b 1
-`, exitCode)
+`, outputLine, exitCode)
 	} else {
 		scriptPath = filepath.Join(dir, "bd")
 		exitCode := "1"
+		outputLine := `echo "unknown flag: --allow-stale" >&2`
 		if supportsAllowStale {
 			exitCode = "0"
+			outputLine = `echo "bd version 0.62.0"`
 		}
 		script = fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "--allow-stale" ]; then
+  %s
   exit %s
 fi
 exit 1
-`, exitCode)
+`, outputLine, exitCode)
 	}
 
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
