@@ -71,75 +71,7 @@ func commitsMatch(a, b string) bool {
 // This check is designed to be fast and non-blocking - errors are captured
 // but don't interrupt normal operation.
 func CheckStaleBinary(repoDir string) *StaleBinaryInfo {
-	info := &StaleBinaryInfo{}
-
-	// Get binary commit
-	info.BinaryCommit = resolveCommitHash()
-	if info.BinaryCommit == "" {
-		info.Error = fmt.Errorf("cannot determine binary commit (dev build?)")
-		return info
-	}
-
-	// Get repo HEAD
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = repoDir
-	output, err := cmd.Output()
-	if err != nil {
-		info.Error = fmt.Errorf("cannot get repo HEAD: %w", err)
-		return info
-	}
-	info.RepoCommit = strings.TrimSpace(string(output))
-
-	// Check which branch the repo is on
-	branchCmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
-	branchCmd.Dir = repoDir
-	if branchOutput, err := branchCmd.Output(); err == nil {
-		branch := strings.TrimSpace(string(branchOutput))
-		info.OnMainBranch = (branch == "main" || branch == "master")
-	}
-
-	// Compare commits using prefix matching (handles short vs full hash)
-	// Use the shorter of the two commit lengths for comparison
-	if !commitsMatch(info.BinaryCommit, info.RepoCommit) {
-		// Verify the binary commit exists in the found repo. GetRepoRoot may
-		// find a different clone (e.g., mayor/rig) than the one the binary was
-		// built from (e.g., crew/woodhouse). If the binary commit isn't in the
-		// repo's object store, we can't determine staleness — skip.
-		verifyCmd := exec.Command("git", "cat-file", "-t", info.BinaryCommit)
-		verifyCmd.Dir = repoDir
-		if err := verifyCmd.Run(); err != nil {
-			// Binary commit not in this repo — different clones, can't compare
-			return info
-		}
-
-		// Check if all commits between binary and HEAD only touch .beads/ files
-		// (e.g., bd backup commits). These don't affect the binary and should not
-		// trigger a stale warning. (GH#2596)
-		if onlyBeadsChanges(repoDir, info.BinaryCommit) {
-			// HEAD advanced but only via beads-only commits — not stale
-			return info
-		}
-
-		info.IsStale = true
-
-		// Check if this is a forward-only update (binary commit is ancestor of HEAD).
-		// This prevents rebuilding to an older or diverged commit, which caused
-		// a crash loop when a crew worktree's HEAD was behind the binary's commit.
-		ancestorCmd := exec.Command("git", "merge-base", "--is-ancestor", info.BinaryCommit, "HEAD")
-		ancestorCmd.Dir = repoDir
-		info.IsForward = ancestorCmd.Run() == nil
-
-		// Try to count commits between binary and HEAD
-		countCmd := exec.Command("git", "rev-list", "--count", info.BinaryCommit+"..HEAD")
-		countCmd.Dir = repoDir
-		if countOutput, err := countCmd.Output(); err == nil {
-			if count, parseErr := fmt.Sscanf(strings.TrimSpace(string(countOutput)), "%d", &info.CommitsBehind); parseErr != nil || count != 1 {
-				info.CommitsBehind = 0
-			}
-		}
-	}
-
-	return info
+	return checkBinaryCommitAgainstRepo(repoDir, resolveCommitHash())
 }
 
 // GetRepoRoot returns the git repository root for the gt source code.
@@ -224,4 +156,76 @@ func onlyBeadsChanges(repoDir, binaryCommit string) bool {
 // SetCommit allows the cmd package to pass in the build-time commit.
 func SetCommit(commit string) {
 	Commit = commit
+}
+
+func checkBinaryCommitAgainstRepo(repoDir, binaryCommit string) *StaleBinaryInfo {
+	info := &StaleBinaryInfo{
+		BinaryCommit: binaryCommit,
+	}
+
+	if binaryCommit == "" {
+		info.Error = fmt.Errorf("cannot determine binary commit (dev build?)")
+		return info
+	}
+
+	// Get repo HEAD
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoDir
+	output, err := cmd.Output()
+	if err != nil {
+		info.Error = fmt.Errorf("cannot get repo HEAD: %w", err)
+		return info
+	}
+	info.RepoCommit = strings.TrimSpace(string(output))
+
+	// Check which branch the repo is on
+	branchCmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	branchCmd.Dir = repoDir
+	if branchOutput, err := branchCmd.Output(); err == nil {
+		branch := strings.TrimSpace(string(branchOutput))
+		info.OnMainBranch = (branch == "main" || branch == "master")
+	}
+
+	// Compare commits using prefix matching (handles short vs full hash)
+	// Use the shorter of the two commit lengths for comparison
+	if !commitsMatch(info.BinaryCommit, info.RepoCommit) {
+		// Verify the binary commit exists in the found repo. GetRepoRoot may
+		// find a different clone (e.g., mayor/rig) than the one the binary was
+		// built from (e.g., crew/woodhouse). If the binary commit isn't in the
+		// repo's object store, we can't determine staleness — skip.
+		verifyCmd := exec.Command("git", "cat-file", "-t", info.BinaryCommit)
+		verifyCmd.Dir = repoDir
+		if err := verifyCmd.Run(); err != nil {
+			// Binary commit not in this repo — different clones, can't compare
+			return info
+		}
+
+		// Check if all commits between binary and HEAD only touch .beads/ files
+		// (e.g., bd backup commits). These don't affect the binary and should not
+		// trigger a stale warning. (GH#2596)
+		if onlyBeadsChanges(repoDir, info.BinaryCommit) {
+			// HEAD advanced but only via beads-only commits — not stale
+			return info
+		}
+
+		info.IsStale = true
+
+		// Check if this is a forward-only update (binary commit is ancestor of HEAD).
+		// This prevents rebuilding to an older or diverged commit, which caused
+		// a crash loop when a crew worktree's HEAD was behind the binary's commit.
+		ancestorCmd := exec.Command("git", "merge-base", "--is-ancestor", info.BinaryCommit, "HEAD")
+		ancestorCmd.Dir = repoDir
+		info.IsForward = ancestorCmd.Run() == nil
+
+		// Try to count commits between binary and HEAD
+		countCmd := exec.Command("git", "rev-list", "--count", info.BinaryCommit+"..HEAD")
+		countCmd.Dir = repoDir
+		if countOutput, err := countCmd.Output(); err == nil {
+			if count, parseErr := fmt.Sscanf(strings.TrimSpace(string(countOutput)), "%d", &info.CommitsBehind); parseErr != nil || count != 1 {
+				info.CommitsBehind = 0
+			}
+		}
+	}
+
+	return info
 }
