@@ -6,8 +6,9 @@ This formula orchestrates a release cycle for Gas Town:
 2. Documentation updates (CHANGELOG.md, info.go)
 3. Version bump (all components)
 4. Git operations (commit, tag, push)
-5. Local installation update
-6. Daemon restart
+5. Release-channel verification (GitHub first, Homebrew/npm second)
+6. Local installation update via the canonical source install path
+7. Runtime verification
 
 ## Usage
 
@@ -309,27 +310,77 @@ Someone pushed while we were releasing.
 """
 
 [[steps]]
-id = "local-install"
-title = "Update local installation"
+id = "wait-release-workflow"
+title = "Wait for Release workflow"
 needs = ["push-release"]
 description = """
-Rebuild and install gt locally with the new version.
+Monitor the `Release` workflow and treat GitHub Releases as the source of truth
+for whether `v{{version}}` exists.
 
+Watch:
+
+- https://github.com/steveyegge/gastown/actions/workflows/release.yml
+- https://github.com/steveyegge/gastown/releases/tag/v{{version}}
+
+Interpretation:
+- If the GitHub release exists and the workflow is green, the release is live.
+- Homebrew and npm can lag behind the GitHub release.
+- Do not block on Homebrew/npm before confirming the GitHub release itself.
+"""
+
+[[steps]]
+id = "verify-release-channels"
+title = "Verify GitHub, Homebrew, and npm expectations"
+needs = ["wait-release-workflow"]
+description = """
+Check all published channels, in this order:
+
+1. GitHub Release (authoritative)
 ```bash
-go build -o $(go env GOPATH)/bin/gt ./cmd/gt
+gh release view v{{version}} --repo steveyegge/gastown
 ```
 
-On macOS, codesign the binary:
+2. Homebrew (downstream, may lag)
 ```bash
-codesign -f -s - $(go env GOPATH)/bin/gt
+brew update
+brew info gastown
 ```
+
+3. npm (best-effort downstream wrapper)
+```bash
+npm view @gastown/gt version
+```
+
+Expected interpretation:
+- GitHub Release should show {{version}} before you announce the release.
+- Homebrew may still show the previous version for several hours after the tag.
+- npm may lag or fail independently; that is follow-up work, not proof the
+  GitHub release failed.
+"""
+
+[[steps]]
+id = "local-install"
+title = "Update local installation"
+needs = ["verify-release-channels"]
+description = """
+Refresh your local source install using the canonical path.
+
+```bash
+make install
+```
+
+`make install` builds `gt`, installs it to `~/.local/bin/gt`, removes stale
+shadowing copies from `~/go/bin` and `~/bin`, and restarts the daemon if it is
+already running.
 
 Verify:
 ```bash
+command -v gt
 gt version
 ```
 
-Should show {{version}}.
+The active `gt` should resolve to the canonical install path and report
+{{version}}.
 
 ## On build failure:
 - **Crew**: Debug build error, fix, retry
@@ -338,23 +389,24 @@ Should show {{version}}.
 
 [[steps]]
 id = "restart-daemons"
-title = "Restart daemons"
+title = "Verify daemon/runtime state"
 needs = ["local-install"]
 description = """
-Restart gt daemon to pick up the new version.
+Confirm the runtime is now using the new binary.
 
-```bash
-gt daemon stop && gt daemon start
-```
-
-Verify:
 ```bash
 gt daemon status
 ```
 
-The daemon should show the new binary timestamp and no stale warning.
+If the daemon was intentionally stopped, start it explicitly:
 
-Note: This step is safe to retry if it fails.
+```bash
+gt daemon start
+gt daemon status
+```
+
+`make install` already restarts a running daemon, so this step is primarily a
+verification pass that the active runtime converged cleanly.
 """
 
 [[steps]]
@@ -370,12 +422,14 @@ Summary:
 - CHANGELOG.md updated with release date
 - info.go versionChanges updated for `gt info --whats-new`
 - Git tag v{{version}} pushed
-- GitHub Actions triggered for artifact builds
-- Local gt binary rebuilt and installed
-- Daemons restarted with new version
+- GitHub Release verified as the authoritative published version
+- Homebrew/npm expectations checked as downstream follow-up channels
+- Local gt binary refreshed via `make install`
+- Active runtime verified against the new binary
 
 Optional next steps:
-- Monitor GitHub Actions for release build completion
-- Verify release artifacts at https://github.com/steveyegge/gastown/releases
+- If Homebrew is still behind after the normal autobump window, inspect
+  homebrew-core PRs
+- If npm is still behind, fix publishing separately without re-tagging
 - Announce the release
 """

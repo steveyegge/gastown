@@ -8,7 +8,17 @@ Gas Town CLI - multi-agent workspace manager for coordinating AI coding agents.
 npm install -g @gastown/gt
 ```
 
-This will download the appropriate native binary for your platform during installation.
+This package downloads the matching native binary from the Gas Town GitHub
+Releases page during installation.
+
+## Channel Expectations
+
+- GitHub Releases are the authoritative source for Gas Town community releases.
+- `@gastown/gt` is a convenience wrapper around those GitHub release binaries.
+- npm publishing is best-effort, so `npm view @gastown/gt version` can lag the
+  newest GitHub release.
+- If you need the newest published release immediately, verify the GitHub
+  Releases page first and fall back to downloading the binary directly.
 
 ## Usage
 

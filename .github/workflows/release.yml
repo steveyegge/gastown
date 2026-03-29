@@ -53,13 +53,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Summarize release channel policy
+        if: always()
+        run: |
+          {
+            echo "## Release channel policy"
+            echo "- GitHub Releases are the authoritative record for a new Gas Town version."
+            echo "- Homebrew follows asynchronously via homebrew-core autobump and may lag behind GitHub Releases."
+            echo "- npm is best-effort; \`@gastown/gt\` wraps GitHub release binaries and may lag or be unavailable."
+            echo "- Verify the GitHub Release first before debugging downstream channel drift."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   publish-npm:
     runs-on: ubuntu-latest
     needs: goreleaser
     if: ${{ github.repository == 'steveyegge/gastown' }}
-    # npm publish is best-effort — don't fail the release if npm is down or
-    # the @gastown org isn't set up yet. GoReleaser + Homebrew are the primary
-    # distribution channels.
+    # npm publish is best-effort — GitHub Releases are authoritative, Homebrew
+    # follows asynchronously, and npm is a convenience wrapper around those
+    # GitHub release binaries.
     continue-on-error: true
     permissions:
       contents: read
@@ -81,3 +92,13 @@ jobs:
         run: |
           cd npm-package
           npm publish --access public --provenance
+
+      - name: Summarize npm expectations
+        if: always()
+        run: |
+          {
+            echo "## npm"
+            echo "- \`@gastown/gt\` is a downstream wrapper around the GitHub release artifacts."
+            echo "- If npm lags, verify the GitHub Release before treating the release as failed."
+            echo "- Check npm with: \`npm view @gastown/gt version\`"
+          } >> "$GITHUB_STEP_SUMMARY"

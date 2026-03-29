@@ -1,18 +1,32 @@
 # Releasing Gas Town
 
-## Distribution Channels
+## Channel Policy
 
-| Channel | Mechanism | Automatic? |
-|---------|-----------|------------|
-| **GitHub Release** | GoReleaser via Actions on tag push | Yes |
-| **Homebrew** (homebrew-core) | Homebrew bot detects new release | Yes (24-48h delay) |
-| **npm** (`@gastown/gt`) | Actions workflow, OIDC trusted publishing | Yes (when org is set up) |
+When Gas Town docs or release notes say "latest community release", they mean
+the newest GitHub release tag whose `Release` workflow completed successfully.
+Homebrew and npm are downstream distribution channels, not the source of truth.
+
+| Channel | Role | Authoritative for `latest`? | Expected delay | What to verify |
+|---------|------|------------------------------|----------------|----------------|
+| **GitHub Releases** | Canonical published release record and binary artifacts | **Yes** | Immediate once the tag workflow succeeds | Release page exists, artifacts are attached, checksums are present |
+| **Homebrew** (`homebrew-core`) | Primary package-manager channel for end users on macOS/Linux | No | Bot-driven and can lag for several hours; allow 24-48h before treating it as stuck | `brew info gastown` eventually reports the new version |
+| **npm** (`@gastown/gt`) | Convenience wrapper that downloads GitHub release binaries | No | Best-effort and may lag or be temporarily unavailable | `npm view @gastown/gt version` may catch up later |
+| **Source checkout** (`make install`) | Developer/local build path | No | N/A | Your local binary matches the checked-out commit, not the newest published release |
+
+Interpretation rules:
+
+- Verify GitHub Releases first. If GitHub is correct, the release exists.
+- Homebrew lag does not mean the release failed.
+- npm lag or publish failure does not block the GitHub release.
+- Do not describe npm as the authoritative "latest" version; it mirrors GitHub
+  artifacts only after `publish-npm` succeeds.
 
 ## How to Release
 
 ### Option A: Automated (recommended)
 
-Use the release formula, which handles all steps:
+Use the release formula, which walks the release owner through the same policy
+documented here:
 
 ```bash
 gt mol wisp create gastown-release --var version=X.Y.Z
@@ -27,10 +41,10 @@ cd gastown/mayor/rig
 
 ### Option C: Manual
 
-1. Update CHANGELOG.md `[Unreleased]` section
-2. Update `internal/cmd/info.go` `versionChanges` slice
-3. Run `./scripts/bump-version.sh X.Y.Z` (updates version.go, package.json, CHANGELOG header)
-4. Commit, tag, push:
+1. Update `CHANGELOG.md` `[Unreleased]`
+2. Update `internal/cmd/info.go` `versionChanges`
+3. Run `./scripts/bump-version.sh X.Y.Z`
+4. Commit, tag, and push:
 
 ```bash
 git add -A
@@ -40,72 +54,77 @@ git push origin main
 git push origin vX.Y.Z
 ```
 
-5. Rebuild locally:
+5. Refresh your local source install:
 
 ```bash
-make install        # builds, codesigns, installs to ~/.local/bin
-gt daemon stop && gt daemon start
+make install
+gt version
 ```
+
+`make install` is the canonical source/dev install path. It installs to
+`~/.local/bin/gt`, removes stale shadowing copies from `~/go/bin` and
+`~/bin`, and restarts the daemon if one is already running.
 
 ## What Happens After Tag Push
 
-The `release.yml` workflow triggers automatically:
+The `Release` workflow triggers automatically:
 
-1. **goreleaser** job builds binaries for all platforms and creates the GitHub Release
-2. **publish-npm** job publishes to npm (best-effort, `continue-on-error: true`)
+1. `goreleaser` builds the release artifacts and creates the GitHub Release.
+2. `publish-npm` attempts to publish `@gastown/gt` with trusted publishing.
+3. Homebrew updates later via `homebrew-core` autobump after the GitHub
+   release exists.
 
-Homebrew is NOT updated by the workflow. See below.
+The release should be considered complete when the GitHub Release is present
+and the release workflow is green. Homebrew and npm are follow-up verification
+steps, not the gating definition of whether `vX.Y.Z` exists.
 
-## Homebrew (homebrew-core)
+## Post-release Verification
 
-Gastown is in **homebrew-core** (not a custom tap). The formula lives at:
+### GitHub Release
+
+Verify this first:
+
+```bash
+gh release view vX.Y.Z --repo steveyegge/gastown
+```
+
+Or inspect:
+`https://github.com/steveyegge/gastown/releases/tag/vX.Y.Z`
+
+Expected:
+
+- Release page exists
+- Archives for supported platforms are attached
+- Checksums are present
+
+### Homebrew (`homebrew-core`)
+
+Gastown is published from `homebrew-core`:
 `https://github.com/Homebrew/homebrew-core/blob/HEAD/Formula/g/gastown.rb`
 
-### How it updates
+Homebrew's autobump bot polls for new upstream releases. It is normal for
+Homebrew to remain behind GitHub for a while after a tag lands.
 
-Homebrew's `BrewTestBot` automatically detects new GitHub releases and opens
-a PR to homebrew-core. Gastown is on the autobump list — the bot checks
-**every ~3 hours**.
-
-### If the bot doesn't pick it up
-
-Gastown is on the autobump list, so `brew bump-formula-pr` will refuse to
-submit a manual PR. If the bot hasn't updated after 6+ hours, check
-https://github.com/Homebrew/homebrew-core/pulls?q=gastown for stuck PRs.
-
-### Verifying
+Verify with:
 
 ```bash
 brew update
-brew info gastown    # Check version
-brew upgrade gastown # Upgrade if installed
+brew info gastown
 ```
 
-## npm (`@gastown/gt`)
+If Homebrew has not updated after roughly 24-48 hours, inspect open PRs:
+`https://github.com/Homebrew/homebrew-core/pulls?q=gastown`
 
-### How it works
+### npm (`@gastown/gt`)
 
-The workflow uses **OIDC trusted publishing** (npm provenance). No NPM_TOKEN
-secret is needed — the `id-token: write` permission on the job generates a
-short-lived OIDC token that npm trusts because the GitHub repo is linked to
-the npm package.
+The npm package is a thin launcher that downloads the platform-specific GitHub
+release artifact matching the npm package version. npm is useful for users who
+prefer `npm install -g`, but it is not the release authority.
 
-### Prerequisites
+The workflow uses OIDC trusted publishing. The `@gastown` npm organization must
+be configured to trust `steveyegge/gastown` as a publisher.
 
-The `@gastown` npm organization must exist and be linked to this repo:
-
-1. Go to https://www.npmjs.com and create (or join) the `@gastown` org
-2. Under org settings, enable "Require 2FA" and configure trusted publishing
-3. Link `steveyegge/gastown` as a trusted publisher for `@gastown/gt`
-
-### Current status (as of 2026-03-06)
-
-The `@gastown` npm org was secured by a community member (Ivan Casco Valero,
-ivan@ivancasco.com) to prevent scope squatting. Ownership transfer is pending.
-Until the org is transferred, npm publish will fail gracefully without blocking
-the release (`continue-on-error: true` in the workflow).
-
-### Verifying
+Verify with:
 
 ```bash
 npm view @gastown/gt version
@@ -113,42 +132,45 @@ npm install -g @gastown/gt
 gt version
 ```
 
+If npm still reports an older version while GitHub Releases is correct, treat
+that as a downstream packaging follow-up. Do not re-tag just to "fix npm".
+
 ## Files Updated During Release
 
 | File | What changes |
-|------|-------------|
+|------|--------------|
 | `CHANGELOG.md` | New version section with date |
 | `internal/cmd/info.go` | `versionChanges` entry for `gt info --whats-new` |
 | `internal/cmd/version.go` | `Version` constant |
-| `npm-package/package.json` | `version` field |
-| `flake.nix` | version + vendorHash (only if `nix` is in PATH) |
+| `npm-package/package.json` | npm package version |
+| `flake.nix` | Version + `vendorHash` (only if `nix` is in `PATH`) |
 
 ## Troubleshooting
 
 ### GoReleaser fails with "replace directives"
 
-The workflow rejects `go.mod` files with `replace` directives (they break
-`go install`). Remove the replace directive and commit before tagging.
+The workflow rejects `go.mod` files with `replace` directives because they
+break `go install ...@latest`. Remove the replace directive and retag only
+after the branch is clean.
 
-### npm publish returns 404
+### npm publish fails or returns 404
 
-The `@gastown` npm org doesn't exist or you don't have publish access.
-See the npm section above. The release still succeeds — npm is best-effort.
+Trusted publishing is not configured correctly, or the package/org permissions
+are incomplete. The GitHub release still stands; fix npm publishing separately
+and republish the package if needed.
 
-### Homebrew shows old version after 6+ hours
+### Homebrew still shows the previous version
 
-Gastown is on BrewTestBot's autobump list (checked every ~3h). Check
-https://github.com/Homebrew/homebrew-core/pulls?q=gastown for stuck PRs.
-Manual `brew bump-formula-pr` is blocked for autobump formulae.
+Homebrew lag is expected immediately after a GitHub release. Only treat it as
+stuck after the autobump window has passed, then inspect homebrew-core PRs.
 
-### `make install` shows `-dirty` suffix
+### `make install` shows a `-dirty` suffix
 
-The `.beads/` directory has unstaged changes. This is cosmetic — the version
-number is correct. The `-dirty` comes from `git describe` seeing any unstaged
-modifications.
+The working tree has unstaged changes. The semantic version is still correct;
+the suffix comes from `git describe`.
 
-### Version in version.go is still old after bump script
+### `version.go` did not update
 
-The bump script reads the current version from version.go and replaces it.
-If version.go was manually edited to a different version, the script's sed
-pattern won't match. Fix version.go manually and re-run.
+`scripts/bump-version.sh` replaces the current literal version. If the file was
+edited manually into an unexpected shape, fix `internal/cmd/version.go` and rerun
+the bump script.
