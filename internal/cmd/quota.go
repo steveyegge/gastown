@@ -351,9 +351,11 @@ func printScanText(results []quota.ScanResult) error {
 
 // Rotate command flags
 var (
-	rotateDryRun bool
-	rotateFrom   string
-	rotateIdle   bool
+	rotateDryRun     bool
+	rotateFrom       string
+	rotateIdle       bool
+	rotateSessions   string
+	rotateTo         string
 )
 
 var quotaRotateCmd = &cobra.Command{
@@ -376,11 +378,14 @@ The rotation process:
   5. Sends /resume to recover conversation context
 
 Examples:
-  gt quota rotate                    # Rotate all blocked sessions
-  gt quota rotate --from work        # Preemptively rotate sessions on 'work' account
-  gt quota rotate --from work --idle # Only rotate idle sessions on 'work' account
-  gt quota rotate --dry-run          # Show plan without executing
-  gt quota rotate --json             # JSON output`,
+  gt quota rotate                                        # Rotate all blocked sessions
+  gt quota rotate --from work                            # Preemptively rotate sessions on 'work' account
+  gt quota rotate --from work --idle                     # Only rotate idle sessions on 'work' account
+  gt quota rotate --sessions gt-refinery,hq-deacon       # Rotate specific sessions only
+  gt quota rotate --to personal                          # Force all rotations to target 'personal'
+  gt quota rotate --sessions gt-refinery --to personal   # Rotate one session to a specific account
+  gt quota rotate --dry-run                              # Show plan without executing
+  gt quota rotate --json                                 # JSON output`,
 	RunE: runQuotaRotate,
 }
 
@@ -408,6 +413,14 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Validate --to account if specified
+	if rotateTo != "" {
+		if _, ok := acctCfg.Accounts[rotateTo]; !ok {
+			return fmt.Errorf("account %q not found (available: %s)",
+				rotateTo, strings.Join(accountHandles(acctCfg), ", "))
+		}
+	}
+
 	// Create scanner and plan rotation
 	t := ttmux.NewTmux()
 	scanner, err := quota.NewScanner(t, nil, acctCfg)
@@ -426,6 +439,29 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 	// pane) would poison the available account pool, blocking rotation of
 	// sessions that actually need it. Account state is updated only after
 	// successful rotation execution (LastUsed in executeKeychainRotation).
+
+	// --sessions: filter assignments to only specified sessions
+	if rotateSessions != "" {
+		targetSet := make(map[string]bool)
+		for _, s := range strings.Split(rotateSessions, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				targetSet[s] = true
+			}
+		}
+		for session := range plan.Assignments {
+			if !targetSet[session] {
+				delete(plan.Assignments, session)
+			}
+		}
+	}
+
+	// --to: override target account for all assignments
+	if rotateTo != "" {
+		for session := range plan.Assignments {
+			plan.Assignments[session] = rotateTo
+		}
+	}
 
 	if len(plan.LimitedSessions) == 0 {
 		if quotaJSON {
@@ -977,6 +1013,8 @@ func init() {
 	quotaRotateCmd.Flags().BoolVar(&quotaJSON, "json", false, "Output as JSON")
 	quotaRotateCmd.Flags().StringVar(&rotateFrom, "from", "", "Preemptively rotate sessions using this account")
 	quotaRotateCmd.Flags().BoolVar(&rotateIdle, "idle", false, "Only rotate sessions at the idle prompt (skip busy agents)")
+	quotaRotateCmd.Flags().StringVar(&rotateSessions, "sessions", "", "Comma-separated session names to target")
+	quotaRotateCmd.Flags().StringVar(&rotateTo, "to", "", "Force target account for all rotations")
 
 	quotaWatchCmd.Flags().DurationVar(&watchInterval, "interval", 5*time.Minute, "Poll interval")
 	quotaWatchCmd.Flags().BoolVar(&watchDryRun, "dry-run", false, "Show detections without executing rotation")
