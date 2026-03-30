@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -694,6 +695,212 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// Balance command flags
+var (
+	balanceDryRun bool
+	balanceMax    []string // repeatable --max handle=N
+	balanceShare  []string // repeatable --share handle=N
+	balanceTo     string
+	balanceForce  bool
+)
+
+var quotaBalanceCmd = &cobra.Command{
+	Use:   "balance",
+	Short: "Spread sessions across accounts",
+	Long: `Distribute sessions across registered accounts to balance credential usage.
+
+By default, spreads evenly. Use --max or --share to customize distribution
+when accounts have unequal remaining budget.
+
+Sessions are moved in priority order:
+  1. Rate-limited sessions (blocked — moved first to unblock)
+  2. Idle sessions (at prompt — no disruption)
+  3. Busy sessions (only with --force — restarted with --continue)
+
+Examples:
+  gt quota balance                       # Even spread across all accounts
+  gt quota balance --max work=4          # At most 4 sessions on "work"
+  gt quota balance --share work=25       # ~25% of sessions on "work"
+  gt quota balance --to personal         # Consolidate all sessions to one account
+  gt quota balance --force               # Include busy sessions
+  gt quota balance --dry-run             # Show plan without executing`,
+	RunE: runQuotaBalance,
+}
+
+func parseKVInts(pairs []string) (map[string]int, error) {
+	result := make(map[string]int)
+	for _, pair := range pairs {
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid format %q (expected handle=N)", pair)
+		}
+		n, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return nil, fmt.Errorf("invalid number in %q: %w", pair, err)
+		}
+		result[parts[0]] = n
+	}
+	return result, nil
+}
+
+func runQuotaBalance(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	acctCfg, err := config.LoadAccountsConfig(accountsPath)
+	if err != nil {
+		return fmt.Errorf("no accounts configured (run 'gt account add' first): %w", err)
+	}
+	if len(acctCfg.Accounts) < 2 && balanceTo == "" {
+		return fmt.Errorf("need at least 2 accounts for balancing (have %d)", len(acctCfg.Accounts))
+	}
+
+	// Parse --max and --share flags
+	opts := quota.BalanceOpts{
+		ToAccount: balanceTo,
+		Force:     balanceForce,
+	}
+
+	if len(balanceMax) > 0 && len(balanceShare) > 0 {
+		return fmt.Errorf("--max and --share are mutually exclusive")
+	}
+
+	if len(balanceMax) > 0 {
+		maxMap, err := parseKVInts(balanceMax)
+		if err != nil {
+			return fmt.Errorf("--max: %w", err)
+		}
+		for handle := range maxMap {
+			if _, ok := acctCfg.Accounts[handle]; !ok {
+				return fmt.Errorf("account %q not found (available: %s)",
+					handle, strings.Join(accountHandles(acctCfg), ", "))
+			}
+		}
+		opts.MaxSessions = maxMap
+	}
+
+	if len(balanceShare) > 0 {
+		shareMap, err := parseKVInts(balanceShare)
+		if err != nil {
+			return fmt.Errorf("--share: %w", err)
+		}
+		for handle := range shareMap {
+			if _, ok := acctCfg.Accounts[handle]; !ok {
+				return fmt.Errorf("account %q not found (available: %s)",
+					handle, strings.Join(accountHandles(acctCfg), ", "))
+			}
+		}
+		opts.SharePct = shareMap
+	}
+
+	if balanceTo != "" {
+		if _, ok := acctCfg.Accounts[balanceTo]; !ok {
+			return fmt.Errorf("account %q not found (available: %s)",
+				balanceTo, strings.Join(accountHandles(acctCfg), ", "))
+		}
+	}
+
+	t := ttmux.NewTmux()
+	scanner, err := quota.NewScanner(t, nil, acctCfg)
+	if err != nil {
+		return fmt.Errorf("creating scanner: %w", err)
+	}
+
+	plan, err := quota.PlanBalance(scanner, t, acctCfg, opts)
+	if err != nil {
+		return fmt.Errorf("planning balance: %w", err)
+	}
+
+	if len(plan.Assignments) == 0 {
+		if quotaJSON {
+			return json.NewEncoder(os.Stdout).Encode(plan)
+		}
+		fmt.Printf(" %s Sessions already balanced\n", style.SuccessPrefix)
+		// Show current distribution
+		fmt.Println()
+		for _, handle := range slices.Sorted(maps.Keys(plan.CurrentDistribution)) {
+			sessions := plan.CurrentDistribution[handle]
+			fmt.Printf(" %-12s %d sessions\n", handle, len(sessions))
+		}
+		return nil
+	}
+
+	// Show plan
+	if !quotaJSON {
+		fmt.Println(style.Bold.Render("Balance Plan"))
+		fmt.Println()
+		// Show current vs target
+		for _, handle := range slices.Sorted(maps.Keys(plan.TargetCounts)) {
+			current := len(plan.CurrentDistribution[handle])
+			target := plan.TargetCounts[handle]
+			delta := ""
+			if target > current {
+				delta = style.Success.Render(fmt.Sprintf(" (+%d)", target-current))
+			} else if target < current {
+				delta = style.Error.Render(fmt.Sprintf(" (-%d)", current-target))
+			}
+			fmt.Printf(" %-12s %d → %d%s\n", handle, current, target, delta)
+		}
+		fmt.Println()
+
+		// Show moves
+		sortedSessions := slices.Sorted(maps.Keys(plan.Assignments))
+		for _, session := range sortedSessions {
+			newAccount := plan.Assignments[session]
+			fmt.Printf(" %s %-25s → %s\n",
+				style.ArrowPrefix, session, style.Success.Render(newAccount))
+		}
+	}
+
+	if balanceDryRun {
+		if quotaJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(plan)
+		}
+		fmt.Println()
+		fmt.Println(style.Dim.Render(" (dry run — no changes made)"))
+		return nil
+	}
+
+	// Execute moves using keychain rotation
+	if !quotaJSON {
+		fmt.Println()
+	}
+	mgr := quota.NewManager(townRoot)
+	swappedConfigDirs := make(map[string]*quota.KeychainCredential)
+	var results []quota.RotateResult
+	sortedSessions := slices.Sorted(maps.Keys(plan.Assignments))
+	for _, session := range sortedSessions {
+		newAccount := plan.Assignments[session]
+		result := executeKeychainRotation(t, mgr, acctCfg, session, newAccount, swappedConfigDirs)
+		results = append(results, result)
+
+		if !quotaJSON {
+			if result.Rotated {
+				suffix := ""
+				if result.KeychainSwap {
+					suffix = style.Dim.Render(" [keychain]")
+				}
+				fmt.Printf(" %s %s → %s%s\n", style.SuccessPrefix, result.Session, result.NewAccount, suffix)
+			} else if result.Error != "" {
+				fmt.Printf(" %s %s: %s\n", style.ErrorPrefix, result.Session, result.Error)
+			}
+		}
+	}
+
+	if quotaJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(results)
+	}
+
+	return nil
+}
+
 var quotaClearCmd = &cobra.Command{
 	Use:   "clear [handle...]",
 	Short: "Mark account(s) as available again",
@@ -1085,12 +1292,20 @@ func init() {
 	quotaRotateCmd.Flags().StringVar(&rotateSessions, "sessions", "", "Comma-separated session names to target")
 	quotaRotateCmd.Flags().StringVar(&rotateTo, "to", "", "Force target account for all rotations")
 
+	quotaBalanceCmd.Flags().BoolVar(&balanceDryRun, "dry-run", false, "Show plan without executing")
+	quotaBalanceCmd.Flags().BoolVar(&quotaJSON, "json", false, "Output as JSON")
+	quotaBalanceCmd.Flags().StringArrayVar(&balanceMax, "max", nil, "Cap sessions per account (handle=N, repeatable)")
+	quotaBalanceCmd.Flags().StringArrayVar(&balanceShare, "share", nil, "Target percentage per account (handle=N, repeatable)")
+	quotaBalanceCmd.Flags().StringVar(&balanceTo, "to", "", "Consolidate all sessions to one account")
+	quotaBalanceCmd.Flags().BoolVar(&balanceForce, "force", false, "Include busy sessions (restarted with --continue)")
+
 	quotaWatchCmd.Flags().DurationVar(&watchInterval, "interval", 5*time.Minute, "Poll interval")
 	quotaWatchCmd.Flags().BoolVar(&watchDryRun, "dry-run", false, "Show detections without executing rotation")
 
 	quotaCmd.AddCommand(quotaStatusCmd)
 	quotaCmd.AddCommand(quotaScanCmd)
 	quotaCmd.AddCommand(quotaRotateCmd)
+	quotaCmd.AddCommand(quotaBalanceCmd)
 	quotaCmd.AddCommand(quotaClearCmd)
 	quotaCmd.AddCommand(quotaWatchCmd)
 

@@ -213,3 +213,258 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 		SkippedAccounts:   skipped,
 	}, nil
 }
+
+// BalanceOpts configures the balance planning behavior.
+type BalanceOpts struct {
+	// MaxSessions caps sessions per account. Key is account handle.
+	MaxSessions map[string]int
+
+	// SharePct sets target percentage per account. Key is account handle.
+	// Mutually exclusive with MaxSessions.
+	SharePct map[string]int
+
+	// ToAccount consolidates all sessions to a single account.
+	ToAccount string
+
+	// Force includes busy sessions (not just idle/limited).
+	Force bool
+}
+
+// BalancePlan describes what the balancer will do.
+type BalancePlan struct {
+	// Assignments maps session -> new account handle for sessions that need to move.
+	Assignments map[string]string
+
+	// CurrentDistribution maps account handle -> list of session names.
+	CurrentDistribution map[string][]string `json:"current_distribution"`
+
+	// TargetCounts maps account handle -> target session count.
+	TargetCounts map[string]int `json:"target_counts"`
+}
+
+// PlanBalance scans all sessions and plans redistribution across accounts.
+// Unlike PlanRotation, this is proactive — it moves sessions regardless of
+// rate-limit status to achieve the desired distribution.
+func PlanBalance(scanner *Scanner, tmuxClient TmuxIdleChecker, acctCfg *config.AccountsConfig, opts BalanceOpts) (*BalancePlan, error) {
+	results, err := scanner.ScanAll()
+	if err != nil {
+		return nil, fmt.Errorf("scanning sessions: %w", err)
+	}
+
+	// Build current distribution: account -> sessions
+	currentDist := make(map[string][]string)
+	sessionAccount := make(map[string]string)   // session -> current account
+	sessionLimited := make(map[string]bool)     // session -> is rate-limited
+	for _, r := range results {
+		if r.AccountHandle == "" {
+			continue // can't balance sessions with unknown accounts
+		}
+		currentDist[r.AccountHandle] = append(currentDist[r.AccountHandle], r.Session)
+		sessionAccount[r.Session] = r.AccountHandle
+		if r.RateLimited {
+			sessionLimited[r.Session] = true
+		}
+	}
+
+	totalSessions := len(sessionAccount)
+	if totalSessions == 0 {
+		return &BalancePlan{
+			Assignments:         make(map[string]string),
+			CurrentDistribution: currentDist,
+			TargetCounts:        make(map[string]int),
+		}, nil
+	}
+
+	// Compute target counts per account
+	accounts := make([]string, 0, len(acctCfg.Accounts))
+	for handle := range acctCfg.Accounts {
+		accounts = append(accounts, handle)
+	}
+
+	targetCounts := make(map[string]int)
+
+	switch {
+	case opts.ToAccount != "":
+		// Consolidate: all sessions to one account
+		for _, handle := range accounts {
+			if handle == opts.ToAccount {
+				targetCounts[handle] = totalSessions
+			} else {
+				targetCounts[handle] = 0
+			}
+		}
+
+	case len(opts.MaxSessions) > 0:
+		// Cap specified accounts, distribute remainder evenly
+		capped := 0
+		uncappedAccounts := 0
+		for _, handle := range accounts {
+			if max, ok := opts.MaxSessions[handle]; ok {
+				targetCounts[handle] = max
+				capped += max
+			} else {
+				uncappedAccounts++
+			}
+		}
+		remainder := totalSessions - capped
+		if remainder < 0 {
+			remainder = 0
+		}
+		if uncappedAccounts > 0 {
+			perUncapped := remainder / uncappedAccounts
+			extra := remainder % uncappedAccounts
+			i := 0
+			for _, handle := range accounts {
+				if _, ok := opts.MaxSessions[handle]; !ok {
+					targetCounts[handle] = perUncapped
+					if i < extra {
+						targetCounts[handle]++
+					}
+					i++
+				}
+			}
+		}
+
+	case len(opts.SharePct) > 0:
+		// Percentage-based distribution
+		for _, handle := range accounts {
+			if pct, ok := opts.SharePct[handle]; ok {
+				targetCounts[handle] = (totalSessions * pct + 50) / 100 // round
+			}
+		}
+		// Distribute remaining percentage evenly to unspecified accounts
+		specified := 0
+		unspecified := 0
+		for _, handle := range accounts {
+			if _, ok := opts.SharePct[handle]; ok {
+				specified += targetCounts[handle]
+			} else {
+				unspecified++
+			}
+		}
+		remainder := totalSessions - specified
+		if remainder < 0 {
+			remainder = 0
+		}
+		if unspecified > 0 {
+			perUnspec := remainder / unspecified
+			extra := remainder % unspecified
+			i := 0
+			for _, handle := range accounts {
+				if _, ok := opts.SharePct[handle]; !ok {
+					targetCounts[handle] = perUnspec
+					if i < extra {
+						targetCounts[handle]++
+					}
+					i++
+				}
+			}
+		}
+
+	default:
+		// Even split
+		perAccount := totalSessions / len(accounts)
+		extra := totalSessions % len(accounts)
+		for i, handle := range accounts {
+			targetCounts[handle] = perAccount
+			if i < extra {
+				targetCounts[handle]++
+			}
+		}
+	}
+
+	// Identify overloaded (above target) and underloaded (below target) accounts
+	type moveCandidate struct {
+		session string
+		tier    int // 1=limited, 2=idle, 3=busy
+	}
+
+	assignments := make(map[string]string)
+
+	// Collect sessions to move from overloaded accounts, prioritized by tier
+	var candidates []moveCandidate
+	for _, handle := range accounts {
+		current := len(currentDist[handle])
+		target := targetCounts[handle]
+		excess := current - target
+		if excess <= 0 {
+			continue
+		}
+
+		// Prioritize: limited first, then idle, then busy
+		var limited, idle, busy []string
+		for _, session := range currentDist[handle] {
+			if sessionLimited[session] {
+				limited = append(limited, session)
+			} else if tmuxClient != nil && tmuxClient.IsIdle(session) {
+				idle = append(idle, session)
+			} else {
+				busy = append(busy, session)
+			}
+		}
+
+		picked := 0
+		for _, s := range limited {
+			if picked >= excess {
+				break
+			}
+			candidates = append(candidates, moveCandidate{session: s, tier: 1})
+			picked++
+		}
+		for _, s := range idle {
+			if picked >= excess {
+				break
+			}
+			candidates = append(candidates, moveCandidate{session: s, tier: 2})
+			picked++
+		}
+		if opts.Force {
+			for _, s := range busy {
+				if picked >= excess {
+					break
+				}
+				candidates = append(candidates, moveCandidate{session: s, tier: 3})
+				picked++
+			}
+		}
+	}
+
+	// Assign candidates to underloaded accounts
+	for _, c := range candidates {
+		// Find the most underloaded account
+		bestHandle := ""
+		bestDeficit := 0
+		for _, handle := range accounts {
+			current := len(currentDist[handle])
+			// Count already-assigned incoming sessions
+			incoming := 0
+			for _, target := range assignments {
+				if target == handle {
+					incoming++
+				}
+			}
+			// Count already-assigned outgoing sessions
+			outgoing := 0
+			for session := range assignments {
+				if sessionAccount[session] == handle {
+					outgoing++
+				}
+			}
+			effective := current + incoming - outgoing
+			deficit := targetCounts[handle] - effective
+			if deficit > bestDeficit && handle != sessionAccount[c.session] {
+				bestDeficit = deficit
+				bestHandle = handle
+			}
+		}
+		if bestHandle != "" {
+			assignments[c.session] = bestHandle
+		}
+	}
+
+	return &BalancePlan{
+		Assignments:         assignments,
+		CurrentDistribution: currentDist,
+		TargetCounts:        targetCounts,
+	}, nil
+}

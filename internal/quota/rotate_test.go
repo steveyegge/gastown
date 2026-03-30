@@ -1022,3 +1022,192 @@ func TestWatchCyclePingPong_WithoutFix(t *testing.T) {
 			plan2.Assignments["gt-crew-bear"])
 	}
 }
+
+func TestPlanBalance_EvenSplit(t *testing.T) {
+	setupTestRegistry(t)
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-a", "gt-crew-b", "gt-crew-c", "gt-crew-d"},
+		paneContent: map[string]string{
+			"gt-crew-a": "working...",
+			"gt-crew-b": "working...",
+			"gt-crew-c": "working...",
+			"gt-crew-d": "working...",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-a": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/work"},
+			"gt-crew-b": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/work"},
+			"gt-crew-c": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/work"},
+			"gt-crew-d": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/work"},
+		},
+		idleSessions: map[string]bool{
+			"gt-crew-a": true, "gt-crew-b": true, "gt-crew-c": true, "gt-crew-d": true,
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"work":     {ConfigDir: "/home/.claude-accounts/work"},
+			"personal": {ConfigDir: "/home/.claude-accounts/personal"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanBalance(scanner, tmux, accounts, BalanceOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// All 4 sessions on "work", target is 2/2 split — should move 2 to "personal"
+	if len(plan.Assignments) != 2 {
+		t.Errorf("expected 2 assignments, got %d", len(plan.Assignments))
+	}
+	for session, target := range plan.Assignments {
+		if target != "personal" {
+			t.Errorf("expected session %s to move to personal, got %s", session, target)
+		}
+	}
+}
+
+func TestPlanBalance_AlreadyBalanced(t *testing.T) {
+	setupTestRegistry(t)
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-a", "gt-crew-b"},
+		paneContent: map[string]string{
+			"gt-crew-a": "working...",
+			"gt-crew-b": "working...",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-a": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/work"},
+			"gt-crew-b": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/personal"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"work":     {ConfigDir: "/home/.claude-accounts/work"},
+			"personal": {ConfigDir: "/home/.claude-accounts/personal"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanBalance(scanner, tmux, accounts, BalanceOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Already 1/1 — no moves needed
+	if len(plan.Assignments) != 0 {
+		t.Errorf("expected 0 assignments (already balanced), got %d", len(plan.Assignments))
+	}
+}
+
+func TestPlanBalance_WithMax(t *testing.T) {
+	setupTestRegistry(t)
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-a", "gt-crew-b", "gt-crew-c", "gt-crew-d", "gt-crew-e", "gt-crew-f"},
+		paneContent: map[string]string{
+			"gt-crew-a": "working...", "gt-crew-b": "working...", "gt-crew-c": "working...",
+			"gt-crew-d": "working...", "gt-crew-e": "working...", "gt-crew-f": "working...",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-a": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/work"},
+			"gt-crew-b": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/work"},
+			"gt-crew-c": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/work"},
+			"gt-crew-d": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/work"},
+			"gt-crew-e": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/work"},
+			"gt-crew-f": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/work"},
+		},
+		idleSessions: map[string]bool{
+			"gt-crew-a": true, "gt-crew-b": true, "gt-crew-c": true,
+			"gt-crew-d": true, "gt-crew-e": true, "gt-crew-f": true,
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"work":     {ConfigDir: "/home/.claude-accounts/work"},
+			"personal": {ConfigDir: "/home/.claude-accounts/personal"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanBalance(scanner, tmux, accounts, BalanceOpts{
+		MaxSessions: map[string]int{"work": 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 6 sessions, work capped at 2 — should move 4 to personal
+	if len(plan.Assignments) != 4 {
+		t.Errorf("expected 4 assignments, got %d", len(plan.Assignments))
+	}
+
+	if plan.TargetCounts["work"] != 2 {
+		t.Errorf("expected work target=2, got %d", plan.TargetCounts["work"])
+	}
+	if plan.TargetCounts["personal"] != 4 {
+		t.Errorf("expected personal target=4, got %d", plan.TargetCounts["personal"])
+	}
+}
+
+func TestPlanBalance_Consolidate(t *testing.T) {
+	setupTestRegistry(t)
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-a", "gt-crew-b"},
+		paneContent: map[string]string{
+			"gt-crew-a": "working...",
+			"gt-crew-b": "working...",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-a": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/work"},
+			"gt-crew-b": {"CLAUDE_CONFIG_DIR": "/home/.claude-accounts/personal"},
+		},
+		idleSessions: map[string]bool{
+			"gt-crew-a": true, "gt-crew-b": true,
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"work":     {ConfigDir: "/home/.claude-accounts/work"},
+			"personal": {ConfigDir: "/home/.claude-accounts/personal"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanBalance(scanner, tmux, accounts, BalanceOpts{
+		ToAccount: "work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// gt-crew-b (on personal) should move to work
+	if len(plan.Assignments) != 1 {
+		t.Errorf("expected 1 assignment, got %d", len(plan.Assignments))
+	}
+	if plan.Assignments["gt-crew-b"] != "work" {
+		t.Errorf("expected gt-crew-b -> work, got %v", plan.Assignments)
+	}
+}

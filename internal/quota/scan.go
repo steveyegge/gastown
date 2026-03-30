@@ -31,6 +31,12 @@ type TmuxClient interface {
 	GetEnvironment(session, key string) (string, error)
 }
 
+// TmuxIdleChecker checks whether a session is idle. Used by PlanBalance
+// to prioritize which sessions to move (idle before busy).
+type TmuxIdleChecker interface {
+	IsIdle(session string) bool
+}
+
 // Scanner detects rate-limited and near-limit sessions by examining tmux pane content.
 type Scanner struct {
 	tmux            TmuxClient

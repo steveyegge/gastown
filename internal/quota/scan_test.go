@@ -27,6 +27,7 @@ type mockTmux struct {
 	sessionsErr error                        // injected ListSessions error
 	paneContent map[string]string            // session -> captured content
 	envVars     map[string]map[string]string // session -> key -> value
+	idleSessions map[string]bool             // session -> is idle
 }
 
 func (m *mockTmux) ListSessions() ([]string, error) {
@@ -42,6 +43,10 @@ func (m *mockTmux) CapturePane(session string, lines int) (string, error) {
 		return "", fmt.Errorf("session %s not found", session)
 	}
 	return content, nil
+}
+
+func (m *mockTmux) IsIdle(session string) bool {
+	return m.idleSessions[session]
 }
 
 func (m *mockTmux) GetEnvironment(session, key string) (string, error) {
