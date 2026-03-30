@@ -2771,6 +2771,17 @@ func (t *Tmux) WaitForIdle(session string, timeout time.Duration) error {
 				continue
 			}
 			if matchesPromptPrefix(trimmed, promptPrefix) || (prefix != "" && trimmed == prefix) {
+				// Check if the user is actively typing after the prompt.
+				// If there's content after the prompt prefix, don't treat as idle.
+				normalizedLine := strings.ReplaceAll(trimmed, "\u00a0", " ")
+				normalizedPrefix := strings.ReplaceAll(promptPrefix, "\u00a0", " ")
+				if strings.HasPrefix(normalizedLine, normalizedPrefix) {
+					afterPrompt := strings.TrimPrefix(normalizedLine, normalizedPrefix)
+					if strings.TrimSpace(afterPrompt) != "" {
+						// User is actively typing after the prompt; not idle
+						break
+					}
+				}
 				promptFound = true
 				break
 			}
