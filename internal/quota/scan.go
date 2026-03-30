@@ -215,7 +215,9 @@ func (s *Scanner) resolveAccountHandle(session string) string {
 
 	configDir, err := s.tmux.GetEnvironment(session, "CLAUDE_CONFIG_DIR")
 	if err != nil {
-		return "" // No CLAUDE_CONFIG_DIR = using default config
+		// No CLAUDE_CONFIG_DIR set — session uses default Claude config.
+		// Attribute to the default account since that's what sessions start on.
+		return s.accounts.Default
 	}
 
 	configDir = strings.TrimSpace(configDir)
@@ -226,7 +228,10 @@ func (s *Scanner) resolveAccountHandle(session string) string {
 		}
 	}
 
-	return "" // CLAUDE_CONFIG_DIR doesn't match any registered account
+	// CLAUDE_CONFIG_DIR doesn't match any registered account — fall back
+	// to default. This handles sessions using ~/.claude (the Claude default)
+	// which won't match account-specific config dirs.
+	return s.accounts.Default
 }
 
 // isGasTownSession returns true if the session name belongs to Gas Town.
