@@ -901,6 +901,19 @@ func runWatchCycle(townRoot string, acctCfg *config.AccountsConfig) {
 		return
 	}
 
+	// Persist scan-detected rate limits into account state so the next cycle
+	// won't rotate back to an exhausted account. Without this, both accounts
+	// show "available" in state and watch ping-pongs sessions between them.
+	// This is safe in the watch loop (unlike one-shot rotate) because watch
+	// re-scans every cycle — stale pane content will be re-evaluated, and
+	// ClearExpired (called inside PlanRotation) auto-clears accounts whose
+	// reset time has passed.
+	if len(plan.LimitedSessions) > 0 {
+		if err := updateQuotaState(townRoot, plan.LimitedSessions, acctCfg); err != nil {
+			style.PrintWarning("updating quota state from scan: %v", err)
+		}
+	}
+
 	// Report findings
 	now := time.Now().Format("15:04:05")
 	totalTargets := len(plan.LimitedSessions) + len(plan.NearLimitSessions)

@@ -811,3 +811,214 @@ func TestPlanRotation_MixedHardAndNearLimit(t *testing.T) {
 		t.Fatalf("expected 2 assignments, got %d", len(plan.Assignments))
 	}
 }
+
+// --- Ping-pong prevention tests ---
+
+// TestWatchCyclePingPong simulates the bug from gt-886: without persisting
+// scan-detected rate limits into account state, watch cycles ping-pong
+// sessions between two exhausted accounts because both always appear
+// "available" in state.
+//
+// The test runs two simulated watch cycles:
+//   Cycle 1: account "alpha" is limited → plan rotates to "beta"
+//   Between cycles: persist alpha as limited in state (the fix)
+//   Cycle 2: account "beta" is now limited too → should NOT rotate back to alpha
+func TestWatchCyclePingPong(t *testing.T) {
+	setupTestRegistry(t)
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"alpha": {ConfigDir: "/home/user/.claude-accounts/alpha"},
+			"beta":  {ConfigDir: "/home/user/.claude-accounts/beta"},
+		},
+	}
+
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+	state := &config.QuotaState{
+		Version: config.CurrentQuotaVersion,
+		Accounts: map[string]config.AccountQuotaState{
+			"alpha": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T01:00:00Z"},
+			"beta":  {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T02:00:00Z"},
+		},
+	}
+	if err := mgr.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	// --- Cycle 1: alpha sessions are rate-limited ---
+	tmux1 := &mockTmux{
+		sessions: []string{"gt-crew-bear", "gt-crew-wolf"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "You've hit your limit · resets 7pm (America/Los_Angeles)",
+			"gt-crew-wolf": "working fine...",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/alpha"},
+			"gt-crew-wolf": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/beta"},
+		},
+	}
+	scanner1, err := NewScanner(tmux1, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan1, err := PlanRotation(scanner1, mgr, accounts, PlanOpts{IncludeNearLimit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(plan1.LimitedSessions) != 1 {
+		t.Fatalf("cycle 1: expected 1 limited session, got %d", len(plan1.LimitedSessions))
+	}
+	if plan1.Assignments["gt-crew-bear"] != "beta" {
+		t.Fatalf("cycle 1: expected assignment to beta, got %q", plan1.Assignments["gt-crew-bear"])
+	}
+
+	// Simulate what runWatchCycle does AFTER the fix: persist scan results
+	// into account state. This is the critical step that prevents ping-pong.
+	if err := mgr.WithLock(func() error {
+		s, loadErr := mgr.Load()
+		if loadErr != nil {
+			return loadErr
+		}
+		mgr.EnsureAccountsTracked(s, accounts.Accounts)
+		for _, r := range plan1.LimitedSessions {
+			if r.RateLimited && r.AccountHandle != "" {
+				existing := s.Accounts[r.AccountHandle]
+				s.Accounts[r.AccountHandle] = config.AccountQuotaState{
+					Status:    config.QuotaStatusLimited,
+					LimitedAt: "2025-01-01T03:00:00Z",
+					ResetsAt:  r.ResetsAt,
+					LastUsed:  existing.LastUsed,
+				}
+			}
+		}
+		return mgr.SaveUnlocked(s)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify alpha is now marked limited in state
+	state, err = mgr.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Accounts["alpha"].Status != config.QuotaStatusLimited {
+		t.Fatalf("expected alpha to be limited in state after cycle 1, got %s", state.Accounts["alpha"].Status)
+	}
+
+	// --- Cycle 2: beta sessions are now also rate-limited ---
+	// The sessions that were rotated to beta have hit beta's limit too.
+	tmux2 := &mockTmux{
+		sessions: []string{"gt-crew-bear", "gt-crew-wolf"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "You've hit your limit · resets 7pm (America/Los_Angeles)",
+			"gt-crew-wolf": "working fine...",
+		},
+		envVars: map[string]map[string]string{
+			// bear was rotated to beta in cycle 1
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/beta"},
+			"gt-crew-wolf": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/beta"},
+		},
+	}
+	scanner2, err := NewScanner(tmux2, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan2, err := PlanRotation(scanner2, mgr, accounts, PlanOpts{IncludeNearLimit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Key assertion: with alpha marked limited in state, there should be
+	// NO assignments back to alpha. Without the fix, alpha would appear
+	// "available" and bear would ping-pong back.
+	if len(plan2.Assignments) != 0 {
+		t.Errorf("cycle 2: expected 0 assignments (no available accounts), got %d: %v",
+			len(plan2.Assignments), plan2.Assignments)
+	}
+	// beta sessions detected as limited
+	if len(plan2.LimitedSessions) != 1 {
+		t.Errorf("cycle 2: expected 1 limited session, got %d", len(plan2.LimitedSessions))
+	}
+}
+
+// TestWatchCyclePingPong_WithoutFix verifies that without persisting scan
+// results, the second cycle DOES incorrectly rotate back (the bug).
+func TestWatchCyclePingPong_WithoutFix(t *testing.T) {
+	setupTestRegistry(t)
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"alpha": {ConfigDir: "/home/user/.claude-accounts/alpha"},
+			"beta":  {ConfigDir: "/home/user/.claude-accounts/beta"},
+		},
+	}
+
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+	state := &config.QuotaState{
+		Version: config.CurrentQuotaVersion,
+		Accounts: map[string]config.AccountQuotaState{
+			"alpha": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T01:00:00Z"},
+			"beta":  {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T02:00:00Z"},
+		},
+	}
+	if err := mgr.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	// --- Cycle 1: alpha limited, rotates to beta ---
+	tmux1 := &mockTmux{
+		sessions: []string{"gt-crew-bear"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "You've hit your limit · resets 7pm",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/alpha"},
+		},
+	}
+	scanner1, err := NewScanner(tmux1, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan1, err := PlanRotation(scanner1, mgr, accounts, PlanOpts{IncludeNearLimit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan1.Assignments["gt-crew-bear"] != "beta" {
+		t.Fatalf("cycle 1: expected beta assignment, got %q", plan1.Assignments["gt-crew-bear"])
+	}
+
+	// BUG: no state persistence between cycles (simulating the old behavior)
+
+	// --- Cycle 2: bear is now on beta and limited ---
+	tmux2 := &mockTmux{
+		sessions: []string{"gt-crew-bear"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "You've hit your limit · resets 7pm",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/beta"},
+		},
+	}
+	scanner2, err := NewScanner(tmux2, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan2, err := PlanRotation(scanner2, mgr, accounts, PlanOpts{IncludeNearLimit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Without the fix: alpha is still "available" in state, so plan assigns
+	// bear BACK to alpha — the ping-pong bug.
+	if plan2.Assignments["gt-crew-bear"] != "alpha" {
+		t.Errorf("expected ping-pong back to alpha (demonstrating bug), got %q",
+			plan2.Assignments["gt-crew-bear"])
+	}
+}
