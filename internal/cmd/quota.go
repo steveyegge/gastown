@@ -57,22 +57,35 @@ var quotaStatusCmd = &cobra.Command{
 
 Displays which accounts are available, rate-limited, or in cooldown,
 along with timestamps for limit detection and estimated reset times.
+Includes live session counts per account.
+
+Use --scan to run a live scan and update state before displaying,
+ensuring the status reflects current rate-limit conditions.
 
 Examples:
-  gt quota status           # Text output
+  gt quota status           # Text output with live session counts
+  gt quota status --scan    # Scan first, then show updated status
   gt quota status --json    # JSON output`,
 	RunE: runQuotaStatus,
 }
 
 // QuotaStatusItem represents an account in status output.
 type QuotaStatusItem struct {
-	Handle    string `json:"handle"`
-	Email     string `json:"email"`
-	Status    string `json:"status"`
-	LimitedAt string `json:"limited_at,omitempty"`
-	ResetsAt  string `json:"resets_at,omitempty"`
-	LastUsed  string `json:"last_used,omitempty"`
-	IsDefault bool   `json:"is_default"`
+	Handle          string `json:"handle"`
+	Email           string `json:"email"`
+	Status          string `json:"status"`
+	LimitedAt       string `json:"limited_at,omitempty"`
+	ResetsAt        string `json:"resets_at,omitempty"`
+	LastUsed        string `json:"last_used,omitempty"`
+	IsDefault       bool   `json:"is_default"`
+	SessionCount    int    `json:"session_count"`
+	LimitedSessions int    `json:"limited_sessions"`
+}
+
+// sessionCounts holds per-account live session statistics.
+type sessionCounts struct {
+	Total   map[string]int // total sessions per account handle
+	Limited map[string]int // rate-limited sessions per account handle
 }
 
 func runQuotaStatus(cmd *cobra.Command, args []string) error {
@@ -96,7 +109,38 @@ func runQuotaStatus(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Load quota state
+	// Scan sessions to get live counts (and optionally update state)
+	t := ttmux.NewTmux()
+	scanner, err := quota.NewScanner(t, nil, acctCfg)
+	if err != nil {
+		return fmt.Errorf("creating scanner: %w", err)
+	}
+
+	results, scanErr := scanner.ScanAll()
+	if scanErr != nil {
+		style.PrintWarning("session scan failed: %v", scanErr)
+	}
+	counts := sessionCounts{
+		Total:   make(map[string]int),
+		Limited: make(map[string]int),
+	}
+	for _, r := range results {
+		if r.AccountHandle != "" {
+			counts.Total[r.AccountHandle]++
+			if r.RateLimited {
+				counts.Limited[r.AccountHandle]++
+			}
+		}
+	}
+
+	// If --scan, persist detected rate limits to quota state
+	if statusScan {
+		if err := updateQuotaState(townRoot, results, acctCfg); err != nil {
+			style.PrintWarning("could not persist scan results: %v", err)
+		}
+	}
+
+	// Load quota state (after potential scan update)
 	mgr := quota.NewManager(townRoot)
 	state, err := mgr.Load()
 	if err != nil {
@@ -114,12 +158,12 @@ func runQuotaStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	if quotaJSON {
-		return printQuotaStatusJSON(acctCfg, state)
+		return printQuotaStatusJSON(acctCfg, state, counts)
 	}
-	return printQuotaStatusText(acctCfg, state)
+	return printQuotaStatusText(acctCfg, state, counts)
 }
 
-func printQuotaStatusJSON(acctCfg *config.AccountsConfig, state *config.QuotaState) error {
+func printQuotaStatusJSON(acctCfg *config.AccountsConfig, state *config.QuotaState, counts sessionCounts) error {
 	var items []QuotaStatusItem
 	for _, handle := range slices.Sorted(maps.Keys(acctCfg.Accounts)) {
 		acct := acctCfg.Accounts[handle]
@@ -129,13 +173,15 @@ func printQuotaStatusJSON(acctCfg *config.AccountsConfig, state *config.QuotaSta
 			status = string(config.QuotaStatusAvailable)
 		}
 		items = append(items, QuotaStatusItem{
-			Handle:    handle,
-			Email:     acct.Email,
-			Status:    status,
-			LimitedAt: qs.LimitedAt,
-			ResetsAt:  qs.ResetsAt,
-			LastUsed:  qs.LastUsed,
-			IsDefault: handle == acctCfg.Default,
+			Handle:          handle,
+			Email:           acct.Email,
+			Status:          status,
+			LimitedAt:       qs.LimitedAt,
+			ResetsAt:        qs.ResetsAt,
+			LastUsed:        qs.LastUsed,
+			IsDefault:       handle == acctCfg.Default,
+			SessionCount:    counts.Total[handle],
+			LimitedSessions: counts.Limited[handle],
 		})
 	}
 	enc := json.NewEncoder(os.Stdout)
@@ -143,9 +189,11 @@ func printQuotaStatusJSON(acctCfg *config.AccountsConfig, state *config.QuotaSta
 	return enc.Encode(items)
 }
 
-func printQuotaStatusText(acctCfg *config.AccountsConfig, state *config.QuotaState) error {
+func printQuotaStatusText(acctCfg *config.AccountsConfig, state *config.QuotaState, counts sessionCounts) error {
 	available := 0
 	limited := 0
+	totalSessions := 0
+	totalLimited := 0
 
 	fmt.Println(style.Bold.Render("Account Quota Status"))
 	fmt.Println()
@@ -183,20 +231,38 @@ func printQuotaStatusText(acctCfg *config.AccountsConfig, state *config.QuotaSta
 			badge = style.Dim.Render("unknown")
 		}
 
+		// Session counts
+		sc := counts.Total[handle]
+		sl := counts.Limited[handle]
+		totalSessions += sc
+		totalLimited += sl
+
+		sessionInfo := style.Dim.Render(fmt.Sprintf("(%d sessions, %d limited)", sc, sl))
+
 		email := ""
 		if acct.Email != "" {
 			email = style.Dim.Render(" <" + acct.Email + ">")
 		}
 
-		fmt.Printf(" %s %-12s %s%s\n", marker, handle, badge, email)
+		fmt.Printf(" %s %-12s %-20s %s%s\n", marker, handle, badge, sessionInfo, email)
 	}
 
 	fmt.Println()
-	fmt.Printf(" %s %d available, %d limited\n",
-		style.Info.Render("Summary:"), available, limited)
+	summary := fmt.Sprintf("%d available, %d limited", available, limited)
+	sessionSummary := fmt.Sprintf("%d sessions", totalSessions)
+	if totalLimited > 0 {
+		sessionSummary += fmt.Sprintf(", %d blocked", totalLimited)
+	}
+	fmt.Printf(" %s %s | %s\n",
+		style.Info.Render("Summary:"), summary, sessionSummary)
 
 	return nil
 }
+
+// Status command flags
+var (
+	statusScan bool
+)
 
 // Scan command flags
 var (
@@ -434,11 +500,13 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("planning rotation: %w", err)
 	}
 
-	// NOTE: We intentionally do NOT persist scan-detected rate limits here.
-	// Stale sessions (e.g., parked rigs with old rate-limit messages in the
-	// pane) would poison the available account pool, blocking rotation of
-	// sessions that actually need it. Account state is updated only after
-	// successful rotation execution (LastUsed in executeKeychainRotation).
+	// Persist scan-detected rate limits to account state. This keeps
+	// gt quota status accurate. Staleness is mitigated by ClearExpired
+	// (auto-clears accounts past reset time) and the scan only checking
+	// the bottom 20 lines of each pane (recent content).
+	if err := updateQuotaState(townRoot, plan.LimitedSessions, acctCfg); err != nil {
+		style.PrintWarning("could not persist scan results: %v", err)
+	}
 
 	// --sessions: filter assignments to only specified sessions
 	if rotateSessions != "" {
@@ -1005,6 +1073,7 @@ func runWatchCycle(townRoot string, acctCfg *config.AccountsConfig) {
 
 func init() {
 	quotaStatusCmd.Flags().BoolVar(&quotaJSON, "json", false, "Output as JSON")
+	quotaStatusCmd.Flags().BoolVar(&statusScan, "scan", false, "Run a live scan and update state before displaying")
 
 	quotaScanCmd.Flags().BoolVar(&quotaJSON, "json", false, "Output as JSON")
 	quotaScanCmd.Flags().BoolVar(&scanUpdate, "update", false, "Update quota state with detected limits")
