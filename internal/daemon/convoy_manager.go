@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -291,6 +292,17 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map
 
 	events, err := store.GetAllEventsSince(m.ctx, querySince)
 	if err != nil {
+		if isInfNaNError(err) {
+			// A corrupted row in the events table has +Inf/-Inf/NaN stored in a
+			// double column (e.g. created_at serialised from Go's zero time.Time).
+			// Advance the high-water mark to now so future polls skip past the
+			// bad row entirely. Events before now are missed, but the stranded
+			// convoy scanner will catch any completions that were lost.
+			now := time.Now().UTC()
+			m.lastEventIDs.Store(name, now)
+			m.logger("Convoy: event poll (%s): +Inf/NaN row detected, advancing HWM to %s to skip corrupt data", name, now.Format(time.RFC3339))
+			return nil
+		}
 		m.logger("Convoy: event poll error (%s): %v", name, err)
 		// Signal recovery mode so the stranded scan shortens its interval and
 		// retries quickly once Dolt comes back.
@@ -373,6 +385,22 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map
 		convoy.CheckConvoysForIssue(m.ctx, hqStore, m.townRoot, issueID, "Convoy", m.logger, m.gtPath, m.isRigParked, resolver)
 	}
 	return nil
+}
+
+// isInfNaNError reports whether err is a Dolt/SQL error about an invalid float
+// value (+Inf, -Inf, NaN) in a double column. These errors arise when a
+// corrupted row (e.g. created_at written from Go's zero time.Time via an old
+// driver path) is encountered during a query. The caller should advance the
+// high-water mark to skip past the offending row rather than entering
+// permanent backoff.
+func isInfNaNError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "+Inf is not a valid value") ||
+		strings.Contains(msg, "-Inf is not a valid value") ||
+		strings.Contains(msg, "NaN is not a valid value")
 }
 
 func isCloseEvent(e *beadsdk.Event) bool {

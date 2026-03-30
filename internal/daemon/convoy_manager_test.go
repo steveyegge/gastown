@@ -2369,3 +2369,74 @@ func TestDoltRecoveryCallback_NilSafe(t *testing.T) {
 	dsm.clearUnhealthySignal()
 	dsm.mu.Unlock()
 }
+
+// infNaNStorage is a minimal Storage stub whose GetAllEventsSince always
+// returns the given error. All other methods panic (they should not be called).
+type infNaNStorage struct {
+	beadsdk.Storage // embedded to satisfy unimplemented methods
+	err             error
+}
+
+func (s *infNaNStorage) GetAllEventsSince(_ context.Context, _ time.Time) ([]*beadsdk.Event, error) {
+	return nil, s.err
+}
+
+// TestPollStore_InfNaNError_AdvancesHWMAndReturnsNil verifies that when
+// GetAllEventsSince returns a "+Inf is not a valid value for double" error
+// (corrupt Dolt row), pollStore advances the high-water mark to now and
+// returns nil (no error, no recovery mode).
+func TestPollStore_InfNaNError_AdvancesHWMAndReturnsNil(t *testing.T) {
+	for _, errMsg := range []string{
+		"Error 1366 (HY000): error: +Inf is not a valid value for double",
+		"Error 1366 (HY000): error: -Inf is not a valid value for double",
+		"Error 1366 (HY000): error: NaN is not a valid value for double",
+	} {
+		t.Run(errMsg[:20], func(t *testing.T) {
+			stub := &infNaNStorage{err: fmt.Errorf("%s", errMsg)}
+			stores := map[string]beadsdk.Storage{"hq": stub}
+
+			var logged []string
+			logger := func(format string, args ...interface{}) {
+				logged = append(logged, fmt.Sprintf(format, args...))
+			}
+
+			before := time.Now()
+			m := NewConvoyManager(t.TempDir(), logger, "gt", 10*time.Minute, stores, nil, nil)
+
+			hadError := m.pollStoresSnapshot(m.stores)
+			after := time.Now()
+
+			// pollStoresSnapshot should report no error (corrupt row is handled)
+			if hadError {
+				t.Errorf("expected no error for inf/nan store, got hadError=true; logs: %v", logged)
+			}
+
+			// recoveryMode must NOT be set (we recovered inline)
+			if m.recoveryMode.Load() {
+				t.Errorf("recoveryMode should not be set for inf/nan error; logs: %v", logged)
+			}
+
+			// High-water mark for "hq" should have been advanced to approximately now
+			v, ok := m.lastEventIDs.Load("hq")
+			if !ok {
+				t.Fatal("expected HWM to be stored for hq")
+			}
+			hwm := v.(time.Time)
+			if hwm.Before(before) || hwm.After(after.Add(time.Second)) {
+				t.Errorf("HWM %v not in expected range [%v, %v]", hwm, before, after)
+			}
+
+			// Should have logged a message about the skip
+			foundMsg := false
+			for _, s := range logged {
+				if strings.Contains(s, "+Inf/NaN row detected") {
+					foundMsg = true
+					break
+				}
+			}
+			if !foundMsg {
+				t.Errorf("expected HWM-advance log message, got: %v", logged)
+			}
+		})
+	}
+}
