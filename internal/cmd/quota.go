@@ -86,8 +86,9 @@ type QuotaStatusItem struct {
 
 // sessionCounts holds per-account live session statistics.
 type sessionCounts struct {
-	Total   map[string]int // total sessions per account handle
-	Limited map[string]int // rate-limited sessions per account handle
+	Total    map[string]int    // total sessions per account handle
+	Limited  map[string]int    // rate-limited sessions per account handle
+	ResetsAt map[string]string // earliest reset time per account handle
 }
 
 func runQuotaStatus(cmd *cobra.Command, args []string) error {
@@ -123,14 +124,18 @@ func runQuotaStatus(cmd *cobra.Command, args []string) error {
 		style.PrintWarning("session scan failed: %v", scanErr)
 	}
 	counts := sessionCounts{
-		Total:   make(map[string]int),
-		Limited: make(map[string]int),
+		Total:    make(map[string]int),
+		Limited:  make(map[string]int),
+		ResetsAt: make(map[string]string),
 	}
 	for _, r := range results {
 		if r.AccountHandle != "" {
 			counts.Total[r.AccountHandle]++
 			if r.RateLimited {
 				counts.Limited[r.AccountHandle]++
+				if r.ResetsAt != "" && counts.ResetsAt[r.AccountHandle] == "" {
+					counts.ResetsAt[r.AccountHandle] = r.ResetsAt
+				}
 			}
 		}
 	}
@@ -174,6 +179,9 @@ func printQuotaStatusJSON(acctCfg *config.AccountsConfig, state *config.QuotaSta
 		if status == "" {
 			status = string(config.QuotaStatusAvailable)
 		}
+		if counts.Limited[handle] > 0 && status == string(config.QuotaStatusAvailable) {
+			status = string(config.QuotaStatusLimited)
+		}
 		items = append(items, QuotaStatusItem{
 			Handle:          handle,
 			Email:           acct.Email,
@@ -208,6 +216,13 @@ func printQuotaStatusText(acctCfg *config.AccountsConfig, state *config.QuotaSta
 			status = config.QuotaStatusAvailable
 		}
 
+		// Override persisted status with live scan data — if sessions
+		// are actively rate-limited, show "limited" regardless of what
+		// the persisted state says.
+		if counts.Limited[handle] > 0 && status == config.QuotaStatusAvailable {
+			status = config.QuotaStatusLimited
+		}
+
 		// Handle marker and default indicator
 		marker := " "
 		if handle == acctCfg.Default {
@@ -223,8 +238,13 @@ func printQuotaStatusText(acctCfg *config.AccountsConfig, state *config.QuotaSta
 		case config.QuotaStatusLimited:
 			badge = style.Error.Render("limited")
 			limited++
-			if qs.ResetsAt != "" {
-				badge += style.Dim.Render(" (resets " + qs.ResetsAt + ")")
+			// Prefer live scan reset time over persisted state
+			resetsAt := qs.ResetsAt
+			if counts.ResetsAt[handle] != "" {
+				resetsAt = counts.ResetsAt[handle]
+			}
+			if resetsAt != "" {
+				badge += style.Dim.Render(" (resets " + resetsAt + ")")
 			}
 		case config.QuotaStatusCooldown:
 			badge = style.Warning.Render("cooldown")
