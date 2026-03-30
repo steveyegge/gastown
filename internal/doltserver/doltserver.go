@@ -558,17 +558,16 @@ func IsRunning(townRoot string) (bool, int, error) {
 		return true, pid, nil
 	}
 
-	// Last resort: TCP reachability check. This handles Docker containers
-	// and other setups where no local dolt process is visible (e.g., the
-	// port is forwarded by a Docker proxy). Only used when GT_DOLT_PORT
-	// overrides the default port, to avoid false positives from other
-	// services on 3307.
-	if config.Port != DefaultPort {
-		conn, err := net.DialTimeout("tcp", config.HostPort(), 2*time.Second)
-		if err == nil {
-			_ = conn.Close()
-			return true, 0, nil
-		}
+	// Last resort: TCP reachability check. This handles Docker containers,
+	// externally-restarted servers (e.g., dolt restarted outside of gt),
+	// and other setups where no local dolt process is visible via lsof/ss
+	// (e.g., the port is forwarded by a Docker proxy).
+	// We always check, even on the default port 3307, so that gt rig add
+	// succeeds when dolt is live regardless of how it was started.
+	conn, err := net.DialTimeout("tcp", config.HostPort(), 2*time.Second)
+	if err == nil {
+		_ = conn.Close()
+		return true, 0, nil
 	}
 
 	return false, 0, nil
