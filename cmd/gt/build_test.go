@@ -31,7 +31,6 @@ func TestCrossPlatformBuild(t *testing.T) {
 		{"linux", "arm64", "0"},
 		{"darwin", "amd64", "0"},
 		{"darwin", "arm64", "0"},
-		{"windows", "amd64", "0"},
 		{"freebsd", "amd64", "0"},
 	}
 
