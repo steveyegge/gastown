@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -422,6 +423,7 @@ var (
 	rotateFrom       string
 	rotateIdle       bool
 	rotateSessions   string
+	rotateMatch      []string
 	rotateTo         string
 )
 
@@ -449,6 +451,7 @@ Examples:
   gt quota rotate --from work                            # Preemptively rotate sessions on 'work' account
   gt quota rotate --from work --idle                     # Only rotate idle sessions on 'work' account
   gt quota rotate --sessions gt-refinery,hq-deacon       # Rotate specific sessions only
+  gt quota rotate --match "qc-crew-*" --to personal      # Rotate sessions matching a glob pattern
   gt quota rotate --to personal                          # Force all rotations to target 'personal'
   gt quota rotate --sessions gt-refinery --to personal   # Rotate one session to a specific account
   gt quota rotate --dry-run                              # Show plan without executing
@@ -520,6 +523,22 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 		}
 		for session := range plan.Assignments {
 			if !targetSet[session] {
+				delete(plan.Assignments, session)
+			}
+		}
+	}
+
+	// --match: filter assignments to sessions matching glob patterns
+	if len(rotateMatch) > 0 {
+		for session := range plan.Assignments {
+			matched := false
+			for _, pattern := range rotateMatch {
+				if ok, _ := filepath.Match(pattern, session); ok {
+					matched = true
+					break
+				}
+			}
+			if !matched {
 				delete(plan.Assignments, session)
 			}
 		}
@@ -702,6 +721,7 @@ var (
 	balanceShare  []string // repeatable --share handle=N
 	balanceTo     string
 	balanceForce  bool
+	balanceMatch  []string
 )
 
 var quotaBalanceCmd = &cobra.Command{
@@ -718,12 +738,13 @@ Sessions are moved in priority order:
   3. Busy sessions (only with --force — restarted with --continue)
 
 Examples:
-  gt quota balance                       # Even spread across all accounts
-  gt quota balance --max work=4          # At most 4 sessions on "work"
-  gt quota balance --share work=25       # ~25% of sessions on "work"
-  gt quota balance --to personal         # Consolidate all sessions to one account
-  gt quota balance --force               # Include busy sessions
-  gt quota balance --dry-run             # Show plan without executing`,
+  gt quota balance                                          # Even spread across all accounts
+  gt quota balance --max work=4                             # At most 4 sessions on "work"
+  gt quota balance --share work=25                          # ~25% of sessions on "work"
+  gt quota balance --to personal                            # Consolidate all sessions to one account
+  gt quota balance --match "qc-crew-*" --to work            # Move matching sessions to "work"
+  gt quota balance --force                                  # Include busy sessions
+  gt quota balance --dry-run                                # Show plan without executing`,
 	RunE: runQuotaBalance,
 }
 
@@ -812,6 +833,22 @@ func runQuotaBalance(cmd *cobra.Command, args []string) error {
 	plan, err := quota.PlanBalance(scanner, t, acctCfg, opts)
 	if err != nil {
 		return fmt.Errorf("planning balance: %w", err)
+	}
+
+	// --match: filter assignments to sessions matching glob patterns
+	if len(balanceMatch) > 0 {
+		for session := range plan.Assignments {
+			matched := false
+			for _, pattern := range balanceMatch {
+				if ok, _ := filepath.Match(pattern, session); ok {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				delete(plan.Assignments, session)
+			}
+		}
 	}
 
 	if len(plan.Assignments) == 0 {
@@ -1290,6 +1327,7 @@ func init() {
 	quotaRotateCmd.Flags().StringVar(&rotateFrom, "from", "", "Preemptively rotate sessions using this account")
 	quotaRotateCmd.Flags().BoolVar(&rotateIdle, "idle", false, "Only rotate sessions at the idle prompt (skip busy agents)")
 	quotaRotateCmd.Flags().StringVar(&rotateSessions, "sessions", "", "Comma-separated session names to target")
+	quotaRotateCmd.Flags().StringArrayVar(&rotateMatch, "match", nil, "Glob pattern to filter sessions (repeatable)")
 	quotaRotateCmd.Flags().StringVar(&rotateTo, "to", "", "Force target account for all rotations")
 
 	quotaBalanceCmd.Flags().BoolVar(&balanceDryRun, "dry-run", false, "Show plan without executing")
@@ -1298,6 +1336,7 @@ func init() {
 	quotaBalanceCmd.Flags().StringArrayVar(&balanceShare, "share", nil, "Target percentage per account (handle=N, repeatable)")
 	quotaBalanceCmd.Flags().StringVar(&balanceTo, "to", "", "Consolidate all sessions to one account")
 	quotaBalanceCmd.Flags().BoolVar(&balanceForce, "force", false, "Include busy sessions (restarted with --continue)")
+	quotaBalanceCmd.Flags().StringArrayVar(&balanceMatch, "match", nil, "Glob pattern to filter sessions (repeatable)")
 
 	quotaWatchCmd.Flags().DurationVar(&watchInterval, "interval", 5*time.Minute, "Poll interval")
 	quotaWatchCmd.Flags().BoolVar(&watchDryRun, "dry-run", false, "Show detections without executing rotation")
