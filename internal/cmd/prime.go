@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/cli"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
@@ -388,8 +389,83 @@ func setupPrimeSession(ctx RoleContext, roleInfo RoleInfo) error {
 	if !roleInfo.Mismatch {
 		ensureBeadsRedirect(ctx)
 	}
+	repairSessionEnv(ctx, roleInfo)
 	emitSessionEvent(ctx)
 	return nil
+}
+
+// repairSessionEnv checks if the tmux session is missing identity env vars
+// and re-injects them from the current role context. This self-heals sessions
+// that were created through non-standard paths or older gt versions. GH#3006.
+func repairSessionEnv(ctx RoleContext, roleInfo RoleInfo) {
+	if os.Getenv("TMUX") == "" {
+		return
+	}
+
+	t := tmux.NewTmux()
+	session, err := t.ResolveCurrentSession()
+	if err != nil || session == "" {
+		return
+	}
+
+	// Quick check: if GT_ROLE is already set in the session env, assume healthy.
+	if _, err := t.GetEnvironment(session, "GT_ROLE"); err == nil {
+		return
+	}
+
+	// Map prime Role type to config.AgentEnv role constant.
+	var agentName string
+	switch ctx.Role {
+	case RoleCrew:
+		agentName = roleInfo.Polecat // RoleInfo.Polecat holds crew member name too
+	case RolePolecat:
+		agentName = roleInfo.Polecat
+	case RoleDog:
+		agentName = roleInfo.Polecat
+	}
+
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:        string(ctx.Role),
+		Rig:         ctx.Rig,
+		AgentName:   agentName,
+		TownRoot:    ctx.TownRoot,
+		SessionName: session,
+	})
+
+	// Only inject identity-related vars that are missing, not the full AgentEnv
+	// output (which includes Dolt ports, OTEL config, etc. that may have been
+	// intentionally overridden per-session).
+	identitySet := make(map[string]bool, len(config.IdentityEnvVars))
+	for _, k := range config.IdentityEnvVars {
+		identitySet[k] = true
+	}
+	// Also include GT_ROOT and GT_SESSION — core session identity.
+	identitySet["GT_ROOT"] = true
+	identitySet["GT_SESSION"] = true
+
+	var repaired int
+	for k, v := range envVars {
+		if !identitySet[k] {
+			continue
+		}
+		if _, err := t.GetEnvironment(session, k); err == nil {
+			continue // already set at session level
+		}
+		if err := t.SetEnvironment(session, k, v); err == nil {
+			repaired++
+		}
+	}
+
+	if repaired > 0 {
+		fmt.Printf("\n%s Injected %d missing identity vars into session %s\n",
+			style.Bold.Render("⚠️  SESSION ENV REPAIR:"), repaired, session)
+		// Also set in the current process so this prime run uses the correct identity.
+		for k, v := range envVars {
+			if identitySet[k] {
+				os.Setenv(k, v)
+			}
+		}
+	}
 }
 
 // outputRoleContext emits session metadata and all role/context output sections.

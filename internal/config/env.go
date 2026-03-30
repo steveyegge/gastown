@@ -13,6 +13,15 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
+// IdentityEnvVars are agent identity env vars that must not leak across
+// process or session boundaries. Used by daemon sanitization (clearing
+// inherited vars), tmux global cleanup, and prime session env repair.
+// See GH#3006.
+var IdentityEnvVars = []string{
+	"GT_ROLE", "GT_RIG", "GT_CREW", "GT_POLECAT", "GT_DOG_NAME",
+	"GT_SESSION", "GT_AGENT", "BD_ACTOR", "GIT_AUTHOR_NAME", "BEADS_AGENT_NAME",
+}
+
 // AgentEnvConfig specifies the configuration for generating agent environment variables.
 // This is the single source of truth for all agent environment configuration.
 type AgentEnvConfig struct {

@@ -2324,6 +2324,12 @@ func (t *Tmux) SetGlobalEnvironment(key, value string) error {
 	return err
 }
 
+// UnsetGlobalEnvironment removes an environment variable from the tmux global environment.
+func (t *Tmux) UnsetGlobalEnvironment(key string) error {
+	_, err := t.run("set-environment", "-g", "-u", key)
+	return err
+}
+
 // GetGlobalEnvironment gets an environment variable from the tmux global environment.
 func (t *Tmux) GetGlobalEnvironment(key string) (string, error) {
 	out, err := t.run("show-environment", "-g", key)

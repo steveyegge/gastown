@@ -24,7 +24,7 @@ import (
 	beadsdk "github.com/steveyegge/beads"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/boot"
-	"github.com/steveyegge/gastown/internal/config"
+	agentconfig "github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/deps"
@@ -172,6 +172,15 @@ func New(config *Config) (*Daemon, error) {
 	t := tmux.NewTmux()
 	if err := t.SetGlobalEnvironment("GT_TOWN_ROOT", config.TownRoot); err != nil {
 		logger.Printf("Warning: failed to set GT_TOWN_ROOT in tmux global env: %v", err)
+	}
+
+	// Clear any agent identity vars that leaked into tmux global env.
+	// Only GT_TOWN_ROOT should be global. Leaked identity vars cause sessions
+	// without their own session-level overrides to inherit a stale identity,
+	// misattributing beads and mail. GH#3006.
+	identityVars := agentconfig.IdentityEnvVars
+	for _, k := range identityVars {
+		_ = t.UnsetGlobalEnvironment(k)
 	}
 
 	// Load patrol config from mayor/daemon.json, ensuring lifecycle defaults
@@ -1852,7 +1861,7 @@ func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 		prefix = rigCfg.Beads.Prefix
 	} else {
 		// Fall back to registry (mayor/rigs.json) when config.json is missing
-		prefix = config.GetRigPrefix(d.config.TownRoot, rigName)
+		prefix = agentconfig.GetRigPrefix(d.config.TownRoot, rigName)
 	}
 
 	rigBeadID := fmt.Sprintf("%s-rig-%s", prefix, rigName)

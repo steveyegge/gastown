@@ -134,6 +134,34 @@ func TestAgentEnv_Dog(t *testing.T) {
 	assertNotSet(t, env, "GT_RIG")
 }
 
+// TestIdentityEnvVars_CoversAgentEnvOutput verifies that IdentityEnvVars contains
+// all identity-bearing keys that AgentEnv can produce. If AgentEnv gains a new
+// identity key, this test fails to remind you to add it to IdentityEnvVars.
+func TestIdentityEnvVars_CoversAgentEnvOutput(t *testing.T) {
+	t.Parallel()
+
+	// Collect all identity keys produced by AgentEnv across all role types.
+	// Identity keys are role/rig/agent-specific — NOT infrastructure keys like
+	// GT_ROOT, NODE_OPTIONS, CLAUDECODE, etc.
+	identityKeys := map[string]bool{
+		"GT_ROLE": true, "GT_RIG": true, "GT_CREW": true,
+		"GT_POLECAT": true, "GT_DOG_NAME": true, "GT_SESSION": true,
+		"GT_AGENT": true, "BD_ACTOR": true, "GIT_AUTHOR_NAME": true,
+		"BEADS_AGENT_NAME": true,
+	}
+
+	have := make(map[string]bool, len(IdentityEnvVars))
+	for _, k := range IdentityEnvVars {
+		have[k] = true
+	}
+
+	for k := range identityKeys {
+		if !have[k] {
+			t.Errorf("IdentityEnvVars is missing %q — add it to prevent identity leakage (GH#3006)", k)
+		}
+	}
+}
+
 func TestAgentEnv_WithRuntimeConfigDir(t *testing.T) {
 	t.Parallel()
 	env := AgentEnv(AgentEnvConfig{
