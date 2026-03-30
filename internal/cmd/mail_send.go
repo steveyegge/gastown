@@ -30,6 +30,14 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 		mailBody = strings.TrimRight(string(data), "\n")
 	}
 
+	// Scan subject + body for credential patterns before creating a permanent Dolt record.
+	// A match warns the user and requires --allow-credentials to proceed.
+	if findings := scanForCredentials(mailSubject + "\n" + mailBody); len(findings) > 0 {
+		if err := warnCredentials(findings, mailAllowCredentials); err != nil {
+			return err
+		}
+	}
+
 	var to string
 
 	if mailSendSelf {

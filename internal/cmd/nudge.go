@@ -37,12 +37,13 @@ func hasACPSessionByName(townRoot, sessionName string) bool {
 }
 
 var (
-	nudgeMessageFlag  string
-	nudgeForceFlag    bool
-	nudgeStdinFlag    bool
-	nudgeIfFreshFlag  bool
-	nudgeModeFlag     string
-	nudgePriorityFlag string
+	nudgeMessageFlag       string
+	nudgeForceFlag         bool
+	nudgeStdinFlag         bool
+	nudgeIfFreshFlag       bool
+	nudgeModeFlag          string
+	nudgePriorityFlag      string
+	nudgeAllowCredentials  bool // Bypass credential scan warning
 )
 
 // Nudge delivery modes.
@@ -66,6 +67,7 @@ func init() {
 	nudgeCmd.Flags().BoolVar(&nudgeIfFreshFlag, "if-fresh", false, "Only send if caller's tmux session is <60s old (suppresses compaction nudges)")
 	nudgeCmd.Flags().StringVar(&nudgeModeFlag, "mode", NudgeModeWaitIdle, "Delivery mode: wait-idle (default), queue, or immediate")
 	nudgeCmd.Flags().StringVar(&nudgePriorityFlag, "priority", nudge.PriorityNormal, "Queue priority: normal (default) or urgent")
+	nudgeCmd.Flags().BoolVar(&nudgeAllowCredentials, "allow-credentials", false, "Bypass credential scan warning (use with caution)")
 }
 
 var nudgeCmd = &cobra.Command{
@@ -405,6 +407,14 @@ func runNudge(cmd *cobra.Command, args []string) (retErr error) {
 		message = args[1]
 	} else {
 		return fmt.Errorf("message required: use -m flag or provide as second argument")
+	}
+
+	// Scan message for credential patterns (nudge messages are logged permanently via events feed).
+	// Nudges themselves are ephemeral but their content may appear in logs/telemetry.
+	if findings := scanForCredentials(message); len(findings) > 0 {
+		if err := warnCredentials(findings, nudgeAllowCredentials); err != nil {
+			return err
+		}
 	}
 
 	// Identify sender for message prefix (needed before channel check)
