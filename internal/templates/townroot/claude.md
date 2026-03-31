@@ -51,7 +51,7 @@ production server and degrade performance. This is a recurring problem.
 {{cmd}} dolt cleanup             # Remove orphan databases (safe — protects production DBs)
 ```
 
-**NEVER use `rm -rf` on `~/.dolt-data/` directories.** Use `{{cmd}} dolt cleanup` instead.
+**NEVER use `rm -rf` on `~/.dolt-data/` directories.** NEVER remove, delete, or modify files inside Dolt's `.dolt/` directory — including `noms/LOCK` files. These are Dolt-internal files. Removing them WILL cause unrecoverable data corruption and data loss. Dolt manages these files itself; external interference is never safe.
 
 ### Key commands
 ```bash

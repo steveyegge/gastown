@@ -50,7 +50,7 @@ func TestStaleSQLServerInfoCheck_DetectsStaleFile(t *testing.T) {
 	}
 }
 
-func TestStaleSQLServerInfoCheck_FixRemovesFiles(t *testing.T) {
+func TestStaleSQLServerInfoCheck_FixIsNoOp(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test uses Unix process signals")
 	}
@@ -81,15 +81,15 @@ func TestStaleSQLServerInfoCheck_FixRemovesFiles(t *testing.T) {
 		t.Fatalf("expected 2 stale files, got %d", len(check.staleFiles))
 	}
 
-	// Fix
+	// Fix is a no-op — sql-server.info is a Dolt-internal file
 	if err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
-	// Verify files are gone
+	// Verify files are NOT removed (Fix no longer deletes Dolt-internal files)
 	for _, path := range check.staleFiles {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Errorf("expected %s to be removed after fix", path)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Errorf("expected %s to still exist after no-op fix", path)
 		}
 	}
 }

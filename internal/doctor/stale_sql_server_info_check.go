@@ -96,17 +96,19 @@ func (c *StaleSQLServerInfoCheck) Run(ctx *CheckContext) *CheckResult {
 		Status:  StatusWarning,
 		Message: fmt.Sprintf("%d stale sql-server.info file(s) from dead Dolt servers", len(c.staleFiles)),
 		Details: details,
-		FixHint: "Run 'gt doctor --fix' to remove stale sql-server.info files",
+		FixHint: "Restart the Dolt server to clear stale sql-server.info files (Dolt writes and cleans these itself)",
 	}
 }
 
-// Fix removes all detected stale sql-server.info files.
+// Fix is a no-op. sql-server.info is a Dolt-internal file written and managed
+// by Dolt itself (see dolt/commands/sqlserver/creds.go). Restarting the Dolt
+// server will create a fresh one.
+//
+// WARNING: DO NOT remove, delete, or modify files inside Dolt's .dolt/
+// directory — including noms/LOCK files. These are Dolt-internal files.
+// Removing them WILL cause unrecoverable data corruption and data loss.
+// Dolt manages these files itself; external interference is never safe.
 func (c *StaleSQLServerInfoCheck) Fix(ctx *CheckContext) error {
-	for _, path := range c.staleFiles {
-		if err := os.Remove(path); err != nil {
-			return fmt.Errorf("could not remove stale sql-server.info %s: %w", path, err)
-		}
-	}
 	return nil
 }
 

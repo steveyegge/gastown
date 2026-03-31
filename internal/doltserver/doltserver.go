@@ -1487,66 +1487,17 @@ func Start(townRoot string) error {
 	}
 
 	// Quarantine corrupted/phantom database dirs before server launch.
-	// Dolt auto-discovers ALL dirs in --data-dir. A phantom dir with a broken
-	// noms store (missing manifest) crashes the ENTIRE server. (gt-hs1i2)
+	// WARNING: DO NOT remove, delete, or modify files inside Dolt's .dolt/
+	// directory — including noms/LOCK files. These are Dolt-internal files.
+	// Removing them WILL cause unrecoverable data corruption and data loss.
+	// Dolt manages these files itself; external interference is never safe.
 	//
-	// Safety: move to .quarantine/ instead of deleting, and skip large databases
-	// that are likely legitimate but temporarily corrupted. (gt-xvh)
-	if entries, readErr := os.ReadDir(config.DataDir); readErr == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			name := entry.Name()
-			if strings.HasPrefix(name, ".") {
-				continue // Skip hidden dirs (.dolt, .doltcfg, .quarantine, etc.)
-			}
-			dbDir := filepath.Join(config.DataDir, name)
-			doltDir := filepath.Join(dbDir, ".dolt")
-			if _, statErr := os.Stat(doltDir); statErr != nil {
-				continue // Not a dolt dir at all — skip
-			}
-			manifest := filepath.Join(doltDir, "noms", "manifest")
-			if _, statErr := os.Stat(manifest); statErr == nil {
-				continue // Manifest exists — healthy database
-			}
-			// Missing manifest — this database would crash the server.
-			// Check size: large databases (>1MB) are likely legitimate databases
-			// with a transient corruption, not empty phantoms. Move instead of delete.
-			size := dirSize(dbDir)
-			quarantineDir := filepath.Join(config.DataDir, ".quarantine")
-			if err := os.MkdirAll(quarantineDir, 0755); err != nil {
-				fmt.Fprintf(os.Stderr, "Quarantine: failed to create quarantine dir: %v\n", err)
-				continue
-			}
-			dest := filepath.Join(quarantineDir, fmt.Sprintf("%s.%d", name, time.Now().Unix()))
-			if err := os.Rename(dbDir, dest); err != nil {
-				// Cross-device rename fails — fall back to removal only for tiny dirs
-				if size > 1<<20 { // >1MB — refuse to destroy, just warn
-					fmt.Fprintf(os.Stderr, "Quarantine: SKIPPING large database %q (%s, missing noms/manifest) — move failed: %v\n",
-						name, formatBytes(size), err)
-					fmt.Fprintf(os.Stderr, "  Manual fix: mv %s %s\n", dbDir, dest)
-				} else {
-					fmt.Fprintf(os.Stderr, "Quarantine: removing small phantom database dir %q (%s, missing noms/manifest)\n",
-						name, formatBytes(size))
-					_ = os.RemoveAll(dbDir)
-				}
-			} else {
-				fmt.Fprintf(os.Stderr, "Quarantine: moved database %q to %s (%s, missing noms/manifest)\n",
-					name, dest, formatBytes(size))
-			}
-		}
-	}
+	// Previously this section quarantined/removed database dirs with missing
+	// noms/manifest and cleaned up stale .dolt/noms/LOCK files. Both operations
+	// manipulated Dolt-internal state and risked data corruption. Dolt handles
+	// its own lock files and database integrity on startup.
 
-	// Clean up stale Dolt LOCK files in all database directories
 	databases, _ := ListDatabases(townRoot)
-	for _, db := range databases {
-		dbDir := filepath.Join(config.DataDir, db)
-		if err := cleanupStaleDoltLock(dbDir); err != nil {
-			// Non-fatal warning
-			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-		}
-	}
 
 	// Open log file
 	logFile, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
@@ -1672,39 +1623,13 @@ func Start(townRoot string) error {
 	return fmt.Errorf("Dolt server process started (PID %d) but not accepting connections after %v (%d databases × 5s): %w\nCheck logs with: gt dolt logs", cmd.Process.Pid, totalTimeout, dbCount, lastErr)
 }
 
-// cleanupStaleDoltLock removes a stale Dolt LOCK file if no process holds it.
-// Dolt's embedded mode uses a file lock at .dolt/noms/LOCK that can become stale
-// after crashes. This checks if any process holds the lock before removing.
-// Returns nil if lock is held by active processes (this is expected if bd is running).
-func cleanupStaleDoltLock(databaseDir string) error {
-	lockPath := filepath.Join(databaseDir, ".dolt", "noms", "LOCK")
-
-	// Check if lock file exists
-	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
-		return nil // No lock file, nothing to clean
-	}
-
-	// Check if any process holds this file open using lsof
-	cmd := exec.Command("lsof", lockPath)
-	setProcessGroup(cmd)
-	_, err := cmd.Output()
-	if err != nil {
-		// lsof returns exit code 1 when no process has the file open
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			// No process holds the lock - safe to remove stale lock
-			if err := os.Remove(lockPath); err != nil {
-				return fmt.Errorf("failed to remove stale LOCK file: %w", err)
-			}
-			return nil
-		}
-		// Other error - ignore, let dolt handle it
-		return nil
-	}
-
-	// lsof found processes - lock is legitimately held (likely by bd)
-	// This is not an error condition; dolt server will handle the conflict
-	return nil
-}
+// WARNING: DO NOT remove, delete, or modify files inside Dolt's .dolt/
+// directory — including noms/LOCK files. These are Dolt-internal files.
+// Removing them WILL cause unrecoverable data corruption and data loss.
+// Dolt manages these files itself; external interference is never safe.
+//
+// cleanupStaleDoltLock previously removed stale .dolt/noms/LOCK files.
+// This was unsafe — Dolt manages its own lock files on startup.
 
 // DefaultDoltSocketPath is the default Unix socket Dolt creates.
 const DefaultDoltSocketPath = "/tmp/mysql.sock"

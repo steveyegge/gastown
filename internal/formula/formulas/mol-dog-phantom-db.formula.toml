@@ -7,19 +7,19 @@ startup, the broken noms store crashes INFORMATION_SCHEMA and can take down
 the entire server. (GH#2051, gt-hs1i2)
 
 Current behavior (from doltserver.go StartServer):
-- Quarantines phantom dirs found during startup (removes them)
-- ListDatabases() skips them with a warning
+- ListDatabases() skips phantom dirs with a warning
 
 This molecule adds continuous monitoring: detect phantoms that appear between
 server restarts (e.g., from DROP DATABASE + branch_control re-materialization),
-and escalate before the next restart hits them.
+and escalate before the next restart hits them. The fix is to restart the Dolt
+server — never to remove or modify files inside .dolt/ directories.
 
 ## Dog Contract
 
 This is infrastructure work. You:
 1. Scan the .dolt-data/ directory for phantom databases
 2. Report findings to Deacon
-3. Quarantine any phantoms found (remove corrupted dirs)
+3. Escalate if phantoms found (do NOT remove or modify any files)
 4. Return to kennel
 
 ## Variables
@@ -30,9 +30,12 @@ This is infrastructure work. You:
 
 ## Safety
 
-Phantom database directories have NO valid data (missing noms/manifest).
-Removing them is safe and prevents server crashes. The quarantine step
-mirrors the existing startup quarantine in doltserver.go."""
+WARNING: DO NOT remove, delete, or modify files inside Dolt's .dolt/
+directory — including noms/LOCK files. These are Dolt-internal files.
+Removing them WILL cause unrecoverable data corruption and data loss.
+Dolt manages these files itself; external interference is never safe.
+
+This molecule detects and escalates only — it never removes files."""
 formula = "mol-dog-phantom-db"
 version = 1
 
@@ -71,44 +74,35 @@ A phantom database has:
 **Exit criteria:** Scan complete, phantoms identified."""
 
 [[steps]]
-id = "quarantine"
-title = "Quarantine phantom databases"
+id = "escalate"
+title = "Escalate phantom databases"
 needs = ["scan"]
 description = """
-Remove phantom database directories to prevent server crashes.
+Escalate phantom database findings — do NOT remove or modify any files.
+
+WARNING: DO NOT remove, delete, or modify files inside Dolt's .dolt/
+directory — including noms/LOCK files. These are Dolt-internal files.
+Removing them WILL cause unrecoverable data corruption and data loss.
+Dolt manages these files itself; external interference is never safe.
 
 **1. If no phantoms found:**
-Skip this step — nothing to quarantine.
+Skip this step — nothing to escalate.
 
-**2. For each phantom database:**
-Remove the corrupted directory:
+**2. If phantoms were found, escalate:**
 ```bash
-rm -rf ~/gt/.dolt-data/<phantom-name>
-```
-
-This is safe because:
-- The directory has no valid noms store (no manifest)
-- It contains no recoverable data
-- Leaving it would crash the server on next restart
-
-**3. Record results:**
-- Count of phantoms quarantined
-- Any errors during removal
-
-**4. Escalate if phantoms were found:**
-```bash
-gt escalate -s HIGH "Dolt: quarantined {{phantom_count}} phantom database(s): {{phantom_names}}"
+gt escalate -s HIGH "Dolt: detected {{phantom_count}} phantom database(s): {{phantom_names}} — requires Dolt server restart to resolve"
 ```
 
 Phantom databases indicate a Dolt bug (DROP DATABASE + catalog re-materialization)
-that should be investigated.
+that should be investigated. The fix is to restart the Dolt server, not to
+remove directories.
 
-**Exit criteria:** All phantoms quarantined (or none found)."""
+**Exit criteria:** Findings escalated (or none found)."""
 
 [[steps]]
 id = "report"
 title = "Report findings and return to kennel"
-needs = ["quarantine"]
+needs = ["escalate"]
 description = """
 Generate summary and signal completion.
 

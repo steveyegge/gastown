@@ -187,7 +187,10 @@ Steps: scan databases → cleanup orphans → report
 ```bash
 ls -d {{ .TownRoot }}/.dolt-data/*/                  # List database dirs
 # Phantom = has .dolt/ subdir but missing .dolt/noms/manifest
-# Quarantine: rm -rf {{ .TownRoot }}/.dolt-data/<phantom-name>
+# WARNING: DO NOT remove, delete, or modify files inside Dolt's .dolt/
+# directory — including noms/LOCK files. These are Dolt-internal files.
+# Removing them WILL cause unrecoverable data corruption and data loss.
+# Escalate phantom findings; restart Dolt server to resolve.
 ```
 
 Steps: scan → quarantine → report
