@@ -193,21 +193,31 @@ else
     echo "  Process alive: pid=$DEACON_PID comm=$DEACON_COMM"
   fi
 
-  # Check deacon heartbeat file (if configured)
-  HEARTBEAT_FILE="$TOWN_ROOT/deacon/.deacon-heartbeat"
+  # Check deacon heartbeat file.
+  # heartbeat.json is the canonical file written by `gt deacon heartbeat` on every
+  # patrol cycle (start + mid-cycle checkpoint). .deacon-heartbeat is also kept in
+  # sync by WriteHeartbeat() for backward compatibility. Prefer heartbeat.json here
+  # as it is always written by the Go implementation.
+  #
+  # Threshold: 1200s (20m). The daemon nudges at 10m and logs STUCK at 15m;
+  # stuck-agent-dog fires at 20m to provide context-aware escalation without
+  # racing with the daemon or false-positiving during normal sleep/idle periods.
+  # Deacon patrol cycles take up to ~15 minutes total with heartbeat writes at
+  # start and mid-cycle, so max gap between writes is ~8 minutes + 60s sleep ≈ 9m.
+  HEARTBEAT_FILE="$TOWN_ROOT/deacon/heartbeat.json"
   if [ -f "$HEARTBEAT_FILE" ]; then
     HEARTBEAT_TIME=$(stat -f %m "$HEARTBEAT_FILE" 2>/dev/null || stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null)
     NOW=$(date +%s)
     HEARTBEAT_AGE=$(( NOW - HEARTBEAT_TIME ))
 
-    if [ "$HEARTBEAT_AGE" -gt 600 ]; then
-      echo "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, >10m threshold)"
+    if [ "$HEARTBEAT_AGE" -gt 1200 ]; then
+      echo "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, >20m threshold)"
       DEACON_ISSUE="stuck_heartbeat_${HEARTBEAT_AGE}s"
     else
       echo "  OK: Deacon heartbeat ${HEARTBEAT_AGE}s old"
     fi
   else
-    echo "  INFO: No heartbeat file (may not be configured)"
+    echo "  WARN: No heartbeat file found at $HEARTBEAT_FILE"
   fi
 fi
 ```

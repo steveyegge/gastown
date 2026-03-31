@@ -38,10 +38,10 @@ func TestIsGitRemoteURL(t *testing.T) {
 		// Bare directory name — should return false
 		{"foo", false},
 
-		// file:// URIs — should return false (local filesystem)
-		{"file:///tmp/evil-repo", false},
-		{"file:///Users/scott/projects/foo", false},
-		{"file://user@localhost:/tmp/evil-repo", false},
+		// file:// URIs — explicit local git remotes are allowed
+		{"file:///tmp/local-repo.git", true},
+		{"file:///Users/scott/projects/foo", true},
+		{"file://user@localhost:/tmp/local-repo.git", true},
 
 		// Argument injection — should return false
 		{"-oProxyCommand=evil", false},

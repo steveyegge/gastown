@@ -298,6 +298,12 @@ func TestResolveProcessNames(t *testing.T) {
 			want:      []string{"codex"},
 		},
 		{
+			name:      "built-in preset through gt wrapper command",
+			agentName: "codex",
+			command:   "gt-codex",
+			want:      []string{"codex"},
+		},
+		{
 			name:      "unknown agent with known command",
 			agentName: "my-custom-agent",
 			command:   "claude",
@@ -1477,12 +1483,12 @@ func TestACPModes(t *testing.T) {
 	t.Cleanup(ResetRegistryForTesting)
 
 	tests := []struct {
-		name      string
-		rc        *RuntimeConfig
-		wantACP   bool
-		wantMode  string
-		wantCmd   string
-		wantArgs  []string
+		name     string
+		rc       *RuntimeConfig
+		wantACP  bool
+		wantMode string
+		wantCmd  string
+		wantArgs []string
 	}{
 		{
 			name: "native mode - claude-agent-acp",

@@ -143,66 +143,10 @@ if [ ${#NEEDS_REVIEW[@]} -gt 0 ]; then
 fi
 ```
 
-### Step 3: Deduplicate CI failures against existing beads
-
-For each failure, check if a bead already exists. Use `--rig` to ensure we
-query the same rig where beads are created:
-
-```bash
-# Derive rig name from GT_RIG_ROOT path (e.g., /home/user/gt/gastown → gastown)
-RIG_NAME=$(basename "$(dirname "$(dirname "$GT_RIG_ROOT")")" 2>/dev/null)
-RIG_FLAG=""
-[ -n "$RIG_NAME" ] && RIG_FLAG="--rig $RIG_NAME"
-
-CREATED=0
-SKIPPED=0
-
-# Only create CI failure beads for repos we own — skip upstream noise
-REPO_OWNER=$(echo "$REPO" | cut -d'/' -f1)
-if [ "$REPO_OWNER" != "athosmartins" ]; then
-  echo "Skipping CI failure beads for upstream repo $REPO (not athosmartins)"
-  SKIPPED=${#FAILURES[@]}
-else
-
-EXISTING=$(bd list --label ci-failure --status open $RIG_FLAG --json 2>/dev/null || echo "[]")
-
-for F in "${FAILURES[@]}"; do
-  IFS='|' read -r PR_NUM PR_TITLE CHECK_NAME CHECK_URL <<< "$F"
-  BEAD_TITLE="CI failure: $CHECK_NAME on PR #$PR_NUM"
-
-  # Check for duplicate (use jq --arg for safe string comparison)
-  if echo "$EXISTING" | jq -e --arg t "$BEAD_TITLE" '.[] | select(.title == $t)' > /dev/null 2>&1; then
-    SKIPPED=$((SKIPPED + 1))
-    continue
-  fi
-
-  DESCRIPTION="CI check \`$CHECK_NAME\` failed on PR #$PR_NUM ($PR_TITLE)
-
-PR: https://github.com/$REPO/pull/$PR_NUM"
-  [ -n "$CHECK_URL" ] && DESCRIPTION="$DESCRIPTION
-Check: $CHECK_URL"
-
-  BEAD_ID=$(bd create "$BEAD_TITLE" -t task -p 2 \
-    -d "$DESCRIPTION" \
-    -l ci-failure \
-    $RIG_FLAG \
-    --json 2>/dev/null | jq -r '.id // empty')
-
-  if [ -n "$BEAD_ID" ]; then
-    CREATED=$((CREATED + 1))
-
-    gt activity emit github_check_failed \
-      --message "CI check $CHECK_NAME failed on PR #$PR_NUM ($REPO), bead $BEAD_ID" \
-      2>/dev/null || true
-  fi
-done
-fi # end athosmartins owner check
-```
-
 ## Record Result
 
 ```bash
-SUMMARY="$REPO: $PR_COUNT PRs — ${#EASY_WINS[@]} easy win(s), ${#NEEDS_REVIEW[@]} need review, ${#FAILURES[@]} failure(s), $CREATED bead(s) created, $SKIPPED already tracked"
+SUMMARY="$REPO: $PR_COUNT PRs — ${#EASY_WINS[@]} easy win(s), ${#NEEDS_REVIEW[@]} need review, ${#FAILURES[@]} CI failure(s) detected"
 echo "$SUMMARY"
 ```
 

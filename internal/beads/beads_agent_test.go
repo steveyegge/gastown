@@ -1,9 +1,11 @@
 package beads
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -70,7 +72,91 @@ esac
 	t.Setenv("MOCK_BD_SHOW_OUTPUT", showOutput)
 }
 
-func TestGetAgentBead_PrefersStructuredAgentState(t *testing.T) {
+func installMockBDShowRecorder(t *testing.T, showOutput string) string {
+	t.Helper()
+
+	binDir := t.TempDir()
+	logPath := filepath.Join(binDir, "bd.log")
+
+	script := `#!/bin/sh
+LOG_FILE='` + logPath + `'
+printf '%s\n' "$*" >> "$LOG_FILE"
+
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    --*) ;;
+    *) cmd="$arg"; break ;;
+  esac
+done
+
+case "$cmd" in
+  version)
+    exit 0
+    ;;
+  show)
+    printf '%s\n' "$MOCK_BD_SHOW_OUTPUT"
+    exit 0
+    ;;
+  update)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`
+	scriptPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write mock bd: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("MOCK_BD_SHOW_OUTPUT", showOutput)
+	return logPath
+}
+
+func installMockBDRequireExplicitBeadsDir(t *testing.T, expectedBeadsDir string) {
+	t.Helper()
+
+	binDir := t.TempDir()
+	script := fmt.Sprintf(`#!/bin/sh
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    --*) ;;
+    *) cmd="$arg"; break ;;
+  esac
+done
+
+target="${BEADS_DIR:-$(pwd)/.beads}"
+if [ "$target" != "%s" ]; then
+  echo "wrong target $target" >&2
+  exit 9
+fi
+
+case "$cmd" in
+  version)
+    exit 0
+    ;;
+  show)
+    printf '%%s\n' '[{"id":"gt-gastown-polecat-nux","title":"Polecat nux","issue_type":"agent","labels":["gt:agent"],"description":"role_type: polecat\nrig: gastown\nagent_state: idle\nhook_bead: null","agent_state":"idle"}]'
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`, expectedBeadsDir)
+	scriptPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write mock bd: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestGetAgentBead_PrefersDescriptionAgentState(t *testing.T) {
 	tmpDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
@@ -92,8 +178,10 @@ func TestGetAgentBead_PrefersStructuredAgentState(t *testing.T) {
 	if issue.AgentState != "idle" {
 		t.Fatalf("issue.AgentState = %q, want %q", issue.AgentState, "idle")
 	}
-	if fields.AgentState != "idle" {
-		t.Fatalf("fields.AgentState = %q, want %q", fields.AgentState, "idle")
+	// Description agent_state ("spawning") now takes priority over the legacy
+	// structured column ("idle") per the bd 0.62+ contract.
+	if fields.AgentState != "spawning" {
+		t.Fatalf("fields.AgentState = %q, want %q (description should win)", fields.AgentState, "spawning")
 	}
 }
 
@@ -115,6 +203,53 @@ func TestGetAgentBead_FallsBackToDescriptionAgentState(t *testing.T) {
 	}
 	if fields.AgentState != "spawning" {
 		t.Fatalf("fields.AgentState = %q, want %q", fields.AgentState, "spawning")
+	}
+}
+
+func TestUpdateAgentState_UsesUpdateDescriptionPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for bd")
+	}
+	tmpDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	logPath := installMockBDShowRecorder(t, `[{"id":"gt-gastown-polecat-nux","title":"Polecat nux","issue_type":"agent","labels":["gt:agent"],"description":"role_type: polecat\nrig: gastown\nagent_state: spawning\nhook_bead: null"}]`)
+	bd := NewIsolated(tmpDir)
+
+	if err := bd.UpdateAgentState("gt-gastown-polecat-nux", "working"); err != nil {
+		t.Fatalf("UpdateAgentState: %v", err)
+	}
+
+	logOutput := readMockBDLog(t, logPath)
+	if !strings.Contains(logOutput, "show gt-gastown-polecat-nux --json") {
+		t.Fatalf("mock bd log %q missing show call", logOutput)
+	}
+	if !strings.Contains(logOutput, "update gt-gastown-polecat-nux") {
+		t.Fatalf("mock bd log %q missing update call", logOutput)
+	}
+	// Should NOT use the obsolete bd agent state or bd set-state path
+	if strings.Contains(logOutput, "agent state") || strings.Contains(logOutput, "set-state") {
+		t.Fatalf("mock bd log %q unexpectedly used obsolete bd agent state / set-state path", logOutput)
+	}
+}
+
+func TestUpdateAgentState_UsesExplicitBeadsDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for bd")
+	}
+	workDir := t.TempDir()
+	targetBeadsDir := filepath.Join(t.TempDir(), ".beads")
+	if err := os.MkdirAll(targetBeadsDir, 0755); err != nil {
+		t.Fatalf("mkdir target .beads: %v", err)
+	}
+
+	installMockBDRequireExplicitBeadsDir(t, targetBeadsDir)
+
+	bd := NewWithBeadsDir(workDir, targetBeadsDir)
+	if err := bd.UpdateAgentState("gt-gastown-polecat-nux", "spawning"); err != nil {
+		t.Fatalf("UpdateAgentState: %v", err)
 	}
 }
 

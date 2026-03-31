@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // signalsToHandle returns the signals that Forward() should listen for.
@@ -14,10 +16,11 @@ func signalsToHandle() []os.Signal {
 	return []os.Signal{os.Interrupt}
 }
 
-// setupProcessGroup is a no-op on Windows.
-// Windows doesn't have process groups like Unix.
+// setupProcessGroup configures the command to suppress the transient console
+// window that Windows creates for console-subsystem children spawned from a
+// GUI/no-console parent (e.g. the daemon).
 func (p *Proxy) setupProcessGroup() {
-	// No-op on Windows - no process group support
+	util.SetDetachedProcessGroup(p.cmd)
 }
 
 // isProcessAlive checks if the agent process is still running.

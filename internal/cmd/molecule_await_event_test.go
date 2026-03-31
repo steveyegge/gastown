@@ -63,6 +63,23 @@ func TestCalculateEventTimeout(t *testing.T) {
 			want:        5 * time.Minute,
 		},
 		{
+			name:        "backoff overflow guard: idle=34 with max cap",
+			timeout:     "60s",
+			backoffBase: "30s",
+			backoffMult: 2,
+			backoffMax:  "5m",
+			idleCycles:  34, // 30s * 2^34 overflows int64; must clamp to 5m
+			want:        5 * time.Minute,
+		},
+		{
+			name:        "backoff overflow guard: idle=34 no max (no overflow without cap)",
+			timeout:     "60s",
+			backoffBase: "1ns",
+			backoffMult: 2,
+			idleCycles:  34, // 1ns * 2^34 = 17179869184ns ≈ 17s — fits in int64, no overflow
+			want:        time.Duration(1 << 34),
+		},
+		{
 			name:        "backoff base exceeds max",
 			timeout:     "60s",
 			backoffBase: "15m",

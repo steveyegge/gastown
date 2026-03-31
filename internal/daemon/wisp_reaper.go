@@ -8,6 +8,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/reaper"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 const (
@@ -128,6 +129,7 @@ func (d *Daemon) dispatchReaperDog(vars map[string]string) error {
 
 	cmd := exec.Command("gt", args...)
 	cmd.Dir = d.config.TownRoot
+	util.SetDetachedProcessGroup(cmd)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("gt sling: %w", err)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Panel represents which panel has focus
@@ -653,6 +654,7 @@ func (m *Model) nudgeSelected() (tea.Model, tea.Cmd) {
 	// Run gt nudge with proper target format
 	target := nudgeTarget(agent)
 	c := exec.Command("gt", "nudge", target, "continue")
+	util.SetDetachedProcessGroup(c)
 	return m, tea.ExecProcess(c, func(err error) tea.Msg {
 		// Refresh problems after nudge
 		return problemsTickMsg{}
@@ -668,6 +670,7 @@ func (m *Model) handoffSelected() (tea.Model, tea.Cmd) {
 	// Run gt nudge with proper target format
 	target := nudgeTarget(agent)
 	c := exec.Command("gt", "nudge", target, "handoff")
+	util.SetDetachedProcessGroup(c)
 	return m, tea.ExecProcess(c, func(err error) tea.Msg {
 		return problemsTickMsg{}
 	})

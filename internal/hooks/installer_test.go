@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -34,9 +35,12 @@ func TestInstallForRole_RoleAware(t *testing.T) {
 				t.Fatal("settings.json not created")
 			}
 
-			// Verify content matches expected template
+			// Verify content matches resolved template (with {{GT_BIN}} substituted)
 			got, _ := os.ReadFile(path)
-			want, _ := templateFS.ReadFile("templates/claude/" + tt.wantFile)
+			want, err := resolveAndSubstitute("claude", tt.wantFile, tt.role)
+			if err != nil {
+				t.Fatalf("resolveAndSubstitute: %v", err)
+			}
 			if string(got) != string(want) {
 				t.Errorf("content mismatch: got %d bytes, want %d bytes (from %s)", len(got), len(want), tt.wantFile)
 			}
@@ -230,12 +234,21 @@ func TestSyncForRole_JSONWhitespaceInsensitive(t *testing.T) {
 		t.Fatalf("reading created file: %v", err)
 	}
 
-	// Add extra whitespace — structurally identical JSON, different bytes
-	reformatted := strings.ReplaceAll(string(original), ":", " : ")
-	if string(original) == reformatted {
+	// Reformat with different whitespace by round-tripping through json.MarshalIndent.
+	// This changes indentation structure without corrupting string values (safe on Windows
+	// where strings.ReplaceAll(":", " : ") would corrupt drive letters like C: → C :).
+	var parsed interface{}
+	if err := json.Unmarshal(original, &parsed); err != nil {
+		t.Fatalf("parsing original JSON: %v", err)
+	}
+	reformatted, err := json.MarshalIndent(parsed, "", "    ")
+	if err != nil {
+		t.Fatalf("reformatting JSON: %v", err)
+	}
+	if string(original) == string(reformatted) {
 		t.Fatal("reformatted content should differ from original bytes")
 	}
-	if err := os.WriteFile(targetPath, []byte(reformatted), 0600); err != nil {
+	if err := os.WriteFile(targetPath, reformatted, 0600); err != nil {
 		t.Fatalf("writing reformatted file: %v", err)
 	}
 
@@ -265,9 +278,10 @@ func TestSyncForRole_GeminiWithGTBinSubstitution(t *testing.T) {
 	if strings.Contains(string(got), "{{GT_BIN}}") {
 		t.Error("{{GT_BIN}} placeholder was not substituted")
 	}
-	// Verify the resolved binary path is present
+	// Verify the resolved binary path is present (JSON-escaped for Windows compatibility).
 	gtBin := resolveGTBinary()
-	if !strings.Contains(string(got), gtBin) {
+	gtBinJSON := strings.ReplaceAll(gtBin, `\`, `\\`)
+	if !strings.Contains(string(got), gtBinJSON) {
 		t.Errorf("expected resolved gt binary %q in output", gtBin)
 	}
 }
@@ -344,7 +358,10 @@ func TestInstallForRole_CursorRoleAware(t *testing.T) {
 	}
 
 	got, _ := os.ReadFile(filepath.Join(dir, ".cursor", "hooks.json"))
-	want, _ := templateFS.ReadFile("templates/cursor/hooks-autonomous.json")
+	want, err := resolveAndSubstitute("cursor", "hooks-autonomous.json", "polecat")
+	if err != nil {
+		t.Fatalf("resolveAndSubstitute: %v", err)
+	}
 	if string(got) != string(want) {
 		t.Error("cursor autonomous: content mismatch")
 	}
@@ -356,7 +373,10 @@ func TestInstallForRole_CursorRoleAware(t *testing.T) {
 	}
 
 	got, _ = os.ReadFile(filepath.Join(dir2, ".cursor", "hooks.json"))
-	want, _ = templateFS.ReadFile("templates/cursor/hooks-interactive.json")
+	want, err = resolveAndSubstitute("cursor", "hooks-interactive.json", "crew")
+	if err != nil {
+		t.Fatalf("resolveAndSubstitute: %v", err)
+	}
 	if string(got) != string(want) {
 		t.Error("cursor interactive: content mismatch")
 	}
@@ -372,9 +392,10 @@ func TestInstallForRole_GeminiRoleAware(t *testing.T) {
 	got, _ := os.ReadFile(filepath.Join(dir, ".gemini", "settings.json"))
 	want, _ := templateFS.ReadFile("templates/gemini/settings-autonomous.json")
 	// Gemini templates contain {{GT_BIN}} which gets resolved at install time.
-	// Apply the same substitution to the expected content for comparison.
+	// Apply the same substitution (with JSON escaping) to the expected content for comparison.
 	gtBin := resolveGTBinary()
-	wantResolved := strings.ReplaceAll(string(want), "{{GT_BIN}}", gtBin)
+	gtBinJSON := strings.ReplaceAll(gtBin, `\`, `\\`)
+	wantResolved := strings.ReplaceAll(string(want), "{{GT_BIN}}", gtBinJSON)
 	if string(got) != wantResolved {
 		t.Error("gemini autonomous: content mismatch")
 	}
@@ -388,11 +409,14 @@ func TestInstallForRole_CodexRoleAware(t *testing.T) {
 	}
 
 	got, _ := os.ReadFile(filepath.Join(dir, ".codex", "hooks.json"))
-	want, _ := templateFS.ReadFile("templates/codex/hooks-interactive.json")
+	want, err := resolveAndSubstitute("codex", "hooks-interactive.json", "crew")
+	if err != nil {
+		t.Fatalf("resolveAndSubstitute: %v", err)
+	}
 	if string(got) != string(want) {
 		t.Error("codex interactive: content mismatch")
 	}
-	if !strings.Contains(string(got), "gt costs record >/dev/null 2>&1 &") {
+	if !strings.Contains(string(got), "costs record >/dev/null 2>&1 &") {
 		t.Error("codex interactive: stop hook should silence gt costs record output")
 	}
 
@@ -403,11 +427,14 @@ func TestInstallForRole_CodexRoleAware(t *testing.T) {
 	}
 
 	got, _ = os.ReadFile(filepath.Join(dir2, ".codex", "hooks.json"))
-	want, _ = templateFS.ReadFile("templates/codex/hooks-autonomous.json")
+	want, err = resolveAndSubstitute("codex", "hooks-autonomous.json", "polecat")
+	if err != nil {
+		t.Fatalf("resolveAndSubstitute: %v", err)
+	}
 	if string(got) != string(want) {
 		t.Error("codex autonomous: content mismatch")
 	}
-	if !strings.Contains(string(got), "gt costs record >/dev/null 2>&1 &") {
+	if !strings.Contains(string(got), "costs record >/dev/null 2>&1 &") {
 		t.Error("codex autonomous: stop hook should silence gt costs record output")
 	}
 }
@@ -421,7 +448,10 @@ func TestInstallForRole_CopilotRoleAware(t *testing.T) {
 	}
 
 	got, _ := os.ReadFile(filepath.Join(dir, ".github/hooks", "gastown.json"))
-	want, _ := templateFS.ReadFile("templates/copilot/gastown-autonomous.json")
+	want, err := resolveAndSubstitute("copilot", "gastown-autonomous.json", "polecat")
+	if err != nil {
+		t.Fatalf("resolveAndSubstitute: %v", err)
+	}
 	if string(got) != string(want) {
 		t.Error("copilot autonomous: content mismatch")
 	}
@@ -433,7 +463,10 @@ func TestInstallForRole_CopilotRoleAware(t *testing.T) {
 	}
 
 	got, _ = os.ReadFile(filepath.Join(dir2, ".github/hooks", "gastown.json"))
-	want, _ = templateFS.ReadFile("templates/copilot/gastown-interactive.json")
+	want, err = resolveAndSubstitute("copilot", "gastown-interactive.json", "crew")
+	if err != nil {
+		t.Fatalf("resolveAndSubstitute: %v", err)
+	}
 	if string(got) != string(want) {
 		t.Error("copilot interactive: content mismatch")
 	}

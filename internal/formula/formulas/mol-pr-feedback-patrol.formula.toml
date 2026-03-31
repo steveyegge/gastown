@@ -1,0 +1,319 @@
+description = """
+Standing patrol for open PR review feedback and failing CI checks.
+
+Scans all open PRs across rigs, identifies those needing attention (review
+feedback or failing CI), and dispatches polecat work beads for each finding.
+A dedup guard prevents re-slinging polecats for PRs that already have open beads.
+
+## Purpose
+
+Without this patrol, review feedback and CI failures on open PRs go unnoticed
+until someone manually checks GitHub. This patrol closes that gap by running
+continuously and dispatching polecats to address findings.
+
+## Rig Parameterization
+
+The patrol is generic — it operates on a specified rig. Run one patrol instance
+per rig, or configure a single instance to scan multiple repos.
+
+## Dispatch Strategy
+
+For each actionable PR finding, the patrol:
+1. Checks for an existing open bead tagged with the PR number (dedup guard)
+2. If no existing bead, creates a new bead with PR context (URL, type, check names)
+3. Slings a polecat to the appropriate rig to address the finding
+
+One bead per PR item. If a bead already exists for that PR, it is skipped.
+
+## PR Actionability Criteria
+
+A PR is actionable if any of the following are true:
+- reviewDecision == "CHANGES_REQUESTED"
+- statusCheckRollup contains any check with state FAILURE or ERROR
+- Any unresolved review thread (requires additional gh api call)
+
+Draft PRs are excluded from actionability by default.
+
+## Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| wisp_type | patrol | Type of wisp — patrol loops continuously |
+| rig | (required) | Target rig to sling polecats to for found work |
+| repo | (required) | GitHub repo in owner/name format (e.g. acme/myapp) |
+| base_branch | main | Base branch filter for open PRs |
+| scan_interval_seconds | 300 | Seconds to sleep between patrol cycles |
+| exclude_drafts | true | Whether to skip draft PRs |
+| max_open_beads | 20 | Stop dispatching if this many open PR-patrol beads exist (safety valve) |
+| patrol_label | pr-feedback-patrol | Label applied to dispatched beads for dedup tracking |"""
+
+formula = "mol-pr-feedback-patrol"
+version = 1
+
+[vars]
+[vars.wisp_type]
+description = "Type of wisp created for this molecule"
+default = "patrol"
+
+[vars.rig]
+description = "Target rig to sling polecats to for found work (e.g. dotfiles)"
+required = true
+
+[vars.repo]
+description = "GitHub repo to scan in owner/name format (e.g. acme/myapp)"
+required = true
+
+[vars.base_branch]
+description = "Base branch filter — only PRs targeting this branch are scanned"
+default = "main"
+
+[vars.scan_interval_seconds]
+description = "Seconds to sleep between patrol cycles"
+default = "300"
+
+[vars.exclude_drafts]
+description = "Whether to skip draft PRs (true/false)"
+default = "true"
+
+[vars.max_open_beads]
+description = "Safety valve — stop dispatching if this many pr-feedback-patrol beads are already open"
+default = "20"
+
+[vars.patrol_label]
+description = "Label applied to dispatched beads used for dedup guard"
+default = "pr-feedback-patrol"
+
+[[steps]]
+id = "list-open-prs"
+title = "List open PRs with review and CI status"
+description = """
+Fetch all open PRs from the target repo, including review decision and CI check rollup.
+
+**1. Fetch open PRs with full status:**
+```bash
+gh pr list \
+  --repo {{repo}} \
+  --base {{base_branch}} \
+  --state open \
+  --json number,title,url,reviewDecision,statusCheckRollup,isDraft,headRefName \
+  --limit 100 \
+  > /tmp/open-prs.json
+```
+
+**2. If exclude_drafts is true, filter out drafts:**
+```bash
+# Filter drafts client-side from /tmp/open-prs.json
+cat /tmp/open-prs.json | jq '[.[] | select(.isDraft == false)]' > /tmp/open-prs-filtered.json
+```
+If exclude_drafts is false, use `open-prs.json` unfiltered.
+
+**3. Count and log:**
+```bash
+PR_COUNT=$(jq length /tmp/open-prs-filtered.json)
+echo "Found ${PR_COUNT} open PRs in {{repo}}"
+```
+
+**4. Handle empty result:**
+If PR_COUNT is 0, nothing to patrol — skip to loop-or-exit.
+
+**Exit criteria:** /tmp/open-prs-filtered.json contains current open PRs with status fields.
+"""
+
+[[steps]]
+id = "check-review-status"
+title = "Filter PRs with review feedback needing response"
+needs = ["list-open-prs"]
+description = """
+Identify PRs where reviewers have requested changes.
+
+**1. Extract PRs with CHANGES_REQUESTED:**
+```bash
+jq '[.[] | select(.reviewDecision == "CHANGES_REQUESTED")]' \
+  /tmp/open-prs-filtered.json \
+  > /tmp/prs-needs-review-response.json
+
+REVIEW_COUNT=$(jq length /tmp/prs-needs-review-response.json)
+echo "PRs with CHANGES_REQUESTED: ${REVIEW_COUNT}"
+```
+
+**2. For each PR with CHANGES_REQUESTED, record the finding:**
+```bash
+jq -c '.[]' /tmp/prs-needs-review-response.json | while read pr; do
+  PR_NUM=$(echo "$pr" | jq -r '.number')
+  PR_URL=$(echo "$pr" | jq -r '.url')
+  PR_TITLE=$(echo "$pr" | jq -r '.title')
+  echo "review-feedback:${PR_NUM}:${PR_URL}:${PR_TITLE}" >> /tmp/patrol-findings.txt
+done
+```
+
+**3. Initialize findings file if first step:**
+If /tmp/patrol-findings.txt does not exist, create it empty before appending.
+
+**Exit criteria:** /tmp/patrol-findings.txt has one line per PR needing review response.
+"""
+
+[[steps]]
+id = "check-ci-status"
+title = "Filter PRs with failing or errored CI checks"
+needs = ["list-open-prs"]
+description = """
+Identify PRs where CI checks have failed or errored.
+
+**1. Extract PRs with failing checks:**
+```bash
+jq '[.[] | select(
+  .statusCheckRollup != null and
+  (.statusCheckRollup | map(select(.state == "FAILURE" or .state == "ERROR")) | length > 0)
+)]' /tmp/open-prs-filtered.json > /tmp/prs-ci-failing.json
+
+CI_COUNT=$(jq length /tmp/prs-ci-failing.json)
+echo "PRs with failing CI: ${CI_COUNT}"
+```
+
+**2. For each PR with failing CI, record which checks failed:**
+```bash
+jq -c '.[]' /tmp/prs-ci-failing.json | while read pr; do
+  PR_NUM=$(echo "$pr" | jq -r '.number')
+  PR_URL=$(echo "$pr" | jq -r '.url')
+  PR_TITLE=$(echo "$pr" | jq -r '.title')
+  FAILING_CHECKS=$(echo "$pr" | jq -r '[.statusCheckRollup[] | select(.state == "FAILURE" or .state == "ERROR") | .name] | join(", ")')
+  echo "ci-failure:${PR_NUM}:${PR_URL}:${PR_TITLE}:${FAILING_CHECKS}" >> /tmp/patrol-findings.txt
+done
+```
+
+**3. Dedup findings:**
+A PR may appear in both review-feedback and ci-failure categories. That is fine —
+each creates a separate, distinctly-typed bead. The dedup guard (next step)
+checks for existing open beads by PR number AND type.
+
+**Exit criteria:** /tmp/patrol-findings.txt contains all actionable PRs (review + CI).
+"""
+
+[[steps]]
+id = "dispatch-work"
+title = "Dispatch polecats for each actionable PR finding"
+needs = ["check-review-status", "check-ci-status"]
+description = """
+For each finding in /tmp/patrol-findings.txt, create a work bead and sling a polecat.
+
+**Safety valve — check open bead count first:**
+```bash
+OPEN_COUNT=$(bd list --label {{patrol_label}} --status open 2>/dev/null | wc -l || echo "0")
+if [ "$OPEN_COUNT" -ge {{max_open_beads}} ]; then
+  echo "Safety valve: ${OPEN_COUNT} open patrol beads already exist (max {{max_open_beads}}). Skipping dispatch."
+  exit 0
+fi
+```
+
+**For each finding:**
+```bash
+while IFS=: read -r TYPE PR_NUM PR_URL PR_TITLE EXTRA; do
+  # Dedup guard: check for existing open bead for this PR + type
+  EXISTING=$(bd list --label "pr-num-${PR_NUM}" --label "{{patrol_label}}" --status open 2>/dev/null | wc -l || echo "0")
+  if [ "$EXISTING" -gt 0 ]; then
+    echo "Skipping PR #${PR_NUM} (${TYPE}): open bead already exists"
+    continue
+  fi
+
+  # Construct bead body based on type
+  if [ "$TYPE" = "review-feedback" ]; then
+    TITLE="Address review feedback on PR #${PR_NUM}: ${PR_TITLE}"
+    BODY="## PR Review Feedback Needs Response
+
+PR: ${PR_URL}
+PR Number: #${PR_NUM}
+Type: Review feedback (CHANGES_REQUESTED)
+
+A reviewer has requested changes on this PR. Address the feedback and push
+an update, or respond to resolve the conversation.
+
+Dispatched by mol-pr-feedback-patrol."
+  elif [ "$TYPE" = "ci-failure" ]; then
+    TITLE="Fix CI failure on PR #${PR_NUM}: ${PR_TITLE}"
+    BODY="## PR CI Checks Failing
+
+PR: ${PR_URL}
+PR Number: #${PR_NUM}
+Type: CI failure
+Failing checks: ${EXTRA}
+
+CI checks are failing on this PR. Investigate the failures, fix the code,
+and push an update.
+
+Dispatched by mol-pr-feedback-patrol."
+  else
+    echo "Unknown finding type: ${TYPE} — skipping"
+    continue
+  fi
+
+  # Create the bead with dedup labels
+  BEAD_ID=$(bd create \
+    --title "$TITLE" \
+    --type task \
+    --priority 2 \
+    --label "{{patrol_label}}" \
+    --label "pr-num-${PR_NUM}" \
+    --description "$BODY" \
+    --format id 2>/dev/null)
+
+  if [ -z "$BEAD_ID" ]; then
+    echo "Failed to create bead for PR #${PR_NUM} (${TYPE})"
+    continue
+  fi
+
+  echo "Created bead ${BEAD_ID} for PR #${PR_NUM} (${TYPE})"
+
+  # Sling a polecat to handle it
+  gt sling {{rig}} "$BEAD_ID" 2>/dev/null || echo "Warning: sling failed for ${BEAD_ID}"
+
+done < /tmp/patrol-findings.txt
+```
+
+**Exit criteria:** All actionable PRs have either a newly created+slung bead, or were
+skipped because an open bead already exists.
+"""
+
+[[steps]]
+id = "loop-or-exit"
+title = "Sleep then respawn for next patrol cycle"
+needs = ["dispatch-work"]
+description = """
+Context-check and either sleep for the next cycle or exit if context is filling.
+
+**1. Check remaining context capacity:**
+```bash
+# A rough proxy: check if we're getting close to context limits
+# by checking if the session has been running for a long time.
+# Gas Town agents typically cycle every 30-60 minutes.
+gt mol step context-check 2>/dev/null || true
+```
+
+**2. Clean up temp files from this cycle:**
+```bash
+rm -f /tmp/open-prs.json /tmp/open-prs-filtered.json
+rm -f /tmp/prs-needs-review-response.json /tmp/prs-ci-failing.json
+rm -f /tmp/patrol-findings.txt
+```
+
+**3. Sleep before next cycle:**
+```bash
+echo "Patrol cycle complete. Sleeping {{scan_interval_seconds}}s before next cycle."
+sleep {{scan_interval_seconds}}
+```
+
+**4. Respawn by looping back to list-open-prs:**
+After sleep, close this step and immediately reopen list-open-prs to begin the next cycle.
+
+```bash
+# Respawn: start the next patrol cycle
+bd mol step respawn --target list-open-prs
+```
+
+**Context filling:** If the session is near context capacity, use `gt handoff` to
+cycle to a fresh session rather than respawning:
+```bash
+gt handoff -s "PR feedback patrol cycling" -m "Next cycle: scan {{repo}} for PR feedback and CI failures."
+```
+
+**Exit criteria:** Next patrol cycle initiated (either via respawn or handoff).
+"""

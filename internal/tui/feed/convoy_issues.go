@@ -8,6 +8,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 type trackedStatus struct {
@@ -27,6 +28,7 @@ func getTrackedIssueStatus(beadsDir, convoyID string) []trackedStatus {
 
 	// Query tracked issues using bd dep list (returns full issue details)
 	cmd := exec.CommandContext(ctx, "bd", "dep", "list", convoyID, "-t", "tracks", "--json")
+	util.SetDetachedProcessGroup(cmd)
 	cmd.Dir = beadsDir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -80,6 +82,7 @@ func refreshTrackedStatus(ctx context.Context, deps []struct {
 	args = append(args, "--json")
 
 	cmd := exec.CommandContext(ctx, "bd", args...)
+	util.SetDetachedProcessGroup(cmd)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 

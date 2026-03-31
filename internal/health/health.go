@@ -17,6 +17,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/steveyegge/gastown/internal/doltserver"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // TCPCheck performs a TCP connection check to host:port.
@@ -146,6 +147,7 @@ func JSONLGitFreshness(gitRepo string) (time.Time, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "git", "-C", gitRepo, "log", "-1", "--format=%ci")
+	util.SetDetachedProcessGroup(cmd)
 	output, err := cmd.Output()
 	if err != nil {
 		return time.Time{}, err

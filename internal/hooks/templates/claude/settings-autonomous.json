@@ -11,7 +11,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow"
+            "command": "{{GT_BIN}} tap guard pr-workflow"
           }
         ]
       },
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow"
+            "command": "{{GT_BIN}} tap guard pr-workflow"
           }
         ]
       },
@@ -29,7 +29,70 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow"
+            "command": "{{GT_BIN}} tap guard pr-workflow"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(sudo *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(apt install*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(apt-get install*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(dnf install*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(yum install*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(pacman -S*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(brew install*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard dangerous-command"
           }
         ]
       }
@@ -40,7 +103,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt prime --hook && gt mail check --inject"
+            "command": "{{GT_BIN}} prime --hook && {{GT_BIN}} mail check --inject"
           }
         ]
       }
@@ -51,7 +114,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt prime --hook"
+            "command": "{{GT_BIN}} prime --hook"
           }
         ]
       }
@@ -62,7 +125,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt mail check --inject"
+            "command": "{{GT_BIN}} mail check --inject"
           }
         ]
       }
@@ -73,7 +136,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt costs record &"
+            "command": "{{GT_BIN}} costs record &"
           }
         ]
       }

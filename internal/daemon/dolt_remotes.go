@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 const (
@@ -148,6 +150,7 @@ func (d *Daemon) runDoltSQL(dataDir, query string) error {
 
 	cmd := exec.CommandContext(ctx, "dolt", "sql", "-q", query)
 	cmd.Dir = dataDir
+	util.SetDetachedProcessGroup(cmd)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -173,6 +176,7 @@ func (d *Daemon) hasStagedChanges(dataDir, db string) bool {
 	query := fmt.Sprintf("USE `%s`; SELECT COUNT(*) FROM dolt_status WHERE staged = 1", db)
 	cmd := exec.CommandContext(ctx, "dolt", "sql", "-r", "csv", "-q", query)
 	cmd.Dir = dataDir
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -227,6 +231,7 @@ func (d *Daemon) databaseHasRemote(dataDir, db, remote string) bool {
 	query := fmt.Sprintf("USE `%s`; SELECT name FROM dolt_remotes WHERE name = '%s'", db, remote)
 	cmd := exec.CommandContext(ctx, "dolt", "sql", "-r", "csv", "-q", query)
 	cmd.Dir = dataDir
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -246,6 +251,7 @@ func (d *Daemon) databaseHasAnyRemote(dataDir, db string) bool {
 	query := fmt.Sprintf("USE `%s`; SELECT name FROM dolt_remotes LIMIT 1", db)
 	cmd := exec.CommandContext(ctx, "dolt", "sql", "-r", "csv", "-q", query)
 	cmd.Dir = dataDir
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -265,6 +271,7 @@ func (d *Daemon) findDatabaseRemote(dataDir, db string) string {
 	query := fmt.Sprintf("USE `%s`; SELECT name FROM dolt_remotes LIMIT 1", db)
 	cmd := exec.CommandContext(ctx, "dolt", "sql", "-r", "csv", "-q", query)
 	cmd.Dir = dataDir
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {

@@ -187,3 +187,11 @@ func TestParseBareFile(t *testing.T) {
 		t.Errorf("bare file trigger = %q, want %q", info.Trigger, TriggerManual)
 	}
 }
+
+func TestDeactivateNonExistent(t *testing.T) {
+	townRoot := t.TempDir()
+	// Should not error on non-existent file
+	if err := Deactivate(townRoot, false); err != nil {
+		t.Fatalf("Deactivate non-existent: %v", err)
+	}
+}

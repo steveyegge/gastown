@@ -99,37 +99,28 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 			if loc.Rig != "" {
 				rigPath = filepath.Join(ctx.TownRoot, loc.Rig)
 			}
-
-			// Use ResolveRoleAgentName to get the *configured* agent name
-			// without binary validation. ResolveRoleAgentConfig falls back
-			// to Claude when the binary isn't in PATH, which would skip
-			// checking hook files for configured non-Claude agents.
+			// Use ResolveRoleAgentName (not ResolveRoleAgentConfig) so that checks are
+			// based on the *configured* agent, not the *resolved* one.
+			// ResolveRoleAgentConfig falls back to claude when the agent binary is not
+			// found in PATH (e.g., in CI), which would silently skip non-Claude targets.
 			agentName, _ := config.ResolveRoleAgentName(loc.Role, ctx.TownRoot, rigPath)
-			if agentName == "" || agentName == "claude" {
+			if agentName == "" {
+				continue
+			}
+			preset := config.GetAgentPresetByName(agentName)
+			if preset == nil || preset.HooksDir == "" || preset.HooksSettingsFile == "" {
+				continue
+			}
+			hooksProvider := preset.HooksProvider
+			if hooksProvider == "" {
+				hooksProvider = agentName
+			}
+			// Claude targets are handled by Loop 1.
+			if hooksProvider == "claude" {
 				continue
 			}
 
-			preset := config.GetAgentPresetByName(agentName)
-			var hooksProvider, hooksDir, settingsFile string
-			if preset != nil {
-				rc := config.RuntimeConfigFromPreset(config.AgentPreset(agentName))
-				if rc == nil || rc.Hooks == nil {
-					continue
-				}
-				hooksProvider = rc.Hooks.Provider
-				hooksDir = rc.Hooks.Dir
-				settingsFile = rc.Hooks.SettingsFile
-			} else {
-				rc := config.ResolveRoleAgentConfig(loc.Role, ctx.TownRoot, rigPath)
-				if rc == nil || rc.Hooks == nil || rc.Hooks.Provider == "" || rc.Hooks.Provider == "claude" {
-					continue
-				}
-				hooksProvider = rc.Hooks.Provider
-				hooksDir = rc.Hooks.Dir
-				settingsFile = rc.Hooks.SettingsFile
-			}
-
-			useSettingsDir := preset != nil && preset.HooksUseSettingsDir
+			useSettingsDir := preset.HooksUseSettingsDir
 
 			var checkDirs []string
 			if loc.Rig == "" || useSettingsDir {
@@ -140,9 +131,9 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 
 			for _, dir := range checkDirs {
 				totalTargets++
-				targetPath := filepath.Join(dir, hooksDir, settingsFile)
+				targetPath := filepath.Join(dir, preset.HooksDir, preset.HooksSettingsFile)
 
-				expected, err := hooks.ComputeExpectedTemplate(hooksProvider, settingsFile, loc.Role)
+				expected, err := hooks.ComputeExpectedTemplate(hooksProvider, preset.HooksSettingsFile, loc.Role)
 				if err != nil {
 					details = append(details, fmt.Sprintf("%s (%s): error computing template: %v", targetPath, hooksProvider, err))
 					continue
@@ -153,8 +144,8 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 					// File missing
 					c.templateOutOfSync = append(c.templateOutOfSync, templateTarget{
 						path: targetPath, dir: dir, provider: hooksProvider,
-						role: loc.Role, hooksDir: hooksDir,
-						settingsFile: settingsFile, useSettingsDir: useSettingsDir,
+						role: loc.Role, hooksDir: preset.HooksDir,
+						settingsFile: preset.HooksSettingsFile, useSettingsDir: useSettingsDir,
 					})
 					details = append(details, fmt.Sprintf("%s (%s): missing", targetPath, hooksProvider))
 					continue
@@ -162,7 +153,7 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 
 				// Compare: structural for JSON, byte-exact for other files.
 				inSync := false
-				if filepath.Ext(settingsFile) == ".json" {
+				if filepath.Ext(preset.HooksSettingsFile) == ".json" {
 					inSync = hooks.TemplateContentEqual(expected, actual)
 				} else {
 					inSync = bytes.Equal(expected, actual)
@@ -171,8 +162,8 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 				if !inSync {
 					c.templateOutOfSync = append(c.templateOutOfSync, templateTarget{
 						path: targetPath, dir: dir, provider: hooksProvider,
-						role: loc.Role, hooksDir: hooksDir,
-						settingsFile: settingsFile, useSettingsDir: useSettingsDir,
+						role: loc.Role, hooksDir: preset.HooksDir,
+						settingsFile: preset.HooksSettingsFile, useSettingsDir: useSettingsDir,
 					})
 					details = append(details, fmt.Sprintf("%s (%s): out of sync", targetPath, hooksProvider))
 				}

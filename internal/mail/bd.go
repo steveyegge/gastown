@@ -9,6 +9,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/telemetry"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 const (
@@ -70,6 +71,7 @@ func runBdCommand(ctx context.Context, args []string, workDir, beadsDir string, 
 
 	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = workDir
+	util.SetDetachedProcessGroup(cmd)
 
 	env := append(cmd.Environ(), "BEADS_DIR="+beadsDir)
 	if dbEnv := beads.DatabaseEnv(beadsDir); dbEnv != "" {
@@ -98,6 +100,7 @@ func runBdCommand(ctx context.Context, args []string, workDir, beadsDir string, 
 		stderr.Reset()
 		retryCmd := exec.CommandContext(ctx, "bd", retryArgs...) //nolint:gosec // G204: bd is a trusted internal tool
 		retryCmd.Dir = workDir
+		util.SetDetachedProcessGroup(retryCmd)
 		retryCmd.Env = env
 		retryCmd.Stdout = &stdout
 		retryCmd.Stderr = &stderr

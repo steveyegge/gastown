@@ -52,6 +52,7 @@ type SyncResult struct {
 func FindRemote(dbDir string) (name, url string, err error) {
 	cmd := exec.Command("dolt", "remote", "-v")
 	cmd.Dir = dbDir
+	setProcessGroup(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", "", fmt.Errorf("dolt remote -v: %w (%s)", err, strings.TrimSpace(string(output)))
@@ -89,6 +90,7 @@ func CommitWorkingSet(dbDir string) error {
 	// Stage all changes
 	addCmd := exec.Command("dolt", "add", ".")
 	addCmd.Dir = dbDir
+	setProcessGroup(addCmd)
 	if output, err := addCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("dolt add: %w (%s)", err, strings.TrimSpace(string(output)))
 	}
@@ -96,6 +98,7 @@ func CommitWorkingSet(dbDir string) error {
 	// Commit (may fail with "nothing to commit" which is fine)
 	commitCmd := exec.Command("dolt", "commit", "-m", "gt dolt sync: auto-commit working changes")
 	commitCmd.Dir = dbDir
+	setProcessGroup(commitCmd)
 	output, err := commitCmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(output))
@@ -120,6 +123,7 @@ func PushDatabase(dbDir, remote string, force bool) error {
 
 	cmd := exec.Command("dolt", args...)
 	cmd.Dir = dbDir
+	setProcessGroup(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("dolt push: %w (%s)", err, strings.TrimSpace(string(output)))
@@ -445,6 +449,7 @@ func PurgeClosedEphemerals(townRoot, dbName string, dryRun bool) (int, error) {
 	cmd := exec.CommandContext(ctx, "bd", args...)
 	cmd.Dir = filepath.Dir(beadsDir) // run from parent of .beads
 	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	setProcessGroup(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

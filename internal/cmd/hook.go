@@ -375,7 +375,8 @@ func runHook(_ *cobra.Command, args []string) error {
 	var lastHookErr error
 	for attempt := 1; attempt <= hookMaxRetries; attempt++ {
 		if err := BdCmd("update", beadID, "--status=hooked", "--assignee="+agentID).
-			Dir(townRoot).
+			Dir(resolveBeadDir(beadID)).
+			StripBeadsDir().
 			WithAutoCommit().
 			Run(); err != nil {
 			lastHookErr = err

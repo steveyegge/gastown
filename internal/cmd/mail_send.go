@@ -71,8 +71,11 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Determine sender
-	from := detectSender()
+	// Determine sender (--from overrides auto-detection, for relay/bridge use)
+	from := mailFrom
+	if from == "" {
+		from = detectSender()
+	}
 
 	// Create message with auto-generated ID and thread ID
 	msg := mail.NewMessage(from, to, mailSubject, mailBody)

@@ -12,10 +12,16 @@ import (
 
 var tapGuardDangerousCmd = &cobra.Command{
 	Use:   "dangerous-command",
-	Short: "Block dangerous commands (rm -rf, force push, etc.)",
+	Short: "Block dangerous commands (sudo, package installs, rm -rf, force push, etc.)",
 	Long: `Block dangerous commands via Claude Code PreToolUse hooks.
 
 This guard blocks operations that could cause irreversible damage:
+  - sudo <anything>      (agents must never elevate privileges)
+  - apt/apt-get/dnf/yum/pacman install (system package managers)
+  - brew install          (Homebrew package installs)
+  - pip install --system  (system-level Python installs)
+  - npm install -g        (global npm installs)
+  - gem install           (system-level Ruby installs)
   - rm -rf /             (only blocks root target; rm -rf ./build/ is allowed)
   - git push --force/-f  (--force-with-lease is allowed)
   - git reset --hard
@@ -70,6 +76,16 @@ func runTapGuardDangerous(cmd *cobra.Command, args []string) error {
 	}
 
 	lower := strings.ToLower(command)
+
+	// Check privilege escalation and package manager commands first
+	if reason := matchesSudo(lower); reason != "" {
+		printDangerousBlock(reason, command)
+		return NewSilentExit(2)
+	}
+	if reason := matchesPackageInstall(lower); reason != "" {
+		printDangerousBlock(reason, command)
+		return NewSilentExit(2)
+	}
 
 	// Check special patterns that need smarter matching
 	if reason := matchesDangerousRmRf(lower); reason != "" {
@@ -153,6 +169,58 @@ func matchesDangerousRmRf(command string) string {
 			return "filesystem destruction (rm -rf /)"
 		}
 	}
+	return ""
+}
+
+// matchesSudo blocks any command that starts with or contains "sudo".
+// Agents must never elevate privileges on the host system.
+func matchesSudo(command string) string {
+	fields := strings.Fields(command)
+	for _, f := range fields {
+		if f == "sudo" {
+			return "Agents must never use sudo — do not elevate privileges or modify the host OS"
+		}
+	}
+	return ""
+}
+
+// packageManagerPatterns lists system package manager install commands.
+// Each entry has the command prefix tokens and a reason.
+var packageManagerPatterns = []struct {
+	tokens []string
+	reason string
+}{
+	{[]string{"apt", "install"}, "System package install (apt) — use workspace tools instead"},
+	{[]string{"apt-get", "install"}, "System package install (apt-get) — use workspace tools instead"},
+	{[]string{"dnf", "install"}, "System package install (dnf) — use workspace tools instead"},
+	{[]string{"yum", "install"}, "System package install (yum) — use workspace tools instead"},
+	{[]string{"pacman", "-s"}, "System package install (pacman) — use workspace tools instead"},
+	{[]string{"brew", "install"}, "Package install (brew) — use workspace tools instead"},
+	{[]string{"gem", "install"}, "System gem install — use workspace tools instead"},
+}
+
+// matchesPackageInstall blocks system package manager install commands.
+// Also blocks "pip install" with --system flag and "npm install -g" (global installs).
+func matchesPackageInstall(command string) string {
+	// Check simple token-based patterns (apt install, dnf install, etc.)
+	for _, p := range packageManagerPatterns {
+		if matchesAllFragments(command, p.tokens) {
+			return p.reason
+		}
+	}
+
+	// pip install --system (but not regular pip install into a venv)
+	if strings.Contains(command, "pip") && strings.Contains(command, "install") && strings.Contains(command, "--system") {
+		return "System-level pip install — use a virtualenv or workspace tools instead"
+	}
+
+	// npm install -g / npm install --global
+	if strings.Contains(command, "npm") && strings.Contains(command, "install") {
+		if strings.Contains(command, " -g ") || strings.Contains(command, " -g") || strings.Contains(command, "--global") {
+			return "Global npm install — use workspace tools instead"
+		}
+	}
+
 	return ""
 }
 

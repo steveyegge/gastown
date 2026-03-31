@@ -38,6 +38,7 @@ var SystemDefaults = map[string]interface{}{
 	"priority_adjustment":     0,
 	"dnd":                     false,
 	"polecat_branch_template": "", // Empty = use default behavior (polecat/{name}/...)
+	"default_formula":         "mol-polecat-work",
 }
 
 // StackingKeys defines which keys use stacking semantics (values add up).

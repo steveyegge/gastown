@@ -1,3 +1,5 @@
+review_only = true  # All legs are analysis-only — no code commits expected (gt-kvf)
+
 description = """
 Parallel PRD review via specialized analysts. Uncovers missing requirements,
 ambiguities, feasibility risks, and scope issues before implementation begins.

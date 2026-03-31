@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 const (
@@ -113,6 +114,7 @@ func (d *Daemon) syncBackup(dataDir, db, backupName string) error {
 	dbDir := dataDir + "/" + db
 	cmd := exec.CommandContext(ctx, "dolt", "backup", "sync", backupName)
 	cmd.Dir = dbDir
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -147,6 +149,7 @@ func (d *Daemon) syncOffsiteBackup() {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "rsync", "-a", "--delete", backupDir+"/", icloudDir+"/")
+	util.SetDetachedProcessGroup(cmd)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		d.logger.Printf("dolt_backup: offsite sync failed: %v (%s)", err, strings.TrimSpace(string(output)))
 	} else {
@@ -190,6 +193,7 @@ func (d *Daemon) hasBackupRemote(dataDir, db, backupName string) bool {
 	dbDir := dataDir + "/" + db
 	cmd := exec.CommandContext(ctx, "dolt", "backup")
 	cmd.Dir = dbDir
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {

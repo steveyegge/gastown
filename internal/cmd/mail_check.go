@@ -72,10 +72,10 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 	// at the next task boundary, normal/low is informational but still
 	// checked before going idle (prevents mail from sitting unread).
 	if mailCheckInject {
-		// Agent-side E-stop check (defense-in-depth, gt-2zf).
+		// Agent-side E-stop check (defense-in-depth).
 		// If an E-stop is active (town-wide or per-rig), inject a system reminder
 		// telling the agent to checkpoint and wait. This catches agents that
-		// survived the daemon's SIGTSTP freeze.
+		// survived the SIGTSTP freeze.
 		if townRoot, twErr := workspace.FindFromCwd(); twErr == nil {
 			rigName := os.Getenv("GT_RIG")
 			if estop.IsActive(townRoot) || (rigName != "" && estop.IsRigActive(townRoot, rigName)) {

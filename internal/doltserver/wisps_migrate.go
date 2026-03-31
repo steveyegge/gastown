@@ -119,6 +119,7 @@ func MigrateAgentBeadsToWisps(townRoot, workDir string, dryRun bool) (*MigrateWi
 func bdSQL(workDir, query string) error {
 	cmd := exec.Command("bd", "sql", query)
 	cmd.Dir = workDir
+	setProcessGroup(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("bd sql: %s: %w", strings.TrimSpace(string(output)), err)
@@ -130,6 +131,7 @@ func bdSQL(workDir, query string) error {
 func bdSQLCSV(workDir, query string) (string, error) {
 	cmd := exec.Command("bd", "sql", "--csv", query)
 	cmd.Dir = workDir
+	setProcessGroup(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("bd sql: %s: %w", strings.TrimSpace(string(output)), err)
@@ -141,6 +143,7 @@ func bdSQLCSV(workDir, query string) (string, error) {
 func bdExec(workDir string, args ...string) error {
 	cmd := exec.Command("bd", args...)
 	cmd.Dir = workDir
+	setProcessGroup(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("bd %s: %s: %w", strings.Join(args, " "), strings.TrimSpace(string(output)), err)

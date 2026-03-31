@@ -303,6 +303,16 @@ func TestRunHooksSyncNonClaudeAgent(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
+	// Put a dummy opencode binary on PATH so agent resolution doesn't fall back to claude.
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "opencode"), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
 	townRoot := filepath.Join(tmpDir, "town")
 
 	// Scaffold workspace: mayor, deacon, and a rig with a crew worktree
@@ -328,6 +338,14 @@ func TestRunHooksSyncNonClaudeAgent(t *testing.T) {
 	// Configure crew role to use opencode
 	townSettings := config.NewTownSettings()
 	townSettings.RoleAgents = map[string]string{"crew": "opencode"}
+	// Register opencode as a custom agent so resolution bypasses binary validation.
+	// fillRuntimeDefaults will auto-fill hooks config from the opencode preset.
+	townSettings.Agents = map[string]*config.RuntimeConfig{
+		"opencode": {
+			Provider: "opencode",
+			Command:  "opencode",
+		},
+	}
 	settingsDir := filepath.Join(townRoot, "settings")
 	if err := os.MkdirAll(settingsDir, 0755); err != nil {
 		t.Fatal(err)

@@ -23,6 +23,18 @@ const (
 	AgentStateAwaitingGate AgentState = "awaiting-gate"
 )
 
+// ResolveAgentState returns the agent state Gastown should act on.
+// bd >= 0.62.0 no longer exposes a supported `bd agent state` writer, so the
+// description's `agent_state:` field is the primary write/read contract.
+// Fall back to the structured column only for legacy beads that do not yet
+// mirror agent_state into the description.
+func ResolveAgentState(description, structured string) string {
+	if fields := ParseAgentFields(description); fields != nil && fields.AgentState != "" {
+		return fields.AgentState
+	}
+	return structured
+}
+
 // ProtectsFromCleanup returns true if this agent state indicates an intentional
 // pause that should prevent the polecat from being cleaned up as stale.
 // States like "stuck" and "awaiting-gate" mean the polecat is paused on purpose.

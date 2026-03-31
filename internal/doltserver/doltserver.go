@@ -77,7 +77,9 @@ func EnsureDoltIdentity() error {
 	// We read --global only (not repo-local) to avoid silently persisting
 	// a repo-scoped override into dolt's permanent global config.
 	if needName {
-		gitName, err := exec.Command("git", "config", "--global", "user.name").Output()
+		nameCmd := exec.Command("git", "config", "--global", "user.name")
+		setProcessGroup(nameCmd)
+		gitName, err := nameCmd.Output()
 		if err != nil || len(bytes.TrimSpace(gitName)) == 0 {
 			return fmt.Errorf("dolt identity not configured and git user.name not available; run: dolt config --global --add user.name \"Your Name\"")
 		}
@@ -87,7 +89,9 @@ func EnsureDoltIdentity() error {
 	}
 
 	if needEmail {
-		gitEmail, err := exec.Command("git", "config", "--global", "user.email").Output()
+		emailCmd := exec.Command("git", "config", "--global", "user.email")
+		setProcessGroup(emailCmd)
+		gitEmail, err := emailCmd.Output()
 		if err != nil || len(bytes.TrimSpace(gitEmail)) == 0 {
 			return fmt.Errorf("dolt identity not configured and git user.email not available; run: dolt config --global --add user.email \"you@example.com\"")
 		}
@@ -104,6 +108,7 @@ func EnsureDoltIdentity() error {
 // and (false, error) when dolt itself fails unexpectedly.
 func doltConfigMissing(key string) (bool, error) {
 	cmd := exec.Command("dolt", "config", "--global", "--get", key)
+	setProcessGroup(cmd)
 	out, err := cmd.Output()
 	if err == nil {
 		// Command succeeded — key exists if output is non-empty
@@ -121,8 +126,12 @@ func doltConfigMissing(key string) (bool, error) {
 // Uses --unset then --add to avoid duplicate entries from repeated calls.
 func setDoltGlobalConfig(key, value string) error {
 	// Remove existing value (ignore error — key may not exist yet)
-	_ = exec.Command("dolt", "config", "--global", "--unset", key).Run()
-	return exec.Command("dolt", "config", "--global", "--add", key, value).Run()
+	unsetCmd := exec.Command("dolt", "config", "--global", "--unset", key)
+	setProcessGroup(unsetCmd)
+	_ = unsetCmd.Run()
+	addCmd := exec.Command("dolt", "config", "--global", "--add", key, value)
+	setProcessGroup(addCmd)
+	return addCmd.Run()
 }
 
 // Default configuration
@@ -414,6 +423,7 @@ func buildDoltSQLCmd(ctx context.Context, config *Config, args ...string) *exec.
 	// .doltcfg/privileges.db files in the caller's CWD. Even TCP client
 	// connections can trigger .doltcfg creation if CWD is uncontrolled.
 	cmd.Dir = config.DataDir
+	setProcessGroup(cmd)
 
 	if config.IsRemote() && config.Password != "" {
 		cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+config.Password)
@@ -484,7 +494,32 @@ func SaveState(townRoot string, state *State) error {
 	return util.AtomicWriteJSON(stateFile, state)
 }
 
+// countDoltDatabases counts the number of Dolt database directories in dataDir.
+// Each subdirectory containing a .dolt directory is considered a database.
+// Returns at least 1 so the caller never divides by zero.
+func countDoltDatabases(dataDir string) int {
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return 1
+	}
+	count := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		// A Dolt database directory contains a .dolt subdirectory.
+		if _, statErr := os.Stat(filepath.Join(dataDir, e.Name(), ".dolt")); statErr == nil {
+			count++
+		}
+	}
+	if count < 1 {
+		return 1
+	}
+	return count
+}
+
 // IsRunning checks if a Dolt server is running for the given town.
+
 // Returns (running, pid, error).
 // Checks both PID file AND port to detect externally-started servers.
 // For remote servers, skips PID/port scan and just does TCP reachability.
@@ -508,18 +543,14 @@ func IsRunning(townRoot string) (bool, int, error) {
 		pid, err := strconv.Atoi(pidStr)
 		if err == nil {
 			// Check if process is alive
-			process, err := os.FindProcess(pid)
-			if err == nil {
-				// On Unix, FindProcess always succeeds. Send signal 0 to check if alive.
-				if err := process.Signal(syscall.Signal(0)); err == nil {
-					// Verify it's actually serving on the expected port.
-					// More reliable than ps string matching (ZFC fix: gt-utuk).
-					if isDoltServerOnPort(config.Port) {
-						if doltProcessMatchesTown(townRoot, pid, config) {
-							return true, pid, nil
-						}
-						// Port served by a different town's Dolt — fall through to stale cleanup
+			if processIsAlive(pid) {
+				// Verify it's actually serving on the expected port.
+				// More reliable than ps string matching (ZFC fix: gt-utuk).
+				if isDoltServerOnPort(config.Port) {
+					if doltProcessMatchesTown(townRoot, pid, config) {
+						return true, pid, nil
 					}
+					// Port served by a different town's Dolt — fall through to stale cleanup
 				}
 			}
 		}
@@ -547,17 +578,16 @@ func IsRunning(townRoot string) (bool, int, error) {
 		// Port is used by a different town's Dolt — not ours
 	}
 
-	// Last resort: TCP reachability check. This handles Docker containers
-	// and other setups where no local dolt process is visible (e.g., the
-	// port is forwarded by a Docker proxy). Only used when GT_DOLT_PORT
-	// overrides the default port, to avoid false positives from other
-	// services on 3307.
-	if config.Port != DefaultPort {
-		conn, err := net.DialTimeout("tcp", config.HostPort(), 2*time.Second)
-		if err == nil {
-			_ = conn.Close()
-			return true, 0, nil
-		}
+	// Last resort: TCP reachability check. This handles Docker containers,
+	// externally-restarted servers (e.g., dolt restarted outside of gt),
+	// and other setups where no local dolt process is visible via lsof/ss
+	// (e.g., the port is forwarded by a Docker proxy).
+	// We always check, even on the default port 3307, so that gt rig add
+	// succeeds when dolt is live regardless of how it was started.
+	conn, err := net.DialTimeout("tcp", config.HostPort(), 2*time.Second)
+	if err == nil {
+		_ = conn.Close()
+		return true, 0, nil
 	}
 
 	return false, 0, nil
@@ -718,6 +748,7 @@ func findDoltServerOnPort(port int) int {
 	// Without -sTCP:LISTEN, lsof returns client PIDs (e.g., gt daemon) first,
 	// which aren't dolt processes — causing false negatives.
 	cmd := exec.Command("lsof", "-i", fmt.Sprintf(":%d", port), "-sTCP:LISTEN", "-t")
+	setProcessGroup(cmd)
 	if output, err := cmd.Output(); err == nil {
 		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 		if len(lines) > 0 && lines[0] != "" {
@@ -730,6 +761,7 @@ func findDoltServerOnPort(port int) int {
 	// Fall back to ss (iproute2) — standard on modern Linux, no extra packages needed.
 	// Example output line: LISTEN 0 128 *:3307 *:* users:(("dolt",pid=12345,fd=7))
 	cmd = exec.Command("ss", "-tlnp", fmt.Sprintf("sport = :%d", port))
+	setProcessGroup(cmd)
 	if output, err := cmd.Output(); err == nil {
 		for _, line := range strings.Split(string(output), "\n") {
 			if idx := strings.Index(line, "pid="); idx >= 0 {
@@ -762,6 +794,7 @@ func FindAllDoltListeners() []DoltListener {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "lsof", "-a", "-c", "dolt", "-sTCP:LISTEN", "-i", "TCP", "-n", "-P", "-F", "pn")
+	setProcessGroup(cmd)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil
@@ -855,6 +888,7 @@ func getProcessArgs(pid int) []string {
 		return nil
 	}
 	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=")
+	setProcessGroup(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil
@@ -871,6 +905,7 @@ func getProcessCWD(pid int) string {
 		}
 	case "darwin":
 		cmd := exec.Command("lsof", "-a", "-p", strconv.Itoa(pid), "-d", "cwd", "-Fn")
+		setProcessGroup(cmd)
 		out, err := cmd.Output()
 		if err == nil {
 			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -1045,15 +1080,15 @@ func KillImposters(townRoot string) error {
 		return fmt.Errorf("finding imposter process %d: %w", pid, err)
 	}
 
-	// SIGTERM first, then SIGKILL
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("sending SIGTERM to imposter PID %d: %w", pid, err)
+	// Graceful termination first (SIGTERM on Unix, Kill on Windows)
+	if err := gracefulTerminate(process); err != nil {
+		return fmt.Errorf("sending termination signal to imposter PID %d: %w", pid, err)
 	}
 
 	// Wait for graceful shutdown
 	for i := 0; i < 10; i++ {
 		time.Sleep(500 * time.Millisecond)
-		if err := process.Signal(syscall.Signal(0)); err != nil {
+		if !processIsAlive(pid) {
 			// Clean up PID file if it pointed to the imposter
 			_ = os.Remove(config.PidFile)
 			return nil
@@ -1061,7 +1096,7 @@ func KillImposters(townRoot string) error {
 	}
 
 	// Force kill
-	_ = process.Signal(syscall.SIGKILL)
+	_ = process.Kill()
 	time.Sleep(100 * time.Millisecond)
 	_ = os.Remove(config.PidFile)
 
@@ -1103,7 +1138,9 @@ func StopIdleMonitors(townRoot string) int {
 		return 0
 	}
 
-	output, err := exec.Command("ps", "-eo", "pid,args").Output()
+	psCmd := exec.Command("ps", "-eo", "pid,args")
+	setProcessGroup(psCmd)
+	output, err := psCmd.Output()
 	if err != nil {
 		return 0
 	}
@@ -1156,18 +1193,18 @@ func StopIdleMonitors(townRoot string) int {
 		if err != nil {
 			continue
 		}
-		if err := proc.Signal(syscall.SIGTERM); err != nil {
+		if err := proc.Kill(); err != nil {
 			continue
 		}
 
 		// Wait briefly for termination
 		for i := 0; i < 5; i++ {
 			time.Sleep(100 * time.Millisecond)
-			if err := proc.Signal(syscall.Signal(0)); err != nil {
+			if !processIsAlive(pid) {
 				break // Process exited
 			}
 			if i == 4 {
-				_ = proc.Signal(syscall.SIGKILL)
+				_ = proc.Kill()
 			}
 		}
 		stopped++
@@ -1287,7 +1324,7 @@ behavior:
 		maxConnLine,
 		readTimeoutLine,
 		writeTimeoutLine,
-		config.DataDir,
+		filepath.ToSlash(config.DataDir),
 	)
 
 	return os.WriteFile(configPath, []byte(content), 0600)
@@ -1318,19 +1355,37 @@ func Start(townRoot string) error {
 		}
 	}
 	if !locked {
-		// Retry a few times with short waits (the holder may be finishing)
-		for i := 0; i < 6; i++ {
-			time.Sleep(500 * time.Millisecond)
+		// Scale the retry window by the number of databases: each database takes
+		// ~5s to initialize. Clamp between 15s and 120s to handle both small and
+		// large installs. (gt-nkn: fix thundering herd)
+		numDBs := countDoltDatabases(config.DataDir)
+		lockTimeout := time.Duration(numDBs) * 5 * time.Second
+		if lockTimeout < 15*time.Second {
+			lockTimeout = 15 * time.Second
+		}
+		if lockTimeout > 120*time.Second {
+			lockTimeout = 120 * time.Second
+		}
+		interval := 500 * time.Millisecond
+		deadline := time.Now().Add(lockTimeout)
+		for time.Now().Before(deadline) {
+			time.Sleep(interval)
 			locked, err = fileLock.TryLock()
 			if err == nil && locked {
 				break
 			}
 		}
 		if !locked {
-			// Still locked. POSIX flocks auto-release on process death, so if we
-			// can't get it, something is actively holding it. Remove the stale lock
-			// file and try one more time. (gt-tosjp)
-			fmt.Fprintf(os.Stderr, "Warning: dolt.lock held for >3s — removing stale lock\n")
+			// Still locked after the full timeout. Before force-removing the lock,
+			// check if Dolt is already running — the lock holder may have finished
+			// starting Dolt successfully. If so, return nil instead of spawning a
+			// duplicate server. (gt-nkn: fix thundering herd)
+			if already, _, _ := IsRunning(townRoot); already {
+				return nil
+			}
+			// POSIX flocks auto-release on process death. We timed out waiting,
+			// so forcibly remove the stale lock and retry once. (gt-tosjp)
+			fmt.Fprintf(os.Stderr, "Warning: dolt.lock held for >%s — removing stale lock\n", lockTimeout.Round(time.Second))
 			_ = os.Remove(lockFile)
 			fileLock = flock.New(lockFile)
 			locked, err = fileLock.TryLock()
@@ -1365,9 +1420,9 @@ func Start(townRoot string) error {
 		if squatterPID := findDoltServerOnPort(config.Port); squatterPID > 0 {
 			fmt.Fprintf(os.Stderr, "Warning: port %d held by unowned dolt process (PID %d) — killing before start\n", config.Port, squatterPID)
 			if proc, findErr := os.FindProcess(squatterPID); findErr == nil {
-				_ = proc.Signal(syscall.SIGTERM)
+				_ = proc.Kill()
 				if err := waitForPortRelease(config.Port, 5*time.Second); err != nil {
-					// SIGTERM didn't work, escalate to SIGKILL
+					// Kill didn't work, try again
 					_ = proc.Kill()
 					if err := waitForPortRelease(config.Port, 3*time.Second); err != nil {
 						fmt.Fprintf(os.Stderr, "Warning: port %d still occupied after killing PID %d: %v\n", config.Port, squatterPID, err)
@@ -1616,8 +1671,8 @@ func Start(townRoot string) error {
 		time.Sleep(500 * time.Millisecond)
 
 		// Check if the process we started is still alive.
-		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
-			return fmt.Errorf("Dolt server process died during startup (check logs with 'gt dolt logs'): %w", err)
+		if !processIsAlive(cmd.Process.Pid) {
+			return fmt.Errorf("Dolt server process died during startup (check logs with 'gt dolt logs')")
 		}
 
 		if err := CheckServerReachable(townRoot); err == nil {
@@ -1645,6 +1700,7 @@ func cleanupStaleDoltLock(databaseDir string) error {
 
 	// Check if any process holds this file open using lsof
 	cmd := exec.Command("lsof", lockPath)
+	setProcessGroup(cmd)
 	_, err := cmd.Output()
 	if err != nil {
 		// lsof returns exit code 1 when no process has the file open
@@ -1684,6 +1740,7 @@ func cleanStaleSocket(socketPath string) {
 
 	// Check if any process holds the socket open
 	cmd := exec.Command("lsof", socketPath)
+	setProcessGroup(cmd)
 	if err := cmd.Run(); err != nil {
 		// lsof exit code 1 = no process holds it → stale, safe to remove
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
@@ -1691,6 +1748,47 @@ func cleanStaleSocket(socketPath string) {
 		}
 	}
 	// If lsof succeeds (exit 0), a process is using it — leave it alone.
+}
+
+// drainConnectionsBeforeStop waits for active queries to complete before SIGTERM,
+// reducing the nbs_manifest race window in Dolt's NomsBlockStore.Close() (gt-9bxzs).
+//
+// Dolt panics (Fatalf) when SIGTERM arrives while a goroutine is mid-write on an
+// nbs_manifest temp file. By waiting until no queries are in-flight, we shrink
+// the window where SIGTERM hits live storage I/O. Non-fatal: if the drain times
+// out or the server is unreachable, we proceed with SIGTERM anyway.
+func drainConnectionsBeforeStop(config *Config) {
+	dsn := fmt.Sprintf("%s@tcp(%s:%d)/?timeout=3s&readTimeout=5s&writeTimeout=5s",
+		config.User, config.EffectiveHost(), config.Port)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	db.SetConnMaxLifetime(5 * time.Second)
+	db.SetMaxOpenConns(1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Poll until only 1 connection remains (ours) or the drain window expires.
+	// INFORMATION_SCHEMA.PROCESSLIST counts all server connections including ours.
+	for {
+		select {
+		case <-ctx.Done():
+			return // Drain window expired — proceed with SIGTERM
+		default:
+		}
+		var count int
+		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.PROCESSLIST").Scan(&count); err != nil {
+			return // Server unreachable — proceed with SIGTERM
+		}
+		if count <= 1 {
+			// Only our drain connection remains — safe to send SIGTERM
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // Stop stops the Dolt SQL server.
@@ -1711,24 +1809,30 @@ func Stop(townRoot string) error {
 		return fmt.Errorf("finding process: %w", err)
 	}
 
-	// Send SIGTERM for graceful shutdown
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("sending SIGTERM: %w", err)
+	// Drain active connections before stopping to reduce the nbs_manifest
+	// race window inside Dolt's NomsBlockStore.Close(). Non-fatal: proceeds even
+	// if drain times out (10s max). Skipped for remote servers (no local PID).
+	if !config.IsRemote() {
+		drainConnectionsBeforeStop(config)
+	}
+
+	// Send termination signal for graceful shutdown (SIGTERM on Unix, Kill on Windows)
+	if err := gracefulTerminate(process); err != nil {
+		return fmt.Errorf("sending termination signal: %w", err)
 	}
 
 	// Wait for graceful shutdown (dolt needs more time)
 	for i := 0; i < 10; i++ {
 		time.Sleep(500 * time.Millisecond)
-		if err := process.Signal(syscall.Signal(0)); err != nil {
-			// Process has exited
+		if !processIsAlive(pid) {
 			break
 		}
 	}
 
 	// Check if still running
-	if err := process.Signal(syscall.Signal(0)); err == nil {
+	if processIsAlive(pid) {
 		// Still running, force kill
-		_ = process.Signal(syscall.SIGKILL)
+		_ = process.Kill()
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -2204,6 +2308,7 @@ func InitRig(townRoot, rigName string) (serverWasRunning bool, created bool, err
 
 		cmd := exec.Command("dolt", "init")
 		cmd.Dir = rigDir
+		setProcessGroup(cmd)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return false, false, fmt.Errorf("initializing Dolt database: %w\n%s", err, output)
@@ -3035,14 +3140,31 @@ func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 		dbToRig[k] = v
 	}
 
+	// Group candidate database names by rig. When routes.jsonl and rigs.json
+	// use different prefixes for the same rig (e.g. "gas" vs "gt" both map to
+	// "gastown"), multiple databases may exist for the same rig. Processing
+	// them all causes oscillation: each one overwrites the other's
+	// dolt_database correction on every startup. (gas-ar0)
+	rigCandidates := make(map[string][]string) // rig -> candidate db names
 	for _, dbName := range databases {
 		rigName := dbName
 		if mapped, ok := dbToRig[dbName]; ok {
 			rigName = mapped
 		}
-		// Special case: "hq" database maps to "hq" rig (town-level)
 		if dbName == "hq" {
 			rigName = "hq"
+		}
+		rigCandidates[rigName] = append(rigCandidates[rigName], dbName)
+	}
+
+	for rigName, candidates := range rigCandidates {
+		// When multiple databases map to the same rig, choose one effective
+		// DB name: prefer whatever is already in metadata.json (if it's among
+		// the valid candidates) to avoid spurious mismatch warnings. Fall back
+		// to the first candidate (alphabetical, from os.ReadDir ordering).
+		dbName := candidates[0]
+		if len(candidates) > 1 {
+			dbName = pickDBForRig(townRoot, rigName, candidates)
 		}
 		// Pass dbName explicitly so EnsureMetadata writes the correct
 		// dolt_database value ("be") rather than the rig dir name ("beads_el").
@@ -3054,6 +3176,28 @@ func EnsureAllMetadata(townRoot string) (updated []string, errs []error) {
 	}
 
 	return updated, errs
+}
+
+// pickDBForRig selects which database name to use for a rig when multiple
+// candidates exist. Prefers the value already in metadata.json to avoid
+// oscillating corrections between two valid aliases for the same rig.
+func pickDBForRig(townRoot, rigName string, candidates []string) string {
+	beadsDir := FindRigBeadsDir(townRoot, rigName)
+	if beadsDir != "" {
+		if data, err := os.ReadFile(filepath.Join(beadsDir, "metadata.json")); err == nil {
+			var meta map[string]interface{}
+			if json.Unmarshal(data, &meta) == nil {
+				if existingDB, _ := meta["dolt_database"].(string); existingDB != "" {
+					for _, c := range candidates {
+						if c == existingDB {
+							return c // Already correct — no repair needed
+						}
+					}
+				}
+			}
+		}
+	}
+	return candidates[0] // Default: first (alphabetical from os.ReadDir)
 }
 
 // buildDatabaseToRigMap loads routes.jsonl and builds a map from database name
@@ -3202,6 +3346,7 @@ func GetActiveConnectionCount(townRoot string) (int, error) {
 	// Always set DOLT_CLI_PASSWORD to prevent interactive password prompt.
 	// When empty, dolt connects without a password (which is the default for local servers).
 	cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+config.Password)
+	setProcessGroup(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return 0, fmt.Errorf("querying connection count: %w (output: %s)", err, strings.TrimSpace(string(output)))
@@ -3264,11 +3409,22 @@ type HealthMetrics struct {
 	DiskUsageHuman string `json:"disk_usage_human"`
 
 	// QueryLatency is the time taken for a SELECT active_branch() round-trip.
+	// TODO: json tag says "ms" but json.Marshal on time.Duration emits nanoseconds.
+	// Consumers extract via .Milliseconds() — the tag is aspirational, not accurate.
 	QueryLatency time.Duration `json:"query_latency_ms"`
 
 	// ReadOnly indicates whether the server is in read-only mode.
 	// When true, the server accepts reads but rejects all writes.
 	ReadOnly bool `json:"read_only"`
+
+	// LastCommitAge is the time since the most recent Dolt commit across all databases.
+	// A large gap (>1 hour) may indicate the server was down or writes are failing.
+	// Note: json.Marshal emits nanoseconds for time.Duration. Consumers should use
+	// ServerHealth.LastCommitAgeSec (float64 seconds) for JSON output instead.
+	LastCommitAge time.Duration `json:"last_commit_age_ns"`
+
+	// LastCommitDB is the database that had the most recent commit.
+	LastCommitDB string `json:"last_commit_db,omitempty"`
 
 	// Healthy indicates whether the server is within acceptable resource limits.
 	Healthy bool `json:"healthy"`
@@ -3324,6 +3480,18 @@ func GetHealthMetrics(townRoot string) *HealthMetrics {
 		metrics.Healthy = false
 		metrics.Warnings = append(metrics.Warnings,
 			"server is in READ-ONLY mode — requires restart to recover")
+	}
+
+	// 5. Commit freshness: check the most recent commit across all databases.
+	// A gap >1 hour suggests writes are failing or the server was recently down.
+	if commitAge, commitDB, err := GetLastCommitAge(townRoot); err == nil {
+		metrics.LastCommitAge = commitAge
+		metrics.LastCommitDB = commitDB
+		if commitAge > 1*time.Hour {
+			metrics.Warnings = append(metrics.Warnings,
+				fmt.Sprintf("last Dolt commit was %v ago (db: %s) — possible commit gap",
+					commitAge.Round(time.Minute), commitDB))
+		}
 	}
 
 	return metrics
@@ -3472,7 +3640,7 @@ func doltSQLWithRecovery(townRoot, rigDB, query string) error {
 func MeasureQueryLatency(townRoot string) (time.Duration, error) {
 	config := DefaultConfig(townRoot)
 
-	dsn := fmt.Sprintf("%s@tcp(127.0.0.1:%d)/", config.User, config.Port)
+	dsn := fmt.Sprintf("%s@tcp(%s:%d)/", config.User, config.EffectiveHost(), config.Port)
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return 0, fmt.Errorf("opening mysql connection: %w", err)
@@ -3495,6 +3663,66 @@ func MeasureQueryLatency(townRoot string) (time.Duration, error) {
 	}
 
 	return elapsed, nil
+}
+
+// GetLastCommitAge returns the age and database name of the most recent Dolt commit
+// across all databases. This detects commit gaps — periods where no writes persisted.
+//
+// Uses database/sql (like MeasureQueryLatency) rather than dolt subprocess to avoid
+// subprocess startup overhead dominating the measurement.
+func GetLastCommitAge(townRoot string) (time.Duration, string, error) {
+	config := DefaultConfig(townRoot)
+
+	dsn := fmt.Sprintf("%s@tcp(%s:%d)/", config.User, config.EffectiveHost(), config.Port)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return 0, "", fmt.Errorf("opening mysql connection: %w", err)
+	}
+	defer db.Close()
+
+	db.SetConnMaxLifetime(5 * time.Second)
+	db.SetMaxOpenConns(1)
+
+	databases, err := ListDatabases(townRoot)
+	if err != nil || len(databases) == 0 {
+		return 0, "", fmt.Errorf("listing databases: %w", err)
+	}
+
+	var mostRecent time.Time
+	var mostRecentDB string
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	for _, dbName := range databases {
+		var dateStr string
+		query := fmt.Sprintf("SELECT MAX(date) FROM `%s`.dolt_log LIMIT 1", dbName)
+		if err := db.QueryRowContext(ctx, query).Scan(&dateStr); err != nil {
+			continue // Skip databases that fail (e.g., no dolt_log)
+		}
+		// Dolt's dolt_log.date is DATETIME(6) (microsecond precision). Without
+		// parseTime=true in the DSN, the Go MySQL driver returns this as a string
+		// like "2025-03-28 12:34:56.123456". Go's ".999" fractional format accepts
+		// any number of trailing digits (1-9), correctly parsing both millisecond
+		// and microsecond timestamps. RFC3339 fallback handles version differences.
+		t, err := time.Parse("2006-01-02 15:04:05.999", dateStr)
+		if err != nil {
+			t, err = time.Parse(time.RFC3339, dateStr)
+			if err != nil {
+				continue
+			}
+		}
+		if t.After(mostRecent) {
+			mostRecent = t
+			mostRecentDB = dbName
+		}
+	}
+
+	if mostRecent.IsZero() {
+		return 0, "", fmt.Errorf("no commits found in any database")
+	}
+
+	return time.Since(mostRecent), mostRecentDB, nil
 }
 
 // dirSize returns the total size of a directory tree in bytes.
@@ -3544,6 +3772,7 @@ func moveDir(src, dest string) error {
 	// Cross-filesystem: copy then delete source
 	if runtime.GOOS == "windows" {
 		cmd := exec.Command("robocopy", src, dest, "/E", "/MOVE", "/R:1", "/W:1")
+		setProcessGroup(cmd)
 		if err := cmd.Run(); err != nil {
 			// robocopy returns 1 for success with copies
 			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() <= 7 {
@@ -3554,6 +3783,7 @@ func moveDir(src, dest string) error {
 		return nil
 	}
 	cmd := exec.Command("cp", "-a", src, dest)
+	setProcessGroup(cmd)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("copying directory: %w", err)
 	}

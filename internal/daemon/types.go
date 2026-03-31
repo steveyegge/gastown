@@ -129,6 +129,7 @@ type PatrolsConfig struct {
 	CheckpointDog          *CheckpointDogConfig           `json:"checkpoint_dog,omitempty"`
 	ScheduledMaintenance   *ScheduledMaintenanceConfig    `json:"scheduled_maintenance,omitempty"`
 	MainBranchTest         *MainBranchTestConfig          `json:"main_branch_test,omitempty"`
+	QuotaDog               *QuotaDogConfig                `json:"quota_dog,omitempty"`
 	RestartTracker         *RestartTrackerConfig          `json:"restart_tracker,omitempty"`
 }
 
@@ -300,6 +301,12 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 			return false
 		}
 		return config.Patrols.MainBranchTest.Enabled
+	}
+	if patrol == "quota_dog" {
+		if config == nil || config.Patrols == nil || config.Patrols.QuotaDog == nil {
+			return false
+		}
+		return config.Patrols.QuotaDog.Enabled
 	}
 
 	if config == nil || config.Patrols == nil {

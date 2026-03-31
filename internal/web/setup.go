@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -94,6 +95,7 @@ type CheckWorkspaceRequest struct {
 type LaunchRequest struct {
 	Path string `json:"path"`
 	Port int    `json:"port"`
+	Bind string `json:"bind"`
 }
 
 // CheckWorkspaceResponse is the response for workspace checks.
@@ -250,8 +252,14 @@ func (h *SetupAPIHandler) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	// Start new dashboard on a DIFFERENT port first, then we'll tell the browser to go there
 	newPort := port + 1
 
+	// Propagate bind address so the child dashboard listens on the same interface.
+	bind := req.Bind
+	if bind == "" {
+		bind = "127.0.0.1"
+	}
+
 	// Start new dashboard process from the workspace directory
-	cmd := exec.Command("gt", "dashboard", "--port", fmt.Sprintf("%d", newPort))
+	cmd := exec.Command("gt", "dashboard", "--port", fmt.Sprintf("%d", newPort), "--bind", bind)
 	cmd.Dir = path
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -261,10 +269,16 @@ func (h *SetupAPIHandler) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Wait for the new server to be ready
+	// Wait for the new server to be ready.
+	// Use the bind address for the health check; if binding to all interfaces,
+	// probe via localhost since 0.0.0.0 is not directly connectable.
+	probeHost := bind
+	if probeHost == "0.0.0.0" {
+		probeHost = "127.0.0.1"
+	}
 	ready := false
 	for i := 0; i < 30; i++ { // Try for 3 seconds
-		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/commands", newPort))
+		resp, err := http.Get(fmt.Sprintf("http://%s:%d/api/commands", probeHost, newPort))
 		if err == nil {
 			_ = resp.Body.Close()
 			ready = true
@@ -278,12 +292,19 @@ func (h *SetupAPIHandler) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build redirect URL using the Host header from the incoming request so the
+	// browser reaches the child dashboard via the same hostname it used for the
+	// parent (works for both localhost and remote/IP access).
+	redirectHost := r.Host
+	if host, _, err := net.SplitHostPort(redirectHost); err == nil {
+		redirectHost = host
+	}
 	// Send success response with the new port to redirect to
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":  true,
 		"message":  fmt.Sprintf("Dashboard launching from %s", path),
-		"redirect": fmt.Sprintf("http://localhost:%d", newPort),
+		"redirect": fmt.Sprintf("http://%s:%d", redirectHost, newPort),
 	})
 }
 
@@ -901,7 +922,7 @@ const setupHTML = `<!DOCTYPE html>
             fetch('/api/launch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path: path, port: 8080 })
+                body: JSON.stringify({ path: path, port: parseInt(window.location.port) || 8080, bind: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? '127.0.0.1' : '0.0.0.0' })
             })
             .then(function(r) { return r.json(); })
             .then(function(data) {

@@ -411,14 +411,15 @@ func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy, baseB
 	}
 
 	// Add tracking relation: convoy tracks the issue.
-	// Pass the raw beadID and let bd handle cross-rig resolution via routes.jsonl,
-	// matching what gt convoy create/add already do (convoy.go:368, convoy.go:464).
-	// Use WithAutoCommit for the same reason as above.
+	// bd dep add validates both IDs exist in the same database, which fails for
+	// cross-rig beads (e.g., gas-xyz tracked by an hq-cv- convoy). Since beads
+	// v0.62 removed cross-rig routing from bd, this validation cannot be satisfied
+	// for rig-prefixed beads. We treat tracking failure as non-fatal: the convoy
+	// still works, the witness and daemon provide backup tracking, and PR #3166
+	// will replace this with the Go module API which can route cross-rig.
 	depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
 	if out, err := BdCmd(depArgs...).Dir(townRoot).WithAutoCommit().StripBeadsDir().CombinedOutput(); err != nil {
-		// Tracking failed — delete the orphan convoy to prevent accumulation
-		_ = BdCmd("close", convoyID, "-r", "tracking dep failed").Dir(townRoot).StripBeadsDir().Run()
-		return "", fmt.Errorf("adding tracking relation for %s: %w\noutput: %s", beadID, err, out)
+		fmt.Printf("Warning: Could not create auto-convoy tracking: %v\noutput: %s\n", err, out)
 	}
 
 	return convoyID, nil

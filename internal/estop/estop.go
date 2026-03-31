@@ -5,6 +5,8 @@
 // be frozen (SIGTSTP) and the daemon should not restart them.
 //
 // The Mayor is exempt from E-stop so it can coordinate recovery.
+//
+// Original implementation by outdoorsea (PR #3237).
 package estop
 
 import (
@@ -27,7 +29,7 @@ const TriggerAuto = "auto"
 // Info represents the parsed contents of an ESTOP file.
 type Info struct {
 	Trigger   string    // "manual" or "auto"
-	Reason    string    // human-readable reason (auto: includes source like "dolt-unreachable")
+	Reason    string    // human-readable reason
 	Timestamp time.Time // when the E-stop was triggered
 }
 
@@ -64,7 +66,7 @@ func Deactivate(townRoot string, onlyAuto bool) error {
 	if onlyAuto {
 		info := Read(townRoot)
 		if info != nil && info.Trigger == TriggerManual {
-			return fmt.Errorf("E-stop was manually triggered — use 'gt resume' to clear")
+			return fmt.Errorf("E-stop was manually triggered — use 'gt thaw' to clear")
 		}
 	}
 	err := os.Remove(FilePath(townRoot))

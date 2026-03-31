@@ -18,11 +18,13 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Common errors
@@ -141,9 +143,21 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// from the shared bare repo (.repo.git) instead of falling back to mayor/rig.
 	// Falling back to mayor/rig causes the refinery to operate in the mayor's
 	// clone, which can interfere with mayor operations and confuse agents.
+	//
+	// Rigs using a standard .git clone (e.g. beads) never have a .repo.git bare
+	// repo, so the repair path is not applicable for them. Fall back to mayor/rig
+	// silently in that case — the fallback is correct and the warning would be noise.
 	refineryRigDir := filepath.Join(m.rig.Path, "refinery", "rig")
 	if _, err := os.Stat(refineryRigDir); os.IsNotExist(err) {
-		if repairErr := m.repairRefineryWorktree(refineryRigDir); repairErr != nil {
+		bareRepoPath := filepath.Join(m.rig.Path, ".repo.git")
+		_, bareErr := os.Stat(bareRepoPath)
+		standardGitPath := filepath.Join(m.rig.Path, ".git")
+		_, standardGitErr := os.Stat(standardGitPath)
+		if os.IsNotExist(bareErr) && standardGitErr == nil {
+			// Rig uses standard .git layout — worktree repair is not applicable.
+			// Fall back to mayor/rig silently; the fallback works correctly here.
+			refineryRigDir = filepath.Join(m.rig.Path, "mayor", "rig")
+		} else if repairErr := m.repairRefineryWorktree(refineryRigDir); repairErr != nil {
 			// Repair failed — fall back to mayor/rig as last resort.
 			_, _ = fmt.Fprintf(m.output, "⚠ Could not repair refinery worktree: %v (falling back to mayor/rig)\n", repairErr)
 			refineryRigDir = filepath.Join(m.rig.Path, "mayor", "rig")
@@ -227,8 +241,20 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("waiting for refinery to start: %w", err)
 	}
 
+	// Start nudge-queue poller (gt-dgf). Claude's UserPromptSubmit hook only
+	// drains when the agent submits a prompt. Idle agents never submit, so
+	// queued nudges deadlock. The poller breaks the cycle by polling every 10s.
+	if _, pollerErr := nudge.StartPoller(townRoot, sessionID); pollerErr != nil {
+		log.Printf("warning: could not start nudge poller for %s: %v", sessionID, pollerErr)
+	}
+
 	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)
 	_ = runtime.DeliverStartupPromptFallback(t, sessionID, initialPrompt, runtimeConfig, constants.ClaudeStartTimeout)
+
+	// Track PID for defense-in-depth orphan cleanup (non-fatal)
+	if err := session.TrackSessionPID(townRoot, sessionID, t); err != nil {
+		log.Printf("warning: tracking session PID for %s: %v", sessionID, err)
+	}
 
 	// Stream refinery's Claude Code JSONL conversation log to VictoriaLogs (opt-in).
 	if os.Getenv("GT_LOG_AGENT_OUTPUT") == "true" && os.Getenv("GT_OTEL_LOGS_URL") != "" {
@@ -623,6 +649,7 @@ func (m *Manager) notifyWorkerRejected(mr *MergeRequest, reason string) {
 	nudgeMsg := fmt.Sprintf("MR rejected: branch=%s issue=%s reason=%s — review feedback and resubmit with 'gt done'",
 		mr.Branch, mr.IssueID, reason)
 	nudgeCmd := exec.Command("gt", "nudge", target, nudgeMsg)
+	util.SetDetachedProcessGroup(nudgeCmd)
 	nudgeCmd.Dir = m.workDir
 	if err := nudgeCmd.Run(); err != nil {
 		log.Printf("warning: nudging worker about rejection for %s: %v", mr.IssueID, err)

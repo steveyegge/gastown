@@ -14,6 +14,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // EventSource represents a source of events
@@ -35,6 +36,7 @@ func NewBdActivitySource(workDir string) (*BdActivitySource, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cmd := exec.CommandContext(ctx, "bd", "activity", "--follow")
+	util.SetDetachedProcessGroup(cmd)
 	cmd.Dir = workDir
 
 	stdout, err := cmd.StdoutPipe()

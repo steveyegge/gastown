@@ -128,47 +128,32 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 				rigPath = filepath.Join(townRoot, loc.Rig)
 			}
 
-			// Use ResolveRoleAgentName to get the *configured* agent name
-			// without binary validation. ResolveRoleAgentConfig falls back
-			// to Claude when the configured agent's binary isn't in PATH,
-			// which would cause us to skip syncing the hook files. But hook
-			// files should be synced based on config, not binary availability.
+			// Use ResolveRoleAgentName (not ResolveRoleAgentConfig) so that hooks are
+			// installed based on the *configured* agent, not the *resolved* one.
+			// ResolveRoleAgentConfig falls back to claude when the agent binary is not
+			// found in PATH (e.g., in CI or on a fresh machine), which would silently
+			// skip creating opencode/gemini/etc. plugin files.
 			agentName, _ := config.ResolveRoleAgentName(loc.Role, townRoot, rigPath)
-			if agentName == "" || agentName == "claude" {
+			if agentName == "" {
 				continue
 			}
 
 			preset := config.GetAgentPresetByName(agentName)
-			if preset == nil {
-				// Not a known preset — try the full resolution path
-				rc := config.ResolveRoleAgentConfig(loc.Role, townRoot, rigPath)
-				if rc == nil || rc.Hooks == nil || rc.Hooks.Provider == "" || rc.Hooks.Provider == "claude" {
-					continue
-				}
-				preset = config.GetAgentPresetByName(rc.Hooks.Provider)
+			if preset == nil || preset.HooksDir == "" || preset.HooksSettingsFile == "" {
+				continue
 			}
 
-			// Get hooks config from the preset or resolved config
-			var hooksProvider string
-			var hooksDir, settingsFile string
-			useSettingsDir := preset != nil && preset.HooksUseSettingsDir
-			if preset != nil {
-				rc := config.RuntimeConfigFromPreset(config.AgentPreset(agentName))
-				if rc == nil || rc.Hooks == nil {
-					continue
-				}
-				hooksProvider = rc.Hooks.Provider
-				hooksDir = rc.Hooks.Dir
-				settingsFile = rc.Hooks.SettingsFile
-			} else {
-				rc := config.ResolveRoleAgentConfig(loc.Role, townRoot, rigPath)
-				if rc == nil || rc.Hooks == nil || rc.Hooks.Provider == "" || rc.Hooks.Provider == "claude" {
-					continue
-				}
-				hooksProvider = rc.Hooks.Provider
-				hooksDir = rc.Hooks.Dir
-				settingsFile = rc.Hooks.SettingsFile
+			hooksProvider := preset.HooksProvider
+			if hooksProvider == "" {
+				hooksProvider = agentName
 			}
+
+			// Claude targets are already handled by DiscoverTargets + syncTarget above.
+			if hooksProvider == "claude" {
+				continue
+			}
+
+			useSettingsDir := preset.HooksUseSettingsDir
 
 			// Determine sync targets.
 			// - Town-level roles (mayor, deacon): the role dir IS the working directory.
@@ -183,7 +168,7 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 			}
 
 			for _, dir := range syncDirs {
-				targetPath := filepath.Join(dir, hooksDir, settingsFile)
+				targetPath := filepath.Join(dir, preset.HooksDir, preset.HooksSettingsFile)
 				relPath, pathErr := filepath.Rel(townRoot, targetPath)
 				if pathErr != nil {
 					relPath = targetPath
@@ -200,7 +185,7 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 				}
 
 				result, syncErr := hooks.SyncForRole(hooksProvider, dir, dir, loc.Role,
-					hooksDir, settingsFile, useSettingsDir)
+					preset.HooksDir, preset.HooksSettingsFile, useSettingsDir)
 				if syncErr != nil {
 					fmt.Printf("  %s %s (%s): %v\n", style.Error.Render("✖"), relPath, hooksProvider, syncErr)
 					errors++

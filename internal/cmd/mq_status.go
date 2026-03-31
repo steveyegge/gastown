@@ -276,7 +276,11 @@ func formatTimeAgo(timestamp string) string {
 		return "" // Can't parse, return empty
 	}
 
-	d := time.Since(t)
+	// Compare in UTC: Dolt stores timestamps in UTC, and time.Parse
+	// without timezone info returns UTC times. Using time.Since (which
+	// uses local time) caused false "in the future" for UTC timestamps
+	// that appear to be tomorrow when local time is still today (gt-ty4).
+	d := time.Now().UTC().Sub(t.UTC())
 	if d < 0 {
 		return style.Dim.Render("(in the future)")
 	}

@@ -3,6 +3,7 @@ package doctor
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -116,6 +117,9 @@ func TestTestutilSymlinkCheck_CrewRealDir(t *testing.T) {
 }
 
 func TestTestutilSymlinkCheck_ValidSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on Windows")
+	}
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -153,6 +157,9 @@ func TestTestutilSymlinkCheck_ValidSymlink(t *testing.T) {
 }
 
 func TestTestutilSymlinkCheck_BrokenSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on Windows")
+	}
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -182,6 +189,9 @@ func TestTestutilSymlinkCheck_BrokenSymlink(t *testing.T) {
 }
 
 func TestTestutilSymlinkCheck_WrongTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on Windows")
+	}
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -246,6 +256,9 @@ func TestTestutilSymlinkCheck_RefineryRealDir(t *testing.T) {
 }
 
 func TestTestutilSymlinkCheck_Fix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on Windows")
+	}
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -335,6 +348,9 @@ func TestTestutilSymlinkCheck_Fix(t *testing.T) {
 }
 
 func TestTestutilSymlinkCheck_MultipleCrewMembers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on Windows")
+	}
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 

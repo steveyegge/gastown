@@ -546,7 +546,7 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 	// Check for required elements based on template
 	// All templates should have:
 	// 1. enabledPlugins
-	// 2. PATH export in hooks
+	// 2. SessionStart hook with prime --hook
 	// 3. Stop hook with gt costs record (for autonomous)
 	// Check enabledPlugins
 	if _, ok := actual["enabledPlugins"]; !ok {
@@ -559,13 +559,13 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 		return append(missing, "hooks")
 	}
 
-	// Check SessionStart hook has PATH export
-	if !c.hookHasPattern(hooks, "SessionStart", "PATH=") {
-		missing = append(missing, "PATH export")
+	// Check SessionStart hook has prime --hook (either via PATH export or resolved {{GT_BIN}})
+	if !c.hookHasPattern(hooks, "SessionStart", "prime --hook") {
+		missing = append(missing, "SessionStart hook (prime --hook)")
 	}
 
-	// Check Stop hook exists with gt costs record (for all roles)
-	if !c.hookHasPattern(hooks, "Stop", "gt costs record") {
+	// Check Stop hook exists with costs record (for all roles)
+	if !c.hookHasPattern(hooks, "Stop", "costs record") {
 		missing = append(missing, "Stop hook")
 	}
 
