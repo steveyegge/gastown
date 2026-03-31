@@ -485,7 +485,14 @@ func PlanBalance(scanner *Scanner, tmuxClient TmuxIdleChecker, acctCfg *config.A
 // FilterAssignmentsByGlob removes entries from assignments whose session name
 // does not match any of the given glob patterns. Uses filepath.Match semantics.
 // Note: filepath.Match does not support ** (recursive glob) — only * (single segment).
-func FilterAssignmentsByGlob(assignments map[string]string, patterns []string) {
+// Returns an error if any pattern has invalid glob syntax.
+func FilterAssignmentsByGlob(assignments map[string]string, patterns []string) error {
+	// Validate all patterns before modifying the map.
+	for _, pattern := range patterns {
+		if _, err := filepath.Match(pattern, ""); err != nil {
+			return fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
+		}
+	}
 	for session := range assignments {
 		matched := false
 		for _, pattern := range patterns {
@@ -498,4 +505,5 @@ func FilterAssignmentsByGlob(assignments map[string]string, patterns []string) {
 			delete(assignments, session)
 		}
 	}
+	return nil
 }

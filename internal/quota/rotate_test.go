@@ -1277,7 +1277,10 @@ func TestFilterAssignmentsByGlob(t *testing.T) {
 			for k, v := range tt.assignments {
 				assignments[k] = v
 			}
-			FilterAssignmentsByGlob(assignments, tt.patterns)
+			err := FilterAssignmentsByGlob(assignments, tt.patterns)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 
 			var gotKeys []string
 			for k := range assignments {
@@ -1303,4 +1306,16 @@ func TestFilterAssignmentsByGlob(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("invalid glob pattern returns error", func(t *testing.T) {
+		assignments := map[string]string{"gt-witness": "work"}
+		err := FilterAssignmentsByGlob(assignments, []string{"[invalid"})
+		if err == nil {
+			t.Error("expected error for malformed glob pattern, got nil")
+		}
+		// Map should be unchanged since validation happens before filtering
+		if len(assignments) != 1 {
+			t.Errorf("expected map unchanged on error, got %d entries", len(assignments))
+		}
+	})
 }

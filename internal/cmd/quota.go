@@ -549,7 +549,9 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 
 	// --match: filter assignments to sessions matching glob patterns
 	if len(rotateMatch) > 0 {
-		quota.FilterAssignmentsByGlob(plan.Assignments, rotateMatch)
+		if err := quota.FilterAssignmentsByGlob(plan.Assignments, rotateMatch); err != nil {
+			return fmt.Errorf("--match: %w", err)
+		}
 	}
 
 	// --to: override target account for all assignments
@@ -584,8 +586,8 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 		}
 		if len(plan.SkippedAccounts) > 0 {
 			fmt.Println()
-			for handle, reason := range plan.SkippedAccounts {
-				fmt.Printf(" %s Skipped %s — %s\n", style.WarningPrefix, handle, reason)
+			for _, handle := range slices.Sorted(maps.Keys(plan.SkippedAccounts)) {
+				fmt.Printf(" %s Skipped %s — %s\n", style.WarningPrefix, handle, plan.SkippedAccounts[handle])
 			}
 		}
 		return nil
@@ -664,9 +666,9 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 		}
 		if len(plan.SkippedAccounts) > 0 {
 			fmt.Println()
-			for handle, reason := range plan.SkippedAccounts {
+			for _, handle := range slices.Sorted(maps.Keys(plan.SkippedAccounts)) {
 				acct := acctCfg.Accounts[handle]
-				fmt.Printf(" %s Skipped %s — %s\n", style.WarningPrefix, handle, reason)
+				fmt.Printf(" %s Skipped %s — %s\n", style.WarningPrefix, handle, plan.SkippedAccounts[handle])
 				fmt.Printf("   Run: claude /login  (in CLAUDE_CONFIG_DIR=%s)\n", acct.ConfigDir)
 			}
 		}
@@ -845,7 +847,9 @@ func runQuotaBalance(cmd *cobra.Command, args []string) error {
 
 	// --match: filter assignments to sessions matching glob patterns
 	if len(balanceMatch) > 0 {
-		quota.FilterAssignmentsByGlob(plan.Assignments, balanceMatch)
+		if err := quota.FilterAssignmentsByGlob(plan.Assignments, balanceMatch); err != nil {
+			return fmt.Errorf("--match: %w", err)
+		}
 	}
 
 	if len(plan.Assignments) == 0 {
