@@ -221,6 +221,7 @@ func buildReport(dateStr string, result *compactResult, activeWisps []*compactIs
 }
 
 // wispTypeToCategory maps a wisp_type string to its display category.
+// When wispType is empty, it falls back to checking the title for keywords.
 func wispTypeToCategory(wispType, title string) string {
 	if cat, ok := wispCategoryMap[wispType]; ok {
 		return cat

@@ -1,0 +1,31 @@
+package dashboard
+
+templ layout(title string, account *AccountView) {
+	<!DOCTYPE html>
+	<html lang="en">
+	<head>
+		<meta charset="utf-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1"/>
+		<title>{ title } — faultline</title>
+		<link rel="stylesheet" href="/static/style.css"/>
+		<script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
+	</head>
+	<body>
+		<nav class="nav">
+			<div class="container">
+				<a href="/dashboard/" class="nav-brand">fault<span>|</span>line</a>
+				<div class="nav-links">
+					if account != nil {
+						<a href="/dashboard/">Seismograph</a>
+						<span class="nav-user">{ account.Name }</span>
+						<a href="/dashboard/logout">Logout</a>
+					}
+				</div>
+			</div>
+		</nav>
+		<div class="container">
+			{ children... }
+		</div>
+	</body>
+	</html>
+}

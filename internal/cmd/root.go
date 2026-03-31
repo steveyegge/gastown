@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/outdoorsea/faultline/pkg/gtfaultline"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -288,6 +290,27 @@ func checkStaleBinaryWarning() {
 // Execute runs the root command and returns an exit code.
 // The caller (main) should call os.Exit with this code.
 func Execute() int {
+	// Initialize faultline error reporting (non-fatal if unavailable).
+	if dsn := os.Getenv("FAULTLINE_DSN"); dsn != "" {
+		if err := gtfaultline.Init(gtfaultline.Config{
+			DSN:         dsn,
+			Release:     Version,
+			Environment: os.Getenv("GT_ENV"),
+			ServerName:  os.Getenv("GT_RIG"),
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: faultline init: %v\n", err)
+		} else {
+			defer gtfaultline.Flush(2 * time.Second)
+			defer gtfaultline.RecoverAndReport()
+
+			// Forward error-level townlog events to faultline.
+			townlog.SetDefaultErrorHook(func(event townlog.Event) {
+				msg := fmt.Sprintf("[%s] %s: %s", event.Type, event.Agent, event.Context)
+				gtfaultline.CaptureMessage(msg)
+			})
+		}
+	}
+
 	ctx := context.Background()
 	provider, err := telemetry.Init(ctx, "gastown", Version)
 	if err != nil {
@@ -309,7 +332,7 @@ func Execute() int {
 		if code, ok := IsSilentExit(err); ok {
 			return code
 		}
-		// Other errors already printed by cobra
+		gtfaultline.CaptureError(err)
 		return 1
 	}
 	return 0

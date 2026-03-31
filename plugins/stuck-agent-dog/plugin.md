@@ -1,7 +1,7 @@
 +++
 name = "stuck-agent-dog"
 description = "Context-aware stuck/crashed agent detection and restart for polecats and deacons"
-version = 2
+version = 1
 
 [gate]
 type = "cooldown"
@@ -103,13 +103,6 @@ while IFS='|' read -r RIG PREFIX; do
   POLECAT_DIR="$TOWN_ROOT/$RIG/polecats"
   [ -d "$POLECAT_DIR" ] || continue
 
-  # Get tmux session prefix from rigs.json (e.g., "gastown" → "gt")
-  PREFIX=$(get_rig_prefix "$RIG")
-  if [ -z "$PREFIX" ]; then
-    echo "  WARN: No prefix found for rig $RIG, skipping"
-    continue
-  fi
-
   for PCAT_PATH in "$POLECAT_DIR"/*/; do
     [ -d "$PCAT_PATH" ] || continue
     PCAT_NAME=$(basename "$PCAT_PATH")
@@ -118,10 +111,9 @@ while IFS='|' read -r RIG PREFIX; do
 
     # Check if session exists
     if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-      # Session dead — check if it has hooked work via gt hook output
-      HOOK_LINE=$(gt hook "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
-        | grep -oE 'Hooked: [^ ]+' | head -1)
-      HOOK_BEAD=$(echo "$HOOK_LINE" | sed 's/Hooked: //')
+      # Session dead — check if it has hooked work
+      HOOK_BEAD=$(bd show "$RIG/polecats/$PCAT_NAME" --json 2>/dev/null \
+        | jq -r '.hook_bead // empty' 2>/dev/null)
 
       if [ -n "$HOOK_BEAD" ]; then
         # Check agent_state to avoid false alerts for intentional shutdowns
@@ -139,20 +131,22 @@ while IFS='|' read -r RIG PREFIX; do
         echo "  CRASHED: $SESSION_NAME (hook=$HOOK_BEAD)"
       fi
     else
-      # Session alive — check if the pane process (claude) is still running.
-      # NOTE: In Gas Town, the pane PID IS the claude process itself (not a
-      # parent shell). So we check if that PID is alive, not its children.
+      # Session alive — check for agent process liveness
+      # Capture last 5 lines of pane output to check for signs of life
+      PANE_OUTPUT=$(tmux capture-pane -t "$SESSION_NAME" -p -S -5 2>/dev/null || echo "")
+
+      # Check if agent process is running in the session
       PANE_PID=$(tmux list-panes -t "$SESSION_NAME" -F '#{pane_pid}' 2>/dev/null | head -1)
       if [ -n "$PANE_PID" ]; then
-        PROC_COMM=$(ps -o comm= -p "$PANE_PID" 2>/dev/null)
-        if [ -z "$PROC_COMM" ]; then
-          # Process dead but session alive — zombie session
-          HOOK_LINE=$(gt hook "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
-            | grep -oE 'Hooked: [^ ]+' | head -1)
-          HOOK_BEAD=$(echo "$HOOK_LINE" | sed 's/Hooked: //')
+        # Check if Claude or another agent process is a descendant
+        AGENT_ALIVE=$(pgrep -P "$PANE_PID" -f 'claude|node|anthropic' 2>/dev/null | head -1)
+        if [ -z "$AGENT_ALIVE" ]; then
+          # Agent process dead but session alive — zombie session
+          HOOK_BEAD=$(bd show "$RIG/polecats/$PCAT_NAME" --json 2>/dev/null \
+            | jq -r '.hook_bead // empty' 2>/dev/null)
           if [ -n "$HOOK_BEAD" ]; then
             STUCK+=("$SESSION_NAME|$RIG|$PCAT_NAME|$HOOK_BEAD|agent_dead")
-            echo "  ZOMBIE: $SESSION_NAME (pid=$PANE_PID dead, session alive, hook=$HOOK_BEAD)"
+            echo "  ZOMBIE: $SESSION_NAME (agent dead, session alive, hook=$HOOK_BEAD)"
           fi
         else
           HEALTHY=$((HEALTHY + 1))

@@ -329,6 +329,19 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		}
 	}
 
+	// Propagate FAULTLINE_DSN for error reporting to the faultline server.
+	// The DSN is rig-specific (e.g., project 2 for gastown). Resolution:
+	//   1. Parent env (set in daemon.json or operator shell)
+	//   2. GT_FAULTLINE_DSN alias (for operator convenience)
+	// Without this, gtfaultline.Init() is a no-op and errors go unreported.
+	if _, ok := env["FAULTLINE_DSN"]; !ok {
+		if v := os.Getenv("FAULTLINE_DSN"); v != "" {
+			env["FAULTLINE_DSN"] = v
+		} else if v := os.Getenv("GT_FAULTLINE_DSN"); v != "" {
+			env["FAULTLINE_DSN"] = v
+		}
+	}
+
 	// Pass through cloud API credentials and provider configuration from the parent shell.
 	// Only variables explicitly listed here are forwarded; all others are blocked for isolation.
 	for _, key := range []string{

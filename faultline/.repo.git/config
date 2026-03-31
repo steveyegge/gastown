@@ -1,0 +1,13 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = true
+	ignorecase = true
+	precomposeunicode = true
+	hooksPath = .githooks
+[remote "origin"]
+	url = git@github.com:outdoorsea/faultline.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[beads]
+	issue-prefix = fl
+	role = contributor

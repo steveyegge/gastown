@@ -1,0 +1,103 @@
+{
+  "env": {
+    "GT_DOLT_PORT": "3307",
+    "FAULTLINE_DSN": "http://gastown_key@localhost:8080/2"
+  },
+  "heartbeat": {
+    "enabled": true,
+    "interval": "3m"
+  },
+  "patrols": {
+    "checkpoint_dog": {
+      "enabled": true,
+      "interval": "10m"
+    },
+    "compactor_dog": {
+      "enabled": true,
+      "interval": "24h",
+      "threshold": 500
+    },
+    "deacon": {
+      "enabled": true,
+      "interval": "5m",
+      "agent": "deacon"
+    },
+    "doctor_dog": {
+      "enabled": true,
+      "interval": "5m"
+    },
+    "dolt_backup": {
+      "enabled": true,
+      "interval": "15m"
+    },
+    "dolt_server": {
+      "enabled": true,
+      "port": 3307,
+      "host": "127.0.0.1",
+      "data_dir": "/Users/jeremy/Documents/gt/.dolt-data",
+      "log_file": "/Users/jeremy/Documents/gt/.dolt-data/dolt.log",
+      "auto_restart": true
+    },
+    "handler": {
+      "enabled": true
+    },
+    "jsonl_git_backup": {
+      "enabled": true,
+      "interval": "15m",
+      "scrub": true
+    },
+    "main_branch_test": {
+      "enabled": true,
+      "interval": "30m",
+      "timeout": "10m"
+    },
+    "refinery": {
+      "agent": "refinery",
+      "enabled": true,
+      "interval": "5m",
+      "rigs": [
+        "meety_me",
+        "theoutlived",
+        "vitalitek",
+        "gastown",
+        "myndy_ios",
+        "myndy_api",
+        "geocaching_ai_lab",
+        "faultline",
+        "switchyard",
+        "rally_tavern"
+      ]
+    },
+    "scheduled_maintenance": {
+      "enabled": true,
+      "window": "03:00",
+      "interval": "daily",
+      "threshold": 1000
+    },
+    "wisp_reaper": {
+      "enabled": true,
+      "interval": "30m",
+      "max_age": "24h",
+      "delete_age": "168h"
+    },
+    "witness": {
+      "agent": "witness",
+      "enabled": true,
+      "interval": "5m",
+      "rigs": [
+        "meety_me",
+        "theoutlived",
+        "vitalitek",
+        "gastown",
+        "myndy_ios",
+        "myndy_api",
+        "geocaching_ai_lab",
+        "faultline",
+        "switchyard",
+        "rally_tavern"
+      ]
+    }
+  },
+  "type": "daemon-patrol-config",
+  "version": 1
+}

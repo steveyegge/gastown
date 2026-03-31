@@ -1,0 +1,1 @@
+Review faultline's P1 Sentry ingest API architecture and validate the roadmap (P2: schema refinement, P3: query API, P4: Gas Town agentic loop, P5: Dolt-native features, P6: myndy_ios dogfooding). Evaluate: HTTP handler design, Dolt storage patterns, fingerprinting algorithm, auth model, and whether the current package structure will scale through P5.

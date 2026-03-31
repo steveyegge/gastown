@@ -1,0 +1,36 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - gosec
+    - revive
+    - misspell
+    - unconvert
+    - unparam
+    - gocritic
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+  gosec:
+    excludes:
+      - G304  # file path from variable (trusted internal paths)
+      - G404  # math/rand (non-security use)
+  revive:
+    rules:
+      - name: exported
+        disabled: true  # don't require comments on all exports yet
+
+run:
+  timeout: 5m
+
+formatters:
+  enable:
+    - gofmt
+
+output:
+  sort-order:
+    - file

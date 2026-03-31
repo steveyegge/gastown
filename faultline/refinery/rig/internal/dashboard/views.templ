@@ -1,0 +1,321 @@
+package dashboard
+
+import (
+	"fmt"
+	"time"
+)
+
+// AccountView is the minimal account info passed to templates.
+type AccountView struct {
+	Name string
+}
+
+// IssueView is an issue group formatted for display.
+type IssueView struct {
+	ID         string
+	ProjectID  int64
+	Title      string
+	Culprit    string
+	Level      string
+	Status     string
+	FirstSeen  time.Time
+	LastSeen   time.Time
+	EventCount int
+}
+
+// EventView is an event formatted for display.
+type EventView struct {
+	EventID   string
+	Timestamp time.Time
+	Platform  string
+	Level     string
+	Message   string
+	RawJSON   string
+}
+
+func severityIcon(level string) string {
+	switch level {
+	case "fatal":
+		return "🔴"
+	case "error":
+		return "⚡"
+	case "warning":
+		return "〰️"
+	default:
+		return "·"
+	}
+}
+
+func severityClass(level string) string {
+	switch level {
+	case "fatal":
+		return "severity-rupture"
+	case "error":
+		return "severity-quake"
+	case "warning":
+		return "severity-tremor"
+	default:
+		return ""
+	}
+}
+
+func statusBadge(status string) string {
+	switch status {
+	case "resolved":
+		return "badge-resolved"
+	case "in_progress":
+		return "badge-fixing"
+	case "regressed":
+		return "badge-regressed"
+	default:
+		return "badge-active"
+	}
+}
+
+func statusLabel(status string) string {
+	switch status {
+	case "resolved":
+		return "Stabilized"
+	case "in_progress":
+		return "Repair crew deployed"
+	case "regressed":
+		return "Aftershock"
+	case "needs_human":
+		return "Manual inspection"
+	default:
+		return "Active fault"
+	}
+}
+
+func magnitude(count int) string {
+	switch {
+	case count >= 1000:
+		return "Great"
+	case count >= 201:
+		return "Major"
+	case count >= 51:
+		return "Strong"
+	case count >= 11:
+		return "Moderate"
+	case count >= 3:
+		return "Minor"
+	default:
+		return "Micro"
+	}
+}
+
+func timeAgo(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+}
+
+// Login page
+templ loginPage(errorMsg string) {
+	<div class="auth-page">
+		<div class="auth-card">
+			<h1>fault<span>|</span>line</h1>
+			<p>Sign in to your error tracker</p>
+			if errorMsg != "" {
+				<div class="alert alert-error">{ errorMsg }</div>
+			}
+			<form method="POST" action="/dashboard/login">
+				<div class="form-group">
+					<label for="email">Email</label>
+					<input type="email" id="email" name="email" required autofocus/>
+				</div>
+				<div class="form-group">
+					<label for="password">Password</label>
+					<input type="password" id="password" name="password" required/>
+				</div>
+				<button type="submit" class="btn btn-primary btn-full">Sign in</button>
+			</form>
+		</div>
+	</div>
+}
+
+// Setup page (first account creation)
+templ setupPage(errorMsg string) {
+	<div class="auth-page">
+		<div class="auth-card">
+			<h1>fault<span>|</span>line</h1>
+			<p>Create your admin account to get started</p>
+			if errorMsg != "" {
+				<div class="alert alert-error">{ errorMsg }</div>
+			}
+			<form method="POST" action="/dashboard/setup">
+				<div class="form-group">
+					<label for="name">Name</label>
+					<input type="text" id="name" name="name" required autofocus/>
+				</div>
+				<div class="form-group">
+					<label for="email">Email</label>
+					<input type="email" id="email" name="email" required/>
+				</div>
+				<div class="form-group">
+					<label for="password">Password</label>
+					<input type="password" id="password" name="password" required minlength="8"/>
+				</div>
+				<button type="submit" class="btn btn-primary btn-full">Create account</button>
+			</form>
+		</div>
+	</div>
+}
+
+// Seismograph — issue list
+templ seismographPage(account *AccountView, issues []IssueView, total int, projectID int64, status string, page int) {
+	@layout("Seismograph", account) {
+		<div class="filters">
+			<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=", projectID)) }
+			   class={ "filter-tab", templ.KV("active", status == "") }>
+				All
+			</a>
+			<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=unresolved", projectID)) }
+			   class={ "filter-tab", templ.KV("active", status == "unresolved") }>
+				Active
+			</a>
+			<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=resolved", projectID)) }
+			   class={ "filter-tab", templ.KV("active", status == "resolved") }>
+				Stabilized
+			</a>
+		</div>
+
+		if len(issues) == 0 {
+			<div class="empty">
+				<p>No seismic activity detected.</p>
+			</div>
+		} else {
+			<div class="issue-list">
+				for _, issue := range issues {
+					<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s", projectID, issue.ID)) }
+					   class="issue-card">
+						<div class={ "issue-severity", severityClass(issue.Level) }>
+							{ severityIcon(issue.Level) }
+						</div>
+						<div>
+							<div class="issue-title">{ issue.Title }</div>
+							<div class="issue-culprit">{ issue.Culprit }</div>
+							<div class="issue-meta">
+								First: { timeAgo(issue.FirstSeen) } · Last: { timeAgo(issue.LastSeen) }
+								<span class={ "badge", statusBadge(issue.Status) }>{ statusLabel(issue.Status) }</span>
+							</div>
+						</div>
+						<div class="issue-stats">
+							<div class="issue-count">{ fmt.Sprintf("%d", issue.EventCount) }</div>
+							<div class="issue-magnitude">{ magnitude(issue.EventCount) }</div>
+						</div>
+					</a>
+				}
+			</div>
+
+			if total > 25 {
+				<div class="pagination">
+					if page > 1 {
+						<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=%s&page=%d", projectID, status, page-1)) }>&laquo; Prev</a>
+					}
+					<span class="current">{ fmt.Sprintf("Page %d", page) }</span>
+					if page * 25 < total {
+						<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=%s&page=%d", projectID, status, page+1)) }>Next &raquo;</a>
+					}
+				</div>
+			}
+		}
+	}
+}
+
+// Fault Report — issue detail
+templ faultReportPage(account *AccountView, issue IssueView, events []EventView, projectID int64) {
+	@layout(issue.Title, account) {
+		<div class="detail-header">
+			<div class="detail-title">
+				<span class={ severityClass(issue.Level) }>{ severityIcon(issue.Level) }</span>
+				{ issue.Title }
+			</div>
+			<div class="detail-meta">
+				<span>Culprit: <strong>{ issue.Culprit }</strong></span>
+				<span>Events: <strong>{ fmt.Sprintf("%d", issue.EventCount) }</strong> ({ magnitude(issue.EventCount) })</span>
+				<span>First: { timeAgo(issue.FirstSeen) }</span>
+				<span>Last: { timeAgo(issue.LastSeen) }</span>
+				<span class={ "badge", statusBadge(issue.Status) }>{ statusLabel(issue.Status) }</span>
+			</div>
+		</div>
+		<div class="detail-body">
+			if issue.Status == "unresolved" || issue.Status == "regressed" {
+				<div class="detail-section">
+					<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s/resolve", projectID, issue.ID)) }>
+						<button type="submit" class="btn btn-primary">Mark Stabilized</button>
+					</form>
+				</div>
+			}
+
+			<div class="detail-section">
+				<h3>Recent Events</h3>
+				if len(events) == 0 {
+					<p class="empty">No events recorded.</p>
+				} else {
+					<table class="events-table">
+						<thead>
+							<tr>
+								<th>Event ID</th>
+								<th>Time</th>
+								<th>Platform</th>
+								<th>Level</th>
+								<th>Message</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, ev := range events {
+								<tr>
+									<td>
+										<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/events/%s", projectID, ev.EventID)) }>
+											{ ev.EventID[:12] }…
+										</a>
+									</td>
+									<td>{ timeAgo(ev.Timestamp) }</td>
+									<td>{ ev.Platform }</td>
+									<td>{ ev.Level }</td>
+									<td>{ ev.Message }</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+			</div>
+		</div>
+	}
+}
+
+// Core Sample — event detail
+templ coreSamplePage(account *AccountView, event EventView, projectID int64, groupID string) {
+	@layout("Event " + event.EventID[:12], account) {
+		<div class="detail-header">
+			<div class="detail-title">Event { event.EventID }</div>
+			<div class="detail-meta">
+				<span>Time: { event.Timestamp.Format("2006-01-02 15:04:05 UTC") }</span>
+				<span>Platform: { event.Platform }</span>
+				<span>Level: { event.Level }</span>
+				<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s", projectID, groupID)) }>&larr; Back to issue</a>
+			</div>
+		</div>
+		<div class="detail-body">
+			if event.Message != "" {
+				<div class="detail-section">
+					<h3>Message</h3>
+					<p>{ event.Message }</p>
+				</div>
+			}
+			<div class="detail-section">
+				<h3>Raw Event Data</h3>
+				<pre class="raw-json">{ event.RawJSON }</pre>
+			</div>
+		</div>
+	}
+}

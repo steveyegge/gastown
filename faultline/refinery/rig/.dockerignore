@@ -1,0 +1,10 @@
+.git
+.github
+docs
+*.md
+!go.mod
+!go.sum
+LICENSE
+.golangci.yml
+arch-review-input.md
+brand-ui-input.md

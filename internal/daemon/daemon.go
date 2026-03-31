@@ -117,6 +117,12 @@ type Daemon struct {
 	// Only accessed from heartbeat loop goroutine - no sync needed.
 	mayorZombieCount int
 
+	// doltFailureCount tracks consecutive heartbeats where Dolt is unreachable.
+	// When this exceeds the configured threshold, an automatic E-stop is triggered.
+	// Only accessed from heartbeat loop goroutine - no sync needed.
+	doltFailureCount int
+	// doltFirstFailure records when the current failure streak started.
+	doltFirstFailure time.Time
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -892,6 +898,11 @@ func (d *Daemon) rotateOversizedLogs() {
 	}
 }
 
+// estopDoltFailureThreshold is the number of consecutive heartbeats with Dolt
+// unreachable before auto-triggering an E-stop. At 30s heartbeat interval,
+// 3 failures = ~90 seconds of sustained failure before stopping agents.
+const estopDoltFailureThreshold = 3
+
 // ensureDoltServerRunning ensures the Dolt SQL server is running if configured.
 // This provides the backend for beads database access in server mode.
 // Option B throttling: pours a mol-dog-doctor molecule only when health check
@@ -903,6 +914,43 @@ func (d *Daemon) ensureDoltServerRunning() {
 
 	if err := d.doltServer.EnsureRunning(); err != nil {
 		d.logger.Printf("Error ensuring Dolt server is running: %v", err)
+	}
+
+	// Track Dolt health for auto E-stop.
+	// Use the health metrics snapshot to determine if Dolt is reachable.
+	h := doltserver.GetHealthMetrics(d.config.TownRoot)
+	if !h.Healthy {
+		if d.doltFailureCount == 0 {
+			d.doltFirstFailure = time.Now()
+		}
+		d.doltFailureCount++
+		d.logger.Printf("Dolt unhealthy (consecutive failures: %d)", d.doltFailureCount)
+
+		if d.doltFailureCount >= estopDoltFailureThreshold && !estop.IsActive(d.config.TownRoot) {
+			duration := time.Since(d.doltFirstFailure).Round(time.Second)
+			reason := fmt.Sprintf("dolt-unreachable for %s (%d consecutive failures)", duration, d.doltFailureCount)
+			d.logger.Printf("AUTO E-STOP: %s", reason)
+			if err := estop.Activate(d.config.TownRoot, estop.TriggerAuto, reason); err != nil {
+				d.logger.Printf("Failed to create ESTOP file: %v", err)
+			} else {
+				d.freezeAgentSessions()
+			}
+		}
+	} else {
+		if d.doltFailureCount > 0 {
+			d.logger.Printf("Dolt recovered after %d consecutive failures", d.doltFailureCount)
+		}
+		d.doltFailureCount = 0
+		d.doltFirstFailure = time.Time{}
+
+		// Auto-resume: if Dolt recovered and E-stop was auto-triggered, clear it.
+		if estop.IsActive(d.config.TownRoot) {
+			if err := estop.Deactivate(d.config.TownRoot, true); err == nil {
+				d.logger.Println("AUTO RESUME: Dolt recovered, clearing auto E-stop")
+				d.thawAgentSessions()
+			}
+			// If Deactivate returns error, E-stop was manual — leave it alone.
+		}
 	}
 
 	// Option B throttling: pour mol-dog-doctor only on anomaly with cooldown.
@@ -945,6 +993,100 @@ func (d *Daemon) pourDoctorMolecule(warnings []string) {
 	summary := strings.Join(warnings, "; ")
 	d.logger.Printf("Doctor molecule: %d warning(s): %s", len(warnings), summary)
 	mol.closeStep("report")
+}
+
+// freezeAgentSessions sends SIGTSTP to all agent tmux sessions.
+// Mayor and overseer are exempt. Called during auto E-stop.
+func (d *Daemon) freezeAgentSessions() {
+	sessions, err := d.tmux.ListSessions()
+	if err != nil {
+		d.logger.Printf("E-STOP: failed to list sessions: %v", err)
+		return
+	}
+
+	exempt := map[string]bool{
+		session.MayorSessionName():    true,
+		session.OverseerSessionName(): true,
+	}
+
+	frozen := 0
+	for _, sess := range sessions {
+		if exempt[sess] {
+			continue
+		}
+		// Only freeze GT sessions (hq-* or rig-prefix-*)
+		if !strings.HasPrefix(sess, session.HQPrefix) {
+			// Check if it's a known rig prefix session
+			isRig := false
+			for _, rigName := range d.getRigNames() {
+				prefix := session.PrefixFor(rigName)
+				if strings.HasPrefix(sess, prefix+"-") || sess == prefix {
+					isRig = true
+					break
+				}
+			}
+			if !isRig {
+				continue
+			}
+		}
+
+		pid, err := d.tmux.GetPanePID(sess)
+		if err != nil {
+			continue
+		}
+		if err := exec.Command("kill", "-TSTP", pid).Run(); err == nil {
+			frozen++
+		}
+	}
+	d.logger.Printf("E-STOP: froze %d session(s)", frozen)
+}
+
+// thawAgentSessions sends SIGCONT to all agent tmux sessions and nudges them.
+// Called during auto-resume when Dolt recovers.
+func (d *Daemon) thawAgentSessions() {
+	sessions, err := d.tmux.ListSessions()
+	if err != nil {
+		d.logger.Printf("RESUME: failed to list sessions: %v", err)
+		return
+	}
+
+	thawed := 0
+	for _, sess := range sessions {
+		pid, err := d.tmux.GetPanePID(sess)
+		if err != nil {
+			continue
+		}
+		if err := exec.Command("kill", "-CONT", pid).Run(); err == nil {
+			thawed++
+			// Nudge the session to alert it that work can continue
+			_ = d.tmux.NudgeSession(sess, "E-stop cleared. Dolt recovered. Work may resume.")
+		}
+	}
+	d.logger.Printf("RESUME: thawed %d session(s)", thawed)
+}
+
+// getRigNames returns all known rig names. Used by freeze/thaw for session filtering.
+func (d *Daemon) getRigNames() []string {
+	entries, err := os.ReadDir(d.config.TownRoot)
+	if err != nil {
+		return nil
+	}
+	var rigs []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == "mayor" || name == "daemon" || name == "deacon" ||
+			name == ".git" || name == "docs" || name[0] == '.' {
+			continue
+		}
+		// Check for rig markers
+		if _, err := os.Stat(filepath.Join(d.config.TownRoot, name, "mayor")); err == nil {
+			rigs = append(rigs, name)
+		}
+	}
+	return rigs
 }
 
 // checkAllRigsDolt verifies all rigs are using the Dolt backend.
@@ -1390,8 +1532,8 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	}
 
 	// Session exists but heartbeat is stale - Deacon may be stuck.
-	// gt-p7k: Use two-tier response — nudge for stale (5-20 min),
-	// escalate only for very stale (>= 20 min). The previous logic gated on
+	// gt-p7k: Use two-tier response — nudge for stale (5-15 min),
+	// escalate only for very stale (>= 15 min). The previous logic gated on
 	// IsVeryStale() (>= 15 min) then checked age > 10 min, making the
 	// nudge path unreachable (dead code). Now nudge fires for 5-20 min
 	// staleness, giving the Deacon a chance to respond before killing.
