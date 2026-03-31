@@ -130,30 +130,33 @@ func TestBdSupportsAllowStale_ReprobesWhenBinaryPathChanges(t *testing.T) {
 func writeAllowStaleBDStub(t *testing.T, dir string, supportsAllowStale bool) {
 	t.Helper()
 
+	// bd v0.60+ exits 0 even on unknown flags, printing the error to stderr.
+	// Detection now checks output for "unknown flag" rather than exit code.
 	var scriptPath, script string
 	if runtime.GOOS == "windows" {
 		scriptPath = filepath.Join(dir, "bd.bat")
-		exitCode := "1"
 		if supportsAllowStale {
-			exitCode = "0"
+			script = `@echo off
+exit /b 0
+`
+		} else {
+			script = `@echo off
+echo unknown flag --allow-stale 1>&2
+exit /b 0
+`
 		}
-		script = fmt.Sprintf(`@echo off
-setlocal enableextensions
-if "%%1"=="--allow-stale" exit /b %s
-exit /b 1
-`, exitCode)
 	} else {
 		scriptPath = filepath.Join(dir, "bd")
-		exitCode := "1"
 		if supportsAllowStale {
-			exitCode = "0"
+			script = `#!/bin/sh
+exit 0
+`
+		} else {
+			script = `#!/bin/sh
+echo "unknown flag --allow-stale" >&2
+exit 0
+`
 		}
-		script = fmt.Sprintf(`#!/bin/sh
-if [ "$1" = "--allow-stale" ]; then
-  exit %s
-fi
-exit 1
-`, exitCode)
 	}
 
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {

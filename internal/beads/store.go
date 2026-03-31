@@ -545,7 +545,7 @@ func (b *Beads) storeDelegationSet(childID string, d *Delegation) error {
 		return fmt.Errorf("building delegation metadata: %w", err)
 	}
 
-	return b.store.UpdateIssue(ctx, childID, map[string]interface{}{"metadata": json.RawMessage(meta)}, actor)
+	return b.store.UpdateIssue(ctx, childID, map[string]interface{}{"metadata": meta}, actor)
 }
 
 // storeDelegationClear removes the "delegated_from" key from the issue's metadata.
@@ -565,7 +565,7 @@ func (b *Beads) storeDelegationClear(childID string) error {
 		return fmt.Errorf("clearing delegation metadata: %w", err)
 	}
 
-	return b.store.UpdateIssue(ctx, childID, map[string]interface{}{"metadata": json.RawMessage(meta)}, actor)
+	return b.store.UpdateIssue(ctx, childID, map[string]interface{}{"metadata": meta}, actor)
 }
 
 // mergeMetadataKey sets a key in a JSON metadata blob, preserving other keys.

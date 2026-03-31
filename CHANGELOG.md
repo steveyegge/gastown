@@ -7,12 +7,161 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-03-29
+
+### Added
+
+- **Directives and overlays** — New `gt prime` directive loader and overlay
+  system with CLI commands (`gt directive`, `gt overlay`), formula overlay
+  support, and doctor health check for overlay integrity.
+- **Gate bead instruction template** — Gate beads now carry structured
+  instruction templates with GitHub API client support.
+- **Merge queue step dependencies** — `gt mq submit` enforces molecule step
+  dependency ordering before submission.
+- **Convoy watch/unwatch** — `gt convoy watch` and `gt convoy unwatch` for
+  opt-in completion notifications on convoy progress.
+- **Convoy merge queue panel** — Feed view now shows merge queue status in
+  convoy panels.
+- **Patrol scan CLI** — `gt patrol scan` detects zombie and stalled polecats
+  from the command line.
+- **Checkpoint dog** — New `checkpoint_dog` auto-commits WIP changes in
+  polecat worktrees periodically.
+- **Crash recovery on startup** — `gt up` detects and recovers orphaned hooked
+  beads left by crashed sessions.
+- **Post-squash gate phase** — Refinery adds a pre-push validation gate after
+  squash merging.
+- **Refinery auto\_push config** — New `auto_push` rig setting controls whether
+  refinery pushes after merge.
+- **PR feedback patrol formula** — `mol-pr-feedback-patrol` formula for
+  automated PR review triage.
+- **Configurable tmux theming** — Window tint and `window-style` theming with
+  resolver; Mayor gets terminal-default theme.
+- **`gt changelog` command** — Generate changelogs from the CLI with tests.
+- **Wasteland stamps and pilot cohorts** — `gt wl stamp`, `gt wl stamps`
+  commands and `pilot_cohort` column for HOP pilot program.
+- **Wasteland scorekeeper** — Charsheet, scorekeeper, and stamp loop
+  integration tests.
+- **`gt wl show <work-id>`** — Structured work-item detail view with
+  auto-fetch.
+- **`gt default-agent list`** — New subcommand to list available agent presets.
+- **Disabled patrols setting** — `disabled_patrols` town config to suppress
+  patrols without editing daemon.json.
+- **Dolt failover/failback** — Multi-host Dolt setups can failover and
+  failback between primary and replica.
+- **`.no-sync` marker files** — Drop a `.no-sync` file in a database directory
+  to exclude it from sync.
+- **`/done` slash command** — Polecats can invoke `/done` with a Stop hook
+  safety net for clean lifecycle exit.
+- **Sling `--review-only` flag** — Prevent assignee from merging; report back
+  only.
+- **Copilot agent support** — GitHub Copilot CLI documented and preset updated
+  for GA release (Feb 2026).
+- **Unique polecat namepool** — Polecat names are now globally unique across
+  rigs via shared namepool with auto-assigned themes.
+- **Handoff restart prompt** — `gt handoff` now prompts the user before
+  restarting the session.
+- **Patrol effort tuning** — Idle patrol cycles now run at reduced reasoning
+  effort; configurable per-formula with `effort_idle` and `effort_active`.
+- **Longer patrol backoff** — Max backoff increased from 5m to 15m for idle
+  patrols, reducing cost by ~66% for dormant rigs.
+- **Formula/path discoverability** — Reference docs for formulas, beads CLI,
+  and Dolt injected into agent context to eliminate discovery tax.
+
+### Changed
+
+- **Beads dependency** upgraded to v0.62.0.
+- **Compactor-dog threshold** — Default compaction threshold raised from 500 to
+  2000 to reduce unnecessary compactions.
+- **Dolt startup timeout** — Scales dynamically by database count (5s per DB)
+  instead of fixed timeout.
+- **Dolt SIGTERM→SIGKILL timeout** — Increased from 5s to 30s for graceful
+  shutdown of large databases.
+- **Polecat CLAUDE.md provisioning** — Lifecycle instructions provisioned on
+  all spawn paths including worktree reuse, with `gt done` reminders injected
+  at startup and after compaction.
+- **Boot and dog cost tiers** — Boot and dog roles now tracked in the cost tier
+  system.
+- **Plugin database discovery** — Plugins auto-discover databases instead of
+  using hardcoded lists; reaper uses `DiscoverDatabases` with proper error
+  handling.
+- **Dolt `dolt_transaction_commit` disabled** — Prevents read-only commit
+  storms on busy servers.
+
 ### Fixed
 
 - **Daemon beads compatibility guard** — `gt daemon run` now fail-fast checks
   workspace beads schema compatibility before Convoy polling starts, and
   `gt daemon start` surfaces the startup mismatch directly instead of only
   telling operators to inspect logs.
+- **Dolt server stability** — Fixed thundering herd in `doltserver.Start()`,
+  port-squatter detection and kill on startup, `cmd.Dir` set on all CLI/SQL
+  invocations to prevent stray `.doltcfg` directories, and timing race in
+  startup sequence.
+- **Security hardening** — Bead ID suffix validation enforced, formula
+  variables use bead IDs instead of user-supplied titles, and
+  `--subject`/`--args` sanitized before tmux pane injection.
+- **Tmux reliability** — Replaced timing-based Enter delivery with
+  verification-based retry, detect and dismiss Claude Code Rewind menu during
+  nudge delivery, restored per-town socket isolation, and added flock-based
+  cross-process nudge lock to prevent interleaved delivery.
+- **Windows fixes** — Atomic counter in `generateStampID` for timer resolution,
+  pipe deadlock prevention in `prime_test`, process group test skips, and
+  multiple CI test stabilizations.
+- **Polecat lifecycle** — Skip crash/zombie alerts for done/nuked polecats,
+  use `IsIdle` instead of `IsAtPrompt` for startup nudge verify, clean dirty
+  worktree before reuse, kill session unconditionally when reusing idle
+  polecats, and wire operational config into startup nudge loop.
+- **Refinery fixes** — Use commit SHA instead of branch name for MR dedup,
+  supersede MR on same-branch re-submission, check `no_merge` flag before
+  merging, close task beads after successful merge, wait for CI in PR mode,
+  and filter MR listings by rig to prevent cross-rig contamination.
+- **Convoy fixes** — Use Unix epoch instead of zero time for initial event poll,
+  stranded scan checks completion status, create legs in target rig beads,
+  and cross-rig dependency routing uses town root.
+- **Cross-town safety** — Prevent orphan cleanup from killing agents on other
+  towns' sockets, distinguish sibling Gas Town instances from test zombies.
+- **Dog and daemon** — Clear agent identity env vars at startup, prevent
+  duplicate Mayor spawns during `gt up`, auto-clear hung dogs and orphan
+  sessions, include dogs in startup retry loop, prevent daemon restart during
+  `gt down`, and respect global default agent for dog spawns.
+- **Doctor improvements** — Avoid slow `filepath.Walk` on Docker bind mounts,
+  stale `sql-server.info` detection, hooks-sync check detects stale Gemini
+  settings, route misclassified wisp fixes by workdir, and repair relocated
+  worktree gitdir paths.
+- **Mail and communication** — Drain crashed polecat notifications, prefer
+  `GT_TOWN_ROOT` env var for town root detection, fall back to explicit agent
+  workspaces for mail delivery.
+- **Dolt plugins** — `dolt-archive` uses `while-read` loops for bash 3.2
+  compatibility (macOS), `dolt-backup` uses `$HOME/gt` as `GT_ROOT` fallback,
+  named Docker volume prevents journal corruption on macOS, and `grep -v`
+  exit code handled under `pipefail`.
+- **Formula and molecule** — Cap backoff before overflow in `await-event` and
+  `await-signal`, inject `merge_strategy` from rig settings into formula vars,
+  propagate `base_branch` to MR target in `gt done` and `gt mq submit`.
+- **Sling** — Serialize concurrent hook writes with per-assignee flock,
+  `--dry-run` detects tmux session collision before spawn, guard `sha[:8]`
+  slice against short hashes.
+- **Config and identity** — Dog sessions inherit env vars from base agent, custom
+  agents inherit Session/Tmux from preset, `CLAUDE_CONFIG_DIR` respected in
+  `gt costs`, rig prefix pattern refresh when stale, propagate
+  `BEADS_DOLT_SERVER_HOST` to subprocesses, and repair PROJECT IDENTITY
+  MISMATCH after crash.
+- **Guard and compliance** — Block polecats from pushing directly to main.
+- **Misc** — `formatPeriod` returns "Week of" on Mondays instead of "Today",
+  sync `agent_state` between column and description on transitions, validate
+  git URL before crew clone, `--flat` flag on all `bd list --json` calls to
+  guarantee JSON output, `gt upgrade` repairs missing identity beads, and
+  `CLAUDE.local.md` added to gitignore patterns.
+
+### Removed
+
+- **Session-hygiene plugin** — Removed entirely after causing repeated crew
+  session kills.
+- **`--no-history` flag** — Removed from identity bead creation in favor of
+  proper ephemeral bead support.
+- **Hardcoded database lists** — Reaper and plugin database discovery replaced
+  with dynamic `DiscoverDatabases`.
+- **Legacy `gt` database** — Removed from reaper fallback list.
 
 ## [0.12.1] - 2026-03-15
 

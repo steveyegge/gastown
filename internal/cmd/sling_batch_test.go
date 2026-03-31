@@ -951,9 +951,10 @@ exit 0
 	}
 }
 
-// TestCreateAutoConvoy_DepFailCleansUpOrphan verifies that when the dep add
-// fails, the convoy is closed to prevent orphans.
-func TestCreateAutoConvoy_DepFailCleansUpOrphan(t *testing.T) {
+// TestCreateAutoConvoy_DepFailIsNonFatal verifies that when the dep add
+// fails, the convoy is still returned (dep failure is non-fatal since
+// cross-rig beads can't satisfy bd dep add validation after beads v0.62).
+func TestCreateAutoConvoy_DepFailIsNonFatal(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows")
 	}
@@ -973,9 +974,6 @@ case "$cmd" in
   dep)
     exit 1
     ;;
-  close)
-    exit 0
-    ;;
 esac
 exit 0
 `
@@ -985,25 +983,25 @@ exit 0
 		t.Fatalf("rewrite bd stub: %v", err)
 	}
 
-	_, err := createAutoConvoy("gt-aaa", "My task", false, "", "")
-	if err == nil {
-		t.Fatal("expected error when dep add fails, got nil")
+	convoyID, err := createAutoConvoy("gt-aaa", "My task", false, "", "")
+	if err != nil {
+		t.Fatalf("expected dep failure to be non-fatal, got error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "tracking relation") {
-		t.Errorf("error should mention tracking relation, got: %v", err)
+	if convoyID == "" {
+		t.Fatal("expected convoy ID to be returned even when dep add fails")
 	}
 
-	// Verify close was called (orphan cleanup)
+	// Verify dep was attempted but close was NOT called (no orphan cleanup)
 	logBytes, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
 	logContent := string(logBytes)
-	if !strings.Contains(logContent, "CMD:close") {
-		t.Errorf("expected close command for orphan cleanup:\n%s", logContent)
+	if !strings.Contains(logContent, "CMD:dep") {
+		t.Errorf("expected dep add to be attempted:\n%s", logContent)
 	}
-	if !strings.Contains(logContent, "tracking dep failed") {
-		t.Errorf("close should include 'tracking dep failed' reason:\n%s", logContent)
+	if strings.Contains(logContent, "CMD:close") {
+		t.Errorf("close should NOT be called — dep failure is non-fatal:\n%s", logContent)
 	}
 }
 
