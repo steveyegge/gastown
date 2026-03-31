@@ -1761,7 +1761,7 @@ func (d *Daemon) ensureCrewRunningForRig(rigName string) {
 
 	// Load rig settings to check crew.startup preference
 	settingsPath := filepath.Join(rigPath, "settings", "config.json")
-	settings, err := config.LoadRigSettings(settingsPath)
+	settings, err := agentconfig.LoadRigSettings(settingsPath)
 	if err != nil || settings.Crew == nil || settings.Crew.Startup == "" {
 		return // No crew startup configured for this rig
 	}
