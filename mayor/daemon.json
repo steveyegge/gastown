@@ -65,7 +65,8 @@
         "geocaching_ai_lab",
         "faultline",
         "switchyard",
-        "rally_tavern"
+        "rally_tavern",
+        "herald"
       ]
     },
     "scheduled_maintenance": {
@@ -94,7 +95,8 @@
         "geocaching_ai_lab",
         "faultline",
         "switchyard",
-        "rally_tavern"
+        "rally_tavern",
+        "herald"
       ]
     }
   },
