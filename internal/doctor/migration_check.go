@@ -302,34 +302,36 @@ func (c *DoltServerReachableCheck) Run(ctx *CheckContext) *CheckResult {
 			details = append(details, fmt.Sprintf("Server %s unreachable (rigs: %s)", addr, strings.Join(rigNames, ", ")))
 		} else {
 			_ = conn.Close()
-			if isLocalDoltAddr(addr) {
-				cfg := doltserver.DefaultConfig(ctx.TownRoot)
-				cfg.Host = hostForAddr(addr)
-				cfg.Port = portForAddr(addr)
-				var expected []string
+			cfg := doltserver.DefaultConfig(ctx.TownRoot)
+			cfg.Host = hostForAddr(addr)
+			cfg.Port = portForAddr(addr)
+			var expected []string
+			for _, rig := range rigs {
+				expected = append(expected, rig.database)
+			}
+			_, missing, verifyErr := verifyExpectedDatabasesAtConfig(cfg, expected)
+			if verifyErr != nil {
+				fixHint := "Check the configured Dolt server and verify the expected rig databases are being served"
+				if isLocalDoltAddr(addr) {
+					fixHint = "Repair or quarantine malformed databases in .dolt-data/ before relying on shared-server health"
+				}
+				return &CheckResult{
+					Name:     c.Name(),
+					Status:   StatusError,
+					Message:  fmt.Sprintf("Dolt server reachable but database verification failed at %s", addr),
+					Details:  []string{verifyErr.Error()},
+					FixHint:  fixHint,
+					Category: c.CheckCategory,
+				}
+			}
+			if len(missing) > 0 {
+				expected := make(map[string]string, len(rigs))
 				for _, rig := range rigs {
-					expected = append(expected, rig.database)
+					expected[rig.database] = rig.name
 				}
-				_, missing, verifyErr := verifyExpectedDatabasesAtConfig(cfg, expected)
-				if verifyErr != nil {
-					return &CheckResult{
-						Name:     c.Name(),
-						Status:   StatusError,
-						Message:  fmt.Sprintf("Dolt server reachable but database verification failed at %s", addr),
-						Details:  []string{verifyErr.Error()},
-						FixHint:  "Repair or quarantine malformed databases in .dolt-data/ before relying on shared-server health",
-						Category: c.CheckCategory,
-					}
-				}
-				if len(missing) > 0 {
-					expected := make(map[string]string, len(rigs))
-					for _, rig := range rigs {
-						expected[rig.database] = rig.name
-					}
-					for _, db := range missing {
-						if rigName, ok := expected[db]; ok {
-							missingDatabases = append(missingDatabases, fmt.Sprintf("%s (%s)", db, rigName))
-						}
+				for _, db := range missing {
+					if rigName, ok := expected[db]; ok {
+						missingDatabases = append(missingDatabases, fmt.Sprintf("%s (%s)", db, rigName))
 					}
 				}
 			}
