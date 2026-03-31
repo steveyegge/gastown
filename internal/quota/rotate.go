@@ -2,6 +2,9 @@ package quota
 
 import (
 	"fmt"
+	"maps"
+	"path/filepath"
+	"slices"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/util"
@@ -166,9 +169,11 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 	}
 
 	// Assign available accounts to unique config dirs (round-robin, skip same-account).
+	// Sort config dirs for deterministic assignment order.
 	configDirSwaps := make(map[string]string) // configDir -> new account handle
 	availIdx := 0
-	for configDir, info := range uniqueConfigDirs {
+	for _, configDir := range slices.Sorted(maps.Keys(uniqueConfigDirs)) {
+		info := uniqueConfigDirs[configDir]
 		if availIdx >= len(available) {
 			break
 		}
@@ -275,11 +280,8 @@ func PlanBalance(scanner *Scanner, tmuxClient TmuxIdleChecker, acctCfg *config.A
 		}, nil
 	}
 
-	// Compute target counts per account
-	accounts := make([]string, 0, len(acctCfg.Accounts))
-	for handle := range acctCfg.Accounts {
-		accounts = append(accounts, handle)
-	}
+	// Compute target counts per account (sorted for deterministic plans)
+	accounts := slices.Sorted(maps.Keys(acctCfg.Accounts))
 
 	targetCounts := make(map[string]int)
 
@@ -373,6 +375,17 @@ func PlanBalance(scanner *Scanner, tmuxClient TmuxIdleChecker, acctCfg *config.A
 		}
 	}
 
+	// Validate tokens for target accounts — skip accounts with expired or
+	// revoked tokens to avoid swapping bad credentials into sessions.
+	validAccounts := make(map[string]bool)
+	for _, handle := range accounts {
+		acct := acctCfg.Accounts[handle]
+		configDir := util.ExpandHome(acct.ConfigDir)
+		if err := ValidateKeychainToken(configDir); err == nil {
+			validAccounts[handle] = true
+		}
+	}
+
 	// Identify overloaded (above target) and underloaded (below target) accounts
 	type moveCandidate struct {
 		session string
@@ -452,7 +465,7 @@ func PlanBalance(scanner *Scanner, tmuxClient TmuxIdleChecker, acctCfg *config.A
 			}
 			effective := current + incoming - outgoing
 			deficit := targetCounts[handle] - effective
-			if deficit > bestDeficit && handle != sessionAccount[c.session] {
+			if deficit > bestDeficit && handle != sessionAccount[c.session] && validAccounts[handle] {
 				bestDeficit = deficit
 				bestHandle = handle
 			}
@@ -467,4 +480,22 @@ func PlanBalance(scanner *Scanner, tmuxClient TmuxIdleChecker, acctCfg *config.A
 		CurrentDistribution: currentDist,
 		TargetCounts:        targetCounts,
 	}, nil
+}
+
+// FilterAssignmentsByGlob removes entries from assignments whose session name
+// does not match any of the given glob patterns. Uses filepath.Match semantics.
+// Note: filepath.Match does not support ** (recursive glob) — only * (single segment).
+func FilterAssignmentsByGlob(assignments map[string]string, patterns []string) {
+	for session := range assignments {
+		matched := false
+		for _, pattern := range patterns {
+			if ok, _ := filepath.Match(pattern, session); ok {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			delete(assignments, session)
+		}
+	}
 }

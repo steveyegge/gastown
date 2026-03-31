@@ -21,7 +21,13 @@ func setupTestRegistry(t *testing.T) {
 	t.Cleanup(func() { session.SetDefaultRegistry(old) })
 }
 
-// mockTmux implements TmuxClient for testing.
+// Compile-time interface assertions.
+var (
+	_ TmuxClient      = (*mockTmux)(nil)
+	_ TmuxIdleChecker = (*mockTmux)(nil)
+)
+
+// mockTmux implements TmuxClient and TmuxIdleChecker for testing.
 type mockTmux struct {
 	sessions    []string
 	sessionsErr error                        // injected ListSessions error

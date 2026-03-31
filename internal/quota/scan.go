@@ -231,6 +231,12 @@ func (s *Scanner) resolveAccountHandle(session string) string {
 	// CLAUDE_CONFIG_DIR doesn't match any registered account — fall back
 	// to default. This handles sessions using ~/.claude (the Claude default)
 	// which won't match account-specific config dirs.
+	home, _ := os.UserHomeDir()
+	defaultDir := home + "/.claude"
+	if configDir != defaultDir {
+		fmt.Fprintf(os.Stderr, "Warning: session %s has CLAUDE_CONFIG_DIR=%s which doesn't match any registered account, falling back to default (%s)\n",
+			session, configDir, s.accounts.Default)
+	}
 	return s.accounts.Default
 }
 

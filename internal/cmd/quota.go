@@ -6,7 +6,6 @@ import (
 	"maps"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -550,18 +549,7 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 
 	// --match: filter assignments to sessions matching glob patterns
 	if len(rotateMatch) > 0 {
-		for session := range plan.Assignments {
-			matched := false
-			for _, pattern := range rotateMatch {
-				if ok, _ := filepath.Match(pattern, session); ok {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				delete(plan.Assignments, session)
-			}
-		}
+		quota.FilterAssignmentsByGlob(plan.Assignments, rotateMatch)
 	}
 
 	// --to: override target account for all assignments
@@ -857,18 +845,7 @@ func runQuotaBalance(cmd *cobra.Command, args []string) error {
 
 	// --match: filter assignments to sessions matching glob patterns
 	if len(balanceMatch) > 0 {
-		for session := range plan.Assignments {
-			matched := false
-			for _, pattern := range balanceMatch {
-				if ok, _ := filepath.Match(pattern, session); ok {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				delete(plan.Assignments, session)
-			}
-		}
+		quota.FilterAssignmentsByGlob(plan.Assignments, balanceMatch)
 	}
 
 	if len(plan.Assignments) == 0 {
@@ -1165,8 +1142,6 @@ func executeKeychainRotation(
 	result.Rotated = true
 	return result
 }
-
-
 
 // Watch command flags
 var (

@@ -1,6 +1,7 @@
 package quota
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -1209,5 +1210,97 @@ func TestPlanBalance_Consolidate(t *testing.T) {
 	}
 	if plan.Assignments["gt-crew-b"] != "work" {
 		t.Errorf("expected gt-crew-b -> work, got %v", plan.Assignments)
+	}
+}
+
+func TestFilterAssignmentsByGlob(t *testing.T) {
+	tests := []struct {
+		name        string
+		assignments map[string]string
+		patterns    []string
+		wantKeys    []string
+	}{
+		{
+			name: "single pattern matches subset",
+			assignments: map[string]string{
+				"qc-crew-kaladin": "work",
+				"qc-crew-dalinar": "work",
+				"gt-witness":      "personal",
+				"hq-mayor":        "personal",
+			},
+			patterns: []string{"qc-crew-*"},
+			wantKeys: []string{"qc-crew-dalinar", "qc-crew-kaladin"},
+		},
+		{
+			name: "multiple patterns union",
+			assignments: map[string]string{
+				"qc-crew-kaladin": "work",
+				"gt-witness":      "personal",
+				"hq-mayor":        "personal",
+			},
+			patterns: []string{"qc-*", "hq-*"},
+			wantKeys: []string{"hq-mayor", "qc-crew-kaladin"},
+		},
+		{
+			name: "no match removes all",
+			assignments: map[string]string{
+				"gt-witness": "personal",
+				"hq-mayor":   "personal",
+			},
+			patterns: []string{"qc-*"},
+			wantKeys: []string{},
+		},
+		{
+			name: "exact match",
+			assignments: map[string]string{
+				"gt-witness": "personal",
+				"hq-mayor":   "personal",
+			},
+			patterns: []string{"hq-mayor"},
+			wantKeys: []string{"hq-mayor"},
+		},
+		{
+			name: "star matches everything",
+			assignments: map[string]string{
+				"gt-witness": "personal",
+				"hq-mayor":   "work",
+			},
+			patterns: []string{"*"},
+			wantKeys: []string{"gt-witness", "hq-mayor"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Copy to avoid mutating test data
+			assignments := make(map[string]string)
+			for k, v := range tt.assignments {
+				assignments[k] = v
+			}
+			FilterAssignmentsByGlob(assignments, tt.patterns)
+
+			var gotKeys []string
+			for k := range assignments {
+				gotKeys = append(gotKeys, k)
+			}
+			slices.Sort(gotKeys)
+			if len(gotKeys) == 0 {
+				gotKeys = []string{}
+			}
+
+			wantKeys := tt.wantKeys
+			slices.Sort(wantKeys)
+
+			if len(gotKeys) != len(wantKeys) {
+				t.Errorf("got keys %v, want %v", gotKeys, wantKeys)
+				return
+			}
+			for i := range gotKeys {
+				if gotKeys[i] != wantKeys[i] {
+					t.Errorf("got keys %v, want %v", gotKeys, wantKeys)
+					return
+				}
+			}
+		})
 	}
 }
