@@ -178,9 +178,6 @@
 [branch "polecat/dag/he-isu"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/furiosa/he-kt5"]
-	remote = origin
-	merge = refs/heads/main
 [branch "polecat/imperator/he-5g1@mngnw2e8"]
 	remote = origin
 	merge = refs/heads/main

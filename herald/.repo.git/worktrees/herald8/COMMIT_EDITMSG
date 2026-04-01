@@ -1,18 +1,17 @@
-test: add end-to-end daemon smoke tests (he-ofv)
+feat: CLI subcommand framework with manual dispatch (he-9eq)
 
-Create smoke_test.go with test doubles for all external dependencies
-(LLM provider, memory stores, channels) to verify the full daemon
-wiring path without real postgres, APIs, or external services.
+Refactor cmd/herald/main.go from simple if/else dispatch to proper
+subcommand handling with backward compatibility.
 
-Tests:
-- TestSmokeEndToEnd: message → assembler → agent → LLM → response
-- TestSmokeWithMemoryContext: verifies memory blocks/STM inject into
-  the system prompt sent to the LLM
-- TestSmokeToolExecution: LLM requests tool call → agent executes →
-  returns final response
-- TestSmokeRouterIntegration: full path through router with mock channel
+Subcommands:
+- serve: start the daemon (default when no command given)
+- dash: launch terminal dashboard
+- migrate up|down|status: database migration management
+- auth google: interactive OAuth2 flow with localhost callback
+  and macOS Keychain token storage
+- version: build info (version, commit, date, go version)
+- help: usage information
 
-Test doubles:
-- mockProvider/capturingProvider/toolCallingProvider (LLM)
-- stubBlockRetriever/stubSTMRetriever/stubLTMSearcher (memory)
-- mockChannel (channels)
+Extracted loadConfig() and makeLogger() helpers for reuse across
+subcommands. Migrate up applies sql/*.sql files in order. Auth
+google uses ephemeral localhost HTTP server for OAuth2 callback.

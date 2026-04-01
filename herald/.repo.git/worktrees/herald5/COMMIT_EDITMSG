@@ -1,1 +1,25 @@
-test: TUI dashboard tests for model, update, view, source (he-9qk)
+feat: embedded migration runner with goose, CLI subcommand, auto-migrate on startup (he-elb)
+
+# Conflicts:
+#	cmd/herald/main.go
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# Author:    capable <jeremy@theirish.com>
+#
+# interactive rebase in progress; onto 36d8a03
+# Last command done (1 command done):
+#    pick 5fdc66f # feat: embedded migration runner with goose, CLI subcommand, auto-migrate on startup (he-elb)
+# No commands remaining.
+# You are currently rebasing branch 'polecat/capable/he-elb' on '36d8a03'.
+#
+# Changes to be committed:
+#	modified:   cmd/herald/main.go
+#	new file:   db/embed.go
+#	modified:   go.mod
+#	modified:   go.sum
+#	modified:   internal/daemon/daemon.go
+#	new file:   internal/db/migrate.go
+#	new file:   internal/db/migrate_test.go
+#
