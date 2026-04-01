@@ -1,0 +1,36 @@
+feat: add platform filtering and separation on issue list (fl-5pf.1)
+
+Add platform column to issue_groups table (populated from first event
+during UpsertIssueGroup), platform filter to seismograph UI as tabs
+(matching existing env filter pattern), ?platform= query param support
+on both dashboard and API endpoints, and platform badge on issue cards.
+Includes migration with backfill from ft_events for existing data.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+# Conflicts:
+#	internal/dashboard/views_templ.go
+#	internal/db/queries.go
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# Author:    jasper <jeremy@theirish.com>
+#
+# interactive rebase in progress; onto fd01b65
+# Last command done (1 command done):
+#    pick a7bc9fa # feat: add platform filtering and separation on issue list (fl-5pf.1)
+# No commands remaining.
+# You are currently rebasing branch 'polecat/jasper/fl-5pf.1@mngog3mh' on 'fd01b65'.
+#
+# Changes to be committed:
+#	modified:   internal/api/api.go
+#	modified:   internal/dashboard/handler.go
+#	modified:   internal/dashboard/static/style.css
+#	modified:   internal/dashboard/views.templ
+#	modified:   internal/dashboard/views_templ.go
+#	modified:   internal/db/dolt.go
+#	modified:   internal/db/issues.go
+#	modified:   internal/db/queries.go
+#	modified:   internal/ingest/handler.go
+#

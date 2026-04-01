@@ -1,1 +1,12 @@
-fix: auto-save uncommitted implementation work (fl-m2f, gt-pvx safety net)
+feat: add release info to dashboard and API (fl-7lr.2)
+
+Add releases table, UpsertRelease on event ingest, and expose release
+data across the dashboard and API:
+- Project card shows latest release badge
+- Issue list shows first-seen release
+- Issue detail shows first/last release in problem box
+- Events table includes release column
+- API: GET releases, GET release by version, POST deploys
+- Issues list API supports ?release= filter
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

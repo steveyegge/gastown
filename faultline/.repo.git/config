@@ -35,9 +35,6 @@
 [branch "dog/alpha-faultline-1775084658347"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/quartz/fl-7lr.2@mngofdra"]
-	remote = origin
-	merge = refs/heads/main
 [branch "polecat/jasper/fl-5pf.1@mngog3mh"]
 	remote = origin
 	merge = refs/heads/main
