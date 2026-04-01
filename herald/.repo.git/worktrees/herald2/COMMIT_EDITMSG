@@ -1,0 +1,7 @@
+feat: pgvector semantic search store for LTM and memory blocks (hr-31j.2)
+
+Add internal/memory package with:
+- Embedder interface + OpenAI (text-embedding-3-small) and Ollama implementations
+- LTMStore: Store/Search/Get/Delete for ltm_items and memory_blocks
+- Semantic search via pgvector cosine distance with top-k results
+- Access count tracking on LTM retrieval
