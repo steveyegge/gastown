@@ -1,0 +1,28 @@
+feat: STM SQLite ring buffer with FIFO eviction and semantic dedup (hr-31j.1)
+
+Implements internal/memory/stm.go — a SQLite-backed short-term memory ring
+buffer with 100-item capacity, 7-day TTL, cosine-similarity dedup on insert,
+and auto-promotion of high-importance items to LTM on eviction via the
+LTMPromoter interface. Includes 14 tests covering all behaviors.
+
+# Conflicts:
+#	go.mod
+#	go.sum
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# Author:    nux <jeremy@theirish.com>
+#
+# interactive rebase in progress; onto 3907846
+# Last command done (1 command done):
+#    pick 0043dcb # feat: STM SQLite ring buffer with FIFO eviction and semantic dedup (hr-31j.1)
+# No commands remaining.
+# You are currently rebasing branch 'temp' on '3907846'.
+#
+# Changes to be committed:
+#	modified:   go.mod
+#	modified:   go.sum
+#	new file:   internal/memory/stm.go
+#	new file:   internal/memory/stm_test.go
+#

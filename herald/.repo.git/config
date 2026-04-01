@@ -16,15 +16,27 @@
 [branch "dog/alpha-herald-1775005418725"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/furiosa/hr-l5e.1@mnfcxr4j"]
+[branch "main"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/nux/hr-31j.1@mnfcy8nb"]
+[branch "dog/alpha-herald-1775027463755"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/slit/hr-31j.2@mnfcyq6x"]
+[branch "dog/alpha-herald-1775032424494"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/rictus/hr-31j.3@mnfcz8bj"]
+[branch "dog/alpha-herald-1775036015201"]
+	remote = origin
+	merge = refs/heads/main
+[branch "dog/alpha-herald-1775054478908"]
+	remote = origin
+	merge = refs/heads/main
+[branch "dog/alpha-herald-1775061238299"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/furiosa/hr-l5e.2@mng9v5qy"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/nux/hr-31j.4@mng9vkve"]
 	remote = origin
 	merge = refs/heads/main
