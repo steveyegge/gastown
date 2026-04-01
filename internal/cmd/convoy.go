@@ -235,7 +235,7 @@ Examples:
   # Auto-discover issues from an epic's children:
   gt convoy create --from-epic gt-epic-abc
   gt convoy create --from-epic gt-epic-abc --owned --merge=direct`,
-	Args: cobra.ArbitraryArgs,
+	Args:         cobra.ArbitraryArgs,
 	SilenceUsage: true,
 	RunE:         runConvoyCreate,
 }
@@ -247,7 +247,7 @@ var convoyStatusCmd = &cobra.Command{
 
 Displays convoy metadata, tracked issues, and completion progress.
 Without an ID, shows status of all active convoys.`,
-	Args: cobra.MaximumNArgs(1),
+	Args:         cobra.MaximumNArgs(1),
 	SilenceUsage: true,
 	RunE:         runConvoyStatus,
 }
@@ -277,7 +277,7 @@ If the convoy is closed, it will be automatically reopened.
 Examples:
   gt convoy add hq-cv-abc gt-new-issue
   gt convoy add hq-cv-abc gt-issue1 gt-issue2 gt-issue3`,
-	Args: cobra.MinimumNArgs(2),
+	Args:         cobra.MinimumNArgs(2),
 	SilenceUsage: true,
 	RunE:         runConvoyAdd,
 }
@@ -298,7 +298,7 @@ Examples:
   gt convoy check              # Check all open convoys
   gt convoy check hq-cv-abc    # Check specific convoy
   gt convoy check --dry-run    # Preview what would close without acting`,
-	Args: cobra.MaximumNArgs(1),
+	Args:         cobra.MaximumNArgs(1),
 	SilenceUsage: true,
 	RunE:         runConvoyCheck,
 }
@@ -340,7 +340,7 @@ Examples:
   gt convoy close hq-cv-abc --force                   # Force close abandoned convoy
   gt convoy close hq-cv-abc --reason="no longer needed" --force
   gt convoy close hq-cv-xyz --notify mayor/`,
-	Args: cobra.ExactArgs(1),
+	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE:         runConvoyClose,
 }
@@ -2173,11 +2173,11 @@ func formatConvoyStatus(status string) string {
 
 // trackedIssueInfo holds info about an issue being tracked by a convoy.
 type trackedIssueInfo struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Status    string `json:"status"`
-	Type      string `json:"dependency_type"`
-	IssueType string `json:"issue_type"`
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Status    string   `json:"status"`
+	Type      string   `json:"dependency_type"`
+	IssueType string   `json:"issue_type"`
 	Blocked   bool     `json:"blocked,omitempty"`    // True if issue currently has blockers
 	Assignee  string   `json:"assignee,omitempty"`   // Assigned agent (e.g., gastown/polecats/goose)
 	Labels    []string `json:"labels,omitempty"`     // Bead labels (propagated from trackedDependency)
@@ -2477,12 +2477,12 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 	args := append([]string{"show"}, issueIDs...)
 	args = append(args, "--json")
 
-	// Run from town root so bd's prefix routing (routes.jsonl) can dispatch
-	// to the correct rig database for cross-rig bead lookups. (GH#2960)
-	townRoot, _ := workspace.FindFromCwdOrError()
+	// Run from the bead's resolved directory so non-HQ routed prefixes use the
+	// owning rig context instead of always forcing town-root lookup. (GH#2960, gs-60j)
+	resolvedDir := resolveBeadDir(issueIDs[0])
 	showCmd := exec.Command("bd", args...)
-	if townRoot != "" {
-		showCmd.Dir = townRoot
+	if resolvedDir != "" {
+		showCmd.Dir = resolvedDir
 		showCmd.Env = stripEnvKey(os.Environ(), "BEADS_DIR")
 	}
 	var stdout bytes.Buffer
@@ -2514,14 +2514,12 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 // getIssueDetails fetches issue details by trying to show it via bd.
 // Prefer getIssueDetailsBatch for multiple issues to avoid N+1 subprocess calls.
 func getIssueDetails(issueID string) *issueDetails {
-	// Use bd show with routing - resolve from town root so bd's prefix
-	// routing (routes.jsonl) can dispatch to the correct rig database.
-	// Without Dir + StripBeadsDir, bd inherits CWD/BEADS_DIR which may
-	// point to a rig that doesn't contain the target bead. (GH#2960)
-	townRoot, _ := workspace.FindFromCwdOrError()
+	// Use the bead's resolved directory so non-HQ routed prefixes use the owning
+	// rig context rather than always forcing town-root lookup. (GH#2960, gs-60j)
+	resolvedDir := resolveBeadDir(issueID)
 	showCmd := exec.Command("bd", "show", issueID, "--json")
-	if townRoot != "" {
-		showCmd.Dir = townRoot
+	if resolvedDir != "" {
+		showCmd.Dir = resolvedDir
 		showCmd.Env = stripEnvKey(os.Environ(), "BEADS_DIR")
 	}
 	var stdout bytes.Buffer

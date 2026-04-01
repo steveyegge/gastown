@@ -29,29 +29,62 @@ import (
 )
 
 // resolveBeadDir returns the directory to run bd commands for a given bead ID.
-// Uses prefix-based routing (routes.jsonl) to resolve the correct rig's .beads
-// directory and returns its parent as the working directory for bd.
-//
-// Background: beads v0.62 removed built-in multi-rig routing from bd — all bd
-// commands now operate on the local database only. Cross-rig resolution must
-// happen in gt before invoking bd, by setting the correct working directory
-// (and stripping BEADS_DIR). This function reads routes.jsonl from the town-level
-// .beads directory and resolves the bead's prefix to the owning rig.
-//
-// PR #3166 (steveyegge/gastown) will replace bd shell-outs with the Go module
-// Storage API, making this function unnecessary. Until then, this is the
-// routing bridge between gt and the routing-free bd CLI.
+// For town-level beads (hq-*) this is the town root. For registered non-HQ
+// prefixes, it resolves the owning rig path from town routes.jsonl first, then
+// falls back to rigs.json prefix mapping if routes are missing.
 func resolveBeadDir(beadID string) string {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return "."
 	}
-	townBeadsDir := filepath.Join(townRoot, ".beads")
-	resolved := beads.ResolveBeadsDirForID(townBeadsDir, beadID)
-	// Return the parent of the .beads directory so bd discovers it naturally.
-	// For town-level beads this returns townRoot; for rig beads it returns
-	// the rig's mayor/rig directory (e.g., gastown/mayor/rig).
-	return filepath.Dir(resolved)
+	if beadID == "" || strings.HasPrefix(beadID, "hq-") {
+		return townRoot
+	}
+	if dir := resolveBeadDirFromRoutes(townRoot, beadID); dir != "" {
+		return dir
+	}
+	if prefix := extractBeadPrefix(beadID); prefix != "" {
+		if dir := resolveBeadDirFromRigsJSON(townRoot, prefix); dir != "" {
+			return dir
+		}
+	}
+	return townRoot
+}
+
+func resolveBeadDirFromRoutes(townRoot, beadID string) string {
+	routes, err := beads.LoadRoutes(filepath.Join(townRoot, ".beads"))
+	if err != nil || len(routes) == 0 {
+		return ""
+	}
+	var best beads.Route
+	for _, route := range routes {
+		if route.Prefix == "" || route.Path == "" {
+			continue
+		}
+		if strings.HasPrefix(beadID, route.Prefix) {
+			if best.Prefix == "" || len(route.Prefix) > len(best.Prefix) {
+				best = route
+			}
+		}
+	}
+	if best.Prefix == "" {
+		return ""
+	}
+	if best.Path == "." {
+		return townRoot
+	}
+	return filepath.Join(townRoot, best.Path)
+}
+
+func extractBeadPrefix(beadID string) string {
+	if beadID == "" {
+		return ""
+	}
+	idx := strings.Index(beadID, "-")
+	if idx == -1 {
+		return ""
+	}
+	return beadID[:idx+1]
 }
 
 // resolveBeadDirFromRigsJSON looks up the rig directory from rigs.json using prefix.
@@ -262,18 +295,18 @@ func getBeadInfo(beadID string) (*beadInfo, error) {
 // This enables a single read-modify-write cycle instead of sequential independent updates,
 // eliminating the race condition where concurrent writers could overwrite each other's fields.
 type beadFieldUpdates struct {
-	Dispatcher       string // Agent that dispatched the work
-	Args             string // Natural language instructions
+	Dispatcher       string   // Agent that dispatched the work
+	Args             string   // Natural language instructions
 	Vars             []string // Formula variables (key=value pairs)
-	AttachedMolecule string // Wisp root ID
-	AttachedFormula  string // Formula name (e.g., "mol-polecat-work") for inline step display
-	NoMerge          bool   // Skip merge queue on completion
-	ReviewOnly       bool   // Review-only mode: assignee must not merge/commit/push
-	Mode             string // Execution mode: "" (normal) or "ralph"
-	ConvoyID         string // Convoy bead ID (e.g., "hq-cv-abc")
-	MergeStrategy    string // Convoy merge strategy: "direct", "mr", "local"
-	ConvoyOwned      bool   // Convoy has gt:owned label (caller-managed lifecycle)
-	FormulaVars      string // Newline-separated key=value pairs for formula template substitution
+	AttachedMolecule string   // Wisp root ID
+	AttachedFormula  string   // Formula name (e.g., "mol-polecat-work") for inline step display
+	NoMerge          bool     // Skip merge queue on completion
+	ReviewOnly       bool     // Review-only mode: assignee must not merge/commit/push
+	Mode             string   // Execution mode: "" (normal) or "ralph"
+	ConvoyID         string   // Convoy bead ID (e.g., "hq-cv-abc")
+	MergeStrategy    string   // Convoy merge strategy: "direct", "mr", "local"
+	ConvoyOwned      bool     // Convoy has gt:owned label (caller-managed lifecycle)
+	FormulaVars      string   // Newline-separated key=value pairs for formula template substitution
 }
 
 // storeFieldsInBead performs a single read-modify-write to update all attachment fields
@@ -711,7 +744,7 @@ func InstantiateFormulaOnBead(ctx context.Context, formulaName, beadID, title, h
 		if err := BdCmd("cook", formulaName).
 			Dir(formulaWorkDir).
 			WithGTRoot(townRoot).
-				Run(); err != nil {
+			Run(); err != nil {
 			// Retry with embedded formula
 			resolvedFormula, formulaCleanup = resolveFormulaToTempFile(formulaName)
 			if formulaCleanup != nil {

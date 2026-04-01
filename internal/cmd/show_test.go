@@ -1,6 +1,10 @@
 package cmd
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestExtractBeadIDFromArgs(t *testing.T) {
 	tests := []struct {
@@ -45,5 +49,34 @@ func TestStripEnvKey_NoMatch(t *testing.T) {
 	got := stripEnvKey(env, "BEADS_DIR")
 	if len(got) != 2 {
 		t.Errorf("expected 2 entries (no change), got %d", len(got))
+	}
+}
+
+func TestResolveBeadDir_UsesRoutesForNonHQPrefix(t *testing.T) {
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	routes := []byte("{\"prefix\":\"gs-\",\"path\":\"gastown/mayor/rig\"}\n{\"prefix\":\"hq-\",\"path\":\".\"}\n")
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), routes, 0644); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(cwd) }()
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := resolveBeadDir("gs-60j"); got != filepath.Join(townRoot, "gastown", "mayor", "rig") {
+		t.Fatalf("resolveBeadDir(gs-60j) = %q, want %q", got, filepath.Join(townRoot, "gastown", "mayor", "rig"))
+	}
+	if got := resolveBeadDir("hq-123"); got != townRoot {
+		t.Fatalf("resolveBeadDir(hq-123) = %q, want %q", got, townRoot)
 	}
 }

@@ -298,6 +298,75 @@ exit /b 0
 	}
 }
 
+func TestVerifyBeadExists_RoutesNonHQPrefixFromTownRoot(t *testing.T) {
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	rigDir := filepath.Join(townRoot, "gastown", "mayor", "rig")
+	if err := os.MkdirAll(rigDir, 0755); err != nil {
+		t.Fatalf("mkdir rigDir: %v", err)
+	}
+	routes := strings.Join([]string{
+		`{"prefix":"gs-","path":"gastown/mayor/rig"}`,
+		`{"prefix":"hq-","path":"."}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(routes), 0644); err != nil {
+		t.Fatalf("write routes.jsonl: %v", err)
+	}
+
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+	bdScript := `#!/bin/sh
+set -e
+echo "$(pwd)|$*" >> "${BD_LOG}"
+if [ "$1" = "show" ]; then
+  echo '[{"title":"Test issue","status":"open","assignee":"","description":""}]'
+  exit 0
+fi
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+echo %CD%^|%*>>"%BD_LOG%"
+if "%1"=="show" (
+  echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+  exit /b 0
+)
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(cwd) }()
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := verifyBeadExists("gs-test123"); err != nil {
+		t.Fatalf("verifyBeadExists: %v", err)
+	}
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(logBytes), rigDir+"|show gs-test123 --json --allow-stale") {
+		t.Fatalf("expected bd show to run from rig dir %q, log:\n%s", rigDir, string(logBytes))
+	}
+}
+
 func TestSlingRollsBackSpawnedPolecatOnInstantiateFailure(t *testing.T) {
 	townRoot := t.TempDir()
 
@@ -1192,19 +1261,19 @@ func TestLooksLikeBeadID(t *testing.T) {
 		{"aaaaaa-b", false},     // prefix too long (6 chars)
 
 		// Injection / invalid suffix characters - should return false
-		{"gt-abc;rm -rf /", false},       // shell injection in suffix
-		{"gt-abc$(cmd)", false},          // command substitution in suffix
-		{"gt-abc&bg", false},            // ampersand in suffix
-		{"gt-abc|pipe", false},          // pipe in suffix
-		{"gt-abc`tick`", false},         // backtick in suffix
-		{"gt-abc>redir", false},         // redirect in suffix
-		{"gt-abc<redir", false},         // redirect in suffix
-		{"gt-abc'quote", false},         // single quote in suffix
-		{"gt-abc\"dquote", false},       // double quote in suffix
-		{"gt-abc\\slash", false},        // backslash in suffix
-		{"gt-abc xyz", false},           // space in suffix
-		{"gt-ABC", false},              // uppercase in suffix
-		{"gt-abc/path", false},          // slash in suffix
+		{"gt-abc;rm -rf /", false}, // shell injection in suffix
+		{"gt-abc$(cmd)", false},    // command substitution in suffix
+		{"gt-abc&bg", false},       // ampersand in suffix
+		{"gt-abc|pipe", false},     // pipe in suffix
+		{"gt-abc`tick`", false},    // backtick in suffix
+		{"gt-abc>redir", false},    // redirect in suffix
+		{"gt-abc<redir", false},    // redirect in suffix
+		{"gt-abc'quote", false},    // single quote in suffix
+		{"gt-abc\"dquote", false},  // double quote in suffix
+		{"gt-abc\\slash", false},   // backslash in suffix
+		{"gt-abc xyz", false},      // space in suffix
+		{"gt-ABC", false},          // uppercase in suffix
+		{"gt-abc/path", false},     // slash in suffix
 	}
 
 	for _, tt := range tests {
