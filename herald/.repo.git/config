@@ -97,6 +97,3 @@
 [branch "polecat/imperator/hr-cax.1@mngbcf8n"]
 	remote = origin
 	merge = refs/heads/main
-[branch "temp"]
-	remote = origin
-	merge = refs/heads/polecat/keeper/hr-8wn.7@mngbcd7s
