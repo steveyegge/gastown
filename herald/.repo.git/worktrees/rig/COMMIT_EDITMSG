@@ -11,11 +11,11 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 #
 # Author:    dag <jeremy@theirish.com>
 #
-# interactive rebase in progress; onto 8b8a8cf
+# interactive rebase in progress; onto 4b34f65
 # Last command done (1 command done):
 #    pick df01445 # feat: Telegram channel with bot token auth, long-polling and webhook modes (hr-8rg.2)
 # No commands remaining.
-# You are currently rebasing branch 'temp' on '8b8a8cf'.
+# You are currently rebasing branch 'temp' on '4b34f65'.
 #
 # Changes to be committed:
 #	modified:   go.mod
