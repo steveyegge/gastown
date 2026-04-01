@@ -8,3 +8,23 @@ Voice channel implementing Channel interface:
 - ffplay/afplay audio playback
 - VoiceChannelConfig with env var overrides
 - Daemon registration when enabled
+
+# Conflicts:
+#	internal/daemon/daemon.go
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# Author:    keeper <jeremy@theirish.com>
+#
+# interactive rebase in progress; onto f61d0e7
+# Last command done (1 command done):
+#    pick dad5d88 # feat: Voice channel with Porcupine wake word, Whisper STT, ElevenLabs TTS (hr-wql.1)
+# No commands remaining.
+# You are currently rebasing branch 'polecat/keeper/hr-wql.1@mngfogke' on 'f61d0e7'.
+#
+# Changes to be committed:
+#	new file:   internal/channels/voice.go
+#	modified:   internal/config/config.go
+#	modified:   internal/daemon/daemon.go
+#
