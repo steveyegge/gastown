@@ -97,3 +97,6 @@
 [branch "polecat/imperator/hr-cax.1@mngbcf8n"]
 	remote = origin
 	merge = refs/heads/main
+[branch "temp"]
+	remote = origin
+	merge = refs/heads/polecat/capable/hr-7js.2@mngb6nec
