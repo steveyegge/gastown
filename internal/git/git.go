@@ -3,6 +3,7 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/util"
 )
@@ -111,13 +113,68 @@ func (g *Git) run(args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// runWithEnv executes a git command with additional environment variables.
-func (g *Git) runWithEnv(args []string, extraEnv []string) (_ string, _ error) { //nolint:unparam // string return kept for consistency with Run()
+// pushTimeout is the maximum time a git push is allowed to run before being
+// killed. This prevents gt done from hanging indefinitely when the remote
+// (e.g. GitLab) is unreachable or slow.
+const pushTimeout = 60 * time.Second
+
+// runWithTimeout executes a git command with a deadline. If the command does
+// not finish within the timeout, the process is killed and an error is returned.
+func (g *Git) runWithTimeout(timeout time.Duration, args ...string) (string, error) {
 	if g.gitDir != "" {
 		args = append([]string{"--git-dir=" + g.gitDir}, args...)
 	}
-	cmd := exec.Command("git", args...)
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", args...)
 	util.SetDetachedProcessGroup(cmd)
+	if g.workDir != "" {
+		cmd.Dir = g.workDir
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("git %s timed out after %v (remote may be unreachable)", args[0], timeout)
+		}
+		return "", g.wrapError(err, stdout.String(), stderr.String(), args)
+	}
+
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// runWithEnv executes a git command with additional environment variables.
+func (g *Git) runWithEnv(args []string, extraEnv []string) (_ string, _ error) { //nolint:unparam // string return kept for consistency with Run()
+	return g.runWithEnvAndTimeout(args, extraEnv, 0)
+}
+
+// runWithEnvAndTimeout executes a git command with extra env vars and an
+// optional timeout. Pass 0 for no timeout.
+func (g *Git) runWithEnvAndTimeout(args []string, extraEnv []string, timeout time.Duration) (_ string, _ error) {
+	if g.gitDir != "" {
+		args = append([]string{"--git-dir=" + g.gitDir}, args...)
+	}
+
+	var cmd *exec.Cmd
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		var ctx context.Context
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		cmd = exec.CommandContext(ctx, "git", args...)
+	} else {
+		cmd = exec.Command("git", args...)
+	}
+	if cancel != nil {
+		defer cancel()
+	}
+	util.SetDetachedProcessGroup(cmd)
+
 	if g.workDir != "" {
 		cmd.Dir = g.workDir
 	}
@@ -129,6 +186,12 @@ func (g *Git) runWithEnv(args []string, extraEnv []string) (_ string, _ error) {
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err != nil {
+		if timeout > 0 {
+			// Check if the context's deadline was exceeded
+			if errors.Is(err, context.DeadlineExceeded) {
+				return "", fmt.Errorf("git %s timed out after %v (remote may be unreachable)", args[0], timeout)
+			}
+		}
 		return "", g.wrapError(err, stdout.String(), stderr.String(), args)
 	}
 	return strings.TrimSpace(stdout.String()), nil
@@ -506,13 +569,14 @@ func (g *Git) GetPushURL(remote string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// Push pushes to the remote branch.
+// Push pushes to the remote branch with a timeout to prevent indefinite hangs
+// when the remote is unreachable.
 func (g *Git) Push(remote, branch string, force bool) error {
 	args := []string{"push", remote, branch}
 	if force {
 		args = append(args, "--force")
 	}
-	_, err := g.run(args...)
+	_, err := g.runWithTimeout(pushTimeout, args...)
 	return err
 }
 
@@ -524,7 +588,7 @@ func (g *Git) PushWithEnv(remote, branch string, force bool, env []string) error
 	if force {
 		args = append(args, "--force")
 	}
-	_, err := g.runWithEnv(args, env)
+	_, err := g.runWithEnvAndTimeout(args, env, pushTimeout)
 	return err
 }
 
@@ -872,7 +936,7 @@ func (g *Git) RecentCommits(n int) (string, error) {
 
 // DeleteRemoteBranch deletes a branch on the remote.
 func (g *Git) DeleteRemoteBranch(remote, branch string) error {
-	_, err := g.run("push", remote, "--delete", branch)
+	_, err := g.runWithTimeout(pushTimeout, "push", remote, "--delete", branch)
 	return err
 }
 
@@ -1755,17 +1819,12 @@ func isGasTownRuntimePath(path string) bool {
 // runtime artifacts (.beads/, .claude/, .runtime/, .logs/, __pycache__/).
 // Used by gt done to avoid blocking completion on toolchain-managed files.
 //
-// Note: UnpushedCommits is intentionally NOT checked here. This function only
-// evaluates whether uncommitted *file* changes are runtime artifacts. Unpushed
-// commits represent committed (but not yet pushed) work and are handled separately
-// by the CommitsAhead check in gt done. Including UnpushedCommits here caused
-// gt done to block when polecats committed their work and called gt done with
-// only infrastructure files untracked (gas-7vg).
+// Note: UnpushedCommits and StashCount are intentionally NOT checked here. This
+// function only evaluates whether uncommitted *file* changes are runtime artifacts.
+// Unpushed commits represent committed (but not yet pushed) work, and stashes
+// survive worktree deletion — both are handled separately and shouldn't block
+// completion on runtime-only dirt (gas-7vg).
 func (s *UncommittedWorkStatus) CleanExcludingRuntime() bool {
-	if s.StashCount > 0 {
-		return false
-	}
-
 	for _, f := range s.ModifiedFiles {
 		if !isGasTownRuntimePath(f) {
 			return false
@@ -2218,11 +2277,16 @@ func (g *Git) PushSubmoduleCommit(submodulePath, sha, remote string) error {
 	if err != nil {
 		return fmt.Errorf("detecting default branch for submodule %s: %w", submodulePath, err)
 	}
-	cmd := exec.Command("git", "-C", absPath, "push", remote, sha+":refs/heads/"+defaultBranch)
+	ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", absPath, "push", remote, sha+":refs/heads/"+defaultBranch)
 	util.SetDetachedProcessGroup(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("pushing submodule %s timed out after %v (remote may be unreachable)", submodulePath, pushTimeout)
+		}
 		abbrev := sha
 		if len(abbrev) > 8 {
 			abbrev = abbrev[:8]
