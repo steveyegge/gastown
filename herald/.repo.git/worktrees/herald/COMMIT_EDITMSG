@@ -1,0 +1,8 @@
+feat: core agent loop with tool calling (3 rounds, 5 tools/round) (hr-l5e.2)
+
+Add internal/agent package with conversation management and tool call loop.
+Extend llm types with ToolDef, ToolCall, ToolResult, ChatResponse for tool
+use support. Update Claude provider SSE parser to handle content_block_start,
+input_json_delta, and content_block_stop events for streaming tool calls.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
