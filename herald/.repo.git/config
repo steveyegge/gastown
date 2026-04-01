@@ -166,3 +166,21 @@
 [branch "polecat/furiosa/he-266"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/ace/he-2nb@mngnuqbi"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/cheedo/he-9eq"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/capable/he-elb"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/dag/he-isu"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/furiosa/he-kt5"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/imperator/he-5g1@mngnw2e8"]
+	remote = origin
+	merge = refs/heads/main
