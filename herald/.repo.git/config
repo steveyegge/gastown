@@ -97,3 +97,6 @@
 [branch "polecat/imperator/hr-cax.1@mngbcf8n"]
 	remote = origin
 	merge = refs/heads/main
+[branch "dog/alpha-herald-1775068052769"]
+	remote = origin
+	merge = refs/heads/main
