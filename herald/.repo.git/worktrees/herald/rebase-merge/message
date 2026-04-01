@@ -1,4 +1,0 @@
-feat: browser automation executor (go-rod) (hr-dym.1)
-
-# Conflicts:
-#	internal/daemon/daemon.go

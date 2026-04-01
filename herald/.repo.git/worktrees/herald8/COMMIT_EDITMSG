@@ -1,5 +1,23 @@
-feat: memory hooks: post-response fact/goal extraction goroutine (hr-31j.5)
+test: expand daemon integration tests for executor registration (he-0r8.2)
 
-Background goroutine calls LLM after each turn to extract facts, goals,
-and insights. Stores to STM with embeddings. Triggers block reflection
-when STM reaches 50 items. Wired into daemon handler after agent response.
+Add test doubles (stubDaemonTool, makeStubTools, makeFailingTools) and
+registerExecutors helper to test config-driven executor registration
+without real postgres or external services.
+
+New test coverage:
+- TestRegistration_AllDisabled: baseline with only local+entities
+- TestRegistration_AllEnabled: all 9 executors with correct tool counts
+- TestRegistration_Partial: selective enablement (memory+comms only)
+- TestRegistration_MCPRequiresServers: MCP needs servers configured
+- TestToolDefsExcludeDisabledExecutors: disabled executor tools hidden
+- TestToolDefsReappearAfterReset: reset re-enables executor tools
+- TestCoordToAgentTools: coordToAgentTools bridge correctness
+- TestCoordToAgentToolsExecute: end-to-end stub tool execution
+- TestSimpleExecutor: simpleExecutor Name/Tools methods
+- TestRegistrationToolCounts: table-driven config combinations
+- TestDaemonStopIdempotent: Stop on never-started daemon
+- TestDaemonNewFields: New constructor field assignment
+- TestGracefulShutdownSequence: all executors disabled = empty ToolDefs
+
+Fix compilation errors in prior test skeleton (tools.FailableCall,
+missing sort import).

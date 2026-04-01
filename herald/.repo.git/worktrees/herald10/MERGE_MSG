@@ -1,0 +1,13 @@
+feat: Voice channel with Porcupine wake word, Whisper STT, ElevenLabs TTS (hr-wql.1)
+
+Voice channel implementing Channel interface:
+- Porcupine CLI wake word detection loop
+- Audio recording via sox/rec
+- OpenAI Whisper API transcription
+- ElevenLabs TTS with macOS 'say' fallback
+- ffplay/afplay audio playback
+- VoiceChannelConfig with env var overrides
+- Daemon registration when enabled
+
+# Conflicts:
+#	internal/daemon/daemon.go
