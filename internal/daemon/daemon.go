@@ -1476,7 +1476,22 @@ func (d *Daemon) checkDeaconHeartbeat() {
 		d.logger.Printf("STUCK DEACON: heartbeat stale for %s, session %s needs restart", age.Round(time.Minute), sessionName)
 		d.restartStuckDeacon(sessionName, fmt.Sprintf("heartbeat stale for %s", age.Round(time.Minute)))
 	} else {
-		// Stale but not very stale (5-20 min) - nudge to wake up
+		// Stale but not very stale (5-20 min) - nudge to wake up (unless idle).
+		//
+		// Idle guard: skip nudge if no beads are actively in flight.
+		// This mirrors the Boot idle guard (ensureBootRunning). When the Deacon's
+		// heartbeat has gone stale during an await-signal backoff sleep, sending a
+		// nudge interrupts the exponential backoff for no reason — the Deacon will
+		// wake naturally at its next timeout. Only nudge if work is actually in
+		// flight (in_progress or hooked) that the Deacon may need to act on.
+		// Conservative: on store errors hasActiveWork returns true, so nudge fires.
+		// See also: runtime/runtime.go:99-101 — session-started nudge was removed
+		// for the same reason (it interrupted the deacon's await-signal backoff).
+		if !d.hasActiveWork() {
+			d.logger.Println("Deacon nudge skipped: no active work in flight, await-signal will fire naturally")
+			return
+		}
+
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
 		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
 			d.logger.Printf("Error nudging stuck Deacon: %v", err)
