@@ -294,7 +294,7 @@ func (m *ConvoyManager) pollStore(name string, store beadsdk.Storage, stores map
 	if err != nil {
 		if isInfNaNError(err) {
 			// A corrupted row in the events table has +Inf/-Inf/NaN stored in a
-			// double column (e.g. created_at serialised from Go's zero time.Time).
+			// double column (e.g. created_at serialized from Go's zero time.Time).
 			// Advance the high-water mark to now so future polls skip past the
 			// bad row entirely. Events before now are missed, but the stranded
 			// convoy scanner will catch any completions that were lost.
