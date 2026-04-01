@@ -116,6 +116,18 @@ type Daemon struct {
 	// triggers a zombie restart, debouncing transient gaps during handoffs.
 	// Only accessed from heartbeat loop goroutine - no sync needed.
 	mayorZombieCount int
+
+	// rigPool runs per-rig heartbeat operations (witness checks, refinery checks,
+	// polecat health, idle reaping, branch pruning) with bounded concurrency and
+	// per-rig context timeouts so one slow rig cannot block all others.
+	rigPool *RigWorkerPool
+
+	// knownRigsCache caches the result of getKnownRigs() for the duration of
+	// a single heartbeat tick, eliminating repeated rigs.json disk reads.
+	// knownRigsCacheValid is true only while heartbeat() is executing.
+	// Only accessed from heartbeat loop goroutine - no sync needed.
+	knownRigsCache      []string
+	knownRigsCacheValid bool
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -741,6 +753,14 @@ func (d *Daemon) heartbeat(state *State) {
 
 	d.metrics.recordHeartbeat(d.ctx)
 	d.logger.Println("Heartbeat starting (recovery-focused)")
+
+	// Populate the per-tick cache so all getKnownRigs() calls within this
+	// heartbeat share a single rigs.json read instead of hitting disk each time.
+	d.knownRigsCache = d.loadKnownRigsFromDisk()
+	d.knownRigsCacheValid = true
+	defer func() {
+		d.knownRigsCacheValid = false
+	}()
 
 	// 0a. Reload prefix registry so new/changed rigs get correct session names.
 	// Without this, rigs added after daemon startup get the "gt" default prefix,
@@ -1778,25 +1798,22 @@ func (d *Daemon) openBeadsStores() (map[string]beadsdk.Storage, error) {
 }
 
 // getKnownRigs returns list of registered rig names.
+// During a heartbeat tick, returns the cached result set at tick start to
+// avoid repeated rigs.json disk reads. Outside heartbeat, reads from disk.
 func (d *Daemon) getKnownRigs() []string {
-	rigsPath := filepath.Join(d.config.TownRoot, "mayor", "rigs.json")
-	data, err := os.ReadFile(rigsPath)
+	if d.knownRigsCacheValid {
+		return d.knownRigsCache
+	}
+	return d.loadKnownRigsFromDisk()
+}
+
+// loadKnownRigsFromDisk reads the rig registry to build the rig list.
+func (d *Daemon) loadKnownRigsFromDisk() []string {
+	names, err := rigsregistry.GetKnownRigNames(d.config.TownRoot)
 	if err != nil {
 		return nil
 	}
-
-	var parsed struct {
-		Rigs map[string]interface{} `json:"rigs"`
-	}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		return nil
-	}
-
-	var rigs []string
-	for name := range parsed.Rigs {
-		rigs = append(rigs, name)
-	}
-	return rigs
+	return names
 }
 
 // getPatrolRigs returns the list of operational rigs for a patrol.
