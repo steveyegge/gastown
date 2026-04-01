@@ -100,3 +100,27 @@
 [branch "dog/alpha-herald-1775068052769"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/ace/hr-8wn.3@mngfipfe"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/capable/hr-8rg.1@mngfjk28"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/cheedo/hr-31j.5@mngfkf93"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/dag/hr-9dz.1@mngfl7de"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/dementus/hr-eat.1@mngflznp"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/furiosa/hr-dym.1@mngfmsjs"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/imperator/hr-jx4.1@mngfnnqh"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/keeper/hr-wql.1@mngfogke"]
+	remote = origin
+	merge = refs/heads/main
