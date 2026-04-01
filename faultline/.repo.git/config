@@ -14,3 +14,6 @@
 [branch "polecat/obsidian/fl-u8o@mngfhr0e"]
 	remote = origin
 	merge = refs/heads/main
+[branch "dog/alpha-faultline-1775075641586"]
+	remote = origin
+	merge = refs/heads/main
