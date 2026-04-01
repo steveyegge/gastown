@@ -7,18 +7,15 @@
 [remote "origin"]
 	url = git@github.com:outdoorsea/herald.git
 	fetch = +refs/heads/*:refs/remotes/origin/*
-[branch "polecat/furiosa/hr-zn2.1@mnfc94fb"]
-	remote = origin
-	merge = refs/heads/main
 [beads]
 	issue-prefix = he
 	role = contributor
-[branch "polecat/nux/hr-zn2.2@mnfc9qgw"]
-	remote = origin
-	merge = refs/heads/main
 [branch "polecat/slit/hr-zn2.3@mnfcac9k"]
 	remote = origin
 	merge = refs/heads/main
 [branch "dog/alpha-herald-1775005418725"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/furiosa/hr-zn2.1@mnfcq2d0"]
 	remote = origin
 	merge = refs/heads/main
