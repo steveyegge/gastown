@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
@@ -605,8 +606,8 @@ func containsFlag(s, flag string) bool {
 // CustomTypesCheck verifies Gas Town custom types are registered with beads.
 type CustomTypesCheck struct {
 	FixableCheck
-	missingTypes []string // Cached during Run for use in Fix
-	townRoot     string   // Cached during Run for use in Fix
+	missingTypes   []string // Cached during Run for use in Fix
+	targetBeadsDir string   // Cached during Run for use in Fix
 }
 
 // NewCustomTypesCheck creates a new custom types check.
@@ -633,9 +634,8 @@ func (c *CustomTypesCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// Check if .beads directory exists at town level
-	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
-	if _, err := os.Stat(townBeadsDir); os.IsNotExist(err) {
+	beadsDir := doctorConfigBeadsDir(ctx)
+	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
@@ -646,11 +646,12 @@ func (c *CustomTypesCheck) Run(ctx *CheckContext) *CheckResult {
 	// Get current custom types configuration
 	// Use Output() not CombinedOutput() to avoid capturing bd's stderr messages
 	cmd := exec.Command("bd", "config", "get", "types.custom")
-	cmd.Dir = ctx.TownRoot
+	cmd.Dir = beadsDir
+	cmd.Env = doctorConfigEnv(beadsDir)
 	output, err := cmd.Output()
 	if err != nil {
 		// If config key doesn't exist, types are not configured
-		c.townRoot = ctx.TownRoot
+		c.targetBeadsDir = beadsDir
 		c.missingTypes = constants.BeadsCustomTypesList()
 		return &CheckResult{
 			Name:    c.Name(),
@@ -690,7 +691,7 @@ func (c *CustomTypesCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Cache for Fix
-	c.townRoot = ctx.TownRoot
+	c.targetBeadsDir = beadsDir
 	c.missingTypes = missing
 
 	return &CheckResult{
@@ -720,8 +721,33 @@ func parseConfigOutput(output []byte) string {
 
 // Fix registers the missing custom types.
 func (c *CustomTypesCheck) Fix(ctx *CheckContext) error {
-	cmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
-	cmd.Dir = c.townRoot
+	getCmd := exec.Command("bd", "config", "get", "types.custom")
+	getCmd.Dir = c.targetBeadsDir
+	getCmd.Env = doctorConfigEnv(c.targetBeadsDir)
+	existingOutput, _ := getCmd.Output()
+
+	typeSet := make(map[string]bool)
+	if existing := parseConfigOutput(existingOutput); existing != "" {
+		for _, typ := range strings.Split(existing, ",") {
+			typ = strings.TrimSpace(typ)
+			if typ != "" {
+				typeSet[typ] = true
+			}
+		}
+	}
+	for _, typ := range constants.BeadsCustomTypesList() {
+		typeSet[typ] = true
+	}
+
+	var merged []string
+	for typ := range typeSet {
+		merged = append(merged, typ)
+	}
+	sort.Strings(merged)
+
+	cmd := exec.Command("bd", "config", "set", "types.custom", strings.Join(merged, ","))
+	cmd.Dir = c.targetBeadsDir
+	cmd.Env = doctorConfigEnv(c.targetBeadsDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("bd config set types.custom: %s", strings.TrimSpace(string(output)))
@@ -733,7 +759,7 @@ func (c *CustomTypesCheck) Fix(ctx *CheckContext) error {
 type CustomStatusesCheck struct {
 	FixableCheck
 	missingStatuses []string // Cached during Run for use in Fix
-	townRoot        string   // Cached during Run for use in Fix
+	targetBeadsDir  string   // Cached during Run for use in Fix
 }
 
 // NewCustomStatusesCheck creates a new custom statuses check.
@@ -759,8 +785,8 @@ func (c *CustomStatusesCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
-	if _, err := os.Stat(townBeadsDir); os.IsNotExist(err) {
+	beadsDir := doctorConfigBeadsDir(ctx)
+	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
@@ -770,10 +796,11 @@ func (c *CustomStatusesCheck) Run(ctx *CheckContext) *CheckResult {
 
 	// Get current custom statuses configuration
 	cmd := exec.Command("bd", "config", "get", "status.custom")
-	cmd.Dir = ctx.TownRoot
+	cmd.Dir = beadsDir
+	cmd.Env = doctorConfigEnv(beadsDir)
 	output, err := cmd.Output()
 	if err != nil {
-		c.townRoot = ctx.TownRoot
+		c.targetBeadsDir = beadsDir
 		c.missingStatuses = constants.BeadsCustomStatusesList()
 		return &CheckResult{
 			Name:    c.Name(),
@@ -810,7 +837,7 @@ func (c *CustomStatusesCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	c.townRoot = ctx.TownRoot
+	c.targetBeadsDir = beadsDir
 	c.missingStatuses = missing
 
 	return &CheckResult{
@@ -830,7 +857,8 @@ func (c *CustomStatusesCheck) Run(ctx *CheckContext) *CheckResult {
 func (c *CustomStatusesCheck) Fix(ctx *CheckContext) error {
 	// Read existing statuses
 	getCmd := exec.Command("bd", "config", "get", "status.custom")
-	getCmd.Dir = c.townRoot
+	getCmd.Dir = c.targetBeadsDir
+	getCmd.Env = doctorConfigEnv(c.targetBeadsDir)
 	existingOutput, _ := getCmd.Output()
 
 	// Build merged set
@@ -854,10 +882,45 @@ func (c *CustomStatusesCheck) Fix(ctx *CheckContext) error {
 	sort.Strings(merged)
 
 	cmd := exec.Command("bd", "config", "set", "status.custom", strings.Join(merged, ","))
-	cmd.Dir = c.townRoot
+	cmd.Dir = c.targetBeadsDir
+	cmd.Env = doctorConfigEnv(c.targetBeadsDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("bd config set status.custom: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func doctorConfigBeadsDir(ctx *CheckContext) string {
+	workDir := ctx.TownRoot
+	if ctx.RigName != "" {
+		workDir = ctx.RigPath()
+	}
+	return beads.ResolveBeadsDir(workDir)
+}
+
+func doctorConfigEnv(beadsDir string) []string {
+	env := stripEnvPrefixes(os.Environ(), "BEADS_DIR=", "BEADS_DB=", "BEADS_DOLT_SERVER_DATABASE=")
+	env = append(env, "BEADS_DIR="+beadsDir)
+	if dbEnv := beads.DatabaseEnv(beadsDir); dbEnv != "" {
+		env = append(env, dbEnv)
+	}
+	return env
+}
+
+func stripEnvPrefixes(env []string, prefixes ...string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, entry := range env {
+		skip := false
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(entry, prefix) {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
