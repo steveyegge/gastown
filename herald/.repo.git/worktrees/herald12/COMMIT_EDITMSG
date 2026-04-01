@@ -1,1 +1,1 @@
-feat: memory tool executor (STM/LTM/block read-write) (hr-8wn.3)
+feat: add Config.Validate() called from Load() (he-0r8.1)
