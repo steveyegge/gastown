@@ -166,6 +166,3 @@
 [branch "polecat/furiosa/he-266"]
 	remote = origin
 	merge = refs/heads/main
-[branch "temp"]
-	remote = origin
-	merge = refs/heads/polecat/cheedo/he-ofv
