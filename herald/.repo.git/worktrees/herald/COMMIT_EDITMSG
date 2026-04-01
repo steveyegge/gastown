@@ -1,1 +1,1 @@
-test: add memory embedder tests for OpenAI and Ollama (he-kt5)
+feat: graceful degradation for unavailable optional services (he-4wt)

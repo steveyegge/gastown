@@ -1,17 +1,17 @@
-feat: CLI subcommand framework with manual dispatch (he-9eq)
+feat: REST API conversation and status endpoints (he-m17)
 
-Refactor cmd/herald/main.go from simple if/else dispatch to proper
-subcommand handling with backward compatibility.
+Add four new API endpoints behind API key auth:
+- GET /api/status: daemon health, registered executors, active channels
+- POST /api/chat: send message through agent pipeline, get response
+- GET /api/memory/blocks: read pinned memory blocks
+- GET /api/tools: list available tools with descriptions
 
-Subcommands:
-- serve: start the daemon (default when no command given)
-- dash: launch terminal dashboard
-- migrate up|down|status: database migration management
-- auth google: interactive OAuth2 flow with localhost callback
-  and macOS Keychain token storage
-- version: build info (version, commit, date, go version)
-- help: usage information
+New files:
+- internal/api/handlers.go: endpoint handlers with provider interfaces
+- internal/api/handlers_test.go: 13 tests covering all endpoints
 
-Extracted loadConfig() and makeLogger() helpers for reuse across
-subcommands. Migrate up applies sql/*.sql files in order. Auth
-google uses ephemeral localhost HTTP server for OAuth2 callback.
+Changes:
+- internal/api/server.go: NewServer accepts optional *Handlers, mounts
+  API routes alongside gateway routes behind shared auth
+- internal/daemon/daemon.go: wire coordinator, block store, and handler
+  func into API handlers via adapter types; always start API server

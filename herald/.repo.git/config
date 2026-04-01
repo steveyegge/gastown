@@ -181,3 +181,21 @@
 [branch "polecat/imperator/he-5g1@mngnw2e8"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/capable/he-0z8@mngp5kae"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/furiosa/he-4wt"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/imperator/he-kep"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/keeper/he-781"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/dag/he-58e@mngp7bl1"]
+	remote = origin
+	merge = refs/heads/main
+[branch "temp"]
+	remote = origin
+	merge = refs/heads/polecat/furiosa/he-4wt
