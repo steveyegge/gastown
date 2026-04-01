@@ -40,3 +40,60 @@
 [branch "polecat/nux/hr-31j.4@mng9vkve"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/furiosa/hr-8wn.1@mngb31t0"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/nux/hr-8rg.1@mngb3tfa"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/nux/hr-lpd.1@mngb4zgj"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/slit/hr-8wn.2@mngb505a"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/rictus/hr-cax.1@mngb5jdo"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/dementus/hr-8rg.3@mngb62a8"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/rictus/hr-8rg.4@mngb6mti"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/capable/hr-7js.2@mngb6nec"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/toast/hr-lpd.2@mngb76ll"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/dag/hr-cax.1@mngb78ip"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/cheedo/hr-8wn.1@mngb7ve3"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/dag/hr-8rg.2@mngb8o2q"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/valkyrie/hr-cax.2@mngb8q9s"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/keeper/hr-8wn.3@mngb9bqg"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/morsov/hr-8wn.4@mngb9d4s"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/ace/hr-8wn.5@mngbaocs"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/warboy/hr-8wn.6@mngbaplt"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/keeper/hr-8wn.7@mngbcd7s"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/imperator/hr-cax.1@mngbcf8n"]
+	remote = origin
+	merge = refs/heads/main
