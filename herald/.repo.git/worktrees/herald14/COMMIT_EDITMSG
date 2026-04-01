@@ -1,8 +1,1 @@
-feat: entity schema: Person, Place, Thing, Relationship (hr-cax.1)
-
-Go structs and store with CRUD + pgvector semantic search for all four
-entity types. Migration adds embedding columns to existing entity tables.
-Follows existing memory package patterns (Embedder interface, UUID keys,
-raw-JSON metadata).
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+chore: add .gitignore for menubar build artifacts (hr-jx4.1)
