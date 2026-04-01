@@ -81,28 +81,42 @@ func SaveTownConfig(path string, config *TownConfig) error {
 }
 
 // LoadRigsConfig loads and validates a rigs registry file.
+// It retries once on JSON parse errors to handle the unlikely case of observing
+// a partially-written file from a concurrent non-atomic writer.
 func LoadRigsConfig(path string) (*RigsConfig, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally, not from user input
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
+	readAndParse := func() (*RigsConfig, error) {
+		data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally, not from user input
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
+			}
+			return nil, fmt.Errorf("reading config: %w", err)
 		}
-		return nil, fmt.Errorf("reading config: %w", err)
+
+		var config RigsConfig
+		if err := json.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("parsing config: %w", err)
+		}
+
+		if err := validateRigsConfig(&config); err != nil {
+			return nil, err
+		}
+
+		return &config, nil
 	}
 
-	var config RigsConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("parsing config: %w", err)
+	cfg, err := readAndParse()
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		// Retry once to handle torn reads from concurrent writers.
+		cfg, err = readAndParse()
 	}
-
-	if err := validateRigsConfig(&config); err != nil {
-		return nil, err
-	}
-
-	return &config, nil
+	return cfg, err
 }
 
-// SaveRigsConfig saves a rigs registry to a file.
+// SaveRigsConfig saves a rigs registry to a file atomically.
+// It writes to a temporary file in the same directory, then renames it into
+// place. The rename is atomic on POSIX systems, preventing readers from
+// observing a partially-written file.
 func SaveRigsConfig(path string, config *RigsConfig) error {
 	if err := validateRigsConfig(config); err != nil {
 		return err
@@ -117,8 +131,44 @@ func SaveRigsConfig(path string, config *RigsConfig) error {
 		return fmt.Errorf("encoding config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := atomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("writing config: %w", err)
+	}
+
+	return nil
+}
+
+// atomicWriteFile writes data to path atomically by writing a temp file
+// in the same directory then renaming it. On POSIX the rename is atomic,
+// so readers never observe a partially-written file.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+
+	f, err := os.CreateTemp(dir, base+".tmp.*")
+	if err != nil {
+		return err
+	}
+	tmpName := f.Name()
+
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+		return err
+	}
+
+	if err := os.Chmod(tmpName, perm); err != nil {
+		os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+		return err
+	}
+
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+		return err
 	}
 
 	return nil

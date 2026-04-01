@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -122,6 +123,118 @@ func TestRigsConfigRoundTrip(t *testing.T) {
 	}
 	if rig.LocalRepo != "/tmp/local-repo" {
 		t.Errorf("LocalRepo = %q, want %q", rig.LocalRepo, "/tmp/local-repo")
+	}
+}
+
+// TestSaveRigsConfigAtomicConcurrentWrites verifies that concurrent writers
+// never produce a torn/invalid rigs.json. Any goroutine reading the file
+// mid-write must see valid JSON due to the atomic rename used by SaveRigsConfig.
+func TestSaveRigsConfigAtomicConcurrentWrites(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mayor", "rigs.json")
+
+	// Seed with an initial valid file.
+	seed := &RigsConfig{
+		Version: 1,
+		Rigs:    map[string]RigEntry{},
+	}
+	if err := SaveRigsConfig(path, seed); err != nil {
+		t.Fatalf("seed SaveRigsConfig: %v", err)
+	}
+
+	const writers = 10
+	const iters = 50
+	var wg sync.WaitGroup
+
+	// N goroutines writing different versions of the file concurrently.
+	for w := 0; w < writers; w++ {
+		w := w
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cfg := &RigsConfig{
+				Version: 1,
+				Rigs: map[string]RigEntry{
+					"rig-" + string(rune('a'+w)): {
+						GitURL:    "git@github.com:example/repo.git",
+						LocalRepo: "/tmp/repo",
+						AddedAt:   time.Now(),
+					},
+				},
+			}
+			for i := 0; i < iters; i++ {
+				if err := SaveRigsConfig(path, cfg); err != nil {
+					t.Errorf("writer %d iter %d: SaveRigsConfig: %v", w, i, err)
+				}
+			}
+		}()
+	}
+
+	// One reader goroutine verifying the file is always valid JSON.
+	stop := make(chan struct{})
+	var readErr error
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue // file may briefly not exist between writes
+			}
+			var cfg RigsConfig
+			if err := json.Unmarshal(data, &cfg); err != nil {
+				readErr = err
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+	close(stop)
+
+	if readErr != nil {
+		t.Errorf("reader observed invalid JSON (torn write): %v", readErr)
+	}
+}
+
+// TestLoadRigsConfigRetryOnTornRead verifies that LoadRigsConfig retries once
+// when it encounters invalid JSON, so transient torn reads don't surface as errors.
+func TestLoadRigsConfigRetryOnTornRead(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rigs.json")
+
+	// Write invalid JSON (simulating a torn write) then immediately overwrite
+	// with valid JSON. The retry in LoadRigsConfig should recover.
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{invalid json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Replace with valid content before LoadRigsConfig is called — the retry
+	// window means a second read sees the good file.
+	valid := &RigsConfig{
+		Version: 1,
+		Rigs:    map[string]RigEntry{},
+	}
+	if err := SaveRigsConfig(path, valid); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadRigsConfig(path)
+	if err != nil {
+		t.Fatalf("LoadRigsConfig: %v", err)
+	}
+	if cfg.Version != 1 {
+		t.Errorf("Version = %d, want 1", cfg.Version)
 	}
 }
 

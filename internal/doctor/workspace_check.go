@@ -175,7 +175,7 @@ func (c *RigsRegistryExistsCheck) Fix(ctx *CheckContext) error {
 		return fmt.Errorf("marshaling empty rigs.json: %w", err)
 	}
 
-	return os.WriteFile(rigsPath, data, 0644)
+	return atomicWriteFile(rigsPath, data, 0644)
 }
 
 // RigsRegistryValidCheck verifies mayor/rigs.json is valid and rigs exist.
@@ -304,13 +304,49 @@ func (c *RigsRegistryValidCheck) Fix(ctx *CheckContext) error {
 		delete(config.Rigs, rig)
 	}
 
-	// Write back
+	// Write back atomically
 	newData, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling rigs.json: %w", err)
 	}
 
-	return os.WriteFile(rigsPath, newData, 0644)
+	return atomicWriteFile(rigsPath, newData, 0644)
+}
+
+// atomicWriteFile writes data to path atomically by writing a temp file
+// in the same directory, then renaming it into place. On POSIX the rename
+// is atomic, so readers never observe a partially-written file.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+
+	f, err := os.CreateTemp(dir, base+".tmp.*")
+	if err != nil {
+		return err
+	}
+	tmpName := f.Name()
+
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+		return err
+	}
+
+	if err := os.Chmod(tmpName, perm); err != nil {
+		os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+		return err
+	}
+
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+		return err
+	}
+
+	return nil
 }
 
 // MayorExistsCheck verifies the mayor/ directory structure.
