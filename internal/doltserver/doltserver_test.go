@@ -3537,22 +3537,26 @@ func TestBuildDoltSQLCmd_Local(t *testing.T) {
 		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, "/tmp/dolt-data")
 	}
 
-	// Should have: dolt sql -q "SELECT 1" (no connection flags)
+	// Should force a TCP client connection even for local servers.
 	args := cmd.Args
-	if len(args) < 4 {
-		t.Fatalf("expected at least 4 args, got %v", args)
+	if len(args) < 10 {
+		t.Fatalf("expected at least 10 args, got %v", args)
 	}
-	if args[1] != "sql" {
-		t.Errorf("args[1] = %q, want 'sql'", args[1])
-	}
-	if args[2] != "-q" {
-		t.Errorf("args[2] = %q, want '-q'", args[2])
-	}
-	// Should NOT have --host flag
-	for _, arg := range args {
-		if arg == "--host" {
-			t.Error("local cmd should not have --host flag")
+	argStr := strings.Join(args, " ")
+	for _, want := range []string{"--host", "127.0.0.1", "--port", "3307", "--user", "root", "--no-tls", "sql", "-q", "SELECT 1"} {
+		if !strings.Contains(argStr, want) {
+			t.Errorf("args %q missing expected %q", argStr, want)
 		}
+	}
+	found := false
+	for _, env := range cmd.Env {
+		if env == "DOLT_CLI_PASSWORD=" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("local cmd should set empty DOLT_CLI_PASSWORD to suppress prompts")
 	}
 }
 
@@ -3606,12 +3610,13 @@ func TestBuildDoltSQLCmd_RemoteNoPassword(t *testing.T) {
 	ctx := t.Context()
 	cmd := buildDoltSQLCmd(ctx, config, "-q", "SELECT 1")
 
-	// Should NOT have DOLT_CLI_PASSWORD in env
+	// Should still have empty DOLT_CLI_PASSWORD in env to suppress prompts.
 	for _, env := range cmd.Env {
-		if strings.HasPrefix(env, "DOLT_CLI_PASSWORD=") {
-			t.Error("remote cmd without password should not have DOLT_CLI_PASSWORD env var")
+		if env == "DOLT_CLI_PASSWORD=" {
+			return
 		}
 	}
+	t.Error("remote cmd without password should set empty DOLT_CLI_PASSWORD env var")
 }
 
 // =============================================================================

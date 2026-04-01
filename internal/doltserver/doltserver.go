@@ -407,14 +407,20 @@ func (c *Config) HostPort() string {
 	return fmt.Sprintf("%s:%d", host, c.Port)
 }
 
-// buildDoltSQLCmd constructs a dolt sql command that works for both local and remote servers.
-// For local: runs from config.DataDir so dolt auto-detects the running server.
-// For remote: prepends connection flags and passes password via DOLT_CLI_PASSWORD env var.
+// buildDoltSQLCmd constructs a non-interactive dolt sql command that always
+// talks to the running SQL server over TCP.
+//
+// For local servers, this avoids embedded-mode auto-discovery, which can load
+// databases relative to cmd.Dir instead of querying the live shared server.
 func buildDoltSQLCmd(ctx context.Context, config *Config, args ...string) *exec.Cmd {
-	sqlArgs := config.SQLArgs()
-	fullArgs := make([]string, 0, len(sqlArgs)+1+len(args))
-	fullArgs = append(fullArgs, "sql")
-	fullArgs = append(fullArgs, sqlArgs...)
+	fullArgs := make([]string, 0, 8+len(args))
+	fullArgs = append(fullArgs,
+		"--host", config.EffectiveHost(),
+		"--port", strconv.Itoa(config.Port),
+		"--user", config.User,
+		"--no-tls",
+		"sql",
+	)
 	fullArgs = append(fullArgs, args...)
 
 	cmd := exec.CommandContext(ctx, "dolt", fullArgs...)
@@ -425,9 +431,9 @@ func buildDoltSQLCmd(ctx context.Context, config *Config, args ...string) *exec.
 	cmd.Dir = config.DataDir
 	setProcessGroup(cmd)
 
-	if config.IsRemote() && config.Password != "" {
-		cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+config.Password)
-	}
+	// Always set DOLT_CLI_PASSWORD to suppress interactive prompts.
+	// When empty, dolt connects without a password, which is the local default.
+	cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+config.Password)
 
 	return cmd
 }
