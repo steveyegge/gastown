@@ -236,7 +236,13 @@ func TestScanExcludesAgentBeads(t *testing.T) {
 		t.Fatalf("read %s: %v", sourcePath, err)
 	}
 	source := string(data)
-	if !strings.Contains(source, "w.issue_type != 'agent'") {
-		t.Fatalf("expected Scan/Reap eligibility to exclude agent beads, source missing predicate:\n%s", source)
+	scanStart := strings.Index(source, "func Scan(")
+	reapStart := strings.Index(source, "func Reap(")
+	if scanStart == -1 || reapStart == -1 || reapStart <= scanStart {
+		t.Fatalf("could not isolate Scan() body in %s", sourcePath)
+	}
+	scanBody := source[scanStart:reapStart]
+	if !strings.Contains(scanBody, "w.issue_type != 'agent'") {
+		t.Fatalf("expected Scan() eligibility to exclude agent beads, scan body was:\n%s", scanBody)
 	}
 }
