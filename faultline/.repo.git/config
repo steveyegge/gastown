@@ -14,6 +14,3 @@
 [branch "polecat/obsidian/fl-u8o@mngfhr0e"]
 	remote = origin
 	merge = refs/heads/main
-[branch "temp"]
-	remote = origin
-	merge = refs/heads/polecat/obsidian/fl-u8o@mngfhr0e

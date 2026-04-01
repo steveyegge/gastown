@@ -121,6 +121,3 @@
 [branch "polecat/keeper/hr-wql.1@mngfogke"]
 	remote = origin
 	merge = refs/heads/main
-[branch "temp"]
-	remote = origin
-	merge = refs/heads/polecat/dag/hr-9dz.1@mngfl7de
