@@ -1,23 +1,18 @@
-test: expand daemon integration tests for executor registration (he-0r8.2)
+test: add end-to-end daemon smoke tests (he-ofv)
 
-Add test doubles (stubDaemonTool, makeStubTools, makeFailingTools) and
-registerExecutors helper to test config-driven executor registration
-without real postgres or external services.
+Create smoke_test.go with test doubles for all external dependencies
+(LLM provider, memory stores, channels) to verify the full daemon
+wiring path without real postgres, APIs, or external services.
 
-New test coverage:
-- TestRegistration_AllDisabled: baseline with only local+entities
-- TestRegistration_AllEnabled: all 9 executors with correct tool counts
-- TestRegistration_Partial: selective enablement (memory+comms only)
-- TestRegistration_MCPRequiresServers: MCP needs servers configured
-- TestToolDefsExcludeDisabledExecutors: disabled executor tools hidden
-- TestToolDefsReappearAfterReset: reset re-enables executor tools
-- TestCoordToAgentTools: coordToAgentTools bridge correctness
-- TestCoordToAgentToolsExecute: end-to-end stub tool execution
-- TestSimpleExecutor: simpleExecutor Name/Tools methods
-- TestRegistrationToolCounts: table-driven config combinations
-- TestDaemonStopIdempotent: Stop on never-started daemon
-- TestDaemonNewFields: New constructor field assignment
-- TestGracefulShutdownSequence: all executors disabled = empty ToolDefs
+Tests:
+- TestSmokeEndToEnd: message → assembler → agent → LLM → response
+- TestSmokeWithMemoryContext: verifies memory blocks/STM inject into
+  the system prompt sent to the LLM
+- TestSmokeToolExecution: LLM requests tool call → agent executes →
+  returns final response
+- TestSmokeRouterIntegration: full path through router with mock channel
 
-Fix compilation errors in prior test skeleton (tools.FailableCall,
-missing sort import).
+Test doubles:
+- mockProvider/capturingProvider/toolCallingProvider (LLM)
+- stubBlockRetriever/stubSTMRetriever/stubLTMSearcher (memory)
+- mockChannel (channels)

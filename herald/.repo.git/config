@@ -154,3 +154,18 @@
 [branch "polecat/organic/he-1gh.7@mngilyvu"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/cheedo/he-ofv"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/dag/he-dij"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/capable/he-9qk"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/furiosa/he-266"]
+	remote = origin
+	merge = refs/heads/main
+[branch "temp"]
+	remote = origin
+	merge = refs/heads/polecat/cheedo/he-ofv
