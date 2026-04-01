@@ -1,5 +1,1 @@
-feat: myndy-comms HTTP bridge client with typed structs (hr-7js.1)
-
-Go HTTP client for myndy-comms:8080 API covering all four endpoints:
-/api/emails, /api/calendar/events, /api/people, /api/limitless/lifelogs.
-Includes query parameter support, error handling, and tests.
+feat: browser automation executor (go-rod) (hr-dym.1)

@@ -1,10 +1,1 @@
-feat: TUI dashboard with Bubbletea fullscreen layout (hr-eat.1)
-
-Add herald dash subcommand with four-pane dashboard:
-- Agent activity feed (left upper)
-- Channel message queue (right upper)
-- Memory stats (left lower)
-- Recent hr-* bead activity (right lower)
-
-Uses lipgloss styling with rounded borders and muted terminal palette.
-Periodic refresh from config and database sources.
+fix: auto-save uncommitted implementation work (hr-eat.1, gt-pvx safety net)
