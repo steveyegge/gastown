@@ -154,6 +154,3 @@
 [branch "polecat/organic/he-1gh.7@mngilyvu"]
 	remote = origin
 	merge = refs/heads/main
-[branch "temp"]
-	remote = origin
-	merge = refs/heads/polecat/dementus/hr-eat.1@mngflznp

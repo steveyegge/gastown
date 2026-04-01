@@ -1,6 +1,4 @@
-feat: Telegram channel with bot token auth, long-polling and webhook modes (hr-8rg.2)
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+feat: browser automation executor (go-rod) (hr-dym.1)
 
 # Conflicts:
 #	go.mod
@@ -9,18 +7,18 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 # Please enter the commit message for your changes. Lines starting
 # with '#' will be ignored, and an empty message aborts the commit.
 #
-# Author:    dag <jeremy@theirish.com>
+# Author:    furiosa <jeremy@theirish.com>
 #
-# interactive rebase in progress; onto cfb6ca7
+# interactive rebase in progress; onto 754d69e
 # Last command done (1 command done):
-#    pick df01445 # feat: Telegram channel with bot token auth, long-polling and webhook modes (hr-8rg.2)
+#    pick 94ac990 # feat: browser automation executor (go-rod) (hr-dym.1)
 # No commands remaining.
-# You are currently rebasing branch 'temp' on 'cfb6ca7'.
+# You are currently rebasing branch 'temp' on '754d69e'.
 #
 # Changes to be committed:
 #	modified:   go.mod
 #	modified:   go.sum
-#	new file:   internal/channels/channel.go
-#	new file:   internal/channels/telegram.go
-#	new file:   internal/channels/telegram_test.go
+#	modified:   internal/daemon/daemon.go
+#	new file:   internal/tools/browser.go
+#	new file:   internal/tools/browser_test.go
 #
