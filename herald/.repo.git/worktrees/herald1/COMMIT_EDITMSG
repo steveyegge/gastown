@@ -1,0 +1,6 @@
+feat: STM SQLite ring buffer with FIFO eviction and semantic dedup (hr-31j.1)
+
+Implements internal/memory/stm.go — a SQLite-backed short-term memory ring
+buffer with 100-item capacity, 7-day TTL, cosine-similarity dedup on insert,
+and auto-promotion of high-importance items to LTM on eviction via the
+LTMPromoter interface. Includes 14 tests covering all behaviors.
