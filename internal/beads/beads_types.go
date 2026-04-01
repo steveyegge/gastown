@@ -35,7 +35,19 @@ var (
 // FindTownRoot walks up from startDir to find the Gas Town root directory.
 // The town root is identified by the presence of mayor/town.json.
 // Returns empty string if not found (reached filesystem root).
+//
+// GT_TOWN_ROOT env var takes priority over filesystem walk. This prevents
+// false positives when startDir is inside a rig that is itself a Gas Town
+// project (e.g., geocaching_ai_lab), which would cause the walk to stop at
+// the nested HQ instead of the actual town root.
 func FindTownRoot(startDir string) string {
+	if envRoot := os.Getenv("GT_TOWN_ROOT"); envRoot != "" {
+		// Verify it actually has mayor/town.json before trusting it.
+		if _, err := os.Stat(filepath.Join(envRoot, "mayor", "town.json")); err == nil {
+			return envRoot
+		}
+	}
+
 	dir := startDir
 	for {
 		townFile := filepath.Join(dir, "mayor", "town.json")

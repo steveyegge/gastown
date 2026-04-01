@@ -1,0 +1,10 @@
+{
+  "type": "rig",
+  "version": 1,
+  "name": "herald",
+  "git_url": "git@github.com:outdoorsea/herald.git",
+  "created_at": "2026-03-31T15:26:08.738607-07:00",
+  "beads": {
+    "prefix": "he"
+  }
+}

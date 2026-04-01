@@ -1,0 +1,13 @@
+{"time":"2026-03-26T17:12:27.455239-07:00","level":"INFO","msg":"self-monitoring enabled","endpoint":"http://localhost:8080/api/0/store/"}
+{"time":"2026-03-26T17:12:27.466863-07:00","level":"INFO","msg":"slow-burn sweep enabled","age":3600000000000,"interval":300000000000}
+{"time":"2026-03-26T17:12:27.466912-07:00","level":"INFO","msg":"health monitor started","interval":60000000000,"gt_doctor":false}
+{"time":"2026-03-26T17:12:27.467004-07:00","level":"INFO","msg":"relay poller started","url":"https://faultline-relay.fly.dev","interval":30000000000}
+{"time":"2026-03-26T17:12:27.467375-07:00","level":"INFO","msg":"listening","addr":":8080"}
+{"time":"2026-03-26T17:12:27.757956-07:00","level":"INFO","msg":"relay poll: received envelopes","count":7}
+{"time":"2026-03-26T17:12:27.760026-07:00","level":"ERROR","msg":"relay ingest failed","id":54,"err":"parse envelope: envelope header: invalid character '\\x1f' looking for beginning of value"}
+{"time":"2026-03-26T17:12:27.760719-07:00","level":"ERROR","msg":"relay ingest failed","id":56,"err":"parse envelope: envelope header: invalid character '\\x1f' looking for beginning of value"}
+{"time":"2026-03-26T17:12:27.764406-07:00","level":"ERROR","msg":"relay ingest failed","id":58,"err":"parse envelope: envelope header: invalid character '\\x1f' looking for beginning of value"}
+{"time":"2026-03-26T17:12:27.770307-07:00","level":"ERROR","msg":"relay ingest failed","id":72,"err":"parse envelope: envelope header: invalid character '\\x1f' looking for beginning of value"}
+{"time":"2026-03-26T17:12:27.773873-07:00","level":"ERROR","msg":"relay ingest failed","id":118,"err":"parse envelope: envelope header: invalid character '\\x1f' looking for beginning of value"}
+{"time":"2026-03-26T17:12:27.807256-07:00","level":"INFO","msg":"store event ingested","event_id":"0a764a67-b9aa-44f1-b559-f63d351ad758","project":1}
+{"time":"2026-03-26T17:12:27.812261-07:00","level":"INFO","msg":"relay ack: confirmed","count":2}
