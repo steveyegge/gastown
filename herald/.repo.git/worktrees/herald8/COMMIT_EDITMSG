@@ -1,6 +1,5 @@
-feat: tool coordinator with failure tracking (hr-8wn.1)
+feat: memory hooks: post-response fact/goal extraction goroutine (hr-31j.5)
 
-Routes tool calls to registered executors with deduplication by tool name
-(first registration wins). Tracks consecutive failures per executor and
-disables executors that exceed the configured threshold. Success resets
-the failure counter.
+Background goroutine calls LLM after each turn to extract facts, goals,
+and insights. Stores to STM with embeddings. Triggers block reflection
+when STM reaches 50 items. Wired into daemon handler after agent response.

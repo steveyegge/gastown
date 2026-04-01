@@ -100,9 +100,6 @@
 [branch "dog/alpha-herald-1775068052769"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/ace/hr-8wn.3@mngfipfe"]
-	remote = origin
-	merge = refs/heads/main
 [branch "polecat/capable/hr-8rg.1@mngfjk28"]
 	remote = origin
 	merge = refs/heads/main
@@ -124,3 +121,6 @@
 [branch "polecat/keeper/hr-wql.1@mngfogke"]
 	remote = origin
 	merge = refs/heads/main
+[branch "temp"]
+	remote = origin
+	merge = refs/heads/polecat/dag/hr-9dz.1@mngfl7de
