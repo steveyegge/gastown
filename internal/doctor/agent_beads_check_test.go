@@ -1,8 +1,10 @@
 package doctor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -99,6 +101,188 @@ func TestAgentBeadsExistCheck_ExpectedIDs(t *testing.T) {
 	}
 
 	t.Logf("Result: status=%v, message=%s, details=%v", result.Status, result.Message, result.Details)
+}
+
+// TestAgentBeadsExistCheck_RespectsRigScope verifies that --rig excludes
+// unrelated rig routes from agent-bead expectations.
+func TestAgentBeadsExistCheck_RespectsRigScope(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	routesContent := strings.Join([]string{
+		`{"prefix":"gs-","path":"gastown/mayor/rig"}`,
+		`{"prefix":"do-","path":"coder_dotfiles/mayor/rig"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{
+		filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads"),
+		filepath.Join(tmpDir, "coder_dotfiles", "mayor", "rig", ".beads"),
+	} {
+		if err := os.MkdirAll(path, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	check := NewAgentBeadsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: "gastown"}
+
+	result := check.Run(ctx)
+
+	if result.Status == StatusOK {
+		t.Fatalf("expected missing agent beads for scoped rig, got OK")
+	}
+	for _, detail := range result.Details {
+		if strings.HasPrefix(detail, "do-") {
+			t.Fatalf("expected --rig scope to exclude coder_dotfiles agent bead %q, got details: %v", detail, result.Details)
+		}
+	}
+	foundGastown := false
+	for _, detail := range result.Details {
+		if strings.HasPrefix(detail, "gs-") {
+			foundGastown = true
+			break
+		}
+	}
+	if !foundGastown {
+		t.Fatalf("expected scoped result to include gastown agent beads, got details: %v", result.Details)
+	}
+}
+
+// TestAgentBeadsExistCheck_FixRespectsRigScope verifies that --fix with a rig
+// scope does not create agent beads for unrelated rig prefixes.
+func TestAgentBeadsExistCheck_FixRespectsRigScope(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	routesContent := strings.Join([]string{
+		`{"prefix":"gs-","path":"gastown/mayor/rig"}`,
+		`{"prefix":"do-","path":"coder_dotfiles/mayor/rig"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{
+		filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads"),
+		filepath.Join(tmpDir, "coder_dotfiles", "mayor", "rig", ".beads"),
+	} {
+		if err := os.MkdirAll(path, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "gastown", "crew", "alice", ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "coder_dotfiles", "crew", "bella", ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	logFile := filepath.Join(tmpDir, "bd.log")
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	bdScript := filepath.Join(binDir, "bd")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+
+logfile="` + logFile + `"
+
+args=()
+for arg in "$@"; do
+  if [[ "$arg" == --allow-stale ]]; then
+    continue
+  fi
+  args+=("$arg")
+done
+
+cmd=""
+idx=0
+for i in "${!args[@]}"; do
+  if [[ "${args[$i]}" != -* ]]; then
+    cmd="${args[$i]}"
+    idx=$i
+    break
+  fi
+done
+
+if [[ -z "$cmd" ]]; then
+  exit 0
+fi
+
+rest=("${args[@]:$((idx + 1))}")
+
+case "$cmd" in
+  list)
+    printf '[]\n'
+    ;;
+  mol)
+    if [[ "${rest[0]:-}" == "wisp" && "${rest[1]:-}" == "list" ]]; then
+      printf '{"wisps":[]}\n'
+      exit 0
+    fi
+    exit 1
+    ;;
+  show)
+    exit 1
+    ;;
+  create)
+    id=""
+    title=""
+    for arg in "${rest[@]}"; do
+      case "$arg" in
+        --id=*) id="${arg#--id=}" ;;
+        --title=*) title="${arg#--title=}" ;;
+      esac
+    done
+    printf 'create %s\n' "$id" >> "$logfile"
+    printf '{"id":"%s","title":"%s","status":"open","labels":["gt:agent"]}\n' "$id" "$title"
+    ;;
+  update)
+    if [[ ${#rest[@]} -gt 0 ]]; then
+      printf 'update %s\n' "${rest[0]}" >> "$logfile"
+    fi
+    printf '{}'\n
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`
+	if err := os.WriteFile(bdScript, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", fmt.Sprintf("%s%c%s", binDir, os.PathListSeparator, os.Getenv("PATH")))
+
+	check := NewAgentBeadsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: "gastown"}
+	if err := check.Fix(ctx); err != nil {
+		t.Fatalf("Fix() returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("reading fake bd log: %v", err)
+	}
+	log := string(data)
+	for _, line := range strings.Split(strings.TrimSpace(log), "\n") {
+		if strings.Contains(line, " do-") {
+			t.Fatalf("expected scoped Fix() to avoid coder_dotfiles beads, got log line %q", line)
+		}
+	}
+	if !strings.Contains(log, "create gs-gastown-witness") {
+		t.Fatalf("expected scoped Fix() to create gastown witness bead, got log: %q", log)
+	}
 }
 
 // TestListCrewWorkers_FiltersWorktrees verifies that listCrewWorkers skips
