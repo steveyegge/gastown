@@ -1,0 +1,6 @@
+feat: tool coordinator with failure tracking (hr-8wn.1)
+
+Routes tool calls to registered executors with deduplication by tool name
+(first registration wins). Tracks consecutive failures per executor and
+disables executors that exceed the configured threshold. Success resets
+the failure counter.

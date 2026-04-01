@@ -1,0 +1,14 @@
+feat: entity tool executor with search and update tools (hr-cax.2)
+
+Implements internal/tools/entities.go with 6 LLM-callable tools:
+- find_person: search persons by name, email, phone, or alias
+- update_person: create or update person records
+- find_place: search places by name, address, or type
+- add_thing: create or update things (objects, projects, concepts)
+- relate_entities: upsert relationships between any entity pair
+- search_entities: full-text search across all entity types using
+  PostgreSQL ts_rank with ILIKE fallback
+
+All tools implement the agent.Tool interface (Name, Description,
+InputSchema, Execute) for direct registration with the agent loop.
+EntityStore.Tools() returns all tools for convenient registration.

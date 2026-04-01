@@ -1,9 +1,6 @@
-feat: STM SQLite ring buffer with FIFO eviction and semantic dedup (hr-31j.1)
+feat: Telegram channel with bot token auth, long-polling and webhook modes (hr-8rg.2)
 
-Implements internal/memory/stm.go — a SQLite-backed short-term memory ring
-buffer with 100-item capacity, 7-day TTL, cosine-similarity dedup on insert,
-and auto-promotion of high-importance items to LTM on eviction via the
-LTMPromoter interface. Includes 14 tests covering all behaviors.
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 # Conflicts:
 #	go.mod
@@ -12,17 +9,18 @@ LTMPromoter interface. Includes 14 tests covering all behaviors.
 # Please enter the commit message for your changes. Lines starting
 # with '#' will be ignored, and an empty message aborts the commit.
 #
-# Author:    nux <jeremy@theirish.com>
+# Author:    dag <jeremy@theirish.com>
 #
-# interactive rebase in progress; onto 3907846
+# interactive rebase in progress; onto 8b8a8cf
 # Last command done (1 command done):
-#    pick 0043dcb # feat: STM SQLite ring buffer with FIFO eviction and semantic dedup (hr-31j.1)
+#    pick df01445 # feat: Telegram channel with bot token auth, long-polling and webhook modes (hr-8rg.2)
 # No commands remaining.
-# You are currently rebasing branch 'temp' on '3907846'.
+# You are currently rebasing branch 'temp' on '8b8a8cf'.
 #
 # Changes to be committed:
 #	modified:   go.mod
 #	modified:   go.sum
-#	new file:   internal/memory/stm.go
-#	new file:   internal/memory/stm_test.go
+#	new file:   internal/channels/channel.go
+#	new file:   internal/channels/telegram.go
+#	new file:   internal/channels/telegram_test.go
 #

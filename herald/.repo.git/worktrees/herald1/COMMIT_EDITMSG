@@ -1,0 +1,5 @@
+feat: SMS channel Android gateway server with receive-sms, pending-sms, FCM (hr-lpd.1)
+
+Implement the Android SMS gateway API endpoints (POST receive-sms,
+GET pending-sms, POST delivery-confirm), SMS channel with FCM push
+for outbound wake, API key auth middleware, and daemon wiring.
