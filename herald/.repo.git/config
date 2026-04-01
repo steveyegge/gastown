@@ -196,6 +196,3 @@
 [branch "polecat/dag/he-58e@mngp7bl1"]
 	remote = origin
 	merge = refs/heads/main
-[branch "temp"]
-	remote = origin
-	merge = refs/heads/polecat/furiosa/he-4wt
