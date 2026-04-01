@@ -1,1 +1,8 @@
-feat: iMessage channel (BlueBubbles REST) (hr-8rg.4)
+feat: add WhatsApp channel tests (he-1gh.2)
+
+Test NewWhatsApp config validation, ID method, Send not-connected error,
+handleMessage text extraction (conversation, extended text, empty body),
+channel-full drop behavior, eventHandler dispatch, disconnect safety,
+classifyMediaType MIME mapping, and connect-already-running guard.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

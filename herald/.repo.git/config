@@ -145,9 +145,12 @@
 [branch "polecat/toast/he-1gh.4@mngij4p7"]
 	remote = origin
 	merge = refs/heads/main
-[branch "temp"]
-	remote = origin
-	merge = refs/heads/polecat/ace/he-0r8.1@mngie9i9
 [branch "polecat/valkyrie/he-1gh.5@mngijx54"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/warboy/he-1gh.6@mngikmxk"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/organic/he-1gh.7@mngilyvu"]
 	remote = origin
 	merge = refs/heads/main

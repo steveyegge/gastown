@@ -1,1 +1,10 @@
-feat: local tool executor (time, math, utilities) (hr-8wn.2)
+test: comprehensive LLM provider and fallback client tests (he-1gh.3)
+
+Add httptest.Server-based tests for Claude, OpenAI, and Gemini providers
+covering request building, response streaming, tool call extraction,
+HTTP error handling, and streaming edge cases. Add baseURL field to
+provider structs (defaulting to production URLs) to enable test server
+injection. Expand FallbackClient tests for retry/fallback flow,
+exponential backoff, no-providers case, and context cancellation.
+
+Test lines: 299 -> 1161 (source: 1047 lines).

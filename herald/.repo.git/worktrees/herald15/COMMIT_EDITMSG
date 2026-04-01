@@ -1,0 +1,8 @@
+test: add integration test for coordinator with all executor types (he-1gh.7)
+
+Registers stubExecutors for each daemon executor type (local, entities,
+google, homeassistant, obsidian, comms, health, memory) and verifies
+ToolDefs aggregation, Execute routing, failure-threshold disabling,
+ResetExecutor re-enabling, and duplicate tool name deduplication.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
