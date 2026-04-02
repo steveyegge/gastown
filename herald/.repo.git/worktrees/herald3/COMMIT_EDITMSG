@@ -1,1 +1,8 @@
-fix: auto-save uncommitted implementation work (he-leg-fyz2c, gt-pvx safety net)
+feat: add security analysis for credential management (he-leg-7xkzo)
+
+Threat model and attack surface analysis for Herald's credential store.
+Key findings: plaintext storage risk, path traversal in account resolution,
+no audit logging, memory zeroing gaps. Recommends phased approach:
+harden file validation now, keychain integration next.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

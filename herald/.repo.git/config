@@ -100,6 +100,3 @@
 [branch "polecat/slit/he-leg-l2f4e@mni0rdaq"]
 	remote = origin
 	merge = refs/heads/main
-[branch "temp"]
-	remote = origin
-	merge = refs/heads/polecat/capable/he-leg-nkp36@mni0leby
