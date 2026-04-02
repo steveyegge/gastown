@@ -1,10 +1,13 @@
-feat: add bulk operations (resolve, ignore, assign) for issues (fl-4b0.11)
+feat: add requireRole middleware for RBAC enforcement (fl-wmd.1)
 
-- Add POST /api/{project_id}/bulk-issues/ endpoint supporting resolve,
-  ignore, unresolve, and assign actions with lifecycle event creation
-- Add BulkResolveIssues, BulkIgnoreIssues, BulkUnresolveIssues DB methods
-- Add LifecycleIgnored and LifecycleAssigned lifecycle event types
-- Add dashboard bulk handler with CSRF protection
-- Add checkboxes to issue list with sticky bulk action bar
-- Add select-all, resolve, ignore, unresolve, and assign-to-member UI
-- Update lifecycle icon/label/class helpers for new event types
+Role hierarchy: owner > admin > member > viewer.
+- Viewer: read-only access (all GET endpoints)
+- Member: resolve/assign/comment/merge/snooze/bulk ops
+- Admin: settings, integrations, fingerprint rules, alert rules,
+  webhook templates, source maps, teams
+- Owner: project registration/removal, API token management
+
+Applied to both API (Bearer auth) and dashboard (session auth) routes.
+Auth middleware now sets X-Account-Role header for downstream checks.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

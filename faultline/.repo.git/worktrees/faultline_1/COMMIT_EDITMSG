@@ -1,15 +1,32 @@
-feat: wire Slack DMs for mentions and assignments (fl-4b0.14)
+feat: add assignment API, dashboard, and lifecycle (fl-4b0.6)
 
-Add comment creation handlers (API + dashboard) that extract @mentions
-and send Slack DMs to mentioned users via SlackBot.SendDM when a Slack
-account mapping exists. Wire assignment handlers in both API and
-dashboard to send Slack DMs to assigned users.
+- Add POST/DELETE /api/{project_id}/issues/{issue_id}/assign/ endpoints
+- Add assignee filter to IssueListParams (filter by user or 'unassigned')
+- Add assign/unassign handlers to dashboard with CSRF protection
+- Add assignee badge to issue list and assignment widget to detail page
+- Record LifecycleAssigned events and send Slack DM notifications
+- Batch-fetch assignments for issue list display
 
-New package internal/slackdm provides the Sender type that handles:
-- Resolving @mention names to accounts via AccountsByNames
-- Looking up Slack user IDs via SlackUserIDForAccount
-- Loading the project's Slack bot integration
-- Sending DMs and creating in-app notifications
-- Skipping self-notifications
+# Conflicts:
+#	internal/dashboard/handler.go
 
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# Author:    jasper <jeremy@theirish.com>
+#
+# interactive rebase in progress; onto a76cc71
+# Last command done (1 command done):
+#    pick 21469a3 # feat: add assignment API, dashboard, and lifecycle (fl-4b0.6)
+# No commands remaining.
+# You are currently rebasing branch 'polecat/jasper/fl-4b0.6@mnhpagjl' on 'a76cc71'.
+#
+# Changes to be committed:
+#	modified:   internal/api/api.go
+#	new file:   internal/api/assignments.go
+#	modified:   internal/dashboard/handler.go
+#	modified:   internal/dashboard/static/style.css
+#	modified:   internal/dashboard/views.templ
+#	modified:   internal/dashboard/views_templ.go
+#	modified:   internal/db/queries.go
+#

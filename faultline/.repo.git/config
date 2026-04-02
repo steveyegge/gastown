@@ -113,9 +113,30 @@
 [branch "polecat/garnet/fl-4b0.9@mnhp9lys"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/jasper/fl-4b0.6@mnhpagjl"]
+[branch "main"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/ruby/fl-wmd.1@mnhpaye7"]
+[branch "rw-e4f"]
+	remote = origin
+	merge = refs/heads/polecat/ruby/fl-wmd.1@mnhpaye7
+[branch "rw-4kk"]
+	remote = origin
+	merge = refs/heads/polecat/garnet/fl-4b0.9@mnhp9lys
+[branch "polecat/topaz/fl-4b0.15@mnhpotr9"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/ruby/fl-wmd.2@mnhpp8wf"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/obsidian/fl-wmd.3@mnhppmcp"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/quartz/fl-wmd.4@mnhppzm0"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/onyx/fl-wmd.5@mnhpqc8n"]
+	remote = origin
+	merge = refs/heads/main
+[branch "rw-6kj"]
+	remote = origin
+	merge = refs/heads/polecat/jasper/fl-4b0.6@mnhpagjl
