@@ -1,1 +1,8 @@
-fix: auto-save uncommitted implementation work (he-slt, gt-pvx safety net)
+feat: add credential store backed by gastown accounts (hr-d94)
+
+Introduces internal/credentials package that resolves API keys from
+gastown account directories (~/.claude-accounts/<handle>/herald/credentials.json)
+with env var override. Replaces raw os.Getenv() calls in daemon and
+prerequisites with credential store lookups.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
