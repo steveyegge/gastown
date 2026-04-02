@@ -21,12 +21,13 @@ import (
 
 // Handler serves the faultline read/management API.
 type Handler struct {
-	DB         *db.DB
-	Log        *slog.Logger
-	BaseURL    string           // e.g. "http://localhost:8080" for DSN generation
-	Auth       ProjectRegistrar // for dynamic project registration
-	HookSecret string           // HMAC secret for webhook verification (resolve hook)
-	SlackDMs   *slackdm.Sender // optional; sends Slack DMs for mentions/assignments
+	DB            *db.DB
+	Log           *slog.Logger
+	BaseURL       string           // e.g. "http://localhost:8080" for DSN generation
+	Auth          ProjectRegistrar // for dynamic project registration
+	HookSecret    string           // HMAC secret for webhook verification (resolve hook)
+	SlackDMs      *slackdm.Sender // optional; sends Slack DMs for mentions/assignments
+	EncryptionKey []byte           // AES-256 key for encrypting connection strings
 }
 
 // ProjectRegistrar allows the API to register and unregister projects at runtime.
@@ -118,6 +119,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Issue assignment.
 	h.registerAssignmentRoutes(mux)
+
+	// Database monitoring CRUD.
+	h.registerDatabaseRoutes(mux)
 
 	// Without trailing slash variants.
 	mux.HandleFunc("GET /api/{project_id}/issues", auth(projAccess(h.listIssues)))

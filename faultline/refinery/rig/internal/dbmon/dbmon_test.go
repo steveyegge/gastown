@@ -121,7 +121,7 @@ func TestMonitor_StateTransitions(t *testing.T) {
 	var mu sync.Mutex
 	var transitions []struct{ old, new Status }
 
-	m.OnStateChange = func(_ DatabaseTarget, oldS, newS Status) {
+	m.OnStateChange = func(_ DatabaseTarget, oldS, newS Status, _ []CheckResult) {
 		mu.Lock()
 		defer mu.Unlock()
 		transitions = append(transitions, struct{ old, new Status }{oldS, newS})

@@ -1,9 +1,0 @@
-feat: add database monitoring core poller framework (fl-1h9)
-
-Create internal/dbmon/ package with Monitor struct following the uptimemon
-pattern. Run(ctx) main loop wakes every second, dispatches due checks to
-bounded worker pool (10 max concurrent). Per-database check intervals,
-10s timeout per check. State evaluation: any critical→down, any warning→
-degraded, all ok→healthy. OnStateChange callback. DBProvider interface
-with SQLDBProvider for loading monitored_databases and writing db_checks
-+ db_monitor_state. Three new tables via migration in internal/db/.

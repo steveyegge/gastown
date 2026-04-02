@@ -17,13 +17,16 @@ import (
 	"github.com/outdoorsea/faultline/internal/api"
 	"github.com/outdoorsea/faultline/internal/ci"
 	"github.com/outdoorsea/faultline/internal/dashboard"
+	"github.com/outdoorsea/faultline/internal/crypto"
 	"github.com/outdoorsea/faultline/internal/db"
+	"github.com/outdoorsea/faultline/internal/dbmon"
 	"github.com/outdoorsea/faultline/internal/gastown"
 	"github.com/outdoorsea/faultline/internal/healthmon"
 	"github.com/outdoorsea/faultline/internal/ingest"
 	"github.com/outdoorsea/faultline/internal/integrations"
 	_ "github.com/outdoorsea/faultline/internal/integrations/github" // register github_issues integration
 	slackint "github.com/outdoorsea/faultline/internal/integrations/slack" // register slack_bot integration
+	_ "github.com/lib/pq" // register PostgreSQL driver for dbmon
 	"github.com/outdoorsea/faultline/internal/notify"
 	"github.com/outdoorsea/faultline/internal/slackdm"
 	"github.com/outdoorsea/faultline/internal/poller"
@@ -201,13 +204,19 @@ func runServe() error {
 		Log: log.With("component", "slack-dm"),
 	}
 
+	encKey, err := crypto.LoadKey()
+	if err != nil {
+		log.Warn("failed to load encryption key; database monitoring encryption disabled", "err", err)
+	}
+
 	apiHandler := &api.Handler{
-		DB:         dolt,
-		Log:        log,
-		BaseURL:    gtCfg.APIBaseURL,
-		Auth:       auth,
-		HookSecret: os.Getenv("FAULTLINE_CI_WEBHOOK_SECRET"), // HMAC for resolve hook
-		SlackDMs:   slackDMs,
+		DB:            dolt,
+		Log:           log,
+		BaseURL:       gtCfg.APIBaseURL,
+		Auth:          auth,
+		HookSecret:    os.Getenv("FAULTLINE_CI_WEBHOOK_SECRET"), // HMAC for resolve hook
+		SlackDMs:      slackDMs,
+		EncryptionKey: encKey,
 	}
 
 	dash := &dashboard.Handler{
@@ -324,6 +333,59 @@ func runServe() error {
 		}
 	}
 	go um.Run(ctx)
+
+	// Start database monitor — periodic health checks for monitored databases.
+	dm := dbmon.New(
+		&dbmon.SQLDBProvider{DB: dolt.DB},
+		log,
+		10*time.Second,
+	)
+	dm.RegisterChecker("postgres", dbmon.NewPostgresChecker())
+	dm.OnStateChange = func(target dbmon.DatabaseTarget, oldStatus, newStatus dbmon.Status, results []dbmon.CheckResult) {
+		if target.ProjectID == nil {
+			log.Warn("dbmon: state change for target without project_id, skipping event",
+				"database", target.Name, "old", string(oldStatus), "new", string(newStatus))
+			return
+		}
+		projectID := *target.ProjectID
+
+		// Map status to Sentry level.
+		level := "info"
+		switch newStatus {
+		case dbmon.StatusDown:
+			level = "error"
+		case dbmon.StatusDegraded:
+			level = "warning"
+		}
+
+		// Create one event per check result that contributed to the transition.
+		for _, r := range results {
+			title := fmt.Sprintf("%s %s: %s — %s", target.DBType, target.Name, r.CheckType, r.Message)
+			fingerprint := fmt.Sprintf("dbmon|%s|%s", target.ID, r.CheckType)
+			eventID := fmt.Sprintf("dbmon-%s-%s-%d", target.ID, r.CheckType, time.Now().UnixNano())
+
+			raw, _ := json.Marshal(map[string]interface{}{
+				"event_id":    eventID,
+				"platform":    "database",
+				"level":       level,
+				"message":     title,
+				"fingerprint": []string{fingerprint},
+				"tags": map[string]string{
+					"db_type":    target.DBType,
+					"db_name":    target.Name,
+					"db_id":      target.ID,
+					"check_type": r.CheckType,
+					"old_status": string(oldStatus),
+					"new_status": string(newStatus),
+				},
+			})
+
+			if err := handler.ProcessCIEvent(context.Background(), projectID, eventID, raw); err != nil {
+				log.Error("dbmon: ingest event failed", "err", err, "database", target.Name, "check", r.CheckType)
+			}
+		}
+	}
+	go dm.Run(ctx)
 
 	// Start relay poller — pulls events from the public relay for mobile/external apps.
 	if relayURL := envOr("FAULTLINE_RELAY_URL", "https://faultline-relay.fly.dev"); relayURL != "" {

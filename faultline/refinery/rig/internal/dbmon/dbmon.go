@@ -64,7 +64,8 @@ type MonitorState struct {
 }
 
 // OnStateChangeFunc is called when a database transitions between health states.
-type OnStateChangeFunc func(target DatabaseTarget, oldStatus, newStatus Status)
+// The results slice contains the check results that produced the new state.
+type OnStateChangeFunc func(target DatabaseTarget, oldStatus, newStatus Status, results []CheckResult)
 
 // DBProvider abstracts data access for the monitor.
 type DBProvider interface {
@@ -271,7 +272,7 @@ func (m *Monitor) processResults(ctx context.Context, target DatabaseTarget, res
 		)
 
 		if m.OnStateChange != nil {
-			m.OnStateChange(target, oldStatus, newStatus)
+			m.OnStateChange(target, oldStatus, newStatus, results)
 		}
 	} else {
 		m.lastStatus[target.ID] = newStatus

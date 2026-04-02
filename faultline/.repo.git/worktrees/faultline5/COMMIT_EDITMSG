@@ -1,9 +1,0 @@
-feat: add Dolt database health checker (fl-vuq)
-
-Implement CheckDolt() for the database monitoring framework. Performs
-four checks: connection ping with latency, query latency via SELECT 1,
-commit lag from dolt_log, and orphan database count (testdb_*, beads_t*,
-beads_pt*, doctest_* patterns). Configurable commit lag threshold
-(default 5min warning) via JSON thresholds field.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
