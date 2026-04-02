@@ -28,3 +28,6 @@
 [branch "polecat/rictus/he-8zw@mngszlwb"]
 	remote = origin
 	merge = refs/heads/main
+[branch "temp"]
+	remote = origin
+	merge = refs/heads/polecat/rictus/he-8zw@mngszlwb
