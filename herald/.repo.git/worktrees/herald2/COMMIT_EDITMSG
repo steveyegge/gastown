@@ -1,7 +1,9 @@
-feat: Telegram channel via go-telegram-bot-api long-polling (he-kep)
+fix: validate table names against allowlist to prevent SQL injection (he-fjn)
 
-Implement Channel interface for Telegram using long-polling with
-go-telegram-bot-api/v5. Includes mock-based tests, config validation,
-and daemon registration.
+Add allowlist validation for dynamic table names in fmt.Sprintf SQL
+queries in deleteByID, searchByEmbedding (entities/store.go) and
+searchTable (tools/entities.go). While callers currently pass only
+hardcoded table names, the unvalidated pattern is a latent injection
+vector.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

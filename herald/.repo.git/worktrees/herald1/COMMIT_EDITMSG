@@ -1,0 +1,3 @@
+feat: Dockerfile with multi-stage build and docker-compose for local dev (he-qug)
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

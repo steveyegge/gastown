@@ -169,6 +169,30 @@
 [branch "polecat/nux/he-2nb@mngpw7ss"]
 	remote = origin
 	merge = refs/heads/main
-[branch "temp"]
+[branch "polecat/furiosa/he-3cu@mngq8jgf"]
 	remote = origin
-	merge = refs/heads/polecat/furiosa/he-0z8
+	merge = refs/heads/main
+[branch "polecat/slit/he-2p6@mngq9pu7"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/furiosa/he-0b3@mngqa48x"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/dementus/he-3cu@mngqazue"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/furiosa/he-7im@mngqbzvp"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/slit/he-fjn"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/rictus/he-8zw@mngqd97r"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/furiosa/he-dib@mngqef0j"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/furiosa/he-slt@mngqeliw"]
+	remote = origin
+	merge = refs/heads/main
