@@ -935,6 +935,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				Priority:    priority,
 				Description: description,
 				Ephemeral:   true,
+				Rig:         rigName, // Ensure MR bead is created in the rig's database (gt-7y7)
 			})
 			if err != nil {
 				// Non-fatal: record the error and skip to notifyWitness.

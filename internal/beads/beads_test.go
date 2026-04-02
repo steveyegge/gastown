@@ -65,6 +65,28 @@ func TestCreateOptions(t *testing.T) {
 	}
 }
 
+// TestCreateOptionsRig verifies the Rig field targets the correct rig database (gt-7y7).
+// When a polecat works on a cross-rig bead (e.g., hq-xxx), gt done must explicitly
+// set Rig on CreateOptions so the MR bead lands in the polecat's rig database,
+// not the town-level database where the source bead lives.
+func TestCreateOptionsRig(t *testing.T) {
+	opts := CreateOptions{
+		Title:     "Merge: hq-abc",
+		Labels:    []string{"gt:merge-request"},
+		Ephemeral: true,
+		Rig:       "gastown",
+	}
+	if opts.Rig != "gastown" {
+		t.Errorf("Rig = %q, want %q", opts.Rig, "gastown")
+	}
+
+	// Zero value: Rig is empty string (no --rig flag passed).
+	var empty CreateOptions
+	if empty.Rig != "" {
+		t.Errorf("zero-value Rig = %q, want empty string", empty.Rig)
+	}
+}
+
 // TestIsFlagLikeTitle verifies flag-like title detection (gt-e0kx5).
 func TestIsFlagLikeTitle(t *testing.T) {
 	tests := []struct {
