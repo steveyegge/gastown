@@ -1,1 +1,35 @@
-fix: auto-save uncommitted implementation work (fl-4b0.12, gt-pvx safety net)
+feat: add snooze with auto-expire sweep (fl-4b0.10)
+
+Add snoozed_until, snooze_reason, snoozed_by columns to issue_groups.
+Add snooze/unsnooze API endpoints and dashboard UI with duration picker.
+Add RunSnoozeSweep goroutine (60s tick): expired+quiet=auto-resolve,
+expired+active=unsnooze. Wire in main.go. Includes bulk snooze/unsnooze
+operations and lifecycle event tracking.
+
+# Conflicts:
+#	internal/dashboard/handler.go
+#	internal/db/dolt.go
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# Author:    garnet <jeremy@theirish.com>
+#
+# interactive rebase in progress; onto 7684a7e
+# Last command done (1 command done):
+#    pick 8f786cd # feat: add snooze with auto-expire sweep (fl-4b0.10)
+# No commands remaining.
+# You are currently rebasing branch 'polecat/garnet/fl-4b0.10@mnho33pi' on '7684a7e'.
+#
+# Changes to be committed:
+#	modified:   cmd/faultline/main.go
+#	modified:   internal/api/api.go
+#	modified:   internal/dashboard/handler.go
+#	modified:   internal/dashboard/static/style.css
+#	modified:   internal/dashboard/views.templ
+#	modified:   internal/dashboard/views_templ.go
+#	modified:   internal/db/audit_log.go
+#	modified:   internal/db/dolt.go
+#	modified:   internal/db/queries.go
+#	new file:   internal/db/snooze_sweep.go
+#
