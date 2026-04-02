@@ -1,1 +1,10 @@
-feat: add tool executor configuration wizard for setup phase 4 (hr-fye.4)
+feat: add API rate limiting, body size limits, and input validation (he-bc7)
+
+Add token-bucket rate limiter middleware (golang.org/x/time/rate) with
+configurable requests/second and burst size. Add request body size limit
+middleware using http.MaxBytesReader on all endpoints. Add max message
+length validation on POST /api/chat. All settings are configurable via
+ServerConfig and environment variables. Includes tests for all new
+middleware and validation logic.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

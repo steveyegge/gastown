@@ -46,6 +46,6 @@
 [branch "polecat/furiosa/hr-fye.4@mnguoa85"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/furiosa/he-bc7@mnh0dzie"]
+[branch "main"]
 	remote = origin
 	merge = refs/heads/main
