@@ -38,3 +38,6 @@
 [branch "refinery-temp3"]
 	remote = origin
 	merge = refs/heads/polecat/opal/fl-4b0.8@mngu3pl4
+[branch "refinery-work"]
+	remote = origin
+	merge = refs/heads/polecat/topaz/fl-88c.1@mngu98m4

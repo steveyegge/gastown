@@ -1,7 +1,0 @@
-feat: macOS launchd deployment plist and install/uninstall scripts (he-0b3)
-
-Add deploy/com.herald.daemon.plist template with RunAtLoad, KeepAlive,
-WorkingDirectory, EnvironmentVariables, and log paths. Add install-macos.sh
-that resolves paths, creates log dir, and loads the agent. Add
-uninstall-macos.sh that stops and removes the agent. Document launchd
-deployment in startup-and-operations.md.
