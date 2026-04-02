@@ -606,7 +606,3 @@
 {"time":"2026-03-25T16:13:34.935473-07:00","level":"DEBUG","msg":"bd status check failed","bead_id":"✓ Created issue in rig \"faultline\": fl-9dg — faultline.inter","err":"bd show: Error fetching ✓ Created issue in rig \"faultline\": fl-9dg — faultline.inter: no issue found matching \"✓ Created issue in rig \\\"faultline\\\": fl-9dg — faultline.inter\"\n: exit status 1"}
 {"time":"2026-03-25T16:13:35.104255-07:00","level":"DEBUG","msg":"bd status check failed","bead_id":"✓ Created issue in rig \"faultline\": fl-97j — TestError: Hell","err":"bd show: Error fetching ✓ Created issue in rig \"faultline\": fl-97j — TestError: Hell: no issue found matching \"✓ Created issue in rig \\\"faultline\\\": fl-97j — TestError: Hell\"\n: exit status 1"}
 {"time":"2026-03-25T16:14:04.805656-07:00","level":"WARN","msg":"relay poll: bad status","status":404,"body":"404 page not found\n"}
-{"time":"2026-03-31T17:29:25.269608-07:00","level":"ERROR","msg":"fatal","err":"database connection failed: dolt open: default addr for network 'localhost:8080' unknown"}
-{"time":"2026-04-01T16:06:03.447323-07:00","level":"ERROR","msg":"fatal","err":"database connection failed: dolt open: default addr for network 'localhost:8080' unknown"}
-{"time":"2026-04-01T16:12:45.411802-07:00","level":"ERROR","msg":"fatal","err":"database connection failed: dolt open: default addr for network 'localhost:8080' unknown"}
-{"time":"2026-04-01T16:19:20.675494-07:00","level":"ERROR","msg":"fatal","err":"database connection failed: dolt open: default addr for network 'localhost:8080' unknown"}

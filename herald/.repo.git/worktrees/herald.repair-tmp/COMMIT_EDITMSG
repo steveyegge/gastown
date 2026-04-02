@@ -1,0 +1,7 @@
+feat: systemd unit and Linux install script (he-dib)
+
+Add deploy/herald.service with Type=simple, Restart=on-failure, and
+systemd hardening (NoNewPrivileges, ProtectSystem=strict, ReadWritePaths
+for data dir). Add deploy/install-linux.sh that creates herald user,
+copies binary/config/unit, and enables the service. Document deployment
+in startup-and-operations.md.

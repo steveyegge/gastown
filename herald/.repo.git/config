@@ -7,192 +7,21 @@
 [remote "origin"]
 	url = git@github.com:outdoorsea/herald.git
 	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "polecat/furiosa/he-bc7@mngr5s46"]
+	remote = origin
+	merge = refs/heads/main
 [beads]
 	issue-prefix = he
 	role = contributor
-[branch "polecat/slit/hr-zn2.3@mnfcac9k"]
+[branch "polecat/furiosa/he-2p6@mngr7fdi"]
 	remote = origin
 	merge = refs/heads/main
-[branch "dog/alpha-herald-1775005418725"]
+[branch "polecat/slit/he-0b3@mngr8g84"]
 	remote = origin
 	merge = refs/heads/main
-[branch "main"]
+[branch "polecat/rictus/he-3cu@mngraqe7"]
 	remote = origin
 	merge = refs/heads/main
-[branch "dog/alpha-herald-1775027463755"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-herald-1775032424494"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-herald-1775036015201"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-herald-1775054478908"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-herald-1775061238299"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/furiosa/hr-l5e.2@mng9v5qy"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/nux/hr-31j.4@mng9vkve"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/furiosa/hr-8wn.1@mngb31t0"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/nux/hr-8rg.1@mngb3tfa"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/nux/hr-lpd.1@mngb4zgj"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/slit/hr-8wn.2@mngb505a"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/rictus/hr-cax.1@mngb5jdo"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/dementus/hr-8rg.3@mngb62a8"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/rictus/hr-8rg.4@mngb6mti"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/capable/hr-7js.2@mngb6nec"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/toast/hr-lpd.2@mngb76ll"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/dag/hr-cax.1@mngb78ip"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/cheedo/hr-8wn.1@mngb7ve3"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/dag/hr-8rg.2@mngb8o2q"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/valkyrie/hr-cax.2@mngb8q9s"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/keeper/hr-8wn.3@mngb9bqg"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/morsov/hr-8wn.4@mngb9d4s"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/ace/hr-8wn.5@mngbaocs"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/warboy/hr-8wn.6@mngbaplt"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/keeper/hr-8wn.7@mngbcd7s"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/imperator/hr-cax.1@mngbcf8n"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-herald-1775068052769"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/capable/hr-8rg.1@mngfjk28"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/cheedo/hr-31j.5@mngfkf93"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/dag/hr-9dz.1@mngfl7de"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/furiosa/hr-dym.1@mngfmsjs"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/imperator/hr-jx4.1@mngfnnqh"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/keeper/hr-wql.1@mngfogke"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-herald-1775075641746"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/cheedo/he-0r8.2@mngiez1f"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/dag/he-0r8.3@mngifnfd"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/cheedo/he-ofv"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/dag/he-dij"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/capable/he-9qk"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/furiosa/he-266"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/ace/he-2nb@mngnuqbi"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/cheedo/he-9eq"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/capable/he-elb"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/dag/he-isu"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/imperator/he-5g1@mngnw2e8"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/capable/he-0z8@mngp5kae"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/furiosa/he-kep@mngplpfn"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/furiosa/he-kep@mngpn922"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/slit/he-kep@mngpux1f"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/nux/he-2nb@mngpw7ss"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/furiosa/he-3cu@mngq8jgf"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/slit/he-2p6@mngq9pu7"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/furiosa/he-0b3@mngqa48x"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/dementus/he-3cu@mngqazue"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/furiosa/he-7im@mngqbzvp"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/slit/he-fjn"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/rictus/he-8zw@mngqd97r"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/furiosa/he-dib@mngqef0j"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/furiosa/he-slt@mngqeliw"]
+[branch "dog/alpha-herald-1775091059784"]
 	remote = origin
 	merge = refs/heads/main

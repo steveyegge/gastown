@@ -1,9 +1,19 @@
-fix: validate table names against allowlist to prevent SQL injection (he-fjn)
+fix: harden auth across channels and decouple server API key (he-3cu)
 
-Add allowlist validation for dynamic table names in fmt.Sprintf SQL
-queries in deleteByID, searchByEmbedding (entities/store.go) and
-searchTable (tools/entities.go). While callers currently pass only
-hardcoded table names, the unvalidated pattern is a latent injection
-vector.
+Security audit findings and fixes:
+- Decouple server API key from SMS channel config so API auth works
+  even when SMS is disabled (daemon.go, config.go)
+- Move iMessage/BlueBubbles password from URL query params to
+  Authorization header to prevent credential leakage in logs/proxies
+- Add Telegram AllowedChatIDs config to restrict which chats can
+  interact with the bot
+- Add config validation for iMessage (url + password required when enabled)
+- Add tests for Telegram allowlist filtering
+
+Audit confirmed OK:
+- API key middleware uses subtle.ConstantTimeCompare (timing-safe)
+- Slack webhook uses HMAC-SHA256 with hmac.Equal and 5-min replay window
+- SMS gateway routes are behind APIKeyAuth middleware
+- No secrets appear in logger calls; DSN is properly redacted
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

@@ -51,10 +51,6 @@
       "interval": "30m",
       "timeout": "10m"
     },
-    "quota_dog": {
-      "enabled": true,
-      "interval": "5m"
-    },
     "refinery": {
       "agent": "refinery",
       "enabled": true,
@@ -70,8 +66,7 @@
         "faultline",
         "switchyard",
         "rally_tavern",
-        "herald",
-        "lilypad_chat"
+        "herald"
       ]
     },
     "scheduled_maintenance": {
@@ -101,8 +96,7 @@
         "faultline",
         "switchyard",
         "rally_tavern",
-        "herald",
-        "lilypad_chat"
+        "herald"
       ]
     }
   },

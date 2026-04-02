@@ -11,36 +11,6 @@
 [beads]
 	issue-prefix = fl
 	role = contributor
-[branch "polecat/obsidian/fl-u8o@mngfhr0e"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-faultline-1775075641586"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-faultline-1775076205512"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-faultline-1775077452294"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-faultline-1775079801289"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-faultline-1775081050083"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-faultline-1775082817201"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-faultline-1775084658347"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/jasper/fl-5pf.1@mngog3mh"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-faultline-1775088229025"]
-	remote = origin
-	merge = refs/heads/main
-[branch "dog/alpha-faultline-1775089112635"]
+[branch "dog/alpha-faultline-1775091058846"]
 	remote = origin
 	merge = refs/heads/main
