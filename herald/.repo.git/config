@@ -55,6 +55,3 @@
 [branch "polecat/furiosa/hr-fye.4@mnguoa85"]
 	remote = origin
 	merge = refs/heads/main
-[branch "temp"]
-	remote = origin
-	merge = refs/heads/polecat/slit/hr-fye.1@mngujtsx
