@@ -1,0 +1,55 @@
+# =============================================================================
+# REQUIRED: Geocaching.com API Credentials
+# =============================================================================
+# Get these from your Geocaching.com API application
+# Apply at: https://www.geocaching.com/api/
+GEOCACHING_CONSUMER_KEY=4CC2916D-4E8E-4559-8B2B-BE851588E43F
+GEOCACHING_CONSUMER_SECRET=7B8DFACA-2E0C-45D6-A928-24082228B33D
+
+# =============================================================================
+# OPTIONAL: Server Configuration  
+# =============================================================================
+# Port for the MCP server (default: 8051 for LibreChat compatibility)
+GEOCACHING_PORT=3000
+
+# Base URI for OAuth callbacks (default: http://localhost)
+# LOCAL DEVELOPMENT - Use localhost
+GEOCACHING_REDIRECT_URI=http://localhost:3000/auth/geocaching/callback
+
+# Alternative port environment variable (some systems use this)
+PORT=8051
+
+# =============================================================================
+# ENVIRONMENT SWITCHING
+# =============================================================================
+# Set to 'staging' or 'production' to automatically configure all endpoints
+# STAGING: Uses staging.geocaching.com, staging.api.groundspeak.com, etc.
+# PRODUCTION: Uses www.geocaching.com, api.groundspeak.com, etc.
+GEOCACHING_ENVIRONMENT=staging
+
+# To switch to production, simply change to:
+# GEOCACHING_ENVIRONMENT=production
+
+# =============================================================================
+# OPTIONAL: Advanced Configuration
+# =============================================================================
+# Enable single-user mode (bypasses session mapping)
+# Set to "1" to enable, comment out or set to "0" to disable
+# MCP_SINGLE_USER_MODE=1
+
+# Logging configuration
+MCP_LOG_LEVEL=INFO
+
+# =============================================================================
+# GOOGLE MAPS API CONFIGURATION
+# =============================================================================
+# Google Maps API key for enhanced mapping features
+GOOGLE_MAPS_API_KEY=AIzaSyCGlp6lKyjhjaKD7ybrLbuPbUNaLsV13p4
+# PYTHONPATH=.
+
+# =============================================================================
+# DOCKER-SPECIFIC: Additional Environment Variables
+# =============================================================================
+# These are automatically set by the Docker container but can be overridden
+# PYTHONUNBUFFERED=1
+# PYTHONDONTWRITEBYTECODE=1
