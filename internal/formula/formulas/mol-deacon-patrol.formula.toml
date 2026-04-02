@@ -1177,10 +1177,12 @@ End of patrol cycle decision.
 
 **If context LOW** (can continue patrolling):
 
-Refresh the heartbeat again immediately before the long idle wait:
+Refresh the heartbeat BEFORE entering await-signal. This prevents false positive
+stuck-deacon alerts from dogs: without this, the gap between heartbeat-mid and
+the next cycle's heartbeat can exceed the 20-minute stale threshold.
 
 ```bash
-gt deacon heartbeat "pre-await checkpoint"
+gt deacon heartbeat "entering await-signal"
 ```
 
 Use await-signal with exponential backoff to wait for activity:

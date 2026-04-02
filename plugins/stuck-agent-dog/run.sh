@@ -114,8 +114,30 @@ else
     HEARTBEAT_AGE=$(( NOW - HEARTBEAT_TIME ))
 
     if [ "$HEARTBEAT_AGE" -gt 1200 ]; then
-      log "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, >20m threshold)"
-      DEACON_ISSUE="stuck_heartbeat_${HEARTBEAT_AGE}s"
+      # Heartbeat is stale. Before escalating, check if the deacon bead was updated
+      # recently — await-signal updates the bead's last_activity (updated_at) on each
+      # timeout/signal even when the heartbeat file is not refreshed.
+      # If the process is alive AND the bead is fresh, the deacon is idle between
+      # patrol cycles (legitimate), not stuck. Only escalate if BOTH are stale.
+      BEAD_UPDATED_AT=$(bd show hq-deacon --json 2>/dev/null \
+        | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('updated_at',''))" 2>/dev/null || echo "")
+      BEAD_AGE=99999
+      if [ -n "$BEAD_UPDATED_AT" ]; then
+        BEAD_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$BEAD_UPDATED_AT" +%s 2>/dev/null \
+          || date -d "$BEAD_UPDATED_AT" +%s 2>/dev/null || echo 0)
+        if [ "$BEAD_EPOCH" -gt 0 ]; then
+          BEAD_AGE=$(( NOW - BEAD_EPOCH ))
+        fi
+      fi
+
+      if [ -z "$DEACON_COMM" ] || [ "$BEAD_AGE" -gt 1200 ]; then
+        # Process is dead (zombie) OR both heartbeat and bead are stale → genuinely stuck
+        log "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, bead_age=${BEAD_AGE}s)"
+        DEACON_ISSUE="stuck_heartbeat_${HEARTBEAT_AGE}s"
+      else
+        # Process is alive and bead was updated recently → idle between cycles, not stuck
+        log "  OK (idle): Deacon heartbeat stale (${HEARTBEAT_AGE}s) but bead updated ${BEAD_AGE}s ago — process alive, legitimately idle"
+      fi
     else
       log "  OK: Deacon heartbeat ${HEARTBEAT_AGE}s old"
     fi
