@@ -26,21 +26,9 @@
 [branch "temp"]
 	remote = origin
 	merge = refs/heads/polecat/jasper/fl-4b0.2@mngu19t8
-[branch "refinery-temp"]
-	remote = origin
-	merge = refs/heads/polecat/quartz/fl-4b0.5@mngu21vt
-[branch "refinery-temp2"]
-	remote = origin
-	merge = refs/heads/polecat/onyx/fl-4b0.7@mngu2ujh
 [branch "polecat/topaz/fl-88c.1@mngu98m4"]
 	remote = origin
 	merge = refs/heads/main
-[branch "refinery-temp3"]
-	remote = origin
-	merge = refs/heads/polecat/opal/fl-4b0.8@mngu3pl4
-[branch "refinery-work"]
-	remote = origin
-	merge = refs/heads/polecat/topaz/fl-88c.1@mngu98m4
 [branch "dog/alpha-faultline-1775107214074"]
 	remote = origin
 	merge = refs/heads/main
@@ -65,6 +53,30 @@
 [branch "dog/alpha-faultline-1775135015699"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/jasper/fl-4b0.3@mnhltxv4"]
+[branch "polecat/onyx/fl-4b0.6@mnhlvpv4"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/quartz/fl-4b0.9@mnhlwng4"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/topaz/fl-88c.2@mnhlxey6"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/garnet/fl-88c.3@mnhly2im"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/ruby/fl-88c.5@mnhlz5b7"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/onyx/fl-4b0.9"]
+	remote = origin
+	merge = refs/heads/main
+[branch "refinery-work"]
+	remote = origin
+	merge = refs/heads/polecat/jasper/fl-4b0.3@mnhltxv4
+[branch "refinery-work2"]
+	remote = origin
+	merge = refs/heads/polecat/quartz/fl-88c.3
+[branch "refinery-work3"]
+	remote = origin
+	merge = refs/heads/polecat/topaz/fl-88c.2@mnhlxey6

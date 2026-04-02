@@ -1,9 +1,8 @@
-feat: add integration framework and plugin architecture (fl-88c.1)
+feat: add GitHub Issues integration plugin (fl-88c.2)
 
-Add internal/integrations/ package with Integration interface (OnNewIssue,
-OnResolved, OnRegression), factory registry, and dispatcher. Add
-integrations_config table with CRUD queries. Add integration management
-API endpoints. Wire IntegrationNotifier into notify.Dispatcher so
-integrations fire alongside webhooks on all lifecycle events.
+Implement github_issues integration that creates, updates, and closes
+GitHub issues in response to faultline lifecycle events. Uses GitHub
+REST API with PAT auth, bidirectional linking via faultline-group-id
+markers, and configurable label mapping per severity level.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

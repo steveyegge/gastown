@@ -1,7 +1,1 @@
-feat: teams schema and CRUD queries (fl-4b0.2)
-
-Add teams, team_members, team_projects tables with migrateTeams() in Open().
-Implement CreateTeam, GetTeam, ListTeams, UpdateTeam, DeleteTeam,
-AddTeamMember, RemoveTeamMember, ListTeamMembers, LinkTeamProject,
-UnlinkTeamProject, ListTeamProjects, TeamsForAccount, ProjectIDsVisibleTo.
-Tests in teams_test.go cover all operations.
+feat: add team management API endpoints (fl-4b0.3)

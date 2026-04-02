@@ -1,37 +1,9 @@
-feat: add integration framework and plugin architecture (fl-88c.1)
+feat: add PagerDuty integration plugin (fl-88c.3)
 
-Add internal/integrations/ package with Integration interface (OnNewIssue,
-OnResolved, OnRegression), factory registry, and dispatcher. Add
-integrations_config table with CRUD queries. Add integration management
-API endpoints. Wire IntegrationNotifier into notify.Dispatcher so
-integrations fire alongside webhooks on all lifecycle events.
+Implement PagerDuty Events API v2 integration: trigger incidents for
+new issues and regressions, auto-resolve when issues resolve. Config
+supports routing key, service ID, and custom severity mapping
+(fatal→critical, error→error, warning→warning, info→info by default).
+Uses dedup key based on project+group for automatic incident correlation.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
-
-# Conflicts:
-#	internal/db/dolt.go
-
-# Please enter the commit message for your changes. Lines starting
-# with '#' will be ignored, and an empty message aborts the commit.
-#
-# Author:    topaz <jeremy@theirish.com>
-#
-# interactive rebase in progress; onto 0accbf8
-# Last command done (1 command done):
-#    pick a73202d # feat: add integration framework and plugin architecture (fl-88c.1)
-# No commands remaining.
-# You are currently rebasing branch 'refinery-work' on '0accbf8'.
-#
-# Changes to be committed:
-#	modified:   cmd/faultline/main.go
-#	modified:   internal/api/api.go
-#	new file:   internal/api/integrations.go
-#	modified:   internal/db/dolt.go
-#	new file:   internal/db/integrations.go
-#	new file:   internal/db/integrations_test.go
-#	new file:   internal/integrations/dbadapter.go
-#	new file:   internal/integrations/dispatcher.go
-#	new file:   internal/integrations/integration.go
-#	new file:   internal/integrations/integration_test.go
-#	modified:   internal/notify/dispatcher.go
-#
