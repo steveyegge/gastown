@@ -22,3 +22,6 @@ vendor/
 __pycache__/
 state.json
 CLAUDE.md
+
+# Gas Town (added by gt)
+CLAUDE.local.md

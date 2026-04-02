@@ -155,3 +155,12 @@
 [branch "merge-c6c"]
 	remote = origin
 	merge = refs/heads/polecat/garnet/fl-wmd.3@mnhr5ayx
+[branch "polecat/garnet/fl-b4f@mnhvfnsx"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/obsidian/fl-g91@mnhvg82v"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/onyx/fl-1h9@mnhvgsle"]
+	remote = origin
+	merge = refs/heads/main
