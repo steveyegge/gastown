@@ -1,6 +1,0 @@
-test: add channel router edge case tests (he-1gh.6)
-
-Add tests for concurrent message handling, Run() context cancellation,
-correct channel routing isolation, Send error logging, channel
-registration logging, and handler error recovery. Also add Info log
-on channel registration in Router.Register().

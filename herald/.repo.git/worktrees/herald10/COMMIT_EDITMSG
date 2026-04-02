@@ -1,9 +1,0 @@
-feat: iMessage channel via BlueBubbles REST API (he-781)
-
-BlueBubbles REST client implementing Channel interface:
-- Poll-based message ingestion with dedup by timestamp
-- Filters outgoing messages, tapbacks, and empty texts
-- Send via private-api method with iMessage chat GUID format
-- Registered in daemon when enabled
-- 11 tests with httptest.Server mocks covering send, fetch,
-  error handling, polling, and edge cases

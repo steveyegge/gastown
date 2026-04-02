@@ -109,9 +109,6 @@
 [branch "polecat/dag/hr-9dz.1@mngfl7de"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/dementus/hr-eat.1@mngflznp"]
-	remote = origin
-	merge = refs/heads/main
 [branch "polecat/furiosa/hr-dym.1@mngfmsjs"]
 	remote = origin
 	merge = refs/heads/main
@@ -128,30 +125,6 @@
 	remote = origin
 	merge = refs/heads/main
 [branch "polecat/dag/he-0r8.3@mngifnfd"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/morsov/he-0r8.4@mngigcoo"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/nux/he-1gh.1@mngih3zb"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/rictus/he-1gh.2@mngihrc9"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/slit/he-1gh.3@mngiie2i"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/toast/he-1gh.4@mngij4p7"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/valkyrie/he-1gh.5@mngijx54"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/warboy/he-1gh.6@mngikmxk"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/organic/he-1gh.7@mngilyvu"]
 	remote = origin
 	merge = refs/heads/main
 [branch "polecat/cheedo/he-ofv"]
@@ -184,15 +157,15 @@
 [branch "polecat/capable/he-0z8@mngp5kae"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/furiosa/he-4wt"]
+[branch "polecat/furiosa/he-kep@mngplpfn"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/imperator/he-kep"]
+[branch "polecat/furiosa/he-kep@mngpn922"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/keeper/he-781"]
+[branch "polecat/nux/he-58e@mngpo96t"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/dag/he-58e@mngp7bl1"]
+[branch "polecat/furiosa/he-1wx@mngpoux7"]
 	remote = origin
 	merge = refs/heads/main
