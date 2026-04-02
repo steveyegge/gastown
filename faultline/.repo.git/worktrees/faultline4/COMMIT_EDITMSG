@@ -1,13 +1,9 @@
-feat: add comments and notifications API + dashboard (fl-4b0.9)
+feat: enforce project-level access via team_projects (fl-wmd.2)
 
-Add comment CRUD API endpoints (update, delete) alongside existing
-list/create. Add notification API under /api/v1/notifications with
-list, unread-count, mark-read, and mark-all-read endpoints.
-
-Wire comment creation to insert LifecycleCommented lifecycle events.
-Add comment thread section to issue detail page with @mention support.
-Add notification bell with unread badge to nav bar, plus a dedicated
-notifications page with mark-all-read. Add GetAccountByID for resolving
-comment author names in the dashboard.
+Add requireProjectAccess middleware that checks team-based project
+visibility for all project-scoped API endpoints. Owners and admins
+bypass the check. Members and viewers are restricted to projects
+linked to their teams via team_projects. The listProjects endpoint
+now filters results by the caller's access.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

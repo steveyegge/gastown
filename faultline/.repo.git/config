@@ -140,3 +140,12 @@
 [branch "rw-6kj"]
 	remote = origin
 	merge = refs/heads/polecat/jasper/fl-4b0.6@mnhpagjl
+[branch "polecat/garnet/fl-wmd.2@mnhqiepx"]
+	remote = origin
+	merge = refs/heads/main
+[branch "rw-le2"]
+	remote = origin
+	merge = refs/heads/polecat/garnet/fl-wmd.2@mnhqiepx
+[branch "merge-le2"]
+	remote = origin
+	merge = refs/heads/polecat/garnet/fl-wmd.2@mnhqiepx
