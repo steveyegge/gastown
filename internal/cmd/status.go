@@ -885,12 +885,42 @@ func gatherStatus() (TownStatus, error) {
 				rs.CrewCount = len(workers)
 			}
 
+			// Run hooks, agents, and MQ discovery concurrently within this rig.
+			// Each was previously sequential; now they overlap since they use
+			// independent bd/beads calls.
+			var rigWg sync.WaitGroup
+
 			// Discover hooks for all agents in this rig
 			// In --fast mode, skip expensive handoff bead lookups. Hook info comes from
 			// preloaded agent beads via discoverRigAgents instead.
 			if !statusFast {
-				rs.Hooks = discoverRigHooks(r, rs.Crews)
+				rigWg.Add(1)
+				go func() {
+					defer rigWg.Done()
+					rs.Hooks = discoverRigHooks(r, rs.Crews)
+				}()
 			}
+
+			// Get MQ summary if rig has a refinery
+			// Skip in --fast mode to avoid expensive bd queries
+			if !statusFast {
+				rigWg.Add(1)
+				go func() {
+					defer rigWg.Done()
+					rs.MQ = getMQSummary(r)
+				}()
+			}
+
+			// Discover runtime state for all agents in this rig
+			// (uses preloaded maps, so it's fast — but run concurrently with hooks/MQ)
+			rigWg.Add(1)
+			go func() {
+				defer rigWg.Done()
+				rs.Agents = discoverRigAgents(allSessions, r, rs.Crews, allAgentBeads, allHookBeads, mailRouter, statusFast)
+			}()
+
+			rigWg.Wait()
+
 			activeHooks := 0
 			for _, hook := range rs.Hooks {
 				if hook.HasWork {
@@ -898,15 +928,6 @@ func gatherStatus() (TownStatus, error) {
 				}
 			}
 			rigActiveHooks[idx] = activeHooks
-
-			// Discover runtime state for all agents in this rig
-			rs.Agents = discoverRigAgents(allSessions, r, rs.Crews, allAgentBeads, allHookBeads, mailRouter, statusFast)
-
-			// Get MQ summary if rig has a refinery
-			// Skip in --fast mode to avoid expensive bd queries
-			if !statusFast {
-				rs.MQ = getMQSummary(r)
-			}
 
 			status.Rigs[idx] = rs
 		}(i, r)
@@ -1503,38 +1524,69 @@ func capitalizeFirst(s string) string {
 }
 
 // discoverRigHooks finds all hook attachments for agents in a rig.
-// It scans polecats, crew workers, witness, and refinery for handoff beads.
+// It fetches all pinned handoff beads in a single bd call, then resolves
+// each agent's hook in-memory. This replaces the previous N+1 pattern where
+// each agent triggered a separate bd subprocess.
 func discoverRigHooks(r *rig.Rig, crews []string) []AgentHookInfo {
 	var hooks []AgentHookInfo
 
 	// Create beads instance for the rig
 	b := beads.New(r.Path)
 
+	// Batch-fetch all handoff beads in one bd call
+	allHandoffs, err := b.FindAllHandoffBeads()
+	if err != nil {
+		// On error, return empty hooks for all agents rather than failing
+		allHandoffs = make(map[string]*beads.Issue)
+	}
+
 	// Check polecats
 	for _, name := range r.Polecats {
-		hook := getAgentHook(b, name, r.Name+"/"+name, constants.RolePolecat)
-		hooks = append(hooks, hook)
+		hooks = append(hooks, resolveHookFromMap(allHandoffs, name, r.Name+"/"+name, constants.RolePolecat))
 	}
 
 	// Check crew workers
 	for _, name := range crews {
-		hook := getAgentHook(b, name, r.Name+"/crew/"+name, constants.RoleCrew)
-		hooks = append(hooks, hook)
+		hooks = append(hooks, resolveHookFromMap(allHandoffs, name, r.Name+"/crew/"+name, constants.RoleCrew))
 	}
 
 	// Check witness
 	if r.HasWitness {
-		hook := getAgentHook(b, constants.RoleWitness, r.Name+"/witness", constants.RoleWitness)
-		hooks = append(hooks, hook)
+		hooks = append(hooks, resolveHookFromMap(allHandoffs, constants.RoleWitness, r.Name+"/witness", constants.RoleWitness))
 	}
 
 	// Check refinery
 	if r.HasRefinery {
-		hook := getAgentHook(b, constants.RoleRefinery, r.Name+"/refinery", constants.RoleRefinery)
-		hooks = append(hooks, hook)
+		hooks = append(hooks, resolveHookFromMap(allHandoffs, constants.RoleRefinery, r.Name+"/refinery", constants.RoleRefinery))
 	}
 
 	return hooks
+}
+
+// resolveHookFromMap builds an AgentHookInfo from a pre-fetched map of handoff beads.
+// This is the in-memory equivalent of getAgentHook, avoiding per-agent bd subprocess calls.
+func resolveHookFromMap(allHandoffs map[string]*beads.Issue, role, agentAddress, roleType string) AgentHookInfo {
+	hook := AgentHookInfo{
+		Agent: agentAddress,
+		Role:  roleType,
+	}
+
+	handoff, ok := allHandoffs[role]
+	if !ok || handoff == nil {
+		return hook
+	}
+
+	attachment := beads.ParseAttachmentFields(handoff)
+	if attachment != nil && attachment.AttachedMolecule != "" {
+		hook.HasWork = true
+		hook.Molecule = attachment.AttachedMolecule
+		hook.Title = handoff.Title
+	} else if handoff.Description != "" {
+		hook.HasWork = true
+		hook.Title = handoff.Title
+	}
+
+	return hook
 }
 
 // discoverGlobalAgents checks runtime state for town-level agents (Mayor, Deacon).
@@ -1800,7 +1852,8 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 }
 
 // getMQSummary queries beads for merge-request issues and returns a summary.
-
+// Uses a single bd call to fetch all non-closed merge-requests, then splits
+// open vs in_progress in memory. Previously used two separate bd calls.
 // Returns nil if the rig has no refinery or no MQ issues.
 func getMQSummary(r *rig.Rig) *MQSummary {
 	if !r.HasRefinery {
@@ -1810,38 +1863,39 @@ func getMQSummary(r *rig.Rig) *MQSummary {
 	// Create beads instance for the rig
 	b := beads.New(r.BeadsPath())
 
-	// Query for all open merge-request issues
+	// Single query for all non-closed merge-request issues.
+	// Status "all" fetches everything; we filter open/in_progress in memory.
 	opts := beads.ListOptions{
 		Label:    "gt:merge-request",
-		Status:   "open",
+		Status:   "all",
 		Priority: -1, // No priority filter
 	}
-	openMRs, err := b.List(opts)
+	allMRs, err := b.List(opts)
 	if err != nil {
 		return nil
 	}
 
-	// Query for in-progress merge-requests
-	opts.Status = "in_progress"
-	inProgressMRs, err := b.List(opts)
-	if err != nil {
-		return nil
-	}
-
-	// Count pending (open with no blockers) vs blocked
+	// Split by status in memory
 	pending := 0
 	blocked := 0
-	for _, mr := range openMRs {
-		if len(mr.BlockedBy) > 0 || mr.BlockedByCount > 0 {
-			blocked++
-		} else {
-			pending++
+	inProgress := 0
+	for _, mr := range allMRs {
+		switch mr.Status {
+		case "open":
+			if len(mr.BlockedBy) > 0 || mr.BlockedByCount > 0 {
+				blocked++
+			} else {
+				pending++
+			}
+		case "in_progress":
+			inProgress++
 		}
+		// closed/other statuses are ignored
 	}
 
 	// Determine queue state
 	state := "idle"
-	if len(inProgressMRs) > 0 {
+	if inProgress > 0 {
 		state = "processing"
 	} else if pending > 0 {
 		state = "idle" // Has work but not processing yet
@@ -1851,24 +1905,24 @@ func getMQSummary(r *rig.Rig) *MQSummary {
 
 	// Determine queue health
 	health := "empty"
-	total := pending + len(inProgressMRs) + blocked
+	total := pending + inProgress + blocked
 	if total > 0 {
 		health = "healthy"
 		// Check for potential issues
-		if pending > 10 && len(inProgressMRs) == 0 {
+		if pending > 10 && inProgress == 0 {
 			// Large queue but nothing processing - may be stuck
 			health = "stale"
 		}
 	}
 
 	// Only return summary if there's something to show
-	if pending == 0 && len(inProgressMRs) == 0 && blocked == 0 {
+	if pending == 0 && inProgress == 0 && blocked == 0 {
 		return nil
 	}
 
 	return &MQSummary{
 		Pending:  pending,
-		InFlight: len(inProgressMRs),
+		InFlight: inProgress,
 		Blocked:  blocked,
 		State:    state,
 		Health:   health,

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -1941,12 +1942,30 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf(" (none)\n")
 	} else {
 		fmt.Printf(" (%d)\n", len(polecats))
-		for _, p := range polecats {
-			sessionName := session.PolecatSessionName(session.PrefixFor(rigName), p.Name)
-			hasSession, _ := t.HasSession(sessionName)
 
+		// Parallel tmux HasSession checks for all polecats
+		type polecatInfo struct {
+			name       string
+			state      polecat.State
+			issue      string
+			hasSession bool
+		}
+		pInfos := make([]polecatInfo, len(polecats))
+		var pcWg sync.WaitGroup
+		for i, p := range polecats {
+			pInfos[i] = polecatInfo{name: p.Name, state: p.State, issue: p.Issue}
+			pcWg.Add(1)
+			go func(idx int, p *polecat.Polecat) {
+				defer pcWg.Done()
+				sessionName := session.PolecatSessionName(session.PrefixFor(rigName), p.Name)
+				pInfos[idx].hasSession, _ = t.HasSession(sessionName)
+			}(i, p)
+		}
+		pcWg.Wait()
+
+		for _, pi := range pInfos {
 			sessionIcon := style.Dim.Render("○")
-			if hasSession {
+			if pi.hasSession {
 				sessionIcon = style.Success.Render("●")
 			}
 
@@ -1957,19 +1976,19 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 			// witness can detect unsubmitted work (gt-3071b). Previously this
 			// showed "done" which masked failures where polecats died before
 			// running gt done, leaving work stranded in worktrees.
-			displayState := p.State
-			if hasSession && displayState == polecat.StateDone {
+			displayState := pi.state
+			if pi.hasSession && displayState == polecat.StateDone {
 				displayState = polecat.StateWorking
-			} else if !hasSession && displayState == polecat.StateWorking {
+			} else if !pi.hasSession && displayState == polecat.StateWorking {
 				displayState = polecat.State("stalled")
 			}
 
 			stateStr := string(displayState)
-			if p.Issue != "" {
-				stateStr = fmt.Sprintf("%s → %s", displayState, p.Issue)
+			if pi.issue != "" {
+				stateStr = fmt.Sprintf("%s → %s", displayState, pi.issue)
 			}
 
-			fmt.Printf("  %s %s: %s\n", sessionIcon, p.Name, stateStr)
+			fmt.Printf("  %s %s: %s\n", sessionIcon, pi.name, stateStr)
 		}
 	}
 	fmt.Println()
@@ -1982,26 +2001,45 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf(" (none)\n")
 	} else {
 		fmt.Printf(" (%d)\n", len(crewWorkers))
-		for _, w := range crewWorkers {
-			sessionName := crewSessionName(rigName, w.Name)
-			hasSession, _ := t.HasSession(sessionName)
 
+		// Parallel tmux + git checks for all crew workers
+		type crewInfo struct {
+			name       string
+			hasSession bool
+			branch     string
+			dirty      bool
+		}
+		cInfos := make([]crewInfo, len(crewWorkers))
+		var cwWg sync.WaitGroup
+		for i, w := range crewWorkers {
+			cInfos[i] = crewInfo{name: w.Name}
+			cwWg.Add(1)
+			go func(idx int, w *crew.CrewWorker) {
+				defer cwWg.Done()
+				sessionName := crewSessionName(rigName, w.Name)
+				cInfos[idx].hasSession, _ = t.HasSession(sessionName)
+				crewGit := git.NewGit(w.ClonePath)
+				cInfos[idx].branch, _ = crewGit.CurrentBranch()
+				gitStatus, _ := crewGit.Status()
+				if gitStatus != nil && !gitStatus.Clean {
+					cInfos[idx].dirty = true
+				}
+			}(i, w)
+		}
+		cwWg.Wait()
+
+		for _, ci := range cInfos {
 			sessionIcon := style.Dim.Render("○")
-			if hasSession {
+			if ci.hasSession {
 				sessionIcon = style.Success.Render("●")
 			}
 
-			// Get git info
-			crewGit := git.NewGit(w.ClonePath)
-			branch, _ := crewGit.CurrentBranch()
-			gitStatus, _ := crewGit.Status()
-
 			gitInfo := ""
-			if gitStatus != nil && !gitStatus.Clean {
+			if ci.dirty {
 				gitInfo = style.Warning.Render(" (dirty)")
 			}
 
-			fmt.Printf("  %s %s: %s%s\n", sessionIcon, w.Name, branch, gitInfo)
+			fmt.Printf("  %s %s: %s%s\n", sessionIcon, ci.name, ci.branch, gitInfo)
 		}
 	}
 
