@@ -121,7 +121,7 @@ func (d *DB) GetSession(ctx context.Context, token string) (*Account, error) {
 		return nil, err
 	}
 	if time.Now().After(s.ExpiresAt) {
-		d.ExecContext(ctx, `DELETE FROM auth_sessions WHERE token = ?`, token)
+		_, _ = d.ExecContext(ctx, `DELETE FROM auth_sessions WHERE token = ?`, token)
 		return nil, nil
 	}
 	var a Account
@@ -140,9 +140,56 @@ func (d *DB) DeleteSession(ctx context.Context, token string) error {
 	return err
 }
 
+// ListAccounts returns all accounts ordered by name.
+func (d *DB) ListAccounts(ctx context.Context) ([]Account, error) {
+	rows, err := d.QueryContext(ctx, `SELECT id, email, name, role, created_at FROM accounts ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var accounts []Account
+	for rows.Next() {
+		var a Account
+		if err := rows.Scan(&a.ID, &a.Email, &a.Name, &a.Role, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, a)
+	}
+	return accounts, rows.Err()
+}
+
 // AccountCount returns the number of accounts (used to detect first-run setup).
 func (d *DB) AccountCount(ctx context.Context) (int, error) {
 	var n int
 	err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM accounts`).Scan(&n)
 	return n, err
+}
+
+// OwnerCount returns the number of accounts with the "owner" role.
+func (d *DB) OwnerCount(ctx context.Context) (int, error) {
+	var n int
+	err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM accounts WHERE role = 'owner'`).Scan(&n)
+	return n, err
+}
+
+// validRoles is the set of allowed account roles.
+var validRoles = map[string]bool{
+	"viewer": true,
+	"member": true,
+	"admin":  true,
+	"owner":  true,
+}
+
+// UpdateAccountRole changes an account's role.
+func (d *DB) UpdateAccountRole(ctx context.Context, accountID int64, role string) error {
+	if !validRoles[role] {
+		return fmt.Errorf("invalid role: %q", role)
+	}
+	_, err := d.ExecContext(ctx, `UPDATE accounts SET role = ? WHERE id = ?`, role, accountID)
+	if err != nil {
+		return err
+	}
+	d.MarkDirty()
+	return nil
 }

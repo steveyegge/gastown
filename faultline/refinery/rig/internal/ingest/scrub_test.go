@@ -320,7 +320,10 @@ func TestScrubEvent_NestedObjects(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	user := result["user"].(map[string]interface{})
+	user, ok := result["user"].(map[string]interface{})
+	if !ok {
+		t.Fatal("user field is not an object")
+	}
 	if user["password"] != redacted {
 		t.Fatalf("nested password not redacted: %v", user["password"])
 	}
@@ -328,7 +331,14 @@ func TestScrubEvent_NestedObjects(t *testing.T) {
 		t.Fatalf("non-sensitive field modified: %v", user["name"])
 	}
 
-	headers := result["request"].(map[string]interface{})["headers"].(map[string]interface{})
+	reqObj, ok := result["request"].(map[string]interface{})
+	if !ok {
+		t.Fatal("request field is not an object")
+	}
+	headers, ok := reqObj["headers"].(map[string]interface{})
+	if !ok {
+		t.Fatal("headers field is not an object")
+	}
 	if headers["authorization"] != redacted {
 		t.Fatalf("nested authorization not redacted: %v", headers["authorization"])
 	}
@@ -352,9 +362,10 @@ func TestScrubEvent_Arrays(t *testing.T) {
 	}
 
 	var result map[string]interface{}
-	json.Unmarshal(out, &result)
-	crumbs := result["breadcrumbs"].([]interface{})
-	entry := crumbs[1].(map[string]interface{})["data"].(map[string]interface{})
+	_ = json.Unmarshal(out, &result)
+	crumbs, _ := result["breadcrumbs"].([]interface{})
+	entryMap, _ := crumbs[1].(map[string]interface{})
+	entry, _ := entryMap["data"].(map[string]interface{})
 	if entry["token"] != redacted {
 		t.Fatalf("token in array element not redacted: %v", entry["token"])
 	}
@@ -383,7 +394,7 @@ func TestScrubEvent_NonSensitivePreserved(t *testing.T) {
 	if result["message"] != "something broke" {
 		t.Fatalf("message changed: %v", result["message"])
 	}
-	tags := result["tags"].(map[string]interface{})
+	tags, _ := result["tags"].(map[string]interface{})
 	if tags["version"] != "1.2.3" {
 		t.Fatalf("version tag changed: %v", tags["version"])
 	}
@@ -453,7 +464,7 @@ func TestScrubEvent_NumericAndBoolPreserved(t *testing.T) {
 	out := ScrubEvent(raw)
 
 	var result map[string]interface{}
-	json.Unmarshal(out, &result)
+	_ = json.Unmarshal(out, &result)
 	if result["count"] != float64(42) {
 		t.Fatalf("count changed: %v", result["count"])
 	}

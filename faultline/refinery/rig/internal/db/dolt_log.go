@@ -44,7 +44,7 @@ func (d *DB) DoltLogForIssue(ctx context.Context, projectID int64, issueID strin
 	if err != nil {
 		return nil, fmt.Errorf("dolt log for issue: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []DoltLogEntry
 	for rows.Next() {

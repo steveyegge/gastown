@@ -57,6 +57,22 @@ func TestParseEmptyEnvelope(t *testing.T) {
 	}
 }
 
+func TestParseEnvelopeHeaderOnly_NoTrailingNewline(t *testing.T) {
+	// Regression: relay poll can deliver envelopes that are just a header
+	// with no trailing newline. This previously caused a slice bounds panic.
+	envelope := `{"event_id":"abc123","dsn":"https://key@sentry.io/1"}`
+	hdr, items, err := parseEnvelopeBytes([]byte(envelope))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hdr.EventID != "abc123" {
+		t.Fatalf("event_id = %q, want abc123", hdr.EventID)
+	}
+	if len(items) != 0 {
+		t.Fatalf("got %d items, want 0", len(items))
+	}
+}
+
 func TestParseDSNProjectID(t *testing.T) {
 	tests := []struct {
 		dsn  string

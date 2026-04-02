@@ -27,9 +27,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 | `POST /api/{project_id}/envelope/` | **Supported** | Primary ingest endpoint |
 | `POST /api/{project_id}/store/` | **Supported** | Legacy single-event JSON |
 | `GET /health` | **Supported** | Health check |
-| `POST /api/{project_id}/minidump/` | Not planned | Used by sentry-native (C/C++) only |
-| `POST /api/{project_id}/unreal/` | Not planned | Unreal Engine only |
-| `POST /api/{project_id}/security/` | Not planned | Browser CSP report-uri |
+| `POST /api/{project_id}/heartbeat` | **Supported** | SDK liveness ping (no events created) |
+| `POST /api/v1/register` | **Supported** | Self-registration (returns DSN) |
+| `POST /api/{project_id}/minidump/` | Accepted (relay) | Stored raw, forwarded to local faultline |
+| `POST /api/{project_id}/unreal/` | Accepted (relay) | Stored raw, forwarded to local faultline |
+| `POST /api/{project_id}/security/` | Accepted (relay) | Stored raw, forwarded to local faultline |
 
 ## Authentication
 
@@ -114,6 +116,23 @@ The following Sentry features are **not planned** for any phase:
 - Multi-region / data residency
 
 These may be reconsidered in future phases based on demand.
+
+## Integration Notes (from crew feedback)
+
+**Critical: Disable performance tracing.** Faultline only processes error events.
+Set `traces_sample_rate=0` and `enable_tracing=False` in all SDK inits.
+Transactions sent with tracing enabled are silently dropped but waste bandwidth.
+
+**DSN environment variable:** Use `FAULTLINE_DSN`. Projects migrating from Sentry
+may already have `SENTRY_DSN` — both work since the SDK doesn't care about the
+env var name, only the DSN value. `FAULTLINE_DSN` is canonical to avoid confusion
+with external Sentry instances.
+
+**Heartbeat required for liveness.** Error-only SDKs appear idle on the dashboard
+when healthy. Add the heartbeat (see docs/HEARTBEAT.md) to report running status.
+
+**See docs/INTEGRATION.md** for the complete integration guide with per-framework
+examples, Docker notes, and troubleshooting.
 
 ## Size Limits
 

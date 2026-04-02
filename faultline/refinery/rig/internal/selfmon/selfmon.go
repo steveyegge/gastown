@@ -114,20 +114,21 @@ func (h *Handler) report(r slog.Record) {
 	if err != nil {
 		return
 	}
-	resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 }
 
 // sentryEvent is a minimal Sentry event payload.
 type sentryEvent struct {
-	EventID   string            `json:"event_id"`
-	Timestamp float64           `json:"timestamp"`
-	Platform  string            `json:"platform"`
-	Level     string            `json:"level"`
-	Logger    string            `json:"logger"`
-	Message   string            `json:"message"`
-	Tags      map[string]string `json:"tags,omitempty"`
-	Extra     map[string]any    `json:"extra,omitempty"`
-	Exception *sentryException  `json:"exception,omitempty"`
+	EventID     string            `json:"event_id"`
+	Timestamp   float64           `json:"timestamp"`
+	Platform    string            `json:"platform"`
+	Level       string            `json:"level"`
+	Logger      string            `json:"logger"`
+	Message     string            `json:"message"`
+	Fingerprint []string          `json:"fingerprint,omitempty"`
+	Tags        map[string]string `json:"tags,omitempty"`
+	Extra       map[string]any    `json:"extra,omitempty"`
+	Exception   *sentryException  `json:"exception,omitempty"`
 }
 
 type sentryException struct {
@@ -135,9 +136,9 @@ type sentryException struct {
 }
 
 type sentryExceptionValue struct {
-	Type       string          `json:"type"`
-	Value      string          `json:"value"`
-	Stacktrace *sentryStack   `json:"stacktrace,omitempty"`
+	Type       string       `json:"type"`
+	Value      string       `json:"value"`
+	Stacktrace *sentryStack `json:"stacktrace,omitempty"`
 }
 
 type sentryStack struct {
@@ -153,13 +154,16 @@ type sentryFrame struct {
 func (h *Handler) buildEvent(r slog.Record) sentryEvent {
 	id := uuid.New().String()
 
-	level := "error"
-	if r.Level >= slog.LevelError+4 { // Fatal-ish
+	var level string
+	switch {
+	case r.Level >= slog.LevelError+4: // Fatal-ish
 		level = "fatal"
-	} else if r.Level >= slog.LevelError {
+	case r.Level >= slog.LevelError:
 		level = "error"
-	} else if r.Level >= slog.LevelWarn {
+	case r.Level >= slog.LevelWarn:
 		level = "warning"
+	default:
+		level = "error"
 	}
 
 	extra := make(map[string]any)
@@ -189,13 +193,18 @@ func (h *Handler) buildEvent(r slog.Record) sentryEvent {
 		exValue = fmt.Sprintf("%s: %s", msg, errVal)
 	}
 
+	// Use the message as a fingerprint component so different selfmon errors
+	// get separate issue groups (not all grouped under "faultline.internal").
+	fingerprint := []string{"faultline.internal", msg}
+
 	ev := sentryEvent{
-		EventID:   id,
-		Timestamp: float64(r.Time.UnixNano()) / 1e9,
-		Platform:  "go",
-		Level:     level,
-		Logger:    "faultline.selfmon",
-		Message:   msg,
+		EventID:     id,
+		Timestamp:   float64(r.Time.UnixNano()) / 1e9,
+		Platform:    "go",
+		Level:       level,
+		Logger:      "faultline.selfmon",
+		Message:     msg,
+		Fingerprint: fingerprint,
 		Tags: map[string]string{
 			"source": "selfmon",
 		},

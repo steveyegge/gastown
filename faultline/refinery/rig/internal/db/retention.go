@@ -82,65 +82,97 @@ func (w *RetentionWorker) purge(ctx context.Context) {
 		w.log.Error("retention: purge revoked api tokens", "err", err)
 	}
 
-	if eventsDeleted > 0 || sessionsDeleted > 0 || authDeleted > 0 || tokensDeleted > 0 {
+	// Purge old health checks (>7 days).
+	healthDeleted, err := w.purgeHealthChecks(ctx)
+	if err != nil {
+		w.log.Error("retention: purge health checks", "err", err)
+	}
+
+	// Purge old CI runs (>90 days).
+	ciDeleted, err := w.purgeCIRuns(ctx)
+	if err != nil {
+		w.log.Error("retention: purge ci runs", "err", err)
+	}
+
+	if eventsDeleted > 0 || sessionsDeleted > 0 || authDeleted > 0 || tokensDeleted > 0 || healthDeleted > 0 || ciDeleted > 0 {
 		w.log.Info("retention purge",
 			"events_deleted", eventsDeleted,
 			"sessions_deleted", sessionsDeleted,
 			"auth_sessions_deleted", authDeleted,
 			"api_tokens_deleted", tokensDeleted,
+			"health_checks_deleted", healthDeleted,
+			"ci_runs_deleted", ciDeleted,
 		)
 	}
 }
 
-// purgeEvents deletes events older than the cutoff. Deletes in batches to
-// avoid holding long locks.
-func (w *RetentionWorker) purgeEvents(ctx context.Context, cutoff time.Time) (int64, error) {
-	var total int64
-	for {
-		res, err := w.db.ExecContext(ctx,
-			`DELETE FROM events WHERE received_at < ? LIMIT 1000`, cutoff)
-		if err != nil {
-			return total, fmt.Errorf("delete events: %w", err)
-		}
-		n, _ := res.RowsAffected()
-		total += n
-		if n > 0 {
-			w.db.MarkDirty()
-		}
-		if n < 1000 {
-			break
-		}
+func (w *RetentionWorker) purgeHealthChecks(ctx context.Context) (int64, error) {
+	cutoff := time.Now().UTC().Add(-7 * 24 * time.Hour)
+	res, err := w.db.ExecContext(ctx,
+		`DELETE FROM health_checks WHERE checked_at < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("delete health checks: %w", err)
 	}
-	return total, nil
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		w.db.MarkDirty()
+	}
+	return n, nil
+}
+
+func (w *RetentionWorker) purgeCIRuns(ctx context.Context) (int64, error) {
+	cutoff := time.Now().UTC().Add(-90 * 24 * time.Hour)
+	res, err := w.db.ExecContext(ctx,
+		`DELETE FROM ci_runs WHERE timestamp < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("delete ci runs: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		w.db.MarkDirty()
+	}
+	return n, nil
+}
+
+// purgeEvents deletes events older than the cutoff.
+// Dolt has a column-resolution bug where unqualified column references in
+// DELETE statements sometimes fail with "column could not be found in any
+// table in scope" (Error 1105). Fully qualifying the column as
+// table.column works around this.
+func (w *RetentionWorker) purgeEvents(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := w.db.ExecContext(ctx,
+		`DELETE FROM ft_events WHERE ft_events.received_at < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("delete events: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		w.db.MarkDirty()
+	}
+	return n, nil
 }
 
 // purgeSessions deletes SDK sessions older than the cutoff.
 func (w *RetentionWorker) purgeSessions(ctx context.Context, cutoff time.Time) (int64, error) {
-	var total int64
-	for {
-		res, err := w.db.ExecContext(ctx,
-			`DELETE FROM sessions WHERE updated_at < ? LIMIT 1000`, cutoff)
-		if err != nil {
-			return total, fmt.Errorf("delete sessions: %w", err)
-		}
-		n, _ := res.RowsAffected()
-		total += n
-		if n > 0 {
-			w.db.MarkDirty()
-		}
-		if n < 1000 {
-			break
-		}
+	// Dolt workaround: fully qualify columns to avoid resolution bugs.
+	res, err := w.db.ExecContext(ctx,
+		`DELETE FROM sessions WHERE sessions.updated_at < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("delete sessions: %w", err)
 	}
-	return total, nil
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		w.db.MarkDirty()
+	}
+	return n, nil
 }
 
 // purgeAuthSessions removes expired dashboard login tokens.
 // The dashboard auth sessions are stored in the auth_sessions table
 // (distinct from SDK sessions in the sessions table).
-func (w *RetentionWorker) purgeAuthSessions(ctx context.Context) (int64, error) {
+func (w *RetentionWorker) purgeAuthSessions(ctx context.Context) (int64, error) { //nolint:unparam // error is always nil but kept for interface consistency
 	res, err := w.db.ExecContext(ctx,
-		`DELETE FROM auth_sessions WHERE expires_at < ?`, time.Now().UTC())
+		`DELETE FROM auth_sessions WHERE auth_sessions.expires_at < ?`, time.Now().UTC())
 	if err != nil {
 		// Table may not exist yet if dashboard auth hasn't been initialized.
 		// Silently return 0 rather than logging an error every cycle.

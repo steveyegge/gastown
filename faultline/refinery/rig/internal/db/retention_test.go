@@ -79,10 +79,10 @@ func openTestDB(t *testing.T) *DB {
 	}
 	t.Cleanup(func() {
 		// Clean up test data.
-		d.ExecContext(context.Background(), "DELETE FROM events")
-		d.ExecContext(context.Background(), "DELETE FROM sessions")
-		d.ExecContext(context.Background(), "DELETE FROM auth_sessions")
-		d.Close()
+		_, _ = d.ExecContext(context.Background(), "DELETE FROM ft_events")
+		_, _ = d.ExecContext(context.Background(), "DELETE FROM sessions")
+		_, _ = d.ExecContext(context.Background(), "DELETE FROM auth_sessions")
+		_ = d.Close()
 	})
 	return d
 }
@@ -93,10 +93,10 @@ func TestPurgeEvents_Integration(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	// Ensure a project exists for FK-free inserts.
-	d.ExecContext(ctx, `INSERT IGNORE INTO projects (id, name, slug, dsn_public_key) VALUES (1, 'test', 'test', 'testkey000')`)
+	_, _ = d.ExecContext(ctx, `INSERT IGNORE INTO projects (id, name, slug, dsn_public_key) VALUES (1, 'test', 'test', 'testkey000')`)
 
 	// Ensure an issue group exists for FK-free inserts.
-	d.ExecContext(ctx, `INSERT IGNORE INTO issue_groups (id, project_id, fingerprint, title, level, status, first_seen, last_seen)
+	_, _ = d.ExecContext(ctx, `INSERT IGNORE INTO issue_groups (id, project_id, fingerprint, title, level, status, first_seen, last_seen)
 		VALUES ('grp-1', 1, 'fp-1', 'Test Issue', 'error', 'unresolved', NOW(), NOW())`)
 
 	now := time.Now().UTC()
@@ -105,13 +105,13 @@ func TestPurgeEvents_Integration(t *testing.T) {
 	// Insert old and recent events.
 	for i := 0; i < 3; i++ {
 		id := fmt.Sprintf("old-evt-%d", i)
-		d.ExecContext(ctx, `INSERT IGNORE INTO events (id, project_id, event_id, fingerprint, group_id, level, raw_json, timestamp, received_at)
+		_, _ = d.ExecContext(ctx, `INSERT IGNORE INTO ft_events (id, project_id, event_id, fingerprint, group_id, level, raw_json, timestamp, received_at)
 			VALUES (?, 1, ?, 'fp-1', 'grp-1', 'error', '{}', ?, ?)`,
 			id, id, old, old)
 	}
 	for i := 0; i < 2; i++ {
 		id := fmt.Sprintf("new-evt-%d", i)
-		d.ExecContext(ctx, `INSERT IGNORE INTO events (id, project_id, event_id, fingerprint, group_id, level, raw_json, timestamp, received_at)
+		_, _ = d.ExecContext(ctx, `INSERT IGNORE INTO ft_events (id, project_id, event_id, fingerprint, group_id, level, raw_json, timestamp, received_at)
 			VALUES (?, 1, ?, 'fp-1', 'grp-1', 'error', '{}', ?, ?)`,
 			id, id, now, now)
 	}
@@ -133,7 +133,7 @@ func TestPurgeEvents_Integration(t *testing.T) {
 
 	// Verify recent events survive.
 	var count int
-	d.QueryRowContext(ctx, "SELECT COUNT(*) FROM events").Scan(&count)
+	_ = d.QueryRowContext(ctx, "SELECT COUNT(*) FROM ft_events").Scan(&count)
 	if count != 2 {
 		t.Errorf("remaining events = %d, want 2", count)
 	}
@@ -150,13 +150,13 @@ func TestPurgeSessions_Integration(t *testing.T) {
 	// Insert old sessions.
 	for i := 0; i < 3; i++ {
 		sid := fmt.Sprintf("old-sess-%d", i)
-		d.ExecContext(ctx, `INSERT IGNORE INTO sessions (session_id, project_id, status, started, updated_at)
+		_, _ = d.ExecContext(ctx, `INSERT IGNORE INTO sessions (session_id, project_id, status, started, updated_at)
 			VALUES (?, 1, 'ok', ?, ?)`, sid, old, old)
 	}
 	// Insert recent sessions.
 	for i := 0; i < 2; i++ {
 		sid := fmt.Sprintf("new-sess-%d", i)
-		d.ExecContext(ctx, `INSERT IGNORE INTO sessions (session_id, project_id, status, started, updated_at)
+		_, _ = d.ExecContext(ctx, `INSERT IGNORE INTO sessions (session_id, project_id, status, started, updated_at)
 			VALUES (?, 1, 'ok', ?, ?)`, sid, now, now)
 	}
 
@@ -176,7 +176,7 @@ func TestPurgeSessions_Integration(t *testing.T) {
 	}
 
 	var count int
-	d.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE session_id LIKE 'new-sess-%' OR session_id LIKE 'old-sess-%'").Scan(&count)
+	_ = d.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE session_id LIKE 'new-sess-%' OR session_id LIKE 'old-sess-%'").Scan(&count)
 	if count != 2 {
 		t.Errorf("remaining sessions = %d, want 2", count)
 	}
@@ -205,8 +205,8 @@ func TestPurgeEvents_BatchDeletion(t *testing.T) {
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	d.ExecContext(ctx, `INSERT IGNORE INTO projects (id, name, slug, dsn_public_key) VALUES (1, 'test', 'test', 'testkey000')`)
-	d.ExecContext(ctx, `INSERT IGNORE INTO issue_groups (id, project_id, fingerprint, title, level, status, first_seen, last_seen)
+	_, _ = d.ExecContext(ctx, `INSERT IGNORE INTO projects (id, name, slug, dsn_public_key) VALUES (1, 'test', 'test', 'testkey000')`)
+	_, _ = d.ExecContext(ctx, `INSERT IGNORE INTO issue_groups (id, project_id, fingerprint, title, level, status, first_seen, last_seen)
 		VALUES ('grp-batch', 1, 'fp-batch', 'Batch Test', 'error', 'unresolved', NOW(), NOW())`)
 
 	old := time.Now().UTC().Add(-200 * 24 * time.Hour)
@@ -215,7 +215,7 @@ func TestPurgeEvents_BatchDeletion(t *testing.T) {
 	for i := 0; i < 1050; i++ {
 		id := fmt.Sprintf("batch-evt-%04d", i)
 		raw, _ := json.Marshal(map[string]string{"i": fmt.Sprintf("%d", i)})
-		d.ExecContext(ctx, `INSERT IGNORE INTO events (id, project_id, event_id, fingerprint, group_id, level, raw_json, timestamp, received_at)
+		_, _ = d.ExecContext(ctx, `INSERT IGNORE INTO ft_events (id, project_id, event_id, fingerprint, group_id, level, raw_json, timestamp, received_at)
 			VALUES (?, 1, ?, 'fp-batch', 'grp-batch', 'error', ?, ?, ?)`,
 			id, id, string(raw), old, old)
 	}
@@ -241,17 +241,17 @@ func TestRetentionWorkerPurge_Integration(t *testing.T) {
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	d.ExecContext(ctx, `INSERT IGNORE INTO projects (id, name, slug, dsn_public_key) VALUES (1, 'test', 'test', 'testkey000')`)
-	d.ExecContext(ctx, `INSERT IGNORE INTO issue_groups (id, project_id, fingerprint, title, level, status, first_seen, last_seen)
+	_, _ = d.ExecContext(ctx, `INSERT IGNORE INTO projects (id, name, slug, dsn_public_key) VALUES (1, 'test', 'test', 'testkey000')`)
+	_, _ = d.ExecContext(ctx, `INSERT IGNORE INTO issue_groups (id, project_id, fingerprint, title, level, status, first_seen, last_seen)
 		VALUES ('grp-purge', 1, 'fp-purge', 'Purge Test', 'error', 'unresolved', NOW(), NOW())`)
 
 	now := time.Now().UTC()
 	old := now.Add(-100 * 24 * time.Hour)
 
 	// Insert old event and session.
-	d.ExecContext(ctx, `INSERT IGNORE INTO events (id, project_id, event_id, fingerprint, group_id, level, raw_json, timestamp, received_at)
+	_, _ = d.ExecContext(ctx, `INSERT IGNORE INTO ft_events (id, project_id, event_id, fingerprint, group_id, level, raw_json, timestamp, received_at)
 		VALUES ('purge-evt-1', 1, 'purge-evt-1', 'fp-purge', 'grp-purge', 'error', '{}', ?, ?)`, old, old)
-	d.ExecContext(ctx, `INSERT IGNORE INTO sessions (session_id, project_id, status, started, updated_at)
+	_, _ = d.ExecContext(ctx, `INSERT IGNORE INTO sessions (session_id, project_id, status, started, updated_at)
 		VALUES ('purge-sess-1', 1, 'ok', ?, ?)`, old, old)
 
 	w := NewRetentionWorker(d, log, RetentionConfig{
@@ -264,8 +264,8 @@ func TestRetentionWorkerPurge_Integration(t *testing.T) {
 	w.purge(ctx)
 
 	var eventCount, sessionCount int
-	d.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE id = 'purge-evt-1'").Scan(&eventCount)
-	d.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE session_id = 'purge-sess-1'").Scan(&sessionCount)
+	_ = d.QueryRowContext(ctx, "SELECT COUNT(*) FROM ft_events WHERE id = 'purge-evt-1'").Scan(&eventCount)
+	_ = d.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE session_id = 'purge-sess-1'").Scan(&sessionCount)
 
 	if eventCount != 0 {
 		t.Errorf("old event not purged")

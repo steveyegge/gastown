@@ -11,18 +11,17 @@ linters:
     - unconvert
     - unparam
     - gocritic
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-  gosec:
-    excludes:
-      - G304  # file path from variable (trusted internal paths)
-      - G404  # math/rand (non-security use)
-  revive:
-    rules:
-      - name: exported
-        disabled: true  # don't require comments on all exports yet
+  settings:
+    errcheck:
+      check-type-assertions: true
+    gosec:
+      excludes:
+        - G304  # file path from variable (trusted internal paths)
+        - G404  # math/rand (non-security use)
+    revive:
+      rules:
+        - name: exported
+          disabled: true  # don't require comments on all exports yet
 
 run:
   timeout: 5m

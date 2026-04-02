@@ -83,4 +83,3 @@ func retryAfterSeconds(lim *rate.Limiter) int {
 func formatRateLimitHeader(retryAfter int) string {
 	return fmt.Sprintf("%d::project", retryAfter)
 }
-

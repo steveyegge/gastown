@@ -15,7 +15,7 @@ import (
 func (d *DB) InsertEvent(ctx context.Context, eventID string, projectID int64, fingerprint, groupID string, ts time.Time, platform, level, culprit, message, environment, release, exceptionType string, raw json.RawMessage) (bool, error) {
 	id := uuid.New().String()
 	res, err := d.ExecContext(ctx, `
-		INSERT IGNORE INTO events (id, project_id, event_id, fingerprint, group_id, level, culprit, message, platform, environment, release_name, exception_type, raw_json, timestamp, received_at)
+		INSERT IGNORE INTO ft_events (id, project_id, event_id, fingerprint, group_id, level, culprit, message, platform, environment, release_name, exception_type, raw_json, timestamp, received_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, projectID, eventID, fingerprint, groupID, level, culprit, message, platform, environment, release, exceptionType, string(raw), ts, time.Now().UTC(),
 	)
@@ -32,7 +32,7 @@ func (d *DB) InsertEvent(ctx context.Context, eventID string, projectID int64, f
 // EventExists checks if an event_id is already stored for a project.
 func (d *DB) EventExists(ctx context.Context, projectID int64, eventID string) (bool, error) {
 	var x int
-	err := d.QueryRowContext(ctx, `SELECT 1 FROM events WHERE project_id = ? AND event_id = ?`, projectID, eventID).Scan(&x)
+	err := d.QueryRowContext(ctx, `SELECT 1 FROM ft_events WHERE project_id = ? AND event_id = ?`, projectID, eventID).Scan(&x)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil

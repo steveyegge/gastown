@@ -1,0 +1,31 @@
+# fly.toml app configuration file generated for faultline-relay on 2026-03-25T15:11:41-07:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'faultline-relay'
+primary_region = 'sjc'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  RELAY_ADDR = ':9090'
+  RELAY_DB = '/data/relay.db'
+  RELAY_PURGE_INTERVAL_MIN = '60'
+  RELAY_TTL_DAYS = '14'
+
+[[mounts]]
+  source = 'relay_data'
+  destination = '/data'
+
+[http_service]
+  internal_port = 9090
+  force_https = true
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'

@@ -40,7 +40,7 @@ type EnvelopeItem struct {
 // Handles gzip Content-Encoding transparently.
 func ParseEnvelope(r *http.Request) (*EnvelopeHeader, []EnvelopeItem, error) {
 	body := http.MaxBytesReader(nil, r.Body, maxEnvelopeSize)
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	var reader io.Reader = body
 	if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
@@ -48,7 +48,7 @@ func ParseEnvelope(r *http.Request) (*EnvelopeHeader, []EnvelopeItem, error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("gzip: %w", err)
 		}
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		reader = gz
 	}
 
@@ -61,6 +61,19 @@ func ParseEnvelope(r *http.Request) (*EnvelopeHeader, []EnvelopeItem, error) {
 }
 
 func parseEnvelopeBytes(data []byte) (*EnvelopeHeader, []EnvelopeItem, error) {
+	// Auto-detect gzip: magic bytes 0x1f 0x8b.
+	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
+		gz, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return nil, nil, fmt.Errorf("gzip decompress: %w", err)
+		}
+		defer func() { _ = gz.Close() }()
+		data, err = io.ReadAll(gz)
+		if err != nil {
+			return nil, nil, fmt.Errorf("gzip read: %w", err)
+		}
+	}
+
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 0, maxItemSize), maxItemSize)
 
@@ -74,7 +87,13 @@ func parseEnvelopeBytes(data []byte) (*EnvelopeHeader, []EnvelopeItem, error) {
 	}
 
 	var items []EnvelopeItem
-	remaining := data[len(scanner.Bytes())+1:] // skip past header + newline
+	// Skip past header + newline. Guard against envelopes that are
+	// header-only with no trailing newline (e.g., relay poll artifacts).
+	headerEnd := len(scanner.Bytes()) + 1 // +1 for the newline
+	if headerEnd > len(data) {
+		return &hdr, nil, nil // header-only envelope, no items
+	}
+	remaining := data[headerEnd:]
 
 	for len(remaining) > 0 {
 		// Trim leading newlines between items.

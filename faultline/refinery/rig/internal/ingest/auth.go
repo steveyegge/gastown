@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // ProjectAuth maps public keys to project IDs and optional rig names.
 type ProjectAuth struct {
+	mu sync.RWMutex
 	// keyToProject maps sentry_key (public DSN key) -> project_id.
 	keyToProject map[string]int64
 	// projectToRig maps project_id -> target rig name for Gas Town integration.
@@ -36,8 +38,36 @@ func NewProjectAuth(pairs []string) (*ProjectAuth, error) {
 	return &ProjectAuth{keyToProject: keys, projectToRig: rigs}, nil
 }
 
+// Register adds a new project to the auth map at runtime (no restart needed).
+func (a *ProjectAuth) Register(publicKey string, projectID int64, rig string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.keyToProject[publicKey] = projectID
+	if rig != "" {
+		a.projectToRig[projectID] = rig
+	}
+}
+
+// Unregister removes a project from the auth map at runtime.
+func (a *ProjectAuth) Unregister(publicKey string, projectID int64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.keyToProject, publicKey)
+	delete(a.projectToRig, projectID)
+}
+
+// UnregisterAll removes all projects from the auth map.
+func (a *ProjectAuth) UnregisterAll() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.keyToProject = make(map[string]int64)
+	a.projectToRig = make(map[int64]string)
+}
+
 // RigForProject returns the target Gas Town rig for a project, or "" if none configured.
 func (a *ProjectAuth) RigForProject(projectID int64) string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	return a.projectToRig[projectID]
 }
 
@@ -48,11 +78,35 @@ func (a *ProjectAuth) Authenticate(r *http.Request) (int64, error) {
 	if key == "" {
 		return 0, fmt.Errorf("missing sentry authentication")
 	}
+	a.mu.RLock()
 	pid, ok := a.keyToProject[key]
+	a.mu.RUnlock()
 	if !ok {
 		return 0, fmt.Errorf("invalid sentry key")
 	}
 	return pid, nil
+}
+
+// ProjectRecord is the minimal project info needed to build auth from a database.
+type ProjectRecord struct {
+	ID        int64
+	PublicKey string
+	Slug      string // used as rig name
+}
+
+// NewProjectAuthFromRecords creates an authenticator from database project records.
+func NewProjectAuthFromRecords(records []ProjectRecord) *ProjectAuth {
+	keys := make(map[string]int64, len(records))
+	rigs := make(map[int64]string, len(records))
+	for _, r := range records {
+		if r.PublicKey != "" {
+			keys[r.PublicKey] = r.ID
+		}
+		if r.Slug != "" {
+			rigs[r.ID] = r.Slug
+		}
+	}
+	return &ProjectAuth{keyToProject: keys, projectToRig: rigs}
 }
 
 // extractKey pulls the sentry_key from the request in priority order:

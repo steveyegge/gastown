@@ -10,8 +10,8 @@ import (
 var (
 	emailRe      = regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
 	creditCardRe = regexp.MustCompile(`\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[ \-]?\d{4}[ \-]?\d{4}[ \-]?\d{1,7}\b`)
-	ssnRe    = regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`)
-	bearerRe = regexp.MustCompile(`(?i)bearer\s+[a-zA-Z0-9\-._~+/]+=*`)
+	ssnRe        = regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`)
+	bearerRe     = regexp.MustCompile(`(?i)bearer\s+[a-zA-Z0-9\-._~+/]+=*`)
 	apiKeyRe     = regexp.MustCompile(`(?i)(?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token|auth[_-]?token)["\s:=]+["']?([a-zA-Z0-9\-._~+/]{16,})["']?`)
 	passwordRe   = regexp.MustCompile(`(?i)(?:password|passwd|pwd)["\s:=]+["']?([^\s"',}{]{1,})["']?`)
 )

@@ -1,8 +1,0 @@
-feat: add database monitoring schema and migrations (fl-b4f)
-
-Create three new tables for database monitoring:
-- monitored_databases: tracks databases with encrypted connection strings
-- db_checks: records individual health check results
-- db_monitor_state: current monitoring state per database
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

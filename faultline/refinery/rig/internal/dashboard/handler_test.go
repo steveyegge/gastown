@@ -27,13 +27,13 @@ func TestPathInt64(t *testing.T) {
 
 func TestQueryInt(t *testing.T) {
 	r := httptest.NewRequest("GET", "/?page=3&bad=xyz", nil)
-	if v := queryInt(r, "page", 1); v != 3 {
+	if v := queryInt(r, "page"); v != 3 {
 		t.Errorf("expected 3, got %d", v)
 	}
-	if v := queryInt(r, "bad", 1); v != 1 {
+	if v := queryInt(r, "bad"); v != 1 {
 		t.Errorf("expected fallback 1, got %d", v)
 	}
-	if v := queryInt(r, "missing", 1); v != 1 {
+	if v := queryInt(r, "missing"); v != 1 {
 		t.Errorf("expected fallback 1, got %d", v)
 	}
 }

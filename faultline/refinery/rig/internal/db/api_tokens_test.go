@@ -18,10 +18,10 @@ func openTokenTestDB(t *testing.T) *DB {
 		t.Skipf("Dolt not available: %v", err)
 	}
 	t.Cleanup(func() {
-		d.ExecContext(context.Background(), "DELETE FROM api_tokens")
-		d.ExecContext(context.Background(), "DELETE FROM auth_sessions")
-		d.ExecContext(context.Background(), "DELETE FROM accounts")
-		d.Close()
+		_, _ = d.ExecContext(context.Background(), "DELETE FROM api_tokens")
+		_, _ = d.ExecContext(context.Background(), "DELETE FROM auth_sessions")
+		_, _ = d.ExecContext(context.Background(), "DELETE FROM accounts")
+		_ = d.Close()
 	})
 	return d
 }
@@ -37,7 +37,7 @@ func TestCreateAndValidateAPIToken(t *testing.T) {
 	}
 
 	// Create a token with no expiry and no project scope.
-	plaintext, token, err := d.CreateAPIToken(ctx, acct.ID, nil, "ci-token", nil)
+	plaintext, token, err := d.CreateAPIToken(ctx, acct.ID, nil, "member", "ci-token", nil)
 	if err != nil {
 		t.Fatalf("create api token: %v", err)
 	}
@@ -54,28 +54,34 @@ func TestCreateAndValidateAPIToken(t *testing.T) {
 	if token.Name != "ci-token" {
 		t.Errorf("expected name 'ci-token', got %q", token.Name)
 	}
+	if token.Role != "member" {
+		t.Errorf("expected role 'member', got %q", token.Role)
+	}
 	if token.Prefix == "" {
 		t.Error("expected non-empty prefix")
 	}
 
 	// Validate the token.
-	account, err := d.ValidateAPIToken(ctx, plaintext)
+	result, err := d.ValidateAPIToken(ctx, plaintext)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	if account == nil {
-		t.Fatal("expected account, got nil")
+	if result == nil {
+		t.Fatal("expected result, got nil")
 	}
-	if account.ID != acct.ID {
-		t.Errorf("expected account %d, got %d", acct.ID, account.ID)
+	if result.Account.ID != acct.ID {
+		t.Errorf("expected account %d, got %d", acct.ID, result.Account.ID)
+	}
+	if result.TokenRole != "member" {
+		t.Errorf("expected token role 'member', got %q", result.TokenRole)
 	}
 
 	// Invalid token should return nil.
-	account, err = d.ValidateAPIToken(ctx, "fl_invalid_token_value")
+	result, err = d.ValidateAPIToken(ctx, "fl_invalid_token_value")
 	if err != nil {
 		t.Fatalf("validate invalid: %v", err)
 	}
-	if account != nil {
+	if result != nil {
 		t.Error("expected nil for invalid token")
 	}
 }
@@ -90,12 +96,30 @@ func TestAPITokenWithProjectScope(t *testing.T) {
 	}
 
 	projectID := int64(42)
-	_, token, err := d.CreateAPIToken(ctx, acct.ID, &projectID, "project-token", nil)
+	plaintext, token, err := d.CreateAPIToken(ctx, acct.ID, &projectID, "viewer", "project-token", nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if token.ProjectID == nil || *token.ProjectID != 42 {
 		t.Errorf("expected project_id 42, got %v", token.ProjectID)
+	}
+	if token.Role != "viewer" {
+		t.Errorf("expected role 'viewer', got %q", token.Role)
+	}
+
+	// Validate returns project scope and token role.
+	result, err := d.ValidateAPIToken(ctx, plaintext)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected result, got nil")
+	}
+	if result.TokenRole != "viewer" {
+		t.Errorf("expected token role 'viewer', got %q", result.TokenRole)
+	}
+	if result.ProjectID == nil || *result.ProjectID != 42 {
+		t.Errorf("expected project_id 42, got %v", result.ProjectID)
 	}
 }
 
@@ -110,17 +134,17 @@ func TestAPITokenExpiry(t *testing.T) {
 
 	// Create a token that already expired.
 	past := time.Now().UTC().Add(-1 * time.Hour)
-	plaintext, _, err := d.CreateAPIToken(ctx, acct.ID, nil, "expired-token", &past)
+	plaintext, _, err := d.CreateAPIToken(ctx, acct.ID, nil, "member", "expired-token", &past)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	// Validation should fail.
-	account, err := d.ValidateAPIToken(ctx, plaintext)
+	result, err := d.ValidateAPIToken(ctx, plaintext)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	if account != nil {
+	if result != nil {
 		t.Error("expected nil for expired token")
 	}
 }
@@ -134,7 +158,7 @@ func TestAPITokenRevoke(t *testing.T) {
 		t.Fatalf("create account: %v", err)
 	}
 
-	plaintext, token, err := d.CreateAPIToken(ctx, acct.ID, nil, "to-revoke", nil)
+	plaintext, token, err := d.CreateAPIToken(ctx, acct.ID, nil, "member", "to-revoke", nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -145,11 +169,11 @@ func TestAPITokenRevoke(t *testing.T) {
 	}
 
 	// Validation should fail.
-	account, err := d.ValidateAPIToken(ctx, plaintext)
+	result, err := d.ValidateAPIToken(ctx, plaintext)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	if account != nil {
+	if result != nil {
 		t.Error("expected nil for revoked token")
 	}
 
@@ -169,11 +193,11 @@ func TestListAPITokens(t *testing.T) {
 	}
 
 	// Create multiple tokens.
-	_, _, err = d.CreateAPIToken(ctx, acct.ID, nil, "token-1", nil)
+	_, _, err = d.CreateAPIToken(ctx, acct.ID, nil, "member", "token-1", nil)
 	if err != nil {
 		t.Fatalf("create 1: %v", err)
 	}
-	_, tok2, err := d.CreateAPIToken(ctx, acct.ID, nil, "token-2", nil)
+	_, tok2, err := d.CreateAPIToken(ctx, acct.ID, nil, "member", "token-2", nil)
 	if err != nil {
 		t.Fatalf("create 2: %v", err)
 	}
@@ -187,7 +211,9 @@ func TestListAPITokens(t *testing.T) {
 	}
 
 	// Revoke one.
-	d.RevokeAPIToken(ctx, tok2.ID, acct.ID)
+	if err := d.RevokeAPIToken(ctx, tok2.ID, acct.ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
 
 	tokens, err = d.ListAPITokens(ctx, acct.ID)
 	if err != nil {
@@ -211,7 +237,7 @@ func TestRevokeTokenWrongAccount(t *testing.T) {
 		t.Fatalf("create account 2: %v", err)
 	}
 
-	_, token, err := d.CreateAPIToken(ctx, acct1.ID, nil, "my-token", nil)
+	_, token, err := d.CreateAPIToken(ctx, acct1.ID, nil, "member", "my-token", nil)
 	if err != nil {
 		t.Fatalf("create token: %v", err)
 	}
@@ -219,6 +245,62 @@ func TestRevokeTokenWrongAccount(t *testing.T) {
 	// acct2 should not be able to revoke acct1's token.
 	if err := d.RevokeAPIToken(ctx, token.ID, acct2.ID); err == nil {
 		t.Error("expected error revoking another account's token")
+	}
+}
+
+func TestAPITokenRoleScoping(t *testing.T) {
+	d := openTokenTestDB(t)
+	ctx := context.Background()
+
+	// Admin account creates a viewer-scoped token.
+	acct, err := d.CreateAccount(ctx, "admin@role.test", "Admin", "password123", "admin")
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+
+	plaintext, token, err := d.CreateAPIToken(ctx, acct.ID, nil, "viewer", "read-only", nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if token.Role != "viewer" {
+		t.Errorf("expected token role 'viewer', got %q", token.Role)
+	}
+
+	result, err := d.ValidateAPIToken(ctx, plaintext)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected result, got nil")
+	}
+	// Account role is admin, token role is viewer.
+	if result.Account.Role != "admin" {
+		t.Errorf("expected account role 'admin', got %q", result.Account.Role)
+	}
+	if result.TokenRole != "viewer" {
+		t.Errorf("expected token role 'viewer', got %q", result.TokenRole)
+	}
+	if result.ProjectID != nil {
+		t.Errorf("expected nil project_id, got %v", result.ProjectID)
+	}
+}
+
+func TestAPITokenDefaultRole(t *testing.T) {
+	d := openTokenTestDB(t)
+	ctx := context.Background()
+
+	acct, err := d.CreateAccount(ctx, "default@role.test", "Default", "password123", "owner")
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+
+	// Empty role should default to member.
+	_, token, err := d.CreateAPIToken(ctx, acct.ID, nil, "", "default-role", nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if token.Role != "member" {
+		t.Errorf("expected default role 'member', got %q", token.Role)
 	}
 }
 

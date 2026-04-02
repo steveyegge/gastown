@@ -4,8 +4,126 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
+
+	"github.com/outdoorsea/faultline/internal/db"
 )
+
+// FingerprintWithRules checks custom fingerprint rules before falling back to
+// the default fingerprint logic. Rules are checked in priority order (highest first).
+func FingerprintWithRules(raw json.RawMessage, rules []db.FingerprintRule) string {
+	if len(rules) == 0 {
+		return Fingerprint(raw)
+	}
+
+	// Parse fields needed for rule matching.
+	var evt struct {
+		Exception *struct {
+			Values []struct {
+				Type       string `json:"type"`
+				Value      string `json:"value"`
+				Stacktrace *struct {
+					Frames []struct {
+						Module string `json:"module"`
+					} `json:"frames"`
+				} `json:"stacktrace"`
+			} `json:"values"`
+		} `json:"exception"`
+		Message  string `json:"message"`
+		Logentry *struct {
+			Formatted string `json:"formatted"`
+			Message   string `json:"message"`
+		} `json:"logentry"`
+		Tags map[string]string `json:"tags"`
+	}
+	_ = json.Unmarshal(raw, &evt)
+
+	// Ensure rules are sorted by priority descending.
+	sorted := make([]db.FingerprintRule, len(rules))
+	copy(sorted, rules)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Priority > sorted[j].Priority
+	})
+
+	// Separate merge rules from matching rules — merge rules act on the computed fingerprint.
+	var mergeRules []db.FingerprintRule
+	var matchRules []db.FingerprintRule
+	for _, rule := range sorted {
+		if rule.MatchType == "fingerprint_merge" {
+			mergeRules = append(mergeRules, rule)
+		} else {
+			matchRules = append(matchRules, rule)
+		}
+	}
+
+	for _, rule := range matchRules {
+		var value string
+		switch rule.MatchType {
+		case "exception_type":
+			if evt.Exception != nil && len(evt.Exception.Values) > 0 {
+				value = evt.Exception.Values[len(evt.Exception.Values)-1].Type
+			}
+		case "message":
+			value = evt.Message
+			if value == "" && evt.Logentry != nil {
+				value = evt.Logentry.Formatted
+				if value == "" {
+					value = evt.Logentry.Message
+				}
+			}
+		case "module":
+			if evt.Exception != nil {
+				for _, ex := range evt.Exception.Values {
+					if ex.Stacktrace != nil && len(ex.Stacktrace.Frames) > 0 {
+						// Use the top frame's module.
+						value = ex.Stacktrace.Frames[len(ex.Stacktrace.Frames)-1].Module
+						break
+					}
+				}
+			}
+		case "tag":
+			// Pattern format for tags: "tag_name:regex"
+			// The tag name is everything before the first colon, regex is the rest.
+			if idx := strings.Index(rule.Pattern, ":"); idx > 0 && evt.Tags != nil {
+				tagName := rule.Pattern[:idx]
+				tagVal, ok := evt.Tags[tagName]
+				if !ok {
+					continue
+				}
+				tagPattern := rule.Pattern[idx+1:]
+				matched, err := regexp.MatchString(tagPattern, tagVal)
+				if err != nil || !matched {
+					continue
+				}
+				return rule.Fingerprint
+			}
+			continue
+		default:
+			continue
+		}
+
+		if value == "" {
+			continue
+		}
+
+		matched, err := regexp.MatchString(rule.Pattern, value)
+		if err != nil || !matched {
+			continue
+		}
+		return rule.Fingerprint
+	}
+
+	// No matching rule found — compute default fingerprint, then check merge rules.
+	fp := Fingerprint(raw)
+	for _, rule := range mergeRules {
+		if rule.Pattern == fp {
+			return rule.Fingerprint
+		}
+	}
+	return fp
+}
 
 // Fingerprint computes a SHA256 group hash from a Sentry event.
 // Priority:
@@ -28,7 +146,7 @@ func Fingerprint(raw json.RawMessage) string {
 				} `json:"stacktrace"`
 			} `json:"values"`
 		} `json:"exception"`
-		Message string `json:"message"`
+		Message  string `json:"message"`
 		Logentry *struct {
 			Formatted string `json:"formatted"`
 			Message   string `json:"message"`
@@ -105,19 +223,19 @@ func IssueTitle(raw json.RawMessage) string {
 	if evt.Exception != nil && len(evt.Exception.Values) > 0 {
 		ex := evt.Exception.Values[len(evt.Exception.Values)-1]
 		if ex.Value != "" {
-			return ex.Type + ": " + ex.Value
+			return truncate(ex.Type + ": " + ex.Value)
 		}
-		return ex.Type
+		return truncate(ex.Type)
 	}
 	if evt.Message != "" {
-		return truncate(evt.Message, 200)
+		return truncate(evt.Message)
 	}
 	if evt.Logentry != nil {
 		msg := evt.Logentry.Formatted
 		if msg == "" {
 			msg = evt.Logentry.Message
 		}
-		return truncate(msg, 200)
+		return truncate(msg)
 	}
 	return "Unknown event"
 }
@@ -164,9 +282,11 @@ func hashString(s string) string {
 	return fmt.Sprintf("%x", h)
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
+const maxTitleLen = 200
+
+func truncate(s string) string {
+	if len(s) <= maxTitleLen {
 		return s
 	}
-	return s[:n]
+	return s[:maxTitleLen]
 }

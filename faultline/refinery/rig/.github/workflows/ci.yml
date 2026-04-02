@@ -39,7 +39,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.11
           args: --timeout=5m
@@ -55,3 +55,35 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      dolt:
+        image: dolthub/dolt-sql-server:latest
+        ports:
+          - 3307:3306
+        env:
+          DOLT_ROOT_HOST: "%"
+        options: >-
+          --health-cmd "dolt sql -q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Integration tests
+        run: go test -race -count=1 -timeout=5m ./...
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t faultline:ci-${{ github.sha }} .

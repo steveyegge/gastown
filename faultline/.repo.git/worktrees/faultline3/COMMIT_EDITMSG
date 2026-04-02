@@ -1,8 +1,12 @@
-feat: add GitHub Issues integration plugin (fl-88c.2)
+feat: add Redis health checker for database monitoring (fl-nvu)
 
-Implement github_issues integration that creates, updates, and closes
-GitHub issues in response to faultline lifecycle events. Uses GitHub
-REST API with PAT auth, bidirectional linking via faultline-group-id
-markers, and configurable label mapping per severity level.
+Implements checkRedis as a CheckFunc for the dbmon framework. Checks:
+PING, INFO memory (used_memory vs maxmemory), INFO stats (evicted_keys
+delta), SLOWLOG GET 10, INFO clients (connected_clients vs maxclients),
+INFO replication (master_link_status, master_last_io_seconds_ago).
+
+Uses RedisClient interface for testability without requiring a live
+Redis instance. Thresholds from design spec (memory >90%, clients >80%,
+replication lag >10s) with override support via RedisThresholds.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

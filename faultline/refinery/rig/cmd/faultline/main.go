@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -12,34 +15,144 @@ import (
 	"time"
 
 	"github.com/outdoorsea/faultline/internal/api"
+	"github.com/outdoorsea/faultline/internal/ci"
 	"github.com/outdoorsea/faultline/internal/dashboard"
 	"github.com/outdoorsea/faultline/internal/db"
 	"github.com/outdoorsea/faultline/internal/gastown"
+	"github.com/outdoorsea/faultline/internal/healthmon"
 	"github.com/outdoorsea/faultline/internal/ingest"
+	"github.com/outdoorsea/faultline/internal/integrations"
+	_ "github.com/outdoorsea/faultline/internal/integrations/github" // register github_issues integration
+	slackint "github.com/outdoorsea/faultline/internal/integrations/slack" // register slack_bot integration
 	"github.com/outdoorsea/faultline/internal/notify"
+	"github.com/outdoorsea/faultline/internal/slackdm"
+	"github.com/outdoorsea/faultline/internal/poller"
 	"github.com/outdoorsea/faultline/internal/selfmon"
 	"github.com/outdoorsea/faultline/internal/server"
+	"github.com/outdoorsea/faultline/internal/uptimemon"
 )
 
 func main() {
+	// Subcommand routing.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "start":
+			cmdStart()
+			return
+		case "stop":
+			cmdStop()
+			return
+		case "status":
+			cmdStatus()
+			return
+		case "register":
+			cmdRegister()
+			return
+		case "relay":
+			cmdRelay()
+			return
+		case "serve":
+			// Fall through to server startup below.
+		case "help", "-h", "--help":
+			fmt.Println("Usage: faultline [command]")
+			fmt.Println()
+			fmt.Println("Commands:")
+			fmt.Println("  serve      Run server in foreground (default)")
+			fmt.Println("  start      Start server as background daemon")
+			fmt.Println("  stop       Stop the background daemon")
+			fmt.Println("  status     Show daemon status and health")
+			fmt.Println("  register   Register a new project")
+			fmt.Println("  relay      Run store-and-forward relay (SQLite, no Dolt)")
+			fmt.Println("  help       Show this help")
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
+			fmt.Fprintln(os.Stderr, "Run 'faultline help' for usage.")
+			os.Exit(1)
+		}
+	}
+
+	if err := runServe(); err != nil {
+		slog.New(slog.NewJSONHandler(os.Stdout, nil)).Error("fatal", "err", err)
+		os.Exit(1)
+	}
+}
+
+func runServe() error {
+	// Write pidfile when running as daemon.
+	if os.Getenv("FAULTLINE_DAEMON") == "1" {
+		if err := writePID(); err != nil {
+			return fmt.Errorf("error writing pidfile: %w", err)
+		}
+		defer removePID()
+	}
+
 	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})
 
 	addr := envOr("FAULTLINE_ADDR", ":8080")
 	dsn := envOr("FAULTLINE_DSN", "root@tcp(127.0.0.1:3307)/faultline")
-	projectPairs := strings.Split(envOr("FAULTLINE_PROJECTS", "1:default_key"), ",")
 	rateLimit := envOrFloat("FAULTLINE_RATE_LIMIT", 100) // events per second per project
 	retentionDays := envOrInt("FAULTLINE_RETENTION_DAYS", 90)
 	scrubPII := envOrBool("FAULTLINE_SCRUB_PII", true)
 
-	auth, err := ingest.NewProjectAuth(projectPairs)
+	dolt, err := db.Open(dsn)
 	if err != nil {
-		slog.New(jsonHandler).Error("invalid project auth config", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("database connection failed: %w", err)
 	}
+	defer func() { _ = dolt.Close() }()
+
+	// Bootstrap: if FAULTLINE_PROJECTS is set, seed those projects into the DB.
+	// This is for first-run only — after that, use `faultline register`.
+	if envProjects := os.Getenv("FAULTLINE_PROJECTS"); envProjects != "" {
+		for _, p := range strings.Split(envProjects, ",") {
+			parts := strings.SplitN(p, ":", 4)
+			if len(parts) < 2 {
+				continue
+			}
+			var id int64
+			if _, err := fmt.Sscanf(parts[0], "%d", &id); err != nil {
+				continue
+			}
+			name := parts[1]
+			if len(parts) >= 3 && parts[2] != "" {
+				name = parts[2]
+			}
+			_ = dolt.EnsureProject(context.Background(), id, name, name, parts[1])
+			if len(parts) == 4 && parts[3] != "" {
+				existing, _ := dolt.GetProject(context.Background(), id)
+				if existing != nil && (existing.Config == nil || existing.Config.URL == "") {
+					cfg := &db.ProjectConfig{URL: parts[3], DeploymentType: db.DeployLocal}
+					if existing.Config != nil {
+						cfg = existing.Config
+						cfg.URL = parts[3]
+					}
+					_ = dolt.UpdateProjectConfig(context.Background(), id, cfg)
+				}
+			}
+		}
+	}
+
+	// Load project auth from database — the DB is the source of truth.
+	projects, err := dolt.ListProjects(context.Background())
+	if err != nil {
+		return fmt.Errorf("load projects: %w", err)
+	}
+	var records []ingest.ProjectRecord
+	for _, p := range projects {
+		records = append(records, ingest.ProjectRecord{
+			ID:        p.ID,
+			PublicKey: p.DSNPublicKey,
+			Slug:      p.Slug,
+		})
+	}
+	auth := ingest.NewProjectAuthFromRecords(records)
 
 	// Self-monitoring: wrap the logger so error-level messages are reported
 	// as Sentry events to faultline's own ingest endpoint.
-	selfmonKey := envOr("FAULTLINE_SELFMON_KEY", firstKey(projectPairs))
+	selfmonKey := os.Getenv("FAULTLINE_SELFMON_KEY")
+	if selfmonKey == "" && len(records) > 0 {
+		selfmonKey = records[0].PublicKey
+	}
 	selfmonEndpoint := fmt.Sprintf("http://localhost%s/api/0/store/", addr)
 	smHandler := selfmon.NewHandler(jsonHandler, selfmon.Config{
 		Endpoint:  selfmonEndpoint,
@@ -48,13 +161,7 @@ func main() {
 	})
 	log := slog.New(smHandler)
 	log.Info("self-monitoring enabled", "endpoint", selfmonEndpoint)
-
-	dolt, err := db.Open(dsn)
-	if err != nil {
-		log.Error("database connection failed", "err", err)
-		os.Exit(1)
-	}
-	defer dolt.Close()
+	log.Info("loaded projects from database", "count", len(records))
 
 	// Gas Town integration bridge.
 	gtCfg := gastown.DefaultConfig()
@@ -63,14 +170,23 @@ func main() {
 	}
 	bridge := gastown.NewBridge(dolt, log, gtCfg, auth.RigForProject)
 
-	// Slack webhook notifications (optional).
+	// Webhook notifications: global fallback (env var) + per-project (DB config).
+	var globalNotifier notify.Notifier
 	if slackURL := os.Getenv("FAULTLINE_SLACK_WEBHOOK"); slackURL != "" {
-		slack := notify.NewSlackWebhook(slackURL, gtCfg.APIBaseURL, log)
-		if slack != nil {
-			bridge.SetNotifier(slack)
-			log.Info("slack notifications enabled")
-		}
+		globalNotifier = notify.NewSlackWebhook(slackURL, gtCfg.APIBaseURL, log)
+		log.Info("global slack notifications enabled")
 	}
+	provider := notify.NewDBProvider(dolt, log)
+	dispatcher := notify.NewDispatcher(globalNotifier, provider, gtCfg.APIBaseURL, log)
+
+	// Integration plugins: fire alongside webhooks for all lifecycle events.
+	integDispatcher := integrations.NewDispatcher(
+		&integrations.DBAdapter{DB: dolt},
+		log.With("component", "integrations"),
+	)
+	dispatcher.SetIntegrations(integDispatcher)
+
+	bridge.SetNotifier(dispatcher)
 
 	handler := &ingest.Handler{
 		DB:       dolt,
@@ -80,17 +196,79 @@ func main() {
 		ScrubPII: scrubPII,
 	}
 
+	slackDMs := &slackdm.Sender{
+		DB:  dolt,
+		Log: log.With("component", "slack-dm"),
+	}
+
 	apiHandler := &api.Handler{
-		DB:       dolt,
-		Log:      log,
-		Projects: buildProjectInfo(projectPairs, auth),
-		BaseURL:  gtCfg.APIBaseURL,
+		DB:         dolt,
+		Log:        log,
+		BaseURL:    gtCfg.APIBaseURL,
+		Auth:       auth,
+		HookSecret: os.Getenv("FAULTLINE_CI_WEBHOOK_SECRET"), // HMAC for resolve hook
+		SlackDMs:   slackDMs,
 	}
 
 	dash := &dashboard.Handler{
-		DB:  dolt,
-		Log: log,
+		DB:       dolt,
+		Log:      log,
+		SlackDMs: slackDMs,
 	}
+
+	// CI webhook handler — converts GitHub Actions failures to faultline events.
+	ciWebhookSecret := os.Getenv("FAULTLINE_CI_WEBHOOK_SECRET")
+	ciHandler := &ci.Handler{
+		Secret: ciWebhookSecret,
+		Log:    log,
+		LookupProject: func(repo string) int64 {
+			// Map GitHub repos to faultline project IDs.
+			// Projects register their repo via config.
+			projects, err := dolt.ListProjects(context.Background())
+			if err != nil {
+				return 0
+			}
+			for _, p := range projects {
+				if p.Slug == repo || p.Name == repo {
+					return p.ID
+				}
+				// Also match by repo name only (without owner).
+				parts := strings.Split(repo, "/")
+				if len(parts) == 2 && (p.Slug == parts[1] || p.Name == parts[1]) {
+					return p.ID
+				}
+			}
+			return 0
+		},
+		OnFailure: func(ctx context.Context, projectID int64, evt ci.CIEvent) error {
+			// Convert CI failure to a Sentry event and ingest it.
+			raw := ci.ConvertToSentryEvent(evt)
+			eventID := fmt.Sprintf("ci-%d-%s", evt.RunID, evt.Repo)
+			return handler.ProcessCIEvent(ctx, projectID, eventID, raw)
+		},
+		OnSuccess: func(ctx context.Context, projectID int64, evt ci.CIEvent) error {
+			// Store CI success in ci_runs for fix verification.
+			return dolt.InsertCIRun(ctx, projectID, evt.Repo, evt.Branch, evt.Commit,
+				evt.Workflow, evt.RunID, evt.RunURL, evt.Conclusion, evt.Actor, evt.Timestamp)
+		},
+	}
+
+	// Slack bot integration — receives interaction webhooks from Slack.
+	var slackHandler *slackint.WebhookHandler
+	slackSigningSecret := os.Getenv("FAULTLINE_SLACK_SIGNING_SECRET")
+	slackBotToken := os.Getenv("FAULTLINE_SLACK_BOT_TOKEN")
+	if slackBotToken != "" {
+		log.Info("slack bot integration enabled")
+	}
+	if slackSigningSecret != "" {
+		slackHandler = &slackint.WebhookHandler{
+			SigningSecret: slackSigningSecret,
+			DB:            dolt,
+			Log:           log.With("component", "slack"),
+		}
+		log.Info("slack interaction webhook enabled")
+	}
+	_ = slackBotToken // used by per-project integrations via integrations_config
 
 	rl := ingest.NewRateLimiter(rateLimit, log)
 
@@ -104,6 +282,88 @@ func main() {
 	// Start Gas Town bead resolution poller.
 	go bridge.RunPoller(ctx)
 
+	// Start slow-burn sweep (files beads for issues that missed the threshold).
+	go bridge.RunSlowBurn(ctx)
+
+	// Start Dolt/beads health monitor.
+	hmCfg := healthmon.DefaultConfig()
+	hmCfg.RunGTDoctor = envOrBool("FAULTLINE_HEALTHMON_DOCTOR", false)
+	hm := healthmon.New(dolt, log, hmCfg, func(severity, message string) {
+		if severity == "error" {
+			log.Error("healthmon: " + message)
+		} else {
+			log.Warn("healthmon: " + message)
+		}
+	})
+	go hm.Run(ctx)
+
+	// Start uptime monitor — periodic HTTP health checks for project URLs.
+	uptimeInterval := time.Duration(envOrInt("FAULTLINE_UPTIME_INTERVAL_SECS", 60)) * time.Second
+	um := uptimemon.New(
+		&uptimemon.DBProvider{DB: dolt.DB},
+		log,
+		uptimeInterval,
+		10*time.Second,
+	)
+	// In Docker on Mac, localhost URLs need to be rewritten to reach the host.
+	if hostRewrite := os.Getenv("FAULTLINE_UPTIME_HOST"); hostRewrite != "" {
+		um.HostRewrite = hostRewrite
+	} else if strings.Contains(dsn, "host.docker.internal") {
+		um.HostRewrite = "host.docker.internal"
+	}
+	um.OnStateChange = func(projectID int64, up bool, responseMS int, statusCode int) {
+		p, _ := dolt.GetProject(context.Background(), projectID)
+		name := fmt.Sprintf("project-%d", projectID)
+		if p != nil {
+			name = p.Name
+		}
+		if up {
+			log.Info("project recovered", "project", name, "response_ms", responseMS)
+		} else {
+			log.Error("project down", "project", name, "status_code", statusCode)
+		}
+	}
+	go um.Run(ctx)
+
+	// Start relay poller — pulls events from the public relay for mobile/external apps.
+	if relayURL := envOr("FAULTLINE_RELAY_URL", "https://faultline-relay.fly.dev"); relayURL != "" {
+		relayInterval := time.Duration(envOrInt("FAULTLINE_RELAY_POLL_SECS", 30)) * time.Second
+		rp := poller.NewRelayPoller(relayURL, relayInterval, func(ctx context.Context, projectID int64, publicKey string, payload []byte) error {
+			return handler.IngestRaw(ctx, projectID, payload)
+		}, log)
+		if token := os.Getenv("FAULTLINE_RELAY_TOKEN"); token != "" {
+			rp.SetPollToken(token)
+		}
+		// Wire CI webhook processing into the relay poller.
+		rp.SetCIWebhookHandler(func(ctx context.Context, payload []byte) error {
+			// Unwrap the relay's CI webhook wrapper.
+			var wrapped struct {
+				Type    string          `json:"type"`
+				Source  string          `json:"source"`
+				Event   string          `json:"event"`
+				Payload json.RawMessage `json:"payload"`
+			}
+			if err := json.Unmarshal(payload, &wrapped); err != nil {
+				return fmt.Errorf("unwrap ci webhook: %w", err)
+			}
+			if wrapped.Type != "ci_webhook" || wrapped.Event != "workflow_run" {
+				return nil // not a workflow_run, skip
+			}
+			// Create a fake HTTP request to reuse the CI handler.
+			req, _ := http.NewRequestWithContext(ctx, "POST", "/api/hooks/ci/github",
+				bytes.NewReader(wrapped.Payload))
+			req.Header.Set("X-GitHub-Event", wrapped.Event)
+			rec := &discardResponseWriter{}
+			ciHandler.HandleGitHub(rec, req)
+			return nil
+		})
+		go rp.Run(ctx)
+	}
+
+	// Start snooze sweep (60s interval) — expires snoozed issues.
+	snoozeSweep := db.NewSnoozeSweep(dolt, log, 60*time.Second)
+	go snoozeSweep.Run(ctx)
+
 	// Start data retention worker.
 	retCfg := db.DefaultRetentionConfig()
 	retCfg.EventTTL = time.Duration(retentionDays) * 24 * time.Hour
@@ -111,37 +371,17 @@ func main() {
 	retention := db.NewRetentionWorker(dolt, log, retCfg)
 	go retention.Run(ctx)
 
-	if err := server.Run(ctx, server.Config{
+	return server.Run(ctx, server.Config{
 		Addr:        addr,
 		Handler:     handler,
 		API:         apiHandler,
 		Dashboard:   dash,
+		CI:          ciHandler,
+		Slack:       slackHandler,
 		RateLimiter: rl,
 		DB:          dolt,
 		Log:         log,
-	}); err != nil {
-		log.Error("server error", "err", err)
-		os.Exit(1)
-	}
-}
-
-func buildProjectInfo(pairs []string, auth *ingest.ProjectAuth) []api.ProjectInfo {
-	var projects []api.ProjectInfo
-	for _, p := range pairs {
-		parts := strings.SplitN(p, ":", 3)
-		if len(parts) < 2 {
-			continue
-		}
-		var id int64
-		fmt.Sscanf(parts[0], "%d", &id)
-		info := api.ProjectInfo{
-			ID:        id,
-			PublicKey: parts[1],
-			Rig:       auth.RigForProject(id),
-		}
-		projects = append(projects, info)
-	}
-	return projects
+	})
 }
 
 func envOr(key, fallback string) string {
@@ -181,14 +421,11 @@ func envOrFloat(key string, fallback float64) float64 {
 	return fallback
 }
 
-// firstKey extracts the public key from the first project pair ("id:key[:rig]").
-func firstKey(pairs []string) string {
-	if len(pairs) == 0 {
-		return ""
-	}
-	parts := strings.SplitN(pairs[0], ":", 3)
-	if len(parts) < 2 {
-		return ""
-	}
-	return parts[1]
+// discardResponseWriter is a no-op http.ResponseWriter for internal handler calls.
+type discardResponseWriter struct {
+	code int
 }
+
+func (d *discardResponseWriter) Header() http.Header         { return http.Header{} }
+func (d *discardResponseWriter) Write(b []byte) (int, error) { return len(b), nil }
+func (d *discardResponseWriter) WriteHeader(code int)        { d.code = code }

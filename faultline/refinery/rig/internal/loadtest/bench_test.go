@@ -32,7 +32,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Skipf("Dolt not available: %v", err)
 	}
-	t.Cleanup(func() { dolt.Close() })
+	t.Cleanup(func() { _ = dolt.Close() })
 
 	auth, _ := ingest.NewProjectAuth([]string{"1:loadtest_key"})
 	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -93,8 +93,12 @@ func makeGzipEnvelope(eventNum int) []byte {
 	raw := makeEnvelope(eventNum)
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
-	gz.Write(raw)
-	gz.Close()
+	if _, err := gz.Write(raw); err != nil {
+		panic(err)
+	}
+	if err := gz.Close(); err != nil {
+		panic(err)
+	}
 	return buf.Bytes()
 }
 
@@ -119,7 +123,7 @@ func TestLoadSequential(t *testing.T) {
 			errors++
 			continue
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != 200 {
 			errors++
 		}
@@ -169,7 +173,7 @@ func TestLoadConcurrent(t *testing.T) {
 							errors.Add(1)
 							continue
 						}
-						resp.Body.Close()
+						_ = resp.Body.Close()
 						if resp.StatusCode != 200 {
 							errors.Add(1)
 						} else {
@@ -227,7 +231,7 @@ func TestLoadSustained(t *testing.T) {
 					errors.Add(1)
 					continue
 				}
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				if resp.StatusCode != 200 {
 					errors.Add(1)
 				} else {
@@ -251,10 +255,10 @@ func TestLoadSustained(t *testing.T) {
 	}
 	dolt, err := db.Open(dsn)
 	if err == nil {
-		defer dolt.Close()
+		defer func() { _ = dolt.Close() }()
 		var eventCount, groupCount int
-		dolt.QueryRow("SELECT COUNT(*) FROM events").Scan(&eventCount)
-		dolt.QueryRow("SELECT COUNT(*) FROM issue_groups").Scan(&groupCount)
+		_ = dolt.QueryRow("SELECT COUNT(*) FROM ft_events").Scan(&eventCount)
+		_ = dolt.QueryRow("SELECT COUNT(*) FROM issue_groups").Scan(&groupCount)
 		t.Logf("DB state: %d events, %d issue groups", eventCount, groupCount)
 	}
 }
@@ -280,7 +284,7 @@ func TestLoadGzip(t *testing.T) {
 			errors++
 			continue
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != 200 {
 			errors++
 		}

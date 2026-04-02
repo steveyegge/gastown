@@ -32,12 +32,15 @@ func TestHandler_ReportsErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var ev sentryEvent
-		json.Unmarshal(body, &ev)
+		if err := json.Unmarshal(body, &ev); err != nil {
+			w.WriteHeader(400)
+			return
+		}
 		mu.Lock()
 		received = append(received, ev)
 		mu.Unlock()
 		w.WriteHeader(200)
-		w.Write([]byte(`{"id":"test"}`))
+		_, _ = w.Write([]byte(`{"id":"test"}`))
 	}))
 	defer srv.Close()
 
@@ -90,7 +93,7 @@ func TestHandler_SkipsInfoLevel(t *testing.T) {
 		received++
 		mu.Unlock()
 		w.WriteHeader(200)
-		w.Write([]byte(`{"id":"test"}`))
+		_, _ = w.Write([]byte(`{"id":"test"}`))
 	}))
 	defer srv.Close()
 
@@ -115,12 +118,15 @@ func TestHandler_SkipsInfoLevel(t *testing.T) {
 }
 
 func TestHandler_SetsAuthHeader(t *testing.T) {
+	var mu sync.Mutex
 	var authHeader string
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		authHeader = r.Header.Get("X-Sentry-Auth")
+		mu.Unlock()
 		w.WriteHeader(200)
-		w.Write([]byte(`{"id":"test"}`))
+		_, _ = w.Write([]byte(`{"id":"test"}`))
 	}))
 	defer srv.Close()
 
@@ -136,8 +142,11 @@ func TestHandler_SetsAuthHeader(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	if authHeader != "Sentry sentry_key=my_secret_key" {
-		t.Errorf("auth header = %q, want %q", authHeader, "Sentry sentry_key=my_secret_key")
+	mu.Lock()
+	got := authHeader
+	mu.Unlock()
+	if got != "Sentry sentry_key=my_secret_key" {
+		t.Errorf("auth header = %q, want %q", got, "Sentry sentry_key=my_secret_key")
 	}
 }
 
@@ -188,5 +197,63 @@ func TestCollectFrames(t *testing.T) {
 	last := frames[len(frames)-1]
 	if last.Function == "" {
 		t.Error("expected function name in frame")
+	}
+}
+
+func TestHandler_DifferentMessagesGetDifferentFingerprints(t *testing.T) {
+	var mu sync.Mutex
+	var received []sentryEvent
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var ev sentryEvent
+		if json.Unmarshal(body, &ev) == nil {
+			mu.Lock()
+			received = append(received, ev)
+			mu.Unlock()
+		}
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"test"}`))
+	}))
+	defer srv.Close()
+
+	inner := slog.NewJSONHandler(io.Discard, nil)
+	h := NewHandler(inner, Config{
+		Endpoint:  srv.URL + "/api/0/store/",
+		SentryKey: "test_key",
+		MinLevel:  slog.LevelError,
+	})
+
+	log := slog.New(h)
+	log.Error("retention: purge events: delete error")
+	time.Sleep(200 * time.Millisecond)
+	// Reset sending guard so second error can fire.
+	h.sending.Store(false)
+	log.Error("relay ingest failed: parse envelope")
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) < 2 {
+		t.Fatalf("expected 2 events, got %d", len(received))
+	}
+
+	// Both should have type "faultline.internal" but different fingerprints.
+	ev1 := received[0]
+	ev2 := received[1]
+	if ev1.Exception.Values[0].Type != "faultline.internal" {
+		t.Errorf("ev1 type = %q", ev1.Exception.Values[0].Type)
+	}
+	if ev2.Exception.Values[0].Type != "faultline.internal" {
+		t.Errorf("ev2 type = %q", ev2.Exception.Values[0].Type)
+	}
+	// Fingerprints must differ despite same exception type.
+	if len(ev1.Fingerprint) == 0 || len(ev2.Fingerprint) == 0 {
+		t.Fatal("events should have explicit fingerprints")
+	}
+	fp1 := ev1.Fingerprint[0] + ev1.Fingerprint[1]
+	fp2 := ev2.Fingerprint[0] + ev2.Fingerprint[1]
+	if fp1 == fp2 {
+		t.Fatalf("different error messages should produce different fingerprints: %v vs %v", ev1.Fingerprint, ev2.Fingerprint)
 	}
 }

@@ -11,15 +11,15 @@ import (
 // UpsertIssueGroup creates or updates an issue group by fingerprint.
 // On new group: inserts with event_count=1, returns the new group ID.
 // On existing: bumps count + last_seen, returns the existing group ID.
-func (d *DB) UpsertIssueGroup(ctx context.Context, fingerprint string, projectID int64, title, culprit, level string, ts time.Time) (groupID string, created bool, err error) {
+func (d *DB) UpsertIssueGroup(ctx context.Context, fingerprint string, projectID int64, title, culprit, level, platform string, ts time.Time) (groupID string, created bool, err error) {
 	newID := uuid.New().String()
 	res, err := d.ExecContext(ctx, `
-		INSERT INTO issue_groups (id, project_id, fingerprint, title, culprit, level, first_seen, last_seen, event_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+		INSERT INTO issue_groups (id, project_id, fingerprint, title, culprit, level, platform, first_seen, last_seen, event_count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
 		ON DUPLICATE KEY UPDATE
 			last_seen = VALUES(last_seen),
 			event_count = event_count + 1`,
-		newID, projectID, fingerprint, title, culprit, level, ts, ts,
+		newID, projectID, fingerprint, title, culprit, level, platform, ts, ts,
 	)
 	if err != nil {
 		return "", false, err

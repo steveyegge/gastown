@@ -7,6 +7,7 @@ templ layout(title string, account *AccountView) {
 		<meta charset="utf-8"/>
 		<meta name="viewport" content="width=device-width, initial-scale=1"/>
 		<title>{ title } — faultline</title>
+		<link rel="icon" type="image/png" href="/static/favicon.png"/>
 		<link rel="stylesheet" href="/static/style.css"/>
 		<script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
 	</head>
@@ -16,7 +17,12 @@ templ layout(title string, account *AccountView) {
 				<a href="/dashboard/" class="nav-brand">fault<span>|</span>line</a>
 				<div class="nav-links">
 					if account != nil {
-						<a href="/dashboard/">Seismograph</a>
+						<a href="/dashboard/">Projects</a>
+						<a href="/dashboard/teams">Teams</a>
+						<a href="/dashboard/live">Live</a>
+						if account.Role == "owner" {
+							<a href="/dashboard/accounts">Accounts</a>
+						}
 						<span class="nav-user">{ account.Name }</span>
 						<a href="/dashboard/logout">Logout</a>
 					}

@@ -17,7 +17,7 @@ func TestSetupDatabase(t *testing.T) {
 	if err != nil {
 		t.Skipf("Dolt not available: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	_, err = db.Exec("CREATE DATABASE IF NOT EXISTS faultline_loadtest")
 	if err != nil {

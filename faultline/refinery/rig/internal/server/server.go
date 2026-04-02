@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/outdoorsea/faultline/internal/api"
+	"github.com/outdoorsea/faultline/internal/ci"
 	"github.com/outdoorsea/faultline/internal/dashboard"
 	"github.com/outdoorsea/faultline/internal/db"
 	"github.com/outdoorsea/faultline/internal/ingest"
+	slackint "github.com/outdoorsea/faultline/internal/integrations/slack"
 )
 
 // Config holds server configuration.
@@ -20,6 +22,8 @@ type Config struct {
 	Handler     *ingest.Handler
 	API         *api.Handler
 	Dashboard   *dashboard.Handler
+	CI          *ci.Handler
+	Slack       *slackint.WebhookHandler
 	RateLimiter *ingest.RateLimiter
 	DB          *db.DB
 	Log         *slog.Logger
@@ -40,6 +44,8 @@ func Run(ctx context.Context, cfg Config) error {
 	mux.HandleFunc("POST /api/{project_id}/envelope", envelope)
 	mux.HandleFunc("POST /api/{project_id}/store/", store)
 	mux.HandleFunc("POST /api/{project_id}/store", store)
+	mux.HandleFunc("POST /api/{project_id}/heartbeat", cfg.Handler.HandleHeartbeat)
+	mux.HandleFunc("POST /api/{project_id}/heartbeat/", cfg.Handler.HandleHeartbeat)
 
 	// Read/management API.
 	if cfg.API != nil {
@@ -50,6 +56,21 @@ func Run(ctx context.Context, cfg Config) error {
 	if cfg.Dashboard != nil {
 		cfg.Dashboard.RegisterRoutes(mux)
 	}
+
+	// CI webhook handlers.
+	if cfg.CI != nil {
+		cfg.CI.RegisterRoutes(mux)
+	}
+
+	// Slack interaction webhook handler.
+	if cfg.Slack != nil {
+		cfg.Slack.RegisterRoutes(mux)
+	}
+
+	// Root redirect to dashboard.
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/dashboard/", http.StatusFound)
+	})
 
 	// Health check — verifies database connectivity.
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -64,12 +85,14 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 		}
 		w.WriteHeader(code)
-		json.NewEncoder(w).Encode(map[string]string{"status": status})
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": status}); err != nil {
+			cfg.Log.Error("health check: encode response", "err", err)
+		}
 	})
 
 	srv := &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      mux,
+		Handler:      securityHeaders(mux),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -90,4 +113,17 @@ func Run(ctx context.Context, cfg Config) error {
 		defer cancel()
 		return srv.Shutdown(shutCtx)
 	}
+}
+
+// securityHeaders adds standard security response headers to all responses.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// CSP: allow self + HTMX CDN + inline scripts (for live stream).
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; script-src 'self' https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'")
+		next.ServeHTTP(w, r)
+	})
 }

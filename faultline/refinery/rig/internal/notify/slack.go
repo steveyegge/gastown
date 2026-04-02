@@ -85,8 +85,8 @@ func (s *SlackWebhook) Notify(ctx context.Context, event Event) {
 		s.log.Error("slack: send webhook", "err", err, "event_type", string(event.Type))
 		return
 	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		s.log.Error("slack: webhook response", "status", resp.StatusCode, "event_type", string(event.Type))

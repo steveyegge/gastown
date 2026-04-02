@@ -3,11 +3,122 @@ package dashboard
 import (
 	"fmt"
 	"time"
+
+	"github.com/outdoorsea/faultline/internal/db"
 )
 
 // AccountView is the minimal account info passed to templates.
 type AccountView struct {
+	Name      string
+	Role      string
+	CSRFToken string
+}
+
+// AccountRoleView holds account data for the role management page.
+type AccountRoleView struct {
+	ID   int64
 	Name string
+	Email string
+	Role  string
+}
+
+// TeamView is a team formatted for the list page.
+type TeamView struct {
+	ID           int64
+	Name         string
+	Slug         string
+	MemberCount  int
+	ProjectCount int
+}
+
+// MemberView is a team member with resolved account info.
+type MemberView struct {
+	AccountID int64
+	Name      string
+	Email     string
+	Role      string
+}
+
+// LinkedProjectView is a project linked to a team.
+type LinkedProjectView struct {
+	ProjectID int64
+	Name      string
+}
+
+// TeamDetailView holds all data for the team detail page.
+type TeamDetailView struct {
+	ID                int64
+	Name              string
+	Slug              string
+	Members           []MemberView
+	Projects          []LinkedProjectView
+	AvailableAccounts []db.Account
+	AvailableProjects []db.Project
+}
+
+// csrfField renders a hidden CSRF token input for forms.
+templ csrfField(token string) {
+	<input type="hidden" name="csrf_token" value={ token }/>
+}
+
+// ProjectStatus represents the health status of a project.
+type ProjectStatus string
+
+const (
+	StatusGreen       ProjectStatus = "green"       // 0 unresolved errors
+	StatusYellow      ProjectStatus = "yellow"      // errors exist, all have beads
+	StatusRed         ProjectStatus = "red"          // unbeaded errors exist
+	StatusUnmonitored ProjectStatus = "unmonitored" // no events ever received
+)
+
+// ProjectView is a project formatted for display.
+type ProjectView struct {
+	ID               int64
+	Name             string
+	Description      string
+	TotalIssues      int
+	UnresolvedIssues int
+	TotalEvents      int
+	Status           ProjectStatus
+	UnbeadedCount    int
+	Platform         string   // primary platform (go, cocoa, javascript, etc.)
+	Platforms        []string // all detected platforms
+	Components       []string // configured subsystems (web, macos, api, database, etc.)
+	Environments     []string // configured environments (staging, production, etc.)
+	DeploymentType   string   // local, remote, hosted
+	LastSeen         string   // human-readable last activity time
+	Running          bool     // received an event in the last hour
+	IsRemote         bool     // mobile/desktop — running status is N/A
+	URL              string   // project web URL for quick access
+	HealthUp         *bool    // nil = no check, true = up, false = down
+	HealthResponseMS int      // last response time in ms
+	HealthCheckedAgo string   // human-readable time since last check
+	Uptime24h        string   // e.g. "99.8%" — uptime over last 24 hours
+	Sparkline        []int    // hourly event counts for last 24h (oldest first)
+	LatestRelease    string   // latest release version for this project
+}
+
+func componentIcon(component string) string {
+	switch component {
+	case "database", "db":
+		return "🗄"
+	case "web", "frontend":
+		return "🌐"
+	case "api", "backend":
+		return "⚡"
+	case "macos", "desktop":
+		return "🖥"
+	case "ios", "mobile":
+		return "📱"
+	case "android":
+		return "🤖"
+	case "worker", "queue":
+		return "⚙"
+	case "cache", "redis":
+		return "💾"
+	default:
+		return "📦"
+	}
 }
 
 // IssueView is an issue group formatted for display.
@@ -21,16 +132,255 @@ type IssueView struct {
 	FirstSeen  time.Time
 	LastSeen   time.Time
 	EventCount int
+	// Assignment.
+	AssignedTo string // currently assigned user (empty if unassigned)
+	// Lifecycle summary (populated on list page)
+	LifecycleStage string    // latest lifecycle event type (detection, bead_filed, dispatched, resolved, etc.)
+	LifecycleActor string    // who performed the latest action (rig or target)
+	LifecycleTime  time.Time // when the latest lifecycle event occurred
+	// Detail fields (only populated on issue detail page)
+	Platform       string // from latest event
+	ExceptionType  string // from latest event
+	ExceptionValue string // from latest event message
+	BeadID         string // linked bead if any
+	Resolution     string // how it was resolved (from lifecycle)
+	RootCause      string // what caused the issue
+	FixExplanation string // how it was fixed
+	FixCommit      string // commit/PR that addressed it
+	FirstRelease   string // release version where issue was first seen
+	LastRelease    string // release version where issue was last seen
+	MergedInto     string // ID of the issue this was merged into
+	MergedIntoTitle string // title of the target issue (for display)
+	MergedChildren []MergedIssueView // issues that have been merged into this one
+	SnoozedUntil   *time.Time // when the snooze expires
+	SnoozeReason   string     // why it was snoozed
+	SnoozedBy      string     // who snoozed it
+}
+
+// MergedIssueView represents a merged child issue.
+type MergedIssueView struct {
+	ID         string
+	Title      string
+	EventCount int
+}
+
+// SettingsView holds project settings for the edit form.
+type SettingsView struct {
+	ProjectID        int64
+	ProjectName      string
+	Description      string
+	URL              string
+	DeploymentType   string
+	Components       string // comma-separated
+	Environments     string // comma-separated
+	WebhookURL       string
+	WebhookType      string
+	WebhookTemplates []db.WebhookTemplate
+	AlertRules       []db.AlertRule
+	AlertHistory     []db.AlertHistoryEntry
 }
 
 // EventView is an event formatted for display.
 type EventView struct {
-	EventID   string
-	Timestamp time.Time
-	Platform  string
-	Level     string
-	Message   string
-	RawJSON   string
+	EventID     string
+	Timestamp   time.Time
+	Platform    string
+	Level       string
+	Message     string
+	Environment string
+	Release     string
+	RawJSON     string
+}
+
+// LifecycleView is an audit log entry formatted for display.
+type LifecycleView struct {
+	EventType  string
+	BeadID     string
+	Rig        string
+	Target     string // who was notified/dispatched (extracted from context)
+	Assignee   string // who fixed it (from bead assignee)
+	Solution   string // how it was fixed (from close_reason)
+	Context    string // JSON context
+	Timestamp  time.Time
+}
+
+func lifecycleIcon(eventType string) string {
+	switch eventType {
+	case "detection":
+		return "🔍"
+	case "bead_filed":
+		return "📋"
+	case "slow_burn_bead":
+		return "🕐"
+	case "dispatched":
+		return "🚀"
+	case "notified":
+		return "📣"
+	case "regression":
+		return "🔄"
+	case "resolved":
+		return "✅"
+	case "escalation":
+		return "⬆️"
+	case "fix_failed":
+		return "❌"
+	case "commit_detected":
+		return "📝"
+	case "ci_green":
+		return "🟢"
+	case "ignored":
+		return "🔇"
+	case "assigned":
+		return "👤"
+	case "snoozed":
+		return "💤"
+	case "unsnoozed":
+		return "⏰"
+	default:
+		return "·"
+	}
+}
+
+func lifecycleLabel(eventType string) string {
+	switch eventType {
+	case "detection":
+		return "Error detected"
+	case "bead_filed":
+		return "Bead filed — dispatched for fix"
+	case "slow_burn_bead":
+		return "Slow-burn bead — error persisted without attention"
+	case "dispatched":
+		return "Polecat dispatched to fix"
+	case "notified":
+		return "Crew notified (auto-sling failed)"
+	case "regression":
+		return "Regression — error reappeared after fix"
+	case "resolved":
+		return "Resolved — fix confirmed, error quiet"
+	case "escalation":
+		return "Escalated to overseer"
+	case "fix_failed":
+		return "Fix failed — error persists after bead closed"
+	case "commit_detected":
+		return "Fix committed — merge detected in closed bead"
+	case "ci_green":
+		return "CI passed — build verified green"
+	case "ignored":
+		return "Ignored — silenced by team member"
+	case "assigned":
+		return "Assigned to team member for triage"
+	case "snoozed":
+		return "Snoozed — temporarily silenced"
+	case "unsnoozed":
+		return "Unsnoozed — snooze expired or manually removed"
+	default:
+		return eventType
+	}
+}
+
+// lifecycleStageLabel returns a short, human-readable label for the lifecycle stage.
+func lifecycleStageLabel(eventType string) string {
+	switch eventType {
+	case "detection":
+		return "Detected"
+	case "bead_filed":
+		return "Picked up"
+	case "slow_burn_bead":
+		return "Slow burn"
+	case "dispatched":
+		return "Polecat dispatched"
+	case "notified":
+		return "Crew notified"
+	case "regression":
+		return "Regressed"
+	case "resolved":
+		return "Resolved"
+	case "escalation":
+		return "Escalated"
+	case "fix_failed":
+		return "Fix failed"
+	case "commit_detected":
+		return "Committed"
+	case "ci_green":
+		return "CI green"
+	case "ignored":
+		return "Ignored"
+	case "assigned":
+		return "Assigned"
+	case "snoozed":
+		return "Snoozed"
+	case "unsnoozed":
+		return "Unsnoozed"
+	default:
+		return ""
+	}
+}
+
+// lifecycleStageClass returns a CSS class for the lifecycle stage pill.
+func lifecycleStageClass(eventType string) string {
+	switch eventType {
+	case "detection":
+		return "stage-detected"
+	case "bead_filed", "slow_burn_bead":
+		return "stage-picked-up"
+	case "dispatched":
+		return "stage-dispatched"
+	case "notified", "escalation":
+		return "stage-escalated"
+	case "resolved", "ci_green":
+		return "stage-resolved"
+	case "regression", "fix_failed":
+		return "stage-regressed"
+	case "commit_detected":
+		return "stage-dispatched"
+	case "ignored":
+		return "stage-resolved"
+	case "assigned":
+		return "stage-dispatched"
+	case "snoozed":
+		return "stage-snoozed"
+	case "unsnoozed":
+		return "stage-detected"
+	default:
+		return ""
+	}
+}
+
+// sparklineSVG builds an inline SVG polyline from hourly counts.
+func sparklineSVG(counts []int) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	maxVal := 0
+	for _, c := range counts {
+		if c > maxVal {
+			maxVal = c
+		}
+	}
+	if maxVal == 0 {
+		return "" // no events, no sparkline
+	}
+
+	w := 120.0
+	h := 28.0
+	stepX := w / float64(len(counts)-1)
+
+	points := ""
+	for i, c := range counts {
+		x := float64(i) * stepX
+		y := h - (float64(c)/float64(maxVal))*h*0.9 - 1 // 1px bottom margin
+		if i > 0 {
+			points += " "
+		}
+		points += fmt.Sprintf("%.1f,%.1f", x, y)
+	}
+
+	return fmt.Sprintf(
+		`<svg class="sparkline" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f">`+
+			`<polyline fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" points="%s"/>`+
+			`</svg>`,
+		w, h, w, h, points,
+	)
 }
 
 func severityIcon(level string) string {
@@ -67,6 +417,8 @@ func statusBadge(status string) string {
 		return "badge-fixing"
 	case "regressed":
 		return "badge-regressed"
+	case "snoozed":
+		return "badge-snoozed"
 	default:
 		return "badge-active"
 	}
@@ -82,6 +434,8 @@ func statusLabel(status string) string {
 		return "Aftershock"
 	case "needs_human":
 		return "Manual inspection"
+	case "snoozed":
+		return "Snoozed"
 	default:
 		return "Active fault"
 	}
@@ -104,6 +458,35 @@ func magnitude(count int) string {
 	}
 }
 
+func timeDelta(from, to time.Time) string {
+	d := to.Sub(from)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%d seconds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%d minutes", int(d.Minutes()))
+	case d < 24*time.Hour:
+		h := int(d.Hours())
+		if h == 1 {
+			return "1 hour"
+		}
+		return fmt.Sprintf("%d hours", h)
+	default:
+		days := int(d.Hours() / 24)
+		if days == 1 {
+			return "1 day"
+		}
+		return fmt.Sprintf("%d days", days)
+	}
+}
+
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-1] + "…"
+}
+
 func timeAgo(t time.Time) string {
 	d := time.Since(t)
 	switch {
@@ -120,10 +503,37 @@ func timeAgo(t time.Time) string {
 
 // Login page
 templ loginPage(errorMsg string) {
+	<!DOCTYPE html>
+	<html lang="en">
+	<head>
+		<meta charset="utf-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1"/>
+		<title>Sign in — faultline</title>
+		<link rel="icon" type="image/png" href="/static/favicon.png"/>
+		<link rel="stylesheet" href="/static/style.css"/>
+	</head>
+	<body>
 	<div class="auth-page">
+		<div class="auth-hero">
+			<h1 class="auth-logo">fault<span>|</span>line</h1>
+			<p class="auth-tagline">Self-hosted error tracking for teams that own their stack.</p>
+			<div class="auth-features">
+				<div class="auth-feature">
+					<strong>Sentry-compatible</strong>
+					<span>Drop-in replacement. Use existing SDKs.</span>
+				</div>
+				<div class="auth-feature">
+					<strong>Version-controlled</strong>
+					<span>Powered by Dolt. Full history of every issue.</span>
+				</div>
+				<div class="auth-feature">
+					<strong>Agent-first</strong>
+					<span>Built for AI coding agents and automation.</span>
+				</div>
+			</div>
+		</div>
 		<div class="auth-card">
-			<h1>fault<span>|</span>line</h1>
-			<p>Sign in to your error tracker</p>
+			<h2>Sign in</h2>
 			if errorMsg != "" {
 				<div class="alert alert-error">{ errorMsg }</div>
 			}
@@ -140,14 +550,30 @@ templ loginPage(errorMsg string) {
 			</form>
 		</div>
 	</div>
+	</body>
+	</html>
 }
 
 // Setup page (first account creation)
 templ setupPage(errorMsg string) {
+	<!DOCTYPE html>
+	<html lang="en">
+	<head>
+		<meta charset="utf-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1"/>
+		<title>Setup — faultline</title>
+		<link rel="icon" type="image/png" href="/static/favicon.png"/>
+		<link rel="stylesheet" href="/static/style.css"/>
+	</head>
+	<body>
 	<div class="auth-page">
+		<div class="auth-hero">
+			<h1 class="auth-logo">fault<span>|</span>line</h1>
+			<p class="auth-tagline">Self-hosted error tracking for teams that own their stack.</p>
+		</div>
 		<div class="auth-card">
-			<h1>fault<span>|</span>line</h1>
-			<p>Create your admin account to get started</p>
+			<h2>Create admin account</h2>
+			<p class="auth-card-sub">Set up your first account to get started.</p>
 			if errorMsg != "" {
 				<div class="alert alert-error">{ errorMsg }</div>
 			}
@@ -168,73 +594,398 @@ templ setupPage(errorMsg string) {
 			</form>
 		</div>
 	</div>
+	</body>
+	</html>
+}
+
+// projectStatusLabel returns a human-readable label for a project status.
+func projectStatusLabel(s ProjectStatus) string {
+	switch s {
+	case StatusGreen:
+		return "Stable"
+	case StatusYellow:
+		return "Active"
+	case StatusRed:
+		return "Unattended"
+	default:
+		return "Registered"
+	}
+}
+
+// platformIcon returns a Unicode icon for the platform type.
+func platformIcon(platform string) string {
+	switch platform {
+	case "go":
+		return "⚙"
+	case "javascript", "node":
+		return "🌐"
+	case "cocoa":
+		return "📱"
+	case "java", "android":
+		return "🤖"
+	case "python":
+		return "🐍"
+	case "react-native":
+		return "⚛"
+	default:
+		if platform != "" {
+			return "💻"
+		}
+		return ""
+	}
+}
+
+// Projects index — shows all monitored software
+templ projectsPage(account *AccountView, projects []ProjectView) {
+	@layout("Projects", account) {
+		<div class="page-header">
+			<h2>Monitored Projects</h2>
+			<p class="page-subtitle">Error tracking across all Gas Town rigs.</p>
+		</div>
+
+		if len(projects) == 0 {
+			<div class="empty">
+				<p>No projects yet. Send your first error event to create one automatically.</p>
+			</div>
+		} else {
+			@projectGridPartial(projects)
+		}
+	}
+}
+
+// Project grid partial — returned by HTMX polling for auto-refresh.
+templ projectGridPartial(projects []ProjectView) {
+	<div class="project-grid"
+		 hx-get="/dashboard/partials/projects"
+		 hx-trigger="every 60s"
+		 hx-swap="outerHTML">
+		for _, p := range projects {
+			@projectCard(p)
+		}
+	</div>
+}
+
+// Single project card — shared by full page and partial.
+templ projectCard(p ProjectView) {
+	<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues", p.ID)) } class="project-card">
+		<div class={ "card-status-bar", fmt.Sprintf("bar-%s", p.Status) }></div>
+		<div class="card-body">
+			<div class="card-title-row">
+				<div class="project-name">{ p.Name }</div>
+				if p.HealthUp != nil {
+					if *p.HealthUp {
+						<span class="project-running" title={ fmt.Sprintf("%dms · %s", p.HealthResponseMS, p.HealthCheckedAgo) }>● Up ({ fmt.Sprintf("%dms", p.HealthResponseMS) })</span>
+					} else {
+						<span class="project-down" title={ p.HealthCheckedAgo }>◉ Down</span>
+					}
+				} else if p.IsRemote {
+					<span class="project-remote">↗ Remote</span>
+				} else if p.Running {
+					<span class="project-running">● Running</span>
+				} else if p.LastSeen != "" {
+					<span class="project-stopped">○ Idle</span>
+				}
+			</div>
+			<div class="project-desc">{ p.Description }</div>
+
+			if len(p.Sparkline) > 0 {
+				<div class={ "sparkline-container", templ.KV("sparkline-alert", p.UnresolvedIssues > 0) }>
+					@templ.Raw(sparklineSVG(p.Sparkline))
+				</div>
+			}
+
+			if p.LatestRelease != "" {
+				<div class="project-release">
+					<span class="release-badge" title={ "Latest release: " + p.LatestRelease }>{ p.LatestRelease }</span>
+				</div>
+			}
+
+			if len(p.Components) > 0 || len(p.Platforms) > 0 || p.URL != "" {
+				<div class="project-infra">
+					if p.URL != "" {
+						<a href={ templ.SafeURL(p.URL) } target="_blank" rel="noopener" class="infra-chip infra-link" title={ p.URL } onclick="event.stopPropagation();">🔗</a>
+					}
+					if len(p.Components) > 0 {
+						for _, comp := range p.Components {
+							<span class="infra-chip" title={ comp }>{ componentIcon(comp) }</span>
+						}
+					} else if len(p.Platforms) > 0 {
+						for _, plat := range p.Platforms {
+							<span class="infra-chip" title={ plat }>{ platformIcon(plat) }</span>
+						}
+					}
+				</div>
+			}
+
+			<div class="project-stats">
+				<div class="project-stat">
+					<span class={ "stat-value", templ.KV("stat-alert", p.UnresolvedIssues > 0) }>{ fmt.Sprintf("%d", p.UnresolvedIssues) }</span>
+					<span class="stat-label">faults</span>
+				</div>
+				if p.UnbeadedCount > 0 {
+					<div class="project-stat">
+						<span class="stat-value stat-danger">{ fmt.Sprintf("%d", p.UnbeadedCount) }</span>
+						<span class="stat-label">unattended</span>
+					</div>
+				}
+				<div class="project-stat">
+					<span class="stat-value">{ fmt.Sprintf("%d", p.TotalEvents) }</span>
+					<span class="stat-label">events</span>
+				</div>
+				if p.LastSeen != "" {
+					<div class="project-stat">
+						<span class="stat-value stat-muted">{ p.LastSeen }</span>
+						<span class="stat-label">last seen</span>
+					</div>
+				}
+				if p.Uptime24h != "" {
+					<div class="project-stat">
+						<span class={ "stat-value", templ.KV("stat-uptime-good", p.Uptime24h == "100.0%"), templ.KV("stat-uptime-warn", p.Uptime24h != "100.0%" && p.Uptime24h != "") }>{ p.Uptime24h }</span>
+						<span class="stat-label">uptime 24h</span>
+					</div>
+				}
+			</div>
+
+			if len(p.Environments) > 0 {
+				<div class="card-envs">
+					for _, env := range p.Environments {
+						<span class={ "env-badge", fmt.Sprintf("env-%s", env) }>{ env }</span>
+					}
+				</div>
+			}
+		</div>
+	</a>
 }
 
 // Seismograph — issue list
-templ seismographPage(account *AccountView, issues []IssueView, total int, projectID int64, status string, page int) {
-	@layout("Seismograph", account) {
+templ seismographPage(account *AccountView, issues []IssueView, total int, projectName string, platform string, projectID int64, status string, sortBy string, page int, env string, envs []string, platformFilter string, plats []string, accounts []db.Account) {
+	@layout(projectName, account) {
+		<div class="page-header">
+			<div class="page-header-row">
+				<div>
+					<h2>
+						{ projectName }
+						if platform != "" {
+							<span class="project-platform-tag">{ platformIcon(platform) } { platform }</span>
+						}
+					</h2>
+					<p class="page-subtitle">
+						<a href="/dashboard/">All Projects</a> / { projectName }
+					</p>
+				</div>
+				<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/settings", projectID)) } class="btn btn-sm">Settings</a>
+			</div>
+		</div>
+
 		<div class="filters">
-			<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=", projectID)) }
+			<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=&sort=%s", projectID, sortBy)) }
 			   class={ "filter-tab", templ.KV("active", status == "") }>
 				All
 			</a>
-			<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=unresolved", projectID)) }
-			   class={ "filter-tab", templ.KV("active", status == "unresolved") }>
+			<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=active&sort=%s", projectID, sortBy)) }
+			   class={ "filter-tab", templ.KV("active", status == "active") }>
 				Active
 			</a>
-			<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=resolved", projectID)) }
+			<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=resolved&sort=%s", projectID, sortBy)) }
 			   class={ "filter-tab", templ.KV("active", status == "resolved") }>
 				Stabilized
 			</a>
+			<span class="filter-separator"></span>
+			<span class="sort-label">Sort:</span>
+			<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=%s&sort=severity", projectID, status)) }
+			   class={ "filter-tab filter-sm", templ.KV("active", sortBy == "severity") }>
+				Severity
+			</a>
+			<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=%s&sort=last_seen", projectID, status)) }
+			   class={ "filter-tab filter-sm", templ.KV("active", sortBy == "last_seen") }>
+				Recent
+			</a>
+			<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=%s&sort=event_count", projectID, status)) }
+			   class={ "filter-tab filter-sm", templ.KV("active", sortBy == "event_count") }>
+				Frequency
+			</a>
+			if len(envs) > 1 {
+				<span class="filter-separator"></span>
+				<span class="sort-label">Env:</span>
+				<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=%s&sort=%s", projectID, status, sortBy)) }
+				   class={ "filter-tab filter-sm", templ.KV("active", env == "") }>
+					All
+				</a>
+				for _, e := range envs {
+					<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=%s&sort=%s&env=%s", projectID, status, sortBy, e)) }
+					   class={ "filter-tab filter-sm", templ.KV("active", env == e) }>
+						{ e }
+					</a>
+				}
+			}
+			if len(plats) > 1 {
+				<span class="filter-separator"></span>
+				<span class="sort-label">Platform:</span>
+				<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=%s&sort=%s&env=%s", projectID, status, sortBy, env)) }
+				   class={ "filter-tab filter-sm", templ.KV("active", platformFilter == "") }>
+					All
+				</a>
+				for _, p := range plats {
+					<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=%s&sort=%s&env=%s&platform=%s", projectID, status, sortBy, env, p)) }
+					   class={ "filter-tab filter-sm", templ.KV("active", platformFilter == p) }>
+						{ platformIcon(p) } { p }
+					</a>
+				}
+			}
 		</div>
 
+		@issueListPartial(issues, total, projectID, status, sortBy, page, account, accounts)
+	}
+}
+
+// Issue list partial — returned by HTMX polling for auto-refresh.
+templ issueListPartial(issues []IssueView, total int, projectID int64, status string, sortBy string, page int, account *AccountView, accounts []db.Account) {
+	<div id="issue-list-container"
+		 hx-get={ fmt.Sprintf("/dashboard/partials/projects/%d/issues?status=%s&sort=%s&page=%d", projectID, status, sortBy, page) }
+		 hx-trigger="every 30s"
+		 hx-swap="outerHTML">
 		if len(issues) == 0 {
 			<div class="empty">
 				<p>No seismic activity detected.</p>
 			</div>
 		} else {
-			<div class="issue-list">
-				for _, issue := range issues {
-					<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s", projectID, issue.ID)) }
-					   class="issue-card">
-						<div class={ "issue-severity", severityClass(issue.Level) }>
-							{ severityIcon(issue.Level) }
-						</div>
-						<div>
-							<div class="issue-title">{ issue.Title }</div>
-							<div class="issue-culprit">{ issue.Culprit }</div>
-							<div class="issue-meta">
-								First: { timeAgo(issue.FirstSeen) } · Last: { timeAgo(issue.LastSeen) }
-								<span class={ "badge", statusBadge(issue.Status) }>{ statusLabel(issue.Status) }</span>
-							</div>
-						</div>
-						<div class="issue-stats">
-							<div class="issue-count">{ fmt.Sprintf("%d", issue.EventCount) }</div>
-							<div class="issue-magnitude">{ magnitude(issue.EventCount) }</div>
-						</div>
-					</a>
+			<form id="bulk-form" method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/bulk", projectID)) }>
+				if account != nil {
+					<input type="hidden" name="csrf_token" value={ account.CSRFToken }/>
 				}
-			</div>
+				<input type="hidden" name="action" id="bulk-action" value=""/>
+				<input type="hidden" name="snooze_hours" value="24"/>
+
+				<div id="bulk-action-bar" class="bulk-action-bar" style="display:none">
+					<span class="bulk-select-info">
+						<input type="checkbox" id="bulk-select-all" onclick="toggleSelectAll(this)"/>
+						<span id="bulk-count">0</span> selected
+					</span>
+					<div class="bulk-actions">
+						<button type="submit" class="btn btn-sm btn-resolve" onclick="return submitBulk('resolve')">Resolve</button>
+						<button type="submit" class="btn btn-sm btn-ignore" onclick="return submitBulk('ignore')">Ignore</button>
+						<button type="submit" class="btn btn-sm btn-unresolve" onclick="return submitBulk('unresolve')">Unresolve</button>
+						<button type="submit" class="btn btn-sm btn-snooze" onclick="return submitBulk('snooze')">Snooze</button>
+						<button type="submit" class="btn btn-sm btn-unsnooze" onclick="return submitBulk('unsnooze')">Unsnooze</button>
+						<select name="assigned_to" id="bulk-assign-select" class="bulk-assign-select">
+							<option value="">Assign to...</option>
+							for _, a := range accounts {
+								<option value={ a.Name }>{ a.Name }</option>
+							}
+						</select>
+						<button type="submit" class="btn btn-sm btn-assign" onclick="return submitBulk('assign')">Assign</button>
+					</div>
+				</div>
+
+				<div class="issue-list">
+					for _, issue := range issues {
+						<div class="issue-card-row">
+							<label class="bulk-checkbox" onclick="event.stopPropagation()">
+								<input type="checkbox" name="issue_ids" value={ issue.ID } onchange="updateBulkBar()"/>
+							</label>
+							<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s", projectID, issue.ID)) }
+							   class="issue-card">
+								<div class={ "issue-severity", severityClass(issue.Level) }>
+									{ severityIcon(issue.Level) }
+								</div>
+								<div class="issue-card-body">
+									<div class="issue-title">{ issue.Title }</div>
+									<div class="issue-culprit">{ issue.Culprit }</div>
+									<div class="issue-meta">
+										First: { timeAgo(issue.FirstSeen) } · Last: { timeAgo(issue.LastSeen) }
+										if issue.FirstRelease != "" {
+											<span class="release-badge release-sm" title={ "First seen in " + issue.FirstRelease }>{ issue.FirstRelease }</span>
+										}
+										<span class={ "badge", statusBadge(issue.Status) }>{ statusLabel(issue.Status) }</span>
+										if issue.Platform != "" {
+											<span class="badge badge-platform">{ platformIcon(issue.Platform) } { issue.Platform }</span>
+										}
+										if issue.AssignedTo != "" {
+											<span class="badge badge-assignee" title={ "Assigned to " + issue.AssignedTo }>{ issue.AssignedTo }</span>
+										}
+									</div>
+									if issue.LifecycleStage != "" {
+										<div class="issue-lifecycle">
+											<span class={ "lifecycle-stage", lifecycleStageClass(issue.LifecycleStage) }>
+												{ lifecycleIcon(issue.LifecycleStage) } { lifecycleStageLabel(issue.LifecycleStage) }
+											</span>
+											if issue.LifecycleActor != "" {
+												<span class="lifecycle-actor">by { issue.LifecycleActor }</span>
+											}
+											<span class="lifecycle-when">{ timeAgo(issue.LifecycleTime) }</span>
+										</div>
+									}
+								</div>
+								<div class="issue-stats">
+									<div class="issue-count">{ fmt.Sprintf("%d", issue.EventCount) }</div>
+									<div class="issue-magnitude">{ magnitude(issue.EventCount) }</div>
+								</div>
+							</a>
+						</div>
+					}
+				</div>
+			</form>
+
+			<script>
+			function updateBulkBar() {
+				var checks = document.querySelectorAll('input[name="issue_ids"]:checked');
+				var bar = document.getElementById('bulk-action-bar');
+				var count = document.getElementById('bulk-count');
+				count.textContent = checks.length;
+				bar.style.display = checks.length > 0 ? 'flex' : 'none';
+				var selectAll = document.getElementById('bulk-select-all');
+				var allChecks = document.querySelectorAll('input[name="issue_ids"]');
+				selectAll.checked = checks.length === allChecks.length && allChecks.length > 0;
+			}
+			function toggleSelectAll(el) {
+				var checks = document.querySelectorAll('input[name="issue_ids"]');
+				for (var i = 0; i < checks.length; i++) { checks[i].checked = el.checked; }
+				updateBulkBar();
+			}
+			function submitBulk(action) {
+				var checks = document.querySelectorAll('input[name="issue_ids"]:checked');
+				if (checks.length === 0) return false;
+				if (action === 'assign') {
+					var sel = document.getElementById('bulk-assign-select');
+					if (!sel.value) { sel.focus(); return false; }
+				}
+				document.getElementById('bulk-action').value = action;
+				return true;
+			}
+			</script>
 
 			if total > 25 {
 				<div class="pagination">
 					if page > 1 {
-						<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=%s&page=%d", projectID, status, page-1)) }>&laquo; Prev</a>
+						<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=%s&sort=%s&page=%d", projectID, status, sortBy, page-1)) }>&laquo; Prev</a>
 					}
 					<span class="current">{ fmt.Sprintf("Page %d", page) }</span>
 					if page * 25 < total {
-						<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=%s&page=%d", projectID, status, page+1)) }>Next &raquo;</a>
+						<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?status=%s&sort=%s&page=%d", projectID, status, sortBy, page+1)) }>Next &raquo;</a>
 					}
 				</div>
 			}
 		}
-	}
+	</div>
 }
 
 // Fault Report — issue detail
-templ faultReportPage(account *AccountView, issue IssueView, events []EventView, projectID int64) {
+templ faultReportPage(account *AccountView, issue IssueView, events []EventView, lifecycle []LifecycleView, projectName string, projectID int64, accounts []db.Account) {
 	@layout(issue.Title, account) {
+		@faultReportPartial(issue, events, lifecycle, projectName, projectID, account.CSRFToken, accounts)
+	}
+}
+
+// Fault report partial — returned by HTMX polling for auto-refresh.
+templ faultReportPartial(issue IssueView, events []EventView, lifecycle []LifecycleView, projectName string, projectID int64, csrfToken string, accounts []db.Account) {
+	<div id="fault-report"
+		 hx-get={ fmt.Sprintf("/dashboard/partials/projects/%d/issues/%s", projectID, issue.ID) }
+		 hx-trigger="every 30s"
+		 hx-swap="outerHTML">
 		<div class="detail-header">
+			<p class="page-subtitle">
+				<a href="/dashboard/">All Projects</a> / <a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues", projectID)) }>{ projectName }</a>
+			</p>
 			<div class="detail-title">
 				<span class={ severityClass(issue.Level) }>{ severityIcon(issue.Level) }</span>
 				{ issue.Title }
@@ -247,17 +998,300 @@ templ faultReportPage(account *AccountView, issue IssueView, events []EventView,
 				<span class={ "badge", statusBadge(issue.Status) }>{ statusLabel(issue.Status) }</span>
 			</div>
 		</div>
+		<div class="assignment-widget">
+			if issue.AssignedTo != "" {
+				<span class="assignment-current">Assigned to <strong>{ issue.AssignedTo }</strong></span>
+				<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s/unassign", projectID, issue.ID)) } style="display:inline;">
+					@csrfField(csrfToken)
+					<button type="submit" class="btn btn-sm">Unassign</button>
+				</form>
+				<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s/assign", projectID, issue.ID)) } style="display:inline;">
+					@csrfField(csrfToken)
+					<select name="assigned_to" class="assign-select">
+						<option value="">Reassign to...</option>
+						for _, a := range accounts {
+							<option value={ a.Name }>{ a.Name }</option>
+						}
+					</select>
+					<button type="submit" class="btn btn-sm">Reassign</button>
+				</form>
+			} else {
+				<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s/assign", projectID, issue.ID)) } style="display:inline;">
+					@csrfField(csrfToken)
+					<select name="assigned_to" class="assign-select">
+						<option value="">Assign to...</option>
+						for _, a := range accounts {
+							<option value={ a.Name }>{ a.Name }</option>
+						}
+					</select>
+					<button type="submit" class="btn btn-sm">Assign</button>
+				</form>
+			}
+		</div>
 		<div class="detail-body">
+			<div class="detail-section">
+				<h3>Problem</h3>
+				<div class="problem-box">
+					<div class="problem-type">
+						if issue.ExceptionType != "" {
+							<code>{ issue.ExceptionType }</code>
+						} else {
+							<code>{ issue.Level }</code>
+						}
+						if issue.Platform != "" {
+							<span class="problem-platform">{ platformIcon(issue.Platform) } { issue.Platform }</span>
+						}
+					</div>
+					<div class="problem-message">{ issue.Title }</div>
+					if issue.Culprit != "" {
+						<div class="problem-culprit">Source: <code>{ issue.Culprit }</code></div>
+					}
+					if issue.FirstRelease != "" || issue.LastRelease != "" {
+						<div class="problem-releases">
+							if issue.FirstRelease != "" {
+								<span>First seen in: <span class="release-badge">{ issue.FirstRelease }</span></span>
+							}
+							if issue.LastRelease != "" && issue.LastRelease != issue.FirstRelease {
+								<span>Last seen in: <span class="release-badge">{ issue.LastRelease }</span></span>
+							}
+						</div>
+					}
+					<div class="problem-impact">
+						{ fmt.Sprintf("%d", issue.EventCount) } occurrences over { timeDelta(issue.FirstSeen, issue.LastSeen) }
+					</div>
+				</div>
+			</div>
+
+			if issue.MergedInto != "" {
+				<div class="detail-section">
+					<div class="merge-banner">
+						<span class="merge-icon">🔗</span>
+						<div>
+							<div class="merge-text">
+								This issue has been merged into
+								<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s", projectID, issue.MergedInto)) }>
+									{ issue.MergedIntoTitle }
+								</a>
+							</div>
+							<div class="merge-detail">New events matching this fingerprint will be routed to the target issue.</div>
+						</div>
+						<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s/unmerge", projectID, issue.ID)) } style="margin-left:auto;">
+							@csrfField(csrfToken)
+							<button type="submit" class="btn btn-sm" title="Reverse this merge and restore the issue">Unmerge</button>
+						</form>
+					</div>
+				</div>
+			}
+
+			if len(issue.MergedChildren) > 0 {
+				<div class="detail-section">
+					<h3>Merged Issues</h3>
+					<div class="merged-children">
+						for _, mc := range issue.MergedChildren {
+							<div class="merged-child">
+								<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s", projectID, mc.ID)) }>
+									{ mc.Title }
+								</a>
+								<span class="merged-child-count">{ fmt.Sprintf("%d events", mc.EventCount) }</span>
+							</div>
+						}
+					</div>
+				</div>
+			}
+
+			if issue.Resolution != "" {
+				<div class="detail-section">
+					if issue.Status == "resolved" {
+						<h3>Resolution</h3>
+						<div class="resolution-box">
+							<span class="resolution-icon">✅</span>
+							<div>
+								<div class="resolution-text">{ issue.Resolution }</div>
+								if issue.BeadID != "" {
+									<div class="resolution-bead">Tracked as bead <code>{ issue.BeadID }</code></div>
+								}
+							</div>
+						</div>
+					} else if issue.Status == "regressed" {
+						<h3>Reopened</h3>
+						<div class="resolution-box regressed">
+							<span class="resolution-icon">🌋</span>
+							<div>
+								<div class="resolution-text">{ issue.Resolution }</div>
+								<div class="resolution-bead">This fix did not hold — the error has reappeared.</div>
+								if issue.BeadID != "" {
+									<div class="resolution-bead">Tracked as bead <code>{ issue.BeadID }</code></div>
+								}
+							</div>
+						</div>
+					}
+				</div>
+			}
+
+			if issue.RootCause != "" || issue.FixExplanation != "" || issue.FixCommit != "" {
+				<div class="detail-section">
+					<h3>Root Cause &amp; Fix</h3>
+					<div class="resolution-details">
+						if issue.RootCause != "" {
+							<div class="resolution-detail-item">
+								<div class="resolution-detail-label">What caused this</div>
+								<div class="resolution-detail-text">{ issue.RootCause }</div>
+							</div>
+						}
+						if issue.FixExplanation != "" {
+							<div class="resolution-detail-item">
+								<div class="resolution-detail-label">How it was fixed</div>
+								<div class="resolution-detail-text">{ issue.FixExplanation }</div>
+							</div>
+						}
+						if issue.FixCommit != "" {
+							<div class="resolution-detail-item">
+								<div class="resolution-detail-label">Fix reference</div>
+								<div class="resolution-detail-text"><code>{ issue.FixCommit }</code></div>
+							</div>
+						}
+					</div>
+				</div>
+			}
+
 			if issue.Status == "unresolved" || issue.Status == "regressed" {
 				<div class="detail-section">
-					<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s/resolve", projectID, issue.ID)) }>
-						<button type="submit" class="btn btn-primary">Mark Stabilized</button>
+					<div class="action-buttons">
+						<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s/dispatch", projectID, issue.ID)) } style="display:inline;">
+							@csrfField(csrfToken)
+							<input type="hidden" name="action" value="polecat"/>
+							<button type="submit" class="btn btn-dispatch" title="Sling a polecat to investigate and fix this issue">Dispatch Polecat</button>
+						</form>
+						<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s/dispatch", projectID, issue.ID)) } style="display:inline;">
+							@csrfField(csrfToken)
+							<input type="hidden" name="action" value="crew"/>
+							<button type="submit" class="btn btn-notify" title="Notify the rig crew to investigate this issue">Notify Crew</button>
+						</form>
+						<button class="btn" onclick="document.getElementById('resolve-form').style.display='block'; this.parentElement.style.display='none';">Mark Stabilized</button>
+							<button class="btn" onclick="document.getElementById('snooze-form').style.display='block'; this.parentElement.style.display='none';">Snooze…</button>
+							<button class="btn" onclick="document.getElementById('merge-form').style.display='block'; this.parentElement.style.display='none';">Merge Into…</button>
+					</div>
+					<form id="merge-form" method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s/merge", projectID, issue.ID)) } class="merge-form" style="display:none; margin-top:1rem;">
+						@csrfField(csrfToken)
+						<h3>Merge this issue into another</h3>
+						<p class="merge-warning">Merging will move all events to the target issue and create a fingerprint rule so future matching events are routed there. This can be reversed.</p>
+						<div class="form-group">
+							<label for="merge-search">Search for target issue</label>
+							<input type="text" id="merge-search" placeholder="Type to search issues..." autocomplete="off"
+								data-project-id={ fmt.Sprintf("%d", projectID) }
+								data-exclude-id={ issue.ID }/>
+							<div id="merge-results" class="merge-results"></div>
+							<input type="hidden" id="merge-target-id" name="target_id" value=""/>
+						</div>
+						<div id="merge-selected" class="merge-selected" style="display:none;">
+							<span>Merging into: </span>
+							<strong id="merge-selected-title"></strong>
+							<button type="button" class="btn btn-sm" onclick="clearMergeSelection()">Change</button>
+						</div>
+						<button type="submit" id="merge-submit" class="btn btn-primary" disabled>Merge</button>
+						<button type="button" class="btn" onclick="document.getElementById('merge-form').style.display='none';">Cancel</button>
+					</form>
+					<form id="snooze-form" method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s/snooze", projectID, issue.ID)) } class="resolve-form" style="display:none; margin-top:1rem;">
+						@csrfField(csrfToken)
+						<h3>Snooze this issue</h3>
+						<div class="form-group">
+							<label for="duration_hours">Snooze for</label>
+							<select id="duration_hours" name="duration_hours">
+								<option value="1">1 hour</option>
+								<option value="4">4 hours</option>
+								<option value="24" selected>1 day</option>
+								<option value="72">3 days</option>
+								<option value="168">1 week</option>
+								<option value="720">30 days</option>
+							</select>
+						</div>
+						<div class="form-group">
+							<label for="snooze-reason">Reason (optional)</label>
+							<input type="text" id="snooze-reason" name="reason" placeholder="e.g., Known issue, waiting for upstream fix"/>
+						</div>
+						<button type="submit" class="btn btn-primary">Snooze</button>
+						<button type="button" class="btn" onclick="document.getElementById('snooze-form').style.display='none';">Cancel</button>
+					</form>
+					<form id="resolve-form" method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s/resolve", projectID, issue.ID)) } class="resolve-form" style="display:none; margin-top:1rem;">
+						@csrfField(csrfToken)
+						<h3>Stabilize this issue</h3>
+						<div class="form-group">
+							<label for="explanation">What caused this issue?</label>
+							<textarea id="explanation" name="explanation" rows="3" required placeholder="e.g., The retention worker was querying the wrong table name due to a naming collision with beads."></textarea>
+						</div>
+						<div class="form-group">
+							<label for="solution">How was it fixed?</label>
+							<textarea id="solution" name="solution" rows="3" required placeholder="e.g., Renamed all SQL references from events to ft_events."></textarea>
+						</div>
+						<div class="form-group">
+							<label for="fix_commit">Commit or PR reference (optional)</label>
+							<input type="text" id="fix_commit" name="fix_commit" placeholder="e.g., f17d1c6 or #42"/>
+						</div>
+						<button type="submit" class="btn btn-primary">Submit</button>
 					</form>
 				</div>
 			}
 
+			if issue.Status == "snoozed" {
+				<div class="detail-section">
+					<div class="snooze-info">
+						<span class="badge badge-snoozed">Snoozed</span>
+						if issue.SnoozedUntil != nil {
+							<span> until { issue.SnoozedUntil.Format("Jan 2, 2006 3:04 PM UTC") }</span>
+						}
+						if issue.SnoozedBy != "" {
+							<span> by { issue.SnoozedBy }</span>
+						}
+						if issue.SnoozeReason != "" {
+							<div class="snooze-reason">{ issue.SnoozeReason }</div>
+						}
+					</div>
+					<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues/%s/unsnooze", projectID, issue.ID)) } style="margin-top:0.5rem;">
+						@csrfField(csrfToken)
+						<button type="submit" class="btn">Unsnooze</button>
+					</form>
+				</div>
+			}
+
+			if len(lifecycle) > 0 {
+				<div class="detail-section">
+					<h3>Lifecycle</h3>
+					<div class="lifecycle-timeline">
+						for _, lc := range lifecycle {
+							<div class="lifecycle-entry">
+								<span class="lifecycle-icon">{ lifecycleIcon(lc.EventType) }</span>
+								<div class="lifecycle-content">
+									<div class="lifecycle-label">{ lifecycleLabel(lc.EventType) }</div>
+									if lc.Assignee != "" {
+										<div class="lifecycle-detail">By: <code>{ lc.Assignee }</code></div>
+									}
+									if lc.Target != "" && lc.Assignee == "" {
+										<div class="lifecycle-detail">Alerted: <code>{ lc.Target }</code></div>
+									}
+									if lc.Solution != "" {
+										<div class="lifecycle-detail lifecycle-solution">{ lc.Solution }</div>
+									}
+									if lc.BeadID != "" {
+										<div class="lifecycle-detail">Bead: <code>{ lc.BeadID }</code></div>
+									}
+									if lc.Rig != "" && lc.Target == "" && lc.Assignee == "" {
+										<div class="lifecycle-detail">Rig: { lc.Rig }</div>
+									}
+								</div>
+								<span class="lifecycle-time">{ timeAgo(lc.Timestamp) }</span>
+							</div>
+						}
+					</div>
+				</div>
+			}
+
 			<div class="detail-section">
-				<h3>Recent Events</h3>
+				<h3>
+					Recent Events
+					if issue.EventCount > 20 {
+						<span class="events-note">showing 20 of { fmt.Sprintf("%d", issue.EventCount) } — similar errors are grouped by fingerprint</span>
+					}
+				</h3>
 				if len(events) == 0 {
 					<p class="empty">No events recorded.</p>
 				} else {
@@ -266,6 +1300,8 @@ templ faultReportPage(account *AccountView, issue IssueView, events []EventView,
 							<tr>
 								<th>Event ID</th>
 								<th>Time</th>
+								<th>Release</th>
+								<th>Env</th>
 								<th>Platform</th>
 								<th>Level</th>
 								<th>Message</th>
@@ -280,6 +1316,16 @@ templ faultReportPage(account *AccountView, issue IssueView, events []EventView,
 										</a>
 									</td>
 									<td>{ timeAgo(ev.Timestamp) }</td>
+									<td>
+										if ev.Release != "" {
+											<span class="release-badge release-sm">{ ev.Release }</span>
+										}
+									</td>
+									<td>
+										if ev.Environment != "" {
+											<span class={ "env-badge", fmt.Sprintf("env-%s", ev.Environment) }>{ ev.Environment }</span>
+										}
+									</td>
 									<td>{ ev.Platform }</td>
 									<td>{ ev.Level }</td>
 									<td>{ ev.Message }</td>
@@ -289,8 +1335,79 @@ templ faultReportPage(account *AccountView, issue IssueView, events []EventView,
 					</table>
 				}
 			</div>
+			<script>
+			(function() {
+				var searchInput = document.getElementById('merge-search');
+				if (!searchInput) return;
+				var resultsDiv = document.getElementById('merge-results');
+				var targetInput = document.getElementById('merge-target-id');
+				var selectedDiv = document.getElementById('merge-selected');
+				var selectedTitle = document.getElementById('merge-selected-title');
+				var submitBtn = document.getElementById('merge-submit');
+				var timer = null;
+
+				function clearResults() {
+					while (resultsDiv.firstChild) resultsDiv.removeChild(resultsDiv.firstChild);
+				}
+
+				function createResultItem(ig) {
+					var div = document.createElement('div');
+					div.className = 'merge-result-item';
+					var titleSpan = document.createElement('span');
+					titleSpan.className = 'merge-result-title';
+					titleSpan.textContent = ig.title;
+					var metaSpan = document.createElement('span');
+					metaSpan.className = 'merge-result-meta';
+					metaSpan.textContent = ig.event_count + ' events \u00b7 ' + ig.status;
+					div.appendChild(titleSpan);
+					div.appendChild(metaSpan);
+					div.addEventListener('click', function() {
+						targetInput.value = ig.id;
+						selectedTitle.textContent = ig.title;
+						selectedDiv.style.display = 'block';
+						searchInput.style.display = 'none';
+						clearResults();
+						submitBtn.disabled = false;
+					});
+					return div;
+				}
+
+				searchInput.addEventListener('input', function() {
+					clearTimeout(timer);
+					var q = searchInput.value.trim();
+					if (q.length < 2) { clearResults(); return; }
+					timer = setTimeout(function() {
+						var projectId = searchInput.getAttribute('data-project-id');
+						var excludeId = searchInput.getAttribute('data-exclude-id');
+						fetch('/dashboard/projects/' + projectId + '/issues/search?q=' + encodeURIComponent(q) + '&exclude=' + excludeId)
+							.then(function(r) { return r.json(); })
+							.then(function(issues) {
+								clearResults();
+								if (!issues.length) {
+									var empty = document.createElement('div');
+									empty.className = 'merge-result-empty';
+									empty.textContent = 'No matching issues found';
+									resultsDiv.appendChild(empty);
+									return;
+								}
+								issues.forEach(function(ig) {
+									resultsDiv.appendChild(createResultItem(ig));
+								});
+							});
+					}, 300);
+				});
+
+				window.clearMergeSelection = function() {
+					targetInput.value = '';
+					selectedDiv.style.display = 'none';
+					searchInput.style.display = '';
+					searchInput.value = '';
+					submitBtn.disabled = true;
+				};
+			})();
+			</script>
 		</div>
-	}
+	</div>
 }
 
 // Core Sample — event detail
@@ -317,5 +1434,610 @@ templ coreSamplePage(account *AccountView, event EventView, projectID int64, gro
 				<pre class="raw-json">{ event.RawJSON }</pre>
 			</div>
 		</div>
+	}
+}
+
+// Project Settings
+templ settingsPage(account *AccountView, s SettingsView, errorMsg string) {
+	@layout(s.ProjectName + " Settings", account) {
+		<div class="page-header">
+			<h2>{ s.ProjectName } — Settings</h2>
+			<p class="page-subtitle">
+				<a href="/dashboard/">All Projects</a> / <a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues", s.ProjectID)) }>{ s.ProjectName }</a> / Settings
+			</p>
+		</div>
+
+		if errorMsg != "" {
+			<div class="alert alert-error">{ errorMsg }</div>
+		}
+
+		<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/settings", s.ProjectID)) } class="settings-form">
+			@csrfField(account.CSRFToken)
+			<div class="form-group">
+				<label for="description">Description</label>
+				<input type="text" id="description" name="description" value={ s.Description } placeholder="Short project description" maxlength="80"/>
+			</div>
+			<div class="form-group">
+				<label for="url">URL</label>
+				<input type="url" id="url" name="url" value={ s.URL } placeholder="http://localhost:3000"/>
+				<span class="form-hint">The project's web URL — shown as a link on the project card.</span>
+			</div>
+			<div class="form-group">
+				<label for="deployment_type">Deployment Type</label>
+				<select id="deployment_type" name="deployment_type">
+					<option value="" selected?={ s.DeploymentType == "" }>Not set</option>
+					<option value="local" selected?={ s.DeploymentType == "local" }>Local</option>
+					<option value="remote" selected?={ s.DeploymentType == "remote" }>Remote (mobile/desktop)</option>
+					<option value="hosted" selected?={ s.DeploymentType == "hosted" }>Hosted (cloud)</option>
+				</select>
+			</div>
+			<div class="form-group">
+				<label for="components">Components</label>
+				<input type="text" id="components" name="components" value={ s.Components } placeholder="web, api, database, macos"/>
+				<span class="form-hint">Comma-separated. Shown as icons on the project card.</span>
+			</div>
+			<div class="form-group">
+				<label for="environments">Environments</label>
+				<input type="text" id="environments" name="environments" value={ s.Environments } placeholder="staging, production"/>
+				<span class="form-hint">Comma-separated. Shown as badges on the project card.</span>
+			</div>
+			<hr/>
+			<h3>Notifications</h3>
+			<div class="form-group">
+				<label for="webhook_url">Webhook URL</label>
+				<input type="url" id="webhook_url" name="webhook_url" value={ s.WebhookURL } placeholder="https://hooks.slack.com/services/..."/>
+				<span class="form-hint">Receives notifications for new issues, regressions, and resolutions.</span>
+			</div>
+			<div class="form-group">
+				<label for="webhook_type">Webhook Type</label>
+				<select id="webhook_type" name="webhook_type">
+					<option value="slack" selected?={ s.WebhookType == "" || s.WebhookType == "slack" }>Slack</option>
+					<option value="discord" selected?={ s.WebhookType == "discord" }>Discord</option>
+					<option value="generic" selected?={ s.WebhookType == "generic" }>Generic (JSON)</option>
+				</select>
+				<span class="form-hint">Slack and Discord use Block Kit formatting. Generic sends a plain JSON payload.</span>
+			</div>
+			<div class="form-actions">
+				<button type="submit" class="btn btn-primary">Save</button>
+				<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues", s.ProjectID)) } class="btn">Cancel</a>
+			</div>
+		</form>
+
+		<hr/>
+		<h3>Webhook Payload Templates</h3>
+		<p class="form-hint">
+			Customize the JSON payload sent to generic webhooks. Use <code>{"{{variable}}"}</code> placeholders for dynamic values.
+			Available variables: <code>event_type</code>, <code>project_id</code>, <code>group_id</code>, <code>title</code>,
+			<code>culprit</code>, <code>level</code>, <code>platform</code>, <code>event_count</code>,
+			<code>bead_id</code>, <code>url</code>, <code>timestamp</code>.
+		</p>
+
+		if len(s.WebhookTemplates) > 0 {
+			<table class="events-table">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Event Type</th>
+						<th>Default</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, tmpl := range s.WebhookTemplates {
+						<tr>
+							<td>{ tmpl.Name }</td>
+							<td>
+								if tmpl.EventType == "*" {
+									All events
+								} else {
+									{ tmpl.EventType }
+								}
+							</td>
+							<td>
+								if tmpl.IsDefault {
+									<span class="badge badge-muted">built-in</span>
+								} else {
+									<span class="badge badge-green">custom</span>
+								}
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		} else {
+			<p class="empty">No custom templates configured. Generic webhooks use the default JSON payload.</p>
+		}
+		<p class="form-hint">
+			Manage templates via the API: <code>GET /api/{ fmt.Sprintf("%d", s.ProjectID) }/webhook-templates/</code>.
+			View built-in templates: <code>GET /api/{ fmt.Sprintf("%d", s.ProjectID) }/webhook-templates/defaults/</code>.
+			Preview a template: <code>POST /api/{ fmt.Sprintf("%d", s.ProjectID) }/webhook-templates/preview/</code>.
+		</p>
+
+		<hr/>
+		<h3>Alert Rules</h3>
+		<p class="form-hint">Rules determine when alerts fire and what action is taken. Default rules match Sentry-like behavior (3 errors in 5 min, immediate fatal, slow-burn after 1 hour).</p>
+
+		if len(s.AlertRules) > 0 {
+			<table class="events-table">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Condition</th>
+						<th>Level</th>
+						<th>Action</th>
+						<th>Enabled</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, rule := range s.AlertRules {
+						<tr>
+							<td>{ rule.Name }</td>
+							<td>
+								if rule.ConditionType == "threshold" {
+									{ fmt.Sprintf("%d events in %d min", rule.Threshold, rule.WindowMinutes) }
+								} else if rule.ConditionType == "slow_burn" {
+									{ fmt.Sprintf("Unattended for %d min", rule.WindowMinutes) }
+								} else {
+									{ string(rule.ConditionType) }
+								}
+							</td>
+							<td>
+								if rule.LevelFilter != "" && rule.LevelFilter != "any" {
+									{ rule.LevelFilter }
+								} else {
+									any
+								}
+							</td>
+							<td>
+								{ string(rule.ActionType) }
+								if rule.ActionTarget != "" {
+									<span class="form-hint"> → { truncateStr(rule.ActionTarget, 40) }</span>
+								}
+							</td>
+							<td>
+								if rule.Enabled {
+									<span class="badge badge-green">on</span>
+								} else {
+									<span class="badge badge-muted">off</span>
+								}
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		} else {
+			<p class="empty">No alert rules configured. Default rules will be created automatically.</p>
+		}
+		<p class="form-hint">Use the API to create, update, or delete rules: <code>GET /api/{ fmt.Sprintf("%d", s.ProjectID) }/alert-rules/</code></p>
+
+		if len(s.AlertHistory) > 0 {
+			<hr/>
+			<h3>Recent Alerts</h3>
+			<table class="events-table">
+				<thead>
+					<tr>
+						<th>Rule</th>
+						<th>Condition</th>
+						<th>Action</th>
+						<th>Fired</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, ah := range s.AlertHistory {
+						<tr>
+							<td>{ ah.RuleName }</td>
+							<td>{ string(ah.ConditionType) }</td>
+							<td>{ string(ah.ActionType) }</td>
+							<td>{ timeAgo(ah.FiredAt) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+	}
+}
+
+// Live Stream — real-time error monitoring
+templ liveStreamPage(account *AccountView) {
+	@layout("Live", account) {
+		<div class="page-header">
+			<h2>Live Error Stream</h2>
+			<p class="page-subtitle">Real-time errors across all projects.</p>
+		</div>
+
+		<div class="live-controls">
+			<span id="live-status" class="live-status live-connecting">Connecting...</span>
+			<span id="live-count" class="live-count">0 events</span>
+		</div>
+
+		<div id="live-feed" class="live-feed">
+			<div class="empty" id="live-empty">
+				<p>Waiting for errors...</p>
+			</div>
+		</div>
+
+		<script>
+		{`
+		(function() {
+			const feed = document.getElementById('live-feed');
+			const status = document.getElementById('live-status');
+			const countEl = document.getElementById('live-count');
+			const empty = document.getElementById('live-empty');
+			let count = 0;
+			const maxItems = 100;
+
+			const levelIcon = {fatal: '\u{1F534}', error: '\u26A1', warning: '\u{3030}\uFE0F'};
+			const levelClass = {fatal: 'severity-rupture', error: 'severity-quake', warning: 'severity-tremor'};
+
+			function connect() {
+				status.textContent = 'Connecting...';
+				status.className = 'live-status live-connecting';
+				const es = new EventSource('/dashboard/live/events');
+
+				es.onopen = function() {
+					status.textContent = '\u25CF Connected';
+					status.className = 'live-status live-connected';
+				};
+
+				es.onmessage = function(e) {
+					const ev = JSON.parse(e.data);
+					if (empty) empty.style.display = 'none';
+					count++;
+					countEl.textContent = count + ' events';
+
+					const div = document.createElement('div');
+					div.className = 'live-event';
+					const icon = levelIcon[ev.level] || '\u00B7';
+					const cls = levelClass[ev.level] || '';
+					const ts = new Date(ev.timestamp).toLocaleTimeString();
+
+					const iconEl = document.createElement('span');
+					iconEl.className = 'live-event-icon ' + (cls || '');
+					iconEl.textContent = icon;
+
+					const projEl = document.createElement('span');
+					projEl.className = 'live-event-project';
+					projEl.textContent = ev.project;
+
+					const msgEl = document.createElement('span');
+					msgEl.className = 'live-event-msg';
+					msgEl.textContent = (ev.message || '').substring(0, 120);
+
+					const timeEl = document.createElement('span');
+					timeEl.className = 'live-event-time';
+					timeEl.textContent = ts;
+
+					div.appendChild(iconEl);
+					div.appendChild(projEl);
+					div.appendChild(msgEl);
+					div.appendChild(timeEl);
+					feed.insertBefore(div, feed.firstChild);
+
+					while (feed.children.length > maxItems) {
+						feed.removeChild(feed.lastChild);
+					}
+				};
+
+				es.onerror = function() {
+					status.textContent = '\u25CB Reconnecting...';
+					status.className = 'live-status live-disconnected';
+					es.close();
+					setTimeout(connect, 3000);
+				};
+			}
+			connect();
+		})();
+		`}
+		</script>
+	}
+}
+
+// Teams list page.
+templ teamsListPage(account *AccountView, teams []TeamView) {
+	@layout("Teams", account) {
+		<div class="page-header">
+			<div class="page-header-row">
+				<div>
+					<h2>Teams</h2>
+					<p class="page-subtitle">Manage teams, members, and project access.</p>
+				</div>
+			</div>
+		</div>
+
+		<details class="create-team-section">
+			<summary class="btn btn-sm">+ New Team</summary>
+			<form method="POST" action="/dashboard/teams/create" class="settings-form" style="margin-top: 0.75rem;">
+				@csrfField(account.CSRFToken)
+				<div class="form-group">
+					<label for="name">Name</label>
+					<input type="text" id="name" name="name" placeholder="Backend Team" required/>
+				</div>
+				<div class="form-group">
+					<label for="slug">Slug</label>
+					<input type="text" id="slug" name="slug" placeholder="backend-team" required/>
+					<span class="form-hint">URL-safe identifier. Lowercase letters, numbers, and hyphens.</span>
+				</div>
+				<div class="form-actions">
+					<button type="submit" class="btn btn-primary">Create Team</button>
+				</div>
+			</form>
+		</details>
+
+		if len(teams) == 0 {
+			<div class="empty">
+				<p>No teams yet. Create one to organize members and project access.</p>
+			</div>
+		} else {
+			<table class="events-table">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Slug</th>
+						<th>Members</th>
+						<th>Projects</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, t := range teams {
+						<tr>
+							<td><a href={ templ.SafeURL(fmt.Sprintf("/dashboard/teams/%d", t.ID)) }>{ t.Name }</a></td>
+							<td><code>{ t.Slug }</code></td>
+							<td>{ fmt.Sprintf("%d", t.MemberCount) }</td>
+							<td>{ fmt.Sprintf("%d", t.ProjectCount) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+	}
+}
+
+// Team detail page.
+templ teamDetailPage(account *AccountView, t TeamDetailView) {
+	@layout(t.Name, account) {
+		<div class="page-header">
+			<h2>{ t.Name }</h2>
+			<p class="page-subtitle">
+				<a href="/dashboard/teams">Teams</a> / { t.Name } (<code>{ t.Slug }</code>)
+			</p>
+		</div>
+
+		// Edit team
+		<details>
+			<summary class="btn btn-sm">Edit Team</summary>
+			<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/teams/%d/update", t.ID)) } class="settings-form" style="margin-top: 0.75rem;">
+				@csrfField(account.CSRFToken)
+				<div class="form-group">
+					<label for="name">Name</label>
+					<input type="text" id="name" name="name" value={ t.Name }/>
+				</div>
+				<div class="form-group">
+					<label for="slug">Slug</label>
+					<input type="text" id="slug" name="slug" value={ t.Slug }/>
+				</div>
+				<div class="form-actions">
+					<button type="submit" class="btn btn-primary">Save</button>
+				</div>
+			</form>
+		</details>
+
+		<hr/>
+		<h3>Members</h3>
+
+		if len(t.Members) > 0 {
+			<table class="events-table">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Email</th>
+						<th>Role</th>
+						<th></th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, m := range t.Members {
+						<tr>
+							<td>{ m.Name }</td>
+							<td>{ m.Email }</td>
+							<td>{ m.Role }</td>
+							<td>
+								<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/teams/%d/members/%d/remove", t.ID, m.AccountID)) } style="display:inline;">
+									@csrfField(account.CSRFToken)
+									<button type="submit" class="btn btn-sm" onclick="return confirm('Remove this member?')">Remove</button>
+								</form>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		} else {
+			<p class="empty">No members yet.</p>
+		}
+
+		if len(t.AvailableAccounts) > 0 {
+			<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/teams/%d/members/add", t.ID)) } class="settings-form" style="margin-top: 0.75rem;">
+				@csrfField(account.CSRFToken)
+				<div style="display: flex; gap: 0.5rem; align-items: flex-end;">
+					<div class="form-group" style="flex: 1; margin-bottom: 0;">
+						<label for="account_id">Add Member</label>
+						<select id="account_id" name="account_id" required>
+							<option value="">Select account...</option>
+							for _, a := range t.AvailableAccounts {
+								<option value={ fmt.Sprintf("%d", a.ID) }>{ a.Name } ({ a.Email })</option>
+							}
+						</select>
+					</div>
+					<div class="form-group" style="margin-bottom: 0;">
+						<label for="role">Role</label>
+						<select id="role" name="role">
+							<option value="member">Member</option>
+							<option value="admin">Admin</option>
+						</select>
+					</div>
+					<button type="submit" class="btn btn-primary" style="margin-bottom: 0;">Add</button>
+				</div>
+			</form>
+		}
+
+		<hr/>
+		<h3>Projects</h3>
+
+		if len(t.Projects) > 0 {
+			<table class="events-table">
+				<thead>
+					<tr>
+						<th>Project</th>
+						<th></th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, p := range t.Projects {
+						<tr>
+							<td><a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues", p.ProjectID)) }>{ p.Name }</a></td>
+							<td>
+								<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/teams/%d/projects/%d/unlink", t.ID, p.ProjectID)) } style="display:inline;">
+									@csrfField(account.CSRFToken)
+									<button type="submit" class="btn btn-sm" onclick="return confirm('Unlink this project?')">Unlink</button>
+								</form>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		} else {
+			<p class="empty">No projects linked.</p>
+		}
+
+		if len(t.AvailableProjects) > 0 {
+			<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/teams/%d/projects/link", t.ID)) } class="settings-form" style="margin-top: 0.75rem;">
+				@csrfField(account.CSRFToken)
+				<div style="display: flex; gap: 0.5rem; align-items: flex-end;">
+					<div class="form-group" style="flex: 1; margin-bottom: 0;">
+						<label for="project_id">Link Project</label>
+						<select id="project_id" name="project_id" required>
+							<option value="">Select project...</option>
+							for _, p := range t.AvailableProjects {
+								<option value={ fmt.Sprintf("%d", p.ID) }>{ p.Name }</option>
+							}
+						</select>
+					</div>
+					<button type="submit" class="btn btn-primary" style="margin-bottom: 0;">Link</button>
+				</div>
+			</form>
+		}
+
+		<hr/>
+		<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/teams/%d/delete", t.ID)) } style="margin-top: 1rem;">
+			@csrfField(account.CSRFToken)
+			<button type="submit" class="btn" style="color: var(--rupture);" onclick="return confirm('Delete this team? This cannot be undone.')">Delete Team</button>
+		</form>
+	}
+}
+
+// Slack account linking page.
+templ slackLinkPage(account *AccountView, mapping *db.SlackUserMapping) {
+	@layout("Slack Integration", account) {
+		<div class="page-header">
+			<h2>Slack Integration</h2>
+			<p class="page-subtitle">
+				<a href="/dashboard/">Dashboard</a> / Slack
+			</p>
+		</div>
+
+		<p class="form-hint">
+			Link your faultline account to your Slack user ID to receive direct messages for mentions, assignments, and issue notifications.
+		</p>
+
+		if mapping != nil {
+			<div class="alert" style="background: var(--surface-raised); border: 1px solid var(--bedrock); padding: 1rem; border-radius: 0.25rem; margin-bottom: 1rem;">
+				<strong>Connected</strong> — Slack User ID: <code>{ mapping.SlackUserID }</code>
+				if mapping.SlackTeamID != "" {
+					<span> (Team: <code>{ mapping.SlackTeamID }</code>)</span>
+				}
+			</div>
+			<form method="POST" action="/dashboard/account/slack/unlink" class="settings-form">
+				@csrfField(account.CSRFToken)
+				<button type="submit" class="btn" style="color: var(--rupture);" onclick="return confirm('Disconnect your Slack account?')">Disconnect Slack</button>
+			</form>
+		} else {
+			<form method="POST" action="/dashboard/account/slack" class="settings-form">
+				@csrfField(account.CSRFToken)
+				<div class="form-group">
+					<label for="slack_user_id">Slack User ID</label>
+					<input type="text" id="slack_user_id" name="slack_user_id" placeholder="U0123456789" required/>
+					<span class="form-hint">
+						Find your Slack user ID: open Slack, click your profile, then "Copy member ID".
+					</span>
+				</div>
+				<div class="form-group">
+					<label for="slack_team_id">Slack Team ID (optional)</label>
+					<input type="text" id="slack_team_id" name="slack_team_id" placeholder="T0123456789"/>
+					<span class="form-hint">
+						Required if your Slack app is installed in multiple workspaces.
+					</span>
+				</div>
+				<div class="form-actions">
+					<button type="submit" class="btn btn-primary">Link Slack Account</button>
+					<a href="/dashboard/" class="btn">Cancel</a>
+				</div>
+			</form>
+		}
+	}
+}
+
+// Account role management page (owner-only).
+templ accountsPage(account *AccountView, accounts []AccountRoleView, flash string) {
+	@layout("Accounts", account) {
+		<div class="page-header">
+			<div class="page-header-row">
+				<div>
+					<h2>Accounts</h2>
+					<p class="page-subtitle">Manage account roles.</p>
+				</div>
+			</div>
+		</div>
+
+		if flash != "" {
+			<div class="alert" style="background: var(--surface-raised); border: 1px solid var(--rupture); padding: 0.75rem 1rem; border-radius: 0.25rem; margin-bottom: 1rem; color: var(--rupture);">
+				{ flash }
+			</div>
+		}
+
+		if len(accounts) == 0 {
+			<div class="empty">
+				<p>No accounts found.</p>
+			</div>
+		} else {
+			<table class="events-table">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Email</th>
+						<th>Role</th>
+						<th></th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, a := range accounts {
+						<tr>
+							<td>{ a.Name }</td>
+							<td>{ a.Email }</td>
+							<td>
+								<form method="POST" action="/dashboard/accounts/update-role" style="display: flex; align-items: center; gap: 0.5rem;">
+									@csrfField(account.CSRFToken)
+									<input type="hidden" name="account_id" value={ fmt.Sprintf("%d", a.ID) }/>
+									<select name="role" onchange="this.form.submit()">
+										<option value="viewer" selected?={ a.Role == "viewer" }>viewer</option>
+										<option value="member" selected?={ a.Role == "member" }>member</option>
+										<option value="admin" selected?={ a.Role == "admin" }>admin</option>
+										<option value="owner" selected?={ a.Role == "owner" }>owner</option>
+									</select>
+									<noscript><button type="submit" class="btn btn-sm">Save</button></noscript>
+								</form>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
 	}
 }

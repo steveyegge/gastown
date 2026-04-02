@@ -1,13 +1,9 @@
-feat: add requireRole middleware for RBAC enforcement (fl-wmd.1)
+feat: add Dolt database health checker (fl-vuq)
 
-Role hierarchy: owner > admin > member > viewer.
-- Viewer: read-only access (all GET endpoints)
-- Member: resolve/assign/comment/merge/snooze/bulk ops
-- Admin: settings, integrations, fingerprint rules, alert rules,
-  webhook templates, source maps, teams
-- Owner: project registration/removal, API token management
-
-Applied to both API (Bearer auth) and dashboard (session auth) routes.
-Auth middleware now sets X-Account-Role header for downstream checks.
+Implement CheckDolt() for the database monitoring framework. Performs
+four checks: connection ping with latency, query latency via SELECT 1,
+commit lag from dolt_log, and orphan database count (testdb_*, beads_t*,
+beads_pt*, doctest_* patterns). Configurable commit lag threshold
+(default 5min warning) via JSON thresholds field.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

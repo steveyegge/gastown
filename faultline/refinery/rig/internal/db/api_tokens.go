@@ -15,12 +15,20 @@ type APIToken struct {
 	ID         int64      `json:"id"`
 	AccountID  int64      `json:"account_id"`
 	ProjectID  *int64     `json:"project_id,omitempty"` // nil = org-wide
+	Role       string     `json:"role"`                 // viewer, member, admin, owner
 	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`      // first 8 chars, for identification
+	Prefix     string     `json:"prefix"` // first 8 chars, for identification
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"` // nil = no expiry
 	CreatedAt  time.Time  `json:"created_at"`
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+}
+
+// TokenResult is returned by ValidateAPIToken with both the account and token metadata.
+type TokenResult struct {
+	Account   *Account
+	TokenRole string // the token's own role (may be lower than Account.Role)
+	ProjectID *int64 // nil = org-wide token
 }
 
 // migrateAPITokens creates the api_tokens table.
@@ -29,6 +37,7 @@ func (d *DB) migrateAPITokens(ctx context.Context) error {
 		id           BIGINT AUTO_INCREMENT PRIMARY KEY,
 		account_id   BIGINT NOT NULL,
 		project_id   BIGINT,
+		role         VARCHAR(16) NOT NULL DEFAULT 'member',
 		name         VARCHAR(256) NOT NULL,
 		token_hash   VARCHAR(64) NOT NULL UNIQUE,
 		prefix       VARCHAR(12) NOT NULL,
@@ -39,12 +48,23 @@ func (d *DB) migrateAPITokens(ctx context.Context) error {
 		INDEX idx_account (account_id),
 		INDEX idx_hash (token_hash)
 	)`)
-	return err
+	if err != nil {
+		return err
+	}
+	// Add role column to existing tables that lack it.
+	_, _ = d.ExecContext(ctx, `ALTER TABLE api_tokens ADD COLUMN role VARCHAR(16) NOT NULL DEFAULT 'member' AFTER project_id`)
+	return nil
 }
 
 // CreateAPIToken generates a new API token and stores a SHA-256 hash.
 // Returns the plaintext token (shown once) and the token metadata.
-func (d *DB) CreateAPIToken(ctx context.Context, accountID int64, projectID *int64, name string, expiresAt *time.Time) (string, *APIToken, error) {
+// The role parameter sets the token's maximum permission level; it must not
+// exceed the creating account's role.
+func (d *DB) CreateAPIToken(ctx context.Context, accountID int64, projectID *int64, role, name string, expiresAt *time.Time) (string, *APIToken, error) {
+	if role == "" {
+		role = "member"
+	}
+
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", nil, fmt.Errorf("generate token: %w", err)
@@ -64,8 +84,8 @@ func (d *DB) CreateAPIToken(ctx context.Context, accountID int64, projectID *int
 	}
 
 	res, err := d.ExecContext(ctx,
-		`INSERT INTO api_tokens (account_id, project_id, name, token_hash, prefix, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		accountID, pid, name, hash, prefix, exp,
+		`INSERT INTO api_tokens (account_id, project_id, role, name, token_hash, prefix, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		accountID, pid, role, name, hash, prefix, exp,
 	)
 	if err != nil {
 		return "", nil, err
@@ -78,6 +98,7 @@ func (d *DB) CreateAPIToken(ctx context.Context, accountID int64, projectID *int
 		ID:        id,
 		AccountID: accountID,
 		ProjectID: projectID,
+		Role:      role,
 		Name:      name,
 		Prefix:    prefix,
 		ExpiresAt: expiresAt,
@@ -87,23 +108,26 @@ func (d *DB) CreateAPIToken(ctx context.Context, accountID int64, projectID *int
 }
 
 // ValidateAPIToken checks a plaintext token against stored hashes.
-// Returns the associated account if valid, nil otherwise.
+// Returns a TokenResult with the account, token role, and project scope if valid.
+// Returns nil result if the token is invalid, expired, or revoked.
 // Updates last_used_at on successful validation.
-func (d *DB) ValidateAPIToken(ctx context.Context, plaintext string) (*Account, error) {
+func (d *DB) ValidateAPIToken(ctx context.Context, plaintext string) (*TokenResult, error) {
 	hash := hashToken(plaintext)
 
 	var tok struct {
 		id        int64
 		accountID int64
+		projectID sql.NullInt64
+		role      string
 		expiresAt *string
 		revokedAt *string
 	}
 	err := d.QueryRowContext(ctx,
-		`SELECT id, account_id,
+		`SELECT id, account_id, project_id, role,
 		        CAST(expires_at AS CHAR) AS expires_at,
 		        CAST(revoked_at AS CHAR) AS revoked_at
 		 FROM api_tokens WHERE token_hash = ?`, hash,
-	).Scan(&tok.id, &tok.accountID, &tok.expiresAt, &tok.revokedAt)
+	).Scan(&tok.id, &tok.accountID, &tok.projectID, &tok.role, &tok.expiresAt, &tok.revokedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -126,7 +150,7 @@ func (d *DB) ValidateAPIToken(ctx context.Context, plaintext string) (*Account, 
 	}
 
 	// Update last_used_at (fire-and-forget).
-	d.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, time.Now().UTC(), tok.id)
+	_, _ = d.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, time.Now().UTC(), tok.id)
 	d.MarkDirty()
 
 	// Fetch the account.
@@ -141,13 +165,22 @@ func (d *DB) ValidateAPIToken(ctx context.Context, plaintext string) (*Account, 
 	if createdStr != nil {
 		a.CreatedAt, _ = time.Parse("2006-01-02 15:04:05.999999", *createdStr)
 	}
-	return &a, nil
+
+	result := &TokenResult{
+		Account:   &a,
+		TokenRole: tok.role,
+	}
+	if tok.projectID.Valid {
+		pid := tok.projectID.Int64
+		result.ProjectID = &pid
+	}
+	return result, nil
 }
 
 // ListAPITokens returns all non-revoked tokens for an account.
 func (d *DB) ListAPITokens(ctx context.Context, accountID int64) ([]APIToken, error) {
 	rows, err := d.QueryContext(ctx,
-		`SELECT id, account_id, project_id, name, prefix,
+		`SELECT id, account_id, project_id, role, name, prefix,
 		        CAST(last_used_at AS CHAR), CAST(expires_at AS CHAR),
 		        CAST(created_at AS CHAR), CAST(revoked_at AS CHAR)
 		 FROM api_tokens WHERE account_id = ? AND revoked_at IS NULL ORDER BY created_at DESC`, accountID,
@@ -155,14 +188,14 @@ func (d *DB) ListAPITokens(ctx context.Context, accountID int64) ([]APIToken, er
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tokens []APIToken
 	for rows.Next() {
 		var t APIToken
 		var pid sql.NullInt64
 		var lastUsed, expires, createdAt, revoked *string
-		if err := rows.Scan(&t.ID, &t.AccountID, &pid, &t.Name, &t.Prefix, &lastUsed, &expires, &createdAt, &revoked); err != nil {
+		if err := rows.Scan(&t.ID, &t.AccountID, &pid, &t.Role, &t.Name, &t.Prefix, &lastUsed, &expires, &createdAt, &revoked); err != nil {
 			return nil, err
 		}
 		if pid.Valid {
@@ -209,10 +242,10 @@ func (d *DB) RevokeAPIToken(ctx context.Context, tokenID, accountID int64) error
 }
 
 // purgeRevokedAPITokens removes tokens that were revoked more than 90 days ago.
-func (w *RetentionWorker) purgeRevokedAPITokens(ctx context.Context) (int64, error) {
+func (w *RetentionWorker) purgeRevokedAPITokens(ctx context.Context) (int64, error) { //nolint:unparam // error is always nil but kept for interface consistency
 	cutoff := time.Now().UTC().Add(-90 * 24 * time.Hour)
 	res, err := w.db.ExecContext(ctx,
-		`DELETE FROM api_tokens WHERE revoked_at IS NOT NULL AND revoked_at < ?`, cutoff)
+		`DELETE FROM api_tokens WHERE api_tokens.revoked_at IS NOT NULL AND api_tokens.revoked_at < ?`, cutoff)
 	if err != nil {
 		return 0, nil // table may not exist yet
 	}

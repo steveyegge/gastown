@@ -8,13 +8,6 @@ import (
 	"testing"
 )
 
-// mockServer creates a test server with the API handler wired to a mux.
-func mockServer(h *Handler) *httptest.Server {
-	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
-	return httptest.NewServer(mux)
-}
-
 func TestPathInt64(t *testing.T) {
 	// pathInt64 returns 0 for missing or invalid values.
 	r := httptest.NewRequest("GET", "/", nil)
@@ -49,7 +42,9 @@ func TestWriteJSON(t *testing.T) {
 		t.Errorf("expected application/json, got %s", ct)
 	}
 	var body map[string]string
-	json.NewDecoder(w.Body).Decode(&body)
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
 	if body["hello"] != "world" {
 		t.Errorf("expected world, got %s", body["hello"])
 	}
@@ -62,7 +57,9 @@ func TestWriteErr(t *testing.T) {
 		t.Errorf("expected 400, got %d", w.Code)
 	}
 	var body map[string]string
-	json.NewDecoder(w.Body).Decode(&body)
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
 	if body["error"] != "bad input" {
 		t.Errorf("expected 'bad input', got %s", body["error"])
 	}
@@ -229,7 +226,9 @@ func TestProjectsRouteRequiresAuth(t *testing.T) {
 	}
 
 	var body map[string]string
-	json.NewDecoder(w.Body).Decode(&body)
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
 	if body["error"] == "" {
 		t.Error("expected error message in response")
 	}

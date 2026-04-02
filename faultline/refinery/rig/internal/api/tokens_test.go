@@ -64,15 +64,42 @@ func TestFormatInt64(t *testing.T) {
 	}
 }
 
-func TestHeaderInt64(t *testing.T) {
+func TestHeaderAccountID(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.Header.Set("X-Account-ID", "123")
-	if got := headerInt64(r, "X-Account-ID"); got != 123 {
-		t.Errorf("headerInt64 = %d, want 123", got)
+	if got := headerAccountID(r); got != 123 {
+		t.Errorf("headerAccountID = %d, want 123", got)
 	}
 
 	r2 := httptest.NewRequest("GET", "/", nil)
-	if got := headerInt64(r2, "X-Account-ID"); got != 0 {
-		t.Errorf("headerInt64 missing = %d, want 0", got)
+	if got := headerAccountID(r2); got != 0 {
+		t.Errorf("headerAccountID missing = %d, want 0", got)
+	}
+}
+
+func TestEffectiveRole(t *testing.T) {
+	tests := []struct {
+		accountRole string
+		tokenRole   string
+		want        string
+	}{
+		{"owner", "owner", "owner"},
+		{"owner", "admin", "admin"},
+		{"owner", "member", "member"},
+		{"owner", "viewer", "viewer"},
+		{"admin", "admin", "admin"},
+		{"admin", "member", "member"},
+		{"admin", "viewer", "viewer"},
+		{"member", "member", "member"},
+		{"member", "viewer", "viewer"},
+		// Token role higher than account role: account role wins.
+		{"member", "admin", "member"},
+		{"viewer", "owner", "viewer"},
+	}
+	for _, tt := range tests {
+		got := effectiveRole(tt.accountRole, tt.tokenRole)
+		if got != tt.want {
+			t.Errorf("effectiveRole(%q, %q) = %q, want %q", tt.accountRole, tt.tokenRole, got, tt.want)
+		}
 	}
 }
