@@ -116,6 +116,13 @@ type Daemon struct {
 	// triggers a zombie restart, debouncing transient gaps during handoffs.
 	// Only accessed from heartbeat loop goroutine - no sync needed.
 	mayorZombieCount int
+
+	// cachedKnownRigs caches the result of reading mayor/rigs.json so that
+	// the 10+ call-sites per heartbeat tick share a single disk read.
+	// Populated at the start of each heartbeat; cleared afterward.
+	// Only accessed from heartbeat loop goroutine - no sync needed.
+	cachedKnownRigs []string
+	knownRigsCached bool
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -738,6 +745,11 @@ func (d *Daemon) heartbeat(state *State) {
 		d.logger.Println("E-STOP active, skipping agent management")
 		return
 	}
+
+	// Invalidate the per-tick rigs cache so this heartbeat re-reads from disk.
+	// The cache avoids redundant reads within a single tick (10+ callers),
+	// while invalidating here ensures we pick up rigs.json changes between ticks.
+	d.invalidateKnownRigsCache()
 
 	d.metrics.recordHeartbeat(d.ctx)
 	d.logger.Println("Heartbeat starting (recovery-focused)")
@@ -1778,7 +1790,27 @@ func (d *Daemon) openBeadsStores() (map[string]beadsdk.Storage, error) {
 }
 
 // getKnownRigs returns list of registered rig names.
+// Results are cached per heartbeat tick to avoid redundant disk reads
+// (10+ callers per tick all read the same mayor/rigs.json).
 func (d *Daemon) getKnownRigs() []string {
+	if d.knownRigsCached {
+		return d.cachedKnownRigs
+	}
+	rigs := d.readKnownRigsFromDisk()
+	d.cachedKnownRigs = rigs
+	d.knownRigsCached = true
+	return rigs
+}
+
+// invalidateKnownRigsCache clears the per-tick cache so the next call
+// to getKnownRigs re-reads mayor/rigs.json from disk.
+func (d *Daemon) invalidateKnownRigsCache() {
+	d.cachedKnownRigs = nil
+	d.knownRigsCached = false
+}
+
+// readKnownRigsFromDisk reads and parses mayor/rigs.json.
+func (d *Daemon) readKnownRigsFromDisk() []string {
 	rigsPath := filepath.Join(d.config.TownRoot, "mayor", "rigs.json")
 	data, err := os.ReadFile(rigsPath)
 	if err != nil {
