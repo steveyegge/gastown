@@ -149,15 +149,15 @@
 [branch "merge-le2"]
 	remote = origin
 	merge = refs/heads/polecat/garnet/fl-wmd.2@mnhqiepx
-[branch "polecat/garnet/fl-wmd.3@mnhr5ayx"]
-	remote = origin
-	merge = refs/heads/main
 [branch "polecat/jasper/fl-wmd.4@mnhr5v0i"]
 	remote = origin
 	merge = refs/heads/main
 [branch "polecat/obsidian/fl-wmd.5@mnhr6a1m"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/onyx/fl-wmd.2@mnhr6zs0"]
+[branch "merge-r4l"]
 	remote = origin
-	merge = refs/heads/main
+	merge = refs/heads/polecat/obsidian/fl-wmd.5@mnhr6a1m
+[branch "merge-c6c"]
+	remote = origin
+	merge = refs/heads/polecat/garnet/fl-wmd.3@mnhr5ayx
