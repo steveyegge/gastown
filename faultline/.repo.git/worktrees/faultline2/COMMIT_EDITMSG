@@ -1,9 +1,0 @@
-feat: add snooze with auto-expire sweep for issue groups (fl-4b0.10)
-
-Add snoozed_until, snooze_reason, snoozed_by columns to issue_groups.
-Snooze/unsnooze via API (PUT status=snoozed/unsnoozed) and dashboard UI.
-Background SnoozeSweepWorker (60s tick) auto-resolves expired+quiet issues
-and unsnoozes expired+active ones. Includes lifecycle audit events, filter
-tab, and snooze banner on issue detail page.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
