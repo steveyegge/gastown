@@ -1,1 +1,8 @@
-feat: add team management API endpoints (fl-4b0.3)
+feat: add integration dashboard settings UI (fl-88c.4)
+
+Add integrations section to project settings page with per-integration
+enable/disable toggle, config forms for GitHub Issues/PagerDuty/Jira/Linear,
+connection test button, and last sync status indicator. Follows existing
+settings page patterns with CSRF protection and form-based actions.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

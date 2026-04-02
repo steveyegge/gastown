@@ -1,10 +1,10 @@
-feat: add API rate limiting, body size limits, and input validation (he-bc7)
+feat: add private extension registry for daemon (hr-eq8.2)
 
-Add token-bucket rate limiter middleware (golang.org/x/time/rate) with
-configurable requests/second and burst size. Add request body size limit
-middleware using http.MaxBytesReader on all endpoints. Add max message
-length validation on POST /api/chat. All settings are configurable via
-ServerConfig and environment variables. Includes tests for all new
-middleware and validation logic.
+Create internal/extensions package with a global Register/All pattern
+for private tool executors. ExtensionFactory receives (*config.Config,
+*slog.Logger) and returns (tools.Executor, error). Private modules call
+Register from init() and the daemon loads all extensions after built-in
+executors. Nil returns (opt-out) and factory errors are handled
+gracefully. Includes Reset() for testing and full test coverage.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

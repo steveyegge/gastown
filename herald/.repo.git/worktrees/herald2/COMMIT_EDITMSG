@@ -1,0 +1,9 @@
+feat: add build tag for private herald builds (hr-eq8.4)
+
+Add //go:build private/!private files so `go build -tags private` pulls
+in herald-private (blank import for init() side-effect bridges).
+Public build compiles without the private module. Add Makefile with
+build/build-private targets, update Dockerfile with BUILD_TAGS arg,
+document in README.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

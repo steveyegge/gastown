@@ -61,3 +61,18 @@
 [branch "dog/alpha-herald-1775137799475"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/nux/hr-eq8.1@mnhn0pk5"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/slit/hr-eq8.4@mnhn1lfk"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/rictus/hr-eq8.3@mnhn264c"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/dementus/hr-eq8.5@mnhn2rmo"]
+	remote = origin
+	merge = refs/heads/main
+[branch "temp"]
+	remote = origin
+	merge = refs/heads/polecat/nux/hr-eq8.1@mnhn0pk5
