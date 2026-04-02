@@ -1187,7 +1187,8 @@ Use await-signal with exponential backoff to wait for activity:
 
 ```bash
 gt mol step await-signal --agent-bead hq-deacon \
-  --backoff-base 60s --backoff-mult 2 --backoff-max 15m
+  --backoff-base 60s --backoff-mult 2 --backoff-max 15m \
+  --deacon-heartbeat
 ```
 
 This command:
