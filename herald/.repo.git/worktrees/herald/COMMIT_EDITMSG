@@ -1,10 +1,1 @@
-feat: add private extension registry for daemon (hr-eq8.2)
-
-Create internal/extensions package with a global Register/All pattern
-for private tool executors. ExtensionFactory receives (*config.Config,
-*slog.Logger) and returns (tools.Executor, error). Private modules call
-Register from init() and the daemon loads all extensions after built-in
-executors. Nil returns (opt-out) and factory errors are handled
-gracefully. Includes Reset() for testing and full test coverage.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+fix: auto-save uncommitted implementation work (he-slt, gt-pvx safety net)

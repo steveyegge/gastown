@@ -1,3 +1,1 @@
-feat: add teams dashboard UI with CRUD, member management, and project linking (fl-4b0.4)
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+fix: auto-save uncommitted implementation work (fl-4b0.12, gt-pvx safety net)

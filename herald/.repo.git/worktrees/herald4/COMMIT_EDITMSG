@@ -1,9 +1,0 @@
-feat: add standalone MCP server for bridge tools (hr-eq8.5)
-
-Create cmd/herald-bridges-mcp, a self-contained MCP server binary that
-exposes comms and health bridge tools via the MCP stdio protocol. Uses
-direct HTTP calls to myndy-comms and myndy-health services (no dependency
-on herald-private module). Implements JSON-RPC 2.0 MCP server protocol
-(initialize, tools/list, tools/call). Includes 9 tests and README docs.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
