@@ -1,9 +1,10 @@
-feat: add webhook payload templates for generic integrations (fl-88c.5)
+feat: add bulk operations (resolve, ignore, assign) for issues (fl-4b0.11)
 
-Add customizable webhook payload templates with variable substitution.
-Templates are stored in ProjectConfig and support event-type matching.
-Includes default templates for Generic JSON, Jira, and Linear formats.
-API endpoints for template CRUD, preview, and listing defaults.
-Dashboard settings page shows configured templates.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Add POST /api/{project_id}/bulk-issues/ endpoint supporting resolve,
+  ignore, unresolve, and assign actions with lifecycle event creation
+- Add BulkResolveIssues, BulkIgnoreIssues, BulkUnresolveIssues DB methods
+- Add LifecycleIgnored and LifecycleAssigned lifecycle event types
+- Add dashboard bulk handler with CSRF protection
+- Add checkboxes to issue list with sticky bulk action bar
+- Add select-all, resolve, ignore, unresolve, and assign-to-member UI
+- Update lifecycle icon/label/class helpers for new event types
