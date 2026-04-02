@@ -1,39 +1,15 @@
-feat: add Slack bot integration with DMs, webhook, and account linking (fl-4b0.13)
+feat: wire Slack DMs for mentions and assignments (fl-4b0.14)
 
-Add slack_user_mappings table for linking faultline accounts to Slack users.
-Create SlackBot integration plugin (chat.postMessage API) registered in the
-plugin system alongside PagerDuty and GitHub Issues. Add Slack interactions
-webhook endpoint with HMAC-SHA256 signature verification. Add account-level
-Slack link UI at /dashboard/account/slack. Wire FAULTLINE_SLACK_BOT_TOKEN
-and FAULTLINE_SLACK_SIGNING_SECRET environment variables in main.go.
+Add comment creation handlers (API + dashboard) that extract @mentions
+and send Slack DMs to mentioned users via SlackBot.SendDM when a Slack
+account mapping exists. Wire assignment handlers in both API and
+dashboard to send Slack DMs to assigned users.
+
+New package internal/slackdm provides the Sender type that handles:
+- Resolving @mention names to accounts via AccountsByNames
+- Looking up Slack user IDs via SlackUserIDForAccount
+- Loading the project's Slack bot integration
+- Sending DMs and creating in-app notifications
+- Skipping self-notifications
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
-
-# Conflicts:
-#	internal/dashboard/handler.go
-#	internal/db/dolt.go
-
-# Please enter the commit message for your changes. Lines starting
-# with '#' will be ignored, and an empty message aborts the commit.
-#
-# Author:    jasper <jeremy@theirish.com>
-#
-# interactive rebase in progress; onto c913a82
-# Last command done (1 command done):
-#    pick dd20a5b # feat: add Slack bot integration with DMs, webhook, and account linking (fl-4b0.13)
-# No commands remaining.
-# You are currently rebasing branch 'polecat/jasper/fl-4b0.13@mnhnqdvv' on 'c913a82'.
-#
-# Changes to be committed:
-#	modified:   cmd/faultline/main.go
-#	modified:   internal/dashboard/handler.go
-#	modified:   internal/dashboard/views.templ
-#	modified:   internal/dashboard/views_templ.go
-#	modified:   internal/db/dolt.go
-#	new file:   internal/db/slack_mappings.go
-#	modified:   internal/integrations/integration.go
-#	new file:   internal/integrations/slack/slack.go
-#	new file:   internal/integrations/slack/webhook.go
-#	new file:   internal/integrations/slack/webhook_test.go
-#	modified:   internal/server/server.go
-#
