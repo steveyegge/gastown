@@ -17,3 +17,24 @@
 [branch "dog/alpha-faultline-1775093618407"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/onyx/fl-4b0.7@mngu2ujh"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/opal/fl-4b0.8@mngu3pl4"]
+	remote = origin
+	merge = refs/heads/main
+[branch "temp"]
+	remote = origin
+	merge = refs/heads/polecat/jasper/fl-4b0.2@mngu19t8
+[branch "refinery-temp"]
+	remote = origin
+	merge = refs/heads/polecat/quartz/fl-4b0.5@mngu21vt
+[branch "refinery-temp2"]
+	remote = origin
+	merge = refs/heads/polecat/onyx/fl-4b0.7@mngu2ujh
+[branch "polecat/topaz/fl-88c.1@mngu98m4"]
+	remote = origin
+	merge = refs/heads/main
+[branch "refinery-temp3"]
+	remote = origin
+	merge = refs/heads/polecat/opal/fl-4b0.8@mngu3pl4

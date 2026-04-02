@@ -1,8 +1,1 @@
-feat: add /health and /ready endpoints for k8s probes (he-2p6)
-
-/health returns 200 if the process is alive (liveness probe).
-/ready returns 200 only when DB is reachable, at least one LLM provider
-responds, and at least one channel is registered. Returns JSON with
-per-component status breakdown. Both endpoints bypass API key auth.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+test: add unit tests for macOS menu bar HeraldClient (he-58e)

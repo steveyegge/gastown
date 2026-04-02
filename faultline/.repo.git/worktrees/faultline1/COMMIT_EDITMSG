@@ -1,0 +1,21 @@
+feat: add issue comments schema, CRUD queries, and mention parsing (fl-4b0.7)
+
+# Conflicts:
+#	internal/db/dolt.go
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# Author:    onyx <jeremy@theirish.com>
+#
+# interactive rebase in progress; onto 1177164
+# Last command done (1 command done):
+#    pick a9e8616 # feat: add issue comments schema, CRUD queries, and mention parsing (fl-4b0.7)
+# No commands remaining.
+# You are currently rebasing branch 'polecat/onyx/fl-4b0.7@mngu2ujh' on '1177164'.
+#
+# Changes to be committed:
+#	new file:   internal/db/comments.go
+#	new file:   internal/db/comments_test.go
+#	modified:   internal/db/dolt.go
+#

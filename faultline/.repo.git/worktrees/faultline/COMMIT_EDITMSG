@@ -1,0 +1,21 @@
+feat: notifications schema and queries (fl-4b0.8)
+
+# Conflicts:
+#	internal/db/dolt.go
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# Author:    opal <jeremy@theirish.com>
+#
+# interactive rebase in progress; onto f134fa8
+# Last command done (1 command done):
+#    pick 59ea286 # feat: notifications schema and queries (fl-4b0.8)
+# No commands remaining.
+# You are currently rebasing branch 'refinery-temp3' on 'f134fa8'.
+#
+# Changes to be committed:
+#	modified:   internal/db/dolt.go
+#	new file:   internal/db/notifications.go
+#	new file:   internal/db/notifications_test.go
+#
