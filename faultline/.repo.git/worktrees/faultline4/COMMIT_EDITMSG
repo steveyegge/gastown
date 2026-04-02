@@ -1,13 +1,8 @@
-feat: enforce API token role scoping (fl-wmd.3)
+feat: add database monitoring schema and migrations (fl-b4f)
 
-Add role field to api_tokens table so tokens carry their own permission
-level independent of the account. ValidateAPIToken now returns a
-TokenResult with the token role and project scope. Both requireBearer
-and requireBearerWithAccount compute an effective role (the lower of
-account and token roles) so a viewer-scoped token on an admin account
-still only gets viewer access. Project-scoped tokens are enforced in
-requireProjectAccess — requests to a different project are rejected
-with 403. Token creation validates that the requested role does not
-exceed the caller's own role.
+Create three new tables for database monitoring:
+- monitored_databases: tracks databases with encrypted connection strings
+- db_checks: records individual health check results
+- db_monitor_state: current monitoring state per database
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

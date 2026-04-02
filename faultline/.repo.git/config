@@ -23,9 +23,6 @@
 [branch "polecat/opal/fl-4b0.8@mngu3pl4"]
 	remote = origin
 	merge = refs/heads/main
-[branch "temp"]
-	remote = origin
-	merge = refs/heads/polecat/jasper/fl-4b0.2@mngu19t8
 [branch "polecat/topaz/fl-88c.1@mngu98m4"]
 	remote = origin
 	merge = refs/heads/main
@@ -155,9 +152,6 @@
 [branch "merge-c6c"]
 	remote = origin
 	merge = refs/heads/polecat/garnet/fl-wmd.3@mnhr5ayx
-[branch "polecat/garnet/fl-b4f@mnhvfnsx"]
-	remote = origin
-	merge = refs/heads/main
 [branch "polecat/obsidian/fl-g91@mnhvg82v"]
 	remote = origin
 	merge = refs/heads/main
