@@ -1,9 +1,0 @@
-feat: add PagerDuty integration plugin (fl-88c.3)
-
-Implement PagerDuty Events API v2 integration: trigger incidents for
-new issues and regressions, auto-resolve when issues resolve. Config
-supports routing key, service ID, and custom severity mapping
-(fatal→critical, error→error, warning→warning, info→info by default).
-Uses dedup key based on project+group for automatic incident correlation.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
