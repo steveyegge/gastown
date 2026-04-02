@@ -1,8 +1,0 @@
-feat: add setup phase 5 verification and test message (hr-fye.5)
-
-Create internal/setup/verify.go that boots the daemon in ephemeral
-mode, sends a test message through the agent, displays the response,
-prints a configuration summary (channels, tools, persona, database),
-and prompts the user to start herald.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

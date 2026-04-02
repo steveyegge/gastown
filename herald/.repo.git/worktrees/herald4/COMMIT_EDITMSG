@@ -1,7 +1,0 @@
-feat: add persona preset templates with review-and-edit flow (hr-fye.6)
-
-Four built-in persona presets (professional, casual, concise, creative)
-with 3-5 sentence templates, plus custom option. Includes ReviewPreset
-function for editing the chosen persona before saving.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

@@ -34,13 +34,7 @@
 [branch "polecat/nux/he-bc7@mngtpy7m"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/rictus/hr-fye.3@mngugnk3"]
-	remote = origin
-	merge = refs/heads/main
 [branch "polecat/slit/hr-fye.1@mnguh7di"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/nux/hr-fye.5@mnguiln5"]
 	remote = origin
 	merge = refs/heads/main
 [branch "polecat/dementus/hr-fye.6@mngul37o"]
@@ -52,9 +46,6 @@
 [branch "polecat/furiosa/hr-fye.4@mnguoa85"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/capable/hr-fye.6@mnguzrbq"]
-	remote = origin
-	merge = refs/heads/main
-[branch "polecat/dementus/he-bc7@mngwaxtg"]
+[branch "polecat/furiosa/he-bc7@mnh0dzie"]
 	remote = origin
 	merge = refs/heads/main
