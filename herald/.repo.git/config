@@ -70,6 +70,18 @@
 [branch "dog/alpha-herald-1775159034274"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/nux/he-leg-hzp6y@mnhxmkl0"]
+[branch "polecat/furiosa/he-leg-fs7r6@mnhxnmd3"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/slit/he-leg-fjggy@mnhxoliv"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/rictus/he-leg-fyz2c@mnhxpjgs"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/dementus/he-leg-hdd6s@mnhxqma0"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/capable/he-leg-gcaoc@mnhxrsdh"]
 	remote = origin
 	merge = refs/heads/main
