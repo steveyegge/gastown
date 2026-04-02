@@ -67,7 +67,8 @@
         "switchyard",
         "rally_tavern",
         "herald",
-        "wherigo"
+        "wherigo",
+        "mock_gps_tool"
       ]
     },
     "scheduled_maintenance": {
@@ -98,7 +99,8 @@
         "switchyard",
         "rally_tavern",
         "herald",
-        "wherigo"
+        "wherigo",
+        "mock_gps_tool"
       ]
     }
   },

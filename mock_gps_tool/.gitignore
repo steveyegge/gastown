@@ -1,0 +1,17 @@
+plugins/
+.repo.git/
+.land-worktree/
+.beads/
+.claude/
+.archive/
+.runtime/
+crew/
+daemon/
+mayor/
+polecats/
+refinery/
+settings/
+witness/
+config.json
+state.json
+AGENTS.md
