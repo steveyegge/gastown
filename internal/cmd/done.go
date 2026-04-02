@@ -971,6 +971,14 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				goto notifyWitness
 			}
 
+			// gt-gpy: Validate that the MR bead landed in the rig's database.
+			// If the source bead has a cross-rig prefix (e.g., hq-), the routing
+			// could still resolve to the wrong database despite Rig: rigName.
+			// This is a warning-only guard — mrFailed is NOT set on mismatch.
+			if prefixErr := beads.ValidateRigPrefix(townRoot, rigName, mrID); prefixErr != nil {
+				style.PrintWarning("MR bead prefix mismatch: %v\nThe refinery may not find this MR — check 'gt mq list %s'", prefixErr, rigName)
+			}
+
 			// GH#3032: Supersede older open MRs for the same source issue.
 			// When a polecat re-submits after fixing a gate failure, the old MR
 			// (same branch, different SHA) is stale. Close it so the refinery
