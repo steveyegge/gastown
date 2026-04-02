@@ -1,0 +1,7 @@
+feat: conversation history persistence (he-0z8)
+
+Create internal/conversation/store.go with SaveTurn, GetHistory, and
+ClearHistory backed by the existing conversations/messages schema.
+Wire into daemon handler to load multi-turn context before each LLM
+request and persist user+assistant turns after each response.
+Include sqlmock tests for all store methods.

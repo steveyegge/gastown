@@ -1,0 +1,7 @@
+feat: Telegram channel via go-telegram-bot-api long-polling (he-kep)
+
+Implement Channel interface for Telegram using long-polling with
+go-telegram-bot-api/v5. Includes mock-based tests, config validation,
+and daemon registration.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

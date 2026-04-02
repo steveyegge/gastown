@@ -163,9 +163,12 @@
 [branch "polecat/furiosa/he-kep@mngpn922"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/nux/he-58e@mngpo96t"]
+[branch "polecat/slit/he-kep@mngpux1f"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/furiosa/he-1wx@mngpoux7"]
+[branch "polecat/nux/he-2nb@mngpw7ss"]
 	remote = origin
 	merge = refs/heads/main
+[branch "temp"]
+	remote = origin
+	merge = refs/heads/polecat/furiosa/he-0z8

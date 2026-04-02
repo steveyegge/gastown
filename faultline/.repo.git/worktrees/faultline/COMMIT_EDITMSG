@@ -1,12 +1,33 @@
-feat: add release info to dashboard and API (fl-7lr.2)
+feat: configurable alert rules engine replacing hardcoded thresholds (fl-v2h)
 
-Add releases table, UpsertRelease on event ingest, and expose release
-data across the dashboard and API:
-- Project card shows latest release badge
-- Issue list shows first-seen release
-- Issue detail shows first/last release in problem box
-- Events table includes release column
-- API: GET releases, GET release by version, POST deploys
-- Issues list API supports ?release= filter
+Replace compile-time alert constants with per-project configurable rules:
+
+DB layer:
+- alert_rules table: condition types (threshold, new_issue, regression,
+  slow_burn), action types (bead, slack, webhook, email), per-rule
+  thresholds and time windows
+- alert_history table: records every rule firing with timestamp
+- EnsureDefaultAlertRules auto-creates defaults matching current behavior
+  (3-in-5min burst, 1 fatal immediate, 1h slow-burn, regression)
+
+Rule engine (gastown/rules.go):
+- Per-rule sliding windows for threshold conditions
+- Level filtering (error, fatal, any)
+- Separate evaluation paths for threshold, regression, and slow-burn
+
+Bridge changes:
+- OnEvent now loads per-project rules and evaluates via RuleEngine
+- sweepSlowBurn evaluates slow_burn rules per project instead of
+  using global SlowBurnAge constant
+- Alert history recorded on every rule firing
+
+API endpoints:
+- GET/POST /api/{project_id}/alert-rules/ — list and create rules
+- GET/PUT/DELETE /api/{project_id}/alert-rules/{rule_id}/ — CRUD
+- GET /api/{project_id}/alert-history/ — fired alert log
+
+Dashboard:
+- Settings page shows alert rules table and recent alert history
+- Rules display condition, level filter, action type, enabled status
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
