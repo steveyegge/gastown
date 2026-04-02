@@ -55,3 +55,6 @@
 [branch "polecat/capable/hr-fye.6@mnguzrbq"]
 	remote = origin
 	merge = refs/heads/main
+[branch "temp"]
+	remote = origin
+	merge = refs/heads/polecat/dementus/hr-fye.6@mngul37o
