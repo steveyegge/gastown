@@ -1906,10 +1906,112 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
+	// --- Parallel data gathering phase ---
+	// All expensive operations (tmux health checks, beads queries, git status)
+	// run concurrently. Display phase follows with pre-fetched data.
+	var dataWg sync.WaitGroup
+
 	// Witness status
-	fmt.Printf("%s\n", style.Bold.Render("Witness"))
 	witMgr := witness.NewManager(r)
-	witnessRunning, _ := witMgr.IsRunning()
+	var witnessRunning bool
+	dataWg.Add(1)
+	go func() {
+		defer dataWg.Done()
+		witnessRunning, _ = witMgr.IsRunning()
+	}()
+
+	// Refinery status + queue
+	refMgr := refinery.NewManager(r)
+	var refineryRunning bool
+	var refineryQueue []refinery.QueueItem
+	dataWg.Add(1)
+	go func() {
+		defer dataWg.Done()
+		refineryRunning, _ = refMgr.IsRunning()
+		if refineryRunning {
+			refineryQueue, _ = refMgr.Queue()
+		}
+	}()
+
+	// Polecats list (involves per-polecat beads + git queries)
+	polecatGit := git.NewGit(r.Path)
+	polecatMgr := polecat.NewManager(r, polecatGit, t)
+	var polecats []*polecat.Polecat
+	var polecatsErr error
+	dataWg.Add(1)
+	go func() {
+		defer dataWg.Done()
+		polecats, polecatsErr = polecatMgr.List()
+	}()
+
+	// Crew list
+	crewMgr := crew.NewManager(r, git.NewGit(townRoot))
+	var crewWorkers []*crew.CrewWorker
+	var crewErr error
+	dataWg.Add(1)
+	go func() {
+		defer dataWg.Done()
+		crewWorkers, crewErr = crewMgr.List()
+	}()
+
+	dataWg.Wait()
+
+	// --- Polecat + Crew session checks (parallel, after List completes) ---
+	type polecatInfo struct {
+		name       string
+		state      polecat.State
+		issue      string
+		hasSession bool
+	}
+	var pInfos []polecatInfo
+	type crewInfo struct {
+		name       string
+		hasSession bool
+		branch     string
+		dirty      bool
+	}
+	var cInfos []crewInfo
+
+	var sessionWg sync.WaitGroup
+
+	if polecatsErr == nil && len(polecats) > 0 {
+		pInfos = make([]polecatInfo, len(polecats))
+		for i, p := range polecats {
+			pInfos[i] = polecatInfo{name: p.Name, state: p.State, issue: p.Issue}
+			sessionWg.Add(1)
+			go func(idx int, p *polecat.Polecat) {
+				defer sessionWg.Done()
+				sessionName := session.PolecatSessionName(session.PrefixFor(rigName), p.Name)
+				pInfos[idx].hasSession, _ = t.HasSession(sessionName)
+			}(i, p)
+		}
+	}
+
+	if crewErr == nil && len(crewWorkers) > 0 {
+		cInfos = make([]crewInfo, len(crewWorkers))
+		for i, w := range crewWorkers {
+			cInfos[i] = crewInfo{name: w.Name}
+			sessionWg.Add(1)
+			go func(idx int, w *crew.CrewWorker) {
+				defer sessionWg.Done()
+				sessionName := crewSessionName(rigName, w.Name)
+				cInfos[idx].hasSession, _ = t.HasSession(sessionName)
+				crewGit := git.NewGit(w.ClonePath)
+				cInfos[idx].branch, _ = crewGit.CurrentBranch()
+				gitStatus, _ := crewGit.Status()
+				if gitStatus != nil && !gitStatus.Clean {
+					cInfos[idx].dirty = true
+				}
+			}(i, w)
+		}
+	}
+
+	sessionWg.Wait()
+
+	// --- Display phase (all data pre-fetched) ---
+
+	// Witness
+	fmt.Printf("%s\n", style.Bold.Render("Witness"))
 	if witnessRunning {
 		fmt.Printf("  %s running\n", style.Success.Render("●"))
 	} else {
@@ -1917,16 +2019,12 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
-	// Refinery status
+	// Refinery
 	fmt.Printf("%s\n", style.Bold.Render("Refinery"))
-	refMgr := refinery.NewManager(r)
-	refineryRunning, _ := refMgr.IsRunning()
 	if refineryRunning {
 		fmt.Printf("  %s running\n", style.Success.Render("●"))
-		// Show queue size
-		queue, err := refMgr.Queue()
-		if err == nil && len(queue) > 0 {
-			fmt.Printf("  Queue: %d items\n", len(queue))
+		if len(refineryQueue) > 0 {
+			fmt.Printf("  Queue: %d items\n", len(refineryQueue))
 		}
 	} else {
 		fmt.Printf("  %s stopped\n", style.Dim.Render("○"))
@@ -1934,35 +2032,11 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	// Polecats
-	polecatGit := git.NewGit(r.Path)
-	polecatMgr := polecat.NewManager(r, polecatGit, t)
-	polecats, err := polecatMgr.List()
 	fmt.Printf("%s", style.Bold.Render("Polecats"))
-	if err != nil || len(polecats) == 0 {
+	if polecatsErr != nil || len(polecats) == 0 {
 		fmt.Printf(" (none)\n")
 	} else {
 		fmt.Printf(" (%d)\n", len(polecats))
-
-		// Parallel tmux HasSession checks for all polecats
-		type polecatInfo struct {
-			name       string
-			state      polecat.State
-			issue      string
-			hasSession bool
-		}
-		pInfos := make([]polecatInfo, len(polecats))
-		var pcWg sync.WaitGroup
-		for i, p := range polecats {
-			pInfos[i] = polecatInfo{name: p.Name, state: p.State, issue: p.Issue}
-			pcWg.Add(1)
-			go func(idx int, p *polecat.Polecat) {
-				defer pcWg.Done()
-				sessionName := session.PolecatSessionName(session.PrefixFor(rigName), p.Name)
-				pInfos[idx].hasSession, _ = t.HasSession(sessionName)
-			}(i, p)
-		}
-		pcWg.Wait()
-
 		for _, pi := range pInfos {
 			sessionIcon := style.Dim.Render("○")
 			if pi.hasSession {
@@ -1994,40 +2068,11 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	// Crew
-	crewMgr := crew.NewManager(r, git.NewGit(townRoot))
-	crewWorkers, err := crewMgr.List()
 	fmt.Printf("%s", style.Bold.Render("Crew"))
-	if err != nil || len(crewWorkers) == 0 {
+	if crewErr != nil || len(crewWorkers) == 0 {
 		fmt.Printf(" (none)\n")
 	} else {
 		fmt.Printf(" (%d)\n", len(crewWorkers))
-
-		// Parallel tmux + git checks for all crew workers
-		type crewInfo struct {
-			name       string
-			hasSession bool
-			branch     string
-			dirty      bool
-		}
-		cInfos := make([]crewInfo, len(crewWorkers))
-		var cwWg sync.WaitGroup
-		for i, w := range crewWorkers {
-			cInfos[i] = crewInfo{name: w.Name}
-			cwWg.Add(1)
-			go func(idx int, w *crew.CrewWorker) {
-				defer cwWg.Done()
-				sessionName := crewSessionName(rigName, w.Name)
-				cInfos[idx].hasSession, _ = t.HasSession(sessionName)
-				crewGit := git.NewGit(w.ClonePath)
-				cInfos[idx].branch, _ = crewGit.CurrentBranch()
-				gitStatus, _ := crewGit.Status()
-				if gitStatus != nil && !gitStatus.Clean {
-					cInfos[idx].dirty = true
-				}
-			}(i, w)
-		}
-		cwWg.Wait()
-
 		for _, ci := range cInfos {
 			sessionIcon := style.Dim.Render("○")
 			if ci.hasSession {

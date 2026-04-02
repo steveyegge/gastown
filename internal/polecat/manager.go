@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -1877,6 +1878,7 @@ func (m *Manager) PoolStatus() (active int, names []string) {
 }
 
 // List returns all polecats in the rig.
+// Loads polecat state in parallel to avoid sequential bd subprocess overhead.
 func (m *Manager) List() ([]*Polecat, error) {
 	polecatsDir := filepath.Join(m.rig.Path, "polecats")
 
@@ -1888,7 +1890,8 @@ func (m *Manager) List() ([]*Polecat, error) {
 		return nil, fmt.Errorf("reading polecats dir: %w", err)
 	}
 
-	var polecats []*Polecat
+	// Filter to valid directories first
+	var names []string
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -1896,12 +1899,32 @@ func (m *Manager) List() ([]*Polecat, error) {
 		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
+		names = append(names, entry.Name())
+	}
 
-		polecat, err := m.Get(entry.Name())
-		if err != nil {
-			continue // Skip invalid polecats
+	// Load all polecats in parallel — each loadFromBeads call involves
+	// multiple bd/git subprocess calls that are independent per polecat.
+	results := make([]*Polecat, len(names))
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Add(1)
+		go func(idx int, name string) {
+			defer wg.Done()
+			p, err := m.Get(name)
+			if err != nil {
+				return // Skip invalid polecats (leaves nil in results)
+			}
+			results[idx] = p
+		}(i, name)
+	}
+	wg.Wait()
+
+	// Compact — remove nil entries from failed Gets
+	polecats := make([]*Polecat, 0, len(results))
+	for _, p := range results {
+		if p != nil {
+			polecats = append(polecats, p)
 		}
-		polecats = append(polecats, polecat)
 	}
 
 	return polecats, nil
