@@ -1,11 +1,1 @@
-feat: add identity and persona wizard for setup phase 2 (hr-fye.2)
-
-Interactive CLI wizard (bufio.Scanner) that collects user identity:
-1. Name → human block
-2. Self-description → human + goals blocks
-3. Persona selection (4 presets + custom) → persona block
-4. Auto-generated facts block from answers
-
-All blocks persisted to PostgreSQL via memory.BlockStore.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+feat: add tool executor configuration wizard for setup phase 4 (hr-fye.4)

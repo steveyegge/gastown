@@ -1,12 +1,10 @@
-feat: add prometheus metrics for observability (he-8zw)
+feat: add channel configuration wizard for setup CLI (hr-fye.3)
 
-Add internal/metrics package with prometheus instrumentation:
-- HTTP request duration/count histograms per endpoint
-- LLM request duration/count/tokens per provider
-- Tool execution duration/count/errors per executor
-- Channel message count (inbound/outbound) per channel
-- Memory: STM size gauge, LTM search latency histogram
-- Runtime goroutines gauge, DB connection pool stats collector
-- /metrics endpoint exposed on API server (unauthenticated)
+Add internal/setup/channels.go with interactive wizard that walks users
+through enabling channels (SMS, Slack, Telegram, WhatsApp, iMessage, Voice)
+and collecting credentials. Validates credential formats where possible.
 
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+Add config.Save() to persist configuration to YAML. Integrate channel
+wizard into the setup command after prerequisite checks.
+
+Includes comprehensive tests for all channels, validation, and edge cases.

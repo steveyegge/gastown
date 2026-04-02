@@ -43,9 +43,6 @@
 [branch "polecat/nux/hr-fye.5@mnguiln5"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/slit/hr-fye.1@mngujtsx"]
-	remote = origin
-	merge = refs/heads/main
 [branch "polecat/dementus/hr-fye.6@mngul37o"]
 	remote = origin
 	merge = refs/heads/main
@@ -53,5 +50,8 @@
 	remote = origin
 	merge = refs/heads/main
 [branch "polecat/furiosa/hr-fye.4@mnguoa85"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/capable/hr-fye.6@mnguzrbq"]
 	remote = origin
 	merge = refs/heads/main
