@@ -4,18 +4,18 @@ set -e
 # Sync gastown fork with upstream, preserving local-only patches.
 # Run from ~/Documents/gt
 #
-# Usage: ./sync-upstream.sh [--dry-run]
+# Usage: ./sync-upstream.sh [--dry-run] [--dir=PATH]
 
-MAYOR_RIG="$HOME/Documents/gt/gastown/mayor/rig"
+WORK_DIR="$HOME/Documents/gt/gastown/crew/beercan"
 GT_BIN="$HOME/.local/bin/gt"
 BD_BIN="$HOME/.local/bin/bd"
 
 # Local-only commits to cherry-pick (order matters)
 BUGFIXES=(
-  d5fdc4b8  # fix: bypass bd set-state FK violation for wisps-backed agent beads
-  d43497f3  # fix: bypass bd routing expansion in scheduler hot path
-  9527aff1  # fix: use preset fields directly for non-Claude agent hook sync
-  5c518c48  # fix: reject invalid JSON payloads in processEvent
+  # d5fdc4b8 — merged upstream (see 1d36391b / d918e676)
+  # d43497f3 — merged upstream (routing fixes in 30265a9c et al)
+  # 9527aff1 — merged upstream (hooks_sync.go already uses preset fields directly)
+  # 5c518c48 — faultline ingest handler deleted upstream; fix no longer applicable
 )
 
 FAULTLINE=(
@@ -25,13 +25,13 @@ FAULTLINE=(
 )
 
 ESTOP=(
-  dcc3bd30  # feat: add gt estop / gt thaw
-  5bd6898b  # feat(daemon): auto E-stop on sustained Dolt failure
-  38b1df23  # feat: per-rig E-stop + agent-side hook check
+  # dcc3bd30 — merged upstream (c98c4ddf)
+  # 5bd6898b — merged upstream (estop feature landed)
+  # 38b1df23 — merged upstream (estop feature landed)
 )
 
 SLING_FIX=(
-  bb0ea1c2  # fix: sling convoy creation fails on hq-cv- prefix mismatch (may conflict)
+  # bb0ea1c2 — merged upstream (103b6aaa extended cross-rig routing to convoy/dep)
 )
 
 # Quota probe — from beercan worktree feat/quota-probe-clean branch
@@ -40,11 +40,14 @@ QUOTA_PROBE=(
 )
 
 DRY_RUN=false
-if [[ "$1" == "--dry-run" ]]; then
-  DRY_RUN=true
-fi
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=true ;;
+    --dir=*) WORK_DIR="${arg#--dir=}" ;;
+  esac
+done
 
-cd "$MAYOR_RIG" || { echo "ERROR: $MAYOR_RIG not found"; exit 1; }
+cd "$WORK_DIR" || { echo "ERROR: $WORK_DIR not found"; exit 1; }
 
 echo "=== Syncing gastown fork with upstream ==="
 echo "Working in: $(pwd)"
@@ -141,14 +144,18 @@ for h in "${QUOTA_PROBE[@]}"; do
 done
 
 echo ""
-echo "Building gt and bd..."
+echo "Building gt..."
 go build -o "$GT_BIN" ./cmd/gt/
-go build -o "$BD_BIN" ./cmd/bd/
+
+if [[ -d "./cmd/bd" ]]; then
+  echo "Building bd..."
+  go build -o "$BD_BIN" ./cmd/bd/
+fi
 
 echo ""
 echo "Verifying..."
 "$GT_BIN" --version
-"$BD_BIN" --version
+[[ -d "./cmd/bd" ]] && "$BD_BIN" --version || echo "(bd not in this repo — skipped)"
 
 echo ""
 echo "=== Sync complete ==="
