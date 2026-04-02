@@ -85,3 +85,21 @@
 [branch "polecat/capable/he-leg-gcaoc@mnhxrsdh"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/dementus/he-leg-u75s6@mni0mjm2"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/furiosa/he-leg-oypyc@mni0nof3"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/nux/he-leg-psiry@mni0ox70"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/rictus/he-leg-7xkzo@mni0q6je"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/slit/he-leg-l2f4e@mni0rdaq"]
+	remote = origin
+	merge = refs/heads/main
+[branch "temp"]
+	remote = origin
+	merge = refs/heads/polecat/capable/he-leg-nkp36@mni0leby

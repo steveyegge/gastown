@@ -1,7 +1,1 @@
-feat: add missing requirements analysis for PRD review (he-leg-fs7r6)
-
-Identify 18 gaps across data lifecycle, security, tool safety,
-channel behavior, and operational concerns. Report-only task with
-findings in .prd-reviews/snqye/gaps.md.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+feat: add UX analysis for credential management PRD (he-leg-oypyc)
