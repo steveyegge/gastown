@@ -168,6 +168,7 @@ type MergedIssueView struct {
 type SettingsView struct {
 	ProjectID        int64
 	ProjectName      string
+	DSN              string // full Sentry-compatible DSN URL
 	Description      string
 	URL              string
 	DeploymentType   string
@@ -1449,6 +1450,18 @@ templ settingsPage(account *AccountView, s SettingsView, errorMsg string) {
 
 		if errorMsg != "" {
 			<div class="alert alert-error">{ errorMsg }</div>
+		}
+
+		if s.DSN != "" {
+			<div class="form-group">
+				<label>DSN (Data Source Name)</label>
+				<div style="display:flex;gap:0.5rem;align-items:center">
+					<input type="text" value={ s.DSN } readonly class="dsn-field" style="flex:1;font-family:monospace;background:#f5f5f5;cursor:text"/>
+					<button type="button" class="btn" onclick="navigator.clipboard.writeText(this.previousElementSibling.value).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)})">Copy</button>
+				</div>
+				<span class="form-hint">Configure your SDK with this DSN to send events to this project.</span>
+			</div>
+			<hr/>
 		}
 
 		<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/settings", s.ProjectID)) } class="settings-form">

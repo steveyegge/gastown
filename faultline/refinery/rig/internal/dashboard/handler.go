@@ -1002,9 +1002,17 @@ func (h *Handler) showSettings(w http.ResponseWriter, r *http.Request) {
 		cfg = &db.ProjectConfig{}
 	}
 
+	// Build Sentry-compatible DSN: scheme://public_key@host/project_id
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	dsn := fmt.Sprintf("%s://%s@%s/%d", scheme, project.DSNPublicKey, r.Host, project.ID)
+
 	sv := SettingsView{
 		ProjectID:        project.ID,
 		ProjectName:      project.Name,
+		DSN:              dsn,
 		Description:      cfg.Description,
 		URL:              cfg.URL,
 		DeploymentType:   string(cfg.DeploymentType),
