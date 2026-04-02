@@ -28,6 +28,6 @@
 [branch "polecat/rictus/he-8zw@mngszlwb"]
 	remote = origin
 	merge = refs/heads/main
-[branch "temp"]
+[branch "dog/alpha-herald-1775094607074"]
 	remote = origin
-	merge = refs/heads/polecat/rictus/he-8zw@mngszlwb
+	merge = refs/heads/main
