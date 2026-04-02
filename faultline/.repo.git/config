@@ -71,9 +71,6 @@
 [branch "polecat/onyx/fl-4b0.9"]
 	remote = origin
 	merge = refs/heads/main
-[branch "refinery-work2"]
-	remote = origin
-	merge = refs/heads/polecat/quartz/fl-88c.3
 [branch "refinery-work3"]
 	remote = origin
 	merge = refs/heads/polecat/topaz/fl-88c.2@mnhlxey6
@@ -89,3 +86,18 @@
 [branch "refinery-work"]
 	remote = origin
 	merge = refs/heads/polecat/garnet/fl-4b0.4@mnhn08pv
+[branch "refinery-work2"]
+	remote = origin
+	merge = refs/heads/polecat/jasper/fl-88c.4@mnhn18zs
+[branch "polecat/opal/fl-4b0.10@mnhnauhv"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/ruby/fl-4b0.11@mnhnbjki"]
+	remote = origin
+	merge = refs/heads/main
+[branch "dog/alpha-faultline-1775145016862"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/garnet/fl-4b0.12@mnhnj0m0"]
+	remote = origin
+	merge = refs/heads/main
