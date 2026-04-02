@@ -349,6 +349,84 @@ func TestWriteHeartbeat_TouchesLegacyFile(t *testing.T) {
 	}
 }
 
+func TestTouchWithState(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "deacon-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Write idle state heartbeat
+	if err := TouchWithState(tmpDir, "idle", "entering patrol sleep"); err != nil {
+		t.Fatalf("TouchWithState error: %v", err)
+	}
+
+	hb := ReadHeartbeat(tmpDir)
+	if hb == nil {
+		t.Fatal("expected heartbeat after TouchWithState")
+	}
+	if hb.State != "idle" {
+		t.Errorf("State = %q, want 'idle'", hb.State)
+	}
+	if hb.LastAction != "entering patrol sleep" {
+		t.Errorf("LastAction = %q, want 'entering patrol sleep'", hb.LastAction)
+	}
+	if hb.Cycle != 1 {
+		t.Errorf("Cycle = %d, want 1", hb.Cycle)
+	}
+
+	// Write working state heartbeat — cycle increments
+	if err := TouchWithState(tmpDir, "working", "starting patrol"); err != nil {
+		t.Fatalf("TouchWithState error: %v", err)
+	}
+
+	hb = ReadHeartbeat(tmpDir)
+	if hb.State != "working" {
+		t.Errorf("State = %q, want 'working'", hb.State)
+	}
+	if hb.Cycle != 2 {
+		t.Errorf("Cycle = %d, want 2", hb.Cycle)
+	}
+}
+
+func TestHeartbeat_IsIdle(t *testing.T) {
+	tests := []struct {
+		name     string
+		hb       *Heartbeat
+		expected bool
+	}{
+		{
+			name:     "nil heartbeat",
+			hb:       nil,
+			expected: false,
+		},
+		{
+			name:     "no state (empty = working)",
+			hb:       &Heartbeat{Timestamp: time.Now()},
+			expected: false,
+		},
+		{
+			name:     "state=working",
+			hb:       &Heartbeat{Timestamp: time.Now(), State: "working"},
+			expected: false,
+		},
+		{
+			name:     "state=idle",
+			hb:       &Heartbeat{Timestamp: time.Now(), State: "idle"},
+			expected: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tc.hb.IsIdle()
+			if result != tc.expected {
+				t.Errorf("IsIdle() = %v, want %v", result, tc.expected)
+			}
+		})
+	}
+}
+
 func TestWriteHeartbeat_SetsTimestamp(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "deacon-test-*")
 	if err != nil {

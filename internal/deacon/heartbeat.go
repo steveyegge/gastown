@@ -42,6 +42,13 @@ type Heartbeat struct {
 
 	// UnhealthyAgents is the count of unhealthy agents observed.
 	UnhealthyAgents int `json:"unhealthy_agents"`
+
+	// State describes the Deacon's current activity state.
+	// "working" (default/empty) means actively patrolling.
+	// "idle" means the Deacon is waiting for the next patrol signal (await-signal).
+	// The stuck-agent-dog uses this to avoid false positives: a stale heartbeat
+	// with state=idle means the Deacon is intentionally sleeping, not stuck.
+	State string `json:"state,omitempty"`
 }
 
 // HeartbeatFile returns the path to the Deacon heartbeat file.
@@ -162,4 +169,29 @@ func TouchWithAction(townRoot, action string, healthy, unhealthy int) error {
 		HealthyAgents:   healthy,
 		UnhealthyAgents: unhealthy,
 	})
+}
+
+// TouchWithState writes a heartbeat with a state and optional action.
+// Use state "idle" when the Deacon is about to enter await-signal (patrol sleep).
+// Use state "working" (or empty string) when actively patrolling.
+// This allows the stuck-agent-dog to distinguish intentional idle from stuck.
+func TouchWithState(townRoot, state, action string) error {
+	existing := ReadHeartbeat(townRoot)
+	cycle := int64(1)
+	if existing != nil {
+		cycle = existing.Cycle + 1
+	}
+
+	return WriteHeartbeat(townRoot, &Heartbeat{
+		Timestamp:  time.Now().UTC(),
+		Cycle:      cycle,
+		LastAction: action,
+		State:      state,
+	})
+}
+
+// IsIdle returns true if the heartbeat state is "idle".
+// An idle Deacon is intentionally sleeping between patrol cycles.
+func (hb *Heartbeat) IsIdle() bool {
+	return hb != nil && hb.State == "idle"
 }

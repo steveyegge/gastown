@@ -306,3 +306,35 @@ func TestDeaconPatrolHasHeartbeatSteps(t *testing.T) {
 		t.Error("deacon patrol formula must refresh heartbeat again before await-signal")
 	}
 }
+
+// TestDeaconPatrolLoopOrExitHasIdleHeartbeat verifies that the loop-or-exit step
+// writes an idle heartbeat before entering await-signal.
+//
+// When the Deacon finishes a patrol cycle and enters await-signal (up to 15m sleep),
+// the heartbeat becomes stale. Without marking state=idle, the stuck-agent-dog fires
+// false positive escalations. The loop-or-exit step must write the idle heartbeat so
+// the stuck-agent-dog can distinguish intentional sleep from a stuck Deacon.
+//
+// See: hq-aonwx (deacon heartbeat false positives).
+func TestDeaconPatrolLoopOrExitHasIdleHeartbeat(t *testing.T) {
+	content, err := formulasFS.ReadFile("formulas/mol-deacon-patrol.formula.toml")
+	if err != nil {
+		t.Fatalf("reading deacon patrol formula: %v", err)
+	}
+
+	f, err := Parse(content)
+	if err != nil {
+		t.Fatalf("parsing deacon patrol formula: %v", err)
+	}
+
+	for _, step := range f.Steps {
+		if step.ID == "loop-or-exit" {
+			if !strings.Contains(step.Description, "--state=idle") {
+				t.Error("loop-or-exit step must contain \"--state=idle\" heartbeat before await-signal " +
+					"to prevent false positive stuck alerts during patrol sleep")
+			}
+			return
+		}
+	}
+	t.Error("deacon patrol formula has no \"loop-or-exit\" step")
+}

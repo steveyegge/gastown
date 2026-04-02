@@ -1177,15 +1177,18 @@ End of patrol cycle decision.
 
 **If context LOW** (can continue patrolling):
 
-Refresh the heartbeat BEFORE entering await-signal. This prevents false positive
-stuck-deacon alerts from dogs: without this, the gap between heartbeat-mid and
-the next cycle's heartbeat can exceed the 20-minute stale threshold.
+Refresh the heartbeat with state=idle BEFORE entering await-signal. This serves
+two purposes: (1) prevents false positive stuck-deacon alerts — without this the
+gap between heartbeat-mid and the next cycle's heartbeat can exceed the 20-minute
+stale threshold; (2) the stuck-agent-dog reads state=idle and applies a 2-hour
+threshold instead of 20 minutes, so the Deacon is never falsely flagged as stuck
+during intentional patrol sleep.
 
 ```bash
-gt deacon heartbeat "entering await-signal"
+gt deacon heartbeat --state=idle "entering patrol sleep"
 ```
 
-Use await-signal with exponential backoff to wait for activity:
+Then use await-signal with exponential backoff to wait for activity:
 
 ```bash
 gt mol step await-signal --agent-bead hq-deacon \
