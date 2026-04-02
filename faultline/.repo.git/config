@@ -80,3 +80,6 @@
 [branch "refinery-work3"]
 	remote = origin
 	merge = refs/heads/polecat/topaz/fl-88c.2@mnhlxey6
+[branch "refinery-work4"]
+	remote = origin
+	merge = refs/heads/polecat/ruby/fl-88c.5@mnhlz5b7

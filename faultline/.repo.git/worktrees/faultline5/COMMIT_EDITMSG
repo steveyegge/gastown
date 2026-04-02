@@ -1,0 +1,9 @@
+feat: add webhook payload templates for generic integrations (fl-88c.5)
+
+Add customizable webhook payload templates with variable substitution.
+Templates are stored in ProjectConfig and support event-type matching.
+Includes default templates for Generic JSON, Jira, and Linear formats.
+API endpoints for template CRUD, preview, and listing defaults.
+Dashboard settings page shows configured templates.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
