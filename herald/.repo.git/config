@@ -31,3 +31,9 @@
 [branch "dog/alpha-herald-1775094607074"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/nux/he-bc7@mngtpy7m"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/furiosa/he-58e@mngtrajz"]
+	remote = origin
+	merge = refs/heads/main

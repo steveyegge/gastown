@@ -1,1 +1,0 @@
-fix: move Gemini API key from URL query to x-goog-api-key header (he-7im)
