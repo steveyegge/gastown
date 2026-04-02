@@ -41,3 +41,6 @@
 [branch "refinery-work"]
 	remote = origin
 	merge = refs/heads/polecat/topaz/fl-88c.1@mngu98m4
+[branch "dog/alpha-faultline-1775107214074"]
+	remote = origin
+	merge = refs/heads/main
