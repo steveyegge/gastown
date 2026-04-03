@@ -1,8 +1,0 @@
-feat: add database monitoring dashboard UI (fl-q69)
-
-Project-level: databases page with status cards (healthy/degraded/down),
-click-through to check history timeline chart, add/edit/delete forms
-with masked connection strings, DB type selector, interval overrides,
-and test connection button. System-level: Dolt health page showing
-ping latency, commit count, orphan database count. Navigation links
-added to issue list page and top nav bar.
