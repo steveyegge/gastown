@@ -1204,7 +1204,7 @@ notifyWitness:
 	}
 
 	// Update agent bead state (ZFC: self-report completion)
-	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
+	updateAgentStateOnDone(cwd, townRoot, exitType, issueID, mrID)
 
 	// Persistent polecat model (gt-hdf8): polecats transition to IDLE after completion.
 	// Session stays alive, sandbox preserved, worktree synced to main for reuse.
@@ -1458,7 +1458,7 @@ func clearDoneCheckpoints(bd *beads.Beads, agentBeadID string) {
 // BUG FIX (hq-3xaxy): This function must be resilient to working directory deletion.
 // If the polecat's worktree is deleted before gt done finishes, we use env vars as fallback.
 // All errors are warnings, not failures - gt done must complete even if bead ops fail.
-func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
+func updateAgentStateOnDone(cwd, townRoot, exitType, issueID, mrID string) {
 	// Get role context - try multiple sources for resilience
 	roleInfo, err := GetRoleWithContext(cwd, townRoot)
 	if err != nil {
@@ -1576,7 +1576,22 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 			if unchecked := beads.HasUncheckedCriteria(hookedBead); unchecked > 0 {
 				style.PrintWarning("hooked bead %s has %d unchecked acceptance criteria — skipping close", hookedBeadID, unchecked)
 				fmt.Fprintf(os.Stderr, "  The bead will remain open for witness/mayor review.\n")
+			} else if mrID != "" {
+				// MR was created — set bead to in_review instead of closing.
+				// CI pipeline will drive the lifecycle: in_review → deploying → closed.
+				// This ensures Kanban lanes reflect reality.
+				inReview := "in_review"
+				if err := bd.Update(hookedBeadID, beads.UpdateOptions{Status: &inReview}); err != nil {
+					// Fallback: try close if status update fails
+					fmt.Fprintf(os.Stderr, "Warning: couldn't set %s to in_review: %v (falling back to close)\n", hookedBeadID, err)
+					if closeErr := bd.Close(hookedBeadID); closeErr != nil {
+						fmt.Fprintf(os.Stderr, "Warning: couldn't close hooked bead %s: %v\n", hookedBeadID, closeErr)
+					}
+				} else {
+					fmt.Printf("%s Issue %s → in_review (CI will drive to closed)\n", style.Bold.Render("✓"), hookedBeadID)
+				}
 			} else if err := bd.Close(hookedBeadID); err != nil {
+				// No MR (zero-commit or direct merge) — close directly.
 				// Non-fatal: warn but continue
 				fmt.Fprintf(os.Stderr, "Warning: couldn't close hooked bead %s: %v\n", hookedBeadID, err)
 			}
