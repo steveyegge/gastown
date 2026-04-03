@@ -79,8 +79,22 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 		if townRoot, twErr := workspace.FindFromCwd(); twErr == nil {
 			rigName := os.Getenv("GT_RIG")
 			if estop.IsActive(townRoot) || (rigName != "" && estop.IsRigActive(townRoot, rigName)) {
+				// Read reason from whichever ESTOP file is active
+				var reason string
+				if info := estop.Read(townRoot); info != nil && info.Reason != "" {
+					reason = info.Reason
+				} else if rigName != "" {
+					if info := estop.ReadRig(townRoot, rigName); info != nil && info.Reason != "" {
+						reason = info.Reason
+					}
+				}
+
 				fmt.Print("<system-reminder>\n")
-				fmt.Print("EMERGENCY STOP ACTIVE. All work is paused.\n")
+				if reason != "" {
+					fmt.Printf("EMERGENCY STOP ACTIVE: %s. All work is paused.\n", reason)
+				} else {
+					fmt.Print("EMERGENCY STOP ACTIVE. All work is paused.\n")
+				}
 				fmt.Print("Do NOT start new tasks or tool calls. Checkpoint your current state\n")
 				fmt.Print("(save progress notes) and wait for the overseer to run 'gt thaw'.\n")
 				fmt.Print("This is a system-level pause — it may be due to infrastructure failure,\n")
