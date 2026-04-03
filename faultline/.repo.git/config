@@ -176,3 +176,21 @@
 [branch "polecat/jasper/fl-leg-jpgqa@mnj5hpct"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/obsidian/fl-leg-t6dbg@mnj7ruyl"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/quartz/fl-leg-yqpcq@mnj7t2xd"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/jasper/fl-leg-nkiok@mnj7ufic"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/onyx/fl-leg-leisc@mnj7voww"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/opal/fl-leg-k37uq@mnj7wy5j"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/topaz/fl-leg-q67x4@mnj7yc4x"]
+	remote = origin
+	merge = refs/heads/main
