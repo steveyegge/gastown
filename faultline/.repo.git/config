@@ -191,3 +191,9 @@
 [branch "polecat/topaz/fl-leg-q67x4@mnj7yc4x"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/jasper/fl-1n2@mnjciopb"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/jasper/fl-q69@mnjcl55w"]
+	remote = origin
+	merge = refs/heads/main
