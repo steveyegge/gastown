@@ -32,7 +32,8 @@ ENV PATH="/app/gastown:/usr/local/go/bin:/home/agent/go/bin:/home/agent/bin:${PA
 
 # Install beads (bd) from source — prebuilt binaries link against ICU 74
 # but the base image ships ICU 76.
-RUN GOBIN=/usr/local/bin CGO_ENABLED=1 go install github.com/steveyegge/beads/cmd/bd@latest
+RUN GOBIN=/usr/local/bin CGO_ENABLED=1 go install github.com/steveyegge/beads/cmd/bd@latest \
+    && go clean -cache -modcache
 RUN curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash
 
 # Set up directories
