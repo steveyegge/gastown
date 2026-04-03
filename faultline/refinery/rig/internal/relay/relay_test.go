@@ -253,3 +253,54 @@ func TestHandlerHealth(t *testing.T) {
 		t.Errorf("expected ok, got %s", resp.Status)
 	}
 }
+
+func TestHandlerIngest503OnSQLiteFailure(t *testing.T) {
+	h, s := newTestHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	// Close the SQLite DB to simulate unavailability.
+	_ = s.Close()
+
+	body := []byte(`{"event_id":"abc123"}`)
+	req := httptest.NewRequest("POST", "/api/1/envelope/?sentry_key=testkey", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	if ra := w.Header().Get("Retry-After"); ra != "30" {
+		t.Errorf("expected Retry-After: 30, got %q", ra)
+	}
+}
+
+func TestHandlerHealth503OnSQLiteFailure(t *testing.T) {
+	h, s := newTestHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	// Close the SQLite DB to simulate unavailability.
+	_ = s.Close()
+
+	req := httptest.NewRequest("GET", "/health", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	if ra := w.Header().Get("Retry-After"); ra != "30" {
+		t.Errorf("expected Retry-After: 30, got %q", ra)
+	}
+
+	var resp struct{ Status string }
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if resp.Status != "degraded" {
+		t.Errorf("expected degraded, got %s", resp.Status)
+	}
+}

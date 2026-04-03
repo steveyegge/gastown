@@ -72,7 +72,7 @@ defer gtfaultline.RecoverAndReport()
 import Sentry
 
 SentrySDK.start { options in
-    options.dsn = "https://KEY@faultline-relay.fly.dev/PROJECT_ID"
+    options.dsn = "https://KEY@faultline.live/PROJECT_ID"
     options.environment = "production"
     options.enableAutoSessionTracking = true
     options.attachStacktrace = true
@@ -186,7 +186,7 @@ extra_hosts:
 
 Use the public relay:
 ```
-FAULTLINE_DSN=https://KEY@faultline-relay.fly.dev/PROJECT_ID
+FAULTLINE_DSN=https://KEY@faultline.live/PROJECT_ID
 ```
 
 The relay stores events and the local faultline polls them every 30 seconds.
@@ -261,7 +261,7 @@ services), SDKs send to the public relay. The local faultline instance runs a
 **relay poller** that pulls envelopes every 30 seconds and processes them
 through the normal ingest pipeline.
 
-**DSN:** `https://KEY@faultline-relay.fly.dev/PROJECT_ID`
+**DSN:** `https://KEY@faultline.live/PROJECT_ID`
 
 **How the poller works:**
 1. Faultline polls `GET /relay/poll?since=lastID&limit=100`
@@ -277,7 +277,7 @@ configure the poller — it starts automatically when `FAULTLINE_RELAY_URL` is s
 |-----------------|-----------|---------|
 | **Local** — service on same machine | `localhost:8080` | Go API, Python worker |
 | **Docker** — service in container | `host.docker.internal:8080` | Dockerized web app |
-| **Remote** — mobile/desktop app | `faultline-relay.fly.dev` | iOS app, Electron app |
+| **Remote** — mobile/desktop app | `faultline.live` | iOS app, Electron app |
 | **Hosted** — cloud service | Either (relay if no tunnel) | Fly.dev, Railway service |
 
 Set the deployment type in project settings to help faultline know what to

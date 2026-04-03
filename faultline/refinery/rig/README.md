@@ -156,7 +156,7 @@ For Next.js, use `@sentry/nextjs` and set the client-side DSN via `NEXT_PUBLIC_F
 import Sentry
 
 SentrySDK.start { options in
-    options.dsn = "https://KEY@faultline-relay.fly.dev/PROJECT_ID"
+    options.dsn = "https://KEY@faultline.live/PROJECT_ID"
     options.environment = "production"
     options.enableAutoSessionTracking = true
     options.attachStacktrace = true
@@ -279,7 +279,7 @@ Every stage is recorded in the `ft_error_lifecycle` table: detection, bead_filed
 | `FAULTLINE_API_URL` | `http://localhost:8080` | Base URL for generated DSNs |
 | `FAULTLINE_SLACK_WEBHOOK` | (empty) | Slack incoming webhook URL |
 | `FAULTLINE_CI_WEBHOOK_SECRET` | (empty) | HMAC-SHA256 secret for GitHub/resolve webhooks |
-| `FAULTLINE_RELAY_URL` | `https://faultline-relay.fly.dev` | Public relay URL |
+| `FAULTLINE_RELAY_URL` | `https://faultline.live` | Public relay URL |
 | `FAULTLINE_RELAY_POLL_SECS` | `30` | Relay poll interval in seconds |
 | `FAULTLINE_HEALTHMON_DOCTOR` | `false` | Run Dolt health diagnostics |
 | `FAULTLINE_UPTIME_INTERVAL_SECS` | `60` | Health check interval in seconds |
@@ -305,7 +305,7 @@ http://{PUBLIC_KEY}@{HOST}:{PORT}/{PROJECT_ID}
 |------------|-----|
 | **Local** | `http://KEY@localhost:8080/PROJECT_ID` |
 | **Docker** | `http://KEY@host.docker.internal:8080/PROJECT_ID` |
-| **Remote/Mobile** | `https://KEY@faultline-relay.fly.dev/PROJECT_ID` |
+| **Remote/Mobile** | `https://KEY@faultline.live/PROJECT_ID` |
 
 ### Docker
 

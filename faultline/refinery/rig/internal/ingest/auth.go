@@ -87,6 +87,17 @@ func (a *ProjectAuth) Authenticate(r *http.Request) (int64, error) {
 	return pid, nil
 }
 
+// Authenticate2 looks up a project ID by key directly (no HTTP request needed).
+func (a *ProjectAuth) Authenticate2(key string) (int64, error) {
+	a.mu.RLock()
+	pid, ok := a.keyToProject[key]
+	a.mu.RUnlock()
+	if !ok {
+		return 0, fmt.Errorf("invalid sentry key")
+	}
+	return pid, nil
+}
+
 // ProjectRecord is the minimal project info needed to build auth from a database.
 type ProjectRecord struct {
 	ID        int64

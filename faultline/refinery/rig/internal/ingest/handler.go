@@ -30,10 +30,12 @@ type Handler struct {
 	Log            *slog.Logger
 	OnEvent        EventHook        // optional callback after event processing
 	ScrubPII       bool             // enable PII scrubbing on event payloads
+	AutoRegister   bool             // auto-create projects on first event (local mode)
 	SourceMapStore *sourcemap.Store // optional source map store for symbolication
 
-	rulesMu sync.RWMutex
-	rules   map[int64][]db.FingerprintRule // cached per project
+	rulesMu    sync.RWMutex
+	rules      map[int64][]db.FingerprintRule // cached per project
+	registerMu sync.Mutex                     // serializes auto-registration
 }
 
 // RefreshRules reloads fingerprint rules from the database for a given project.
@@ -305,7 +307,63 @@ func (h *Handler) authenticateRequest(r *http.Request) (int64, error) {
 		return pid, nil
 	}
 
+	// Auto-register: if key is unknown and auto-registration is enabled (local mode),
+	// create the project on first event. The DSN key becomes the project identifier.
+	if h.AutoRegister && h.DB != nil {
+		key := extractKey(r)
+		if key != "" {
+			pid, regErr := h.autoRegisterProject(r.Context(), key)
+			if regErr != nil {
+				h.Log.Error("auto-register project", "err", regErr, "key", key)
+				return 0, err // return original auth error
+			}
+			return pid, nil
+		}
+	}
+
 	return 0, err
+}
+
+// autoRegisterProject creates a new project for an unknown DSN key.
+// The key is used as both the public key and the basis for the project name/slug.
+func (h *Handler) autoRegisterProject(ctx context.Context, key string) (int64, error) {
+	h.registerMu.Lock()
+	defer h.registerMu.Unlock()
+
+	// Double-check under lock — another goroutine may have registered it.
+	if pid, err := h.Auth.Authenticate2(key); err == nil {
+		return pid, nil
+	}
+
+	// Derive project name from key: use the key itself, truncated for readability.
+	slug := key
+	if len(slug) > 32 {
+		slug = slug[:32]
+	}
+
+	// Find next project ID.
+	projects, err := h.DB.ListProjects(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("auto-register: list projects: %w", err)
+	}
+	var maxID int64
+	for _, p := range projects {
+		if p.ID > maxID {
+			maxID = p.ID
+		}
+	}
+	projectID := maxID + 1
+
+	// Create in database.
+	if err := h.DB.EnsureProject(ctx, projectID, slug, slug, key); err != nil {
+		return 0, fmt.Errorf("auto-register: create project: %w", err)
+	}
+
+	// Register in auth (live).
+	h.Auth.Register(key, projectID, slug)
+
+	h.Log.Info("auto-registered project", "project_id", projectID, "slug", slug, "key", key)
+	return projectID, nil
 }
 
 func (h *Handler) processEvent(ctx context.Context, projectID int64, eventID string, raw json.RawMessage) error {

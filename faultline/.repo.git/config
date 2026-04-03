@@ -236,6 +236,21 @@
 [branch "polecat/jasper/fl-x19@mnje03ba"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/onyx/fl-pn7@mnje1qfr"]
+[branch "polecat/opal/fl-18g@mnje3gpw"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/topaz/fl-czb@mnje4ybf"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/garnet/fl-4ha@mnje6vwc"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/garnet/fl-8a8@mnjeaegl"]
+	remote = origin
+	merge = refs/heads/main
+[branch "dog/alpha-faultline-1775250638909"]
+	remote = origin
+	merge = refs/heads/main
+[branch "dog/alpha-faultline-1775256042918"]
 	remote = origin
 	merge = refs/heads/main

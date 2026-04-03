@@ -145,7 +145,8 @@ func (h *Handler) HandleIngest(w http.ResponseWriter, r *http.Request) {
 	id, err := h.Store.Insert(projectID, key, body)
 	if err != nil {
 		h.Log.Error("store insert failed", "err", err)
-		http.Error(w, "storage error", http.StatusInternalServerError)
+		w.Header().Set("Retry-After", "30")
+		http.Error(w, "storage unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -200,14 +201,19 @@ func (h *Handler) HandleAck(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleHealth returns relay health status.
+// Returns 503 with Retry-After when SQLite is unavailable.
 func (h *Handler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	total, unpulled, err := h.Store.Stats()
 	status := "ok"
+	code := http.StatusOK
 	if err != nil {
 		status = "degraded"
+		code = http.StatusServiceUnavailable
+		w.Header().Set("Retry-After", "30")
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":   status,
 		"total":    total,
@@ -246,7 +252,8 @@ func (h *Handler) HandleCIWebhook(w http.ResponseWriter, r *http.Request) {
 	id, err := h.Store.Insert(0, "ci-webhook", wrappedJSON)
 	if err != nil {
 		h.Log.Error("store ci webhook failed", "err", err)
-		http.Error(w, "storage error", http.StatusInternalServerError)
+		w.Header().Set("Retry-After", "30")
+		http.Error(w, "storage unavailable", http.StatusServiceUnavailable)
 		return
 	}
 

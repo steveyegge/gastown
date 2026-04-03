@@ -193,12 +193,14 @@ func runServe() error {
 
 	bridge.SetNotifier(dispatcher)
 
+	autoRegister := envOr("FAULTLINE_AUTO_REGISTER", "true") == "true"
 	handler := &ingest.Handler{
-		DB:       dolt,
-		Auth:     auth,
-		Log:      log,
-		OnEvent:  bridge.OnEvent,
-		ScrubPII: scrubPII,
+		DB:           dolt,
+		Auth:         auth,
+		Log:          log,
+		OnEvent:      bridge.OnEvent,
+		ScrubPII:     scrubPII,
+		AutoRegister: autoRegister,
 	}
 
 	slackDMs := &slackdm.Sender{
@@ -391,7 +393,7 @@ func runServe() error {
 	go dm.Run(ctx)
 
 	// Start relay poller — pulls events from the public relay for mobile/external apps.
-	if relayURL := envOr("FAULTLINE_RELAY_URL", "https://faultline-relay.fly.dev"); relayURL != "" {
+	if relayURL := envOr("FAULTLINE_RELAY_URL", "https://faultline.live"); relayURL != "" {
 		relayInterval := time.Duration(envOrInt("FAULTLINE_RELAY_POLL_SECS", 30)) * time.Second
 		rp := poller.NewRelayPoller(relayURL, relayInterval, func(ctx context.Context, projectID int64, publicKey string, payload []byte) error {
 			return handler.IngestRaw(ctx, projectID, payload)

@@ -1,0 +1,22 @@
+# Railway deployment: builds faultline and runs in relay mode (SQLite, no Dolt).
+# Persistent volume must be mounted at /data.
+FROM golang:1.26-bookworm AS build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /faultline ./cmd/faultline
+
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=build /faultline /faultline
+
+ENV FAULTLINE_RELAY_ADDR=":8080"
+ENV FAULTLINE_RELAY_DB="/data/relay.db"
+
+EXPOSE 8080
+
+VOLUME /data
+
+ENTRYPOINT ["/faultline", "relay"]
