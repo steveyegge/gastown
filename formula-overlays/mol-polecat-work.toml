@@ -1,0 +1,32 @@
+# Rally Tavern knowledge injection for mol-polecat-work
+# Appends rally knowledge check to implement step and nomination prompt to submit-and-exit
+
+[[step-overrides]]
+step_id = "implement"
+mode = "append"
+description = """
+
+## Rally Knowledge Check
+Before implementing, check for known patterns relevant to this task:
+```
+gt rally lookup <relevant-tags-from-your-issue>
+```
+If `gt rally` is unavailable, skip this step and proceed.
+If results are returned, review them — known patterns prevent repeated work across rigs.
+"""
+
+[[step-overrides]]
+step_id = "submit-and-exit"
+mode = "append"
+description = """
+
+## Knowledge Contribution
+If you discovered a reusable engineering pattern during this work (not Gas Town
+ops, but patterns applicable to other projects — auth, security, testing, CI,
+platform-specific gotchas), nominate it:
+```
+gt rally nominate --category <practice|solution|learned> \
+  --title "..." --summary "..." --tags "..."
+```
+If `gt rally` is unavailable, skip this step.
+"""
