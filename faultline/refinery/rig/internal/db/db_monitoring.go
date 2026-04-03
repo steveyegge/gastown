@@ -182,3 +182,53 @@ func (d *DB) ListDBChecksByDatabase(ctx context.Context, databaseID string, limi
 	}
 	return checks, rows.Err()
 }
+
+// GetDBMonitorState returns the current monitoring state for a database.
+func (d *DB) GetDBMonitorState(ctx context.Context, databaseID string) (*DBMonitorState, error) {
+	var s DBMonitorState
+	var lastTransition, lastCheck sql.NullTime
+	err := d.QueryRowContext(ctx,
+		`SELECT database_id, status, last_transition_at, last_check_at, consecutive_failures
+		 FROM db_monitor_state WHERE database_id = ?`, databaseID,
+	).Scan(&s.DatabaseID, &s.Status, &lastTransition, &lastCheck, &s.ConsecutiveFailures)
+	if err != nil {
+		return nil, err
+	}
+	if lastTransition.Valid {
+		s.LastTransitionAt = lastTransition.Time
+	}
+	if lastCheck.Valid {
+		s.LastCheckAt = lastCheck.Time
+	}
+	return &s, nil
+}
+
+// ListDBMonitorStatesByProject returns monitor states for all databases in a project.
+func (d *DB) ListDBMonitorStatesByProject(ctx context.Context, projectID int64) (map[string]*DBMonitorState, error) {
+	rows, err := d.QueryContext(ctx,
+		`SELECT s.database_id, s.status, s.last_transition_at, s.last_check_at, s.consecutive_failures
+		 FROM db_monitor_state s
+		 JOIN monitored_databases m ON m.id = s.database_id
+		 WHERE m.project_id = ?`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list db monitor states: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	states := make(map[string]*DBMonitorState)
+	for rows.Next() {
+		var s DBMonitorState
+		var lastTransition, lastCheck sql.NullTime
+		if err := rows.Scan(&s.DatabaseID, &s.Status, &lastTransition, &lastCheck, &s.ConsecutiveFailures); err != nil {
+			return nil, fmt.Errorf("scan db monitor state: %w", err)
+		}
+		if lastTransition.Valid {
+			s.LastTransitionAt = lastTransition.Time
+		}
+		if lastCheck.Valid {
+			s.LastCheckAt = lastCheck.Time
+		}
+		states[s.DatabaseID] = &s
+	}
+	return states, rows.Err()
+}

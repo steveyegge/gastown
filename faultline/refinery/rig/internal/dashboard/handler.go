@@ -3,7 +3,9 @@ package dashboard
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
+	"database/sql"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +18,10 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql" // register MySQL driver for test connection
+	_ "github.com/lib/pq"              // register PostgreSQL driver for test connection
+
+	"github.com/outdoorsea/faultline/internal/crypto"
 	"github.com/outdoorsea/faultline/internal/db"
 	"github.com/outdoorsea/faultline/internal/slackdm"
 )
@@ -28,6 +34,7 @@ type Handler struct {
 	DB            *db.DB
 	Log           *slog.Logger
 	SlackDMs      *slackdm.Sender  // optional; sends Slack DMs for mentions/assignments
+	EncryptionKey []byte           // AES-256 key for encrypting connection strings
 	loginAttempts map[string][]time.Time // IP → recent attempt timestamps
 }
 
@@ -119,6 +126,20 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /dashboard/teams/{team_id}/members/{account_id}/remove", h.requireAuth(admin(h.removeTeamMemberForm)))
 	mux.HandleFunc("POST /dashboard/teams/{team_id}/projects/link", h.requireAuth(admin(h.linkTeamProjectForm)))
 	mux.HandleFunc("POST /dashboard/teams/{team_id}/projects/{project_id}/unlink", h.requireAuth(admin(h.unlinkTeamProjectForm)))
+
+	// Database monitoring (admin).
+	mux.HandleFunc("GET /dashboard/projects/{project_id}/databases", h.requireAuth(admin(h.showDatabases)))
+	mux.HandleFunc("GET /dashboard/projects/{project_id}/databases/", h.requireAuth(admin(h.showDatabases)))
+	mux.HandleFunc("GET /dashboard/projects/{project_id}/databases/{database_id}", h.requireAuth(admin(h.showDatabaseDetail)))
+	mux.HandleFunc("GET /dashboard/projects/{project_id}/databases/{database_id}/", h.requireAuth(admin(h.showDatabaseDetail)))
+	mux.HandleFunc("POST /dashboard/projects/{project_id}/databases", h.requireAuth(admin(h.saveDatabaseMonitor)))
+	mux.HandleFunc("POST /dashboard/projects/{project_id}/databases/", h.requireAuth(admin(h.saveDatabaseMonitor)))
+	mux.HandleFunc("POST /dashboard/projects/{project_id}/databases/{database_id}/delete", h.requireAuth(admin(h.deleteDatabaseMonitor)))
+	mux.HandleFunc("POST /dashboard/projects/{project_id}/databases/{database_id}/test", h.requireAuth(admin(h.testDatabaseConnectionDash)))
+
+	// System-level: Dolt health (admin).
+	mux.HandleFunc("GET /dashboard/dolt-health", h.requireAuth(admin(h.showDoltHealth)))
+	mux.HandleFunc("GET /dashboard/dolt-health/", h.requireAuth(admin(h.showDoltHealth)))
 
 	// Slack account linking (member — per-user operation).
 	mux.HandleFunc("GET /dashboard/account/slack", h.requireAuth(h.showSlackLink))
@@ -1986,4 +2007,344 @@ func (h *Handler) searchIssues(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(results)
+}
+
+// ── Database monitoring handlers ──────────────────────────────────────
+
+func (h *Handler) showDatabases(w http.ResponseWriter, r *http.Request) {
+	account := h.currentAccount(r)
+	projectID := pathInt64(r, "project_id")
+
+	project, err := h.DB.GetProject(r.Context(), projectID)
+	if err != nil {
+		http.Error(w, "project not found", http.StatusNotFound)
+		return
+	}
+
+	dbs, err := h.DB.ListMonitoredDatabasesByProject(r.Context(), projectID)
+	if err != nil {
+		h.Log.Error("list databases", "err", err)
+		dbs = nil
+	}
+
+	states, err := h.DB.ListDBMonitorStatesByProject(r.Context(), projectID)
+	if err != nil {
+		h.Log.Error("list db monitor states", "err", err)
+		states = make(map[string]*db.DBMonitorState)
+	}
+
+	var views []DatabaseCardView
+	for _, m := range dbs {
+		cv := DatabaseCardView{
+			ID:        m.ID,
+			ProjectID: m.ProjectID,
+			Name:      m.Name,
+			DBType:    m.DBType,
+			Enabled:   m.Enabled,
+			Interval:  m.CheckIntervalSec,
+			Status:    "unknown",
+		}
+		if st, ok := states[m.ID]; ok {
+			cv.Status = st.Status
+			if !st.LastCheckAt.IsZero() {
+				cv.LastCheckAgo = timeAgo(st.LastCheckAt)
+			}
+			cv.ConsecutiveFailures = st.ConsecutiveFailures
+		}
+		views = append(views, cv)
+	}
+
+	_ = databasesPage(account, project.Name, projectID, views).Render(r.Context(), w)
+}
+
+func (h *Handler) showDatabaseDetail(w http.ResponseWriter, r *http.Request) {
+	account := h.currentAccount(r)
+	projectID := pathInt64(r, "project_id")
+	databaseID := r.PathValue("database_id")
+
+	project, err := h.DB.GetProject(r.Context(), projectID)
+	if err != nil {
+		http.Error(w, "project not found", http.StatusNotFound)
+		return
+	}
+
+	m, err := h.DB.GetMonitoredDatabase(r.Context(), projectID, databaseID)
+	if err != nil {
+		http.Error(w, "database not found", http.StatusNotFound)
+		return
+	}
+
+	checks, err := h.DB.ListDBChecksByDatabase(r.Context(), databaseID, 100)
+	if err != nil {
+		h.Log.Error("list db checks", "err", err)
+		checks = nil
+	}
+
+	state, _ := h.DB.GetDBMonitorState(r.Context(), databaseID)
+	status := "unknown"
+	var lastCheckAgo string
+	if state != nil {
+		status = state.Status
+		if !state.LastCheckAt.IsZero() {
+			lastCheckAgo = timeAgo(state.LastCheckAt)
+		}
+	}
+
+	connStr := crypto.MaskConnectionString(string(m.ConnectionString))
+
+	dv := DatabaseDetailView{
+		ID:               m.ID,
+		ProjectID:        m.ProjectID,
+		ProjectName:      project.Name,
+		Name:             m.Name,
+		DBType:           m.DBType,
+		ConnectionString: connStr,
+		Enabled:          m.Enabled,
+		Interval:         m.CheckIntervalSec,
+		Status:           status,
+		LastCheckAgo:     lastCheckAgo,
+		Checks:           checks,
+	}
+
+	_ = databaseDetailPage(account, dv).Render(r.Context(), w)
+}
+
+func (h *Handler) saveDatabaseMonitor(w http.ResponseWriter, r *http.Request) {
+	projectID := pathInt64(r, "project_id")
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	if !validateCSRF(r) {
+		http.Error(w, "invalid CSRF token", http.StatusForbidden)
+		return
+	}
+
+	project, err := h.DB.GetProject(r.Context(), projectID)
+	if err != nil {
+		http.Error(w, "project not found", http.StatusNotFound)
+		return
+	}
+
+	name := strings.TrimSpace(r.FormValue("name"))
+	dbType := strings.TrimSpace(r.FormValue("db_type"))
+	connStr := strings.TrimSpace(r.FormValue("connection_string"))
+	enabledStr := r.FormValue("enabled")
+	intervalStr := r.FormValue("check_interval_secs")
+	editID := strings.TrimSpace(r.FormValue("database_id"))
+
+	if name == "" || dbType == "" {
+		http.Error(w, "name and db_type are required", http.StatusBadRequest)
+		return
+	}
+
+	interval := 60
+	if v, err := strconv.Atoi(intervalStr); err == nil && v > 0 {
+		interval = v
+	}
+
+	enabled := enabledStr == "on" || enabledStr == "true" || enabledStr == "1"
+
+	if editID != "" {
+		// Update existing.
+		existing, err := h.DB.GetMonitoredDatabase(r.Context(), projectID, editID)
+		if err != nil {
+			http.Error(w, "database not found", http.StatusNotFound)
+			return
+		}
+		existing.Name = name
+		existing.DBType = dbType
+		existing.Enabled = enabled
+		existing.CheckIntervalSec = interval
+
+		if connStr != "" {
+			connBytes, err := h.dashEncryptConnectionString(connStr)
+			if err != nil {
+				h.Log.Error("encrypt connection string", "err", err)
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			existing.ConnectionString = connBytes
+		}
+
+		if err := h.DB.UpdateMonitoredDatabase(r.Context(), existing); err != nil {
+			h.Log.Error("update database", "err", err)
+			http.Error(w, "failed to update database", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Create new.
+		if connStr == "" {
+			http.Error(w, "connection_string is required", http.StatusBadRequest)
+			return
+		}
+		connBytes, err := h.dashEncryptConnectionString(connStr)
+		if err != nil {
+			h.Log.Error("encrypt connection string", "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		m := &db.MonitoredDatabase{
+			ProjectID:        projectID,
+			Name:             name,
+			DBType:           dbType,
+			ConnectionString: connBytes,
+			Enabled:          enabled,
+			CheckIntervalSec: interval,
+		}
+		if err := h.DB.InsertMonitoredDatabase(r.Context(), m); err != nil {
+			h.Log.Error("create database", "err", err)
+			http.Error(w, "failed to create database", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	_ = project // used above for validation
+	http.Redirect(w, r, fmt.Sprintf("/dashboard/projects/%d/databases", projectID), http.StatusSeeOther)
+}
+
+func (h *Handler) deleteDatabaseMonitor(w http.ResponseWriter, r *http.Request) {
+	projectID := pathInt64(r, "project_id")
+	databaseID := r.PathValue("database_id")
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	_ = r.ParseForm()
+
+	if !validateCSRF(r) {
+		http.Error(w, "invalid CSRF token", http.StatusForbidden)
+		return
+	}
+
+	if err := h.DB.DeleteMonitoredDatabase(r.Context(), projectID, databaseID); err != nil {
+		h.Log.Error("delete database", "err", err)
+		http.Error(w, "failed to delete database", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, fmt.Sprintf("/dashboard/projects/%d/databases", projectID), http.StatusSeeOther)
+}
+
+func (h *Handler) testDatabaseConnectionDash(w http.ResponseWriter, r *http.Request) {
+	projectID := pathInt64(r, "project_id")
+	databaseID := r.PathValue("database_id")
+
+	m, err := h.DB.GetMonitoredDatabase(r.Context(), projectID, databaseID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"success":false,"error":"database not found"}`))
+		return
+	}
+
+	connStr, err := h.dashDecryptConnectionString(m.ConnectionString)
+	if err != nil {
+		h.Log.Error("decrypt connection string for test", "err", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"success":false,"error":"internal error"}`))
+		return
+	}
+
+	var testErr error
+	switch m.DBType {
+	case "mysql", "mariadb", "dolt":
+		testErr = testDBPing(r.Context(), "mysql", connStr)
+	case "postgres":
+		testErr = testDBPing(r.Context(), "postgres", connStr)
+	default:
+		testErr = fmt.Errorf("unsupported engine: %s", m.DBType)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if testErr != nil {
+		_, _ = fmt.Fprintf(w, `{"success":false,"error":%q}`, testErr.Error())
+		return
+	}
+	_, _ = w.Write([]byte(`{"success":true}`))
+}
+
+func (h *Handler) showDoltHealth(w http.ResponseWriter, r *http.Request) {
+	account := h.currentAccount(r)
+
+	var metrics []DoltMetric
+
+	// Ping latency.
+	start := time.Now()
+	err := h.DB.PingContext(r.Context())
+	latency := time.Since(start)
+
+	if err != nil {
+		metrics = append(metrics, DoltMetric{"Ping", "unreachable", "bad"})
+	} else {
+		ms := latency.Milliseconds()
+		cls := "good"
+		if ms > 100 {
+			cls = "warn"
+		}
+		if ms > 500 {
+			cls = "bad"
+		}
+		metrics = append(metrics, DoltMetric{"Ping Latency", fmt.Sprintf("%dms", ms), cls})
+	}
+
+	// Commit lag — count of recent Dolt commits.
+	var commitCount int
+	row := h.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM dolt_log LIMIT 100`)
+	if err := row.Scan(&commitCount); err != nil {
+		metrics = append(metrics, DoltMetric{"Commit Count", "N/A", "warn"})
+	} else {
+		metrics = append(metrics, DoltMetric{"Commit Count", fmt.Sprintf("%d", commitCount), "good"})
+	}
+
+	// Orphan database count.
+	orphanQuery := `SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME LIKE 'testdb_%' OR SCHEMA_NAME LIKE 'beads_t%' OR SCHEMA_NAME LIKE 'beads_pt%' OR SCHEMA_NAME LIKE 'doctest_%'`
+	var orphanCount int
+	row = h.DB.QueryRowContext(r.Context(), orphanQuery)
+	if err := row.Scan(&orphanCount); err != nil {
+		metrics = append(metrics, DoltMetric{"Orphan Databases", "N/A", "warn"})
+	} else {
+		cls := "good"
+		if orphanCount > 5 {
+			cls = "warn"
+		}
+		if orphanCount > 20 {
+			cls = "bad"
+		}
+		metrics = append(metrics, DoltMetric{"Orphan Databases", fmt.Sprintf("%d", orphanCount), cls})
+	}
+
+	_ = doltHealthPage(account, metrics).Render(r.Context(), w)
+}
+
+// dashEncryptConnectionString encrypts a plaintext connection string.
+func (h *Handler) dashEncryptConnectionString(plaintext string) ([]byte, error) {
+	if len(h.EncryptionKey) == 0 {
+		return []byte(plaintext), nil
+	}
+	encrypted, err := crypto.Encrypt(plaintext, h.EncryptionKey)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(encrypted), nil
+}
+
+// dashDecryptConnectionString decrypts an encrypted connection string.
+func (h *Handler) dashDecryptConnectionString(ciphertext []byte) (string, error) {
+	if len(h.EncryptionKey) == 0 {
+		return string(ciphertext), nil
+	}
+	return crypto.Decrypt(string(ciphertext), h.EncryptionKey)
+}
+
+// testDBPing opens a database/sql connection and pings.
+func testDBPing(ctx context.Context, driver, connStr string) error {
+	testDB, err := sql.Open(driver, connStr)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = testDB.Close() }()
+	return testDB.PingContext(ctx)
 }

@@ -964,3 +964,99 @@ a.infra-link:hover {
 /* Empty state */
 .empty { text-align: center; padding: 3rem 1rem; color: var(--sediment); }
 .empty p { font-size: 0.9rem; }
+
+/* Database monitoring cards */
+.db-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.db-card {
+  background: white;
+  border-radius: var(--radius);
+  border: 1px solid #e5e2df;
+  overflow: hidden;
+  transition: box-shadow 0.15s;
+  text-decoration: none;
+  color: var(--bedrock);
+  display: block;
+}
+.db-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-decoration: none; }
+.db-card-status-bar { height: 3px; }
+.db-bar-dormant { background: var(--dormant); }
+.db-bar-tremor { background: var(--tremor); }
+.db-bar-rupture { background: var(--rupture); }
+.db-bar-sediment { background: var(--sediment); }
+.db-card-body { padding: 1rem; }
+.db-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+.db-card-name { font-weight: 600; font-size: 0.95rem; }
+.db-status { font-size: 0.8rem; font-weight: 500; }
+.db-status-dormant { color: var(--dormant); }
+.db-status-tremor { color: var(--tremor); }
+.db-status-rupture { color: var(--rupture); }
+.db-status-sediment { color: var(--sediment); }
+.db-card-meta { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.db-type-badge {
+  display: inline-block;
+  background: #e8e0d6;
+  color: var(--bedrock);
+  padding: 0.1em 0.5em;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-family: monospace;
+}
+.db-check-ago { font-size: 0.75rem; color: var(--sediment); }
+.db-card-stats { display: flex; gap: 1rem; }
+
+/* Database detail page */
+.db-detail-summary {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: white;
+  border-radius: var(--radius);
+  border: 1px solid #e5e2df;
+}
+.db-status-large { font-size: 1.3rem; font-weight: 600; }
+.db-detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+.db-detail-meta code { font-size: 0.8rem; background: #f5f0eb; padding: 0.1em 0.3em; border-radius: 3px; }
+
+/* Check history timeline */
+.check-timeline { margin-bottom: 1rem; }
+.check-timeline-svg { width: 100%; height: 40px; border-radius: 4px; background: #f5f0eb; }
+.check-message { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; color: var(--sediment); }
+
+/* Badge variants */
+.badge { display: inline-block; padding: 0.15em 0.5em; border-radius: 4px; font-size: 0.75rem; font-weight: 500; }
+.badge-green { background: #e0f5ec; color: #1a7a4a; }
+.badge-yellow { background: #fef3cd; color: #856404; }
+.badge-red { background: #fde8e8; color: #c62828; }
+.badge-muted { background: #f0ede8; color: var(--sediment); }
+
+/* Dolt health page */
+.dolt-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.dolt-health-card {
+  background: white;
+  border-radius: var(--radius);
+  border: 1px solid #e5e2df;
+  padding: 1.25rem;
+  text-align: center;
+}
+.dolt-health-label { font-size: 0.8rem; color: var(--sediment); margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.dolt-health-value { font-size: 1.5rem; font-weight: 700; font-family: var(--font-mono); }
+.dolt-good { color: var(--dormant); }
+.dolt-warn { color: var(--tremor); }
+.dolt-bad { color: var(--rupture); }

@@ -222,9 +222,10 @@ func runServe() error {
 	}
 
 	dash := &dashboard.Handler{
-		DB:       dolt,
-		Log:      log,
-		SlackDMs: slackDMs,
+		DB:            dolt,
+		Log:           log,
+		SlackDMs:      slackDMs,
+		EncryptionKey: encKey,
 	}
 
 	// CI webhook handler — converts GitHub Actions failures to faultline events.
