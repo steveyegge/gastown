@@ -1287,11 +1287,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 				fmt.Printf("  %s Could not init bd database: %v\n", style.Warning.Render("!"), err)
 			} else {
 				fmt.Printf("  %s Initialized beads database (Dolt)\n", style.Success.Render("✓"))
-				// Ensure metadata.json has dolt_database=<rigName>, not beads_<prefix>.
-				// Without this, bd connects to the wrong database (same fix as AddRig path).
-				if err := doltserver.EnsureMetadata(townRoot, name); err != nil {
-					fmt.Printf("  %s Could not set Dolt server metadata: %v\n", style.Warning.Render("!"), err)
-				}
+				mgr.FinalizeBeads(rigPath, prefix, name)
 			}
 		}
 		break
@@ -1307,10 +1303,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			fmt.Printf("  %s Could not init beads database: %v\n", style.Warning.Render("!"), err)
 		} else {
 			fmt.Printf("  %s Initialized beads database\n", style.Success.Render("✓"))
-			// Ensure metadata.json has dolt_database=<rigName>, not beads_<prefix>.
-			if err := doltserver.EnsureMetadata(townRoot, name); err != nil {
-				fmt.Printf("  %s Could not set Dolt server metadata: %v\n", style.Warning.Render("!"), err)
-			}
+			mgr.FinalizeBeads(rigPath, result.BeadsPrefix, name)
 		}
 	}
 

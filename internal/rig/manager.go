@@ -629,41 +629,9 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	}
 	fmt.Printf("   ✓ Initialized beads (prefix: %s)\n", opts.BeadsPrefix)
 
-	// Ensure metadata.json has dolt_mode=server and dolt_database=<rigName>.
-	// bd init --server sets dolt_mode but not dolt_database. EnsureMetadata
-	// writes both fields so bd connects to the correct centralized database.
-	// This must happen BEFORE setting issue_prefix below, so bd connects to
-	// the correct server-side database (rigName, not beads_<prefix>).
-	if err := doltserver.EnsureMetadata(m.townRoot, opts.Name); err != nil {
-		// Non-fatal: daemon's EnsureAllMetadata self-heals on next startup,
-		// or user can run gt doctor --fix to repair manually.
-		fmt.Printf("  Warning: Could not set Dolt server metadata: %v\n", err)
-		fmt.Printf("  Run 'gt doctor --fix' to repair, or it will self-heal on next daemon start.\n")
-	}
-
-	// Safety-net: drop orphaned beads_<prefix> database if it differs from rigName (gt-sv1h).
-	// InitBeads already does this, but repeat here in case EnsureMetadata path diverges.
-	if orphanDB := "beads_" + opts.BeadsPrefix; orphanDB != opts.Name {
-		_ = doltserver.RemoveDatabase(m.townRoot, orphanDB, true)
-	}
-
-	// Set issue_prefix on the correct server-side database.
-	// InitBeads ran bd config set issue_prefix, but against the wrong database
-	// (beads_<prefix> from bd init, not <rigName> from the centralized server).
-	// Now that EnsureMetadata has corrected dolt_database, re-set it.
-	{
-		resolvedBeadsDir := beads.ResolveBeadsDir(rigPath)
-		prefixCmd := exec.Command("bd", "config", "set", "issue_prefix", opts.BeadsPrefix)
-		prefixCmd.Dir = rigPath
-		prefixCmd.Env = append(os.Environ(), "BEADS_DIR="+resolvedBeadsDir)
-		if out, err := prefixCmd.CombinedOutput(); err != nil {
-			fmt.Printf("  Warning: Could not set issue_prefix on rig database: %v (%s)\n", err, strings.TrimSpace(string(out)))
-		}
-		typesCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
-		typesCmd.Dir = rigPath
-		typesCmd.Env = append(os.Environ(), "BEADS_DIR="+resolvedBeadsDir)
-		_, _ = typesCmd.CombinedOutput()
-	}
+	// Correct metadata.json, drop orphan database, and re-set config on the
+	// correct server-side database. See FinalizeBeads for details.
+	m.FinalizeBeads(rigPath, opts.BeadsPrefix, opts.Name)
 
 	// Auto-create DoltHub remote for the rig's beads database.
 	// Requires DOLTHUB_TOKEN and DOLTHUB_ORG environment variables.
@@ -955,6 +923,46 @@ func warnDeprecatedRigConfigKeys(data []byte, path string) {
 // InitBeads initializes the beads database at rig level.
 // The project's .beads/config.yaml determines sync-branch settings.
 // Use `bd doctor --fix` in the project to configure sync-branch if needed.
+// FinalizeBeads performs the post-InitBeads steps required to connect beads
+// to the correct Dolt database. InitBeads creates a database named
+// beads_<prefix>, but the rig uses <rigName> as its database. This method:
+//  1. Corrects metadata.json so bd connects to <rigName>, not beads_<prefix>.
+//  2. Drops the orphaned beads_<prefix> database.
+//  3. Re-sets issue_prefix and types.custom on the correct database.
+//
+// Both AddRig and rig adopt must call this after InitBeads. Without it,
+// bd commands fail with "database not found" (the adopt path bug fixed here).
+func (m *Manager) FinalizeBeads(rigPath, prefix, rigName string) {
+	// 1. Ensure metadata.json has dolt_mode=server and dolt_database=<rigName>.
+	if err := doltserver.EnsureMetadata(m.townRoot, rigName); err != nil {
+		fmt.Printf("  Warning: Could not set Dolt server metadata: %v\n", err)
+		fmt.Printf("  Run 'gt doctor --fix' to repair, or it will self-heal on next daemon start.\n")
+	}
+
+	// 2. Drop orphaned beads_<prefix> database if it differs from rigName.
+	if orphanDB := "beads_" + prefix; orphanDB != rigName {
+		_ = doltserver.RemoveDatabase(m.townRoot, orphanDB, true)
+	}
+
+	// 3. Re-set issue_prefix and types.custom on the correct database.
+	// InitBeads already ran these, but against the wrong database
+	// (beads_<prefix>). Now that metadata points to <rigName>, re-set them.
+	resolvedBeadsDir := beads.ResolveBeadsDir(rigPath)
+	env := append(os.Environ(), "BEADS_DIR="+resolvedBeadsDir)
+
+	prefixCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
+	prefixCmd.Dir = rigPath
+	prefixCmd.Env = env
+	if out, err := prefixCmd.CombinedOutput(); err != nil {
+		fmt.Printf("  Warning: Could not set issue_prefix on rig database: %v (%s)\n", err, strings.TrimSpace(string(out)))
+	}
+
+	typesCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+	typesCmd.Dir = rigPath
+	typesCmd.Env = env
+	_, _ = typesCmd.CombinedOutput()
+}
+
 // TODO(bd-yaml): beads config should migrate to JSON (see beads issue)
 //
 // rigName is the rig's database name (e.g. "gastown"). When non-empty and
