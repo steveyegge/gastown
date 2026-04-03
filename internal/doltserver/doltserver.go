@@ -3273,7 +3273,7 @@ func FindOrCreateRigBeadsDir(townRoot, rigName string) (string, error) {
 	}
 	if rigName == "hq" {
 		dir := filepath.Join(townRoot, ".beads")
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0700); err != nil {
 			return "", fmt.Errorf("creating HQ beads dir: %w", err)
 		}
 		return dir, nil
@@ -3285,7 +3285,7 @@ func FindOrCreateRigBeadsDir(townRoot, rigName string) (string, error) {
 	mayorBeads := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
 	if _, err := os.Stat(mayorBeads); err == nil {
 		// Ensure it still exists (no-op if present, recreates if deleted)
-		if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+		if err := os.MkdirAll(mayorBeads, 0700); err != nil {
 			return "", fmt.Errorf("ensuring mayor beads dir: %w", err)
 		}
 		return mayorBeads, nil
@@ -3294,7 +3294,7 @@ func FindOrCreateRigBeadsDir(townRoot, rigName string) (string, error) {
 	// Check rig-root .beads
 	rigBeads := filepath.Join(townRoot, rigName, ".beads")
 	if _, err := os.Stat(rigBeads); err == nil {
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			return "", fmt.Errorf("ensuring rig beads dir: %w", err)
 		}
 		return rigBeads, nil
@@ -3306,7 +3306,7 @@ func FindOrCreateRigBeadsDir(townRoot, rigName string) (string, error) {
 	// cause InitBeads to misdetect an untracked repo as having tracked beads,
 	// taking the redirect early-return and skipping config.yaml creation
 	// (see rig/manager.go InitBeads).
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBeads, 0700); err != nil {
 		return "", fmt.Errorf("creating beads dir: %w", err)
 	}
 

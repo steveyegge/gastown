@@ -1211,7 +1211,7 @@ func TestResolveBeadsDir(t *testing.T) {
 		// Create a simple .beads directory without redirect
 		workDir := filepath.Join(tmpDir, "no-redirect")
 		beadsDir := filepath.Join(workDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1229,10 +1229,10 @@ func TestResolveBeadsDir(t *testing.T) {
 		targetBeadsDir := filepath.Join(tmpDir, "mayor", "rig", ".beads")
 
 		// Create both directories
-		if err := os.MkdirAll(localBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(localBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.MkdirAll(targetBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(targetBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1267,7 +1267,7 @@ func TestResolveBeadsDir(t *testing.T) {
 		// Redirect file exists but is empty - should fall back to local
 		workDir := filepath.Join(tmpDir, "empty-redirect")
 		beadsDir := filepath.Join(workDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1291,10 +1291,10 @@ func TestResolveBeadsDir(t *testing.T) {
 		localBeadsDir := filepath.Join(workDir, ".beads")
 		targetBeadsDir := filepath.Join(tmpDir, "canonical", ".beads")
 
-		if err := os.MkdirAll(localBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(localBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.MkdirAll(targetBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(targetBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1315,10 +1315,10 @@ func TestResolveBeadsDir(t *testing.T) {
 		firstBeadsDir := filepath.Join(tmpDir, "chain-test", "first", ".beads")
 		finalBeadsDir := filepath.Join(tmpDir, "chain-test", "final", ".beads")
 
-		if err := os.MkdirAll(firstBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(firstBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.MkdirAll(finalBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(finalBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1338,7 +1338,7 @@ func TestResolveBeadsDir(t *testing.T) {
 		// This is the bug scenario from gt-csbjj
 		workDir := filepath.Join(tmpDir, "mayor", "rig")
 		beadsDir := filepath.Join(workDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -2049,10 +2049,10 @@ func TestSetupRedirect(t *testing.T) {
 		crewPath := filepath.Join(rigRoot, "crew", "max")
 
 		// Create both town-level and rig-level beads
-		if err := os.MkdirAll(filepath.Join(townBeads, "dolt"), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(townBeads, "dolt"), 0700); err != nil {
 			t.Fatalf("mkdir town beads: %v", err)
 		}
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatalf("mkdir rig beads: %v", err)
 		}
 		// Rig has its own database (e.g., laneassist with lc- prefix)
@@ -2095,7 +2095,7 @@ func TestSetupRedirect(t *testing.T) {
 		crewPath := filepath.Join(rigRoot, "crew", "max")
 
 		// Create town-level beads with dolt DB
-		if err := os.MkdirAll(filepath.Join(townBeads, "dolt"), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(townBeads, "dolt"), 0700); err != nil {
 			t.Fatalf("mkdir town beads: %v", err)
 		}
 		if err := os.MkdirAll(crewPath, 0755); err != nil {
@@ -2133,7 +2133,7 @@ func TestSetupRedirect(t *testing.T) {
 		crewPath := filepath.Join(rigRoot, "crew", "max")
 
 		// Create rig-level beads only (no town-level, no metadata.json)
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatalf("mkdir rig beads: %v", err)
 		}
 		if err := os.MkdirAll(crewPath, 0755); err != nil {
@@ -2167,10 +2167,10 @@ func TestSetupRedirect(t *testing.T) {
 		crewPath := filepath.Join(rigRoot, "crew", "max")
 
 		// Create rig structure with tracked beads
-		if err := os.MkdirAll(mayorRigBeads, 0755); err != nil {
+		if err := os.MkdirAll(mayorRigBeads, 0700); err != nil {
 			t.Fatalf("mkdir mayor/rig beads: %v", err)
 		}
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatalf("mkdir rig beads: %v", err)
 		}
 		// Create rig-level redirect to mayor/rig/.beads
@@ -2220,7 +2220,7 @@ func TestSetupRedirect(t *testing.T) {
 		}
 
 		// Create rig structure with absolute redirect
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatalf("mkdir rig beads: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(rigBeads, "redirect"), []byte(absTarget+"\n"), 0644); err != nil {
@@ -2260,7 +2260,7 @@ func TestSetupRedirect(t *testing.T) {
 		rigBeads := filepath.Join(rigRoot, ".beads")
 		polecatPath := filepath.Join(rigRoot, "polecats", "worker1")
 
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatalf("mkdir rig beads: %v", err)
 		}
 		if err := os.MkdirAll(polecatPath, 0755); err != nil {
@@ -2289,7 +2289,7 @@ func TestSetupRedirect(t *testing.T) {
 		rigBeads := filepath.Join(rigRoot, ".beads")
 		refineryPath := filepath.Join(rigRoot, "refinery", "rig")
 
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatalf("mkdir rig beads: %v", err)
 		}
 		if err := os.MkdirAll(refineryPath, 0755); err != nil {
@@ -2319,11 +2319,11 @@ func TestSetupRedirect(t *testing.T) {
 		crewPath := filepath.Join(rigRoot, "crew", "max")
 		crewBeads := filepath.Join(crewPath, ".beads")
 
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatalf("mkdir rig beads: %v", err)
 		}
 		// Simulate worktree with both runtime and tracked files
-		if err := os.MkdirAll(crewBeads, 0755); err != nil {
+		if err := os.MkdirAll(crewBeads, 0700); err != nil {
 			t.Fatalf("mkdir crew beads: %v", err)
 		}
 		// Runtime files (should be removed)
@@ -2374,7 +2374,7 @@ func TestSetupRedirect(t *testing.T) {
 		rigBeads := filepath.Join(rigRoot, ".beads")
 		mayorRigPath := filepath.Join(rigRoot, "mayor", "rig")
 
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatalf("mkdir rig beads: %v", err)
 		}
 		if err := os.MkdirAll(mayorRigPath, 0755); err != nil {
@@ -2432,7 +2432,7 @@ func TestSetupRedirect(t *testing.T) {
 		crewPath := filepath.Join(rigRoot, "crew", "max")
 
 		// Create rig/.beads with metadata but NO database (no dolt/)
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatalf("mkdir rig beads: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(rigBeads, "metadata.json"),
@@ -2481,7 +2481,7 @@ func TestSetupRedirect(t *testing.T) {
 		crewPath := filepath.Join(rigRoot, "crew", "max")
 
 		// Create only mayor/rig/.beads (no rig/.beads)
-		if err := os.MkdirAll(mayorRigBeads, 0755); err != nil {
+		if err := os.MkdirAll(mayorRigBeads, 0700); err != nil {
 			t.Fatalf("mkdir mayor/rig beads: %v", err)
 		}
 		if err := os.MkdirAll(crewPath, 0755); err != nil {
@@ -2521,7 +2521,7 @@ func TestSetupRedirect(t *testing.T) {
 		crewPath := filepath.Join(rigRoot, "crew", "max")
 
 		// Create rig structure
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatalf("mkdir rig beads: %v", err)
 		}
 		if err := os.MkdirAll(crewPath, 0755); err != nil {
@@ -3094,7 +3094,7 @@ func TestBuildRoutingEnv(t *testing.T) {
 func TestBuildRunEnv_OverridesStaleDoltPortFromBeadsDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(beadsDir, "dolt-server.port"), []byte("43113\n"), 0644); err != nil {
@@ -3122,7 +3122,7 @@ func TestBuildRunEnv_OverridesStaleDoltPortFromBeadsDir(t *testing.T) {
 func TestBuildRoutingEnv_OverridesStaleDoltPortFromBeadsDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(beadsDir, "dolt-server.port"), []byte("43113\n"), 0644); err != nil {

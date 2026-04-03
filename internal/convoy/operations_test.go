@@ -591,7 +591,7 @@ func TestRigForIssue_ValidPrefix(t *testing.T) {
 
 	// Create .beads/routes.jsonl with a mapping
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	routesContent := `{"prefix":"gt-","path":"gastown/.beads"}` + "\n" +
@@ -635,7 +635,7 @@ func TestRigForIssue_UnknownPrefix(t *testing.T) {
 
 	// Create routes.jsonl with only gt- mapping
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	routesContent := `{"prefix":"gt-","path":"gastown/.beads"}` + "\n"
@@ -665,7 +665,7 @@ func TestRigForIssue_TownLevelPrefix(t *testing.T) {
 
 	// Town-level beads have path="." which should return "" (no specific rig)
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	routesContent := `{"prefix":"hq-","path":"."}` + "\n"
@@ -689,7 +689,7 @@ func setupTownRoot(t *testing.T) string {
 	t.Helper()
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("MkdirAll .beads: %v", err)
 	}
 	routesContent := `{"prefix":"test-","path":"testrig/.beads"}` + "\n"

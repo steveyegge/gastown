@@ -12,7 +12,7 @@ func TestGetPrefixForRig(t *testing.T) {
 	// Create a temporary directory with routes.jsonl
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -111,7 +111,7 @@ func TestGetRigPathForPrefix(t *testing.T) {
 	// Create a temporary directory with routes.jsonl
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -158,7 +158,7 @@ func TestResolveHookDir(t *testing.T) {
 	// Create a temporary directory with routes.jsonl
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -221,13 +221,13 @@ func TestResolveHookDir(t *testing.T) {
 func TestResolveBeadsDirForID(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create rig beads directory for gt- prefix
 	rigBeadsDir := filepath.Join(tmpDir, "gastown/mayor/rig/.beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -289,7 +289,7 @@ func TestResolveBeadsDirForID(t *testing.T) {
 func TestResolveBeadsDirForID_NoRoutes(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	// No routes.jsonl — should always return currentBeadsDir
@@ -302,7 +302,7 @@ func TestResolveBeadsDirForID_NoRoutes(t *testing.T) {
 func TestGetRigNameForPrefix(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -338,7 +338,7 @@ func TestGetRigNameForPrefix(t *testing.T) {
 func TestCheckPrefixAvailable(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 

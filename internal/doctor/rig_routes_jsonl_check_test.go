@@ -29,7 +29,7 @@ func TestRigRoutesJSONLCheck_Run(t *testing.T) {
 		tmpDir := t.TempDir()
 		// Create rig with .beads but no routes.jsonl
 		rigBeads := filepath.Join(tmpDir, "myrig", ".beads")
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -45,7 +45,7 @@ func TestRigRoutesJSONLCheck_Run(t *testing.T) {
 	t.Run("rig with routes.jsonl warns", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		rigBeads := filepath.Join(tmpDir, "myrig", ".beads")
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -72,7 +72,7 @@ func TestRigRoutesJSONLCheck_Run(t *testing.T) {
 		// Create two rigs with routes.jsonl
 		for _, rigName := range []string{"rig1", "rig2"} {
 			rigBeads := filepath.Join(tmpDir, rigName, ".beads")
-			if err := os.MkdirAll(rigBeads, 0755); err != nil {
+			if err := os.MkdirAll(rigBeads, 0700); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(rigBeads, "routes.jsonl"), []byte(`{"prefix":"x-","path":"."}`+"\n"), 0644); err != nil {
@@ -97,7 +97,7 @@ func TestRigRoutesJSONLCheck_Fix(t *testing.T) {
 	t.Run("deletes routes.jsonl unconditionally", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		rigBeads := filepath.Join(tmpDir, "myrig", ".beads")
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -130,7 +130,7 @@ func TestRigRoutesJSONLCheck_Fix(t *testing.T) {
 	t.Run("fix is idempotent", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		rigBeads := filepath.Join(tmpDir, "myrig", ".beads")
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -161,7 +161,7 @@ func TestRigRoutesJSONLCheck_FindRigDirectories(t *testing.T) {
 
 		// Create town-level .beads with routes.jsonl
 		townBeads := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(townBeads, 0755); err != nil {
+		if err := os.MkdirAll(townBeads, 0700); err != nil {
 			t.Fatal(err)
 		}
 		routes := `{"prefix":"rig1-","path":"rig1/mayor/rig"}` + "\n"
@@ -170,12 +170,12 @@ func TestRigRoutesJSONLCheck_FindRigDirectories(t *testing.T) {
 		}
 
 		// Create rig1 (from routes.jsonl)
-		if err := os.MkdirAll(filepath.Join(tmpDir, "rig1", ".beads"), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(tmpDir, "rig1", ".beads"), 0700); err != nil {
 			t.Fatal(err)
 		}
 
 		// Create rig2 (unregistered but has .beads)
-		if err := os.MkdirAll(filepath.Join(tmpDir, "rig2", ".beads"), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(tmpDir, "rig2", ".beads"), 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -191,10 +191,10 @@ func TestRigRoutesJSONLCheck_FindRigDirectories(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		// Create directories that should be excluded
-		if err := os.MkdirAll(filepath.Join(tmpDir, "mayor", ".beads"), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(tmpDir, "mayor", ".beads"), 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -214,12 +214,12 @@ func TestRigRoutesJSONLCheck_FindRigDirectories(t *testing.T) {
 
 		// Create town-level .beads
 		townBeads := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(townBeads, 0755); err != nil {
+		if err := os.MkdirAll(townBeads, 0700); err != nil {
 			t.Fatal(err)
 		}
 
 		// Create a real rig with its own .beads
-		if err := os.MkdirAll(filepath.Join(tmpDir, "realrig", ".beads"), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(tmpDir, "realrig", ".beads"), 0700); err != nil {
 			t.Fatal(err)
 		}
 

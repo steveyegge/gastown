@@ -74,7 +74,7 @@ func createTrackedBeadsRepoWithIssues(t *testing.T, path, prefix string, numIssu
 
 	// Initialize beads
 	beadsDir := filepath.Join(path, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -465,7 +465,7 @@ func createTrackedBeadsRepoWithNoIssues(t *testing.T, path, prefix string) {
 
 	// Initialize beads
 	beadsDir := filepath.Join(path, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 

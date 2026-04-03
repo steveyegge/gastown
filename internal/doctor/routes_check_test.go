@@ -14,7 +14,7 @@ func TestRoutesCheck_MissingTownRoute(t *testing.T) {
 
 		// Create .beads directory with routes.jsonl missing the hq- route
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -49,7 +49,7 @@ func TestRoutesCheck_MissingTownRoute(t *testing.T) {
 
 		// Create .beads directory with valid routes.jsonl
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -83,7 +83,7 @@ func TestRoutesCheck_FixRestoresTownRoute(t *testing.T) {
 
 		// Create .beads directory with empty routes.jsonl
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -135,7 +135,7 @@ func TestRoutesCheck_FixRestoresTownRoute(t *testing.T) {
 
 		// Create .beads directory
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -187,7 +187,7 @@ func TestRoutesCheck_FixRestoresTownRoute(t *testing.T) {
 
 		// Create .beads directory with valid routes.jsonl
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -232,13 +232,13 @@ func TestRoutesCheck_DirectLayoutRig(t *testing.T) {
 
 		// Create town-level .beads
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
 		// Create direct-layout rig: .beads at rig root, no redirect
 		rigBeadsDir := filepath.Join(tmpDir, "myrig", ".beads")
-		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 		// No redirect file — this is a direct layout
@@ -285,7 +285,7 @@ func TestRoutesCheck_DirectLayoutRig(t *testing.T) {
 
 		// Create town-level .beads with empty routes
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 		routesPath := filepath.Join(beadsDir, "routes.jsonl")
@@ -296,7 +296,7 @@ func TestRoutesCheck_DirectLayoutRig(t *testing.T) {
 		// Create direct-layout rig: .beads at rig root, no redirect
 		rigDir := filepath.Join(tmpDir, "myrig")
 		rigBeadsDir := filepath.Join(rigDir, ".beads")
-		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -349,7 +349,7 @@ func TestDetermineRigBeadsPath_Containment(t *testing.T) {
 		// Create rig with redirect that escapes the town root
 		rigDir := filepath.Join(tmpDir, "myrig")
 		rigBeadsDir := filepath.Join(rigDir, ".beads")
-		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 		// Write a redirect that escapes via ..
@@ -371,10 +371,10 @@ func TestDetermineRigBeadsPath_Containment(t *testing.T) {
 		rigDir := filepath.Join(tmpDir, "myrig")
 		rigBeadsDir := filepath.Join(rigDir, ".beads")
 		mayorBeadsDir := filepath.Join(rigDir, "mayor", "rig", ".beads")
-		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.MkdirAll(mayorBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(mayorBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(rigBeadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
@@ -393,7 +393,7 @@ func TestDetermineRigBeadsPath_Containment(t *testing.T) {
 
 		// Create direct-layout rig
 		rigBeadsDir := filepath.Join(tmpDir, "myrig", ".beads")
-		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -414,13 +414,13 @@ func TestRoutesCheck_SuboptimalRoutes(t *testing.T) {
 
 		// Town-level .beads
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
 		// Legacy rig: redirect at rig root points to mayor/rig/.beads
 		rigBeadsDir := filepath.Join(tmpDir, "crom", ".beads")
-		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(rigBeadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
@@ -428,7 +428,7 @@ func TestRoutesCheck_SuboptimalRoutes(t *testing.T) {
 		}
 		// The canonical target must exist with a real .beads directory
 		canonicalBeads := filepath.Join(tmpDir, "crom", "mayor", "rig", ".beads")
-		if err := os.MkdirAll(canonicalBeads, 0755); err != nil {
+		if err := os.MkdirAll(canonicalBeads, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -521,13 +521,13 @@ func TestRoutesCheck_SuboptimalRoutes(t *testing.T) {
 
 		// Town-level .beads
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
 		// Rig with redirect, but the canonical target directory has NO .beads
 		rigBeadsDir := filepath.Join(tmpDir, "crom", ".beads")
-		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(rigBeadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
@@ -612,7 +612,7 @@ func TestRoutesCheck_CorruptedRoutesJsonl(t *testing.T) {
 
 		// Create .beads directory with corrupted routes.jsonl
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -646,7 +646,7 @@ func TestRoutesCheck_CorruptedRoutesJsonl(t *testing.T) {
 
 		// Create .beads directory with corrupted routes.jsonl
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 

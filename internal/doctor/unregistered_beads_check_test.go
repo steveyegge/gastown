@@ -31,7 +31,7 @@ func TestUnregisteredBeadsDirs_Clean(t *testing.T) {
 
 	// Create system dirs (should be ignored)
 	os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755)
-	os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0700)
 
 	check := NewUnregisteredBeadsDirsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
@@ -172,7 +172,7 @@ func TestUnregisteredBeadsDirs_DirWithoutMetadata(t *testing.T) {
 	setupRigsJSON(t, tmpDir, nil)
 
 	// Directory with .beads/ but no metadata.json
-	os.MkdirAll(filepath.Join(tmpDir, "random_dir", ".beads"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "random_dir", ".beads"), 0700)
 
 	// Plain directory (no .beads at all)
 	os.MkdirAll(filepath.Join(tmpDir, "plain_dir"), 0755)
@@ -190,7 +190,7 @@ func TestUnregisteredBeadsDirs_DirWithoutMetadata(t *testing.T) {
 func writeBeadsMetadata(t *testing.T, dir string, doltDB string) {
 	t.Helper()
 	beadsDir := filepath.Join(dir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	content := `{"backend":"dolt","dolt_database":"` + doltDB + `","dolt_mode":"server"}`

@@ -80,7 +80,7 @@ func TestManagerGetPrefersHookedBeadOverStaleAgentHook(t *testing.T) {
 
 	// Rig .beads redirects to mayor/rig/.beads so NewManager resolves correctly.
 	rigBeadsDir := filepath.Join(rigPath, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir rig .beads: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
@@ -89,7 +89,7 @@ func TestManagerGetPrefersHookedBeadOverStaleAgentHook(t *testing.T) {
 
 	// Town routing with unique prefix for this test DB.
 	townBeadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(townBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir town .beads: %v", err)
 	}
 	routes := []beads.Route{
@@ -175,7 +175,7 @@ func TestManagerDoesNotTreatLiveSessionAsIdle(t *testing.T) {
 	}
 
 	rigBeadsDir := filepath.Join(rigPath, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir rig .beads: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
@@ -183,7 +183,7 @@ func TestManagerDoesNotTreatLiveSessionAsIdle(t *testing.T) {
 	}
 
 	townBeadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(townBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir town .beads: %v", err)
 	}
 	routes := []beads.Route{

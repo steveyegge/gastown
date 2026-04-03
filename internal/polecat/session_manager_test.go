@@ -309,7 +309,7 @@ func TestSessionManager_resolveBeadsDir(t *testing.T) {
 	// Set up a mock town with routes.jsonl
 	townRoot := t.TempDir()
 	townBeadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(townBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 

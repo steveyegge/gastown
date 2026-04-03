@@ -28,7 +28,7 @@ func TestFixWorkDir_HQ(t *testing.T) {
 func TestFixWorkDir_RoutedRig(t *testing.T) {
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -70,7 +70,7 @@ func TestGetRigPathForPrefix_RoutesResolution(t *testing.T) {
 	// Create a temporary town structure with routes.jsonl
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -139,7 +139,7 @@ func TestRigPathResolution_NoRoutesFile(t *testing.T) {
 func TestRigDirResolution_Logic(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 

@@ -47,7 +47,7 @@ func TestStaleAgentBeadsCheck_NoRigs(t *testing.T) {
 
 	// Create .beads dir with empty routes.jsonl
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(""), 0644); err != nil {
@@ -69,7 +69,7 @@ func TestStaleAgentBeadsCheck_CrewOnDisk(t *testing.T) {
 
 	// Set up routes pointing to a rig
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	routesContent := `{"prefix":"gt-","path":"myrig/mayor/rig"}` + "\n"
@@ -79,7 +79,7 @@ func TestStaleAgentBeadsCheck_CrewOnDisk(t *testing.T) {
 
 	// Create rig beads directory
 	rigBeadsDir := filepath.Join(tmpDir, "myrig", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -109,7 +109,7 @@ func TestStaleAgentBeadsCheck_Phase2_NoTownBeadsDir(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	// Routes with one known rig + town-level route
@@ -121,7 +121,7 @@ func TestStaleAgentBeadsCheck_Phase2_NoTownBeadsDir(t *testing.T) {
 
 	// Create the rig beads directory so Phase 1 can attempt to scan
 	rigBeadsDir := filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -145,7 +145,7 @@ func TestStaleAgentBeadsCheck_KnownPrefixTracking(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -320,7 +320,7 @@ func TestStaleAgentBeadsCheck_FixFallbackToTownBeads(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	routesContent := `{"prefix":"hq-","path":"."}` + "\n" +
@@ -330,7 +330,7 @@ func TestStaleAgentBeadsCheck_FixFallbackToTownBeads(t *testing.T) {
 	}
 
 	rigBeadsDir := filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 

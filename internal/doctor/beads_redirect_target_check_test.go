@@ -16,7 +16,7 @@ func TestBeadsRedirectTargetCheck_ValidTarget(t *testing.T) {
 	crewBeadsDir := filepath.Join(crewDir, ".beads")
 
 	// Create rig with valid beads setup
-	if err := os.MkdirAll(filepath.Join(rigBeadsDir, "dolt"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(rigBeadsDir, "dolt"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(rigDir, ".git"), 0755); err != nil {
@@ -24,7 +24,7 @@ func TestBeadsRedirectTargetCheck_ValidTarget(t *testing.T) {
 	}
 
 	// Create crew with redirect pointing to valid target
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
@@ -52,7 +52,7 @@ func TestBeadsRedirectTargetCheck_TargetDoesNotExist(t *testing.T) {
 	}
 
 	// Create crew with redirect pointing to non-existent target
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
@@ -79,7 +79,7 @@ func TestBeadsRedirectTargetCheck_TargetNoBeadsSetup(t *testing.T) {
 	crewBeadsDir := filepath.Join(crewDir, ".beads")
 
 	// Create rig beads dir but with no dolt/, redirect, or config.yaml
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(rigDir, ".git"), 0755); err != nil {
@@ -87,7 +87,7 @@ func TestBeadsRedirectTargetCheck_TargetNoBeadsSetup(t *testing.T) {
 	}
 
 	// Create crew with redirect pointing to empty beads dir
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
@@ -127,7 +127,7 @@ func TestBeadsRedirectTargetCheck_PolecatBrokenTarget(t *testing.T) {
 	}
 
 	// Create polecat with .git (old flat structure) and redirect to non-existent target
-	if err := os.MkdirAll(polecatBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(polecatBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(polecatDir, ".git"), []byte("gitdir: /fake\n"), 0644); err != nil {
@@ -158,7 +158,7 @@ func TestBeadsRedirectTargetCheck_RefineryBrokenTarget(t *testing.T) {
 	}
 
 	// Create refinery with redirect to non-existent target
-	if err := os.MkdirAll(refineryBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(refineryBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(refineryBeadsDir, "redirect"), []byte("../../../.beads\n"), 0644); err != nil {
@@ -204,7 +204,7 @@ func TestBeadsRedirectTargetCheck_FixRecomputesRedirect(t *testing.T) {
 	crewBeadsDir := filepath.Join(crewDir, ".beads")
 
 	// Create rig with valid beads setup (will be the fix target)
-	if err := os.MkdirAll(filepath.Join(rigBeadsDir, "dolt"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(rigBeadsDir, "dolt"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(rigDir, ".git"), 0755); err != nil {
@@ -212,7 +212,7 @@ func TestBeadsRedirectTargetCheck_FixRecomputesRedirect(t *testing.T) {
 	}
 
 	// Create crew with redirect pointing to wrong/broken path
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../nonexistent/.beads\n"), 0644); err != nil {
@@ -258,7 +258,7 @@ func TestBeadsRedirectTargetCheck_FixWithMayorBeads(t *testing.T) {
 	crewBeadsDir := filepath.Join(crewDir, ".beads")
 
 	// Create mayor beads as canonical location
-	if err := os.MkdirAll(filepath.Join(mayorBeadsDir, "dolt"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(mayorBeadsDir, "dolt"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(rigDir, ".git"), 0755); err != nil {
@@ -266,7 +266,7 @@ func TestBeadsRedirectTargetCheck_FixWithMayorBeads(t *testing.T) {
 	}
 
 	// Create crew with redirect to non-existent rig .beads
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
@@ -310,7 +310,7 @@ func TestBeadsRedirectTargetCheck_FixUnfixable(t *testing.T) {
 	}
 
 	// Create crew with redirect to non-existent target
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
@@ -343,12 +343,12 @@ func TestBeadsRedirectTargetCheck_MayorRedirectChain(t *testing.T) {
 	crewBeadsDir := filepath.Join(crewDir, ".beads")
 
 	// Create mayor beads (final canonical)
-	if err := os.MkdirAll(filepath.Join(mayorBeadsDir, "dolt"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(mayorBeadsDir, "dolt"), 0700); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create rig beads with redirect to mayor
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
@@ -361,7 +361,7 @@ func TestBeadsRedirectTargetCheck_MayorRedirectChain(t *testing.T) {
 
 	// Create crew with redirect to rig beads (which itself redirects to mayor)
 	// The redirect target (rig/.beads) exists and has a "redirect" marker, so hasBeadsSetup returns true
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
@@ -396,7 +396,7 @@ func TestBeadsRedirectTargetCheck_MultipleWorktrees(t *testing.T) {
 
 	for _, wt := range worktrees {
 		beadsDir := filepath.Join(wt, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(beadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
@@ -429,7 +429,7 @@ func TestBeadsRedirectTargetCheck_ValidConfigYaml(t *testing.T) {
 	crewBeadsDir := filepath.Join(crewDir, ".beads")
 
 	// Create rig beads with only config.yaml (no dolt)
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "config.yaml"), []byte("prefix: gt-\n"), 0644); err != nil {
@@ -440,7 +440,7 @@ func TestBeadsRedirectTargetCheck_ValidConfigYaml(t *testing.T) {
 	}
 
 	// Create crew with redirect
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
@@ -466,7 +466,7 @@ func TestBeadsRedirectTargetCheck_AbsolutePathRedirect(t *testing.T) {
 
 	// Create an absolute target with valid beads setup
 	absTarget := filepath.Join(t.TempDir(), "canonical", ".beads")
-	if err := os.MkdirAll(filepath.Join(absTarget, "dolt"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(absTarget, "dolt"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(rigDir, ".git"), 0755); err != nil {
@@ -474,7 +474,7 @@ func TestBeadsRedirectTargetCheck_AbsolutePathRedirect(t *testing.T) {
 	}
 
 	// Create crew with absolute-path redirect
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte(absTarget+"\n"), 0644); err != nil {
@@ -563,7 +563,7 @@ func TestBeadsRedirectTargetCheck_FixWithMissingConfigYaml(t *testing.T) {
 	crewBeadsDir := filepath.Join(crewDir, ".beads")
 
 	// Create rig beads with only metadata.json (no config.yaml, no dolt/, no redirect)
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadataJSON := `{"issue_prefix": "test", "dolt_database": "beads_test"}`
@@ -575,7 +575,7 @@ func TestBeadsRedirectTargetCheck_FixWithMissingConfigYaml(t *testing.T) {
 	}
 
 	// Create crew with redirect to the rig beads dir (which has no beads setup yet)
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
@@ -630,7 +630,7 @@ func TestBeadsRedirectTargetCheck_FixMetadataRepairFails(t *testing.T) {
 	crewBeadsDir := filepath.Join(crewDir, ".beads")
 
 	// Create rig beads dir that is not writable (so config.yaml creation fails)
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(rigDir, ".git"), 0755); err != nil {
@@ -643,7 +643,7 @@ func TestBeadsRedirectTargetCheck_FixMetadataRepairFails(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(rigBeadsDir, 0755) })
 
 	// Create crew with redirect to the unwritable beads dir
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
@@ -678,12 +678,12 @@ func TestBeadsRedirectTargetCheck_FixWithAbsoluteRigRedirect(t *testing.T) {
 
 	// Create an absolute canonical beads location
 	absTarget := filepath.Join(t.TempDir(), "canonical", ".beads")
-	if err := os.MkdirAll(filepath.Join(absTarget, "dolt"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(absTarget, "dolt"), 0700); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create rig beads with absolute redirect to canonical location
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "redirect"), []byte(absTarget+"\n"), 0644); err != nil {
@@ -694,7 +694,7 @@ func TestBeadsRedirectTargetCheck_FixWithAbsoluteRigRedirect(t *testing.T) {
 	}
 
 	// Create crew with a broken redirect
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../nonexistent/.beads\n"), 0644); err != nil {

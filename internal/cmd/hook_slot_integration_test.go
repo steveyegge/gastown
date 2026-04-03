@@ -53,7 +53,7 @@ func setupHookTestTown(t *testing.T) (townRoot, polecatDir, rigPrefix string) {
 
 	// Create town-level .beads directory
 	townBeadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(townBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir town .beads: %v", err)
 	}
 
@@ -74,7 +74,7 @@ func setupHookTestTown(t *testing.T) (townRoot, polecatDir, rigPrefix string) {
 
 	// Create gastown .beads directory with its own config
 	gasBeadsDir := filepath.Join(gasRigPath, ".beads")
-	if err := os.MkdirAll(gasBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(gasBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir gastown .beads: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(gasBeadsDir, "config.yaml"), []byte("prefix: "+rigPrefix+"\n"), 0644); err != nil {
@@ -89,7 +89,7 @@ func setupHookTestTown(t *testing.T) (townRoot, polecatDir, rigPrefix string) {
 
 	// Create redirect file for polecat -> mayor/rig/.beads
 	polecatBeadsDir := filepath.Join(polecatDir, ".beads")
-	if err := os.MkdirAll(polecatBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(polecatBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir polecat .beads: %v", err)
 	}
 	redirectContent := "../../mayor/rig/.beads"

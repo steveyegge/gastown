@@ -22,7 +22,7 @@ func TestNewPrefixMismatchCheck(t *testing.T) {
 func TestPrefixMismatchCheck_NoRoutes(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -39,7 +39,7 @@ func TestPrefixMismatchCheck_NoRoutes(t *testing.T) {
 func TestPrefixMismatchCheck_NoRigsJson(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -64,7 +64,7 @@ func TestPrefixMismatchCheck_Matching(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
 	mayorDir := filepath.Join(tmpDir, "mayor")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
@@ -112,16 +112,16 @@ func TestPrefixMismatchCheck_Mismatch(t *testing.T) {
 	// Create rig's mayor/rig/.beads directory and redirect so ResolveBeadsDir returns the mayor/rig path
 	rigBeadsDir := filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads")
 	rigRootBeadsDir := filepath.Join(tmpDir, "gastown", ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(rigRootBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigRootBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	// Create redirect file so ResolveBeadsDir follows it
@@ -174,16 +174,16 @@ func TestPrefixMismatchCheck_Fix(t *testing.T) {
 	// Create rig's mayor/rig/.beads directory and redirect so ResolveBeadsDir returns the mayor/rig path
 	rigBeadsDir := filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads")
 	rigRootBeadsDir := filepath.Join(tmpDir, "gastown", ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(rigRootBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigRootBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	// Create redirect file so ResolveBeadsDir follows it
@@ -264,7 +264,7 @@ func TestNewDatabasePrefixCheck(t *testing.T) {
 func TestDatabasePrefixCheck_NoRoutes(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -281,7 +281,7 @@ func TestDatabasePrefixCheck_NoRoutes(t *testing.T) {
 func TestDatabasePrefixCheck_EmptyRoutes(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -304,7 +304,7 @@ func TestDatabasePrefixCheck_EmptyRoutes(t *testing.T) {
 func TestDatabasePrefixCheck_NoBeadsDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -358,7 +358,7 @@ func TestDatabasePrefixCheck_SkipsRigRedirectingToTownDB(t *testing.T) {
 
 	// Town-level .beads
 	townBeads := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -371,7 +371,7 @@ func TestDatabasePrefixCheck_SkipsRigRedirectingToTownDB(t *testing.T) {
 
 	// site_manager/.beads/redirect -> ../.beads (shares town DB)
 	smBeads := filepath.Join(tmpDir, "site_manager", ".beads")
-	if err := os.MkdirAll(smBeads, 0755); err != nil {
+	if err := os.MkdirAll(smBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(smBeads, "redirect"), []byte("../.beads\n"), 0644); err != nil {
@@ -406,7 +406,7 @@ func TestDatabasePrefixCheck_DetectsMismatchForOwnDB(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	townBeads := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -418,7 +418,7 @@ func TestDatabasePrefixCheck_DetectsMismatchForOwnDB(t *testing.T) {
 
 	// mission_manager has its own .beads (no redirect)
 	mmBeads := filepath.Join(tmpDir, "mission_manager", ".beads")
-	if err := os.MkdirAll(mmBeads, 0755); err != nil {
+	if err := os.MkdirAll(mmBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -452,7 +452,7 @@ func TestDatabasePrefixCheck_MultipleRedirectsSameDB(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	townBeads := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -467,7 +467,7 @@ func TestDatabasePrefixCheck_MultipleRedirectsSameDB(t *testing.T) {
 	// All three rigs redirect to town root
 	for _, rig := range []string{"site_manager", "camera_relay", "autostart"} {
 		rigBeads := filepath.Join(tmpDir, rig, ".beads")
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(rigBeads, "redirect"), []byte("../.beads\n"), 0644); err != nil {
@@ -502,7 +502,7 @@ func TestDatabasePrefixCheck_MixedOwnAndRedirect(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	townBeads := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -515,7 +515,7 @@ func TestDatabasePrefixCheck_MixedOwnAndRedirect(t *testing.T) {
 
 	// site_manager redirects to town DB
 	smBeads := filepath.Join(tmpDir, "site_manager", ".beads")
-	if err := os.MkdirAll(smBeads, 0755); err != nil {
+	if err := os.MkdirAll(smBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(smBeads, "redirect"), []byte("../.beads\n"), 0644); err != nil {
@@ -524,7 +524,7 @@ func TestDatabasePrefixCheck_MixedOwnAndRedirect(t *testing.T) {
 
 	// mission_manager has its own DB (no redirect) with wrong prefix
 	mmBeads := filepath.Join(tmpDir, "mission_manager", ".beads")
-	if err := os.MkdirAll(mmBeads, 0755); err != nil {
+	if err := os.MkdirAll(mmBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 

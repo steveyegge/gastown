@@ -30,7 +30,7 @@ func TestAgentBeadsExistCheck_NoRigs(t *testing.T) {
 
 	// Create .beads dir with empty routes.jsonl
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(""), 0644); err != nil {
@@ -53,7 +53,7 @@ func TestAgentBeadsExistCheck_ExpectedIDs(t *testing.T) {
 
 	// Set up routes pointing to a rig with known prefix
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	// Use "sw" prefix to match sallaWork pattern
@@ -64,7 +64,7 @@ func TestAgentBeadsExistCheck_ExpectedIDs(t *testing.T) {
 
 	// Create rig beads directory
 	rigBeadsDir := filepath.Join(tmpDir, "sallaWork", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 

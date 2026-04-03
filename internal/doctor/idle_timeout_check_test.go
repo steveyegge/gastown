@@ -12,7 +12,7 @@ func TestIdleTimeoutCheck_Run(t *testing.T) {
 
 	// Create town beads with routes.jsonl
 	townBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	routesContent := `{"prefix":"gt-","path":"gastown"}
@@ -24,7 +24,7 @@ func TestIdleTimeoutCheck_Run(t *testing.T) {
 
 	// Create gastown rig with correct idle-timeout
 	gastownBeads := filepath.Join(townRoot, "gastown", ".beads")
-	if err := os.MkdirAll(gastownBeads, 0755); err != nil {
+	if err := os.MkdirAll(gastownBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	gastownConfig := `prefix: gt
@@ -37,7 +37,7 @@ dolt.idle-timeout: "0"
 
 	// Create beads rig WITHOUT idle-timeout
 	beadsBeads := filepath.Join(townRoot, "beads", ".beads")
-	if err := os.MkdirAll(beadsBeads, 0755); err != nil {
+	if err := os.MkdirAll(beadsBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	beadsConfig := `prefix: bd
@@ -70,7 +70,7 @@ func TestIdleTimeoutCheck_Run_AllCorrect(t *testing.T) {
 
 	// Create town beads with routes.jsonl
 	townBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	routesContent := `{"prefix":"gt-","path":"gastown"}
@@ -81,7 +81,7 @@ func TestIdleTimeoutCheck_Run_AllCorrect(t *testing.T) {
 
 	// Create gastown rig with correct idle-timeout
 	gastownBeads := filepath.Join(townRoot, "gastown", ".beads")
-	if err := os.MkdirAll(gastownBeads, 0755); err != nil {
+	if err := os.MkdirAll(gastownBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	gastownConfig := `prefix: gt
@@ -109,7 +109,7 @@ func TestIdleTimeoutCheck_Fix(t *testing.T) {
 
 	// Create town beads with routes.jsonl
 	townBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	routesContent := `{"prefix":"gt-","path":"gastown"}
@@ -120,7 +120,7 @@ func TestIdleTimeoutCheck_Fix(t *testing.T) {
 
 	// Create gastown rig WITHOUT idle-timeout
 	gastownBeads := filepath.Join(townRoot, "gastown", ".beads")
-	if err := os.MkdirAll(gastownBeads, 0755); err != nil {
+	if err := os.MkdirAll(gastownBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	gastownConfig := `prefix: gt

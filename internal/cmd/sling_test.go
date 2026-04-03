@@ -127,7 +127,7 @@ func TestSlingFormulaOnBeadRoutesBDCommandsToTargetRig(t *testing.T) {
 
 	// Create a rig path that owns gt-* beads, and a routes.jsonl pointing to it.
 	rigDir := filepath.Join(townRoot, "gastown", "mayor", "rig")
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	if err := os.MkdirAll(rigDir, 0755); err != nil {
@@ -333,7 +333,7 @@ func TestSlingRollsBackSpawnedPolecatOnInstantiateFailure(t *testing.T) {
 	}
 
 	// Routes: gt-* resolves to gastown's rig beads dir.
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	routes := strings.Join([]string{
@@ -701,7 +701,7 @@ func TestRunSlingFormulaPersistsVarContext(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
 		t.Fatalf("mkdir mayor/rig: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -819,7 +819,7 @@ func TestSlingFormulaOnBeadPassesFeatureAndIssueVars(t *testing.T) {
 
 	// Create a rig path that owns gt-* beads, and a routes.jsonl pointing to it.
 	rigDir := filepath.Join(townRoot, "gastown", "mayor", "rig")
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	if err := os.MkdirAll(rigDir, 0755); err != nil {
@@ -1235,7 +1235,7 @@ func TestSlingFormulaOnBeadSetsAttachedMolecule(t *testing.T) {
 
 	// Create a rig path that owns gt-* beads, and a routes.jsonl pointing to it.
 	rigDir := filepath.Join(townRoot, "gastown", "mayor", "rig")
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	if err := os.MkdirAll(rigDir, 0755); err != nil {
@@ -1526,7 +1526,7 @@ exit /b 0
 func TestCheckCrossRigGuard(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2376,7 +2376,7 @@ func TestSlingNudgeCrewAndMayor(t *testing.T) {
 			if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
 				t.Fatalf("mkdir: %v", err)
 			}
-			if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 				t.Fatalf("mkdir .beads: %v", err)
 			}
 			rigDir := filepath.Join(townRoot, "gastown", "mayor", "rig")

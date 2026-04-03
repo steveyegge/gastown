@@ -301,7 +301,7 @@ func TestFindMigratableDatabases_FollowsRedirect(t *testing.T) {
 	rigName := "nexus"
 	rigDir := filepath.Join(townRoot, rigName)
 	rigBeadsDir := filepath.Join(rigDir, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -386,7 +386,7 @@ func TestFindLocalDoltDB(t *testing.T) {
 
 	t.Run("empty dolt directory", func(t *testing.T) {
 		beadsDir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(beadsDir, "dolt"), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(beadsDir, "dolt"), 0700); err != nil {
 			t.Fatal(err)
 		}
 		result := findLocalDoltDB(beadsDir)
@@ -496,7 +496,7 @@ func TestEnsureMetadata_HQ(t *testing.T) {
 
 	// Create .beads directory
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -540,7 +540,7 @@ func TestEnsureMetadata_Rig(t *testing.T) {
 
 	// Create rig with mayor/rig/.beads
 	beadsDir := filepath.Join(townRoot, "myrig", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -570,7 +570,7 @@ func TestEnsureMetadata_Idempotent(t *testing.T) {
 	townRoot := t.TempDir()
 
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -606,10 +606,10 @@ func TestEnsureAllMetadata(t *testing.T) {
 	setupDoltDB(t, dataDir, "myrig")
 
 	// Create beads dirs
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, "myrig", "mayor", "rig", ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, "myrig", "mayor", "rig", ".beads"), 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -647,7 +647,7 @@ func TestFindRigBeadsDir(t *testing.T) {
 
 	// Test rig with mayor/rig/.beads
 	mayorBeads := filepath.Join(townRoot, "myrig", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+	if err := os.MkdirAll(mayorBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if dir := FindRigBeadsDir(townRoot, "myrig"); dir != mayorBeads {
@@ -656,7 +656,7 @@ func TestFindRigBeadsDir(t *testing.T) {
 
 	// Test rig with only rig-root .beads
 	rigBeads := filepath.Join(townRoot, "otherrig", ".beads")
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if dir := FindRigBeadsDir(townRoot, "otherrig"); dir != rigBeads {
@@ -706,7 +706,7 @@ func TestFindOrCreateRigBeadsDir(t *testing.T) {
 	t.Run("existing mayor path returned as-is", func(t *testing.T) {
 		townRoot := t.TempDir()
 		mayorBeads := filepath.Join(townRoot, "myrig", "mayor", "rig", ".beads")
-		if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+		if err := os.MkdirAll(mayorBeads, 0700); err != nil {
 			t.Fatal(err)
 		}
 		dir, err := FindOrCreateRigBeadsDir(townRoot, "myrig")
@@ -721,7 +721,7 @@ func TestFindOrCreateRigBeadsDir(t *testing.T) {
 	t.Run("existing rig-root path returned", func(t *testing.T) {
 		townRoot := t.TempDir()
 		rigBeads := filepath.Join(townRoot, "otherrig", ".beads")
-		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		if err := os.MkdirAll(rigBeads, 0700); err != nil {
 			t.Fatal(err)
 		}
 		dir, err := FindOrCreateRigBeadsDir(townRoot, "otherrig")
@@ -878,7 +878,7 @@ func TestMigrateRigFromBeads(t *testing.T) {
 
 	// Create beads dir for metadata
 	beadsDir := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -950,7 +950,7 @@ func TestHasServerModeMetadata_WithServerMode(t *testing.T) {
 
 	// Create town beads with server mode
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadata := `{"backend":"dolt","dolt_mode":"server","dolt_database":"hq"}`
@@ -960,7 +960,7 @@ func TestHasServerModeMetadata_WithServerMode(t *testing.T) {
 
 	// Create rig with server mode
 	rigBeadsDir := filepath.Join(townRoot, "myrig", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	rigMetadata := `{"backend":"dolt","dolt_mode":"server","dolt_database":"myrig"}`
@@ -987,7 +987,7 @@ func TestHasServerModeMetadata_MixedModes(t *testing.T) {
 
 	// Town beads with server mode
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"),
@@ -997,7 +997,7 @@ func TestHasServerModeMetadata_MixedModes(t *testing.T) {
 
 	// Rig with sqlite (not server mode)
 	rigBeadsDir := filepath.Join(townRoot, "sqliterig", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "metadata.json"),
@@ -1098,7 +1098,7 @@ func TestMidMigrationCrashRecovery_PartialMigration(t *testing.T) {
 		}
 		// Create beads dir for metadata
 		beadsDir := filepath.Join(townRoot, rig, "mayor", "rig", ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1194,7 +1194,7 @@ func TestMidMigrationCrashRecovery_SourceGoneTargetExists(t *testing.T) {
 
 	// EnsureMetadata should still work to repair metadata.json
 	beadsDir := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1228,7 +1228,7 @@ func TestConcurrentMetadataAccess(t *testing.T) {
 	rigs := []string{"rig-a", "rig-b", "rig-c", "rig-d", "rig-e"}
 	for _, rig := range rigs {
 		beadsDir := filepath.Join(townRoot, rig, "mayor", "rig", ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1281,7 +1281,7 @@ func TestConcurrentMetadataSameFile(t *testing.T) {
 	// All goroutines will target the same rig (and thus the same metadata.json)
 	rigName := "shared-rig"
 	beadsDir := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1409,7 +1409,7 @@ func TestConcurrentMigrateAndFind(t *testing.T) {
 			t.Fatal(err)
 		}
 		beadsDir := filepath.Join(townRoot, rig, "mayor", "rig", ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1483,7 +1483,7 @@ func TestEnsureMetadata_RepairsCorruptJSON(t *testing.T) {
 	townRoot := t.TempDir()
 
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1521,7 +1521,7 @@ func TestEnsureMetadata_RepairsEmptyFile(t *testing.T) {
 	townRoot := t.TempDir()
 
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1554,7 +1554,7 @@ func TestEnsureMetadata_RepairsWrongBackend(t *testing.T) {
 	townRoot := t.TempDir()
 
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1599,7 +1599,7 @@ func TestEnsureMetadata_RepairsMissingDoltFields(t *testing.T) {
 	townRoot := t.TempDir()
 
 	beadsDir := filepath.Join(townRoot, "myrig", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1642,7 +1642,7 @@ func TestEnsureMetadata_RepairsStalePort(t *testing.T) {
 	townRoot := t.TempDir()
 
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1692,7 +1692,7 @@ func TestEnsureMetadata_RepairsWrongDoltDatabase(t *testing.T) {
 	townRoot := t.TempDir()
 
 	beadsDir := filepath.Join(townRoot, "gastown", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1742,7 +1742,7 @@ func TestEnsureAllMetadata_RepairsAllCorrupt(t *testing.T) {
 
 	// Create beads dirs with corrupt metadata
 	hqBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(hqBeads, 0755); err != nil {
+	if err := os.MkdirAll(hqBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(hqBeads, "metadata.json"), []byte(`CORRUPT`), 0600); err != nil {
@@ -1750,7 +1750,7 @@ func TestEnsureAllMetadata_RepairsAllCorrupt(t *testing.T) {
 	}
 
 	rigBeads := filepath.Join(townRoot, "corruptrig", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeads, "metadata.json"), []byte(`{invalid`), 0600); err != nil {
@@ -1805,7 +1805,7 @@ func TestMigrateRigFromBeads_IdempotentDetection(t *testing.T) {
 		t.Fatal(err)
 	}
 	beadsDir := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1896,7 +1896,7 @@ func TestFindAndMigrateAll_Idempotent(t *testing.T) {
 			t.Fatal(err)
 		}
 		beadsDir := filepath.Join(townRoot, rig, "mayor", "rig", ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2244,7 +2244,7 @@ func TestRollbackRoundTrip(t *testing.T) {
 
 	rigName := "roundtrip"
 	originalBeads := filepath.Join(townRoot, rigName, ".beads")
-	if err := os.MkdirAll(originalBeads, 0755); err != nil {
+	if err := os.MkdirAll(originalBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(originalBeads, "metadata.json"),
@@ -2417,7 +2417,7 @@ func TestFindBrokenWorkspaces_HealthyWorkspace(t *testing.T) {
 
 	// Create a healthy workspace: metadata says dolt, and database exists
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadata := `{"backend":"dolt","dolt_mode":"server","dolt_database":"hq"}`
@@ -2449,7 +2449,7 @@ func TestFindBrokenWorkspaces_MissingDatabase(t *testing.T) {
 
 	// Metadata says dolt, but database does NOT exist
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadata := `{"backend":"dolt","dolt_mode":"server","dolt_database":"hq"}`
@@ -2490,7 +2490,7 @@ func TestFindBrokenWorkspaces_WithLocalData(t *testing.T) {
 	// Rig metadata says dolt, database missing, but local data exists
 	rigName := "myrig"
 	beadsDir := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadata := `{"backend":"dolt","dolt_mode":"server","dolt_database":"myrig"}`
@@ -2532,7 +2532,7 @@ func TestFindBrokenWorkspaces_SqliteNotBroken(t *testing.T) {
 
 	// Workspace configured for SQLite, not Dolt — should not appear as broken
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadata := `{"backend":"sqlite","database":"beads.db"}`
@@ -2567,7 +2567,7 @@ func TestFindBrokenWorkspaces_MultipleRigs(t *testing.T) {
 
 	// rig-a: broken (metadata says dolt, no database)
 	beadsDirA := filepath.Join(townRoot, "rig-a", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(beadsDirA, 0755); err != nil {
+	if err := os.MkdirAll(beadsDirA, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(beadsDirA, "metadata.json"),
@@ -2577,7 +2577,7 @@ func TestFindBrokenWorkspaces_MultipleRigs(t *testing.T) {
 
 	// rig-b: healthy (metadata says dolt, database exists)
 	beadsDirB := filepath.Join(townRoot, "rig-b", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(beadsDirB, 0755); err != nil {
+	if err := os.MkdirAll(beadsDirB, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(beadsDirB, "metadata.json"),
@@ -2996,7 +2996,7 @@ func setupRigMetadata(t *testing.T, townRoot, rigName, doltDatabase string) {
 	} else {
 		beadsDir = filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
 	}
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("creating beads dir for %s: %v", rigName, err)
 	}
 	meta := map[string]interface{}{
@@ -3643,7 +3643,7 @@ func TestWaitForReady_ServerAlreadyListening(t *testing.T) {
 	// Create a town root with server mode metadata pointing to this port
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadata := fmt.Sprintf(`{"backend":"dolt","dolt_mode":"server","port":%d}`, port)
@@ -3680,7 +3680,7 @@ func TestWaitForReady_TimeoutWhenNoServer(t *testing.T) {
 
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3719,7 +3719,7 @@ func TestWaitForReady_ServerBecomesReady(t *testing.T) {
 
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadata := fmt.Sprintf(`{"backend":"dolt","dolt_mode":"server","port":%d}`, port)
@@ -4007,7 +4007,7 @@ func TestWriteServerConfig_Overwrites(t *testing.T) {
 func TestBuildDatabaseToRigMap(t *testing.T) {
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4068,7 +4068,7 @@ func TestEnsureAllMetadata_UsesRigNames(t *testing.T) {
 
 	// Create routes.jsonl with correct mappings
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	routesContent := `{"prefix":"hq-","path":"."}
@@ -4080,10 +4080,10 @@ func TestEnsureAllMetadata_UsesRigNames(t *testing.T) {
 	}
 
 	// Create correct rig beads directories (not the buggy stub paths)
-	if err := os.MkdirAll(filepath.Join(townRoot, "beads", "mayor", "rig", ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, "beads", "mayor", "rig", ".beads"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, "gastown", "mayor", "rig", ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, "gastown", "mayor", "rig", ".beads"), 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4137,7 +4137,7 @@ func TestEnsureAllMetadata_FallbackToDbName(t *testing.T) {
 
 	// Create empty routes.jsonl
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(""), 0644); err != nil {
@@ -4145,7 +4145,7 @@ func TestEnsureAllMetadata_FallbackToDbName(t *testing.T) {
 	}
 
 	// Create rig beads dir with same name as database
-	if err := os.MkdirAll(filepath.Join(townRoot, "unknownrig", ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, "unknownrig", ".beads"), 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4190,10 +4190,10 @@ func TestEnsureAllMetadata_NoOscillation(t *testing.T) {
 	}
 
 	// Create beads dirs
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, "gastown", "mayor", "rig", ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, "gastown", "mayor", "rig", ".beads"), 0700); err != nil {
 		t.Fatal(err)
 	}
 

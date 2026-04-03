@@ -26,7 +26,7 @@ listener:
 
 	// Create town .beads/metadata.json with consistent port
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadata := map[string]interface{}{
@@ -74,7 +74,7 @@ listener:
 
 	// Create town .beads/metadata.json with WRONG port (3306 instead of 3307)
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadata := map[string]interface{}{
@@ -124,7 +124,7 @@ listener:
 
 	// Create town .beads/metadata.json with WRONG port
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadata := map[string]interface{}{

@@ -18,7 +18,7 @@ func mockBdForConvoyTest(t *testing.T, convoyID, convoyTitle string) (binDir, to
 	binDir = t.TempDir()
 	townRoot = t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -154,7 +154,7 @@ func TestFindStrandedConvoys_MixedConvoys(t *testing.T) {
 	binDir := t.TempDir()
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	// Routes needed so isSlingableBead can resolve gt- prefix to a rig
@@ -298,7 +298,7 @@ func TestFindStrandedConvoys_StuckConvoy(t *testing.T) {
 	binDir := t.TempDir()
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(`{"prefix":"gt-","path":"gastown/mayor/rig"}`+"\n"), 0644); err != nil {

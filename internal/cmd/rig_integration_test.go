@@ -177,7 +177,7 @@ func setupTestTown(t *testing.T) string {
 
 	// Create .beads directory for routes
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -1197,7 +1197,7 @@ func runAgentCleanTest(t *testing.T, hasTrackedBeads bool) {
 	// Optionally create tracked .beads/ directory (simulates beads-enabled project)
 	if hasTrackedBeads {
 		beadsDir := filepath.Join(repoDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatalf("mkdir .beads: %v", err)
 		}
 		// Create minimal beads files that would be tracked

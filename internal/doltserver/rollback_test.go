@@ -112,7 +112,7 @@ func TestRestoreFromBackup_FormulaStyle(t *testing.T) {
 
 	// Town-level backup
 	townBackupBeads := filepath.Join(backupDir, "town-beads")
-	if err := os.MkdirAll(townBackupBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBackupBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(townBackupBeads, "metadata.json"),
@@ -122,7 +122,7 @@ func TestRestoreFromBackup_FormulaStyle(t *testing.T) {
 
 	// Rig-level backup
 	rigBackupBeads := filepath.Join(backupDir, "gastown-beads")
-	if err := os.MkdirAll(rigBackupBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBackupBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBackupBeads, "metadata.json"),
@@ -132,7 +132,7 @@ func TestRestoreFromBackup_FormulaStyle(t *testing.T) {
 
 	// Create existing (post-migration) .beads dirs that will be replaced
 	townBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(townBeads, "metadata.json"),
@@ -141,7 +141,7 @@ func TestRestoreFromBackup_FormulaStyle(t *testing.T) {
 	}
 
 	rigBeads := filepath.Join(townRoot, "gastown", ".beads")
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeads, "metadata.json"),
@@ -197,7 +197,7 @@ func TestRestoreFromBackup_TestBackupStyle(t *testing.T) {
 
 	// Town-level backup
 	townBackupBeads := filepath.Join(backupDir, "town-beads")
-	if err := os.MkdirAll(townBackupBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBackupBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(townBackupBeads, "metadata.json"),
@@ -216,10 +216,10 @@ func TestRestoreFromBackup_TestBackupStyle(t *testing.T) {
 	}
 
 	// Create existing dirs
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, "gastown", ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, "gastown", ".beads"), 0700); err != nil {
 		t.Fatal(err)
 	}
 

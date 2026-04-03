@@ -14,7 +14,7 @@ func TestStaleBeadsRedirectCheck_NoStaleFiles(t *testing.T) {
 	beadsDir := filepath.Join(rigDir, ".beads")
 
 	// Create rig structure
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -46,7 +46,7 @@ func TestStaleBeadsRedirectCheck_WithStaleFiles(t *testing.T) {
 	beadsDir := filepath.Join(rigDir, ".beads")
 
 	// Create rig structure
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -89,7 +89,7 @@ func TestStaleBeadsRedirectCheck_FixRemovesStaleFiles(t *testing.T) {
 	beadsDir := filepath.Join(rigDir, ".beads")
 
 	// Create rig structure
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -164,7 +164,7 @@ func TestStaleBeadsRedirectCheck_NoRedirect(t *testing.T) {
 	beadsDir := filepath.Join(rigDir, ".beads")
 
 	// Create rig structure
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -196,7 +196,7 @@ func TestStaleBeadsRedirectCheck_CrewWorkspaces(t *testing.T) {
 	crewBeadsDir := filepath.Join(rigDir, "crew", "worker1", ".beads")
 
 	// Create crew structure
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -234,7 +234,7 @@ func TestStaleBeadsRedirectCheck_MissingRedirect(t *testing.T) {
 	crewDir := filepath.Join(rigDir, "crew", "worker1")
 
 	// Create rig beads (canonical location)
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -278,7 +278,7 @@ func TestStaleBeadsRedirectCheck_FixCreatesMissingRedirect(t *testing.T) {
 	crewDir := filepath.Join(rigDir, "crew", "worker1")
 
 	// Create rig beads (canonical location)
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	// Create a marker file so it's recognized as having beads
@@ -338,7 +338,7 @@ func TestStaleBeadsRedirectCheck_TrackedBeadsArchitecture(t *testing.T) {
 	crewDir := filepath.Join(rigDir, "crew", "worker1")
 
 	// Create mayor beads (canonical location for tracked beads)
-	if err := os.MkdirAll(mayorBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(mayorBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	// Create a marker file
@@ -394,12 +394,12 @@ func TestStaleBeadsRedirectCheck_IncorrectRedirect(t *testing.T) {
 	crewBeadsDir := filepath.Join(crewDir, ".beads")
 
 	// Create rig beads (canonical location)
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create crew workspace with WRONG redirect
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	redirectPath := filepath.Join(crewBeadsDir, "redirect")
@@ -445,12 +445,12 @@ func TestStaleBeadsRedirectCheck_ValidRedirectNotFlagged(t *testing.T) {
 	crewBeadsDir := filepath.Join(crewDir, ".beads")
 
 	// Create rig beads (canonical location)
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create crew workspace with CORRECT redirect
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	redirectPath := filepath.Join(crewBeadsDir, "redirect")
@@ -481,7 +481,7 @@ func TestStaleBeadsRedirectCheck_PolecatWorkspace(t *testing.T) {
 	polecatDir := filepath.Join(rigDir, "polecats", "polecat1")
 
 	// Create rig beads (canonical location)
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -517,7 +517,7 @@ func TestStaleBeadsRedirectCheck_NestedPolecatWorkspace(t *testing.T) {
 	polecatClone := filepath.Join(rigDir, "polecats", "polecat1", "myrig")
 
 	// Create rig beads (canonical location)
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -549,7 +549,7 @@ func TestStaleBeadsRedirectCheck_RefineryWorkspace(t *testing.T) {
 	refineryDir := filepath.Join(rigDir, "refinery", "rig")
 
 	// Create rig beads (canonical location)
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 

@@ -181,7 +181,7 @@ func setupTestTownForDotDir(t *testing.T) string {
 	}
 
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 

@@ -39,7 +39,7 @@ func makeExternalTrackingTownWorkspace(t *testing.T) (string, string, string) {
 
 	townRoot := t.TempDir()
 	townBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {

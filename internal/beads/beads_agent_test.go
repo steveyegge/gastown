@@ -158,7 +158,7 @@ esac
 
 func TestGetAgentBead_PrefersDescriptionAgentState(t *testing.T) {
 	tmpDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -187,7 +187,7 @@ func TestGetAgentBead_PrefersDescriptionAgentState(t *testing.T) {
 
 func TestGetAgentBead_FallsBackToDescriptionAgentState(t *testing.T) {
 	tmpDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -211,7 +211,7 @@ func TestUpdateAgentState_UsesUpdateDescriptionPath(t *testing.T) {
 		t.Skip("test uses Unix shell script mocks for bd")
 	}
 	tmpDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -241,7 +241,7 @@ func TestUpdateAgentState_UsesExplicitBeadsDir(t *testing.T) {
 	}
 	workDir := t.TempDir()
 	targetBeadsDir := filepath.Join(t.TempDir(), ".beads")
-	if err := os.MkdirAll(targetBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(targetBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir target .beads: %v", err)
 	}
 

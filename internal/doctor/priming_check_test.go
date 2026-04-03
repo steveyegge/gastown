@@ -25,7 +25,7 @@ func TestPrimingCheck_PolecatNewStructure(t *testing.T) {
 
 	// Set up rig structure with .beads and PRIME.md
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	primeMdPath := filepath.Join(rigBeadsDir, "PRIME.md")
@@ -36,7 +36,7 @@ func TestPrimingCheck_PolecatNewStructure(t *testing.T) {
 	// Set up polecat with NEW structure: polecats/<name>/<rigname>/
 	polecatWorktree := filepath.Join(tmpDir, rigName, "polecats", polecatName, rigName)
 	polecatWorktreeBeads := filepath.Join(polecatWorktree, ".beads")
-	if err := os.MkdirAll(polecatWorktreeBeads, 0755); err != nil {
+	if err := os.MkdirAll(polecatWorktreeBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -86,7 +86,7 @@ func TestPrimingCheck_PolecatDirLevel_NoPrimeMD(t *testing.T) {
 
 	// Set up rig with PRIME.md
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
@@ -103,7 +103,7 @@ func TestPrimingCheck_PolecatDirLevel_NoPrimeMD(t *testing.T) {
 	// Create the actual worktree with redirect
 	polecatWorktree := filepath.Join(polecatDir, rigName)
 	polecatWorktreeBeads := filepath.Join(polecatWorktree, ".beads")
-	if err := os.MkdirAll(polecatWorktreeBeads, 0755); err != nil {
+	if err := os.MkdirAll(polecatWorktreeBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(polecatWorktreeBeads, "redirect"), []byte("../../../.beads\n"), 0644); err != nil {
@@ -135,7 +135,7 @@ func TestPrimingCheck_FixRemovesBadPolecatBeads(t *testing.T) {
 
 	// Set up rig with .beads and PRIME.md
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
@@ -146,7 +146,7 @@ func TestPrimingCheck_FixRemovesBadPolecatBeads(t *testing.T) {
 	polecatDir := filepath.Join(tmpDir, rigName, "polecats", polecatName)
 	polecatWorktree := filepath.Join(polecatDir, rigName)
 	polecatWorktreeBeads := filepath.Join(polecatWorktree, ".beads")
-	if err := os.MkdirAll(polecatWorktreeBeads, 0755); err != nil {
+	if err := os.MkdirAll(polecatWorktreeBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	// Create redirect pointing to rig's beads
@@ -156,7 +156,7 @@ func TestPrimingCheck_FixRemovesBadPolecatBeads(t *testing.T) {
 
 	// Create BAD .beads at polecatDir level (this is what the bug created)
 	badBeadsDir := filepath.Join(polecatDir, ".beads")
-	if err := os.MkdirAll(badBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(badBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	badPrimeMd := filepath.Join(badBeadsDir, "PRIME.md")
@@ -216,7 +216,7 @@ func TestPrimingCheck_AllowsClaudeMdInMayorRig(t *testing.T) {
 
 	// Set up rig with .beads
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
@@ -261,7 +261,7 @@ func TestPrimingCheck_AllowsClaudeMdInRefineryRig(t *testing.T) {
 
 	// Set up rig with .beads
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
@@ -307,7 +307,7 @@ func TestPrimingCheck_AllowsClaudeMdInCrewWorktree(t *testing.T) {
 
 	// Set up rig with .beads
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
@@ -317,7 +317,7 @@ func TestPrimingCheck_AllowsClaudeMdInCrewWorktree(t *testing.T) {
 	// Create crew/<name>/ structure with beads redirect
 	crewWorktree := filepath.Join(tmpDir, rigName, "crew", crewName)
 	crewBeadsDir := filepath.Join(crewWorktree, ".beads")
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(crewBeadsDir, "redirect"), []byte("../../.beads\n"), 0644); err != nil {
@@ -357,7 +357,7 @@ func TestPrimingCheck_AllowsClaudeMdInPolecatWorktree(t *testing.T) {
 
 	// Set up rig with .beads
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
@@ -367,7 +367,7 @@ func TestPrimingCheck_AllowsClaudeMdInPolecatWorktree(t *testing.T) {
 	// Create polecat worktree structure: polecats/<name>/<rigname>/
 	polecatWorktree := filepath.Join(tmpDir, rigName, "polecats", polecatName, rigName)
 	polecatBeadsDir := filepath.Join(polecatWorktree, ".beads")
-	if err := os.MkdirAll(polecatBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(polecatBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(polecatBeadsDir, "redirect"), []byte("../../../.beads\n"), 0644); err != nil {
@@ -407,7 +407,7 @@ func TestPrimingCheck_FixPreservesCustomerClaudeMd(t *testing.T) {
 
 	// Set up rig with .beads
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
@@ -453,7 +453,7 @@ func TestPrimingCheck_FlagsStaleAgentLevelFiles(t *testing.T) {
 
 	// Set up rig with .beads
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
@@ -515,7 +515,7 @@ func TestPrimingCheck_NoIssuesWhenCorrectlyConfigured(t *testing.T) {
 
 	// Set up rig with .beads and PRIME.md
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
@@ -615,7 +615,7 @@ func TestPrimingCheck_DetectsStaleIntermediateFiles(t *testing.T) {
 
 	// Set up rig with .beads
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
@@ -680,7 +680,7 @@ func TestPrimingCheck_FixRemovesStaleIntermediateFiles(t *testing.T) {
 
 	// Set up rig with .beads
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
@@ -752,7 +752,7 @@ func TestPrimingCheck_DetectsNoPrimeHook(t *testing.T) {
 
 	// Set up rig with .beads and PRIME.md
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {
@@ -834,7 +834,7 @@ func TestPrimingCheck_FixNoPrimeHook(t *testing.T) {
 
 	// Set up rig with .beads and PRIME.md
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsDir, "PRIME.md"), []byte("# PRIME\n"), 0644); err != nil {

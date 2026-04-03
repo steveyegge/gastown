@@ -18,7 +18,7 @@ func TestTownBeadsConfigCheck_NoTownBeadsDir(t *testing.T) {
 
 func TestTownBeadsConfigCheck_DetectsMissingConfig(t *testing.T) {
 	townRoot := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -32,7 +32,7 @@ func TestTownBeadsConfigCheck_DetectsMissingConfig(t *testing.T) {
 func TestTownBeadsConfigCheck_FixCreatesConfigFromMetadata(t *testing.T) {
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	meta := `{"backend":"dolt","dolt_mode":"server","dolt_database":"hq","issue_prefix":"foo"}`
@@ -72,7 +72,7 @@ func TestTownBeadsConfigCheck_FixCreatesConfigFromMetadata(t *testing.T) {
 func TestTownBeadsConfigCheck_FixDoesNotOverwriteExistingConfig(t *testing.T) {
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	original := "prefix: custom\nissue-prefix: custom\nsync-branch: main\n"

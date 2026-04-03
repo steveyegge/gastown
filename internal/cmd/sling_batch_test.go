@@ -27,7 +27,7 @@ func TestCreateBatchConvoy_CreatesOneConvoyTrackingAllBeads(t *testing.T) {
 		t.Fatalf("mkdir mayor/rig: %v", err)
 	}
 	townBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -135,7 +135,7 @@ func TestCreateBatchConvoy_OwnedLabel(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -197,7 +197,7 @@ func TestCreateBatchConvoy_MergeStrategyInDescription(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -270,7 +270,7 @@ func TestCreateBatchConvoy_TitleIncludesBeadCount(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -334,7 +334,7 @@ func TestCreateBatchConvoy_PartialDepFailureContinues(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -517,7 +517,7 @@ exit 0
 		t.Fatalf("mkdir: %v", err)
 	}
 	townBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -588,7 +588,7 @@ func TestAllBeadIDs_TrueWhenAllBeadIDs(t *testing.T) {
 func TestResolveRigFromBeadIDs_AllSamePrefix(t *testing.T) {
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -612,7 +612,7 @@ func TestResolveRigFromBeadIDs_AllSamePrefix(t *testing.T) {
 func TestResolveRigFromBeadIDs_MixedPrefixes_Errors(t *testing.T) {
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -644,7 +644,7 @@ func TestResolveRigFromBeadIDs_MixedPrefixes_Errors(t *testing.T) {
 func TestResolveRigFromBeadIDs_UnmappedPrefix_Errors(t *testing.T) {
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -672,7 +672,7 @@ func TestResolveRigFromBeadIDs_UnmappedPrefix_Errors(t *testing.T) {
 func TestResolveRigFromBeadIDs_TownLevelPrefix_Errors(t *testing.T) {
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -706,7 +706,7 @@ func TestBatchSling_EmptyConvoyCleanupOnAllFailures(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	townBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -830,7 +830,7 @@ func setupTownWithBdStub(t *testing.T, bdScript string) (townRoot, logPath strin
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
 		t.Fatalf("mkdir mayor/rig: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -1126,7 +1126,7 @@ func TestBatchSling_CrossRigGuardRejectsPrefix(t *testing.T) {
 		t.Fatalf("mkdir mayor/rig: %v", err)
 	}
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -1268,7 +1268,7 @@ func TestCreateBatchConvoy_ReturnsTrackedBeadSet(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -1345,7 +1345,7 @@ exit 0
 func TestResolveRigFromBeadIDs_MixedPrefixes_DoesNotSuggestForce(t *testing.T) {
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -1797,7 +1797,7 @@ func TestGetConvoyInfoFromIssue_NonexistentIssue(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -1838,7 +1838,7 @@ func TestGetConvoyInfoForIssue_PhantomConvoy(t *testing.T) {
 
 	// Create .beads directory structure
 	townBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 

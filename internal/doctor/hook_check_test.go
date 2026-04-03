@@ -39,7 +39,7 @@ func TestHookAttachmentValidCheck_NoBeadsDir(t *testing.T) {
 func TestHookAttachmentValidCheck_EmptyBeadsDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,13 +93,13 @@ func TestHookAttachmentValidCheck_FindRigBeadsDirs(t *testing.T) {
 
 	// Create town-level .beads (should be excluded)
 	townBeads := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create rig-level .beads
 	rigBeads := filepath.Join(tmpDir, "myrig", ".beads")
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -157,7 +157,7 @@ func TestHookSingletonCheck_NoBeadsDir(t *testing.T) {
 func TestHookSingletonCheck_EmptyBeadsDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 

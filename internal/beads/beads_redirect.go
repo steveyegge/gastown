@@ -339,7 +339,7 @@ func SetupRedirect(townRoot, worktreePath string) error {
 	}
 
 	// Create .beads directory if it doesn't exist
-	if err := os.MkdirAll(worktreeBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(worktreeBeadsDir, 0700); err != nil {
 		return fmt.Errorf("creating .beads dir: %w", err)
 	}
 

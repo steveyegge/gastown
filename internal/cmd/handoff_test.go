@@ -565,7 +565,7 @@ func TestWarnHandoffGitStatus(t *testing.T) {
 	t.Run("no warning for .beads-only changes", func(t *testing.T) {
 		dir := makeTestGitRepo(t)
 		// Only .beads/ untracked files — should be clean (excluded)
-		os.MkdirAll(filepath.Join(dir, ".beads"), 0755)
+		os.MkdirAll(filepath.Join(dir, ".beads"), 0700)
 		os.WriteFile(filepath.Join(dir, ".beads", "somefile.db"), []byte("db"), 0644)
 		os.Chdir(dir)
 		t.Cleanup(func() { os.Chdir(origCwd) })

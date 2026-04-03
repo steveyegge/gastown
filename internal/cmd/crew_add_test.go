@@ -32,7 +32,7 @@ func (f *fakeAgentBeadUpserter) CreateOrReopenAgentBead(id, title string, fields
 
 func TestUpsertCrewAgentBead(t *testing.T) {
 	townRoot := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	routes := `{"prefix":"bom-","path":"bti_ops_match"}` + "\n"

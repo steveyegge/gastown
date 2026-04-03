@@ -301,7 +301,7 @@ func recomputeRedirect(townRoot, worktreePath string) error {
 
 	// Ensure .beads directory exists
 	worktreeBeads := filepath.Join(worktreePath, ".beads")
-	if err := os.MkdirAll(worktreeBeads, 0755); err != nil {
+	if err := os.MkdirAll(worktreeBeads, 0700); err != nil {
 		return err
 	}
 

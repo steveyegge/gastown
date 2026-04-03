@@ -52,7 +52,7 @@ func setupRoutingTestTownWithPrefixes(t *testing.T, hqPrefix, gtPrefix, trPrefix
 
 	// Create town-level .beads directory
 	townBeadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(townBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir town .beads: %v", err)
 	}
 
@@ -74,7 +74,7 @@ func setupRoutingTestTownWithPrefixes(t *testing.T, hqPrefix, gtPrefix, trPrefix
 
 	// Create gastown .beads directory with its own config
 	gasBeadsDir := filepath.Join(gasRigPath, ".beads")
-	if err := os.MkdirAll(gasBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(gasBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir gastown .beads: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(gasBeadsDir, "config.yaml"), []byte("prefix: "+gtPrefix+"\n"), 0644); err != nil {
@@ -89,7 +89,7 @@ func setupRoutingTestTownWithPrefixes(t *testing.T, hqPrefix, gtPrefix, trPrefix
 
 	// Create testrig .beads directory
 	testBeadsDir := filepath.Join(testRigPath, ".beads")
-	if err := os.MkdirAll(testBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(testBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir testrig .beads: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(testBeadsDir, "config.yaml"), []byte("prefix: "+trPrefix+"\n"), 0644); err != nil {
@@ -105,7 +105,7 @@ func setupRoutingTestTownWithPrefixes(t *testing.T, hqPrefix, gtPrefix, trPrefix
 	// Create redirect file for polecat -> mayor/rig/.beads
 	// Path: gastown/polecats/rictus -> ../../mayor/rig/.beads -> gastown/mayor/rig/.beads
 	polecatBeadsDir := filepath.Join(polecatsDir, ".beads")
-	if err := os.MkdirAll(polecatBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(polecatBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir polecat .beads: %v", err)
 	}
 	redirectContent := "../../mayor/rig/.beads"
@@ -121,7 +121,7 @@ func setupRoutingTestTownWithPrefixes(t *testing.T, hqPrefix, gtPrefix, trPrefix
 	}
 
 	crewBeadsDir := filepath.Join(crewDir, ".beads")
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir crew .beads: %v", err)
 	}
 	crewRedirect := "../../mayor/rig/.beads"
@@ -286,7 +286,7 @@ func TestBeadsCircularRedirectDetection(t *testing.T) {
 
 	// Create a beads directory with a redirect pointing to itself
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -313,7 +313,7 @@ func TestBeadsCircularRedirectDetection(t *testing.T) {
 func TestBeadsPrefixConflictDetection(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -411,7 +411,7 @@ func TestBeadsListFromCrewDirectory(t *testing.T) {
 func TestBeadsRoutesLoading(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -459,7 +459,7 @@ func TestBeadsRoutesLoading(t *testing.T) {
 func TestBeadsAppendRoute(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -507,7 +507,7 @@ func TestBeadsAppendRoute(t *testing.T) {
 func TestBeadsRemoveRoute(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -606,7 +606,7 @@ func TestSlingCrossRigUnknownPrefix(t *testing.T) {
 func TestBeadsGetPrefixForRig(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 

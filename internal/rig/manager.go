@@ -981,7 +981,7 @@ func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 	// If so, create a redirect file instead of a new database.
 	if _, err := os.Stat(mayorRigBeads); err == nil {
 		// Tracked beads exist - create redirect to mayor/rig/.beads
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			return err
 		}
 		redirectPath := filepath.Join(beadsDir, "redirect")
@@ -992,7 +992,7 @@ func (m *Manager) InitBeads(rigPath, prefix, rigName string) error {
 	}
 
 	// No tracked beads - create local database
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		return err
 	}
 

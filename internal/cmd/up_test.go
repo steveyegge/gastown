@@ -305,7 +305,7 @@ func TestWaitForDoltReady_ServerListening(t *testing.T) {
 
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadata := fmt.Sprintf(`{"backend":"dolt","dolt_mode":"server","port":%d}`, port)
@@ -340,7 +340,7 @@ func TestWaitForDoltReady_GracefulDegradation(t *testing.T) {
 	tmpListener.Close()
 
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadata := fmt.Sprintf(`{"backend":"dolt","dolt_mode":"server","port":%d}`, freePort)
@@ -370,7 +370,7 @@ func TestWaitForDoltReady_WrapperTimesOutAndContinues(t *testing.T) {
 
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	metadata := fmt.Sprintf(`{"backend":"dolt","dolt_mode":"server","port":%d}`, port)

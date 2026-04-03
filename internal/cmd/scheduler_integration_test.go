@@ -134,7 +134,7 @@ func setupSchedulerIntegrationTown(t *testing.T) (hqPath, rigPath, gtBinary stri
 
 	// --- town-level .beads/ ---
 	townBeadsDir := filepath.Join(hqPath, ".beads")
-	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(townBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir town .beads: %v", err)
 	}
 	routes := []beads.Route{
@@ -177,7 +177,7 @@ func setupSchedulerIntegrationTown(t *testing.T) (hqPath, rigPath, gtBinary stri
 	// beadsSearchDirs scans townRoot/<dir>/.beads — the redirect lets bd commands
 	// from testrig/ resolve to the actual rig beads DB.
 	rigBeadsRedirect := filepath.Join(hqPath, "testrig", ".beads")
-	if err := os.MkdirAll(rigBeadsRedirect, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsRedirect, 0700); err != nil {
 		t.Fatalf("mkdir rig .beads redirect: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeadsRedirect, "redirect"), []byte("mayor/rig/.beads"), 0644); err != nil {
@@ -572,7 +572,7 @@ func setupMultiRigSchedulerTown(t *testing.T) (hqPath, rig1Path, rig2Path, gtBin
 
 	// --- town-level .beads/ with routes for all three DBs ---
 	townBeadsDir := filepath.Join(hqPath, ".beads")
-	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(townBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir town .beads: %v", err)
 	}
 	routes := []beads.Route{

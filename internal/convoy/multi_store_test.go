@@ -61,7 +61,7 @@ func TestStoreResolver_ResolveIssues_SingleStore(t *testing.T) {
 	// Create a town root with routes pointing hq- to "."
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	os.MkdirAll(beadsDir, 0755)
+	os.MkdirAll(beadsDir, 0700)
 	beadsRouting.WriteRoutes(beadsDir, []beadsRouting.Route{
 		{Prefix: "hq-", Path: "."},
 	})
@@ -122,7 +122,7 @@ func TestStoreResolver_ResolveIssues_CrossStore(t *testing.T) {
 	// Set up routes
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	os.MkdirAll(beadsDir, 0755)
+	os.MkdirAll(beadsDir, 0700)
 	beadsRouting.WriteRoutes(beadsDir, []beadsRouting.Route{
 		{Prefix: "hq-", Path: "."},
 		{Prefix: "ds-", Path: "dashboard"},
@@ -171,7 +171,7 @@ func TestStoreResolver_EmptyIDs(t *testing.T) {
 func TestStoreResolver_StoreForID_ExternalFormat(t *testing.T) {
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	os.MkdirAll(beadsDir, 0755)
+	os.MkdirAll(beadsDir, 0700)
 	beadsRouting.WriteRoutes(beadsDir, []beadsRouting.Route{
 		{Prefix: "ds-", Path: "dashboard"},
 	})

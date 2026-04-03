@@ -160,7 +160,7 @@ func TestFindTownRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	rigBeadsDir := filepath.Join(rigDir, ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -191,7 +191,7 @@ func TestResolveRoutingTarget(t *testing.T) {
 	// Create a temporary town with routes
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -214,7 +214,7 @@ func TestResolveRoutingTarget(t *testing.T) {
 
 	// Create the rig beads directory
 	rigBeadsDir := filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads")
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -290,7 +290,7 @@ func TestEnsureCustomTypes(t *testing.T) {
 	t.Run("sentinel file triggers cache hit", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -315,7 +315,7 @@ func TestEnsureCustomTypes(t *testing.T) {
 		logPath := installMockBDRecorder(t)
 		tmpDir := t.TempDir()
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -347,7 +347,7 @@ func TestEnsureCustomTypes(t *testing.T) {
 	t.Run("in-memory cache prevents repeated calls", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -415,7 +415,7 @@ esac
 
 		tmpDir := t.TempDir()
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -457,7 +457,7 @@ func TestEnsureCustomStatuses(t *testing.T) {
 	t.Run("sentinel file triggers cache hit", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -481,7 +481,7 @@ func TestEnsureCustomStatuses(t *testing.T) {
 		logPath := installMockBDRecorder(t)
 		tmpDir := t.TempDir()
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -517,7 +517,7 @@ func TestEnsureCustomStatuses(t *testing.T) {
 	t.Run("in-memory cache prevents repeated calls", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -546,7 +546,7 @@ func TestEnsureCustomStatuses(t *testing.T) {
 	t.Run("cache key does not collide with types cache", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -572,7 +572,7 @@ func TestEnsureCustomStatuses(t *testing.T) {
 func TestEnsureDatabaseInitialized(t *testing.T) {
 	t.Run("dolt dir exists — skip init", func(t *testing.T) {
 		beadsDir := filepath.Join(t.TempDir(), ".beads")
-		os.MkdirAll(filepath.Join(beadsDir, "dolt"), 0755)
+		os.MkdirAll(filepath.Join(beadsDir, "dolt"), 0700)
 
 		err := ensureDatabaseInitialized(beadsDir)
 		if err != nil {
@@ -589,7 +589,7 @@ func TestEnsureDatabaseInitialized(t *testing.T) {
 
 		rigDir := filepath.Join(townDir, "testrig")
 		beadsDir := filepath.Join(rigDir, ".beads")
-		os.MkdirAll(beadsDir, 0755)
+		os.MkdirAll(beadsDir, 0700)
 
 		// Create the referenced database in .dolt-data/
 		os.MkdirAll(filepath.Join(townDir, ".dolt-data", "testdb"), 0755)
@@ -614,7 +614,7 @@ func TestEnsureDatabaseInitialized(t *testing.T) {
 
 		rigDir := filepath.Join(townDir, "testrig")
 		beadsDir := filepath.Join(rigDir, ".beads")
-		os.MkdirAll(beadsDir, 0755)
+		os.MkdirAll(beadsDir, 0700)
 
 		meta := `{"dolt_mode":"server","dolt_database":"missing_db"}`
 		os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(meta), 0644)
@@ -634,7 +634,7 @@ func TestEnsureDatabaseInitialized(t *testing.T) {
 	t.Run("no database artifacts — attempts bd init", func(t *testing.T) {
 		logPath := installMockBDRecorder(t)
 		beadsDir := filepath.Join(t.TempDir(), ".beads")
-		os.MkdirAll(beadsDir, 0755)
+		os.MkdirAll(beadsDir, 0700)
 
 		if err := ensureDatabaseInitialized(beadsDir); err != nil {
 			t.Fatalf("ensureDatabaseInitialized: %v", err)
@@ -662,7 +662,7 @@ func mustReadFile(t *testing.T, path string) []byte {
 func TestDetectPrefix(t *testing.T) {
 	t.Run("config.yaml unquoted prefix", func(t *testing.T) {
 		beadsDir := filepath.Join(t.TempDir(), ".beads")
-		os.MkdirAll(beadsDir, 0755)
+		os.MkdirAll(beadsDir, 0700)
 		os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte("issue-prefix: myrig-\n"), 0644)
 
 		got := detectPrefix(beadsDir)
@@ -673,7 +673,7 @@ func TestDetectPrefix(t *testing.T) {
 
 	t.Run("config.yaml double-quoted prefix", func(t *testing.T) {
 		beadsDir := filepath.Join(t.TempDir(), ".beads")
-		os.MkdirAll(beadsDir, 0755)
+		os.MkdirAll(beadsDir, 0700)
 		os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte("prefix: \"myrig\"\n"), 0644)
 
 		got := detectPrefix(beadsDir)
@@ -684,7 +684,7 @@ func TestDetectPrefix(t *testing.T) {
 
 	t.Run("config.yaml single-quoted prefix", func(t *testing.T) {
 		beadsDir := filepath.Join(t.TempDir(), ".beads")
-		os.MkdirAll(beadsDir, 0755)
+		os.MkdirAll(beadsDir, 0700)
 		os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte("prefix: 'myrig'\n"), 0644)
 
 		got := detectPrefix(beadsDir)
@@ -695,7 +695,7 @@ func TestDetectPrefix(t *testing.T) {
 
 	t.Run("config.yaml double-quoted prefix with trailing dash", func(t *testing.T) {
 		beadsDir := filepath.Join(t.TempDir(), ".beads")
-		os.MkdirAll(beadsDir, 0755)
+		os.MkdirAll(beadsDir, 0700)
 		os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte("prefix: \"myrig-\"\n"), 0644)
 
 		got := detectPrefix(beadsDir)
@@ -706,7 +706,7 @@ func TestDetectPrefix(t *testing.T) {
 
 	t.Run("config.yaml single-quoted prefix with trailing dash", func(t *testing.T) {
 		beadsDir := filepath.Join(t.TempDir(), ".beads")
-		os.MkdirAll(beadsDir, 0755)
+		os.MkdirAll(beadsDir, 0700)
 		os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte("prefix: 'myrig-'\n"), 0644)
 
 		got := detectPrefix(beadsDir)
@@ -717,7 +717,7 @@ func TestDetectPrefix(t *testing.T) {
 
 	t.Run("config.yaml invalid prefix falls through to default", func(t *testing.T) {
 		beadsDir := filepath.Join(t.TempDir(), ".beads")
-		os.MkdirAll(beadsDir, 0755)
+		os.MkdirAll(beadsDir, 0700)
 		os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte("prefix: 123-invalid\n"), 0644)
 
 		got := detectPrefix(beadsDir)
@@ -728,7 +728,7 @@ func TestDetectPrefix(t *testing.T) {
 
 	t.Run("no config.yaml falls through to default", func(t *testing.T) {
 		beadsDir := filepath.Join(t.TempDir(), ".beads")
-		os.MkdirAll(beadsDir, 0755)
+		os.MkdirAll(beadsDir, 0700)
 
 		got := detectPrefix(beadsDir)
 		if got != "gt" {
@@ -750,7 +750,7 @@ func TestDetectPrefix(t *testing.T) {
 		// Create rig directory with .beads
 		rigDir := filepath.Join(townDir, "testrig")
 		beadsDir := filepath.Join(rigDir, ".beads")
-		os.MkdirAll(beadsDir, 0755)
+		os.MkdirAll(beadsDir, 0700)
 
 		got := detectPrefix(beadsDir)
 		// GetRigPrefix should find "testrig" in rigs.json and return "tr".
@@ -772,7 +772,7 @@ func TestDetectPrefix(t *testing.T) {
 		rigDir := filepath.Join(townDir, "myrig")
 		routedDir := filepath.Join(rigDir, "mayor", "rig")
 		beadsDir := filepath.Join(routedDir, ".beads")
-		os.MkdirAll(beadsDir, 0755)
+		os.MkdirAll(beadsDir, 0700)
 
 		got := detectPrefix(beadsDir)
 		// "rig" won't be found in rigs.json → falls to "gt" default

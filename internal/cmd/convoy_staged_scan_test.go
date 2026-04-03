@@ -28,7 +28,7 @@ func TestStrandedScanExcludesStagedConvoys(t *testing.T) {
 	binDir := t.TempDir()
 	townRoot := t.TempDir()
 	townBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatalf("mkdir townBeads: %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestStrandedScanQueryShape(t *testing.T) {
 	binDir := t.TempDir()
 	townRoot := t.TempDir()
 	townBeads := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(townBeads, 0755); err != nil {
+	if err := os.MkdirAll(townBeads, 0700); err != nil {
 		t.Fatalf("mkdir townBeads: %v", err)
 	}
 

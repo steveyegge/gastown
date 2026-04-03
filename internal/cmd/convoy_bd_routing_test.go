@@ -64,7 +64,7 @@ func makeRoutingTownWorkspace(t *testing.T) (string, string) {
 	t.Helper()
 
 	townRoot := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {

@@ -38,7 +38,7 @@ func TestConvoyResolveBeadsDir_RegressionEmptyConvoy(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(townRoot, "mayor", "town.json"), []byte("{}"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -82,7 +82,7 @@ func TestConvoyResolveBeadsDir_RegressionEmptyConvoy(t *testing.T) {
 
 		townRoot := t.TempDir()
 		beadsDir := filepath.Join(townRoot, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -126,7 +126,7 @@ func TestConvoyResolveBeadsDir_RegressionEmptyConvoy(t *testing.T) {
 
 		townRoot := t.TempDir()
 		beadsDir := filepath.Join(townRoot, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -153,7 +153,7 @@ func TestConvoyResolveBeadsDir_RegressionEmptyConvoy(t *testing.T) {
 
 		townRoot := t.TempDir()
 		beadsDir := filepath.Join(townRoot, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		if err := os.MkdirAll(beadsDir, 0700); err != nil {
 			t.Fatal(err)
 		}
 
@@ -179,7 +179,7 @@ func TestConvoyResolveBeadsDir_RegressionEmptyConvoy(t *testing.T) {
 func TestResolveBeadsDir_WorkspaceRootVsBeadsDir(t *testing.T) {
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -217,13 +217,13 @@ func TestResolveBeadsDir_WorkspaceRootVsBeadsDir(t *testing.T) {
 func TestResolveBeadsDir_WithRedirect(t *testing.T) {
 	sharedRoot := t.TempDir()
 	sharedBeads := filepath.Join(sharedRoot, ".beads")
-	if err := os.MkdirAll(sharedBeads, 0755); err != nil {
+	if err := os.MkdirAll(sharedBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
 	worktreeRoot := t.TempDir()
 	worktreeBeads := filepath.Join(worktreeRoot, ".beads")
-	if err := os.MkdirAll(worktreeBeads, 0755); err != nil {
+	if err := os.MkdirAll(worktreeBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -254,7 +254,7 @@ func TestConvoyCreate_SentinelPlacement(t *testing.T) {
 
 	townRoot := t.TempDir()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {

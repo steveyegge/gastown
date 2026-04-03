@@ -38,10 +38,10 @@ func TestDoneUsesResolveBeadsDir(t *testing.T) {
 	polecatBeadsDir := filepath.Join(polecatDir, ".beads")
 
 	// Create directories
-	if err := os.MkdirAll(mayorRigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(mayorRigBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir mayor/rig/.beads: %v", err)
 	}
-	if err := os.MkdirAll(polecatBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(polecatBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir polecats/fixer/.beads: %v", err)
 	}
 
@@ -87,7 +87,7 @@ func TestDoneBeadsInitWithoutRedirect(t *testing.T) {
 
 	// Create a simple .beads directory without redirect (like mayor/rig)
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -119,10 +119,10 @@ func TestDoneBeadsInitBothCodePaths(t *testing.T) {
 	crewDir := filepath.Join(tmpDir, "crew", "max")
 	crewBeadsDir := filepath.Join(crewDir, ".beads")
 
-	if err := os.MkdirAll(mayorRigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(mayorRigBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir mayor/rig/.beads: %v", err)
 	}
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(crewBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir crew/max/.beads: %v", err)
 	}
 
@@ -212,7 +212,7 @@ func TestDoneEmptyRedirectFallback(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -235,7 +235,7 @@ func TestDoneCircularRedirectProtection(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	beadsDir := filepath.Join(tmpDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 

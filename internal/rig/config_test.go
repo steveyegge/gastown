@@ -239,7 +239,7 @@ func TestGetConfig_BeadLabel(t *testing.T) {
 	beadsDir := filepath.Join(rigPath, ".beads")
 
 	// Create directory structure
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 

@@ -374,7 +374,7 @@ func (d *testDAG) Setup(t *testing.T) (townRoot, logPath string) {
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
 		t.Fatalf("mkdir mayor/rig: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
@@ -411,7 +411,7 @@ func (d *testDAG) Setup(t *testing.T) (townRoot, logPath string) {
 	for _, b := range d.beads {
 		if b.Rig != "" {
 			rigBeadsDir := filepath.Join(townRoot, b.Rig, ".beads")
-			if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+			if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 				t.Fatalf("mkdir rig .beads dir %s: %v", rigBeadsDir, err)
 			}
 		}

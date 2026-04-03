@@ -99,7 +99,7 @@ func TestBeadsRedirectCheck_LocalBeadsOnly(t *testing.T) {
 
 	// Create local beads at rig root (no mayor/rig/.beads)
 	localBeads := filepath.Join(rigDir, ".beads")
-	if err := os.MkdirAll(localBeads, 0755); err != nil {
+	if err := os.MkdirAll(localBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -123,7 +123,7 @@ func TestBeadsRedirectCheck_TrackedBeadsMissingRedirect(t *testing.T) {
 
 	// Create tracked beads at mayor/rig/.beads
 	trackedBeads := filepath.Join(rigDir, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(trackedBeads, 0755); err != nil {
+	if err := os.MkdirAll(trackedBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -147,13 +147,13 @@ func TestBeadsRedirectCheck_TrackedBeadsCorrectRedirect(t *testing.T) {
 
 	// Create tracked beads at mayor/rig/.beads
 	trackedBeads := filepath.Join(rigDir, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(trackedBeads, 0755); err != nil {
+	if err := os.MkdirAll(trackedBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create rig-level .beads with correct redirect
 	rigBeads := filepath.Join(rigDir, ".beads")
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	redirectPath := filepath.Join(rigBeads, "redirect")
@@ -181,13 +181,13 @@ func TestBeadsRedirectCheck_TrackedBeadsWrongRedirect(t *testing.T) {
 
 	// Create tracked beads at mayor/rig/.beads
 	trackedBeads := filepath.Join(rigDir, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(trackedBeads, 0755); err != nil {
+	if err := os.MkdirAll(trackedBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create rig-level .beads with wrong redirect
 	rigBeads := filepath.Join(rigDir, ".beads")
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	redirectPath := filepath.Join(rigBeads, "redirect")
@@ -215,13 +215,13 @@ func TestBeadsRedirectCheck_FixWrongRedirect(t *testing.T) {
 
 	// Create tracked beads at mayor/rig/.beads
 	trackedBeads := filepath.Join(rigDir, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(trackedBeads, 0755); err != nil {
+	if err := os.MkdirAll(trackedBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create rig-level .beads with wrong redirect
 	rigBeads := filepath.Join(rigDir, ".beads")
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	redirectPath := filepath.Join(rigBeads, "redirect")
@@ -266,7 +266,7 @@ func TestBeadsRedirectCheck_Fix(t *testing.T) {
 
 	// Create tracked beads at mayor/rig/.beads
 	trackedBeads := filepath.Join(rigDir, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(trackedBeads, 0755); err != nil {
+	if err := os.MkdirAll(trackedBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -310,7 +310,7 @@ func TestBeadsRedirectCheck_FixNoOp_LocalBeads(t *testing.T) {
 
 	// Create only local beads (no tracked beads)
 	localBeads := filepath.Join(rigDir, ".beads")
-	if err := os.MkdirAll(localBeads, 0755); err != nil {
+	if err := os.MkdirAll(localBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -402,7 +402,7 @@ func TestBeadsRedirectCheck_ConflictingLocalBeads(t *testing.T) {
 
 	// Create tracked beads at mayor/rig/.beads
 	trackedBeads := filepath.Join(rigDir, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(trackedBeads, 0755); err != nil {
+	if err := os.MkdirAll(trackedBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	// Add some content to tracked beads
@@ -412,7 +412,7 @@ func TestBeadsRedirectCheck_ConflictingLocalBeads(t *testing.T) {
 
 	// Create conflicting local beads with actual data
 	localBeads := filepath.Join(rigDir, ".beads")
-	if err := os.MkdirAll(localBeads, 0755); err != nil {
+	if err := os.MkdirAll(localBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	// Add data to local beads (this is the conflict)
@@ -518,7 +518,7 @@ func TestBeadsRedirectCheck_FixConflictingLocalBeads(t *testing.T) {
 
 	// Create tracked beads at mayor/rig/.beads with config.yaml as data marker
 	trackedBeads := filepath.Join(rigDir, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(trackedBeads, 0755); err != nil {
+	if err := os.MkdirAll(trackedBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(trackedBeads, "config.yaml"), []byte("prefix: tr\n"), 0644); err != nil {
@@ -527,7 +527,7 @@ func TestBeadsRedirectCheck_FixConflictingLocalBeads(t *testing.T) {
 
 	// Create conflicting local beads with actual data
 	localBeads := filepath.Join(rigDir, ".beads")
-	if err := os.MkdirAll(localBeads, 0755); err != nil {
+	if err := os.MkdirAll(localBeads, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(localBeads, "config.yaml"), []byte("prefix: local\n"), 0644); err != nil {

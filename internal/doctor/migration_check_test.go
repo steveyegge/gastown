@@ -28,7 +28,7 @@ func setupRigMetadata(t *testing.T, townRoot, rigName, doltDatabase string) {
 	} else {
 		beadsDir = filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
 	}
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("creating beads dir for %s: %v", rigName, err)
 	}
 	meta := map[string]interface{}{
@@ -48,7 +48,7 @@ func setupRigMetadata(t *testing.T, townRoot, rigName, doltDatabase string) {
 // setupServerMetadata creates a .beads/metadata.json with optional host/port fields.
 func setupServerMetadata(t *testing.T, beadsDir, host string, port int) {
 	t.Helper()
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("creating beads dir: %v", err)
 	}
 	meta := map[string]interface{}{
@@ -155,7 +155,7 @@ func TestGetServerAddr(t *testing.T) {
 func TestGetServerAddr_NotServerMode(t *testing.T) {
 	check := NewDoltServerReachableCheck()
 	beadsDir := filepath.Join(t.TempDir(), ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	meta := map[string]interface{}{

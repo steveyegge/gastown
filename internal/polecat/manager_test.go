@@ -408,11 +408,11 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 
 	// Create rig-level .beads directory with redirect to mayor/rig/.beads
 	rigBeads := filepath.Join(root, ".beads")
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBeads, 0700); err != nil {
 		t.Fatalf("mkdir rig .beads: %v", err)
 	}
 	mayorBeads := filepath.Join(mayorRig, ".beads")
-	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+	if err := os.MkdirAll(mayorBeads, 0700); err != nil {
 		t.Fatalf("mkdir mayor/rig/.beads: %v", err)
 	}
 	rigRedirect := filepath.Join(rigBeads, "redirect")
@@ -888,13 +888,13 @@ func TestAddWithOptions_NoPrimeMDCreatedLocally(t *testing.T) {
 
 	// Create rig-level .beads directory
 	rigBeads := filepath.Join(root, ".beads")
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBeads, 0700); err != nil {
 		t.Fatalf("mkdir rig .beads: %v", err)
 	}
 
 	// Create redirect at rig level pointing to mayor/rig/.beads
 	mayorBeads := filepath.Join(mayorRig, ".beads")
-	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+	if err := os.MkdirAll(mayorBeads, 0700); err != nil {
 		t.Fatalf("mkdir mayor/rig/.beads: %v", err)
 	}
 	rigRedirect := filepath.Join(rigBeads, "redirect")
@@ -1004,11 +1004,11 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 
 	// Create rig-level .beads directory with redirect
 	rigBeads := filepath.Join(root, ".beads")
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBeads, 0700); err != nil {
 		t.Fatalf("mkdir rig .beads: %v", err)
 	}
 	mayorBeads := filepath.Join(mayorRig, ".beads")
-	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+	if err := os.MkdirAll(mayorBeads, 0700); err != nil {
 		t.Fatalf("mkdir mayor/rig/.beads: %v", err)
 	}
 	rigRedirect := filepath.Join(rigBeads, "redirect")
@@ -1150,11 +1150,11 @@ func TestAddWithOptions_SettingsInstalledInPolecatsDir(t *testing.T) {
 
 	// Create rig-level .beads directory with redirect
 	rigBeads := filepath.Join(root, ".beads")
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBeads, 0700); err != nil {
 		t.Fatalf("mkdir rig .beads: %v", err)
 	}
 	mayorBeads := filepath.Join(mayorRig, ".beads")
-	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+	if err := os.MkdirAll(mayorBeads, 0700); err != nil {
 		t.Fatalf("mkdir mayor/rig/.beads: %v", err)
 	}
 	rigRedirect := filepath.Join(rigBeads, "redirect")
@@ -1566,11 +1566,11 @@ esac
 
 	// Create rig-level .beads directory
 	rigBeads := filepath.Join(root, ".beads")
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+	if err := os.MkdirAll(rigBeads, 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	mayorBeads := filepath.Join(mayorRig, ".beads")
-	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+	if err := os.MkdirAll(mayorBeads, 0700); err != nil {
 		t.Fatalf("mkdir mayor .beads: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(rigBeads, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {

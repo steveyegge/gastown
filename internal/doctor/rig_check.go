@@ -1046,7 +1046,7 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 		prefix := config.GetRigPrefix(ctx.TownRoot, ctx.RigName)
 
 		// Create .beads directory
-		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 			return fmt.Errorf("creating .beads directory: %w", err)
 		}
 
@@ -1086,7 +1086,7 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 		}
 
 		// Create .beads directory if needed
-		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 			return fmt.Errorf("creating .beads directory: %w", err)
 		}
 

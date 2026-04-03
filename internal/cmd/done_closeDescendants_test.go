@@ -26,7 +26,7 @@ func TestDoneCloseDescendantsWithChildren(t *testing.T) {
 
 	// .beads directory
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0700); err != nil {
 		t.Fatalf("mkdir .beads/locks: %v", err)
 	}
 
@@ -208,7 +208,7 @@ func TestDoneCloseDescendantsNoChildren(t *testing.T) {
 		t.Fatalf("mkdir mayor: %v", err)
 	}
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0700); err != nil {
 		t.Fatalf("mkdir .beads/locks: %v", err)
 	}
 
@@ -338,7 +338,7 @@ func TestDoneCloseDescendantsSomeAlreadyClosed(t *testing.T) {
 		t.Fatalf("mkdir mayor: %v", err)
 	}
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0700); err != nil {
 		t.Fatalf("mkdir .beads/locks: %v", err)
 	}
 
@@ -486,7 +486,7 @@ func TestDoneCloseDescendantsDeeplyNested(t *testing.T) {
 		t.Fatalf("mkdir mayor: %v", err)
 	}
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0700); err != nil {
 		t.Fatalf("mkdir .beads/locks: %v", err)
 	}
 
@@ -664,7 +664,7 @@ func TestDoneCloseDescendantsNoMoleculeAttached(t *testing.T) {
 		t.Fatalf("mkdir mayor: %v", err)
 	}
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0700); err != nil {
 		t.Fatalf("mkdir .beads/locks: %v", err)
 	}
 
@@ -784,7 +784,7 @@ func TestCloseDescendantsHandlesListError(t *testing.T) {
 		t.Fatalf("mkdir mayor: %v", err)
 	}
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0700); err != nil {
 		t.Fatalf("mkdir .beads/locks: %v", err)
 	}
 
@@ -897,7 +897,7 @@ func TestCloseDescendantsMoleculeNotFound(t *testing.T) {
 		t.Fatalf("mkdir mayor: %v", err)
 	}
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0700); err != nil {
 		t.Fatalf("mkdir .beads/locks: %v", err)
 	}
 

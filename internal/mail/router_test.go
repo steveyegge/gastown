@@ -1186,7 +1186,7 @@ func TestValidateRecipient(t *testing.T) {
 
 	// Create .beads directory and initialize
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("creating beads dir: %v", err)
 	}
 

@@ -169,7 +169,7 @@ func TestSlingFormulaOnBeadHooksBaseBead(t *testing.T) {
 	}
 
 	// Create routes
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	rigDir := filepath.Join(townRoot, "gastown", "mayor", "rig")
@@ -363,7 +363,7 @@ func TestSlingFormulaOnBeadSetsAttachedMoleculeInBaseBead(t *testing.T) {
 	}
 
 	// Create routes
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 	rigDir := filepath.Join(townRoot, "gastown", "mayor", "rig")
@@ -549,7 +549,7 @@ func TestBurnClosesWispRoot(t *testing.T) {
 
 	// .beads directory (for findLocalBeadsDir and lockBead)
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0700); err != nil {
 		t.Fatalf("mkdir .beads/locks: %v", err)
 	}
 
@@ -651,7 +651,7 @@ func TestSquashClosesWispRoot(t *testing.T) {
 
 	// .beads directory
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0700); err != nil {
 		t.Fatalf("mkdir .beads/locks: %v", err)
 	}
 
@@ -761,7 +761,7 @@ func TestSquashClosesDescendantsAndRoot(t *testing.T) {
 		t.Fatalf("mkdir mayor: %v", err)
 	}
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(beadsDir, "locks"), 0700); err != nil {
 		t.Fatalf("mkdir .beads/locks: %v", err)
 	}
 
@@ -894,7 +894,7 @@ func TestDoneClosesAttachedMolecule(t *testing.T) {
 	if err := os.MkdirAll(rigPath, 0755); err != nil {
 		t.Fatalf("mkdir rig: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0700); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 

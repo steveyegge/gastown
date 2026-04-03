@@ -24,7 +24,7 @@ func setupBdWorkDir(t *testing.T, port int) string {
 
 	workDir := t.TempDir()
 	beadsDir := filepath.Join(workDir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("creating .beads dir: %v", err)
 	}
 

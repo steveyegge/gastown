@@ -968,7 +968,7 @@ func TestDiscoverRoleLocations_SkipsNonRigs(t *testing.T) {
 	// Create a directory that isn't a rig (no crew/witness/polecats/refinery subdirs)
 	os.MkdirAll(filepath.Join(tmpDir, "notarig", "something"), 0755)
 	// Hidden dirs should be skipped
-	os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0700)
 	os.MkdirAll(filepath.Join(tmpDir, ".hidden", "crew"), 0755)
 
 	locations, err := DiscoverRoleLocations(tmpDir)

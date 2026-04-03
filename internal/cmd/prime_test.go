@@ -47,7 +47,7 @@ func captureStdout(t *testing.T, fn func()) string {
 func writeTestRoutes(t *testing.T, townRoot string, routes []beads.Route) {
 	t.Helper()
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("create beads dir: %v", err)
 	}
 	if err := beads.WriteRoutes(beadsDir, routes); err != nil {
@@ -594,7 +594,7 @@ func TestDryRunSkipsSideEffects(t *testing.T) {
 
 	// Set up minimal workspace structure
 	beadsDir := filepath.Join(townRoot, ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("create beads dir: %v", err)
 	}
 

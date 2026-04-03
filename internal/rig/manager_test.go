@@ -394,7 +394,7 @@ func TestInitBeads_TrackedBeads_CreatesRedirect(t *testing.T) {
 
 	// Simulate tracked beads in the cloned repo
 	mayorBeadsDir := filepath.Join(rigPath, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(mayorBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(mayorBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir mayor beads: %v", err)
 	}
 	// Create a config file to simulate a real beads directory
@@ -566,7 +566,7 @@ func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {
 	rigPath := filepath.Join(townRoot, "testrip")
 	rigBeadsDir := filepath.Join(rigPath, ".beads")
 
-	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+	if err := os.MkdirAll(rigBeadsDir, 0700); err != nil {
 		t.Fatalf("mkdir rig beads dir: %v", err)
 	}
 
@@ -1243,7 +1243,7 @@ func TestEnsureMetadata_SetsRequiredFields(t *testing.T) {
 
 	// Create the beads directory structure that EnsureMetadata expects
 	beadsDir := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+	if err := os.MkdirAll(beadsDir, 0700); err != nil {
 		t.Fatalf("mkdir beads dir: %v", err)
 	}
 
