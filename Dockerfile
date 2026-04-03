@@ -30,8 +30,9 @@ RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" | tar -C /usr/local -xz
 ENV PATH="/app/gastown:/usr/local/go/bin:/home/agent/go/bin:/home/agent/bin:${PATH}"
 
-# Install beads (bd) and dolt
-RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
+# Install beads (bd) from source — prebuilt binaries link against ICU 74
+# but the base image ships ICU 76.
+RUN GOBIN=/usr/local/bin CGO_ENABLED=1 go install github.com/steveyegge/beads/cmd/bd@latest
 RUN curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash
 
 # Set up directories
