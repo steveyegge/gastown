@@ -46,7 +46,13 @@ if [ ! -f /gt/mayor/town.json ]; then
     
     # Configure agents
     echo "Configuring agents..."
-    /app/gastown/gt config agent set opencode "gt-opencode -m fireworks/kimi-k2p5-fast"
+    /app/gastown/gt config agent set opencode "gt-opencode -m fireworks-ai/accounts/fireworks/routers/kimi-k2p5-turbo"
+
+    # Seed OpenCode default model (standalone opencode picks most recent)
+    mkdir -p "$HOME/.local/state/opencode"
+    cat > "$HOME/.local/state/opencode/model.json" <<'MODELJSON'
+{"recent":[{"providerID":"fireworks-ai","modelID":"accounts/fireworks/routers/kimi-k2p5-turbo"}],"favorite":[],"variant":{}}
+MODELJSON
 else
     # Subsequent runs: refresh in background so dashboard starts fast
     echo "Refreshing Gas Town workspace at /gt (background)..."
