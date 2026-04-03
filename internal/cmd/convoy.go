@@ -470,6 +470,60 @@ func runBdJSON(dir string, args ...string) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
+// runBdSQL executes a write query via bd sql with auto-commit enabled.
+// Used for direct dependency writes that bypass bd dep add's cross-database
+// validation limitation.
+func runBdSQL(dir, query string) ([]byte, error) {
+	cmd := BdCmd("sql", query).
+		WithAutoCommit().
+		Dir(dir).
+		StripBeadsDir()
+	built := cmd.Build()
+	var stdout, stderr bytes.Buffer
+	built.Stdout = &stdout
+	built.Stderr = &stderr
+	if err := built.Run(); err != nil {
+		if errMsg := strings.TrimSpace(stderr.String()); errMsg != "" {
+			return nil, fmt.Errorf("bd sql: %s", errMsg)
+		}
+		return nil, fmt.Errorf("bd sql: %w", err)
+	}
+	return stdout.Bytes(), nil
+}
+
+// addTracksDep writes a 'tracks' dependency row directly into the hq
+// dependencies table via SQL. This bypasses bd dep add, which fails for
+// cross-rig beads because it validates that depends_on_id exists in the
+// local database. Convoys always live in hq while tracked issues live in
+// rigs, so every convoy tracking relation is cross-database.
+//
+// Uses INSERT IGNORE (Dolt/MySQL dialect) so duplicate relations are no-ops.
+func addTracksDep(townBeads, convoyID, issueID, createdBy string) error {
+	if !isValidBeadID(convoyID) || !isValidBeadID(issueID) {
+		return fmt.Errorf("invalid bead ID: %s → %s", convoyID, issueID)
+	}
+	query := fmt.Sprintf(
+		"INSERT IGNORE INTO dependencies (issue_id, depends_on_id, type, created_by) VALUES ('%s', '%s', 'tracks', '%s')",
+		convoyID, issueID, createdBy,
+	)
+	_, err := runBdSQL(townBeads, query)
+	return err
+}
+
+// removeTracksDep removes a 'tracks' dependency row from the hq dependencies
+// table via direct SQL. Companion to addTracksDep for convoy reconciliation.
+func removeTracksDep(townBeads, convoyID, issueID string) error {
+	if !isValidBeadID(convoyID) || !isValidBeadID(issueID) {
+		return fmt.Errorf("invalid bead ID: %s → %s", convoyID, issueID)
+	}
+	query := fmt.Sprintf(
+		"DELETE FROM dependencies WHERE issue_id = '%s' AND depends_on_id = '%s' AND type = 'tracks'",
+		convoyID, issueID,
+	)
+	_, err := runBdSQL(townBeads, query)
+	return err
+}
+
 // bdDepListRawIDs queries the raw dependencies table via bd sql to get
 // dependency target IDs. Unlike bd dep list, this does NOT join with the
 // issues table, so it works for cross-database dependencies where the
@@ -719,26 +773,14 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 
 	// Notify address is stored in description (line 166-168) and read from there
 
-	// Run dep add from town root so bd routes correctly across rigs via
-	// routes.jsonl. getTownBeadsDir() already returns the town root.
-	// StripBeadsDir prevents inherited BEADS_DIR from overriding routing.
-
-	// Add 'tracks' relations for each tracked issue
+	// Add 'tracks' relations via direct SQL INSERT into the hq dependencies
+	// table. This bypasses bd dep add which fails for cross-rig beads because
+	// bd validates that depends_on_id exists in the local database — but
+	// convoys always live in hq while tracked issues live in rigs.
 	trackedCount := 0
 	for _, issueID := range trackedIssues {
-		// Use --type=tracks for non-blocking tracking relation
-		var depStderr bytes.Buffer
-		if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
-			WithAutoCommit().
-			Dir(townBeads).
-			StripBeadsDir().
-			Stderr(&depStderr).
-			Run(); err != nil {
-			errMsg := strings.TrimSpace(depStderr.String())
-			if errMsg == "" {
-				errMsg = err.Error()
-			}
-			style.PrintWarning("couldn't track %s: %s", issueID, errMsg)
+		if err := addTracksDep(townBeads, convoyID, issueID, "gt convoy create"); err != nil {
+			style.PrintWarning("couldn't track %s: %s", issueID, err)
 		} else {
 			trackedCount++
 		}
@@ -839,24 +881,12 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Reopened convoy %s\n", style.Bold.Render("↺"), convoyID)
 	}
 
-	// Run dep add from town root so bd routes correctly across rigs via
-	// routes.jsonl. getTownBeadsDir() already returns the town root.
-
-	// Add 'tracks' relations for each issue
+	// Add 'tracks' relations via direct SQL INSERT (bypasses bd dep add's
+	// cross-database validation — convoys live in hq, tracked issues in rigs).
 	addedCount := 0
 	for _, issueID := range issuesToAdd {
-		var depStderr bytes.Buffer
-		if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
-			Dir(townBeads).
-			WithAutoCommit().
-			StripBeadsDir().
-			Stderr(&depStderr).
-			Run(); err != nil {
-			errMsg := strings.TrimSpace(depStderr.String())
-			if errMsg == "" {
-				errMsg = err.Error()
-			}
-			style.PrintWarning("couldn't add %s: %s", issueID, errMsg)
+		if err := addTracksDep(townBeads, convoyID, issueID, "gt convoy add"); err != nil {
+			style.PrintWarning("couldn't add %s: %s", issueID, err)
 		} else {
 			addedCount++
 		}
@@ -2514,16 +2544,13 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 // getIssueDetails fetches issue details by trying to show it via bd.
 // Prefer getIssueDetailsBatch for multiple issues to avoid N+1 subprocess calls.
 func getIssueDetails(issueID string) *issueDetails {
-	// Use bd show with routing - resolve from town root so bd's prefix
-	// routing (routes.jsonl) can dispatch to the correct rig database.
-	// Without Dir + StripBeadsDir, bd inherits CWD/BEADS_DIR which may
-	// point to a rig that doesn't contain the target bead. (GH#2960)
-	townRoot, _ := workspace.FindFromCwdOrError()
+	// Resolve the correct rig directory for this bead's prefix, since bd
+	// no longer routes cross-rig via routes.jsonl. resolveBeadDir maps
+	// the prefix to the rig's beads directory so bd discovers the right DB.
+	dir := resolveBeadDir(issueID)
 	showCmd := exec.Command("bd", "show", issueID, "--json")
-	if townRoot != "" {
-		showCmd.Dir = townRoot
-		showCmd.Env = stripEnvKey(os.Environ(), "BEADS_DIR")
-	}
+	showCmd.Dir = dir
+	showCmd.Env = stripEnvKey(os.Environ(), "BEADS_DIR")
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout
 

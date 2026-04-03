@@ -732,16 +732,11 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string, title strin
 		return "", fmt.Errorf("bd update convoy status: %w\noutput: %s", err, out)
 	}
 
-	// Track each slingable bead via bd dep add.
-	// Cross-rig tracking may fail because bd validates both IDs exist in the
-	// same database (beads v0.62 removed cross-rig routing). Non-fatal: the
-	// convoy still works without tracking deps.
+	// Track each slingable bead via direct SQL INSERT. Bypasses bd dep add
+	// which fails for cross-rig beads (bd validates both IDs in same DB).
 	for _, beadID := range slingableIDs {
-		if out, err := BdCmd("dep", "add", convoyID, beadID, "--type=tracks").
-			Dir(townBeads).WithAutoCommit().StripBeadsDir().
-			CombinedOutput(); err != nil {
+		if err := addTracksDep(townBeads, convoyID, beadID, "gt convoy stage"); err != nil {
 			fmt.Printf("  Warning: could not track %s in convoy: %v\n", beadID, err)
-			_ = out
 		}
 	}
 
@@ -773,27 +768,20 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 		return fmt.Errorf("reading tracked beads for %s: %w", existingConvoyID, err)
 	}
 
-	// Add new beads not currently tracked.
-	// Cross-rig tracking may fail (bd validates both IDs in same DB). Non-fatal.
+	// Add new beads not currently tracked via direct SQL INSERT.
 	for _, id := range desiredIDs {
 		if !currentIDs[id] {
-			if out, err := BdCmd("dep", "add", existingConvoyID, id, "--type=tracks").
-				Dir(townBeads).WithAutoCommit().StripBeadsDir().
-				CombinedOutput(); err != nil {
+			if err := addTracksDep(townBeads, existingConvoyID, id, "gt convoy stage"); err != nil {
 				fmt.Printf("  Warning: could not track %s in convoy: %v\n", id, err)
-				_ = out
 			}
 		}
 	}
 
-	// Remove stale beads no longer in the DAG.
+	// Remove stale beads no longer in the DAG via direct SQL DELETE.
 	for id := range currentIDs {
 		if !desiredSet[id] {
-			if out, err := BdCmd("dep", "remove", existingConvoyID, id, "--type=tracks").
-				Dir(townBeads).WithAutoCommit().StripBeadsDir().
-				CombinedOutput(); err != nil {
+			if err := removeTracksDep(townBeads, existingConvoyID, id); err != nil {
 				fmt.Printf("  Warning: could not untrack %s from convoy: %v\n", id, err)
-				_ = out
 			}
 		}
 	}

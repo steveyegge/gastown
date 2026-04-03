@@ -212,10 +212,14 @@ esac
 	}
 }
 
-// TestConvoyCreate_DepAddUsesTownRoot verifies that `dep add` during convoy
-// create runs from the town root (not its parent), so bd's prefix routing
-// can resolve cross-rig beads via routes.jsonl. This was the root cause of
-// "no beads database found" when tracking beads from other rigs. (GH#2960)
+// TestConvoyCreate_DepAddUsesTownRoot verifies that tracking dependency
+// creation during convoy create runs bd sql from the town root (not its
+// parent), so the INSERT goes into the correct hq database. This was the
+// root cause of "no beads database found" when tracking beads from other
+// rigs. (GH#2960)
+//
+// Updated: convoy create now uses direct SQL INSERT instead of bd dep add,
+// bypassing bd's cross-database validation entirely.
 func TestConvoyCreate_DepAddUsesTownRoot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows - shell stubs")
@@ -231,21 +235,22 @@ func TestConvoyCreate_DepAddUsesTownRoot(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(beadsDir, ".gt-types-configured"), []byte(typesList), 0644)
 	_ = os.WriteFile(filepath.Join(beadsDir, ".gt-statuses-configured"), []byte("staged_ready,staged_warnings"), 0644)
 
-	// Track which directory dep add runs from.
-	depLogPath := filepath.Join(t.TempDir(), "dep-add.log")
+	// Track which directory bd sql runs from.
+	sqlLogPath := filepath.Join(t.TempDir(), "sql.log")
 
 	scriptBody := fmt.Sprintf(`
 case "$1" in
   create)
     echo '[{"id":"hq-cv-test"}]'
     ;;
-  dep)
-    # Log the working directory for dep add calls
-    echo "$PWD" >> %s
+  sql)
+    # Log the working directory and query for sql calls
+    echo "$PWD: $2" >> %s
     if [ "$PWD" != "%s" ]; then
-      echo "dep add: expected town root %s, got $PWD" >&2
+      echo "bd sql: expected town root %s, got $PWD" >&2
       exit 1
     fi
+    echo "1 row(s) affected"
     ;;
   init|config)
     exit 0
@@ -254,7 +259,7 @@ case "$1" in
     echo '[]'
     ;;
 esac
-`, depLogPath, expectedWD, expectedWD)
+`, sqlLogPath, expectedWD, expectedWD)
 	writeRoutingBdStub(t, scriptBody)
 
 	// Override the entropy source for deterministic convoy IDs.
@@ -269,13 +274,18 @@ esac
 		t.Fatalf("runConvoyCreate: %v", err)
 	}
 
-	// Verify dep add was called from the town root
-	logData, err := os.ReadFile(depLogPath)
+	// Verify bd sql was called from the town root
+	logData, err := os.ReadFile(sqlLogPath)
 	if err != nil {
-		t.Fatalf("dep add was never called (no log file): %v", err)
+		t.Fatalf("bd sql was never called (no log file): %v", err)
 	}
-	logged := strings.TrimSpace(string(logData))
-	if logged != expectedWD {
-		t.Errorf("dep add ran from %q, want town root %q", logged, expectedWD)
+	lines := strings.Split(strings.TrimSpace(string(logData)), "\n")
+	for _, line := range lines {
+		if !strings.HasPrefix(line, expectedWD+":") {
+			t.Errorf("bd sql ran from wrong dir: %s", line)
+		}
+		if !strings.Contains(line, "INSERT IGNORE INTO dependencies") {
+			t.Errorf("expected INSERT query, got: %s", line)
+		}
 	}
 }
