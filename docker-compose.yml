@@ -29,7 +29,7 @@ services:
       # or provided as an environment variable when running docker compose,
       # e.g. FOLDER=/home/user docker compose up
       - agent-home:/home/agent
-      - ${FOLDER}:/gt
+      - ${FOLDER:-.}:/gt
       # Dolt data on a proper ext4 volume (not the macOS bind mount) to
       # avoid journal corruption from VirtioFS fsync semantics.
       - dolt-data:/gt/.dolt-data
