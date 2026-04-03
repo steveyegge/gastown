@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     netcat-openbsd \
     tini \
     vim \
+    libicu-dev \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 # Upgrade OpenCode to pinned version (replaces base image copy in-place)
