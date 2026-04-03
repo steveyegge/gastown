@@ -170,12 +170,9 @@
 [branch "dog/alpha-faultline-1775234478212"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/obsidian/fl-leg-nrvw4@mnj5c8cy"]
-	remote = origin
-	merge = refs/heads/main
 [branch "polecat/quartz/fl-leg-cij4q@mnj5d7lt"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/jasper/fl-leg-anaxs@mnj5gjm0"]
+[branch "polecat/jasper/fl-leg-jpgqa@mnj5hpct"]
 	remote = origin
 	merge = refs/heads/main

@@ -44,10 +44,10 @@ func (h *Handler) registerDatabaseRoutes(mux *http.ServeMux) {
 // databaseResponse is the JSON shape returned for a monitored database.
 // Connection strings are always masked in responses.
 type databaseResponse struct {
-	ID               int64  `json:"id"`
+	ID               string `json:"id"`
 	ProjectID        int64  `json:"project_id"`
 	Name             string `json:"name"`
-	Engine           string `json:"engine"`
+	DBType           string `json:"db_type"`
 	ConnectionString string `json:"connection_string"` // masked
 	Enabled          bool   `json:"enabled"`
 	CheckIntervalSec int    `json:"check_interval_sec"`
@@ -61,7 +61,7 @@ func maskDatabase(m *db.MonitoredDatabase) databaseResponse {
 		ID:               m.ID,
 		ProjectID:        m.ProjectID,
 		Name:             m.Name,
-		Engine:           m.Engine,
+		DBType:           m.DBType,
 		ConnectionString: connStr,
 		Enabled:          m.Enabled,
 		CheckIntervalSec: m.CheckIntervalSec,
@@ -94,8 +94,8 @@ func (h *Handler) listDatabases(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) getDatabase(w http.ResponseWriter, r *http.Request) {
 	projectID := pathInt64(r, "project_id")
-	databaseID := pathInt64(r, "database_id")
-	if projectID <= 0 || databaseID <= 0 {
+	databaseID := r.PathValue("database_id")
+	if projectID <= 0 || databaseID == "" {
 		writeErr(w, http.StatusBadRequest, "invalid parameters")
 		return
 	}
@@ -111,7 +111,7 @@ func (h *Handler) getDatabase(w http.ResponseWriter, r *http.Request) {
 
 type createDatabaseRequest struct {
 	Name             string `json:"name"`
-	Engine           string `json:"engine"`
+	DBType           string `json:"db_type"`
 	ConnectionString string `json:"connection_string"`
 	Enabled          *bool  `json:"enabled"`
 	CheckIntervalSec int    `json:"check_interval_sec"`
@@ -134,8 +134,8 @@ func (h *Handler) createDatabase(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if req.Engine == "" {
-		writeErr(w, http.StatusBadRequest, "engine is required")
+	if req.DBType == "" {
+		writeErr(w, http.StatusBadRequest, "db_type is required")
 		return
 	}
 	if req.ConnectionString == "" {
@@ -159,7 +159,7 @@ func (h *Handler) createDatabase(w http.ResponseWriter, r *http.Request) {
 	m := &db.MonitoredDatabase{
 		ProjectID:        projectID,
 		Name:             req.Name,
-		Engine:           req.Engine,
+		DBType:           req.DBType,
 		ConnectionString: connBytes,
 		Enabled:          enabled,
 		CheckIntervalSec: req.CheckIntervalSec,
@@ -176,8 +176,8 @@ func (h *Handler) createDatabase(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) updateDatabase(w http.ResponseWriter, r *http.Request) {
 	projectID := pathInt64(r, "project_id")
-	databaseID := pathInt64(r, "database_id")
-	if projectID <= 0 || databaseID <= 0 {
+	databaseID := r.PathValue("database_id")
+	if projectID <= 0 || databaseID == "" {
 		writeErr(w, http.StatusBadRequest, "invalid parameters")
 		return
 	}
@@ -198,8 +198,8 @@ func (h *Handler) updateDatabase(w http.ResponseWriter, r *http.Request) {
 	if req.Name != "" {
 		existing.Name = req.Name
 	}
-	if req.Engine != "" {
-		existing.Engine = req.Engine
+	if req.DBType != "" {
+		existing.DBType = req.DBType
 	}
 	if req.ConnectionString != "" {
 		connBytes, err := h.encryptConnectionString(req.ConnectionString)
@@ -228,8 +228,8 @@ func (h *Handler) updateDatabase(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) deleteDatabase(w http.ResponseWriter, r *http.Request) {
 	projectID := pathInt64(r, "project_id")
-	databaseID := pathInt64(r, "database_id")
-	if projectID <= 0 || databaseID <= 0 {
+	databaseID := r.PathValue("database_id")
+	if projectID <= 0 || databaseID == "" {
 		writeErr(w, http.StatusBadRequest, "invalid parameters")
 		return
 	}
@@ -245,8 +245,8 @@ func (h *Handler) deleteDatabase(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) testDatabaseConnection(w http.ResponseWriter, r *http.Request) {
 	projectID := pathInt64(r, "project_id")
-	databaseID := pathInt64(r, "database_id")
-	if projectID <= 0 || databaseID <= 0 {
+	databaseID := r.PathValue("database_id")
+	if projectID <= 0 || databaseID == "" {
 		writeErr(w, http.StatusBadRequest, "invalid parameters")
 		return
 	}
@@ -266,7 +266,7 @@ func (h *Handler) testDatabaseConnection(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Attempt a basic connection test using database/sql.
-	testDB, err := openTestConnection(m.Engine, connStr)
+	testDB, err := openTestConnection(m.DBType, connStr)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false,
@@ -291,8 +291,8 @@ func (h *Handler) testDatabaseConnection(w http.ResponseWriter, r *http.Request)
 
 func (h *Handler) listDatabaseChecks(w http.ResponseWriter, r *http.Request) {
 	projectID := pathInt64(r, "project_id")
-	databaseID := pathInt64(r, "database_id")
-	if projectID <= 0 || databaseID <= 0 {
+	databaseID := r.PathValue("database_id")
+	if projectID <= 0 || databaseID == "" {
 		writeErr(w, http.StatusBadRequest, "invalid parameters")
 		return
 	}

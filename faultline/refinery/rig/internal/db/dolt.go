@@ -141,18 +141,6 @@ func Open(dsn string) (*DB, error) {
 		_ = sqldb.Close()
 		return nil, fmt.Errorf("dolt migrate snooze: %w", err)
 	}
-	if err := d.migrateMonitoredDatabases(context.Background()); err != nil {
-		_ = sqldb.Close()
-		return nil, fmt.Errorf("dolt migrate monitored_databases: %w", err)
-	}
-	if err := d.migrateDBChecks(context.Background()); err != nil {
-		_ = sqldb.Close()
-		return nil, fmt.Errorf("dolt migrate db_checks: %w", err)
-	}
-	if err := d.migrateDBMonitorState(context.Background()); err != nil {
-		_ = sqldb.Close()
-		return nil, fmt.Errorf("dolt migrate db_monitor_state: %w", err)
-	}
 	if err := d.migrateDBMonitors(context.Background()); err != nil {
 		_ = sqldb.Close()
 		return nil, fmt.Errorf("dolt migrate db_monitors: %w", err)

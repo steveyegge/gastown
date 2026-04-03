@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"fmt"
+	"html/template"
 	"time"
 
 	"github.com/outdoorsea/faultline/internal/db"
@@ -96,6 +97,33 @@ type ProjectView struct {
 	Uptime24h        string   // e.g. "99.8%" — uptime over last 24 hours
 	Sparkline        []int    // hourly event counts for last 24h (oldest first)
 	LatestRelease    string   // latest release version for this project
+}
+
+// Card class helpers — return plain strings to avoid templ RenderCSSItems
+// injecting <style> tags inside <a> elements (breaks grid layout).
+func cardSparklineClass(unresolvedIssues int) string {
+	if unresolvedIssues > 0 {
+		return "sparkline-container sparkline-alert"
+	}
+	return "sparkline-container"
+}
+
+func cardStatClass(condition bool, extra string) string {
+	if condition {
+		return "stat-value " + extra
+	}
+	return "stat-value"
+}
+
+func cardUptimeClass(uptime string) string {
+	switch {
+	case uptime == "100.0%":
+		return "stat-value stat-uptime-good"
+	case uptime != "":
+		return "stat-value stat-uptime-warn"
+	default:
+		return "stat-value"
+	}
 }
 
 func componentIcon(component string) string {
@@ -669,7 +697,7 @@ templ projectGridPartial(projects []ProjectView) {
 // Single project card — shared by full page and partial.
 templ projectCard(p ProjectView) {
 	<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues", p.ID)) } class="project-card">
-		<div class={ "card-status-bar", fmt.Sprintf("bar-%s", p.Status) }></div>
+		@templ.Raw(fmt.Sprintf(`<div class="card-status-bar bar-%s"></div>`, p.Status))
 		<div class="card-body">
 			<div class="card-title-row">
 				<div class="project-name">{ p.Name }</div>
@@ -690,9 +718,9 @@ templ projectCard(p ProjectView) {
 			<div class="project-desc">{ p.Description }</div>
 
 			if len(p.Sparkline) > 0 {
-				<div class={ "sparkline-container", templ.KV("sparkline-alert", p.UnresolvedIssues > 0) }>
+				@templ.Raw(fmt.Sprintf(`<div class="%s">`, cardSparklineClass(p.UnresolvedIssues)))
 					@templ.Raw(sparklineSVG(p.Sparkline))
-				</div>
+				@templ.Raw("</div>")
 			}
 
 			if p.LatestRelease != "" {
@@ -720,7 +748,7 @@ templ projectCard(p ProjectView) {
 
 			<div class="project-stats">
 				<div class="project-stat">
-					<span class={ "stat-value", templ.KV("stat-alert", p.UnresolvedIssues > 0) }>{ fmt.Sprintf("%d", p.UnresolvedIssues) }</span>
+					@templ.Raw(fmt.Sprintf(`<span class="%s">%d</span>`, cardStatClass(p.UnresolvedIssues > 0, "stat-alert"), p.UnresolvedIssues))
 					<span class="stat-label">faults</span>
 				</div>
 				if p.UnbeadedCount > 0 {
@@ -741,7 +769,7 @@ templ projectCard(p ProjectView) {
 				}
 				if p.Uptime24h != "" {
 					<div class="project-stat">
-						<span class={ "stat-value", templ.KV("stat-uptime-good", p.Uptime24h == "100.0%"), templ.KV("stat-uptime-warn", p.Uptime24h != "100.0%" && p.Uptime24h != "") }>{ p.Uptime24h }</span>
+						@templ.Raw(fmt.Sprintf(`<span class="%s">%s</span>`, cardUptimeClass(p.Uptime24h), template.HTMLEscapeString(p.Uptime24h)))
 						<span class="stat-label">uptime 24h</span>
 					</div>
 				}
@@ -750,7 +778,7 @@ templ projectCard(p ProjectView) {
 			if len(p.Environments) > 0 {
 				<div class="card-envs">
 					for _, env := range p.Environments {
-						<span class={ "env-badge", fmt.Sprintf("env-%s", env) }>{ env }</span>
+						@templ.Raw(fmt.Sprintf(`<span class="env-badge env-%s">%s</span>`, template.HTMLEscapeString(env), template.HTMLEscapeString(env)))
 					}
 				</div>
 			}
