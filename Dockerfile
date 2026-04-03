@@ -21,6 +21,9 @@ RUN apt-get update && apt-get install -y \
     vim \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
+# Upgrade OpenCode to pinned version (replaces base image copy in-place)
+RUN npm install -g opencode-ai@1.3.13
+
 # Install Go from official tarball (apt golang-go is too old)
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" | tar -C /usr/local -xz
