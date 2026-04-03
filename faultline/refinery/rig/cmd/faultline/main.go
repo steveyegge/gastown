@@ -153,10 +153,12 @@ func runServe() error {
 	// Self-monitoring: wrap the logger so error-level messages are reported
 	// as Sentry events to faultline's own ingest endpoint.
 	selfmonKey := os.Getenv("FAULTLINE_SELFMON_KEY")
+	selfmonProjectID := int64(1)
 	if selfmonKey == "" && len(records) > 0 {
 		selfmonKey = records[0].PublicKey
+		selfmonProjectID = records[0].ID
 	}
-	selfmonEndpoint := fmt.Sprintf("http://localhost%s/api/0/store/", addr)
+	selfmonEndpoint := fmt.Sprintf("http://localhost%s/api/%d/store/", addr, selfmonProjectID)
 	smHandler := selfmon.NewHandler(jsonHandler, selfmon.Config{
 		Endpoint:  selfmonEndpoint,
 		SentryKey: selfmonKey,

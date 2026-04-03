@@ -123,6 +123,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Database monitoring CRUD.
 	h.registerDatabaseRoutes(mux)
 
+	// Docker container monitoring.
+	h.registerContainerRoutes(mux)
+
 	// Without trailing slash variants.
 	mux.HandleFunc("GET /api/{project_id}/issues", auth(projAccess(h.listIssues)))
 	mux.HandleFunc("GET /api/{project_id}/issues/{issue_id}", auth(projAccess(h.getIssue)))

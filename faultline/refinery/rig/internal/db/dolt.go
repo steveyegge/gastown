@@ -152,7 +152,7 @@ func Open(dsn string) (*DB, error) {
 	return d, nil
 }
 
-const schemaVersion = 3
+const schemaVersion = 5
 
 func (d *DB) migrate(ctx context.Context) error {
 	// Create version tracking table.
@@ -172,9 +172,11 @@ func (d *DB) migrate(ctx context.Context) error {
 		return nil // already up to date
 	}
 
-	// Drop old v1 tables if they exist (pre-production, no data to preserve).
-	if ver < schemaVersion {
-		for _, t := range []string{"events", "issue_groups", "beads"} {
+	// Drop old v1 faultline tables if upgrading from v0.
+	// NOTE: Do NOT drop "events" — it's owned by beads (issue tracker) and
+	// shares this Dolt database. Faultline uses "ft_events" instead.
+	if ver == 0 {
+		for _, t := range []string{"issue_groups", "beads"} {
 			_, _ = d.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", t)) //nolint:gosec // table names are hardcoded above
 		}
 	}

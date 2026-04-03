@@ -209,3 +209,21 @@
 [branch "polecat/quartz/fl-1n2@mnjcxemv"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/quartz/fl-1n2@mnjd2ih3"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/jasper/fl-q69@mnjd2vy4"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/onyx/fl-m4e@mnjd3cbe"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/topaz/fl-csv@mnjd43uw"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/garnet/fl-4jt@mnjd5qp5"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/ruby/fl-c71@mnjd7fs0"]
+	remote = origin
+	merge = refs/heads/main

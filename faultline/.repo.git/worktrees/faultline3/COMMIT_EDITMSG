@@ -1,0 +1,15 @@
+feat: add Docker container monitoring core framework (fl-m4e)
+
+Create internal/dockermon/ package with Monitor struct implementing:
+- Event watcher goroutine for Docker /events stream
+- Stats poller goroutine (30s interval)
+- discoverContainers() for labeled containers (faultline.monitor=true)
+- evaluateState() threshold logic (memory, CPU, health, restarts)
+- OnStateChange callback for state transitions
+- Graceful socket unavailability handling (warn + retry 60s)
+- SQLDBProvider for persistence to monitored_containers, container_checks,
+  and container_monitor_state tables
+- Comprehensive unit tests (20 tests)
+
+Based on WIP from obsidian polecat session, completed with tests and
+dependency resolution.

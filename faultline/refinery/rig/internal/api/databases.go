@@ -344,6 +344,10 @@ func openTestConnection(engine, connStr string) (*sql.DB, error) {
 	switch engine {
 	case "mysql", "mariadb", "dolt":
 		return sql.Open("mysql", connStr)
+	case "postgres":
+		return sql.Open("postgres", connStr)
+	case "redis":
+		return nil, fmt.Errorf("redis test connection not supported via database/sql — use the Redis checker instead")
 	default:
 		return nil, fmt.Errorf("unsupported engine for test: %s", engine)
 	}

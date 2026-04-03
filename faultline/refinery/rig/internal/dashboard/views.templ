@@ -732,7 +732,7 @@ templ projectCard(p ProjectView) {
 			if len(p.Components) > 0 || len(p.Platforms) > 0 || p.URL != "" {
 				<div class="project-infra">
 					if p.URL != "" {
-						<a href={ templ.SafeURL(p.URL) } target="_blank" rel="noopener" class="infra-chip infra-link" title={ p.URL } onclick="event.stopPropagation();">🔗</a>
+						@templ.Raw(fmt.Sprintf(`<span class="infra-chip infra-link" title="%s" onclick="event.stopPropagation();window.open('%s','_blank')">🔗</span>`, template.HTMLEscapeString(p.URL), template.JSEscapeString(p.URL)))
 					}
 					if len(p.Components) > 0 {
 						for _, comp := range p.Components {

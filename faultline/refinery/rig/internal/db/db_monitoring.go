@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"crypto/rand"
-	encoding_hex "encoding/hex"
+	"encoding/hex"
 )
 
 // MonitoredDatabase represents a database being monitored.
@@ -53,11 +53,11 @@ func newUUID() string {
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%s-%s-%s-%s-%s",
-		encoding_hex.EncodeToString(b[0:4]),
-		encoding_hex.EncodeToString(b[4:6]),
-		encoding_hex.EncodeToString(b[6:8]),
-		encoding_hex.EncodeToString(b[8:10]),
-		encoding_hex.EncodeToString(b[10:16]))
+		hex.EncodeToString(b[0:4]),
+		hex.EncodeToString(b[4:6]),
+		hex.EncodeToString(b[6:8]),
+		hex.EncodeToString(b[8:10]),
+		hex.EncodeToString(b[10:16]))
 }
 
 // ListMonitoredDatabasesByProject returns all monitored databases for a project.
