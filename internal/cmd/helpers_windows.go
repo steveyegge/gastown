@@ -40,6 +40,24 @@ func attachToTmuxSession(sessionID string) error {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
+		// psmux on Windows can successfully list sessions but still fail
+		// attach-session with "can't find session" even when the session exists.
+		// Fall back to a plain attach invocation, which targets the most recent
+		// session and works reliably for the single-session attach workflow.
+		if !isInSameTmuxSocket() {
+			fallbackArgs := []string{"-u"}
+			if socket := tmux.GetDefaultSocket(); socket != "" {
+				fallbackArgs = append(fallbackArgs, "-L", socket)
+			}
+			fallbackArgs = append(fallbackArgs, "attach")
+			fallback := exec.Command(tmuxPath, fallbackArgs...)
+			fallback.Stdin = os.Stdin
+			fallback.Stdout = os.Stdout
+			fallback.Stderr = os.Stderr
+			if fallbackErr := fallback.Run(); fallbackErr == nil {
+				os.Exit(0)
+			}
+		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			os.Exit(exitErr.ExitCode())
 		}
