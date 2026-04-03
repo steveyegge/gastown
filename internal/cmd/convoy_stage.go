@@ -726,9 +726,11 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string, title strin
 	}
 
 	// Set the staged status.
-	statusCmd := exec.Command("bd", "update", convoyID, "--status="+status)
-	statusCmd.Dir = townBeads
-	if out, err := statusCmd.CombinedOutput(); err != nil {
+	// Strip BEADS_DIR so bd discovers the correct database from Dir()
+	// rather than using an inherited (possibly wrong) override.
+	if out, err := BdCmd("update", convoyID, "--status="+status).
+		Dir(townBeads).StripBeadsDir().WithAutoCommit().
+		CombinedOutput(); err != nil {
 		return "", fmt.Errorf("bd update convoy status: %w\noutput: %s", err, out)
 	}
 
@@ -1504,8 +1506,14 @@ func bdDepList(beadID string) ([]bdDepResult, error) {
 // routes.jsonl so this works regardless of the caller's working directory.
 func bdListChildren(parentID string) ([]bdShowResult, error) {
 	cmd := exec.Command("bd", "list", "--parent="+parentID, "--json")
-	if dir := beadsDirForID(parentID); dir != "" {
+	// Route to the correct rig database via prefix resolution.
+	// resolveBeadDir returns the parent of .beads (the working directory bd
+	// expects), unlike beadsDirForID which returns the .beads directory itself.
+	// Also strip BEADS_DIR to prevent inherited overrides from interfering
+	// with bd's workspace detection (consistent with bdShow/bdDepList).
+	if dir := resolveBeadDir(parentID); dir != "" && dir != "." {
 		cmd.Dir = dir
+		cmd.Env = filterEnvKey(os.Environ(), "BEADS_DIR")
 	}
 	out, err := cmd.Output()
 	if err != nil {

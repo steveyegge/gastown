@@ -407,7 +407,7 @@ func (d *testDAG) Setup(t *testing.T) (townRoot, logPath string) {
 	}
 
 	// Create rig .beads directories referenced by routes so that
-	// beadsDirForID() can resolve them and bdListChildren() can chdir.
+	// resolveBeadDir() can resolve them and bdListChildren() can chdir.
 	for _, b := range d.beads {
 		if b.Rig != "" {
 			rigBeadsDir := filepath.Join(townRoot, b.Rig, ".beads")
