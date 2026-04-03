@@ -1,0 +1,9 @@
+feat: add data model design analysis (fl-leg-yqpcq)
+
+Comprehensive analysis of faultline's 25+ table Dolt schema covering:
+- Current schema inventory and growth projections
+- Migration strategy recommendation (numbered SQL files)
+- Data lifecycle and access pattern analysis
+- Integration points and open questions
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

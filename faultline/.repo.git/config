@@ -179,9 +179,6 @@
 [branch "polecat/obsidian/fl-leg-t6dbg@mnj7ruyl"]
 	remote = origin
 	merge = refs/heads/main
-[branch "polecat/quartz/fl-leg-yqpcq@mnj7t2xd"]
-	remote = origin
-	merge = refs/heads/main
 [branch "polecat/jasper/fl-leg-nkiok@mnj7ufic"]
 	remote = origin
 	merge = refs/heads/main
