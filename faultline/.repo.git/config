@@ -197,3 +197,15 @@
 [branch "polecat/jasper/fl-q69@mnjcl55w"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/jasper/fl-m4e@mnjcnpj8"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/jasper/fl-4ya@mnjcqa9t"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/obsidian/fl-1n2@mnjcucn5"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/quartz/fl-1n2@mnjcxemv"]
+	remote = origin
+	merge = refs/heads/main
