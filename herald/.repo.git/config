@@ -100,3 +100,6 @@
 [branch "polecat/slit/he-leg-l2f4e@mni0rdaq"]
 	remote = origin
 	merge = refs/heads/main
+[branch "dog/alpha-herald-1775178841760"]
+	remote = origin
+	merge = refs/heads/main
