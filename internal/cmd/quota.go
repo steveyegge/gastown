@@ -30,7 +30,9 @@ func (quotaLogger) Warn(format string, args ...interface{}) {
 
 // Quota command flags
 var (
-	quotaJSON bool
+	quotaJSON      bool
+	statusProbe    bool
+	firstAvailable bool
 )
 
 var quotaCmd = &cobra.Command{
@@ -66,13 +68,14 @@ Examples:
 
 // QuotaStatusItem represents an account in status output.
 type QuotaStatusItem struct {
-	Handle    string `json:"handle"`
-	Email     string `json:"email"`
-	Status    string `json:"status"`
-	LimitedAt string `json:"limited_at,omitempty"`
-	ResetsAt  string `json:"resets_at,omitempty"`
-	LastUsed  string `json:"last_used,omitempty"`
-	IsDefault bool   `json:"is_default"`
+	Handle     string `json:"handle"`
+	Email      string `json:"email"`
+	Status     string `json:"status"`
+	LimitedAt  string `json:"limited_at,omitempty"`
+	ResetsAt   string `json:"resets_at,omitempty"`
+	LastUsed   string `json:"last_used,omitempty"`
+	IsDefault  bool   `json:"is_default"`
+	ProbeError string `json:"probe_error,omitempty"`
 }
 
 func runQuotaStatus(cmd *cobra.Command, args []string) error {
@@ -113,13 +116,83 @@ func runQuotaStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if quotaJSON {
-		return printQuotaStatusJSON(acctCfg, state)
+	probeErrors := make(map[string]string)
+	stateChanged := false
+	if statusProbe {
+		for _, handle := range slices.Sorted(maps.Keys(acctCfg.Accounts)) {
+			qs := state.Accounts[handle]
+			if qs.Status == config.QuotaStatusLimited {
+				continue
+			}
+			acct := acctCfg.Accounts[handle]
+			fmt.Fprintf(os.Stderr, "  Probing %s (%s)...\n", handle, acct.Email)
+			probeErr, resetsAt := probeAccount(handle, acct.ConfigDir)
+			if probeErr != nil {
+				probeErrors[handle] = probeErr.Error()
+				now := time.Now().UTC().Format(time.RFC3339)
+				state.Accounts[handle] = config.AccountQuotaState{
+					Status:    config.QuotaStatusLimited,
+					LimitedAt: now,
+					ResetsAt:  resetsAt,
+					LastUsed:  qs.LastUsed,
+				}
+				stateChanged = true
+			}
+		}
+		if stateChanged {
+			if err := mgr.Save(state); err != nil {
+				style.PrintWarning("could not persist probe results: %v", err)
+			}
+		}
 	}
-	return printQuotaStatusText(acctCfg, state)
+
+	if firstAvailable {
+		for _, handle := range slices.Sorted(maps.Keys(acctCfg.Accounts)) {
+			qs := state.Accounts[handle]
+			if qs.Status == config.QuotaStatusLimited {
+				continue
+			}
+			if _, hasErr := probeErrors[handle]; hasErr {
+				continue
+			}
+			fmt.Println(handle)
+			return nil
+		}
+		return fmt.Errorf("no available accounts")
+	}
+
+	if quotaJSON {
+		return printQuotaStatusJSON(acctCfg, state, probeErrors)
+	}
+	return printQuotaStatusText(acctCfg, state, probeErrors)
 }
 
-func printQuotaStatusJSON(acctCfg *config.AccountsConfig, state *config.QuotaState) error {
+// probeAccount checks if an account can make API calls using the non-LLM probe.
+func probeAccount(handle string, configDir string) (probeErr error, resetsAt string) {
+	expandedDir := util.ExpandHome(configDir)
+	svcName := quota.KeychainServiceName(expandedDir)
+	token, err := quota.ReadKeychainToken(svcName)
+	if err != nil {
+		return fmt.Errorf("cannot read credentials: %v", err), ""
+	}
+	if token == "" {
+		return fmt.Errorf("no token found"), ""
+	}
+
+	result := quota.ProbeAPIKey(quota.DefaultProbeURL, token)
+	switch result.Status {
+	case quota.ProbeUsable:
+		return nil, ""
+	case quota.ProbeLimited:
+		return fmt.Errorf("rate-limited (%d)", result.HTTPCode), ""
+	case quota.ProbeInvalid:
+		return fmt.Errorf("invalid token (%d)", result.HTTPCode), ""
+	default:
+		return fmt.Errorf("probe error: %s", result.StatusText), ""
+	}
+}
+
+func printQuotaStatusJSON(acctCfg *config.AccountsConfig, state *config.QuotaState, probeErrors map[string]string) error {
 	var items []QuotaStatusItem
 	for _, handle := range slices.Sorted(maps.Keys(acctCfg.Accounts)) {
 		acct := acctCfg.Accounts[handle]
@@ -128,7 +201,7 @@ func printQuotaStatusJSON(acctCfg *config.AccountsConfig, state *config.QuotaSta
 		if status == "" {
 			status = string(config.QuotaStatusAvailable)
 		}
-		items = append(items, QuotaStatusItem{
+		item := QuotaStatusItem{
 			Handle:    handle,
 			Email:     acct.Email,
 			Status:    status,
@@ -136,14 +209,18 @@ func printQuotaStatusJSON(acctCfg *config.AccountsConfig, state *config.QuotaSta
 			ResetsAt:  qs.ResetsAt,
 			LastUsed:  qs.LastUsed,
 			IsDefault: handle == acctCfg.Default,
-		})
+		}
+		if probeErrors != nil {
+			item.ProbeError = probeErrors[handle]
+		}
+		items = append(items, item)
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(items)
 }
 
-func printQuotaStatusText(acctCfg *config.AccountsConfig, state *config.QuotaState) error {
+func printQuotaStatusText(acctCfg *config.AccountsConfig, state *config.QuotaState, probeErrors map[string]string) error {
 	available := 0
 	limited := 0
 
@@ -188,7 +265,14 @@ func printQuotaStatusText(acctCfg *config.AccountsConfig, state *config.QuotaSta
 			email = style.Dim.Render(" <" + acct.Email + ">")
 		}
 
-		fmt.Printf(" %s %-12s %s%s\n", marker, handle, badge, email)
+		probeNote := ""
+		if probeErrors != nil {
+			if pe, ok := probeErrors[handle]; ok {
+				probeNote = style.Dim.Render(" [probe: " + pe + "]")
+			}
+		}
+
+		fmt.Printf(" %s %-12s %s%s%s\n", marker, handle, badge, email, probeNote)
 	}
 
 	fmt.Println()
@@ -959,6 +1043,8 @@ func runWatchCycle(townRoot string, acctCfg *config.AccountsConfig) {
 
 func init() {
 	quotaStatusCmd.Flags().BoolVar(&quotaJSON, "json", false, "Output as JSON")
+	quotaStatusCmd.Flags().BoolVar(&statusProbe, "probe", false, "Actively validate each account with a lightweight API call")
+	quotaStatusCmd.Flags().BoolVar(&firstAvailable, "first-available", false, "With --probe, print only the first available account handle and exit")
 
 	quotaScanCmd.Flags().BoolVar(&quotaJSON, "json", false, "Output as JSON")
 	quotaScanCmd.Flags().BoolVar(&scanUpdate, "update", false, "Update quota state with detected limits")
