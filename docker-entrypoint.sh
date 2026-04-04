@@ -29,6 +29,11 @@ if [ -n "$GH_APP_PEM" ]; then
     (while true; do sleep 3000; gh_app_refresh; done) &
 fi
 
+# --- Fireworks AI env var alias (OpenCode expects FIREWORKS_API_KEY) ---
+if [ -n "$FIREWORKS_AI_API_KEY" ]; then
+    export FIREWORKS_API_KEY="$FIREWORKS_AI_API_KEY"
+fi
+
 # --- Git/Dolt identity ---
 if [ -n "$GIT_USER" ] && [ -n "$GIT_EMAIL" ]; then
     git config --global user.name "$GIT_USER"
@@ -46,13 +51,22 @@ if [ ! -f /gt/mayor/town.json ]; then
     
     # Configure agents
     echo "Configuring agents..."
-    /app/gastown/gt config agent set opencode "gt-opencode -m fireworks-ai/accounts/fireworks/routers/kimi-k2p5-turbo"
+    /app/gastown/gt config default-agent opencode
 
     # Seed OpenCode default model (standalone opencode picks most recent)
     mkdir -p "$HOME/.local/state/opencode"
     cat > "$HOME/.local/state/opencode/model.json" <<'MODELJSON'
 {"recent":[{"providerID":"fireworks-ai","modelID":"accounts/fireworks/routers/kimi-k2p5-turbo"}],"favorite":[],"variant":{}}
 MODELJSON
+
+    # Seed OpenCode auth for Fireworks AI (OpenCode expects FIREWORKS_API_KEY,
+    # but Kamal passes FIREWORKS_AI_API_KEY — bridge the gap via auth.json)
+    if [ -n "$FIREWORKS_AI_API_KEY" ]; then
+        mkdir -p "$HOME/.local/share/opencode"
+        cat > "$HOME/.local/share/opencode/auth.json" <<AUTHJSON
+{"fireworks-ai":{"type":"api","key":"$FIREWORKS_AI_API_KEY"}}
+AUTHJSON
+    fi
 else
     # Subsequent runs: refresh in background so dashboard starts fast
     echo "Refreshing Gas Town workspace at /gt (background)..."
