@@ -405,6 +405,17 @@ func parseEtime(etime string) (int, error) {
 	return days*86400 + hours*3600 + minutes*60 + seconds, nil
 }
 
+// isAgentOrphanCommName returns true if the ps "comm" field names a runtime we track for
+// TTY-less orphan / zombie cleanup (matches internal/config agent presets).
+func isAgentOrphanCommName(cmdLower string) bool {
+	switch cmdLower {
+	case "claude", "claude-code", "codex", "opencode", "cursor-agent", "agent", "copilot":
+		return true
+	default:
+		return false
+	}
+}
+
 // OrphanedProcess represents a claude process running without a controlling terminal.
 type OrphanedProcess struct {
 	PID      int
@@ -413,7 +424,8 @@ type OrphanedProcess struct {
 	TownRoot string // Gas Town workspace root, or "" if not in any workspace
 }
 
-// FindOrphanedClaudeProcesses finds claude/codex/opencode processes without a controlling terminal.
+// FindOrphanedClaudeProcesses finds Gas Town agent processes (claude/codex/opencode/cursor-agent/copilot, etc.)
+// without a controlling terminal.
 // These are typically subagent processes spawned by Claude Code's Task tool that didn't
 // clean up properly after completion.
 //
@@ -467,9 +479,9 @@ func FindOrphanedClaudeProcesses() ([]OrphanedProcess, error) {
 			continue
 		}
 
-		// Match claude, codex, or opencode command names
+		// Match known agent comm names (claude family, opencode, Cursor, Copilot CLI)
 		cmdLower := strings.ToLower(cmd)
-		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" && cmdLower != "opencode" {
+		if !isAgentOrphanCommName(cmdLower) {
 			continue
 		}
 
@@ -582,9 +594,8 @@ func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
 		cmd := fields[2]
 		etimeStr := fields[3]
 
-		// Match claude, codex, or opencode command names
 		cmdLower := strings.ToLower(cmd)
-		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" && cmdLower != "opencode" {
+		if !isAgentOrphanCommName(cmdLower) {
 			continue
 		}
 

@@ -409,8 +409,39 @@ func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) { //noli
 	return pids, nil
 }
 
-// findRuntimeProcesses finds Gas Town Claude processes (those with --dangerously-skip-permissions).
-// Only detects processes started by Gas Town, not user's personal Claude sessions.
+// argvHasFlag reports whether argv (full command line) contains a standalone flag token.
+func argvHasFlag(args, flag string) bool {
+	for _, tok := range strings.Fields(args) {
+		if tok == flag || strings.HasPrefix(tok, flag+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+// gasTownRuntimeYOLO returns true when argv matches a Gas Town-managed agent (YOLO / auto-approve),
+// excluding personal interactive sessions that omit these flags.
+func gasTownRuntimeYOLO(cmdName, args string) bool {
+	cmdName = strings.ToLower(filepath.Base(cmdName))
+	switch cmdName {
+	case "claude", "claude-code", "codex":
+		return strings.Contains(args, "--dangerously-skip-permissions")
+	case "cursor-agent":
+		return argvHasFlag(args, "-f")
+	case "agent":
+		// Install may symlink cursor-agent as "agent"; require -f plus a Cursor-specific token.
+		return argvHasFlag(args, "-f") &&
+			(strings.Contains(args, "--resume") || argvHasFlag(args, "-p") || strings.Contains(args, "--print"))
+	case "copilot":
+		return strings.Contains(args, "--yolo")
+	default:
+		return false
+	}
+}
+
+// findRuntimeProcesses finds Gas Town agent processes by per-provider YOLO / launch signatures
+// in argv (not comm name alone): claude/codex --dangerously-skip-permissions, cursor-agent -f,
+// copilot --yolo, etc.
 func (c *OrphanProcessCheck) findRuntimeProcesses() ([]processInfo, error) {
 	var procs []processInfo
 
@@ -432,18 +463,10 @@ func (c *OrphanProcessCheck) findRuntimeProcesses() ([]processInfo, error) {
 			cmd = cmd[idx+1:]
 		}
 
-		// Only match claude/codex processes, not tmux or other launchers
-		// (tmux command line may contain --dangerously-skip-permissions as part of the launched command)
-		if cmd != "claude" && cmd != "claude-code" && cmd != "codex" {
-			continue
-		}
-
 		// Get full args
 		args := strings.Join(fields[2:], " ")
 
-		// Only match Gas Town Claude processes (have --dangerously-skip-permissions)
-		// This excludes user's personal Claude sessions
-		if !strings.Contains(args, "--dangerously-skip-permissions") {
+		if !gasTownRuntimeYOLO(cmd, args) {
 			continue
 		}
 

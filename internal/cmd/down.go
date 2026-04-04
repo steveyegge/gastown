@@ -742,8 +742,8 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 	return respawned
 }
 
-// findOrphanedClaudeProcesses finds Claude/node processes that are running in the
-// town directory but aren't associated with any active tmux session.
+// findOrphanedClaudeProcesses finds Gas Town agent processes (claude/codex/opencode/cursor-agent/copilot/node)
+// that are running in the town directory but aren't associated with any active tmux session.
 // This can happen when tmux sessions are killed but child processes don't terminate.
 //
 // Only matches processes whose full command line references the town root path,
@@ -778,7 +778,7 @@ func findOrphanedClaudeProcesses(townRoot string) []int {
 		// Only consider known Gas Town process names
 		comm := strings.ToLower(fields[1])
 		switch comm {
-		case "claude", "claude-code", "codex", "node":
+		case "claude", "claude-code", "codex", "opencode", "cursor-agent", "agent", "copilot", "node":
 			// Potential Gas Town process
 		default:
 			continue
@@ -1205,4 +1205,3 @@ func containsPathBoundary(line, path string) bool {
 	}
 	return false
 }
-
