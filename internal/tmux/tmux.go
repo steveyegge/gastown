@@ -1272,7 +1272,6 @@ func nudgeFlockPath(townRoot, session string) string {
 	return filepath.Join(townRoot, constants.DirRuntime, "nudge_queue", safe, ".lock")
 }
 
-
 // IsSessionAttached returns true if the session has any clients attached.
 func (t *Tmux) IsSessionAttached(target string) bool {
 	attached, err := t.run("display-message", "-t", target, "-p", "#{session_attached}")
@@ -1433,9 +1432,9 @@ func (t *Tmux) dismissRewindMode(target string) {
 // Falls back to best-effort (no verification) if pane capture fails.
 func (t *Tmux) sendEnterVerified(target string) error {
 	const (
-		maxRetries       = 3
-		initialBackoff   = 500 * time.Millisecond
-		verifyLines      = 5 // capture last N lines for comparison
+		maxRetries     = 3
+		initialBackoff = 500 * time.Millisecond
+		verifyLines    = 5 // capture last N lines for comparison
 	)
 
 	// Snapshot pane content before Enter so we can detect processing.
@@ -2029,7 +2028,7 @@ func (t *Tmux) findAgentPaneByScan(session string) (string, error) {
 		paneCmd := parts[1]
 		panePID := parts[2]
 
-		if matchesPaneRuntime(paneCmd, panePID, processNames) {
+		if t.matchesPaneRuntime(session, paneCmd, panePID, processNames) {
 			return paneID, nil
 		}
 	}
@@ -2560,7 +2559,7 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 
 	// ZFC: check declared pane identity set at session startup (gt-qmsx).
 	if declaredPane, err := t.GetEnvironment(session, "GT_PANE_ID"); err == nil && declaredPane != "" {
-		if t.checkTargetPaneForRuntime(declaredPane, processNames) {
+		if t.checkTargetPaneForRuntime(session, declaredPane, processNames) {
 			return true
 		}
 		// On Windows (psmux), pane IDs like %1 may not be supported by
@@ -2584,7 +2583,7 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 			continue
 		}
 		cmd, pid := parts[0], parts[1]
-		if matchesPaneRuntime(cmd, pid, processNames) {
+		if t.matchesPaneRuntime(session, cmd, pid, processNames) {
 			return true
 		}
 	}
@@ -2593,13 +2592,13 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 
 // checkTargetPaneForRuntime checks if a specific pane (by ID, e.g., "%5") is
 // running a matching process. Used by the ZFC path when GT_PANE_ID is declared.
-func (t *Tmux) checkTargetPaneForRuntime(paneID string, processNames []string) bool {
+func (t *Tmux) checkTargetPaneForRuntime(session, paneID string, processNames []string) bool {
 	cmd, err := t.run("display-message", "-t", paneID, "-p", "#{pane_current_command}")
 	if err != nil {
 		return false // pane doesn't exist
 	}
 	pid, _ := t.run("display-message", "-t", paneID, "-p", "#{pane_pid}")
-	return matchesPaneRuntime(strings.TrimSpace(cmd), strings.TrimSpace(pid), processNames)
+	return t.matchesPaneRuntime(session, strings.TrimSpace(cmd), strings.TrimSpace(pid), processNames)
 }
 
 // checkPaneForRuntime checks if the first window's pane is running a matching process.
@@ -2609,13 +2608,62 @@ func (t *Tmux) checkPaneForRuntime(session string, processNames []string) bool {
 		return false
 	}
 	pid, _ := t.GetPanePID(session)
-	return matchesPaneRuntime(cmd, pid, processNames)
+	return t.matchesPaneRuntime(session, cmd, pid, processNames)
+}
+
+// cursorAgentSessionDeclaresCursor reports whether tmux session env identifies the Cursor
+// runtime (preset "cursor"). Used to disambiguate the generic process name "agent" (Cursor's
+// install script symlinks `agent` to the same binary as cursor-agent) from unrelated binaries
+// named `agent`. The most reliable signal is GT_AGENT=cursor together with GT_PROCESS_NAMES
+// set at session startup (see internal/session/lifecycle.go).
+func cursorAgentSessionDeclaresCursor(t *Tmux, session string) bool {
+	if t == nil || session == "" {
+		return false
+	}
+	agent, err := t.GetEnvironment(session, "GT_AGENT")
+	if err == nil && agent == string(config.AgentCursor) {
+		return true
+	}
+	if names, err := t.GetEnvironment(session, "GT_PROCESS_NAMES"); err == nil && names != "" {
+		for _, n := range strings.Split(names, ",") {
+			if strings.TrimSpace(n) == "cursor-agent" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func withoutProcessName(names []string, drop string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if n != drop {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// processNamesForSession returns process names for pane matching, dropping the ambiguous
+// name "agent" unless the session declares the Cursor runtime.
+func processNamesForSession(t *Tmux, session string, processNames []string) []string {
+	if len(processNames) == 0 {
+		return processNames
+	}
+	if cursorAgentSessionDeclaresCursor(t, session) {
+		return processNames
+	}
+	return withoutProcessName(processNames, "agent")
 }
 
 // matchesPaneRuntime checks if a pane with the given command and PID is running a matching process.
-func matchesPaneRuntime(cmd, pid string, processNames []string) bool {
+func (t *Tmux) matchesPaneRuntime(session, cmd, pid string, processNames []string) bool {
+	names := processNamesForSession(t, session, processNames)
+	if len(names) == 0 {
+		return false
+	}
 	// Direct command match
-	for _, name := range processNames {
+	for _, name := range names {
 		if cmd == name {
 			return true
 		}
@@ -2626,15 +2674,15 @@ func matchesPaneRuntime(cmd, pid string, processNames []string) bool {
 	// If pane command is a shell, check descendants
 	for _, shell := range constants.SupportedShells {
 		if cmd == shell {
-			return hasDescendantWithNames(pid, processNames, 0)
+			return hasDescendantWithNames(pid, names, 0)
 		}
 	}
 	// Unrecognized command: check if process itself matches (version-as-argv[0])
-	if processMatchesNames(pid, processNames) {
+	if processMatchesNames(pid, names) {
 		return true
 	}
 	// Finally check descendants as fallback
-	return hasDescendantWithNames(pid, processNames, 0)
+	return hasDescendantWithNames(pid, names, 0)
 }
 
 // IsAgentAlive checks if an agent is running in the session using agent-agnostic detection.

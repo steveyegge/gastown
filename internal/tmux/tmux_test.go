@@ -481,6 +481,34 @@ func TestIsAgentRunning_NonexistentSession(t *testing.T) {
 	}
 }
 
+func TestIsRuntimeRunning_AgentNameRequiresCursorSession(t *testing.T) {
+	tm := newTestTmux(t)
+	sessionName := "gt-test-runtime-agent-filter-" + t.Name()
+	_ = tm.KillSession(sessionName)
+	if err := tm.NewSessionWithCommand(sessionName, "", "sleep 60"); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// sleep matches; "agent" in the list is ignored when session does not declare Cursor
+	if !tm.IsRuntimeRunning(sessionName, []string{"agent", "sleep"}) {
+		t.Error("expected sleep to match when agent is stripped for non-cursor sessions")
+	}
+	if tm.IsRuntimeRunning(sessionName, []string{"agent"}) {
+		t.Error("expected bare agent not to match without GT_AGENT=cursor / GT_PROCESS_NAMES")
+	}
+	if err := tm.SetEnvironment(sessionName, "GT_AGENT", "cursor"); err != nil {
+		t.Fatalf("SetEnvironment: %v", err)
+	}
+	// With Cursor declared, "agent" is kept in the filter list (pane is still sleep — no match on agent alone)
+	if tm.IsRuntimeRunning(sessionName, []string{"agent"}) {
+		t.Error("pane is sleep, not agent — should not match on agent name alone")
+	}
+	if !tm.IsRuntimeRunning(sessionName, []string{"agent", "sleep"}) {
+		t.Error("expected sleep to still match with GT_AGENT=cursor")
+	}
+}
+
 func TestIsRuntimeRunning(t *testing.T) {
 	tm := newTestTmux(t)
 	sessionName := "gt-test-runtime-" + t.Name()

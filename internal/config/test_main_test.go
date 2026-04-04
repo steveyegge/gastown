@@ -41,10 +41,14 @@ func TestMain(m *testing.M) {
 
 	originalPath := os.Getenv("PATH")
 	_ = os.Setenv("PATH", stubDir+string(os.PathListSeparator)+originalPath)
+	// cursor_agent_cli_test.go skips this directory when resolving a real cursor-agent
+	// (must stay in sync — do not rename without updating that resolver).
+	_ = os.Setenv("GT_AGENT_STUB_BIN_DIR", stubDir)
 
 	code := m.Run()
 
 	_ = os.Setenv("PATH", originalPath)
+	_ = os.Unsetenv("GT_AGENT_STUB_BIN_DIR")
 	_ = os.RemoveAll(stubDir)
 	os.Exit(code)
 }

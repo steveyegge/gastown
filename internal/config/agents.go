@@ -59,7 +59,7 @@ type AgentPresetInfo struct {
 
 	// ProcessNames are the process names to look for when detecting if the agent is running.
 	// Used by tmux.IsAgentRunning to check pane_current_command.
-	// E.g., ["node"] for Claude, ["cursor-agent"] for Cursor.
+	// E.g., ["node"] for Claude, ["cursor-agent", "agent"] for Cursor (install script symlinks both names).
 	ProcessNames []string `json:"process_names,omitempty"`
 
 	// SessionIDEnv is the environment variable for session ID.
@@ -283,15 +283,18 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		InstructionsFile:  "AGENTS.md",
 	},
 	AgentCursor: {
-		Name:                AgentCursor,
-		Command:             "cursor-agent",
-		Args:                []string{"-f"}, // Force mode (YOLO equivalent), -p requires prompt
-		ProcessNames:        []string{"cursor-agent"},
+		Name:    AgentCursor,
+		Command: "cursor-agent",
+		// -f/--force: auto-approve tool use (see cursor-agent --help). Install script also symlinks "agent" -> same binary.
+		Args: []string{"-f"},
+		// cursor-agent + agent (install symlinks). Pane matching for "agent" requires session env (GT_AGENT=cursor or GT_PROCESS_NAMES includes cursor-agent); see internal/tmux processNamesForSession.
+		ProcessNames:        []string{"cursor-agent", "agent"},
 		SessionIDEnv:        "", // Uses --resume with chatId directly
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
 		SupportsHooks:       true,
 		SupportsForkSession: false,
+		// Non-interactive/headless: -p/--print + --output-format json (matches cursor-agent --help).
 		NonInteractive: &NonInteractiveConfig{
 			PromptFlag: "-p",
 			OutputFlag: "--output-format json",
@@ -301,7 +304,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ConfigDir:         ".cursor",
 		HooksProvider:     "cursor",
 		HooksDir:          ".cursor",
-		HooksSettingsFile: "hooks.json",
+		HooksSettingsFile: "hooks.json", // installed path: .cursor/hooks.json
 		InstructionsFile:  "AGENTS.md",
 	},
 	AgentAuggie: {

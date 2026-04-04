@@ -610,7 +610,7 @@ func TestGetProcessNames(t *testing.T) {
 		{"claude", []string{"node", "claude"}},
 		{"gemini", []string{"gemini"}},
 		{"codex", []string{"codex"}},
-		{"cursor", []string{"cursor-agent"}},
+		{"cursor", []string{"cursor-agent", "agent"}},
 		{"auggie", []string{"auggie"}},
 		{"amp", []string{"amp"}},
 		{"opencode", []string{"opencode", "node", "bun"}},
@@ -754,8 +754,7 @@ func TestCursorAgentPreset(t *testing.T) {
 		t.Errorf("cursor command = %q, want cursor-agent", info.Command)
 	}
 
-	// Check YOLO-equivalent flag (-f for force mode)
-	// Note: -p is for non-interactive mode with prompt, not used for default Args
+	// Check YOLO-equivalent flag (-f for force mode; CLI also documents --force / --yolo)
 	hasF := false
 	for _, arg := range info.Args {
 		if arg == "-f" {
@@ -766,12 +765,16 @@ func TestCursorAgentPreset(t *testing.T) {
 		t.Error("cursor args missing -f (force/YOLO mode)")
 	}
 
-	// Check ProcessNames for detection
-	if len(info.ProcessNames) == 0 {
-		t.Error("cursor ProcessNames is empty")
+	// Check ProcessNames for detection (install script provides both "agent" and "cursor-agent" symlinks).
+	// Tmux only treats "agent" as Cursor when GT_AGENT=cursor or GT_PROCESS_NAMES includes cursor-agent.
+	seen := make(map[string]bool, len(info.ProcessNames))
+	for _, n := range info.ProcessNames {
+		seen[n] = true
 	}
-	if info.ProcessNames[0] != "cursor-agent" {
-		t.Errorf("cursor ProcessNames[0] = %q, want cursor-agent", info.ProcessNames[0])
+	for _, name := range []string{"agent", "cursor-agent"} {
+		if !seen[name] {
+			t.Errorf("cursor ProcessNames missing %q (got %v)", name, info.ProcessNames)
+		}
 	}
 
 	// Check resume support
