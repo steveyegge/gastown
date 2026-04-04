@@ -203,3 +203,157 @@ func TestRedispatchState_GetBeadState(t *testing.T) {
 		t.Error("expected different bead state for different ID")
 	}
 }
+
+func TestLoadModelEscalationConfig(t *testing.T) {
+	t.Run("missing file returns nil", func(t *testing.T) {
+		cfg, err := LoadModelEscalationConfig(t.TempDir())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg != nil {
+			t.Error("expected nil config for missing file")
+		}
+	})
+
+	t.Run("loads valid config", func(t *testing.T) {
+		dir := t.TempDir()
+		gastown := filepath.Join(dir, ".gastown")
+		if err := os.MkdirAll(gastown, 0755); err != nil {
+			t.Fatal(err)
+		}
+		content := `{
+			"type": "model-escalation",
+			"version": 1,
+			"enabled": true,
+			"rules": [
+				{
+					"from_agent": "claude-sonnet",
+					"to_agent": "claude",
+					"promote_after_failures": 1
+				}
+			]
+		}`
+		if err := os.WriteFile(filepath.Join(gastown, "model-escalation.json"), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := LoadModelEscalationConfig(dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg == nil {
+			t.Fatal("expected non-nil config")
+		}
+		if !cfg.Enabled {
+			t.Error("expected enabled=true")
+		}
+		if len(cfg.Rules) != 1 {
+			t.Fatalf("expected 1 rule, got %d", len(cfg.Rules))
+		}
+		if cfg.Rules[0].ToAgent != "claude" {
+			t.Errorf("expected ToAgent=claude, got %q", cfg.Rules[0].ToAgent)
+		}
+	})
+}
+
+func TestResolveAgentForRedispatch(t *testing.T) {
+	// Build a temp town with a fake rig project directory containing escalation config.
+	townDir := t.TempDir()
+	rigName := "myrig"
+	rigProjectDir := filepath.Join(townDir, rigName, "refinery", "rig", ".gastown")
+	if err := os.MkdirAll(rigProjectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configContent := `{
+		"type": "model-escalation",
+		"version": 1,
+		"enabled": true,
+		"rules": [
+			{
+				"from_agent": "claude-sonnet",
+				"to_agent": "claude",
+				"promote_after_failures": 1
+			}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(rigProjectDir, "model-escalation.json"), []byte(configContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name         string
+		attemptCount int
+		wantAgent    string
+	}{
+		{
+			name:         "first re-dispatch (1 total failure) promotes at threshold 1",
+			attemptCount: 0,
+			wantAgent:    "claude",
+		},
+		{
+			name:         "second re-dispatch also promotes",
+			attemptCount: 1,
+			wantAgent:    "claude",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := &BeadRedispatchState{
+				BeadID:       "gt-test",
+				AttemptCount: tt.attemptCount,
+			}
+			got := resolveAgentForRedispatch(townDir, rigName, state)
+			if got != tt.wantAgent {
+				t.Errorf("resolveAgentForRedispatch() = %q, want %q", got, tt.wantAgent)
+			}
+		})
+	}
+}
+
+func TestResolveAgentForRedispatch_NoConfig(t *testing.T) {
+	state := &BeadRedispatchState{BeadID: "gt-test", AttemptCount: 0}
+	got := resolveAgentForRedispatch(t.TempDir(), "myrig", state)
+	if got != "" {
+		t.Errorf("expected empty agent when no config, got %q", got)
+	}
+}
+
+func TestResolveAgentForRedispatch_HighThreshold(t *testing.T) {
+	townDir := t.TempDir()
+	rigName := "myrig"
+	rigProjectDir := filepath.Join(townDir, rigName, "refinery", "rig", ".gastown")
+	if err := os.MkdirAll(rigProjectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// threshold=2: need 2 total failures before promoting
+	configContent := `{
+		"type": "model-escalation",
+		"version": 1,
+		"enabled": true,
+		"rules": [
+			{
+				"from_agent": "claude-sonnet",
+				"to_agent": "claude",
+				"promote_after_failures": 2
+			}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(rigProjectDir, "model-escalation.json"), []byte(configContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// First re-dispatch: totalFailures=1, threshold=2 → no promotion yet
+	state := &BeadRedispatchState{BeadID: "gt-test", AttemptCount: 0}
+	got := resolveAgentForRedispatch(townDir, rigName, state)
+	if got != "" {
+		t.Errorf("expected no promotion at 1 failure with threshold 2, got %q", got)
+	}
+
+	// Second re-dispatch: totalFailures=2, threshold=2 → promote
+	state.AttemptCount = 1
+	got = resolveAgentForRedispatch(townDir, rigName, state)
+	if got != "claude" {
+		t.Errorf("expected promotion at 2 failures with threshold 2, got %q", got)
+	}
+}

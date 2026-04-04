@@ -51,12 +51,47 @@ type BeadRedispatchState struct {
 	// LastRig is the rig where the last re-dispatch was sent.
 	LastRig string `json:"last_rig,omitempty"`
 
+	// LastAgent is the agent alias used for the last re-dispatch (empty = rig default).
+	LastAgent string `json:"last_agent,omitempty"`
+
 	// Escalated is true if this bead has been escalated to Mayor.
 	Escalated bool `json:"escalated,omitempty"`
 
 	// EscalatedAt is when the bead was escalated.
 	EscalatedAt time.Time `json:"escalated_at,omitempty"`
 }
+
+// ModelEscalationRule defines a single agent promotion rule.
+type ModelEscalationRule struct {
+	// FromAgent is the agent alias that triggers this rule (e.g., "claude-sonnet").
+	FromAgent string `json:"from_agent"`
+
+	// ToAgent is the agent alias to promote to (e.g., "claude" for Opus).
+	ToAgent string `json:"to_agent"`
+
+	// PromoteAfterFailures is the number of total failures (initial + re-dispatches)
+	// required before promoting to ToAgent.
+	PromoteAfterFailures int `json:"promote_after_failures"`
+
+	// Comment is an optional human-readable description of this rule.
+	Comment string `json:"comment,omitempty"`
+}
+
+// ModelEscalationConfig defines per-rig agent promotion rules for re-dispatch.
+// Loaded from <rig>/refinery/rig/.gastown/model-escalation.json.
+type ModelEscalationConfig struct {
+	Type             string                `json:"type"`
+	Version          int                   `json:"version"`
+	Enabled          bool                  `json:"enabled"`
+	Description      string                `json:"description,omitempty"`
+	Rules            []ModelEscalationRule `json:"rules"`
+	MaxTotalAttempts int                   `json:"max_total_attempts,omitempty"`
+	Fallback         string                `json:"fallback,omitempty"`
+}
+
+// ModelEscalationConfigPath is the path within a rig project directory where
+// the model escalation config is stored.
+const ModelEscalationConfigPath = ".gastown/model-escalation.json"
 
 // RedispatchResult describes the outcome of a re-dispatch attempt.
 type RedispatchResult struct {
@@ -267,13 +302,17 @@ func Redispatch(townRoot, beadID, sourceRig string, maxAttempts int, cooldown ti
 		return result
 	}
 
+	// Determine agent override from model escalation config (if any).
+	escalationAgent := resolveAgentForRedispatch(townRoot, targetRig, beadState)
+
 	// Re-dispatch via gt sling
-	err = slingBead(townRoot, beadID, targetRig)
+	err = slingBead(townRoot, beadID, targetRig, escalationAgent)
 	if err != nil {
 		result.Action = "error"
 		result.Error = fmt.Errorf("slinging bead to %s: %w", targetRig, err)
 
 		// Record the failed attempt
+		beadState.LastAgent = escalationAgent
 		beadState.RecordAttempt(targetRig)
 		_ = SaveRedispatchState(townRoot, state)
 
@@ -281,10 +320,15 @@ func Redispatch(townRoot, beadID, sourceRig string, maxAttempts int, cooldown ti
 	}
 
 	// Record successful dispatch
+	beadState.LastAgent = escalationAgent
 	beadState.RecordAttempt(targetRig)
 	result.Action = "redispatched"
 	result.Attempts = beadState.AttemptCount
-	result.Message = fmt.Sprintf("re-dispatched to %s (attempt %d/%d)", targetRig, beadState.AttemptCount, maxAttempts)
+	if escalationAgent != "" {
+		result.Message = fmt.Sprintf("re-dispatched to %s with agent %q (attempt %d/%d)", targetRig, escalationAgent, beadState.AttemptCount, maxAttempts)
+	} else {
+		result.Message = fmt.Sprintf("re-dispatched to %s (attempt %d/%d)", targetRig, beadState.AttemptCount, maxAttempts)
+	}
 
 	// Save state
 	if saveErr := SaveRedispatchState(townRoot, state); saveErr != nil {
@@ -350,9 +394,64 @@ func getBeadStatusForRedispatch(townRoot, beadID string) string {
 	return issues[0].Status
 }
 
+// LoadModelEscalationConfig loads model escalation rules from a rig project directory.
+// Returns nil, nil if the file does not exist (no escalation configured).
+func LoadModelEscalationConfig(rigProjectDir string) (*ModelEscalationConfig, error) {
+	path := filepath.Join(rigProjectDir, ModelEscalationConfigPath)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed from trusted rigProjectDir
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading model escalation config: %w", err)
+	}
+
+	var cfg ModelEscalationConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing model escalation config %s: %w", path, err)
+	}
+	return &cfg, nil
+}
+
+// resolveAgentForRedispatch determines which agent alias to use when re-dispatching
+// a bead, based on the rig's model escalation config.
+//
+// The "total failures" seen by this bead is beadState.AttemptCount (prior re-dispatches)
+// plus 1 (the original dispatch failure that triggered this re-dispatch).
+// Rules fire when totalFailures >= rule.PromoteAfterFailures.
+//
+// Returns "" (empty) if no escalation is configured or no rule applies — the caller
+// should omit the --agent flag and let the rig use its default.
+func resolveAgentForRedispatch(townRoot, targetRig string, beadState *BeadRedispatchState) string {
+	// Rig project dir is <townRoot>/<rig>/refinery/rig
+	rigProjectDir := filepath.Join(townRoot, targetRig, "refinery", "rig")
+
+	cfg, err := LoadModelEscalationConfig(rigProjectDir)
+	if err != nil || cfg == nil || !cfg.Enabled || len(cfg.Rules) == 0 {
+		return ""
+	}
+
+	// Total failures = prior re-dispatch attempts + 1 (initial failure that triggered
+	// this re-dispatch call). AttemptCount is recorded AFTER each sling, so on entry
+	// it reflects the number of completed re-dispatches, not the current one.
+	totalFailures := beadState.AttemptCount + 1
+
+	for _, rule := range cfg.Rules {
+		if totalFailures >= rule.PromoteAfterFailures {
+			return rule.ToAgent
+		}
+	}
+	return ""
+}
+
 // slingBead dispatches a bead to a rig via gt sling.
-func slingBead(townRoot, beadID, rig string) error {
-	cmd := exec.Command("gt", "sling", beadID, rig, "--force", "--no-convoy")
+// If agent is non-empty, passes --agent <agent> to override the rig's default.
+func slingBead(townRoot, beadID, rig, agent string) error {
+	args := []string{"sling", beadID, rig, "--force", "--no-convoy"}
+	if agent != "" {
+		args = append(args, "--agent", agent)
+	}
+	cmd := exec.Command("gt", args...)
 	cmd.Dir = townRoot
 	util.SetDetachedProcessGroup(cmd)
 	cmd.Stdout = os.Stdout
