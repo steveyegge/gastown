@@ -842,7 +842,15 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 
 	// OpenCode requires --prompt flag for initial prompt in interactive mode.
 	// Positional argument causes opencode to exit immediately.
+	// OpenCode uses --prompt text as the session title and creates snapshot
+	// directories with it — long prompts cause ENAMETOOLONG. Truncate to a
+	// short kick-start instruction; gastown.js injects full context via
+	// system.transform.
 	if resolved.Command == "opencode" {
+		const maxPromptLen = 80
+		if len(p) > maxPromptLen {
+			p = "Run gt prime --hook and begin work."
+		}
 		return base + " --prompt " + quoteForShell(p)
 	}
 

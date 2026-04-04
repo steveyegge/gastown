@@ -351,12 +351,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			OutputFlag: "--format json",
 		},
 		// Runtime defaults
-		// PromptMode "none": OpenCode uses --prompt text as the session title and
-		// creates a snapshot directory with it. Long prompts (like the startup
-		// beacon) cause ENAMETOOLONG crashes. The gastown.js plugin handles all
-		// context injection via session.created + system.transform, so --prompt
-		// is unnecessary.
-		PromptMode:        "none",
+		PromptMode:        "arg",
 		ConfigDir:         ".opencode",
 		HooksProvider:     "opencode",
 		HooksDir:          ".opencode/plugins",
