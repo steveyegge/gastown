@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/doltserver"
@@ -1287,6 +1288,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 				fmt.Printf("  %s Could not init bd database: %v\n", style.Warning.Render("!"), err)
 			} else {
 				fmt.Printf("  %s Initialized beads database (Dolt)\n", style.Success.Render("✓"))
+				finalizeBeadsAfterInit(townRoot, rigPath, prefix, name)
 			}
 		}
 		break
@@ -1302,6 +1304,7 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 			fmt.Printf("  %s Could not init beads database: %v\n", style.Warning.Render("!"), err)
 		} else {
 			fmt.Printf("  %s Initialized beads database\n", style.Success.Render("✓"))
+			finalizeBeadsAfterInit(townRoot, rigPath, result.BeadsPrefix, name)
 		}
 	}
 
@@ -2398,6 +2401,42 @@ func commitTownConfigChanges(townRoot, rigName string) {
 			fmt.Fprintf(os.Stderr, "  Warning: could not commit town config files: %v\n", err)
 		}
 	}
+}
+
+// finalizeBeadsAfterInit performs the post-InitBeads steps needed to connect
+// beads to the correct Dolt database. InitBeads creates a database named
+// beads_<prefix>, but the rig uses <rigName> as its database. This corrects
+// the metadata, drops the orphan database, and re-sets config on the right DB.
+//
+// The AddRig path in manager.go already does these steps inline. The adopt
+// path was missing them, causing bd to fail with "database not found".
+func finalizeBeadsAfterInit(townRoot, rigPath, prefix, rigName string) {
+	// Correct metadata.json: dolt_database must be <rigName>, not beads_<prefix>.
+	if err := doltserver.EnsureMetadata(townRoot, rigName); err != nil {
+		fmt.Printf("  Warning: Could not set Dolt server metadata: %v\n", err)
+		fmt.Printf("  Run 'gt doctor --fix' to repair, or it will self-heal on next daemon start.\n")
+	}
+
+	// Drop orphaned beads_<prefix> database if it differs from rigName.
+	if orphanDB := "beads_" + prefix; orphanDB != rigName {
+		_ = doltserver.RemoveDatabase(townRoot, orphanDB, true)
+	}
+
+	// Re-set issue_prefix and types.custom on the correct database.
+	resolvedBeadsDir := beads.ResolveBeadsDir(rigPath)
+	env := append(os.Environ(), "BEADS_DIR="+resolvedBeadsDir)
+
+	prefixCmd := exec.Command("bd", "config", "set", "issue_prefix", prefix)
+	prefixCmd.Dir = rigPath
+	prefixCmd.Env = env
+	if out, err := prefixCmd.CombinedOutput(); err != nil {
+		fmt.Printf("  Warning: Could not set issue_prefix on rig database: %v (%s)\n", err, strings.TrimSpace(string(out)))
+	}
+
+	typesCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+	typesCmd.Dir = rigPath
+	typesCmd.Env = env
+	_, _ = typesCmd.CombinedOutput()
 }
 
 // isGitRemoteURL returns true if s looks like a remote git URL rather than a
