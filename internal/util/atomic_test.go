@@ -197,6 +197,9 @@ func TestAtomicWriteFileReadOnlyDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based read-only directories are not reliable on Windows")
 	}
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses directory permission bits; chmod read-only is not enforceable")
+	}
 
 	tmpDir := t.TempDir()
 	roDir := filepath.Join(tmpDir, "readonly")
@@ -272,6 +275,9 @@ func TestAtomicWriteFileConcurrent(t *testing.T) {
 func TestAtomicWritePreservesOnFailure(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based read-only directories are not reliable on Windows")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses directory permission bits; chmod read-only is not enforceable")
 	}
 
 	tmpDir := t.TempDir()

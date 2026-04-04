@@ -30,11 +30,13 @@ Epic tasks for Cursor runtime parity are tracked in beads; coordination notes an
 
 ## Automated regression (local)
 
+CI already runs **`go test ./...`** (same coverage as a “gate” over these packages). For a **faster loop** while touching Cursor-related code, narrow packages:
+
 ```bash
-./scripts/cursor-runtime-test-gate.sh
+go test ./internal/config/... ./internal/hooks/... ./internal/crew/... ./internal/tmux/... ./internal/runtime/... -count=1 -short
 ```
 
-Covers `internal/config`, `hooks`, `crew`, `tmux`, and `runtime` packages (see script for exact `go test` line).
+Run as a **non-root** user if you want chmod/read-only failure tests in `hooks` and `util` (root skips those cases by design).
 
 ## Manual smoke (short)
 

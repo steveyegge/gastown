@@ -544,6 +544,32 @@ func TestEnsureSettingsForRole_CopilotUsesWorkDir(t *testing.T) {
 	}
 }
 
+func TestEnsureSettingsForRole_CursorUsesWorkDir(t *testing.T) {
+	// Cursor hooks.json is installed under workDir (HooksUseSettingsDir false for cursor preset).
+	settingsDir := t.TempDir()
+	workDir := t.TempDir()
+
+	rc := &config.RuntimeConfig{
+		Hooks: &config.RuntimeHooksConfig{
+			Provider:     "cursor",
+			Dir:          ".cursor",
+			SettingsFile: "hooks.json",
+		},
+	}
+
+	err := EnsureSettingsForRole(settingsDir, workDir, "crew", rc)
+	if err != nil {
+		t.Fatalf("EnsureSettingsForRole() error = %v", err)
+	}
+
+	if _, err := os.Stat(settingsDir + "/.cursor/hooks.json"); err == nil {
+		t.Error("Cursor hooks should NOT be in settingsDir")
+	}
+	if _, err := os.Stat(workDir + "/.cursor/hooks.json"); err != nil {
+		t.Error("Cursor hooks should be in workDir")
+	}
+}
+
 func TestGetStartupFallbackInfo_InformationalHooks(t *testing.T) {
 	// Copilot: hooks provider set but informational (instructions file, not executable).
 	// Should be treated as having NO hooks for startup fallback purposes.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -14,6 +15,18 @@ func isClaudeCmd(cmd string) bool {
 	base := filepath.Base(cmd)
 	base = strings.TrimSuffix(base, filepath.Ext(base))
 	return base == "claude"
+}
+
+func TestBuiltInAgentPresetSummary(t *testing.T) {
+	t.Parallel()
+	s := BuiltInAgentPresetSummary()
+	if !strings.Contains(s, "cursor") || !strings.Contains(s, "claude") {
+		t.Fatalf("BuiltInAgentPresetSummary() = %q, want cursor and claude", s)
+	}
+	names := strings.Split(s, ", ")
+	if !sort.StringsAreSorted(names) {
+		t.Errorf("BuiltInAgentPresetSummary not sorted: %q", s)
+	}
 }
 
 func TestBuiltinPresets(t *testing.T) {

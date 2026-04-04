@@ -201,6 +201,9 @@ func TestSyncForRole_WriteError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows does not support read-only directories reliably")
 	}
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses directory permission bits; chmod read-only is not enforceable")
+	}
 
 	dir := t.TempDir()
 	// Create a read-only parent to prevent MkdirAll from creating the hooks dir
