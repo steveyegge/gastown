@@ -266,3 +266,6 @@
 [branch "dog/alpha-faultline-1775286639111"]
 	remote = origin
 	merge = refs/heads/main
+[branch "dog/alpha-faultline-1775290255338"]
+	remote = origin
+	merge = refs/heads/main
