@@ -2069,16 +2069,24 @@ func TestIsDoltRetryableError_CatalogRace(t *testing.T) {
 }
 
 func TestWaitForCatalog_NoServer(t *testing.T) {
-	// When no Dolt server is running, waitForCatalog should fail immediately
-	// (not retry) because the error is non-retryable (not a catalog race).
+	// When no Dolt server is reachable, waitForCatalog should fail.
+	// Use port 13399 (unlikely to be in use) to ensure no server responds.
 	townRoot := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(townRoot, ".dolt-data"), 0755); err != nil {
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Write a config.yaml with an unreachable port so buildServerSQLCmd
+	// tries to connect to a port that nobody is listening on.
+	configContent := "listener:\n  port: 13399\ndata_dir: " + dataDir + "\n"
+	if err := os.WriteFile(filepath.Join(dataDir, "config.yaml"), []byte(configContent), 0644); err != nil {
 		t.Fatal(err)
 	}
 	err := waitForCatalog(townRoot, "testdb")
 	if err == nil {
 		t.Fatal("expected error when no server is running")
 	}
+	// Connection refused or similar non-retryable error
 	if !strings.Contains(err.Error(), "non-retryable") {
 		t.Errorf("expected non-retryable error, got: %v", err)
 	}

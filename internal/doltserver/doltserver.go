@@ -3821,17 +3821,55 @@ func moveDir(src, dest string) error {
 
 // serverExecSQL executes a SQL statement against the Dolt server without targeting
 // a specific database. Used for server-level commands like CREATE DATABASE.
+//
+// Always connects via explicit --host/--port flags to ensure the command goes
+// through the running sql-server process. Without these flags, `dolt sql` runs
+// in embedded mode (even from the data directory), which creates databases on
+// disk but does NOT register them with the live server catalog. This caused
+// "database not found" errors during gt rig add.
 func serverExecSQL(townRoot, query string) error {
 	config := DefaultConfig(townRoot)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	cmd := buildDoltSQLCmd(ctx, config, "-q", query)
+	cmd := buildServerSQLCmd(ctx, config, "-q", query)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w (output: %s)", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// buildServerSQLCmd constructs a dolt sql command that always connects to the
+// running sql-server via explicit --host/--port flags. Unlike buildDoltSQLCmd,
+// which omits connection flags for local servers (relying on dolt auto-detection),
+// this function ensures the command goes through the live server process.
+// This is critical for DDL operations (CREATE/DROP DATABASE) that must modify
+// the server's in-memory catalog, not just the filesystem.
+//
+// Dolt requires --host, --port, --user, --no-tls as global flags (before the
+// subcommand), not as subcommand flags. The order is:
+//   dolt --host=H --port=P --user=U --no-tls sql -q "..."
+func buildServerSQLCmd(ctx context.Context, config *Config, args ...string) *exec.Cmd {
+	// Global connection flags must come before the "sql" subcommand.
+	// Always pass --password to prevent dolt from prompting on stdin
+	// (which fails with "inappropriate ioctl" in non-TTY environments).
+	password := config.Password
+	fullArgs := []string{
+		"--host", config.EffectiveHost(),
+		"--port", strconv.Itoa(config.Port),
+		"--user", config.User,
+		"--password", password,
+		"--no-tls",
+		"sql",
+	}
+	fullArgs = append(fullArgs, args...)
+
+	cmd := exec.CommandContext(ctx, "dolt", fullArgs...)
+	cmd.Dir = config.DataDir
+	setProcessGroup(cmd)
+
+	return cmd
 }
 
 // waitForCatalog polls the Dolt server until the named database is visible in the
@@ -3852,7 +3890,8 @@ func waitForCatalog(townRoot, dbName string) error {
 			lastErr = err
 			// Only retry catalog-race errors; fail fast on other errors
 			// (connection refused, binary missing, etc.)
-			if !strings.Contains(err.Error(), "Unknown database") {
+			errStr := err.Error()
+			if !strings.Contains(errStr, "Unknown database") && !strings.Contains(errStr, "database not found") {
 				return fmt.Errorf("database %q probe failed (non-retryable): %w", dbName, err)
 			}
 			if attempt < maxAttempts {
@@ -3874,7 +3913,8 @@ func waitForCatalog(townRoot, dbName string) error {
 }
 
 // doltSQL executes a SQL statement against a specific rig database on the Dolt server.
-// Uses the dolt CLI from the data directory (auto-detects running server).
+// Uses explicit --host/--port flags to connect to the running server (same rationale
+// as serverExecSQL — embedded mode doesn't share the server's catalog).
 // The USE prefix selects the database since --use-db is not available on all dolt versions.
 func doltSQL(townRoot, rigDB, query string) error {
 	config := DefaultConfig(townRoot)
@@ -3883,7 +3923,7 @@ func doltSQL(townRoot, rigDB, query string) error {
 
 	// Prepend USE <db> to select the target database.
 	fullQuery := fmt.Sprintf("USE %s; %s", rigDB, query)
-	cmd := buildDoltSQLCmd(ctx, config, "-q", fullQuery)
+	cmd := buildServerSQLCmd(ctx, config, "-q", fullQuery)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w (output: %s)", err, strings.TrimSpace(string(output)))
