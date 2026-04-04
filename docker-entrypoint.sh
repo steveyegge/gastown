@@ -48,29 +48,25 @@ if [ ! -f /gt/mayor/town.json ]; then
     # First run: block on full install (dashboard will run in setup mode)
     echo "Initializing Gas Town workspace at /gt..."
     /app/gastown/gt install /gt --git --wrappers
-    
-    # Configure agents
-    echo "Configuring agents..."
-    /app/gastown/gt config default-agent opencode
-
-    # Seed OpenCode default model (standalone opencode picks most recent)
-    mkdir -p "$HOME/.local/state/opencode"
-    cat > "$HOME/.local/state/opencode/model.json" <<'MODELJSON'
-{"recent":[{"providerID":"fireworks-ai","modelID":"accounts/fireworks/routers/kimi-k2p5-turbo"}],"favorite":[],"variant":{}}
-MODELJSON
-
-    # Seed OpenCode auth for Fireworks AI (OpenCode expects FIREWORKS_API_KEY,
-    # but Kamal passes FIREWORKS_AI_API_KEY — bridge the gap via auth.json)
-    if [ -n "$FIREWORKS_AI_API_KEY" ]; then
-        mkdir -p "$HOME/.local/share/opencode"
-        cat > "$HOME/.local/share/opencode/auth.json" <<AUTHJSON
-{"fireworks-ai":{"type":"api","key":"$FIREWORKS_AI_API_KEY"}}
-AUTHJSON
-    fi
 else
     # Subsequent runs: refresh in background so dashboard starts fast
     echo "Refreshing Gas Town workspace at /gt (background)..."
     /app/gastown/gt install /gt --git --wrappers --force &
+fi
+
+# --- OpenCode + Kimi 2.5 Turbo (every boot) ---
+/app/gastown/gt config default-agent opencode
+
+mkdir -p "$HOME/.local/state/opencode"
+cat > "$HOME/.local/state/opencode/model.json" <<'MODELJSON'
+{"recent":[{"providerID":"fireworks-ai","modelID":"accounts/fireworks/routers/kimi-k2p5-turbo"}],"favorite":[],"variant":{}}
+MODELJSON
+
+if [ -n "$FIREWORKS_AI_API_KEY" ]; then
+    mkdir -p "$HOME/.local/share/opencode"
+    cat > "$HOME/.local/share/opencode/auth.json" <<AUTHJSON
+{"fireworks-ai":{"type":"api","key":"$FIREWORKS_AI_API_KEY"}}
+AUTHJSON
 fi
 
 # --- Gas Town shell + doctor setup (background to not delay health check) ---
