@@ -30,6 +30,7 @@ import (
 	"github.com/outdoorsea/faultline/internal/notify"
 	"github.com/outdoorsea/faultline/internal/slackdm"
 	"github.com/outdoorsea/faultline/internal/poller"
+	"github.com/outdoorsea/faultline/internal/relay"
 	"github.com/outdoorsea/faultline/internal/selfmon"
 	"github.com/outdoorsea/faultline/internal/server"
 	"github.com/outdoorsea/faultline/internal/uptimemon"
@@ -88,6 +89,11 @@ func runServe() error {
 			return fmt.Errorf("error writing pidfile: %w", err)
 		}
 		defer removePID()
+	}
+
+	// Cloud mode: relay-only server (SQLite, no Dolt).
+	if envOr("FAULTLINE_MODE", "") == "cloud" {
+		return runCloud()
 	}
 
 	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})
@@ -393,7 +399,8 @@ func runServe() error {
 	go dm.Run(ctx)
 
 	// Start relay poller — pulls events from the public relay for mobile/external apps.
-	if relayURL := envOr("FAULTLINE_RELAY_URL", "https://faultline.live"); relayURL != "" {
+	// Disabled by default; set FAULTLINE_RELAY_URL to enable (e.g. https://faultline.live).
+	if relayURL := os.Getenv("FAULTLINE_RELAY_URL"); relayURL != "" {
 		relayInterval := time.Duration(envOrInt("FAULTLINE_RELAY_POLL_SECS", 30)) * time.Second
 		rp := poller.NewRelayPoller(relayURL, relayInterval, func(ctx context.Context, projectID int64, publicKey string, payload []byte) error {
 			return handler.IngestRaw(ctx, projectID, payload)
@@ -449,6 +456,101 @@ func runServe() error {
 		DB:          dolt,
 		Log:         log,
 	})
+}
+
+// runCloud starts the server in cloud/relay mode: SQLite-backed envelope
+// storage with relay poll/ack API. No Dolt, no dashboard, no bridge, no monitors.
+func runCloud() error {
+	addr := envOr("FAULTLINE_ADDR", ":8080")
+	dbPath := envOr("FAULTLINE_RELAY_DB", "relay.db")
+	ttl := time.Duration(envOrInt("FAULTLINE_RELAY_TTL_HOURS", 72)) * time.Hour
+	pollToken := os.Getenv("FAULTLINE_RELAY_TOKEN")
+	projectPairs := strings.Split(envOr("FAULTLINE_PROJECTS", ""), ",")
+
+	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	if len(projectPairs) == 1 && projectPairs[0] == "" {
+		return fmt.Errorf("FAULTLINE_PROJECTS required in cloud mode (format: id:key,…)")
+	}
+
+	var relayPairs []string
+	for _, p := range projectPairs {
+		parts := strings.SplitN(p, ":", 3)
+		if len(parts) >= 2 {
+			relayPairs = append(relayPairs, parts[0]+":"+parts[1])
+		}
+	}
+
+	auth, err := relay.NewAuth(relayPairs)
+	if err != nil {
+		return fmt.Errorf("invalid project config: %w", err)
+	}
+
+	store, err := relay.NewStore(dbPath, ttl)
+	if err != nil {
+		return fmt.Errorf("open relay store: %w", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	if pollToken == "" {
+		log.Warn("FAULTLINE_RELAY_TOKEN not set — poll/ack endpoints are unauthenticated")
+	}
+
+	handler := &relay.Handler{
+		Store:     store,
+		Auth:      auth,
+		Log:       log,
+		PollToken: pollToken,
+	}
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// Purge loop for expired envelopes.
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				n, err := store.Purge()
+				if err != nil {
+					log.Error("purge failed", "err", err)
+				} else if n > 0 {
+					log.Info("purged old envelopes", "count", n)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	log.Info("cloud mode listening", "addr", addr, "db", dbPath, "projects", len(relayPairs))
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.ListenAndServe()
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutCtx)
+	}
 }
 
 func envOr(key, fallback string) string {
