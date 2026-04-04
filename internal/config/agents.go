@@ -306,6 +306,8 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		HooksDir:          ".cursor",
 		HooksSettingsFile: "hooks.json", // installed path: .cursor/hooks.json
 		InstructionsFile:  "AGENTS.md",
+		// No stable ReadyPromptPrefix yet; delay before nudge poller / early input (HasTurnBoundaryDrain is false — see Copilot).
+		ReadyDelayMs: 5000,
 	},
 	AgentAuggie: {
 		Name:                AgentAuggie,

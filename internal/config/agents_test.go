@@ -784,6 +784,9 @@ func TestCursorAgentPreset(t *testing.T) {
 	if info.ResumeStyle != "flag" {
 		t.Errorf("cursor ResumeStyle = %q, want flag", info.ResumeStyle)
 	}
+	if info.ReadyDelayMs != 5000 {
+		t.Errorf("cursor ReadyDelayMs = %d, want 5000 (nudge poller + WaitForRuntimeReady)", info.ReadyDelayMs)
+	}
 }
 
 // TestDefaultRigAgentRegistryPath verifies that the default rig agent registry path is constructed correctly.
