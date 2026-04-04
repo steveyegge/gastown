@@ -55,6 +55,9 @@ else
 fi
 
 # --- OpenCode + Kimi 2.5 Turbo (every boot) ---
+# Remove any custom "opencode" agent that shadows the built-in preset
+# (legacy from previous gt config agent set opencode "gt-opencode ...")
+/app/gastown/gt config agent remove opencode 2>/dev/null || true
 /app/gastown/gt config default-agent opencode
 
 mkdir -p "$HOME/.local/state/opencode"
