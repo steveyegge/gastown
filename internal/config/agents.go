@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -559,6 +560,14 @@ func ListAgentPresets() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// BuiltInAgentPresetSummary returns a sorted, comma-separated list of built-in preset names
+// for CLI help text (gt config agent list, default-agent, --provider, etc.).
+func BuiltInAgentPresetSummary() string {
+	names := ListAgentPresets()
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // DefaultAgentPreset returns the default agent preset (Claude).
