@@ -581,11 +581,12 @@ func (m *Manager) RejectMR(idOrBranch string, reason string, notify bool) (*Merg
 
 // PostMergeResult holds the result of a post-merge cleanup operation.
 type PostMergeResult struct {
-	MR                  *MergeRequest
-	MRClosed            bool
-	SourceIssueClosed   bool
-	SourceIssueID       string
-	SourceIssueNotFound bool // true if source issue doesn't exist (already closed or invalid)
+	MR                    *MergeRequest
+	MRClosed              bool
+	SourceIssueClosed     bool // true if source issue was already terminal (closed by polecat/GH Actions)
+	SourceIssueDeploying  bool // true if source issue was set to deploying status
+	SourceIssueID         string
+	SourceIssueNotFound   bool // true if source issue doesn't exist (already closed or invalid)
 }
 
 // PostMerge performs post-merge cleanup for a successfully merged MR.
@@ -618,23 +619,24 @@ func (m *Manager) PostMerge(idOrBranch string) (*PostMergeResult, error) {
 		result.MRClosed = true
 	}
 
-	// Close the source issue with reason and --force to bypass dependency checks.
-	// The source issue may have an attached molecule (wisp) whose open steps
-	// would block a normal bd close. ForceCloseWithReason bypasses this,
-	// matching how gt done handles closures for the no-MR path.
+	// Set the source issue to deploying — GH Actions will close it after
+	// the release pipeline succeeds. This makes the bead visible in the
+	// Deploying kanban lane between merge and release.
 	if mr.IssueID != "" {
-		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
-		if err := b.ForceCloseWithReason(closeReason, mr.IssueID); err != nil {
-			// Check if already closed (by polecat's gt done) — that's fine
+		deployingStatus := "deploying"
+		if err := b.Update(mr.IssueID, beads.UpdateOptions{Status: &deployingStatus}); err != nil {
+			// If status update fails (e.g., already closed), log and continue
 			if issue, showErr := b.Show(mr.IssueID); showErr == nil && beads.IssueStatus(issue.Status).IsTerminal() {
 				_, _ = fmt.Fprintf(m.output, "  %s source issue already closed: %s\n", style.Dim.Render("○"), mr.IssueID)
 				result.SourceIssueClosed = true
 			} else {
-				_, _ = fmt.Fprintf(m.output, "  %s source issue close: %v\n", style.Dim.Render("○"), err)
+				_, _ = fmt.Fprintf(m.output, "  %s set deploying: %v\n", style.Warning.Render("⚠"), err)
 				result.SourceIssueNotFound = true
 			}
 		} else {
-			result.SourceIssueClosed = true
+			_, _ = fmt.Fprintf(m.output, "  %s Source issue → deploying: %s\n", style.Success.Render("✓"), mr.IssueID)
+			result.SourceIssueDeploying = true
+			result.SourceIssueID = mr.IssueID
 		}
 	}
 

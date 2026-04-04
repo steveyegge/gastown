@@ -524,10 +524,12 @@ func runMQPostMerge(_ *cobra.Command, args []string) error {
 	if result.MRClosed {
 		fmt.Printf("  %s MR closed (merged)\n", style.Success.Render("✓"))
 	}
-	if result.SourceIssueClosed {
-		fmt.Printf("  %s Source issue closed: %s\n", style.Success.Render("✓"), result.SourceIssueID)
+	if result.SourceIssueDeploying {
+		fmt.Printf("  %s Source issue → deploying: %s\n", style.Success.Render("✓"), result.SourceIssueID)
+	} else if result.SourceIssueClosed {
+		fmt.Printf("  %s Source issue already closed: %s\n", style.Dim.Render("○"), result.SourceIssueID)
 	} else if result.SourceIssueNotFound {
-		fmt.Printf("  %s Source issue: %s %s\n", style.Dim.Render("○"), result.SourceIssueID, style.Dim.Render("(already closed or not found)"))
+		fmt.Printf("  %s Source issue: %s %s\n", style.Dim.Render("○"), result.SourceIssueID, style.Dim.Render("(not found)"))
 	}
 
 	// Delete remote branch unless skipped
