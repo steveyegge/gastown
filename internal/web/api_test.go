@@ -1158,3 +1158,26 @@ func TestHandleSessionPreviewPrefixValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestPaneCurrentCommandIsAgent(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want bool
+	}{
+		{"claude", true},
+		{"node", true},
+		{"codex", true},
+		{"opencode", true},
+		{"cursor-agent", true},
+		{"copilot", true},
+		{"agent", true},
+		{"bash", false},
+		{"", false},
+		{"   ", false},
+	}
+	for _, tt := range tests {
+		if got := paneCurrentCommandIsAgent(tt.cmd); got != tt.want {
+			t.Errorf("paneCurrentCommandIsAgent(%q) = %v, want %v", tt.cmd, got, tt.want)
+		}
+	}
+}
