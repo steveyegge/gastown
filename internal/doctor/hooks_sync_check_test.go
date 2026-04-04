@@ -140,17 +140,19 @@ func TestHooksSyncCheck_TemplateAgent_InSync(t *testing.T) {
 	// Sync Claude targets first
 	syncAllClaudeTargets(t, townRoot)
 
-	// Install the correct OpenCode template file
-	expectedContent, err := hooks.ComputeExpectedTemplate("opencode", "gastown.js", "crew")
-	if err != nil {
-		t.Fatalf("ComputeExpectedTemplate: %v", err)
-	}
+	// Install the correct OpenCode template files (primary + additional)
 	pluginDir := filepath.Join(worktree, ".opencode", "plugins")
 	if err := os.MkdirAll(pluginDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "gastown.js"), expectedContent, 0644); err != nil {
-		t.Fatal(err)
+	for _, file := range []string{"gastown.js", "gastown-tui.js"} {
+		content, err := hooks.ComputeExpectedTemplate("opencode", file, "crew")
+		if err != nil {
+			t.Fatalf("ComputeExpectedTemplate(%s): %v", file, err)
+		}
+		if err := os.WriteFile(filepath.Join(pluginDir, file), content, 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	check := NewHooksSyncCheck()

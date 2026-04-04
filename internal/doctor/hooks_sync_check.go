@@ -129,43 +129,49 @@ func (c *HooksSyncCheck) Run(ctx *CheckContext) *CheckResult {
 				checkDirs = hooks.DiscoverWorktrees(loc.Dir)
 			}
 
+			// Check primary settings file + any additional files from the preset.
+			checkFiles := []string{preset.HooksSettingsFile}
+			checkFiles = append(checkFiles, preset.AdditionalHooksFiles...)
+
 			for _, dir := range checkDirs {
-				totalTargets++
-				targetPath := filepath.Join(dir, preset.HooksDir, preset.HooksSettingsFile)
+				for _, checkFile := range checkFiles {
+					totalTargets++
+					targetPath := filepath.Join(dir, preset.HooksDir, checkFile)
 
-				expected, err := hooks.ComputeExpectedTemplate(hooksProvider, preset.HooksSettingsFile, loc.Role)
-				if err != nil {
-					details = append(details, fmt.Sprintf("%s (%s): error computing template: %v", targetPath, hooksProvider, err))
-					continue
-				}
+					expected, err := hooks.ComputeExpectedTemplate(hooksProvider, checkFile, loc.Role)
+					if err != nil {
+						details = append(details, fmt.Sprintf("%s (%s): error computing template: %v", targetPath, hooksProvider, err))
+						continue
+					}
 
-				actual, readErr := os.ReadFile(targetPath)
-				if readErr != nil {
-					// File missing
-					c.templateOutOfSync = append(c.templateOutOfSync, templateTarget{
-						path: targetPath, dir: dir, provider: hooksProvider,
-						role: loc.Role, hooksDir: preset.HooksDir,
-						settingsFile: preset.HooksSettingsFile, useSettingsDir: useSettingsDir,
-					})
-					details = append(details, fmt.Sprintf("%s (%s): missing", targetPath, hooksProvider))
-					continue
-				}
+					actual, readErr := os.ReadFile(targetPath)
+					if readErr != nil {
+						// File missing
+						c.templateOutOfSync = append(c.templateOutOfSync, templateTarget{
+							path: targetPath, dir: dir, provider: hooksProvider,
+							role: loc.Role, hooksDir: preset.HooksDir,
+							settingsFile: checkFile, useSettingsDir: useSettingsDir,
+						})
+						details = append(details, fmt.Sprintf("%s (%s): missing", targetPath, hooksProvider))
+						continue
+					}
 
-				// Compare: structural for JSON, byte-exact for other files.
-				inSync := false
-				if filepath.Ext(preset.HooksSettingsFile) == ".json" {
-					inSync = hooks.TemplateContentEqual(expected, actual)
-				} else {
-					inSync = bytes.Equal(expected, actual)
-				}
+					// Compare: structural for JSON, byte-exact for other files.
+					inSync := false
+					if filepath.Ext(checkFile) == ".json" {
+						inSync = hooks.TemplateContentEqual(expected, actual)
+					} else {
+						inSync = bytes.Equal(expected, actual)
+					}
 
-				if !inSync {
-					c.templateOutOfSync = append(c.templateOutOfSync, templateTarget{
-						path: targetPath, dir: dir, provider: hooksProvider,
-						role: loc.Role, hooksDir: preset.HooksDir,
-						settingsFile: preset.HooksSettingsFile, useSettingsDir: useSettingsDir,
-					})
-					details = append(details, fmt.Sprintf("%s (%s): out of sync", targetPath, hooksProvider))
+					if !inSync {
+						c.templateOutOfSync = append(c.templateOutOfSync, templateTarget{
+							path: targetPath, dir: dir, provider: hooksProvider,
+							role: loc.Role, hooksDir: preset.HooksDir,
+							settingsFile: checkFile, useSettingsDir: useSettingsDir,
+						})
+						details = append(details, fmt.Sprintf("%s (%s): out of sync", targetPath, hooksProvider))
+					}
 				}
 			}
 		}

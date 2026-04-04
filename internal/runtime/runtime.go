@@ -38,11 +38,20 @@ func EnsureSettingsForRole(settingsDir, workDir, role string, rc *config.Runtime
 	// 1. Provider-specific settings via generic installer.
 	// Reads template metadata from the preset and installs the appropriate template.
 	useSettingsDir := false
+	var additionalFiles []string
 	if preset := config.GetAgentPresetByName(provider); preset != nil {
 		useSettingsDir = preset.HooksUseSettingsDir
+		additionalFiles = preset.AdditionalHooksFiles
 	}
 	if err := hooks.InstallForRole(provider, settingsDir, workDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile, useSettingsDir); err != nil {
 		return err
+	}
+
+	// 1b. Deploy additional template files (e.g., OpenCode's TUI plugin).
+	for _, file := range additionalFiles {
+		if err := hooks.InstallForRole(provider, settingsDir, workDir, role, rc.Hooks.Dir, file, useSettingsDir); err != nil {
+			return err
+		}
 	}
 
 	// 2. Slash commands (agent-agnostic, uses shared body with provider-specific frontmatter)

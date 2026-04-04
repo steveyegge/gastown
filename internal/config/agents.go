@@ -123,6 +123,11 @@ type AgentPresetInfo struct {
 	// settingsDir; when false, they're installed in workDir.
 	HooksUseSettingsDir bool `json:"hooks_use_settings_dir,omitempty"`
 
+	// AdditionalHooksFiles lists extra template files to deploy alongside the
+	// primary HooksSettingsFile. Used when an agent needs multiple plugin files
+	// (e.g., OpenCode's separate server and TUI plugins).
+	AdditionalHooksFiles []string `json:"additional_hooks_files,omitempty"`
+
 	// ReadyPromptPrefix is the prompt prefix for tmux readiness detection (e.g., "❯ ").
 	// Empty means delay-based detection only.
 	ReadyPromptPrefix string `json:"ready_prompt_prefix,omitempty"`
@@ -354,9 +359,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		PromptMode:        "arg",
 		ConfigDir:         ".opencode",
 		HooksProvider:     "opencode",
-		HooksDir:          ".opencode/plugins",
-		HooksSettingsFile: "gastown.js",
-		ReadyDelayMs:      8000,
+		HooksDir:             ".opencode/plugins",
+		HooksSettingsFile:    "gastown.js",
+		AdditionalHooksFiles: []string{"gastown-tui.js"},
+		ReadyDelayMs:         8000,
 		InstructionsFile:  "AGENTS.md",
 		// ACP support
 		ACP: &ACPConfig{

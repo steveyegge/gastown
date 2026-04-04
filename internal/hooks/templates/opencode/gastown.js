@@ -8,6 +8,8 @@ export const GasTown = async ({ $, directory }) => {
   // Promise-based context loading ensures the system transform hook can
   // await the result even if session.created hasn't resolved yet.
   let primePromise = null;
+  let lastMailCheck = 0;
+  const MAIL_CHECK_INTERVAL = 30_000; // 30 seconds
 
   const captureRun = async (cmd) => {
     try {
@@ -62,6 +64,16 @@ export const GasTown = async ({ $, directory }) => {
       } else {
         // Reset so next transform retries instead of pushing empty forever.
         primePromise = null;
+      }
+
+      // Debounced mail check — mirrors Claude's UserPromptSubmit hook.
+      // Without this, mail sent after session start is invisible until compaction.
+      if (autonomousRoles.has(role) && Date.now() - lastMailCheck > MAIL_CHECK_INTERVAL) {
+        lastMailCheck = Date.now();
+        const mail = await captureRun("gt mail check --inject");
+        if (mail) {
+          output.system.push(mail);
+        }
       }
     },
     "experimental.session.compacting": async ({ sessionID }, output) => {

@@ -167,42 +167,48 @@ func runHooksSync(cmd *cobra.Command, args []string) error {
 				syncDirs = hooks.DiscoverWorktrees(loc.Dir)
 			}
 
+			// Build file list: primary settings file + any additional files from the preset.
+			syncFiles := []string{preset.HooksSettingsFile}
+			syncFiles = append(syncFiles, preset.AdditionalHooksFiles...)
+
 			for _, dir := range syncDirs {
-				targetPath := filepath.Join(dir, preset.HooksDir, preset.HooksSettingsFile)
-				relPath, pathErr := filepath.Rel(townRoot, targetPath)
-				if pathErr != nil {
-					relPath = targetPath
-				}
-
-				if hooksSyncDryRun {
-					if _, statErr := os.Stat(targetPath); statErr == nil {
-						fmt.Printf("  %s %s %s\n", style.Warning.Render("~"), relPath, style.Dim.Render("(would check "+hooksProvider+")"))
-					} else {
-						fmt.Printf("  %s %s %s\n", style.Warning.Render("~"), relPath, style.Dim.Render("(would create "+hooksProvider+")"))
-						created++
+				for _, syncFile := range syncFiles {
+					targetPath := filepath.Join(dir, preset.HooksDir, syncFile)
+					relPath, pathErr := filepath.Rel(townRoot, targetPath)
+					if pathErr != nil {
+						relPath = targetPath
 					}
-					continue
-				}
 
-				result, syncErr := hooks.SyncForRole(hooksProvider, dir, dir, loc.Role,
-					preset.HooksDir, preset.HooksSettingsFile, useSettingsDir)
-				if syncErr != nil {
-					fmt.Printf("  %s %s (%s): %v\n", style.Error.Render("✖"), relPath, hooksProvider, syncErr)
-					errors++
-					failedTargets = append(failedTargets, relPath)
-					continue
-				}
+					if hooksSyncDryRun {
+						if _, statErr := os.Stat(targetPath); statErr == nil {
+							fmt.Printf("  %s %s %s\n", style.Warning.Render("~"), relPath, style.Dim.Render("(would check "+hooksProvider+")"))
+						} else {
+							fmt.Printf("  %s %s %s\n", style.Warning.Render("~"), relPath, style.Dim.Render("(would create "+hooksProvider+")"))
+							created++
+						}
+						continue
+					}
 
-				switch result {
-				case hooks.SyncCreated:
-					fmt.Printf("  %s %s %s\n", style.Success.Render("✓"), relPath, style.Dim.Render("(created "+hooksProvider+")"))
-					created++
-				case hooks.SyncUpdated:
-					fmt.Printf("  %s %s %s\n", style.Success.Render("✓"), relPath, style.Dim.Render("(updated "+hooksProvider+")"))
-					updated++
-				case hooks.SyncUnchanged:
-					fmt.Printf("  %s %s %s\n", style.Dim.Render("·"), relPath, style.Dim.Render("(unchanged "+hooksProvider+")"))
-					unchanged++
+					result, syncErr := hooks.SyncForRole(hooksProvider, dir, dir, loc.Role,
+						preset.HooksDir, syncFile, useSettingsDir)
+					if syncErr != nil {
+						fmt.Printf("  %s %s (%s): %v\n", style.Error.Render("✖"), relPath, hooksProvider, syncErr)
+						errors++
+						failedTargets = append(failedTargets, relPath)
+						continue
+					}
+
+					switch result {
+					case hooks.SyncCreated:
+						fmt.Printf("  %s %s %s\n", style.Success.Render("✓"), relPath, style.Dim.Render("(created "+hooksProvider+")"))
+						created++
+					case hooks.SyncUpdated:
+						fmt.Printf("  %s %s %s\n", style.Success.Render("✓"), relPath, style.Dim.Render("(updated "+hooksProvider+")"))
+						updated++
+					case hooks.SyncUnchanged:
+						fmt.Printf("  %s %s %s\n", style.Dim.Render("·"), relPath, style.Dim.Render("(unchanged "+hooksProvider+")"))
+						unchanged++
+					}
 				}
 			}
 		}
