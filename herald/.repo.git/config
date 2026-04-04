@@ -115,3 +115,6 @@
 [branch "polecat/capable/hr-0b7@mnje5i7u"]
 	remote = origin
 	merge = refs/heads/main
+[branch "dog/alpha-herald-1775283049813"]
+	remote = origin
+	merge = refs/heads/main
