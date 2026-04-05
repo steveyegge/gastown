@@ -81,6 +81,18 @@ func (b *bdCmd) RouteForBead(beadID string) *bdCmd {
 	return b
 }
 
+// RouteForPrefix resolves the correct rig database directory for the given bead
+// prefix (e.g. "nw-") and strips any inherited BEADS_DIR. This is used by
+// commands that take a prefix rather than a bead ID (e.g. list, search, create).
+// If the prefix cannot be resolved, routing is left unchanged.
+func (b *bdCmd) RouteForPrefix(prefix string) *bdCmd {
+	if prefix == "" {
+		return b
+	}
+	// Construct a synthetic bead ID so resolveBeadDir can extract the prefix.
+	return b.RouteForBead(prefix + "0")
+}
+
 // StripBeadsDir removes any inherited BEADS_DIR from the environment.
 // Use this when the command relies on Dir() for routing and an inherited
 // BEADS_DIR would incorrectly override the working-directory-based database

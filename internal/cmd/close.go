@@ -87,10 +87,10 @@ func runClose(cmd *cobra.Command, args []string) error {
 	if beadIDs := extractBeadIDs(convertedArgs); len(beadIDs) > 0 {
 		builder = builder.RouteForBead(beadIDs[0])
 	}
-	cmd := builder.Build()
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	if err := cmd.Run(); err != nil {
+	bdExec := builder.Build()
+	bdExec.Stdin = os.Stdin
+	bdExec.Stdout = os.Stdout
+	if err := bdExec.Run(); err != nil {
 		return err
 	}
 

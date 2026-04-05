@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -48,10 +47,10 @@ func runCat(cmd *cobra.Command, args []string) error {
 		bdArgs = append(bdArgs, "--json")
 	}
 
-	cmd := BdCmd(bdArgs...).RouteForBead(beadID).Build()
-	cmd.Stdout = os.Stdout
+	bdExec := BdCmd(bdArgs...).RouteForBead(beadID).Build()
+	bdExec.Stdout = os.Stdout
 
-	return cmd.Run()
+	return bdExec.Run()
 }
 
 // isBeadID checks if a string looks like a bead ID.
