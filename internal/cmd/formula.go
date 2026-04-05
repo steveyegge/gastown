@@ -639,7 +639,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 			for _, legBeadID := range legBeads {
 				_ = BdCmd("dep", "add", synthesisBeadID, legBeadID).
 					WithAutoCommit().
-					Dir(townBeads).
+					Dir(rigBeadsDir).
 					Run()
 			}
 
@@ -823,7 +823,7 @@ func executeWorkflowFormula(f *formula.Formula, formulaName, targetRig string) e
 			}
 			_ = BdCmd("dep", "add", stepBeadID, depBeadID).
 				WithAutoCommit().
-				Dir(townBeads).
+				Dir(rigBeadsDir).
 				Run()
 		}
 
