@@ -1,0 +1,9 @@
+{
+  "id": "warrant-1775359595289",
+  "target": "opal",
+  "reason": "stuck: worktree destroyed",
+  "filed_by": "faultline/crew/bugspray",
+  "filed_at": "2026-04-04T20:26:35.289308-07:00",
+  "executed": true,
+  "executed_at": "2026-04-04T20:27:38.239249-07:00"
+}
