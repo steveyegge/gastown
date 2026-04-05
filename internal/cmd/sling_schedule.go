@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/scheduler/capacity"
@@ -92,8 +93,13 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 
 	// Idempotency: check for existing open sling context for this work bead.
 	// Fail fast on errors to avoid creating duplicate contexts on transient DB failures.
-	townBeads := beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
-	existingCtx, _, findErr := townBeads.FindOpenSlingContext(beadID)
+	//
+	// Create the sling context in the target rig's beads dir so that the target
+	// rig's witness can discover it during patrol. Previously this used the HQ
+	// beads dir, which meant non-HQ rig witnesses never saw the context. (GH#3468)
+	rigBeadsDir := doltserver.FindRigBeadsDir(townRoot, rigName)
+	rigBeads := beads.NewWithBeadsDir(townRoot, rigBeadsDir)
+	existingCtx, _, findErr := rigBeads.FindOpenSlingContext(beadID)
 	if findErr != nil {
 		return fmt.Errorf("checking for existing sling context: %w", findErr)
 	}
@@ -166,8 +172,9 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 	}
 	fields.Owned = opts.Owned
 
-	// Create sling context bead — single atomic operation. No two-step write.
-	ctxBead, err := townBeads.CreateSlingContext(info.Title, beadID, fields)
+	// Create sling context bead in the target rig's beads dir so the rig's
+	// witness discovers it during patrol. (GH#3468)
+	ctxBead, err := rigBeads.CreateSlingContext(info.Title, beadID, fields)
 	if err != nil {
 		return fmt.Errorf("creating sling context: %w", err)
 	}
@@ -183,7 +190,7 @@ func scheduleBead(beadID, rigName string, opts ScheduleOptions) error {
 				fmt.Printf("%s Created convoy %s\n", style.Bold.Render("→"), convoyID)
 				// Update the context bead fields with convoy ID
 				fields.Convoy = convoyID
-				if updateErr := townBeads.UpdateSlingContextFields(ctxBead.ID, fields); updateErr != nil {
+				if updateErr := rigBeads.UpdateSlingContextFields(ctxBead.ID, fields); updateErr != nil {
 					fmt.Printf("%s Could not update context with convoy: %v\n", style.Dim.Render("Warning:"), updateErr)
 				}
 			}
@@ -299,11 +306,10 @@ func resolveFormula(explicit string, hookRawBead bool, townRoot, rigName string)
 const slingContextTTL = 30 * time.Minute
 
 // areScheduled returns a set of bead IDs that have open sling contexts.
-// Queries HQ only — sling contexts are always created in the town-root DB,
-// so HQ is authoritative. This avoids partial-failure scenarios where a rig
-// dir succeeds but HQ fails, which would silently return incomplete results.
-// On error, fails closed: treats ALL requested beads as scheduled to prevent
-// false stranded detection and duplicate scheduling attempts.
+// Scans all rig beads dirs since sling contexts are created in the target
+// rig's beads dir (GH#3468). On error, fails closed: treats ALL requested
+// beads as scheduled to prevent false stranded detection and duplicate
+// scheduling attempts.
 //
 // Sling contexts older than slingContextTTL are ignored — they are likely
 // orphans from failed spawn attempts (GH#2279).
@@ -322,8 +328,8 @@ func areScheduled(beadIDs []string) map[string]bool {
 		return result
 	}
 
-	townBeads := beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
-	contexts, err := townBeads.ListOpenSlingContexts()
+	// Scan all rig beads dirs (sling contexts live in target rig's DB). (GH#3468)
+	contexts, err := listAllSlingContexts(townRoot)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s Warning: could not list sling contexts: %v (treating all as scheduled)\n",
 			style.Dim.Render("⚠"), err)

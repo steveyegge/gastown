@@ -1177,6 +1177,12 @@ End of patrol cycle decision.
 
 **If context LOW** (can continue patrolling):
 
+Refresh the heartbeat again immediately before the long idle wait:
+
+```bash
+gt deacon heartbeat "pre-await checkpoint"
+```
+
 Use await-signal with exponential backoff to wait for activity:
 
 ```bash

@@ -160,6 +160,16 @@ type MergeQueueConfig struct {
 	// CI/CD builds (e.g. Vercel) on every merge.
 	AutoPush bool `json:"auto_push"`
 
+	// MergeStrategy controls how the refinery lands work: "direct" (default)
+	// does local squash merge + git push; "pr" uses gh pr merge via GitHub API
+	// which respects branch protection rules.
+	MergeStrategy string `json:"merge_strategy,omitempty"`
+
+	// RequireReview controls whether the refinery requires at least one approving
+	// GitHub review before merging a PR. Only meaningful when MergeStrategy="pr".
+	// Nil defaults to false (no review required).
+	RequireReview *bool `json:"require_review,omitempty"`
+
 	// Batch holds configuration for the batch-then-bisect merge queue.
 	// When nil or MaxBatchSize <= 1, batching is disabled and MRs process sequentially.
 	Batch *BatchConfig `json:"batch,omitempty"`
@@ -336,6 +346,8 @@ func (e *Engineer) LoadConfig() error {
 		Gates                map[string]*gateConfigRaw  `json:"gates"`
 		GatesParallel        *bool                      `json:"gates_parallel"`
 		AutoPush             *bool                      `json:"auto_push"`
+		MergeStrategy        *string                    `json:"merge_strategy"`
+		RequireReview        *bool                      `json:"require_review"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -414,6 +426,12 @@ func (e *Engineer) LoadConfig() error {
 	if mqRaw.AutoPush != nil {
 		e.config.AutoPush = *mqRaw.AutoPush
 	}
+	if mqRaw.MergeStrategy != nil {
+		e.config.MergeStrategy = *mqRaw.MergeStrategy
+	}
+	if mqRaw.RequireReview != nil {
+		e.config.RequireReview = mqRaw.RequireReview
+	}
 
 	return nil
 }
@@ -441,6 +459,7 @@ type ProcessResult struct {
 	SlotTimeout    bool // Merge slot contention timeout (distinct from build/test failure)
 	BranchNotFound bool // Source branch no longer exists (e.g. cleaned up after cherry-pick)
 	NoMerge        bool // Source issue has no_merge flag — intentionally blocked, not a failure
+	NeedsApproval  bool // PR exists but lacks required approving review (merge_strategy=pr)
 }
 
 // doMerge performs the actual git merge operation.
@@ -565,6 +584,13 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		_, _ = fmt.Fprintln(e.output, "[Engineer] Tests passed")
 	}
 
+	// PR merge path: when merge_strategy=pr, use GitHub's merge API instead of
+	// local squash merge + direct push. This respects branch protection rules
+	// and preserves the PR audit trail.
+	if e.config.MergeStrategy == "pr" {
+		return e.doMergePR(ctx, branch, target)
+	}
+
 	// Step 5: Perform the actual merge using squash merge
 	// Get the original commit message from the polecat branch to preserve the
 	// conventional commit format (feat:/fix:) instead of creating redundant merge commits
@@ -672,6 +698,83 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 	}
 
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Successfully merged: %s\n", shortSHA(mergeCommit))
+	return ProcessResult{
+		Success:     true,
+		MergeCommit: mergeCommit,
+	}
+}
+
+// doMergePR handles merging via GitHub's PR merge API (merge_strategy=pr).
+// This respects branch protection rules including required reviews.
+// Called from doMerge after quality gates have passed.
+func (e *Engineer) doMergePR(ctx context.Context, branch, target string) ProcessResult {
+	_, _ = fmt.Fprintln(e.output, "[Engineer] Using PR merge strategy (merge_strategy=pr)")
+
+	// Step PR.1: Find the GitHub PR for this branch
+	prNumber, err := e.git.FindPRNumber(branch)
+	if err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to find PR for branch %s: %v", branch, err),
+		}
+	}
+	if prNumber == 0 {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("no open PR found for branch %s — merge_strategy=pr requires a PR", branch),
+		}
+	}
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Found PR #%d for branch %s\n", prNumber, branch)
+
+	// Step PR.2: Check approval status if require_review is enabled
+	requireReview := e.config.RequireReview != nil && *e.config.RequireReview
+	if requireReview {
+		approved, err := e.git.IsPRApproved(prNumber)
+		if err != nil {
+			return ProcessResult{
+				Success: false,
+				Error:   fmt.Sprintf("failed to check PR #%d approval status: %v", prNumber, err),
+			}
+		}
+		if !approved {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] PR #%d awaiting human approval — deferring merge\n", prNumber)
+			return ProcessResult{
+				Success:       false,
+				NeedsApproval: true,
+				Error:         fmt.Sprintf("PR #%d requires approving review before merge", prNumber),
+			}
+		}
+		_, _ = fmt.Fprintf(e.output, "[Engineer] PR #%d has approving review\n", prNumber)
+	}
+
+	// Step PR.3: Merge via GitHub API using squash merge
+	// gh pr merge respects branch protection rules — if protection requires
+	// reviews and the PR doesn't have them, the merge will fail.
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Merging PR #%d via gh pr merge --squash...\n", prNumber)
+	mergeCommit, err := e.git.GhPrMerge(prNumber, "squash")
+	if err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("gh pr merge failed for PR #%d: %v", prNumber, err),
+		}
+	}
+
+	// Step PR.4: Sync local target branch after GitHub merge
+	// Reset local target to match origin so subsequent operations see the merged state.
+	if err := e.git.Checkout(target); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to checkout %s after PR merge: %v\n", target, err)
+	} else if err := e.git.Pull("origin", target); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to pull %s after PR merge: %v\n", target, err)
+	}
+
+	// Get the actual merge commit SHA if GhPrMerge couldn't determine it
+	if mergeCommit == "" {
+		if sha, err := e.git.Rev("HEAD"); err == nil {
+			mergeCommit = sha
+		}
+	}
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Successfully merged PR #%d: %s\n", prNumber, shortSHA(mergeCommit))
 	return ProcessResult{
 		Success:     true,
 		MergeCommit: mergeCommit,
@@ -1133,6 +1236,14 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 	// No polecat or mayor notification needed; the MR is simply dequeued.
 	if result.NoMerge {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] MR %s: no_merge flag set on source issue, dequeued\n", mr.ID)
+		return
+	}
+
+	// NeedsApproval: PR exists but lacks required approving review (merge_strategy=pr).
+	// Not a failure — the MR stays in queue and will be retried on the next poll.
+	// No polecat notification needed; the PR just needs a human review on GitHub.
+	if result.NeedsApproval {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] MR %s: PR awaiting human approval, will retry next poll\n", mr.ID)
 		return
 	}
 

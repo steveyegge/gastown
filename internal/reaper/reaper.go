@@ -126,12 +126,21 @@ type PurgeResult struct {
 	Anomalies   []Anomaly `json:"anomalies,omitempty"`
 }
 
+// ClosedEntry records an individual issue closure with details for logging.
+type ClosedEntry struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	AgeDays  int    `json:"age_days"`
+	Database string `json:"database"`
+}
+
 // AutoCloseResult holds the results of an auto-close operation.
 type AutoCloseResult struct {
-	Database string    `json:"database"`
-	Closed   int       `json:"closed"`
-	DryRun   bool      `json:"dry_run,omitempty"`
-	Anomalies []Anomaly `json:"anomalies,omitempty"`
+	Database      string        `json:"database"`
+	Closed        int           `json:"closed"`
+	ClosedEntries []ClosedEntry `json:"closed_entries,omitempty"`
+	DryRun        bool          `json:"dry_run,omitempty"`
+	Anomalies     []Anomaly     `json:"anomalies,omitempty"`
 }
 
 // Anomaly represents an unexpected condition found during reaper operations.
@@ -604,7 +613,7 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 
 	// Two-step SELECT-then-UPDATE to avoid self-referencing subquery in UPDATE,
 	// which is not valid MySQL (Error 1093) and fragile in Dolt (dolthub/dolt#10600).
-	selectQuery := fmt.Sprintf("SELECT i.id FROM issues i WHERE %s", whereClause)
+	selectQuery := fmt.Sprintf("SELECT i.id, i.title, i.updated_at FROM issues i WHERE %s", whereClause)
 	rows, err := db.QueryContext(ctx, selectQuery, staleCutoff)
 	if err != nil {
 		if isTableNotFound(err) {
@@ -612,16 +621,34 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 		}
 		return nil, fmt.Errorf("select stale: %w", err)
 	}
-	var ids []string
+	type candidate struct {
+		id        string
+		title     string
+		updatedAt time.Time
+	}
+	var candidates []candidate
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var c candidate
+		if err := rows.Scan(&c.id, &c.title, &c.updatedAt); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan stale id: %w", err)
 		}
-		ids = append(ids, id)
+		candidates = append(candidates, c)
 	}
 	rows.Close()
+
+	// Build per-issue closure log entries.
+	now := time.Now().UTC()
+	ids := make([]string, len(candidates))
+	for i, c := range candidates {
+		ids[i] = c.id
+		result.ClosedEntries = append(result.ClosedEntries, ClosedEntry{
+			ID:       c.id,
+			Title:    c.title,
+			AgeDays:  int(now.Sub(c.updatedAt).Hours() / 24),
+			Database: dbName,
+		})
+	}
 
 	if dryRun {
 		result.Closed = len(ids)
@@ -646,7 +673,7 @@ func AutoClose(db *sql.DB, dbName string, staleAge time.Duration, dryRun bool) (
 		args[i] = id
 	}
 	updateQuery := fmt.Sprintf(
-		"UPDATE `%s`.issues SET status = 'closed', closed_at = NOW() WHERE id IN (%s)",
+		"UPDATE `%s`.issues SET status = 'closed', closed_at = NOW(), close_reason = 'stale:auto-closed by reaper' WHERE id IN (%s)",
 		dbName, strings.Join(placeholders, ","))
 	if _, err := db.ExecContext(ctx, updateQuery, args...); err != nil {
 		return nil, fmt.Errorf("auto-close: %w", err)

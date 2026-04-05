@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-04-02
+
+### Added
+
+- **Windows platform support** — Cherry-picked Windows support: platform-specific
+  signal handling, process management, tmux descendant tracking, and estop split
+  into OS-specific files.
+- **Workflow formula type** — `gt formula run` now supports `type = "workflow"`
+  formulas with interactive step execution.
+- **Refinery PR merge strategy** — New `merge_strategy=pr` option uses `gh pr merge`
+  instead of direct push, enabling GitHub's native merge queue.
+- **`/crew-commit` skill** — Canonical crew commit workflow as a Claude skill.
+- **Rate-limit watchdog plugin** — Auto-estop on API 429 rate limit errors.
+- **`gt mail send --from` flag** — Relay/bridge use case for mail forwarding.
+- **`gt mail mark-read --all`** — Mark all inbox messages as read at once.
+- **`RequireTownEnv` test helper** — Integration test guard with documentation
+  for GH#2717.
+- **Prefix collision checking** — `gt rig add` and `gt rig adopt` now detect
+  prefix collisions before creation.
+- **Bead description in PR body** — PR body now includes bead description and
+  diff stat for richer context.
+- **Dolt commit freshness health check** — Dolt health metrics now include commit
+  freshness monitoring.
+- **Default effort level config** — `CLAUDE_CODE_EFFORT_LEVEL` configurable for
+  all agents.
+- **`gt dolt pull`** — New command for pulling Dolt remotes.
+
+### Changed
+
+- **CI: Windows smoke tests** — Replaced Windows unit tests with lighter smoke
+  tests for faster CI.
+- **Refinery requires review** — `require_review=true` now blocks merge until PR
+  has an approving review.
+- **Mayor approval for scope expansion** — Polecats must get mayor approval
+  before expanding molecule scope.
+- **Polecat PreToolUse guard** — Blocks `sudo` and system package installs in
+  polecat sessions.
+- **Patrol formulas use rig-prefixed vars** — Template variables for agent bead
+  IDs are now rig-prefixed.
+- **Polecat auto-checkout** — Sessions auto-checkout a fresh branch when started
+  on the default branch.
+- **Makefile OOM fixes** — Strip flags and codesign removal to prevent OOM kills
+  during builds.
+
+### Fixed
+
+- **SQL injection in dolt_remotes** — Escaped SQL string in remote name query
+  (security fix).
+- **ACP integration test flakiness** — Resolved CleanExit and FullLoop test
+  races.
+- **Witness zombie detection** — Distinguish bead lookup failure from
+  closed/reaped beads.
+- **Scheduler capacity counting** — Exclude idle polecats from capacity count.
+- **Nested town root detection** — `FindTownRoot` now returns outermost town
+  root for nested rigs.
+- **Convoy +Inf metadata** — Fix detection and flip-flop in convoy metadata.
+- **Carry branch builds** — Support `carry/*` branches in build infrastructure.
+- **Unsigned binary handling** — Refuse to run unsigned binary instead of just
+  warning.
+- **Shell hook shebang** — `shell-hook.sh` shebang now matches registered shell.
+- **Sling context routing** — Route sling-context wisp to target rig instead of
+  HQ.
+- **Feed timestamps** — Display feed timestamps in local timezone instead of UTC.
+- **Crew status across rigs** — `gt crew status` now shows all rigs.
+- **Polecat CLAUDE.md commit guard** — Prevent polecats from committing Gas Town
+  overlay CLAUDE.md.
+- **PR branch deletion guard** — Guard PR branch deletion and add review approval
+  check.
+- **Lint fixes** — Resolve unconvert, unparam, and misspell warnings.
+- **Git identity in worktrees** — Propagate global git identity into polecat
+  worktrees.
+- **Sparse-checkout deletions** — Ignore sparse-checkout deletions in git status.
+- **Beads config parsing** — Ignore `(not set)` in beads config output.
+- **Plugin heartbeat path** — Check `heartbeat.json` instead of legacy
+  `.deacon-heartbeat`.
+- **Dog mail race condition** — Send dog mail before session start to prevent
+  race.
+- **Polecat dashboard drops** — Use local prefix registry in dashboard
+  FetchWorkers.
+- **Dolt TCP ping fallback** — Always TCP-ping dolt port as last resort in
+  IsRunning.
+- **ENABLED_RIGS unbound variable** — Initialize array to avoid error with
+  `set -u`.
+- **Claude project dir path encoding** — Encode underscores as hyphens in
+  project directory path.
+- **Hook template PATH export** — Replace `export PATH` with `{{GT_BIN}}` in all
+  hook templates.
+
 ## [0.13.0] - 2026-03-29
 
 ### Added

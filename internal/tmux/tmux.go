@@ -1650,7 +1650,7 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 		// to avoid ambiguity. On some tmux versions (e.g., 3.3 on Windows),
 		// pane IDs are NOT globally unique — every session may have "%1".
 		// A bare "send-keys -t %1" targets the attached session's pane,
-		// not necessarily this session's. (gt-ect)
+		// not necessarily this session's.
 		target = session + ":" + agentPane
 	}
 

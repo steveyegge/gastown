@@ -201,6 +201,17 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// this empty value with intentional settings like --max-old-space-size.
 	env["NODE_OPTIONS"] = ""
 
+	// Set Claude Code effort level for all agents. Opus 4.6 defaults to "medium"
+	// which under-utilizes the model's reasoning capability. Propagate any
+	// user-level override (from shell env); otherwise default to "high".
+	// Users can set CLAUDE_CODE_EFFORT_LEVEL=max in their profile for maximum
+	// reasoning depth (Opus 4.6 only, more expensive).
+	if effortLevel := os.Getenv("CLAUDE_CODE_EFFORT_LEVEL"); effortLevel != "" {
+		env["CLAUDE_CODE_EFFORT_LEVEL"] = effortLevel
+	} else {
+		env["CLAUDE_CODE_EFFORT_LEVEL"] = "high"
+	}
+
 	// Clear CLAUDECODE to prevent nested session detection in Claude Code v2.x.
 	// When gt sling is invoked from within a Claude Code session, CLAUDECODE=1
 	// leaks through tmux's global environment into new polecat sessions, causing

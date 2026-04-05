@@ -148,6 +148,178 @@ func validSQLName(name string) bool {
 	return true
 }
 
+// PullDatabaseSQL pulls a database from its remote via SQL (CALL DOLT_PULL) through
+// the running Dolt server. This avoids lock contention with the server process.
+func PullDatabaseSQL(townRoot, db, remote string) error {
+	if !validSQLName(db) {
+		return fmt.Errorf("invalid database name %q: must match [a-zA-Z0-9_.-]+", db)
+	}
+	if !validSQLName(remote) {
+		return fmt.Errorf("invalid remote name %q: must match [a-zA-Z0-9_.-]+", remote)
+	}
+
+	// Pull via SQL — fetch + merge through the running server
+	pullQuery := fmt.Sprintf("USE `%s`; CALL DOLT_PULL('%s')", db, remote)
+
+	// Pull can be slow for large databases or slow remotes
+	config := DefaultConfig(townRoot)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	cmd := buildDoltSQLCmd(ctx, config, "-q", pullQuery)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("DOLT_PULL: %w (%s)", err, strings.TrimSpace(string(output)))
+	}
+
+	return nil
+}
+
+// PullDatabase pulls a Dolt database directory from the specified remote's main branch
+// using the CLI. Requires the Dolt server to be stopped (CLI mode).
+func PullDatabase(dbDir, remote string) error {
+	cmd := exec.Command("dolt", "pull", remote, "main")
+	cmd.Dir = dbDir
+	setProcessGroup(cmd)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("dolt pull: %w (%s)", err, strings.TrimSpace(string(output)))
+	}
+
+	return nil
+}
+
+// PullDatabasesSQL iterates all databases (or a filtered subset) and pulls via SQL
+// through the running Dolt server. This avoids lock contention between the CLI and server.
+func PullDatabasesSQL(townRoot string, opts SyncOptions) []SyncResult {
+	databases, err := ListDatabases(townRoot)
+	if err != nil {
+		return []SyncResult{{
+			Database: "(list)",
+			Error:    fmt.Errorf("listing databases: %w", err),
+		}}
+	}
+
+	var results []SyncResult
+
+	for _, db := range databases {
+		if opts.Filter != "" && db != opts.Filter {
+			continue
+		}
+
+		result := SyncResult{Database: db}
+
+		// Skip databases with a .no-sync marker file (local-only databases),
+		// unless explicitly requested via Filter (--db flag).
+		dbDir := RigDatabaseDir(townRoot, db)
+		if opts.Filter == "" {
+			if _, err := os.Stat(filepath.Join(dbDir, ".no-sync")); err == nil {
+				result.Skipped = true
+				results = append(results, result)
+				continue
+			}
+		}
+
+		// Check for remote via SQL
+		remoteName, remoteURL, err := FindRemoteSQL(townRoot, db)
+		if err != nil {
+			result.Error = fmt.Errorf("checking remote: %w", err)
+			results = append(results, result)
+			continue
+		}
+		result.Remote = remoteURL
+
+		if remoteURL == "" {
+			result.Skipped = true
+			results = append(results, result)
+			continue
+		}
+
+		if opts.DryRun {
+			result.DryRun = true
+			results = append(results, result)
+			continue
+		}
+
+		// Pull via SQL (server stays running)
+		if err := PullDatabaseSQL(townRoot, db, remoteName); err != nil {
+			result.Error = err
+			results = append(results, result)
+			continue
+		}
+
+		result.Pushed = true // reusing Pushed field to indicate success
+		results = append(results, result)
+	}
+
+	return results
+}
+
+// PullDatabases iterates all databases (or a filtered subset) and pulls via CLI.
+// Requires the Dolt server to be stopped.
+func PullDatabases(townRoot string, opts SyncOptions) []SyncResult {
+	databases, err := ListDatabases(townRoot)
+	if err != nil {
+		return []SyncResult{{
+			Database: "(list)",
+			Error:    fmt.Errorf("listing databases: %w", err),
+		}}
+	}
+
+	var results []SyncResult
+
+	for _, db := range databases {
+		if opts.Filter != "" && db != opts.Filter {
+			continue
+		}
+
+		dbDir := RigDatabaseDir(townRoot, db)
+		result := SyncResult{Database: db}
+
+		// Skip databases with a .no-sync marker file,
+		// unless explicitly requested via Filter (--db flag).
+		if opts.Filter == "" {
+			if _, err := os.Stat(filepath.Join(dbDir, ".no-sync")); err == nil {
+				result.Skipped = true
+				results = append(results, result)
+				continue
+			}
+		}
+
+		// Check for remote
+		remoteName, remoteURL, err := FindRemote(dbDir)
+		if err != nil {
+			result.Error = fmt.Errorf("checking remote: %w", err)
+			results = append(results, result)
+			continue
+		}
+		result.Remote = remoteURL
+
+		if remoteURL == "" {
+			result.Skipped = true
+			results = append(results, result)
+			continue
+		}
+
+		if opts.DryRun {
+			result.DryRun = true
+			results = append(results, result)
+			continue
+		}
+
+		if err := PullDatabase(dbDir, remoteName); err != nil {
+			result.Error = err
+			results = append(results, result)
+			continue
+		}
+
+		result.Pushed = true // reusing Pushed field to indicate success
+		results = append(results, result)
+	}
+
+	return results
+}
+
 // PushDatabaseSQL pushes a database to its remote via SQL (CALL DOLT_PUSH) through
 // the running Dolt server. This avoids stopping the server and crashing all agents.
 func PushDatabaseSQL(townRoot, db, remote string, force bool) error {
@@ -251,11 +423,14 @@ func SyncDatabases(townRoot string, opts SyncOptions) []SyncResult {
 		dbDir := RigDatabaseDir(townRoot, db)
 		result := SyncResult{Database: db}
 
-		// Skip databases with a .no-sync marker file (local-only databases).
-		if _, err := os.Stat(filepath.Join(dbDir, ".no-sync")); err == nil {
-			result.Skipped = true
-			results = append(results, result)
-			continue
+		// Skip databases with a .no-sync marker file (local-only databases),
+		// unless explicitly requested via Filter (--db flag).
+		if opts.Filter == "" {
+			if _, err := os.Stat(filepath.Join(dbDir, ".no-sync")); err == nil {
+				result.Skipped = true
+				results = append(results, result)
+				continue
+			}
 		}
 
 		// Check for remote (any name — "origin", "github", etc.)
@@ -341,12 +516,15 @@ func SyncDatabasesSQL(townRoot string, opts SyncOptions) []SyncResult {
 
 		result := SyncResult{Database: db}
 
-		// Skip databases with a .no-sync marker file (local-only databases).
+		// Skip databases with a .no-sync marker file (local-only databases),
+		// unless explicitly requested via Filter (--db flag).
 		dbDir := RigDatabaseDir(townRoot, db)
-		if _, err := os.Stat(filepath.Join(dbDir, ".no-sync")); err == nil {
-			result.Skipped = true
-			results = append(results, result)
-			continue
+		if opts.Filter == "" {
+			if _, err := os.Stat(filepath.Join(dbDir, ".no-sync")); err == nil {
+				result.Skipped = true
+				results = append(results, result)
+				continue
+			}
 		}
 
 		// Check for remote via SQL

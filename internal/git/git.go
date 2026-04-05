@@ -3,6 +3,7 @@ package git
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -888,6 +889,76 @@ func (g *Git) HasOpenPR(branch string) bool {
 	out = bytes.TrimSpace(out)
 	// Empty array "[]" means no open PRs
 	return len(out) > 2
+}
+
+// FindPRNumber returns the GitHub PR number for the given branch, or 0 if none exists.
+// Uses the gh CLI to query for open PRs with the branch as head ref.
+func (g *Git) FindPRNumber(branch string) (int, error) {
+	cmd := exec.Command("gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number", "--limit", "1")
+	cmd.Dir = g.workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("gh pr list failed: %w", err)
+	}
+	out = bytes.TrimSpace(out)
+	if len(out) <= 2 {
+		return 0, nil // No open PR
+	}
+	var prs []struct {
+		Number int `json:"number"`
+	}
+	if err := json.Unmarshal(out, &prs); err != nil {
+		return 0, fmt.Errorf("failed to parse gh pr list output: %w", err)
+	}
+	if len(prs) == 0 {
+		return 0, nil
+	}
+	return prs[0].Number, nil
+}
+
+// IsPRApproved checks whether a GitHub PR has at least one approving review.
+// Returns true if approved, false if not (or on error).
+func (g *Git) IsPRApproved(prNumber int) (bool, error) {
+	// Use gh pr view which includes review decision
+	cmd := exec.Command("gh", "pr", "view", fmt.Sprintf("%d", prNumber), "--json", "reviewDecision")
+	cmd.Dir = g.workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("gh pr view failed: %w", err)
+	}
+	var result struct {
+		ReviewDecision string `json:"reviewDecision"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(out), &result); err != nil {
+		return false, fmt.Errorf("failed to parse gh pr view output: %w", err)
+	}
+	// APPROVED is the GitHub review decision when at least one approving review exists
+	return result.ReviewDecision == "APPROVED", nil
+}
+
+// GhPrMerge merges a GitHub PR using the gh CLI, respecting branch protection rules.
+// The method parameter should be "merge", "squash", or "rebase".
+// Returns the merge commit SHA on success.
+func (g *Git) GhPrMerge(prNumber int, method string) (string, error) {
+	args := []string{"pr", "merge", fmt.Sprintf("%d", prNumber), "--" + method, "--delete-branch"}
+	cmd := exec.Command("gh", args...)
+	cmd.Dir = g.workDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("gh pr merge failed: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	// After merge, pull the target branch to get the merge commit locally
+	if _, pullErr := g.run("pull", "origin"); pullErr != nil {
+		// Non-fatal: the merge succeeded on GitHub, we just can't get the SHA locally
+		return "", nil
+	}
+	// Get the latest commit on HEAD (should be the merge commit)
+	sha, revErr := g.Rev("HEAD")
+	if revErr != nil {
+		return "", nil // Merge succeeded, just can't determine SHA
+	}
+	return sha, nil
 }
 
 // ListRemoteRefs returns remote ref names matching a prefix using ls-remote.

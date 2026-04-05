@@ -278,11 +278,15 @@ func runFormulaRun(cmd *cobra.Command, args []string) error {
 		return dryRunFormula(f, formulaName, targetRig)
 	}
 
-	// Currently only convoy formulas are supported for execution
-	if f.Type != formula.TypeConvoy {
+	switch f.Type {
+	case formula.TypeConvoy:
+		return executeConvoyFormula(f, formulaName, targetRig)
+	case formula.TypeWorkflow:
+		return executeWorkflowFormula(f, formulaName, targetRig)
+	default:
 		fmt.Printf("%s Formula type '%s' not yet supported for execution.\n",
 			style.Dim.Render("Note:"), f.Type)
-		fmt.Printf("Currently only 'convoy' formulas can be run.\n")
+		fmt.Printf("Currently only 'convoy' and 'workflow' formulas can be run.\n")
 		fmt.Printf("\nTo run '%s' manually:\n", formulaName)
 		fmt.Printf("  1. View formula:   gt formula show %s\n", formulaName)
 		fmt.Printf("  2. Cook to proto:  bd cook %s\n", formulaName)
@@ -290,9 +294,6 @@ func runFormulaRun(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  4. Sling to rig:   gt sling <mol-id> %s\n", targetRig)
 		return nil
 	}
-
-	// Execute convoy formula
-	return executeConvoyFormula(f, formulaName, targetRig)
 }
 
 // dryRunFormula shows what would happen without executing
@@ -391,6 +392,21 @@ func dryRunFormula(f *formula.Formula, formulaName, targetRig string) error {
 			} else {
 				fmt.Printf("    • %s\n", f.Synthesis.Title)
 			}
+		}
+	}
+
+	if f.Type == formula.TypeWorkflow && len(f.Steps) > 0 {
+		fmt.Printf("\n  Steps (%d sequential):\n", len(f.Steps))
+		for i, step := range f.Steps {
+			needsStr := ""
+			if len(step.Needs) > 0 {
+				needsStr = fmt.Sprintf(" [needs: %s]", strings.Join(step.Needs, ", "))
+			}
+			readyStr := ""
+			if len(step.Needs) == 0 {
+				readyStr = " ← ready"
+			}
+			fmt.Printf("    %d. %s: %s%s%s\n", i+1, step.ID, step.Title, needsStr, readyStr)
 		}
 	}
 
@@ -689,6 +705,203 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 	fmt.Printf("\n  Track progress: gt convoy status %s\n", convoyID)
 
 	return nil
+}
+
+// executeWorkflowFormula creates step beads with dependency wiring and dispatches
+// ready steps (those with no unmet needs) to polecats on the target rig.
+// Subsequent steps are auto-dispatched when their dependencies close. (gt-jh68)
+func executeWorkflowFormula(f *formula.Formula, formulaName, targetRig string) error {
+	fmt.Printf("%s Executing workflow formula: %s\n\n",
+		style.Bold.Render("📋"), formulaName)
+
+	if len(f.Steps) == 0 {
+		return fmt.Errorf("workflow formula '%s' has no steps", formulaName)
+	}
+
+	// Get town beads directory
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+	townBeads := filepath.Join(townRoot, ".beads")
+
+	// Resolve the target rig's beads prefix and directory
+	rigPrefix := beads.GetPrefixForRig(townRoot, targetRig)
+	rigBeadsDir := townBeads
+	if rigPrefix != "hq" {
+		routes, _ := beads.LoadRoutes(townBeads)
+		for _, r := range routes {
+			parts := strings.SplitN(r.Path, "/", 2)
+			if len(parts) > 0 && parts[0] == targetRig {
+				rigBeadsDir = filepath.Join(townRoot, r.Path, ".beads")
+				break
+			}
+		}
+	}
+
+	// Step 1: Create workflow root bead
+	workflowID := fmt.Sprintf("hq-wf-%s", generateFormulaShortID())
+	workflowTitle := fmt.Sprintf("%s: %s (%d steps)", formulaName,
+		truncate(f.Description, 50), len(f.Steps))
+
+	description := fmt.Sprintf("Workflow: %s\n\nSteps: %d\nRig: %s",
+		formulaName, len(f.Steps), targetRig)
+
+	if beads.IsFlagLikeTitle(workflowTitle) {
+		return fmt.Errorf("refusing to create workflow: title %q looks like a CLI flag", workflowTitle)
+	}
+
+	createArgs := []string{
+		"create",
+		"--type=convoy", // reuse convoy type for workflow tracking
+		"--id=" + workflowID,
+		"--title=" + workflowTitle,
+		"--description=" + description,
+	}
+	if beads.NeedsForceForID(workflowID) {
+		createArgs = append(createArgs, "--force")
+	}
+
+	if err := BdCmd(createArgs...).
+		WithAutoCommit().
+		Dir(townBeads).
+		Stderr(os.Stderr).
+		Run(); err != nil {
+		return fmt.Errorf("creating workflow bead: %w", err)
+	}
+
+	fmt.Printf("%s Created workflow: %s\n", style.Bold.Render("✓"), workflowID)
+
+	// Step 2: Create step beads and wire dependencies
+	stepBeads := make(map[string]string) // step.ID -> bead ID
+
+	for _, step := range f.Steps {
+		stepBeadID := fmt.Sprintf("%s-wfs-%s", rigPrefix, generateFormulaShortID())
+
+		// Step descriptions contain {{var}} placeholders (e.g., {{problem}},
+		// {{context}}) that are instructions for the executing AGENT, not Go
+		// template vars. Do not render them — pass through verbatim.
+
+		// Use --body-file=- (stdin) for the description to avoid CLI arg
+		// length limits and quoting issues with large markdown descriptions.
+		stepArgs := []string{
+			"create",
+			"--type=task",
+			"--id=" + stepBeadID,
+			"--title=" + step.Title,
+			"--body-file=-",
+		}
+		if beads.NeedsForceForID(stepBeadID) {
+			stepArgs = append(stepArgs, "--force")
+		}
+
+		createCmd := BdCmd(stepArgs...).
+			WithAutoCommit().
+			Dir(rigBeadsDir).
+			Stderr(os.Stderr).
+			Build()
+		createCmd.Stdin = strings.NewReader(step.Description)
+		if err := createCmd.Run(); err != nil {
+			fmt.Printf("%s Failed to create step bead for %s: %v\n",
+				style.Dim.Render("Warning:"), step.ID, err)
+			continue
+		}
+
+		// Track the step with the workflow
+		_ = BdCmd("dep", "add", workflowID, stepBeadID, "--type=tracks").
+			WithAutoCommit().
+			Dir(townBeads).
+			Run()
+
+		// Wire dependencies: this step depends on its needs
+		for _, needID := range step.Needs {
+			depBeadID, ok := stepBeads[needID]
+			if !ok {
+				fmt.Printf("%s Step '%s' needs '%s' but it has no bead (ordering issue?)\n",
+					style.Dim.Render("Warning:"), step.ID, needID)
+				continue
+			}
+			_ = BdCmd("dep", "add", stepBeadID, depBeadID).
+				WithAutoCommit().
+				Dir(townBeads).
+				Run()
+		}
+
+		stepBeads[step.ID] = stepBeadID
+
+		needsStr := ""
+		if len(step.Needs) > 0 {
+			needsStr = fmt.Sprintf(" (needs: %s)", strings.Join(step.Needs, ", "))
+		}
+		fmt.Printf("  %s %s: %s%s\n", style.Dim.Render("○"), step.ID, stepBeadID, needsStr)
+	}
+
+	// Step 3: Identify and sling ready steps (those with no dependencies)
+	fmt.Printf("\n%s Dispatching ready steps...\n\n", style.Bold.Render("→"))
+
+	slingCount := 0
+	for _, step := range f.Steps {
+		if len(step.Needs) > 0 {
+			continue // has unmet dependencies — will be auto-dispatched
+		}
+
+		stepBeadID, ok := stepBeads[step.ID]
+		if !ok {
+			continue
+		}
+
+		// Agent precedence: CLI --agent > formula-level
+		stepAgent := formulaRunAgent
+		if stepAgent == "" {
+			stepAgent = f.Agent
+		}
+
+		slingArgs := []string{
+			"sling", stepBeadID, targetRig,
+			"-a", step.Description,
+			"-s", step.Title,
+		}
+		if stepAgent != "" {
+			slingArgs = append(slingArgs, "--agent", stepAgent)
+		}
+
+		slingCmd := exec.Command("gt", slingArgs...)
+		slingCmd.Stdout = os.Stdout
+		slingCmd.Stderr = os.Stderr
+
+		if err := slingCmd.Run(); err != nil {
+			fmt.Printf("%s Failed to sling step %s: %v\n",
+				style.Dim.Render("Warning:"), step.ID, err)
+			_ = BdCmd("comment", stepBeadID, fmt.Sprintf("Failed to sling: %v", err)).
+				Dir(townBeads).
+				Run()
+			continue
+		}
+
+		slingCount++
+	}
+
+	// Summary
+	blockedCount := len(f.Steps) - slingCount
+	fmt.Printf("\n%s Workflow dispatched!\n", style.Bold.Render("✓"))
+	fmt.Printf("  Workflow: %s\n", workflowID)
+	fmt.Printf("  Steps:    %d total, %d dispatched, %d awaiting dependencies\n",
+		len(f.Steps), slingCount, blockedCount)
+	fmt.Printf("\n  Track progress: gt convoy status %s\n", workflowID)
+
+	return nil
+}
+
+// truncate shortens a string to maxLen, appending "..." if truncated.
+// Truncates at the first newline if one appears before maxLen.
+func truncate(s string, maxLen int) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 && i < maxLen {
+		s = s[:i]
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
 
 // findFormulaFile searches for a formula file by name

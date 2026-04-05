@@ -93,13 +93,14 @@ func CheckStaleBinary(repoDir string) *StaleBinaryInfo {
 	}
 	info.RepoCommit = strings.TrimSpace(string(output))
 
-	// Check which branch the repo is on
+	// Check which branch the repo is on.
+	// Accept main/master (upstream) and carry/* (fork operational branches).
 	branchCmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
 	branchCmd.Dir = repoDir
 	util.SetDetachedProcessGroup(branchCmd)
 	if branchOutput, err := branchCmd.Output(); err == nil {
 		branch := strings.TrimSpace(string(branchOutput))
-		info.OnMainBranch = (branch == "main" || branch == "master")
+		info.OnMainBranch = isBuildBranch(branch)
 	}
 
 	// Compare commits using prefix matching (handles short vs full hash)
@@ -229,6 +230,21 @@ func onlyBeadsChanges(repoDir, binaryCommit string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(output)) == ""
+}
+
+// isBuildBranch returns true if the given branch is safe for automated rebuilds.
+// Accepted branches:
+//   - main, master: upstream default branches
+//   - carry/*: fork operational branches (e.g., carry/operational)
+//
+// This prevents automated rebuilds from random feature, fix, or polecat branches
+// which could cause downgrades or crash loops.
+func isBuildBranch(branch string) bool {
+	switch branch {
+	case "main", "master":
+		return true
+	}
+	return strings.HasPrefix(branch, "carry/")
 }
 
 // SetCommit allows the cmd package to pass in the build-time commit.

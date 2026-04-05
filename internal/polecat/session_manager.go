@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -173,6 +174,18 @@ func (m *SessionManager) clonePath(polecat string) string {
 	return newPath
 }
 
+// freshBranchName returns a unique branch name for a new polecat session.
+// Mirrors the naming convention in Manager.buildBranchName:
+//   - polecat/<name>/<issue>@<timestamp> when an issue is known
+//   - polecat/<name>-<timestamp> otherwise
+func (m *SessionManager) freshBranchName(polecatName, issue string) string {
+	ts := strconv.FormatInt(time.Now().UnixMilli(), 36)
+	if issue != "" {
+		return fmt.Sprintf("polecat/%s/%s@%s", polecatName, issue, ts)
+	}
+	return fmt.Sprintf("polecat/%s-%s", polecatName, ts)
+}
+
 // hasPolecat checks if the polecat exists in this rig.
 func (m *SessionManager) hasPolecat(polecat string) bool {
 	polecatPath := m.polecatDir(polecat)
@@ -325,6 +338,20 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	if g := git.NewGit(workDir); g != nil {
 		if b, err := g.CurrentBranch(); err == nil {
 			polecatGitBranch = b
+			// Auto-checkout a fresh branch if the worktree is on the default branch.
+			// After gt done merges a polecat's work, the worktree reverts to main/master.
+			// Starting a new session on main triggers the PRIME.md branch guard, which
+			// nukes the polecat — causing the zombie loop seen in production (hq-h01n8).
+			defaultBranch := g.DefaultBranch()
+			if polecatGitBranch == defaultBranch || polecatGitBranch == "master" || polecatGitBranch == "main" {
+				newBranch := m.freshBranchName(polecat, opts.Issue)
+				if err := g.CheckoutNewBranch(newBranch, defaultBranch); err != nil {
+					// Non-fatal: PRIME.md guard remains as a fallback; log for debugging.
+					debugSession("auto-checkout fresh branch on default", err)
+				} else {
+					polecatGitBranch = newBranch
+				}
+			}
 		}
 	}
 	// Generate the GASTA run ID — the root identifier for all telemetry emitted

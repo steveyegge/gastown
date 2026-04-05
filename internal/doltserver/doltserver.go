@@ -2990,12 +2990,13 @@ func RepairWorkspace(townRoot string, ws BrokenWorkspace) (string, error) {
 // should pass it as doltDatabase so metadata.json gets the right value.
 func EnsureMetadata(townRoot, rigName string, doltDatabase ...string) error {
 	// Determine the Dolt database name to write when the field is absent.
-	// Default: rigName (correct when db-name == rig-dir-name, e.g. "gastown_el").
-	// Callers from EnsureAllMetadata pass the actual DB prefix ("be", "sw") so
+	// Default: rigName (correct when db-name == rig-dir-name, e.g. "gastown").
+	// Callers from EnsureAllMetadata pass the actual DB prefix ("at", "be") so
 	// that rigs with short prefixes get the correct database name, not the full
 	// rig directory name.
+	explicitDB := len(doltDatabase) > 0 && doltDatabase[0] != ""
 	effectiveDB := rigName
-	if len(doltDatabase) > 0 && doltDatabase[0] != "" {
+	if explicitDB {
 		effectiveDB = doltDatabase[0]
 	}
 
@@ -3048,11 +3049,17 @@ func EnsureMetadata(townRoot, rigName string, doltDatabase ...string) error {
 		existing["dolt_database"] = effectiveDB
 		changed = true
 	} else if dbStr, ok := existing["dolt_database"].(string); ok && dbStr != effectiveDB {
-		// The database name is wrong — fix it. This is the primary repair path
-		// for identity mismatches caused by bd init writing the wrong database name.
-		fmt.Fprintf(os.Stderr, "Warning: metadata.json dolt_database was %q, correcting to %q (identity mismatch repair)\n", dbStr, effectiveDB)
-		existing["dolt_database"] = effectiveDB
-		changed = true
+		// The existing value differs from what we'd write. When the caller
+		// provided an explicit dbName (from EnsureAllMetadata, which resolves
+		// the canonical name from rigs.json), always correct. When no explicit
+		// dbName was given (effectiveDB == rigName), only correct if the
+		// existing value is not a real database — this prevents flip-flop
+		// between "at" and "atomize" when two code paths disagree. (gt-9c4)
+		if explicitDB || !DatabaseExists(townRoot, dbStr) {
+			fmt.Fprintf(os.Stderr, "Warning: metadata.json dolt_database was %q, correcting to %q (identity mismatch repair)\n", dbStr, effectiveDB)
+			existing["dolt_database"] = effectiveDB
+			changed = true
+		}
 	}
 
 	// Ensure server connection fields match the authoritative config.

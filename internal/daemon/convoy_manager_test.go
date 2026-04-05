@@ -2390,6 +2390,12 @@ func TestPollStore_InfNaNError_AdvancesHWMAndReturnsNil(t *testing.T) {
 		"Error 1366 (HY000): error: +Inf is not a valid value for double",
 		"Error 1366 (HY000): error: -Inf is not a valid value for double",
 		"Error 1366 (HY000): error: NaN is not a valid value for double",
+		// Dolt wraps values in single quotes in actual error messages
+		"Error 1366 (HY000): error: '+Inf' is not a valid value for 'double'",
+		"Error 1366 (HY000): error: '-Inf' is not a valid value for 'double'",
+		"Error 1366 (HY000): error: 'NaN' is not a valid value for 'double'",
+		// Wrapped in beads SDK error context (actual observed format)
+		"failed to get events since 0: Error 1366 (HY000): error: '+Inf' is not a valid value for 'double'",
 	} {
 		t.Run(errMsg[:20], func(t *testing.T) {
 			stub := &infNaNStorage{err: fmt.Errorf("%s", errMsg)}
