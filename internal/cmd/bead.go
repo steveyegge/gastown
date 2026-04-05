@@ -118,8 +118,7 @@ func runBeadMove(cmd *cobra.Command, args []string) error {
 	// Get source bead details — resolve rig directory from prefix so that
 	// rig-prefixed beads are found in their rig database (GH#2126).
 	output, err := BdCmd("show", sourceID, "--json").
-		Dir(resolveBeadDir(sourceID)).
-		StripBeadsDir().
+		RouteForBead(sourceID).
 		Output()
 	if err != nil {
 		return fmt.Errorf("getting bead %s: %w", sourceID, err)

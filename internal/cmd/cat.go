@@ -48,16 +48,10 @@ func runCat(cmd *cobra.Command, args []string) error {
 		bdArgs = append(bdArgs, "--json")
 	}
 
-	bdCmd := exec.Command("bd", bdArgs...)
-	bdCmd.Stdout = os.Stdout
-	bdCmd.Stderr = os.Stderr
-	// Route to the correct rig database via prefix resolution.
-	if dir := resolveBeadDir(beadID); dir != "" && dir != "." {
-		bdCmd.Dir = dir
-		bdCmd.Env = filterEnvKey(os.Environ(), "BEADS_DIR")
-	}
+	cmd := BdCmd(bdArgs...).RouteForBead(beadID).Build()
+	cmd.Stdout = os.Stdout
 
-	return bdCmd.Run()
+	return cmd.Run()
 }
 
 // isBeadID checks if a string looks like a bead ID.

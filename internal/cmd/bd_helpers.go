@@ -68,6 +68,19 @@ func (b *bdCmd) Dir(dir string) *bdCmd {
 	return b
 }
 
+// RouteForBead resolves the correct rig database directory for the given bead ID
+// and strips any inherited BEADS_DIR to prevent incorrect database targeting.
+// This replaces the two-call pattern Dir(resolveBeadDir(id)).StripBeadsDir()
+// with a single builder method. If the bead's prefix can't be resolved, routing
+// is left unchanged.
+func (b *bdCmd) RouteForBead(beadID string) *bdCmd {
+	if dir := resolveBeadDir(beadID); dir != "" && dir != "." {
+		b.dir = dir
+		b.env = filterEnvKey(b.env, "BEADS_DIR")
+	}
+	return b
+}
+
 // StripBeadsDir removes any inherited BEADS_DIR from the environment.
 // Use this when the command relies on Dir() for routing and an inherited
 // BEADS_DIR would incorrectly override the working-directory-based database
