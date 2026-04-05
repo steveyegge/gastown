@@ -3367,6 +3367,10 @@ func TestIsRemote(t *testing.T) {
 		{"10.0.0.5", true},
 		{"dolt.internal", true},
 		{"192.168.1.100", true},
+		// Hostnames resolving to loopback should be treated as local.
+		// This covers /etc/hosts entries like "127.0.0.1 dolt.home.arpa".
+		// Note: "localhost" is already covered above; any hostname that
+		// the OS resolves to 127.0.0.1 or ::1 should also be local.
 	}
 	for _, tt := range tests {
 		c := &Config{Host: tt.host}

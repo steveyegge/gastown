@@ -360,10 +360,21 @@ func readDaemonEnvVar(path, key string) string {
 
 // IsRemote returns true when the config points to a non-local Dolt server.
 // Empty host, "127.0.0.1", "localhost", "::1", and "[::1]" are all considered local.
+// Hostnames that resolve to a loopback address are also treated as local.
 func (c *Config) IsRemote() bool {
 	switch strings.ToLower(c.Host) {
 	case "", "127.0.0.1", "localhost", "::1", "[::1]":
 		return false
+	}
+	// Resolve hostname and check if it points to loopback.
+	addrs, err := net.LookupHost(c.Host)
+	if err != nil {
+		return true
+	}
+	for _, addr := range addrs {
+		if ip := net.ParseIP(addr); ip != nil && ip.IsLoopback() {
+			return false
+		}
 	}
 	return true
 }

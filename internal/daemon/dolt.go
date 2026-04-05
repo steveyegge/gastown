@@ -220,9 +220,20 @@ func (m *DoltServerManager) isRemote() bool {
 	if m.config == nil {
 		return false
 	}
-	switch strings.ToLower(m.config.Host) {
+	host := strings.ToLower(m.config.Host)
+	switch host {
 	case "", "127.0.0.1", "localhost", "::1", "[::1]":
 		return false
+	}
+	// Resolve hostname and check if it points to loopback.
+	addrs, err := net.LookupHost(m.config.Host)
+	if err != nil {
+		return true
+	}
+	for _, addr := range addrs {
+		if ip := net.ParseIP(addr); ip != nil && ip.IsLoopback() {
+			return false
+		}
 	}
 	return true
 }
