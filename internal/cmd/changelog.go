@@ -287,9 +287,8 @@ func formatPeriod(since time.Time) string {
 	y, m, d := now.Date()
 	today := time.Date(y, m, d, 0, 0, 0, 0, time.Local)
 
-	if since.Equal(today) {
-		return "Today"
-	}
+	// Check week start BEFORE today — on Mondays, weekStart == today and
+	// "Week of ..." is more informative than "Today".
 	weekday := int(now.Weekday())
 	if weekday == 0 {
 		weekday = 7
@@ -299,6 +298,9 @@ func formatPeriod(since time.Time) string {
 	weekStart := time.Date(monY, monM, monD, 0, 0, 0, 0, time.Local)
 	if since.Equal(weekStart) {
 		return fmt.Sprintf("Week of %s", since.Format("Jan 02, 2006"))
+	}
+	if since.Equal(today) {
+		return "Today"
 	}
 	return fmt.Sprintf("Since %s", since.Format("Jan 02, 2006"))
 }

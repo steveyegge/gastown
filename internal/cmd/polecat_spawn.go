@@ -110,15 +110,15 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	}
 
 	// Global polecat cap (clown show #22): last-resort safety net for the
-	// direct-dispatch path. For town-wide capacity gating, use
-	// scheduler.max_polecats in town settings (see internal/scheduler/capacity/).
+	// direct-dispatch path. Uses countWorkingPolecats to exclude idle polecats
+	// (completed work, no hook bead) available for re-sling under persistent polecat model.
 	const defaultMaxActivePolecats = 25
-	activeCount := countActivePolecats()
-	if activeCount >= defaultMaxActivePolecats {
-		return nil, fmt.Errorf("global polecat cap reached: %d active polecats (max %d). "+
+	workingCount := countWorkingPolecats()
+	if workingCount >= defaultMaxActivePolecats {
+		return nil, fmt.Errorf("polecat cap reached: %d working polecats (max %d). "+
 			"This is a safety limit to prevent spawn storms. "+
 			"Investigate why polecats are accumulating before spawning more",
-			activeCount, defaultMaxActivePolecats)
+			workingCount, defaultMaxActivePolecats)
 	}
 
 	// Per-bead respawn circuit breaker (clown show #22):
@@ -405,13 +405,6 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	startOpts := polecat.SessionStartOptions{
 		RuntimeConfigDir: claudeConfigDir,
 		Agent:            s.agent,
-	}
-	if s.agent != "" {
-		cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(s.RigName, s.PolecatName, r.Path, "", s.agent)
-		if err != nil {
-			return "", err
-		}
-		startOpts.Command = cmd
 	}
 	if err := polecatSessMgr.Start(s.PolecatName, startOpts); err != nil {
 		return "", fmt.Errorf("starting session: %w", err)

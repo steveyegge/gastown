@@ -254,8 +254,8 @@ func TestManager_PostMerge_ClosesMRAndSourceIssue(t *testing.T) {
 	if !result.MRClosed {
 		t.Error("PostMerge() MRClosed = false, want true")
 	}
-	if !result.SourceIssueClosed {
-		t.Error("PostMerge() SourceIssueClosed = false, want true")
+	if !result.SourceIssueDeploying {
+		t.Error("PostMerge() SourceIssueDeploying = false, want true")
 	}
 	if result.SourceIssueID != srcIssue.ID {
 		t.Errorf("PostMerge() SourceIssueID = %s, want %s", result.SourceIssueID, srcIssue.ID)

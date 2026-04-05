@@ -342,7 +342,7 @@ func RoleEmoji(role string) string {
 
 // SupportedShells lists shell binaries that Gas Town can detect and work with.
 // Used to identify if a tmux pane is at a shell prompt vs running a command.
-var SupportedShells = []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh"}
+var SupportedShells = []string{"bash", "zsh", "sh", "fish", "tcsh", "ksh", "pwsh", "powershell"}
 
 // Path helpers construct common paths.
 

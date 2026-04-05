@@ -15,7 +15,8 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-LDFLAGS := -X github.com/steveyegge/gastown/internal/cmd.Version=$(VERSION) \
+LDFLAGS := -s -w \
+           -X github.com/steveyegge/gastown/internal/cmd.Version=$(VERSION) \
            -X github.com/steveyegge/gastown/internal/cmd.Commit=$(COMMIT) \
            -X github.com/steveyegge/gastown/internal/cmd.BuildTime=$(BUILD_TIME) \
            -X github.com/steveyegge/gastown/internal/cmd.BuiltProperly=1
@@ -35,21 +36,9 @@ build:
 	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-proxy-server ./cmd/gt-proxy-server
 	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-proxy-client ./cmd/gt-proxy-client
 	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/gt
-ifeq ($(shell uname),Darwin)
-	@codesign -s - -f $(BUILD_DIR)/$(BINARY)-proxy-server 2>/dev/null || true
-	@echo "Signed $(BINARY)-proxy-server for macOS"
-	@codesign -s - -f $(BUILD_DIR)/$(BINARY)-proxy-client 2>/dev/null || true
-	@echo "Signed $(BINARY)-proxy-client for macOS"
-	@codesign -s - -f $(BUILD_DIR)/$(BINARY) 2>/dev/null || true
-	@echo "Signed $(BINARY) for macOS"
-endif
 
 desktop-build:
 	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_DESKTOP) ./cmd/gt-desktop
-ifeq ($(shell uname),Darwin)
-	@codesign -s - -f $(BUILD_DIR)/$(BINARY_DESKTOP) 2>/dev/null || true
-	@echo "Signed $(BINARY_DESKTOP) for macOS"
-endif
 
 desktop-run:
 	go run ./cmd/gt-desktop
@@ -58,14 +47,21 @@ check-up-to-date:
 ifndef SKIP_UPDATE_CHECK
 	@# Skip check on detached HEAD (tag checkouts, CI builds)
 	@if ! git symbolic-ref HEAD >/dev/null 2>&1; then exit 0; fi
-	@BRANCH=$$(git symbolic-ref --short HEAD 2>/dev/null); \
-	git fetch origin "$$BRANCH" --quiet 2>/dev/null || true; \
+	@# Use the current branch's tracking ref (works for main, carry/operational, etc.)
+	@UPSTREAM=$$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null); \
+	if [ -z "$$UPSTREAM" ]; then \
+		echo "Warning: no upstream tracking branch set, skipping update check"; \
+		exit 0; \
+	fi; \
+	REMOTE_NAME=$$(echo "$$UPSTREAM" | cut -d/ -f1); \
+	REMOTE_BRANCH=$$(echo "$$UPSTREAM" | cut -d/ -f2-); \
+	git fetch "$$REMOTE_NAME" "$$REMOTE_BRANCH" --quiet 2>/dev/null || true; \
 	LOCAL=$$(git rev-parse HEAD 2>/dev/null); \
-	REMOTE=$$(git rev-parse "origin/$$BRANCH" 2>/dev/null); \
+	REMOTE=$$(git rev-parse "$$UPSTREAM" 2>/dev/null); \
 	if [ -n "$$REMOTE" ] && [ "$$LOCAL" != "$$REMOTE" ]; then \
-		echo "ERROR: Local branch is not up to date with origin/$$BRANCH"; \
+		echo "ERROR: Local branch is not up to date with $$UPSTREAM"; \
 		echo "  Local:  $$(git rev-parse --short HEAD)"; \
-		echo "  Remote: $$(git rev-parse --short origin/$$BRANCH)"; \
+		echo "  Remote: $$(git rev-parse --short $$UPSTREAM)";
 		echo "Run 'git pull' first, or use SKIP_UPDATE_CHECK=1 to override"; \
 		exit 1; \
 	fi

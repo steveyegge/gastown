@@ -1125,6 +1125,37 @@ func TestInitSubmodules_NoSubmodules(t *testing.T) {
 	}
 }
 
+func TestInitSubmodules_SkipsUntrackedGitmodules(t *testing.T) {
+	dir := initTestRepo(t)
+	gitmodules := filepath.Join(dir, ".gitmodules")
+	content := []byte("[submodule \"libs/sub\"]\n\tpath = libs/sub\n\turl = https://example.com/sub.git\n")
+	if err := os.WriteFile(gitmodules, content, 0644); err != nil {
+		t.Fatalf("write .gitmodules: %v", err)
+	}
+	if err := InitSubmodules(dir); err != nil {
+		t.Fatalf("InitSubmodules should skip untracked .gitmodules: %v", err)
+	}
+}
+
+func TestHasTrackedGitmodules(t *testing.T) {
+	dir := initTestRepo(t)
+	if hasTrackedGitmodules(dir) {
+		t.Fatal("expected false when .gitmodules doesn't exist")
+	}
+	gitmodules := filepath.Join(dir, ".gitmodules")
+	if err := os.WriteFile(gitmodules, []byte("[submodule \"x\"]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if hasTrackedGitmodules(dir) {
+		t.Fatal("expected false when .gitmodules exists but is untracked")
+	}
+	runGit(t, dir, "add", ".gitmodules")
+	runGit(t, dir, "commit", "-m", "add gitmodules")
+	if !hasTrackedGitmodules(dir) {
+		t.Fatal("expected true when .gitmodules is tracked")
+	}
+}
+
 func TestInitSubmodules_WithSubmodules(t *testing.T) {
 	parent, _ := initTestRepoWithSubmodule(t)
 
@@ -1752,17 +1783,42 @@ func TestCleanExcludingRuntime(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "unpushed commits block",
+			// Unpushed commits alone do not affect CleanExcludingRuntime — this
+			// function only evaluates uncommitted file changes. Unpushed commits
+			// are handled separately by the CommitsAhead check in gt done (gas-7vg).
+			name: "unpushed commits alone do not block",
 			s: UncommittedWorkStatus{
 				UnpushedCommits: 2,
 			},
-			want: false,
+			want: true,
+		},
+		{
+			// The primary bug scenario (gas-7vg): polecat commits work (1 unpushed
+			// commit) then calls gt done with only infrastructure files untracked.
+			// CleanExcludingRuntime must return true so gt done is not blocked.
+			name: "unpushed commit with only runtime artifacts",
+			s: UncommittedWorkStatus{
+				HasUncommittedChanges: true,
+				UnpushedCommits:       1,
+				UntrackedFiles:        []string{".beads/", ".claude/commands/done.md", ".runtime/state.json"},
+			},
+			want: true,
 		},
 		{
 			name: "pycache untracked",
 			s: UncommittedWorkStatus{
 				HasUncommittedChanges: true,
 				UntrackedFiles:        []string{"__pycache__/foo.pyc", ".beads/db"},
+			},
+			want: true,
+		},
+		{
+			// CLAUDE.local.md is a Gas Town overlay file (gt-p35) that must not
+			// block gt done or be auto-committed.
+			name: "CLAUDE.local.md is runtime artifact",
+			s: UncommittedWorkStatus{
+				HasUncommittedChanges: true,
+				UntrackedFiles:        []string{"CLAUDE.local.md"},
 			},
 			want: true,
 		},
@@ -1842,5 +1898,246 @@ func TestCheckBranchContamination(t *testing.T) {
 	}
 	if contam.Ahead != 5 {
 		t.Errorf("Ahead (from main) = %d, want 5", contam.Ahead)
+	}
+}
+
+// initTestRepoWithSplitRemote creates a test setup that mirrors the polecat workflow:
+// two bare repos (upstream and fork), a local clone whose origin has fetch URL → upstream
+// and push URL → fork. Returns (localDir, upstreamBareDir, forkBareDir, mainBranch).
+func initTestRepoWithSplitRemote(t *testing.T) (string, string, string, string) {
+	t.Helper()
+	tmp := t.TempDir()
+
+	upstream := filepath.Join(tmp, "upstream.git")
+	fork := filepath.Join(tmp, "fork.git")
+	localDir := filepath.Join(tmp, "local")
+
+	for _, bare := range []string{upstream, fork} {
+		if err := exec.Command("git", "init", "--bare", bare).Run(); err != nil {
+			t.Fatalf("git init --bare %s: %v", bare, err)
+		}
+	}
+
+	if err := os.MkdirAll(localDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, args := range [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test User"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = localDir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("%s: %v", args, err)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(localDir, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "."},
+		{"git", "commit", "-m", "initial"},
+		{"git", "remote", "add", "origin", upstream},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = localDir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("%s: %v", args, err)
+		}
+	}
+
+	cmd := exec.Command("git", "branch", "--show-current")
+	cmd.Dir = localDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("branch --show-current: %v", err)
+	}
+	mainBranch := strings.TrimSpace(string(out))
+
+	// Push initial commit to both upstream and fork
+	cmd = exec.Command("git", "push", "origin", mainBranch)
+	cmd.Dir = localDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("push to upstream: %v", err)
+	}
+	cmd = exec.Command("git", "push", fork, mainBranch)
+	cmd.Dir = localDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("push to fork: %v", err)
+	}
+
+	// Split the remote: fetch stays at upstream, push goes to fork
+	g := NewGit(localDir)
+	if err := g.ConfigurePushURL("origin", fork); err != nil {
+		t.Fatalf("ConfigurePushURL: %v", err)
+	}
+
+	return localDir, upstream, fork, mainBranch
+}
+
+// TestPushRemoteBranchExists_SplitURL is the core regression test for GH#3224:
+// with a split fetch/push URL, RemoteBranchExists checks the fetch URL (upstream)
+// while PushRemoteBranchExists checks the push URL (fork/bare repo).
+func TestPushRemoteBranchExists_SplitURL(t *testing.T) {
+	localDir, _, _, _ := initTestRepoWithSplitRemote(t)
+	g := NewGit(localDir)
+
+	// Create a feature branch and push to origin (goes to fork via push URL)
+	if err := g.CreateBranch("polecat/fix-test"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	if err := g.Checkout("polecat/fix-test"); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "fix.go"), []byte("package fix\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = localDir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "commit", "-m", "fix commit")
+	cmd.Dir = localDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	if err := g.Push("origin", "polecat/fix-test", false); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	// RemoteBranchExists checks the fetch URL (upstream) — branch NOT there
+	exists, err := g.RemoteBranchExists("origin", "polecat/fix-test")
+	if err != nil {
+		t.Fatalf("RemoteBranchExists: %v", err)
+	}
+	if exists {
+		t.Error("RemoteBranchExists should return false — branch was pushed to fork, not upstream")
+	}
+
+	// PushRemoteBranchExists checks the push URL (fork) — branch IS there
+	exists, err = g.PushRemoteBranchExists("origin", "polecat/fix-test")
+	if err != nil {
+		t.Fatalf("PushRemoteBranchExists: %v", err)
+	}
+	if !exists {
+		t.Error("PushRemoteBranchExists should return true — branch was pushed to fork")
+	}
+}
+
+// TestPushRemoteBranchExists_NoPushURL verifies that PushRemoteBranchExists
+// falls back to RemoteBranchExists when no custom push URL is configured.
+func TestPushRemoteBranchExists_NoPushURL(t *testing.T) {
+	localDir, _, mainBranch := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	// No custom push URL — PushRemoteBranchExists should behave like RemoteBranchExists
+	exists, err := g.PushRemoteBranchExists("origin", mainBranch)
+	if err != nil {
+		t.Fatalf("PushRemoteBranchExists: %v", err)
+	}
+	if !exists {
+		t.Errorf("PushRemoteBranchExists should find %s on origin (no split URL)", mainBranch)
+	}
+
+	// Nonexistent branch should return false
+	exists, err = g.PushRemoteBranchExists("origin", "nonexistent-branch")
+	if err != nil {
+		t.Fatalf("PushRemoteBranchExists (nonexistent): %v", err)
+	}
+	if exists {
+		t.Error("PushRemoteBranchExists should return false for nonexistent branch")
+	}
+}
+
+// TestBranchPushedToRemote_SplitURL verifies that BranchPushedToRemote correctly
+// reports a branch as pushed when it exists on the push target (fork), even though
+// it's absent from the fetch URL (upstream). This is the GH#3224 fix.
+func TestBranchPushedToRemote_SplitURL(t *testing.T) {
+	localDir, _, _, _ := initTestRepoWithSplitRemote(t)
+	g := NewGit(localDir)
+
+	// Create and push a feature branch (goes to fork via push URL)
+	if err := g.CreateBranch("polecat/status-test"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	if err := g.Checkout("polecat/status-test"); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "status.go"), []byte("package status\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = localDir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "commit", "-m", "status commit")
+	cmd.Dir = localDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	if err := g.Push("origin", "polecat/status-test", false); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	pushed, unpushed, err := g.BranchPushedToRemote("polecat/status-test", "origin")
+	if err != nil {
+		t.Fatalf("BranchPushedToRemote: %v", err)
+	}
+	if !pushed {
+		t.Error("BranchPushedToRemote should report pushed=true (branch is on fork)")
+	}
+	if unpushed != 0 {
+		t.Errorf("BranchPushedToRemote unpushed = %d, want 0", unpushed)
+	}
+}
+
+// TestBranchPushedToRemote_NoPushURL verifies baseline behavior: when fetch and
+// push URLs are the same, BranchPushedToRemote works normally.
+func TestBranchPushedToRemote_NoPushURL(t *testing.T) {
+	localDir, _, mainBranch := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	// Main branch is pushed — should be reported as pushed
+	pushed, unpushed, err := g.BranchPushedToRemote(mainBranch, "origin")
+	if err != nil {
+		t.Fatalf("BranchPushedToRemote: %v", err)
+	}
+	if !pushed {
+		t.Error("BranchPushedToRemote should report pushed=true for main")
+	}
+	if unpushed != 0 {
+		t.Errorf("BranchPushedToRemote unpushed = %d, want 0", unpushed)
+	}
+
+	// Unpushed branch — should report not pushed
+	if err := g.CreateBranch("polecat/unpushed"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	if err := g.Checkout("polecat/unpushed"); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "new.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = localDir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "commit", "-m", "local only")
+	cmd.Dir = localDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	pushed, unpushed, err = g.BranchPushedToRemote("polecat/unpushed", "origin")
+	if err != nil {
+		t.Fatalf("BranchPushedToRemote: %v", err)
+	}
+	if pushed {
+		t.Error("BranchPushedToRemote should report pushed=false for unpushed branch")
+	}
+	if unpushed < 1 {
+		t.Errorf("BranchPushedToRemote unpushed = %d, want >= 1", unpushed)
 	}
 }

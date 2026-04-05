@@ -22,11 +22,14 @@ func TestDoltRebase_DecimalScanForMinMax(t *testing.T) {
 	if strings.Contains(src, "var minOrder, maxOrder int") {
 		t.Error("dolt_rebase.go must not scan MIN/MAX(rebase_order) as int — Dolt returns decimal strings as []uint8")
 	}
-	// Must scan as string then parse via helper
+	// Must scan as string then parse
 	if !strings.Contains(src, "var minOrderStr, maxOrderStr string") {
 		t.Error("dolt_rebase.go must use string variables for MIN/MAX scan (Dolt returns []uint8 byte slices)")
 	}
-	if !strings.Contains(src, "parseRebaseOrderRange(minOrderStr, maxOrderStr)") {
-		t.Error("dolt_rebase.go must use parseRebaseOrderRange helper to parse decimal strings")
+	if !strings.Contains(src, "strconv.ParseFloat(minOrderStr") {
+		t.Error("dolt_rebase.go must parse string to float after scanning")
+	}
+	if !strings.Contains(src, "int(minOrderF)") {
+		t.Error("dolt_rebase.go must cast float64 to int after parsing")
 	}
 }

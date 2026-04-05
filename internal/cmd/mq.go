@@ -23,6 +23,8 @@ var (
 	mqSubmitEpic      string
 	mqSubmitPriority  int
 	mqSubmitNoCleanup bool
+	mqSubmitSkipDeps  bool
+	mqSubmitResubmit  bool
 
 	// Retry flags
 	mqRetryNow bool
@@ -308,6 +310,8 @@ func init() {
 	mqSubmitCmd.Flags().StringVar(&mqSubmitEpic, "epic", "", "Target epic's integration branch instead of main")
 	mqSubmitCmd.Flags().IntVarP(&mqSubmitPriority, "priority", "p", -1, "Override priority (0-4, default: inherit from issue)")
 	mqSubmitCmd.Flags().BoolVar(&mqSubmitNoCleanup, "no-cleanup", false, "Don't auto-cleanup after submit (for polecats)")
+	mqSubmitCmd.Flags().BoolVar(&mqSubmitSkipDeps, "skip-deps", false, "Skip molecule step dependency check")
+	mqSubmitCmd.Flags().BoolVar(&mqSubmitResubmit, "resubmit", false, "Resubmit after a fix (skips dependency check)")
 
 	// Retry flags
 	mqRetryCmd.Flags().BoolVar(&mqRetryNow, "now", false, "Immediately process instead of waiting for refinery loop")
@@ -520,10 +524,12 @@ func runMQPostMerge(_ *cobra.Command, args []string) error {
 	if result.MRClosed {
 		fmt.Printf("  %s MR closed (merged)\n", style.Success.Render("✓"))
 	}
-	if result.SourceIssueClosed {
-		fmt.Printf("  %s Source issue closed: %s\n", style.Success.Render("✓"), result.SourceIssueID)
+	if result.SourceIssueDeploying {
+		fmt.Printf("  %s Source issue → deploying: %s\n", style.Success.Render("✓"), result.SourceIssueID)
+	} else if result.SourceIssueClosed {
+		fmt.Printf("  %s Source issue already closed: %s\n", style.Dim.Render("○"), result.SourceIssueID)
 	} else if result.SourceIssueNotFound {
-		fmt.Printf("  %s Source issue: %s %s\n", style.Dim.Render("○"), result.SourceIssueID, style.Dim.Render("(already closed or not found)"))
+		fmt.Printf("  %s Source issue: %s %s\n", style.Dim.Render("○"), result.SourceIssueID, style.Dim.Render("(not found)"))
 	}
 
 	// Delete remote branch unless skipped
@@ -558,8 +564,12 @@ func runMQPostMerge(_ *cobra.Command, args []string) error {
 		return nil // non-fatal: beads cleanup succeeded
 	}
 
-	// Delete remote branch
-	if err := rigGit.DeleteRemoteBranch("origin", mr.Branch); err != nil {
+	// Delete remote branch — but skip if there's an open PR on it.
+	// Deleting a branch with an open PR causes GitHub to auto-close the PR
+	// as "closed" (not "merged"), destroying the PR audit trail. (gas-fk4)
+	if rigGit.HasOpenPR(mr.Branch) {
+		fmt.Printf("  %s Skipping remote branch delete for %s: open PR exists (gas-fk4)\n", style.Dim.Render("○"), mr.Branch)
+	} else if err := rigGit.DeleteRemoteBranch("origin", mr.Branch); err != nil {
 		fmt.Printf("  %s remote branch delete: %v\n", style.Warning.Render("⚠"), err)
 	} else {
 		fmt.Printf("  %s Deleted remote branch: %s\n", style.Success.Render("✓"), mr.Branch)

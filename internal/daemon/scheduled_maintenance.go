@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 const (
@@ -143,7 +145,7 @@ func shouldRunMaintenance(now time.Time, lastRun time.Time, interval string) boo
 // runScheduledMaintenance checks if we're in the maintenance window and
 // if any database exceeds the commit threshold, runs `gt maintain --force`.
 func (d *Daemon) runScheduledMaintenance() {
-	if !IsPatrolEnabled(d.patrolConfig, "scheduled_maintenance") {
+	if !d.isPatrolActive("scheduled_maintenance") {
 		return
 	}
 
@@ -205,6 +207,7 @@ func (d *Daemon) runScheduledMaintenance() {
 	cmd := exec.CommandContext(d.ctx, d.gtPath, "maintain", "--force",
 		"--threshold", strconv.Itoa(threshold))
 	cmd.Dir = d.config.TownRoot
+	util.SetDetachedProcessGroup(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		d.logger.Printf("scheduled_maintenance: gt maintain failed: %v\nOutput: %s", err, string(output))

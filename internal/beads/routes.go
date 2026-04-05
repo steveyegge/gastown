@@ -193,6 +193,33 @@ func GetPrefixForRig(townRoot, rigName string) string {
 	return config.GetRigPrefix(townRoot, rigName)
 }
 
+// CheckPrefixAvailable verifies that a prefix is not already used by a different rig.
+// The prefix should include the trailing hyphen (e.g., "gt-").
+// newPath is the path of the rig being added (e.g., "gastown" or "gastown/mayor/rig").
+// Returns nil if the prefix is available or already maps to the same rig.
+func CheckPrefixAvailable(townRoot string, prefix string, newPath string) error {
+	beadsDir := filepath.Join(townRoot, ".beads")
+	routes, err := LoadRoutes(beadsDir)
+	if err != nil {
+		return fmt.Errorf("loading routes: %w", err)
+	}
+
+	// Extract the rig name (first path component) for comparison,
+	// since the same rig can have different path variants (e.g., "gastown" vs "gastown/mayor/rig").
+	newRig := strings.SplitN(newPath, "/", 2)[0]
+
+	for _, r := range routes {
+		if r.Prefix == prefix {
+			existingRig := strings.SplitN(r.Path, "/", 2)[0]
+			if existingRig != newRig {
+				return fmt.Errorf("prefix %q is already used by %s (path: %s); use --prefix to specify a different prefix", prefix, existingRig, r.Path)
+			}
+		}
+	}
+
+	return nil
+}
+
 // FindConflictingPrefixes checks for duplicate prefixes in routes.
 // Returns a map of prefix -> list of paths that use it.
 func FindConflictingPrefixes(beadsDir string) (map[string][]string, error) {

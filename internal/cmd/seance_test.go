@@ -110,6 +110,10 @@ func createTestSession(t *testing.T, configDir, projectName, sessionID string) {
 }
 
 func TestFindSessionLocation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests require elevated privileges on Windows")
+	}
+
 	t.Run("finds session in account1", func(t *testing.T) {
 		townRoot, fakeHome, cleanup := setupSeanceTestEnv(t)
 		defer cleanup()

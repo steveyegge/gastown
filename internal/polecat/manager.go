@@ -28,6 +28,7 @@ import (
 	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -137,17 +138,32 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 	resolvedBeads := beads.ResolveBeadsDir(r.Path)
 	beadsPath := filepath.Dir(resolvedBeads) // Get the directory containing .beads
 
-	// Try to load rig settings for namepool config
+	// Try to load rig settings for namepool config.
+	// Check both settings/config.json (RigSettings) and config.json (RigConfig)
+	// since namepool may be configured in either location.
 	settingsPath := filepath.Join(r.Path, "settings", "config.json")
 	var pool *NamePool
+	var npConfig *config.NamepoolConfig
 
 	settings, err := config.LoadRigSettings(settingsPath)
 	if err == nil && settings.Namepool != nil {
+		npConfig = settings.Namepool
+	}
+
+	// Fall back to rig-level config.json namepool if settings doesn't have it
+	if npConfig == nil {
+		rigConfigPath := filepath.Join(r.Path, "config.json")
+		if rigCfg, rcErr := config.LoadRigConfigNamepool(rigConfigPath); rcErr == nil && rigCfg != nil {
+			npConfig = rigCfg
+		}
+	}
+
+	if npConfig != nil {
 		// If style is set but not built-in and no explicit names, resolve custom theme
-		names := settings.Namepool.Names
-		if len(names) == 0 && settings.Namepool.Style != "" && !IsBuiltinTheme(settings.Namepool.Style) {
+		names := npConfig.Names
+		if len(names) == 0 && npConfig.Style != "" && !IsBuiltinTheme(npConfig.Style) {
 			if townRoot, twErr := workspace.Find(r.Path); twErr == nil {
-				if resolved, rErr := ResolveThemeNames(townRoot, settings.Namepool.Style); rErr == nil {
+				if resolved, rErr := ResolveThemeNames(townRoot, npConfig.Style); rErr == nil {
 					names = resolved
 				}
 			}
@@ -155,9 +171,9 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 		pool = NewNamePoolWithConfig(
 			r.Path,
 			r.Name,
-			settings.Namepool.Style,
+			npConfig.Style,
 			names,
-			settings.Namepool.MaxBeforeNumbering,
+			npConfig.MaxBeforeNumbering,
 		)
 	} else {
 		// Use defaults
@@ -394,7 +410,7 @@ func (m *Manager) getCleanupStatusFromBead(name string) CleanupStatus {
 
 // checkCleanupStatus validates the cleanup status against removal safety rules.
 // Returns an error if removal should be blocked based on the status.
-// force=true: allow has_uncommitted, block has_stash and has_unpushed
+// force=true: allow has_uncommitted and has_unpushed, block has_stash
 // force=false: block all non-clean statuses
 func (m *Manager) checkCleanupStatus(name string, status CleanupStatus, force bool) error {
 	// Clean status is always safe
@@ -1026,15 +1042,15 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (_ *Polecat, retE
 }
 
 // Remove deletes a polecat worktree.
-// If force is true, removes even with uncommitted changes (but not stashes/unpushed).
-// Use nuclear=true to bypass ALL safety checks.
+// If force is true, removes even with uncommitted changes and unpushed commits.
+// Stashes still block removal with force (use nuclear=true to bypass all checks).
 func (m *Manager) Remove(name string, force bool) error {
 	return m.RemoveWithOptions(name, force, false, false)
 }
 
 // RemoveWithOptions deletes a polecat worktree with explicit control over safety checks.
-// force=true: bypass uncommitted changes check (legacy behavior)
-// nuclear=true: bypass ALL safety checks including stashes and unpushed commits
+// force=true: bypass uncommitted changes and unpushed commits check
+// nuclear=true: bypass ALL safety checks including stashes
 // selfNuke=true: bypass cwd-in-worktree check (for polecat deleting its own worktree)
 //
 // ZFC #10: Uses cleanup_status from agent bead if available (polecat self-report),
@@ -1073,10 +1089,10 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) 
 			polecatGit := git.NewGit(clonePath)
 			status, err := polecatGit.CheckUncommittedWork()
 			if err == nil && !status.Clean() {
-				// For backward compatibility: force only bypasses uncommitted changes, not stashes/unpushed
 				if force {
-					// Force mode: allow uncommitted changes but still block on stashes/unpushed
-					if status.StashCount > 0 || status.UnpushedCommits > 0 {
+					// Force mode: bypass uncommitted changes and unpushed commits.
+					// Only block on stashes, which represent intentional work-in-progress.
+					if status.StashCount > 0 {
 						return &UncommittedWorkError{PolecatName: name, Status: status}
 					}
 				} else {
@@ -1639,6 +1655,15 @@ func (m *Manager) ReuseIdlePolecat(name string, opts AddOptions) (*Polecat, erro
 		HookBead:   opts.HookBead,
 	}); err != nil {
 		return nil, fmt.Errorf("agent bead required for polecat tracking: %w", err)
+	}
+
+	// Sync agent_state column to "spawning" (gt-ulom).
+	// createAgentBeadWithRetry sets agent_state in the description only.
+	// The column stays stale (e.g., "idle" from previous gt done) until
+	// StartSession sets it to "working". Without this, the column and
+	// description diverge, causing dashboards to show incorrect state.
+	if err := m.beads.UpdateAgentState(agentID, "spawning"); err != nil {
+		style.PrintWarning("could not sync agent_state column to spawning: %v", err)
 	}
 
 	now := time.Now()
@@ -2244,9 +2269,13 @@ func (m *Manager) setupSharedBeads(clonePath string) error {
 	// sessions don't warn about missing role/prefix.
 	prefix := beads.GetPrefixForRig(townRoot, m.rig.Name)
 	if prefix != "" {
-		_ = exec.Command("git", "-C", clonePath, "config", "beads.issue-prefix", prefix).Run()
+		cmd := exec.Command("git", "-C", clonePath, "config", "beads.issue-prefix", prefix)
+		util.SetDetachedProcessGroup(cmd)
+		_ = cmd.Run()
 	}
-	_ = exec.Command("git", "-C", clonePath, "config", "beads.role", "contributor").Run()
+	cmd := exec.Command("git", "-C", clonePath, "config", "beads.role", "contributor")
+	util.SetDetachedProcessGroup(cmd)
+	_ = cmd.Run()
 
 	return nil
 }

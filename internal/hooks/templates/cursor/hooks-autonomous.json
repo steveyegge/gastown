@@ -3,36 +3,36 @@
   "hooks": {
     "preToolUse": [
       {
-        "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow",
+        "command": "{{GT_BIN}} tap guard pr-workflow",
         "matcher": "Shell(gh pr create*)"
       },
       {
-        "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow",
+        "command": "{{GT_BIN}} tap guard pr-workflow",
         "matcher": "Shell(git checkout -b*)"
       },
       {
-        "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow",
+        "command": "{{GT_BIN}} tap guard pr-workflow",
         "matcher": "Shell(git switch -c*)"
       }
     ],
     "sessionStart": [
       {
-        "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt prime --hook && gt mail check --inject"
+        "command": "{{GT_BIN}} prime --hook && {{GT_BIN}} mail check --inject"
       }
     ],
     "preCompact": [
       {
-        "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt prime --hook"
+        "command": "{{GT_BIN}} prime --hook"
       }
     ],
     "beforeSubmitPrompt": [
       {
-        "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt mail check --inject"
+        "command": "{{GT_BIN}} mail check --inject"
       }
     ],
     "stop": [
       {
-        "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt costs record &"
+        "command": "{{GT_BIN}} costs record &"
       }
     ]
   }

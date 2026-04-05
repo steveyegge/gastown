@@ -63,6 +63,30 @@ func TestSetCommit(t *testing.T) {
 	}
 }
 
+func TestIsBuildBranch(t *testing.T) {
+	tests := []struct {
+		branch string
+		want   bool
+	}{
+		{"main", true},
+		{"master", true},
+		{"carry/operational", true},
+		{"carry/staging", true},
+		{"carry/", true},
+		{"fix/something", false},
+		{"feat/new-thing", false},
+		{"develop", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.branch, func(t *testing.T) {
+			if got := isBuildBranch(tt.branch); got != tt.want {
+				t.Errorf("isBuildBranch(%q) = %v, want %v", tt.branch, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCheckStaleBinary_NoCommit(t *testing.T) {
 	original := Commit
 	defer func() { Commit = original }()

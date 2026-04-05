@@ -4,21 +4,21 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt prime --hook",
+        "bash": "{{GT_BIN}} prime --hook",
         "timeoutSec": 30
       }
     ],
     "userPromptSubmitted": [
       {
         "type": "command",
-        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt mail check --inject",
+        "bash": "{{GT_BIN}} mail check --inject",
         "timeoutSec": 10
       }
     ],
     "sessionEnd": [
       {
         "type": "command",
-        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt costs record &",
+        "bash": "{{GT_BIN}} costs record &",
         "timeoutSec": 10
       }
     ]

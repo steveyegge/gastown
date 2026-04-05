@@ -33,14 +33,55 @@ if the Deacon dies, Witnesses detect it and escalate to the Mayor.
 
 No WITNESS_PING mail is sent. Witnesses observe the Deacon's last_activity
 timestamp instead, and only send an alert to the Mayor if the Deacon appears
-unresponsive (>5 minutes stale). This avoids heartbeat mail spam."""
+unresponsive (>5 minutes stale). This avoids heartbeat mail spam.
+
+## Abbreviated Patrol Mode (Idle Effort Tuning)
+
+When `await-signal` outputs `EFFORT: reduced`, run an ABBREVIATED patrol.
+This happens when idle_cycles >= {{idle_effort_threshold}} (no activity detected).
+
+Abbreviated patrol rules:
+- **heartbeat**: ALWAYS run (required by daemon).
+- **inbox-check**: Run `gt mail drain` only. Skip individual message processing unless drain reports unprocessed HELP or RECOVERED_BEAD messages.
+- **orphan-process-cleanup**: SKIP.
+- **test-pollution-cleanup**: SKIP.
+- **gate-evaluation**: SKIP.
+- **dispatch-gated-molecules**: SKIP.
+- **check-convoy-completion**: SKIP.
+- **resolve-external-deps**: SKIP.
+- **fire-notifications**: SKIP.
+- **heartbeat-mid**: SKIP (short cycle doesn't need mid-cycle refresh).
+- **health-scan**: Quick `gt witness status` / `gt refinery status` only. Skip nudges.
+- **dolt-health**: SKIP.
+- **zombie-scan**: SKIP.
+- **plugin-run**: SKIP.
+- **dog-pool-maintenance**: SKIP.
+- **dog-health-check**: SKIP.
+- **orphan-check**: SKIP.
+- **session-gc**: SKIP.
+- **wisp-compact**: SKIP.
+- **compact-report**: SKIP.
+- **costs-digest**: SKIP (already disabled).
+- **patrol-digest**: SKIP.
+- **log-maintenance**: SKIP.
+- **patrol-cleanup**: Quick inbox check only.
+- **context-check**: Quick self-assessment (one sentence).
+- **loop-or-exit**: Normal (await-signal as usual).
+
+When `await-signal` outputs `EFFORT: full`, run all steps thoroughly (normal mode).
+
+The goal: idle cycles should burn ~10% of the tokens a full patrol uses."""
 formula = "mol-deacon-patrol"
-version = 13
+version = 14
 
 [vars]
 [vars.wisp_type]
 description = "Type of wisp created for this molecule"
 default = "patrol"
+
+[vars.idle_effort_threshold]
+description = "Idle cycles before switching to abbreviated patrol (0 = always full)"
+default = "1"
 
 [[steps]]
 id = "heartbeat"
@@ -49,7 +90,7 @@ description = """
 Signal liveness to the daemon.
 
 The daemon monitors `deacon/heartbeat.json` and kills the Deacon if it goes stale
-(>15 minutes without update). Refresh the heartbeat at the start of every patrol cycle
+(>20 minutes without update). Refresh the heartbeat at the start of every patrol cycle
 so the daemon knows we are alive.
 
 ```bash
@@ -169,8 +210,20 @@ gt deacon cleanup-orphans
 This command:
 1. Lists all claude/codex processes with `ps -eo pid,tty,comm`
 2. Filters for TTY = "?" (no controlling terminal)
-3. Sends SIGTERM to each orphaned process
-4. Reports how many were killed
+3. Resolves each candidate's Gas Town workspace root (shown as `town=` in output)
+4. Sends SIGTERM to each orphaned process
+5. Reports how many were killed, with their town affiliation
+
+**Multi-town awareness:**
+Multiple Gas Town instances may share the same machine, each with its own tmux
+socket and agent processes. `ps` output shows Claude processes from ALL towns,
+but each town's deacon should only clean up processes belonging to its own town.
+
+- The `gt deacon cleanup-orphans` output shows `town=<path>` for each orphan
+- Only clean up processes where the town path matches this town's root (`$GT_ROOT`)
+- Processes belonging to other towns are managed by those towns' own deacons
+- If you use manual process inspection (`ps aux`), verify a process's working
+  directory is under this town's root before killing it
 
 **Why this is safe:**
 - Processes in terminals (your personal sessions) have a TTY - they won't be touched
@@ -488,11 +541,14 @@ gt rig status <rig>
 # Check the Status: line - if DOCKED or PARKED, skip entirely
 ```
 
-DOCKED rigs are globally shut down - do NOT:
+DOCKED rigs are intentionally offline (Mayor or human docked them). Do NOT:
 - Check their witness/refinery status
 - Send health pings
 - Attempt restarts
-Simply skip them and move to the next rig.
+- Undock the rig (NEVER run `gt rig undock`)
+- Escalate or send mail about a docked rig being offline
+- "Restore" a docked rig to operational status
+A docked rig is NOT broken. It is off on purpose. Skip it entirely.
 
 **IMPORTANT: Idle Town Protocol**
 Before sending health check nudges, check if the town is idle:
@@ -1121,11 +1177,17 @@ End of patrol cycle decision.
 
 **If context LOW** (can continue patrolling):
 
+Refresh the heartbeat again immediately before the long idle wait:
+
+```bash
+gt deacon heartbeat "pre-await checkpoint"
+```
+
 Use await-signal with exponential backoff to wait for activity:
 
 ```bash
 gt mol step await-signal --agent-bead hq-deacon \
-  --backoff-base 60s --backoff-mult 2 --backoff-max 5m
+  --backoff-base 60s --backoff-mult 2 --backoff-max 15m
 ```
 
 This command:
@@ -1135,8 +1197,9 @@ This command:
    - First timeout: 60s
    - Second timeout: 120s
    - Third timeout: 240s
-   - ...capped at 5 minutes max (PATCH-002: reduced from 10m for faster recovery)
+   - ...capped at 15 minutes max
 4. Tracks `idle:N` label on hq-deacon bead for backoff state
+5. Outputs `EFFORT: reduced` or `EFFORT: full` directive for next cycle
 
 **On signal received** (activity detected):
 Reset the idle counter and start next patrol cycle:
@@ -1147,6 +1210,26 @@ gt agent state hq-deacon --set idle=0
 **On timeout** (no activity):
 The idle counter was auto-incremented. Continue to next patrol cycle
 (the longer backoff will apply next time).
+
+## Effort-Based Patrol Routing
+
+After await-signal returns, check the EFFORT directive in the output:
+
+**If `EFFORT: full`** — Run all steps thoroughly (normal patrol).
+
+**If `EFFORT: reduced`** — Run ABBREVIATED patrol:
+- heartbeat: ALWAYS run
+- inbox-check: Quick drain only, skip individual messages unless HELP/RECOVERED_BEAD
+- orphan-process-cleanup through fire-notifications: SKIP all
+- heartbeat-mid: SKIP
+- health-scan: Quick status checks only, skip nudges
+- dolt-health through session-gc: SKIP all
+- wisp-compact through log-maintenance: SKIP all
+- patrol-cleanup: Quick inbox check only
+- context-check: One-sentence self-assessment
+
+Abbreviated patrol should complete in ~10% of the tokens of a full patrol.
+Mark skipped steps as SKIP in the patrol report.
 
 After await-signal returns (either by signal or timeout):
 1. Generate a brief summary of this patrol cycle's observations

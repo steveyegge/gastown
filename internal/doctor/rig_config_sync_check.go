@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
@@ -394,16 +395,27 @@ func (c *RigConfigSyncCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	// If we renamed databases, restart the Dolt server to pick up the changes
+	// If we renamed databases, restart the Dolt server to pick up the changes.
+	// Guard: skip restart if the server has been running less than 60s — restarting
+	// during startup churn is a known crash trigger (gt-9bxzs: Dolt NomsBlockStore
+	// panic when SIGTERM arrives mid-write). The server will pick up renamed databases
+	// on its next natural restart or on the next doctor --fix run once stable.
 	if renamedDBs {
 		if running, pid, _ := doltserver.IsRunning(ctx.TownRoot); running && pid > 0 {
-			// Stop the server
-			if err := doltserver.Stop(ctx.TownRoot); err != nil {
-				return fmt.Errorf("could not stop Dolt server for restart: %w", err)
-			}
-			// Start the server again
-			if err := doltserver.Start(ctx.TownRoot); err != nil {
-				return fmt.Errorf("could not restart Dolt server: %w", err)
+			const minStableAge = 60 * time.Second
+			state, _ := doltserver.LoadState(ctx.TownRoot)
+			if state != nil && !state.StartedAt.IsZero() && time.Since(state.StartedAt) < minStableAge {
+				// Server started less than 60s ago — skip restart to avoid crash
+				// during Dolt startup churn. Databases will be picked up on next restart.
+			} else {
+				// Stop the server
+				if err := doltserver.Stop(ctx.TownRoot); err != nil {
+					return fmt.Errorf("could not stop Dolt server for restart: %w", err)
+				}
+				// Start the server again
+				if err := doltserver.Start(ctx.TownRoot); err != nil {
+					return fmt.Errorf("could not restart Dolt server: %w", err)
+				}
 			}
 		}
 	}

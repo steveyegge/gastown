@@ -31,8 +31,9 @@ type Formula struct {
 	Description string      `toml:"description"`
 	Type        FormulaType `toml:"type"`
 	Version     int         `toml:"version"`
-	Pour        bool        `toml:"pour"` // If true, steps are materialized as sub-wisps with checkpoint recovery. Default false (inline/root-only).
-	Agent       string      `toml:"agent"` // Default agent for all legs (GH#2118)
+	Pour        bool        `toml:"pour"`        // If true, steps are materialized as sub-wisps with checkpoint recovery. Default false (inline/root-only).
+	Agent       string      `toml:"agent"`       // Default agent for all legs (GH#2118)
+	ReviewOnly  bool        `toml:"review_only"` // If true, all legs are analysis-only — no code commits expected (gt-kvf)
 
 	// Convoy-specific
 	Inputs    map[string]Input `toml:"inputs"`
@@ -105,7 +106,8 @@ type Leg struct {
 	Title       string `toml:"title"`
 	Focus       string `toml:"focus"`
 	Description string `toml:"description"`
-	Agent       string `toml:"agent"` // Per-leg agent override (GH#2118)
+	Agent       string `toml:"agent"`       // Per-leg agent override (GH#2118)
+	ReviewOnly  bool   `toml:"review_only"` // If true, leg is analysis-only — no code commits expected (gt-kvf)
 }
 
 // Synthesis represents the synthesis step that combines leg outputs.
@@ -131,6 +133,7 @@ type Template struct {
 	Title       string   `toml:"title"`
 	Description string   `toml:"description"`
 	Needs       []string `toml:"needs"`
+	Acceptance  string   `toml:"acceptance"` // Exit criteria for this expanded step (propagated to generated Step)
 }
 
 // Var represents a variable definition for formulas.

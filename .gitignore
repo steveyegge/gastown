@@ -27,15 +27,17 @@ Thumbs.db
 # Test
 coverage.out
 *.test
+internal/events/*/
 
 # Local config
 config.toml
 !config.example.toml
 gt
 
-# Runtime state
+# Runtime state (ignore contents, but allow setup-hooks to be tracked)
 state.json
-.runtime/
+.runtime/*
+!.runtime/setup-hooks/
 
 # Beads runtime state (not tracked)
 # Formulas ARE tracked for `go install @latest` - see bottom of file
@@ -78,3 +80,7 @@ result
 
 # Gas Town (added by gt)
 __pycache__/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

@@ -7,7 +7,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // PID file format: "PID\nNONCE"
@@ -80,7 +79,7 @@ func verifyPIDOwnership(path string) (pid int, alive bool, err error) {
 		return pid, false, nil
 	}
 
-	if err := process.Signal(syscall.Signal(0)); err != nil {
+	if !isProcessAlive(process) {
 		// Process not running — stale PID file
 		return pid, false, nil
 	}

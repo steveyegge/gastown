@@ -109,6 +109,70 @@ func TestMatchesDangerousGitPush(t *testing.T) {
 	}
 }
 
+func TestMatchesSudo(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		blocked bool
+	}{
+		// Should block
+		{"sudo dnf install", "sudo dnf install -y postgresql-contrib", true},
+		{"sudo rm", "sudo rm -rf /var/log/syslog", true},
+		{"sudo bare", "sudo su", true},
+		{"sudo in pipeline", "echo foo | sudo tee /etc/config", true},
+
+		// Should allow
+		{"no sudo", "echo hello", false},
+		{"sudo in string", "echo 'do not use sudo'", false}, // contains "sudo" as substring of different token? Actually "sudo" IS a token here
+		{"pseudocode", "cat pseudocode.txt", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchesSudo(strings.ToLower(tt.command)) != ""
+			if got != tt.blocked {
+				t.Errorf("matchesSudo(%q) blocked=%v, want %v", tt.command, got, tt.blocked)
+			}
+		})
+	}
+}
+
+func TestMatchesPackageInstall(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		blocked bool
+	}{
+		// Should block
+		{"apt install", "apt install -y curl", true},
+		{"apt-get install", "apt-get install -y build-essential", true},
+		{"dnf install", "dnf install -y postgresql-contrib", true},
+		{"yum install", "yum install -y gcc", true},
+		{"pacman -S", "pacman -S git", true},
+		{"brew install", "brew install node", true},
+		{"gem install", "gem install bundler", true},
+		{"pip install --system", "pip install --system requests", true},
+		{"pip3 install --system", "pip3 install --system flask", true},
+		{"npm install -g", "npm install -g typescript", true},
+		{"npm install --global", "npm install --global eslint", true},
+
+		// Should allow
+		{"pip install (venv ok)", "pip install requests", false},
+		{"npm install (local ok)", "npm install express", false},
+		{"npm install --save-dev", "npm install --save-dev jest", false},
+		{"go install", "go install ./...", false},
+		{"cargo install", "cargo install ripgrep", false},
+		{"normal command", "ls -la", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchesPackageInstall(strings.ToLower(tt.command)) != ""
+			if got != tt.blocked {
+				t.Errorf("matchesPackageInstall(%q) blocked=%v, want %v", tt.command, got, tt.blocked)
+			}
+		})
+	}
+}
+
 // TestDangerousGuard_Integration tests the full pattern set end-to-end.
 func TestDangerousGuard_Integration(t *testing.T) {
 	tests := []struct {
@@ -116,7 +180,18 @@ func TestDangerousGuard_Integration(t *testing.T) {
 		command string
 		blocked bool
 	}{
-		// Blocked
+		// Blocked — privilege escalation
+		{"sudo command", "sudo dnf install -y foo", true},
+		{"sudo rm", "sudo rm -rf /var/cache", true},
+
+		// Blocked — package installs
+		{"apt install", "apt install -y curl", true},
+		{"dnf install", "dnf install -y postgresql-contrib", true},
+		{"brew install", "brew install node", true},
+		{"npm install -g", "npm install -g typescript", true},
+		{"pip install --system", "pip install --system requests", true},
+
+		// Blocked — destructive operations
 		{"rm -rf /", "rm -rf /", true},
 		{"git push --force", "git push --force origin main", true},
 		{"git reset --hard", "git reset --hard HEAD~1", true},
@@ -130,13 +205,19 @@ func TestDangerousGuard_Integration(t *testing.T) {
 		{"git push --force-with-lease", "git push --force-with-lease origin main", false},
 		{"git push normal", "git push origin main", false},
 		{"git reset soft", "git reset --soft HEAD~1", false},
+		{"pip install (venv)", "pip install requests", false},
+		{"npm install (local)", "npm install express", false},
 		{"normal command", "ls -la", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			lower := strings.ToLower(tt.command)
 			blocked := false
-			if matchesDangerousRmRf(lower) != "" {
+			if matchesSudo(lower) != "" {
+				blocked = true
+			} else if matchesPackageInstall(lower) != "" {
+				blocked = true
+			} else if matchesDangerousRmRf(lower) != "" {
 				blocked = true
 			} else if matchesDangerousGitPush(lower) != "" {
 				blocked = true

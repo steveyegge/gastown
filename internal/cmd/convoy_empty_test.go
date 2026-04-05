@@ -86,7 +86,10 @@ esac
 	return binDir, townRoot, closeLogPath
 }
 
-func TestCheckSingleConvoy_EmptyConvoyAutoCloses(t *testing.T) {
+func TestCheckSingleConvoy_EmptyConvoyDoesNotAutoClose(t *testing.T) {
+	// When getTrackedIssues returns empty (cross-rig resolution failure or truly
+	// no tracked issues), closeConvoyIfComplete must NOT auto-close. A 0/0 result
+	// means "could not resolve", not "all done". (GH#hq-439)
 	_, townBeads, closeLogPath := mockBdForConvoyTest(t, "hq-empty1", "Empty test convoy")
 
 	err := checkSingleConvoy(townBeads, "hq-empty1", false)
@@ -94,17 +97,10 @@ func TestCheckSingleConvoy_EmptyConvoyAutoCloses(t *testing.T) {
 		t.Fatalf("checkSingleConvoy() error: %v", err)
 	}
 
-	// Verify bd close was called with the empty-convoy reason
-	data, err := os.ReadFile(closeLogPath)
-	if err != nil {
-		t.Fatalf("reading close log: %v", err)
-	}
-	log := string(data)
-	if !strings.Contains(log, "hq-empty1") {
-		t.Errorf("close log should contain convoy ID, got: %q", log)
-	}
-	if !strings.Contains(log, "Empty convoy") {
-		t.Errorf("close log should contain empty-convoy reason, got: %q", log)
+	// Verify bd close was NOT called — 0 tracked issues = no auto-close.
+	_, err = os.ReadFile(closeLogPath)
+	if err == nil {
+		t.Error("convoy with 0 tracked issues should NOT be auto-closed, but close log exists")
 	}
 }
 

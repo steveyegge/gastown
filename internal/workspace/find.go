@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/steveyegge/gastown/internal/config"
 )
@@ -28,7 +27,8 @@ const (
 
 // Find locates the town root by walking up from the given directory.
 // It prefers mayor/town.json over mayor/ directory as workspace marker.
-// When in a worktree path (polecats/ or crew/), continues to outermost workspace.
+// Always continues to the outermost workspace, correctly handling nested
+// workspace structures (e.g., rig directories with their own mayor/town.json).
 // Does not resolve symlinks to stay consistent with os.Getwd().
 func Find(startDir string) (string, error) {
 	absDir, err := filepath.Abs(startDir)
@@ -36,22 +36,18 @@ func Find(startDir string) (string, error) {
 		return "", fmt.Errorf("resolving path: %w", err)
 	}
 
-	inWorktree := isInWorktreePath(absDir)
 	var primaryMatch, secondaryMatch string
 
 	current := absDir
 	for {
+		// Always keep updating primaryMatch and secondaryMatch to find the outermost
+		// directory with the respective markers. This handles nested workspace
+		// structures where inner workspaces (e.g., rig directories or worktrees)
+		// have their own mayor/town.json, ensuring we return the actual town root.
 		if _, err := os.Stat(filepath.Join(current, PrimaryMarker)); err == nil {
-			if !inWorktree {
-				return current, nil
-			}
 			primaryMatch = current
 		}
 
-		// Always keep updating secondaryMatch to find the outermost mayor/ directory.
-		// This handles nested structures where rigs have their own mayor/ directories
-		// but only the town root should be detected as the workspace.
-		// The primary marker (mayor/town.json) is authoritative and returns early above.
 		if info, err := os.Stat(filepath.Join(current, SecondaryMarker)); err == nil && info.IsDir() {
 			secondaryMatch = current
 		}
@@ -65,11 +61,6 @@ func Find(startDir string) (string, error) {
 		}
 		current = parent
 	}
-}
-
-func isInWorktreePath(path string) bool {
-	sep := string(filepath.Separator)
-	return strings.Contains(path, sep+"polecats"+sep) || strings.Contains(path, sep+"crew"+sep)
 }
 
 // FindOrError is like Find but returns a user-friendly error if not found.

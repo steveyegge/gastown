@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -184,10 +185,17 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  cd %s\n", worktreePath)
 		fmt.Println()
 		fmt.Printf("Environment variables to preserve your identity:\n")
-		fmt.Printf("  export BD_ACTOR=%s\n", bdActor)
-		fmt.Printf("  export GT_ROLE=crew\n")
-		fmt.Printf("  export GT_RIG=%s\n", sourceRig)
-		fmt.Printf("  export GT_CREW=%s\n", crewName)
+		if runtime.GOOS == "windows" {
+			fmt.Printf("  $env:BD_ACTOR=%s\n", bdActor)
+			fmt.Printf("  $env:GT_ROLE=crew\n")
+			fmt.Printf("  $env:GT_RIG=%s\n", sourceRig)
+			fmt.Printf("  $env:GT_CREW=%s\n", crewName)
+		} else {
+			fmt.Printf("  export BD_ACTOR=%s\n", bdActor)
+			fmt.Printf("  export GT_ROLE=crew\n")
+			fmt.Printf("  export GT_RIG=%s\n", sourceRig)
+			fmt.Printf("  export GT_CREW=%s\n", crewName)
+		}
 	}
 
 	return nil

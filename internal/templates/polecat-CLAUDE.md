@@ -98,6 +98,54 @@ gt done                  # Submit and self-clean
 
 ---
 
+## Formula & Workflow Reference
+
+Your work is driven by **formulas** — structured workflow templates with step-by-step checklists.
+
+**How it works:**
+1. A formula (e.g., `mol-polecat-work`) is attached to your hook bead when dispatched
+2. `gt prime` renders the formula steps inline — you see the full checklist
+3. Work through steps in order. Each step has exit criteria.
+4. `gt done` submits your work and exits
+
+**You do NOT need to manually find or run formulas.** They are attached to your hook
+bead and rendered automatically. This reference exists to eliminate discovery overhead.
+
+## Beads CLI Reference
+
+Beads (`bd`) is the issue/work tracking system backed by Dolt. Exact commands:
+
+```bash
+# Reading
+bd show <id>                          # Full issue details (e.g., bd show gt-abc)
+bd list --status=open                 # List open issues
+
+# Updating
+bd update <id> --status=in_progress   # Claim work
+bd update <id> --notes "..."          # Persist findings (survives session death)
+bd update <id> --design "..."         # Persist structured analysis
+bd close <id>                         # Close issue
+bd close <id> --reason="no-changes: <explanation>"  # Close without code changes
+
+# Creating
+bd create --title="Found bug" --type=bug --priority=2  # File discovered work
+```
+
+**Valid statuses:** `open`, `in_progress`, `blocked`, `deferred`, `closed`, `pinned`, `hooked`
+(there is NO `done` or `complete` status — use `bd close`)
+
+## Dolt Connectivity
+
+Beads data is stored in **Dolt** (git-for-data) on port 3307. If `bd` commands hang or fail:
+
+```bash
+gt dolt status                     # Check server health + latency
+```
+
+**Do NOT restart Dolt yourself.** Escalate: `gt escalate -s HIGH "Dolt: <symptom>"`
+
+---
+
 ## Startup Protocol
 
 1. Announce: "Polecat {{name}}, checking in."

@@ -4,28 +4,28 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt prime --hook && gt mail check --inject",
+        "bash": "{{GT_BIN}} prime --hook && {{GT_BIN}} mail check --inject",
         "timeoutSec": 30
       }
     ],
     "userPromptSubmitted": [
       {
         "type": "command",
-        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt mail check --inject",
+        "bash": "{{GT_BIN}} mail check --inject",
         "timeoutSec": 10
       }
     ],
     "preToolUse": [
       {
         "type": "command",
-        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && INPUT=$(cat) && TOOL=$(echo \"$INPUT\" | jq -r '.toolName // empty') && if [ \"$TOOL\" = \"bash\" ]; then CMD=$(echo \"$INPUT\" | jq -r '.toolArgs // empty' | jq -r '.command // empty'); if echo \"$CMD\" | grep -qE 'gh\\s+pr\\s+create|git\\s+checkout\\s+-b|git\\s+switch\\s+-c'; then gt tap guard pr-workflow 2>/dev/null || echo '{\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Gas Town PR workflow guard: use gt done to submit work\"}'; fi; fi",
+        "bash": "INPUT=$(cat) && TOOL=$(echo \"$INPUT\" | jq -r '.toolName // empty') && if [ \"$TOOL\" = \"bash\" ]; then CMD=$(echo \"$INPUT\" | jq -r '.toolArgs // empty' | jq -r '.command // empty'); if echo \"$CMD\" | grep -qE 'gh\\s+pr\\s+create|git\\s+checkout\\s+-b|git\\s+switch\\s+-c'; then {{GT_BIN}} tap guard pr-workflow 2>/dev/null || echo '{\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Gas Town PR workflow guard: use gt done to submit work\"}'; fi; fi",
         "timeoutSec": 10
       }
     ],
     "sessionEnd": [
       {
         "type": "command",
-        "bash": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt costs record &",
+        "bash": "{{GT_BIN}} costs record &",
         "timeoutSec": 10
       }
     ]

@@ -67,6 +67,7 @@ source of truth.
 | judgment_enabled | false | Enable quality review for merges (true/false) |
 | review_depth | standard | Review depth: quick, standard, or deep |
 | merge_strategy | direct | Merge strategy: 'direct' (ff-only merge+push) or 'pr' (GitHub PR) |
+| require_review | false | Require at least one approving GitHub review before merging (pr mode only) |
 
 ## Target Resolution Rule
 
@@ -85,7 +86,26 @@ resolve that placeholder with this rule:
 ## Step Execution Order
 
 You MUST process steps in strict DAG order. Walk through each step sequentially,
-unless you are explicitly told to skip to a step."""
+unless you are explicitly told to skip to a step.
+
+## Abbreviated Patrol Mode (Idle Effort Tuning)
+
+When `await-event` outputs `EFFORT: reduced`, run an ABBREVIATED patrol.
+This happens when idle_cycles >= {{idle_effort_threshold}} (no events on channel).
+
+Abbreviated patrol rules:
+- **inbox-check**: Run `gt mail drain` and quick inbox check. Skip individual message processing unless new MERGE_READY found.
+- **queue-scan**: Quick `gt mq list` check. If queue is empty, skip directly to check-integration-branches.
+- **process-branch through merge-push**: Only run if queue-scan found work. Otherwise SKIP all.
+- **loop-check through generate-summary**: SKIP if no merges were processed.
+- **check-integration-branches**: Quick check only.
+- **context-check**: Quick self-assessment (one sentence).
+- **patrol-cleanup**: SKIP.
+- **burn-or-loop**: Normal (await-event as usual).
+
+When `await-event` outputs `EFFORT: full`, run all steps thoroughly (normal mode).
+
+The goal: idle cycles should burn ~10% of the tokens a full patrol uses."""
 formula = "mol-refinery-patrol"
 version = 13
 
@@ -93,6 +113,10 @@ version = 13
 [vars.wisp_type]
 description = "Type of wisp created for this molecule"
 default = "patrol"
+
+[vars.idle_effort_threshold]
+description = "Idle cycles before switching to abbreviated patrol (0 = always full)"
+default = "1"
 
 [vars.integration_branch_refinery_enabled]
 description = "Whether the refinery merges to integration branches (true) or always to target_branch (false)"
@@ -145,6 +169,18 @@ default = "standard"
 [vars.merge_strategy]
 description = "Merge strategy: 'direct' (ff-only merge + push) or 'pr' (create GitHub PR). Default: direct."
 default = "direct"
+
+[vars.require_review]
+description = "Require at least one approving GitHub review before merging (only applies when merge_strategy=pr)."
+default = "false"
+
+[vars.rig]
+description = "Name of the rig this refinery belongs to (e.g., gastown, laser)"
+default = "UNSET_RIG"
+
+[vars.prefix]
+description = "Beads prefix for this rig (e.g., gt for gastown, la for laser)"
+default = "gt"
 
 [[steps]]
 id = "inbox-check"
@@ -633,6 +669,7 @@ Merge and push. CRITICAL: Notifications come IMMEDIATELY after push.
 **Config: target_branch = {{target_branch}}**
 **Config: delete_merged_branches = {{delete_merged_branches}}**
 **Config: merge_strategy = {{merge_strategy}}**
+**Config: require_review = {{require_review}}**
 
 **Step 1: Merge (strategy-dependent)**
 
@@ -669,7 +706,28 @@ echo "Local:  $LOCAL_SHA"
 echo "Remote: $REMOTE_SHA"
 ```
 
-**If SHAs match**: Push succeeded. Continue to Step 2.
+**If SHAs match**: Push succeeded.
+
+**Step 1.6 (direct only): CHECK FOR OPEN PR ON BRANCH (gas-fk4)**
+
+Before proceeding to post-merge cleanup (which deletes the remote branch),
+check if this branch has an open GitHub PR. Deleting the remote branch would
+cause GitHub to auto-close the PR as "closed" (not "merged"), destroying
+the PR audit trail and making it appear that work was rejected.
+
+```bash
+OPEN_PR=$(gh pr list --head <polecat-branch> --state open --json number --limit 1 2>/dev/null || echo "[]")
+if [ "$OPEN_PR" != "[]" ] && [ "$OPEN_PR" != "" ]; then
+  echo "Open PR found on branch — will use --skip-branch-delete in post-merge"
+  # Set flag for Step 3 (post-merge cleanup) to skip branch deletion
+  SKIP_BRANCH_DELETE=true
+fi
+```
+
+If an open PR exists, pass `--skip-branch-delete` to `gt mq post-merge` in Step 3.
+The PR should be merged or closed through the GitHub API, not by branch deletion.
+
+Continue to Step 2.
 
 **If SHAs differ**: STOP. Push failed silently.
 - DO NOT send MERGED notification
@@ -746,6 +804,44 @@ Attempt-Number: 1"
 Then skip to Step 4 (archive mail) and continue patrol.
 
 **If CI checks PASS:**
+
+**Step 1.7 (pr only): CHECK REVIEW APPROVAL STATUS (gas-fk4)**
+
+⚠️ **DO NOT merge a PR that has not been explicitly approved.**
+Plain review comments (COMMENTED) are NOT approval. Only an explicit
+"APPROVED" reviewDecision allows the merge to proceed.
+
+```bash
+REVIEW_DECISION=$(gh pr view <polecat-branch> --repo "$REPO_URL" --json reviewDecision -q '.reviewDecision')
+echo "Review decision: $REVIEW_DECISION"
+```
+
+| reviewDecision | Action |
+|----------------|--------|
+| `APPROVED` | Proceed to merge |
+| `CHANGES_REQUESTED` | Send FIX_NEEDED to polecat (reviewer rejected), skip merge |
+| `REVIEW_REQUIRED` or empty | PR has not been reviewed yet — skip merge, leave PR open |
+
+**If CHANGES_REQUESTED:**
+```bash
+gt mail send <rig>/polecats/<polecat-name> -s "FIX_NEEDED <polecat-name>" --stdin <<'BODY'
+Branch: <branch>
+Issue: <issue-id>
+PR: ${PR_URL}
+Failure-Type: review-rejected
+Error: Reviewer requested changes on the PR. Address the review feedback and resubmit.
+Attempt-Number: 1
+BODY
+```
+Clean up temp branch, archive MERGE_READY, skip to loop-check.
+
+**If REVIEW_REQUIRED or empty (not yet reviewed):**
+Do NOT merge. Do NOT close. Do NOT send FIX_NEEDED. Leave the PR open
+for human review. Archive the MERGE_READY mail — the PR will be picked
+up on a future patrol cycle if/when it gets approved.
+Clean up temp branch and skip to loop-check.
+
+**If APPROVED:**
 Merge the PR:
 ```bash
 gh pr merge <polecat-branch> --repo "$REPO_URL" --merge --delete-branch
@@ -786,7 +882,11 @@ This single command handles closing the MR bead, closing the source issue, and
 deleting the remote polecat branch (respects delete_merged_branches config):
 
 ```bash
-gt mq post-merge <rig> <mr-bead-id>
+# If an open PR was detected in Step 1.6 (direct) or merge_strategy=pr,
+# pass --skip-branch-delete to avoid auto-closing the PR via head_ref_delete.
+# Otherwise, omit the flag.
+gt mq post-merge <rig> <mr-bead-id>            # normal (no open PR)
+gt mq post-merge <rig> <mr-bead-id> --skip-branch-delete  # open PR exists
 ```
 
 The MR bead ID was in the MERGE_READY message or find via:
@@ -798,7 +898,8 @@ Verify the command output shows all steps succeeded (✓ for each).
 
 **Note**: In PR mode, the source branch is NOT deleted (it's the PR head branch).
 `delete_merged_branches` is ignored when merge_strategy=pr — the branch is cleaned
-up when the PR is merged on GitHub.
+up when the PR is merged on GitHub. The `--skip-branch-delete` flag (gas-fk4) also
+prevents branch deletion when an open PR is detected in direct merge mode.
 
 **Step 4: Archive the MERGE_READY mail (REQUIRED)**
 ```bash
@@ -992,11 +1093,17 @@ End of patrol cycle decision. Use the signals from context-check to decide.
 
 **If you decide to continue patrolling:**
 
-Use await-event to subscribe to the refinery event channel with exponential backoff:
+Resolve your agent bead ID for this patrol cycle. You MUST replace `<YOUR_RIG>` below with your actual rig name (e.g., `beads`, `town`) before running:
+```bash
+bd list --type=agent --desc-contains="role_type: refinery" --json | jq -r '.[] | select(.status != "closed") | select(.description | test("(?m)^\\\\s*rig: <YOUR_RIG>\\\\s*$")) | .id'
+```
+This must return exactly one bead ID. If it returns zero results, STOP and report an error — verify you substituted `<YOUR_RIG>` correctly. If it returns multiple results, STOP and report an error — manual disambiguation is required. Use the single resolved bead ID as YOUR_AGENT_BEAD in the commands below.
+
+Then use await-event to subscribe to the refinery event channel with exponential backoff:
 
 ```bash
-gt mol step await-event --channel refinery --agent-bead gt-<rig>-refinery \
-  --backoff-base 30s --backoff-mult 2 --backoff-max 60s --cleanup
+gt mol step await-event --channel refinery --agent-bead YOUR_AGENT_BEAD \
+  --backoff-base 30s --backoff-mult 2 --backoff-max 15m --cleanup
 ```
 
 This command:
@@ -1005,9 +1112,11 @@ This command:
 3. If no events, times out with exponential backoff:
    - First timeout: 30s
    - Second timeout: 60s
-   - ...capped at 60 seconds max (ensures polling at least once per minute)
+   - Third timeout: 120s
+   - ...capped at 15 minutes max
 4. Tracks `idle:N` label on refinery agent bead for backoff state
 5. `--cleanup` auto-deletes processed event files
+6. Outputs `EFFORT: reduced` or `EFFORT: full` directive for next cycle
 
 **Supported events:**
 - `MERGE_READY` — from witness when polecat branch is pushed and ready to merge
@@ -1023,6 +1132,24 @@ gt agent state YOUR_AGENT_BEAD --set idle=0
 **On timeout** (no events):
 The idle counter was auto-incremented. Continue to next patrol cycle
 (the longer backoff will apply next time).
+
+## Effort-Based Patrol Routing
+
+After await-event returns, check the EFFORT directive in the output:
+
+**If `EFFORT: full`** — Run all steps thoroughly (normal patrol).
+
+**If `EFFORT: reduced`** — Run ABBREVIATED patrol:
+- inbox-check: Quick drain + check for MERGE_READY only
+- queue-scan: Quick `gt mq list`. If empty, skip to check-integration-branches
+- process-branch through merge-push: SKIP if queue empty
+- loop-check through generate-summary: SKIP if no merges processed
+- check-integration-branches: Quick check only
+- context-check: One-sentence self-assessment
+- patrol-cleanup: SKIP
+
+Abbreviated patrol should complete in ~10% of the tokens of a full patrol.
+Mark skipped steps as SKIP in the patrol report.
 
 After await-event returns (either by event or timeout):
 1. **Re-assess session health** (check RSS, context, age again — conditions change)

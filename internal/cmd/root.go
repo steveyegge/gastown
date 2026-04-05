@@ -65,6 +65,8 @@ var beadsExemptCommands = map[string]bool{
 	"install":    true,
 	"tap":        true,
 	"dnd":        true,
+	"estop":      true, // E-stop must work when Dolt is down
+	"thaw":       true, // Thaw must work when Dolt is down
 	"signal":        true, // Hook signal handlers must be fast, handle beads internally
 	"metrics":       true, // Metrics reads local JSONL, no beads needed
 	"krc":           true, // KRC doesn't require beads
@@ -81,6 +83,8 @@ var branchCheckExemptCommands = map[string]bool{
 	"help":       true,
 	"completion": true,
 	"doctor":     true, // Used to fix the problem
+	"estop":      true, // Emergency stop must always work
+	"thaw":       true, // Thaw must always work
 	"install":    true, // Initial setup
 	"git-init":   true, // Git setup
 	"upgrade":    true, // Post-install migration
@@ -94,11 +98,12 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 	// Skip warning when Build was set by a package manager (e.g. Homebrew sets
 	// Build to "Homebrew" via ldflags but doesn't set BuiltProperly).
 	if BuiltProperly == "" && Build == "dev" {
-		fmt.Fprintln(os.Stderr, "WARNING: This binary was built with 'go build' directly.")
-		fmt.Fprintln(os.Stderr, "         Use 'make build' to create a properly signed binary.")
+		fmt.Fprintln(os.Stderr, "ERROR: This binary was built with 'go build' directly.")
+		fmt.Fprintln(os.Stderr, "       macOS will SIGKILL unsigned binaries. Use 'make build' instead.")
 		if gtRoot := os.Getenv("GT_ROOT"); gtRoot != "" {
-			fmt.Fprintf(os.Stderr, "         Run from: %s\n", gtRoot)
+			fmt.Fprintf(os.Stderr, "       Run from: %s\n", gtRoot)
 		}
+		os.Exit(1)
 	}
 
 	// Initialize CLI theme (dark/light mode support)
@@ -231,7 +236,7 @@ func warnIfTownRootOffMain() {
 	}
 
 	branch := strings.TrimSpace(string(out))
-	if branch == "" || branch == "main" || branch == "master" {
+	if branch == "" || branch == "main" || branch == "master" || branch == "gt_managed" {
 		return
 	}
 

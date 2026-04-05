@@ -452,7 +452,11 @@ func handleMoleculeComplete(cwd, townRoot, moleculeID string, dryRun bool) error
 
 	if dryRun {
 		fmt.Printf("[dry-run] Would unpin work for %s\n", agentID)
-		fmt.Printf("[dry-run] Would send POLECAT_DONE to witness\n")
+		if roleCtx.Role == RoleDog {
+			fmt.Printf("[dry-run] Would run gt dog done\n")
+		} else {
+			fmt.Printf("[dry-run] Would send POLECAT_DONE to witness\n")
+		}
 		return nil
 	}
 
@@ -486,6 +490,23 @@ func handleMoleculeComplete(cwd, townRoot, moleculeID string, dryRun bool) error
 		doneCmd.Stdout = os.Stdout
 		doneCmd.Stderr = os.Stderr
 		return doneCmd.Run()
+	}
+
+	// For dogs, use gt dog done to clear work and auto-terminate session.
+	// Without this, dogs idle at the prompt indefinitely after completing
+	// their formula, wasting resources until the stale-working detector
+	// kills them (2 hours).
+	if roleCtx.Role == RoleDog {
+		fmt.Printf("%s Signaling dog completion...\n", style.Bold.Render("📤"))
+
+		dogDoneArgs := []string{"dog", "done"}
+		if roleCtx.Polecat != "" { // dog name stored in Polecat field
+			dogDoneArgs = append(dogDoneArgs, roleCtx.Polecat)
+		}
+		dogDoneCmd := exec.Command("gt", dogDoneArgs...)
+		dogDoneCmd.Stdout = os.Stdout
+		dogDoneCmd.Stderr = os.Stderr
+		return dogDoneCmd.Run()
 	}
 
 	// For other roles, just print completion message

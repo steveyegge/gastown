@@ -25,6 +25,7 @@ func FirstLine(s string) string {
 func ExecWithOutput(workDir, cmd string, args ...string) (string, error) {
 	c := exec.Command(cmd, args...) //nolint:gosec // G204: callers validate args
 	c.Dir = workDir
+	SetDetachedProcessGroup(c) // suppress console window flash on Windows
 
 	var stdout, stderr bytes.Buffer
 	c.Stdout = &stdout
@@ -46,6 +47,7 @@ func ExecWithOutput(workDir, cmd string, args ...string) (string, error) {
 func ExecRun(workDir, cmd string, args ...string) error {
 	c := exec.Command(cmd, args...) //nolint:gosec // G204: callers validate args
 	c.Dir = workDir
+	SetDetachedProcessGroup(c) // suppress console window flash on Windows
 
 	var stderr bytes.Buffer
 	c.Stderr = &stderr

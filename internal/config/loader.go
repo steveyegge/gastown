@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -168,6 +169,23 @@ func LoadRigConfig(path string) (*RigConfig, error) {
 	}
 
 	return &config, nil
+}
+
+// LoadRigConfigNamepool extracts just the namepool config from a rig's config.json.
+// Returns nil if no namepool is configured.
+func LoadRigConfigNamepool(path string) (*NamepoolConfig, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally
+	if err != nil {
+		return nil, err
+	}
+
+	var raw struct {
+		Namepool *NamepoolConfig `json:"namepool,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	return raw.Namepool, nil
 }
 
 // SaveRigConfig saves a rig configuration to a file.
@@ -340,6 +358,9 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 		if local.Enabled {
 			result.Enabled = local.Enabled
 		}
+		if local.MergeStrategy != "" {
+			result.MergeStrategy = local.MergeStrategy
+		}
 		if local.OnConflict != "" {
 			result.OnConflict = local.OnConflict
 		}
@@ -360,6 +381,12 @@ func MergeSettingsCommand(repo, local *MergeQueueConfig) *MergeQueueConfig {
 		}
 		if local.StaleClaimTimeout != "" {
 			result.StaleClaimTimeout = local.StaleClaimTimeout
+		}
+		if local.MergeStrategy != "" {
+			result.MergeStrategy = local.MergeStrategy
+		}
+		if local.RequireReview != nil {
+			result.RequireReview = local.RequireReview
 		}
 	}
 	return result
@@ -1428,6 +1455,13 @@ func withRoleSettingsFlag(rc *RuntimeConfig, role, rigPath string) *RuntimeConfi
 		return rc
 	}
 
+	// Guard against double-adding (ResolveRoleAgentConfig already calls this)
+	for _, arg := range rc.Args {
+		if arg == "--settings" {
+			return rc
+		}
+	}
+
 	settingsDir := RoleSettingsDir(role, rigPath)
 	if settingsDir == "" {
 		return rc
@@ -1689,6 +1723,45 @@ func ResolveRoleAgentName(role, townRoot, rigPath string) (agentName string, isR
 		return townSettings.DefaultAgent, false
 	}
 	return "claude", false
+}
+
+// ResolveAgentConfigByName looks up an agent's RuntimeConfig by name without requiring
+// the agent binary to be installed. Checks custom agents first, then built-in presets.
+// Returns nil if the agent name is unknown. Used by hooks sync, which needs the preset's
+// hooks metadata regardless of whether the binary is installed on this machine.
+func ResolveAgentConfigByName(name, townRoot, rigPath string) *RuntimeConfig {
+	resolveConfigMu.Lock()
+	defer resolveConfigMu.Unlock()
+
+	var rigSettings *RigSettings
+	if rigPath != "" {
+		if rs, err := LoadRigSettings(RigSettingsPath(rigPath)); err == nil {
+			rigSettings = rs
+		}
+	}
+
+	townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		townSettings = NewTownSettings()
+	}
+
+	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
+	if rigPath != "" {
+		_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
+	}
+
+	return lookupAgentConfigIfExists(name, townSettings, rigSettings)
+}
+
+// HasExplicitRoleAgent returns true if role_agents (rig or town level)
+// explicitly maps this role to a named agent. This distinguishes between
+// "role_agents says use claude-sonnet" and "no role_agents entry, falling
+// back to defaults". When an explicit mapping exists, the TOML start_command
+// should be skipped in favor of BuildStartupCommandFromConfig which honors
+// the model/settings from the mapped agent definition.
+func HasExplicitRoleAgent(role, townRoot, rigPath string) bool {
+	_, isRoleSpecific := ResolveRoleAgentName(role, townRoot, rigPath)
+	return isRoleSpecific
 }
 
 // lookupAgentConfig looks up an agent by name.
@@ -2158,35 +2231,83 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 
 	SanitizeAgentEnv(resolvedEnv, envVars)
 
-	// Build environment export prefix
-	var exports []string
-	for k, v := range resolvedEnv {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
-	}
-
-	// Sort for deterministic output
-	sort.Strings(exports)
-
 	var cmd string
-	if len(exports) > 0 {
-		// Use 'exec env' instead of 'export ... &&' so the agent process
-		// replaces the shell. This allows WaitForCommand to detect the
-		// running agent via pane_current_command (which shows the direct
-		// process, not child processes).
-		cmd = "exec env " + strings.Join(exports, " ") + " "
-	}
+	if runtime.GOOS == "windows" {
+		// On Windows, tmux (psmux) uses PowerShell and send-keys has line length
+		// limits. Write env vars + agent command to a temp .ps1 script and invoke
+		// that instead. This avoids send-keys corrupting long commands.
+		var scriptLines []string
+		keys := make([]string, 0, len(resolvedEnv))
+		for k := range resolvedEnv {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			scriptLines = append(scriptLines, fmt.Sprintf("$env:%s=%s", k, psQuote(resolvedEnv[k])))
+		}
 
-	// Insert exec wrapper between env vars and agent command if configured.
-	// Example: exec env VAR=val ... exitbox run --profile=foo -- claude ...
-	if len(rc.ExecWrapper) > 0 {
-		cmd += strings.Join(rc.ExecWrapper, " ") + " "
-	}
+		var agentCmd string
+		if len(rc.ExecWrapper) > 0 {
+			agentCmd = strings.Join(rc.ExecWrapper, " ") + " "
+		}
+		if prompt != "" {
+			agentCmd += "& " + rc.BuildCommandWithPrompt(prompt)
+		} else {
+			agentCmd += "& " + rc.BuildCommand()
+		}
+		scriptLines = append(scriptLines, agentCmd)
 
-	// Add runtime command
-	if prompt != "" {
-		cmd += rc.BuildCommandWithPrompt(prompt)
+		// Write script to temp file in town's daemon dir
+		townRoot := resolvedEnv["GT_ROOT"]
+		if townRoot == "" {
+			townRoot = os.TempDir()
+		}
+		scriptDir := filepath.Join(townRoot, "daemon", "scripts")
+		_ = os.MkdirAll(scriptDir, 0755)
+		role := resolvedEnv["GT_ROLE"]
+		if role == "" {
+			role = "agent"
+		}
+		// Sanitize role for filename (replace / with -)
+		safeRole := strings.ReplaceAll(role, "/", "-")
+		scriptPath := filepath.Join(scriptDir, safeRole+"-startup.ps1")
+		scriptContent := strings.Join(scriptLines, "\n") + "\n"
+		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0644); err != nil {
+			// Fallback: inline command (may fail if too long)
+			cmd = strings.Join(scriptLines, "; ")
+		} else {
+			cmd = "& " + psQuote(scriptPath)
+		}
 	} else {
-		cmd += rc.BuildCommand()
+		// Build environment export prefix (POSIX shell)
+		var exports []string
+		for k, v := range resolvedEnv {
+			exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
+		}
+
+		// Sort for deterministic output
+		sort.Strings(exports)
+
+		if len(exports) > 0 {
+			// Use 'exec env' instead of 'export ... &&' so the agent process
+			// replaces the shell. This allows WaitForCommand to detect the
+			// running agent via pane_current_command (which shows the direct
+			// process, not child processes).
+			cmd = "exec env " + strings.Join(exports, " ") + " "
+		}
+
+		// Insert exec wrapper between env vars and agent command if configured.
+		// Example: exec env VAR=val ... exitbox run --profile=foo -- claude ...
+		if len(rc.ExecWrapper) > 0 {
+			cmd += strings.Join(rc.ExecWrapper, " ") + " "
+		}
+
+		// Add runtime command
+		if prompt != "" {
+			cmd += rc.BuildCommandWithPrompt(prompt)
+		} else {
+			cmd += rc.BuildCommand()
+		}
 	}
 
 	return cmd
@@ -2229,6 +2350,7 @@ func SanitizeAgentEnv(resolvedEnv, callerEnv map[string]string) {
 
 // PrependEnv prepends export statements to a command string.
 // Values containing special characters are properly shell-quoted.
+// On Windows, uses PowerShell $env: syntax.
 func PrependEnv(command string, envVars map[string]string) string {
 	if len(envVars) == 0 {
 		return command
@@ -2236,10 +2358,17 @@ func PrependEnv(command string, envVars map[string]string) string {
 
 	var exports []string
 	for k, v := range envVars {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
+		if runtime.GOOS == "windows" {
+			exports = append(exports, fmt.Sprintf("$env:%s=%s", k, psQuote(v)))
+		} else {
+			exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
+		}
 	}
 
 	sort.Strings(exports)
+	if runtime.GOOS == "windows" {
+		return strings.Join(exports, "; ") + "; " + command
+	}
 	return "export " + strings.Join(exports, " ") + " && " + command
 }
 
@@ -2312,6 +2441,13 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 		}
 	}
 
+	// Ensure Claude agents get --settings when their settings directory
+	// differs from the session working directory. This must run for ALL
+	// resolution paths (including agent overrides) — previously only the
+	// non-override ResolveRoleAgentConfig path included it, causing hooks
+	// to silently not fire for polecats launched with --agent.
+	rc = withRoleSettingsFlag(rc, role, rigPath)
+
 	// Apply exec wrapper from rig/town settings if not already set on the resolved config.
 	if len(rc.ExecWrapper) == 0 {
 		rc.ExecWrapper = resolveExecWrapper(rigPath)
@@ -2348,31 +2484,70 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 
 	SanitizeAgentEnv(resolvedEnv, envVars)
 
-	// Build environment export prefix
-	var exports []string
-	for k, v := range resolvedEnv {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
-	}
-	sort.Strings(exports)
-
 	var cmd string
-	if len(exports) > 0 {
-		// Use 'exec env' instead of 'export ... &&' so the agent process
-		// replaces the shell. This allows WaitForCommand to detect the
-		// running agent via pane_current_command (which shows the direct
-		// process, not child processes).
-		cmd = "exec env " + strings.Join(exports, " ") + " "
-	}
+	if runtime.GOOS == "windows" {
+		// Write env vars + agent command to a temp .ps1 script to avoid
+		// send-keys line length limits in psmux.
+		var scriptLines []string
+		keys := make([]string, 0, len(resolvedEnv))
+		for k := range resolvedEnv {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			scriptLines = append(scriptLines, fmt.Sprintf("$env:%s=%s", k, psQuote(resolvedEnv[k])))
+		}
 
-	// Insert exec wrapper between env vars and agent command if configured.
-	if len(rc.ExecWrapper) > 0 {
-		cmd += strings.Join(rc.ExecWrapper, " ") + " "
-	}
+		var agentCmd string
+		if len(rc.ExecWrapper) > 0 {
+			agentCmd = strings.Join(rc.ExecWrapper, " ") + " "
+		}
+		if prompt != "" {
+			agentCmd += "& " + rc.BuildCommandWithPrompt(prompt)
+		} else {
+			agentCmd += "& " + rc.BuildCommand()
+		}
+		scriptLines = append(scriptLines, agentCmd)
 
-	if prompt != "" {
-		cmd += rc.BuildCommandWithPrompt(prompt)
+		townRoot := resolvedEnv["GT_ROOT"]
+		if townRoot == "" {
+			townRoot = os.TempDir()
+		}
+		scriptDir := filepath.Join(townRoot, "daemon", "scripts")
+		_ = os.MkdirAll(scriptDir, 0755)
+		role := resolvedEnv["GT_ROLE"]
+		if role == "" {
+			role = "agent"
+		}
+		safeRole := strings.ReplaceAll(role, "/", "-")
+		scriptPath := filepath.Join(scriptDir, safeRole+"-startup.ps1")
+		scriptContent := strings.Join(scriptLines, "\n") + "\n"
+		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0644); err != nil {
+			cmd = strings.Join(scriptLines, "; ")
+		} else {
+			cmd = "& " + psQuote(scriptPath)
+		}
 	} else {
-		cmd += rc.BuildCommand()
+		// Build environment export prefix (POSIX shell)
+		var exports []string
+		for k, v := range resolvedEnv {
+			exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
+		}
+		sort.Strings(exports)
+
+		if len(exports) > 0 {
+			cmd = "exec env " + strings.Join(exports, " ") + " "
+		}
+
+		if len(rc.ExecWrapper) > 0 {
+			cmd += strings.Join(rc.ExecWrapper, " ") + " "
+		}
+
+		if prompt != "" {
+			cmd += rc.BuildCommandWithPrompt(prompt)
+		} else {
+			cmd += rc.BuildCommand()
+		}
 	}
 
 	return cmd, nil

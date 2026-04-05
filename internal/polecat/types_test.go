@@ -110,7 +110,7 @@ func TestCleanupStatus_CanForceRemove(t *testing.T) {
 		{CleanupClean, true},
 		{CleanupUncommitted, true},
 		{CleanupStash, false},
-		{CleanupUnpushed, false},
+		{CleanupUnpushed, true},
 		{CleanupUnknown, false},
 	}
 	for _, tt := range tests {

@@ -344,12 +344,11 @@ func runSchedulerClear(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	townBeads := beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
-
 	if schedulerClearBead != "" {
 		// Close ALL sling contexts for this specific work bead (there may be
 		// duplicates if concurrent scheduleBead calls raced past idempotency).
-		contexts, listErr := townBeads.ListOpenSlingContexts()
+		// Scan all rig dirs since contexts live in target rig beads. (GH#3468)
+		contexts, listErr := listAllSlingContexts(townRoot)
 		if listErr != nil {
 			return fmt.Errorf("listing contexts: %w", listErr)
 		}
@@ -358,7 +357,8 @@ func runSchedulerClear(cmd *cobra.Command, args []string) error {
 		for _, ctx := range contexts {
 			fields := beads.ParseSlingContextFields(ctx.Description)
 			if fields != nil && fields.WorkBeadID == schedulerClearBead {
-				if err := townBeads.CloseSlingContext(ctx.ID, "cleared"); err != nil {
+				b := beadsForContext(townRoot, fields)
+				if err := b.CloseSlingContext(ctx.ID, "cleared"); err != nil {
 					fmt.Printf("  %s Could not close context %s: %v\n", style.Dim.Render("Warning:"), ctx.ID, err)
 					continue
 				}
@@ -388,8 +388,9 @@ func runSchedulerClear(cmd *cobra.Command, args []string) error {
 
 	cleared := 0
 	for _, ctx := range allContexts {
-		// Use the townBeads instance for all close operations (contexts are in HQ DB)
-		if err := townBeads.CloseSlingContext(ctx.ID, "cleared"); err != nil {
+		fields := beads.ParseSlingContextFields(ctx.Description)
+		b := beadsForContext(townRoot, fields)
+		if err := b.CloseSlingContext(ctx.ID, "cleared"); err != nil {
 			fmt.Printf("  %s Could not close context %s: %v\n", style.Dim.Render("Warning:"), ctx.ID, err)
 			continue
 		}
@@ -809,9 +810,10 @@ func batchFetchBeadPriorities(townRoot string, ids []string) map[string]int {
 	return result
 }
 
-// countActivePolecats counts working polecats across all rigs in the town.
-// Excludes idle and done polecats that have completed their work — these
-// are preserved for reuse but should not consume capacity slots.
+// countActivePolecats counts all running polecat tmux sessions across all rigs.
+// This includes idle polecats (completed work, no hook bead) which still occupy
+// tmux sessions under the persistent polecat model. For capacity gating, use
+// countWorkingPolecats which excludes idle sessions.
 func countActivePolecats() int {
 	return countActivePolecatsForRig("")
 }
@@ -909,4 +911,52 @@ func idlePolecatNames() map[string]bool {
 		}
 	}
 	return result
+}
+
+// countWorkingPolecats counts polecat sessions that are actively working.
+// A polecat is "working" if its agent bead has a non-null hook_bead.
+// Idle polecats (completed work, hook_bead=null) don't count toward capacity
+// since they're available for re-sling under the persistent polecat model.
+func countWorkingPolecats() int {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return countActivePolecats() // Fallback to total count
+	}
+
+	listCmd := tmux.BuildCommand("list-sessions", "-F", "#{session_name}")
+	out, err := listCmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	bd := beads.New(townRoot)
+	count := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		identity, err := session.ParseSessionName(line)
+		if err != nil || identity.Role != session.RolePolecat {
+			continue
+		}
+
+		// Check if this polecat has hooked work
+		prefix := identity.Prefix
+		if prefix == "" {
+			prefix = session.PrefixFor(identity.Rig)
+		}
+		agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, identity.Rig, identity.Name)
+		issue, err := bd.Show(agentBeadID)
+		if err != nil || issue == nil {
+			count++ // Can't verify — count conservatively
+			continue
+		}
+
+		fields := beads.ParseAgentFields(issue.Description)
+		if fields.HookBead == "" {
+			continue // Idle — don't count toward cap
+		}
+		count++
+	}
+	return count
 }

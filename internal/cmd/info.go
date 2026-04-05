@@ -75,6 +75,33 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "1.0.0",
+		Date:    "2026-04-02",
+		Changes: []string{
+			"NEW: Windows platform support (signals, process management, tmux)",
+			"NEW: Workflow formula type — gt formula run supports type=workflow",
+			"NEW: Refinery merge_strategy=pr — use gh pr merge for native merge queue",
+			"NEW: /crew-commit skill for canonical crew commit workflow",
+			"NEW: Rate-limit watchdog plugin — auto-estop on API 429",
+			"NEW: gt mail send --from flag for relay/bridge use",
+			"NEW: gt mail mark-read --all",
+			"NEW: gt dolt pull command",
+			"NEW: Prefix collision checking on rig add/adopt",
+			"NEW: Default effort level config (CLAUDE_CODE_EFFORT_LEVEL)",
+			"CHANGED: Refinery enforces require_review=true — blocks merge until PR approved",
+			"CHANGED: Mayor approval required before polecat scope expansion",
+			"CHANGED: Polecat PreToolUse guard blocks sudo and system package installs",
+			"CHANGED: Polecat sessions auto-checkout fresh branch on default branch",
+			"FIX: SQL injection in dolt_remotes remote name query (security)",
+			"FIX: Witness zombie detection — distinguish lookup failure from closed beads",
+			"FIX: Feed timestamps now display in local timezone",
+			"FIX: Crew status shows all rigs",
+			"FIX: Git identity propagated into polecat worktrees",
+			"FIX: Sling context routed to target rig instead of HQ",
+			"FIX: Nested town root detection returns outermost root",
+		},
+	},
+	{
 		Version: "0.12.1",
 		Date:    "2026-03-15",
 		Changes: []string{

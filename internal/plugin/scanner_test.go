@@ -400,10 +400,9 @@ func TestParsePluginMD_GitHubSheriff(t *testing.T) {
 	}
 }
 
-func TestGitHubSheriff_AssigneeFromBranch(t *testing.T) {
-	// Verify github-sheriff plugin assigns CI failure beads to the polecat that
-	// authored the PR (extracted from headRefName), falling back to mayor/.
-	// This is a content test — validates the plugin.md contains the required patterns.
+func TestGitHubSheriff_RepoDetectionAndNoOwnerFilter(t *testing.T) {
+	// Verify the sheriff plugin detects repos from GT_ROOT (not GT_RIG_ROOT which
+	// doesn't exist in the dog env), and has no hardcoded repo owner filter.
 	content, err := os.ReadFile(filepath.Join("..", "..", "plugins", "github-sheriff", "plugin.md"))
 	if err != nil {
 		t.Skipf("github-sheriff plugin not found: %v", err)
@@ -411,29 +410,59 @@ func TestGitHubSheriff_AssigneeFromBranch(t *testing.T) {
 
 	src := string(content)
 
-	// Must fetch headRefName from gh pr list
-	if !strings.Contains(src, "headRefName") {
-		t.Error("plugin must fetch headRefName from gh pr list to extract polecat identity")
+	// Must NOT reference GT_RIG_ROOT (doesn't exist in dog env)
+	if strings.Contains(src, "GT_RIG_ROOT") {
+		t.Error("plugin must not reference GT_RIG_ROOT — dogs don't have it. Use GT_ROOT to find rigs.")
 	}
 
-	// Must extract polecat name from branch pattern polecat/<name>/<bead>
-	if !strings.Contains(src, `polecat/([^/]+)/`) {
-		t.Error("plugin must extract polecat name from branch pattern polecat/<name>/<bead>")
+	// Must use GT_ROOT to scan for rigs
+	if !strings.Contains(src, "GT_ROOT") {
+		t.Error("plugin must use GT_ROOT to find rig git clones for repo detection")
 	}
 
-	// Must pass --assignee to bd create
-	if !strings.Contains(src, `--assignee "$ASSIGNEE"`) {
-		t.Error("plugin must pass --assignee to bd create")
+	// Must NOT have hardcoded repo owner filter (was 'athosmartins')
+	if strings.Contains(src, "athosmartins") {
+		t.Error("plugin must not have hardcoded repo owner filter")
+	}
+}
+
+func TestParsePluginMD_StuckAgentDogUsesCanonicalHeartbeatPath(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "plugins", "stuck-agent-dog", "plugin.md"))
+	if err != nil {
+		t.Skipf("stuck-agent-dog plugin not found (expected in plugins/): %v", err)
 	}
 
-	// Must default to mayor/ when branch is not a polecat branch
-	if !strings.Contains(src, `ASSIGNEE="mayor/"`) {
-		t.Error("plugin must default assignee to mayor/ for non-polecat branches")
+	plugin, err := parsePluginMD(content, "/test/stuck-agent-dog", LocationRig, "gastown")
+	if err != nil {
+		t.Fatalf("parsePluginMD failed: %v", err)
 	}
 
-	// Must NOT assign to 'tester' (the bug we're fixing)
-	if strings.Contains(src, `--assignee "tester"`) || strings.Contains(src, `--assignee=tester`) {
-		t.Error("plugin must not assign to 'tester' — use polecat identity or mayor/ fallback")
+	if plugin.Name != "stuck-agent-dog" {
+		t.Fatalf("expected name 'stuck-agent-dog', got %q", plugin.Name)
+	}
+	if !strings.Contains(plugin.Instructions, "deacon/heartbeat.json") {
+		t.Fatalf("expected canonical heartbeat path in instructions, got:\n%s", plugin.Instructions)
+	}
+	if strings.Contains(plugin.Instructions, ".deacon-heartbeat") {
+		t.Fatalf("did not expect legacy heartbeat path in instructions, got:\n%s", plugin.Instructions)
+	}
+	if !strings.Contains(plugin.Instructions, "Fallback for older/runtime-copied layouts") {
+		t.Fatalf("expected rigs.json fallback guidance in instructions, got:\n%s", plugin.Instructions)
+	}
+	if !strings.Contains(plugin.Instructions, "RIGS_JSON_PATH=\"${TOWN_ROOT}/rigs.json\"") {
+		t.Fatalf("expected town-root rigs.json as canonical source in instructions, got:\n%s", plugin.Instructions)
+	}
+	if !strings.Contains(plugin.Instructions, "$TOWN_ROOT/mayor/rigs.json") {
+		t.Fatalf("expected mayor/ fallback in instructions, got:\n%s", plugin.Instructions)
+	}
+	if !strings.Contains(plugin.Instructions, "Filter out any malformed/blank rows") {
+		t.Fatalf("expected fail-safe blank/malformed rigs row handling in instructions, got:\n%s", plugin.Instructions)
+	}
+	if !strings.Contains(plugin.Instructions, "could not parse rigs.json") {
+		t.Fatalf("expected fail-safe rigs.json parse handling in instructions, got:\n%s", plugin.Instructions)
+	}
+	if !strings.Contains(plugin.Instructions, ">15m threshold") {
+		t.Fatalf("expected canonical deacon very-stale threshold in instructions, got:\n%s", plugin.Instructions)
 	}
 }
 

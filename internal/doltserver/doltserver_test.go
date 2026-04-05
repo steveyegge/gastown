@@ -4164,6 +4164,86 @@ func TestEnsureAllMetadata_FallbackToDbName(t *testing.T) {
 	}
 }
 
+// TestEnsureAllMetadata_NoOscillation verifies that when two databases map to
+// the same rig (e.g. "gastown" and "gt" both map to rig "gastown" via
+// conflicting routes.jsonl/rigs.json entries), EnsureAllMetadata does not
+// oscillate the dolt_database value on repeated calls. (gas-ar0)
+func TestEnsureAllMetadata_NoOscillation(t *testing.T) {
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+
+	// Simulate two databases that both map to "gastown":
+	//   "gastown" — matched by default (db name == rig name)
+	//   "gt"      — matched via rigs.json prefix "gt"
+	setupDoltDB(t, dataDir, "gastown")
+	setupDoltDB(t, dataDir, "gt")
+	setupDoltDB(t, dataDir, "hq")
+
+	// rigs.json: gastown rig uses prefix "gt"
+	mayorDir := filepath.Join(townRoot, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	rigsData := `{"version":1,"rigs":{"gastown":{"beads":{"prefix":"gt"}}}}`
+	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"), []byte(rigsData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create beads dirs
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, "gastown", "mayor", "rig", ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// First call: no existing metadata.json — whichever candidate wins is fine
+	_, errs := EnsureAllMetadata(townRoot)
+	if len(errs) > 0 {
+		t.Fatalf("first EnsureAllMetadata errors: %v", errs)
+	}
+
+	// Read the value that was written
+	metaPath := filepath.Join(townRoot, "gastown", "mayor", "rig", ".beads", "metadata.json")
+	readDB := func() string {
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			t.Fatalf("reading metadata.json: %v", err)
+		}
+		var meta map[string]interface{}
+		if err := json.Unmarshal(data, &meta); err != nil {
+			t.Fatalf("parsing metadata.json: %v", err)
+		}
+		db, _ := meta["dolt_database"].(string)
+		return db
+	}
+
+	firstDB := readDB()
+	if firstDB == "" {
+		t.Fatal("dolt_database should be set after first call")
+	}
+
+	// Second call: must produce the same value (no oscillation)
+	_, errs = EnsureAllMetadata(townRoot)
+	if len(errs) > 0 {
+		t.Fatalf("second EnsureAllMetadata errors: %v", errs)
+	}
+	secondDB := readDB()
+	if secondDB != firstDB {
+		t.Errorf("oscillation: first call wrote %q, second call wrote %q", firstDB, secondDB)
+	}
+
+	// Third call: still no change
+	_, errs = EnsureAllMetadata(townRoot)
+	if len(errs) > 0 {
+		t.Fatalf("third EnsureAllMetadata errors: %v", errs)
+	}
+	thirdDB := readDB()
+	if thirdDB != firstDB {
+		t.Errorf("oscillation: first call wrote %q, third call wrote %q", firstDB, thirdDB)
+	}
+}
+
 func TestCleanStaleSocket_RemovesStaleFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix sockets not applicable on Windows")
@@ -4186,4 +4266,194 @@ func TestCleanStaleSocket_RemovesStaleFile(t *testing.T) {
 func TestCleanStaleSocket_NoopWhenMissing(t *testing.T) {
 	// Should not panic or error when socket doesn't exist
 	cleanStaleSocket(filepath.Join(t.TempDir(), "nonexistent.sock"))
+}
+
+// =============================================================================
+// Thundering herd fix tests (gt-nkn)
+// =============================================================================
+
+func TestCountDoltDatabases(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Non-existent directory returns 1 (safe default).
+	if got := countDoltDatabases(filepath.Join(tmpDir, "noexist")); got != 1 {
+		t.Errorf("non-existent dir: got %d, want 1", got)
+	}
+
+	// Empty directory returns 1 (safe default).
+	empty := filepath.Join(tmpDir, "empty")
+	if err := os.MkdirAll(empty, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if got := countDoltDatabases(empty); got != 1 {
+		t.Errorf("empty dir: got %d, want 1", got)
+	}
+
+	// Directory with Dolt databases (subdirs containing .dolt).
+	dataDir := filepath.Join(tmpDir, "data")
+	for _, name := range []string{"hq", "gastown", "beads"} {
+		if err := os.MkdirAll(filepath.Join(dataDir, name, ".dolt"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A plain directory without .dolt should not be counted.
+	if err := os.MkdirAll(filepath.Join(dataDir, "notadb"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if got := countDoltDatabases(dataDir); got != 3 {
+		t.Errorf("dataDir with 3 dbs + 1 plain dir: got %d, want 3", got)
+	}
+}
+
+// TestRemoveDatabase_RefusesLargeDBWhenServerDown verifies that RemoveDatabase
+// refuses to delete databases with >1MB of data when the server is offline
+// and --force is not set. (gt-xvh)
+func TestRemoveDatabase_RefusesLargeDBWhenServerDown(t *testing.T) {
+	// Skip if a real Dolt server is running on the default port — IsRunning
+	// would detect it and take the SQL-check path instead of the size-check path.
+	if conn, err := net.DialTimeout("tcp", "127.0.0.1:3307", time.Second); err == nil {
+		conn.Close()
+		t.Skip("skipping: real Dolt server running on port 3307 would bypass size check")
+	}
+
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	setupDoltDB(t, dataDir, "big_db")
+
+	// Write >1MB of data to make it look like a real database
+	bigFile := filepath.Join(dataDir, "big_db", ".dolt", "noms", "data")
+	data := make([]byte, 2<<20) // 2MB
+	if err := os.WriteFile(bigFile, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Server is not running (no PID file, no process)
+	err := RemoveDatabase(townRoot, "big_db", false)
+	if err == nil {
+		t.Fatal("expected error when removing large database with server offline")
+	}
+	if !strings.Contains(err.Error(), "server offline") {
+		t.Errorf("expected 'server offline' in error, got: %v", err)
+	}
+
+	// Verify the database still exists
+	if _, statErr := os.Stat(filepath.Join(dataDir, "big_db")); statErr != nil {
+		t.Error("big_db should still exist after refused removal")
+	}
+}
+
+// TestRemoveDatabase_AllowsSmallDBWhenServerDown verifies that small databases
+// (<1MB) can be removed even when the server is offline. (gt-xvh)
+func TestRemoveDatabase_AllowsSmallDBWhenServerDown(t *testing.T) {
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	setupDoltDB(t, dataDir, "small_orphan")
+
+	// Small database (<1MB) — manifest file is only a few bytes from setupDoltDB
+	err := RemoveDatabase(townRoot, "small_orphan", true)
+	if err != nil {
+		t.Fatalf("RemoveDatabase with force: %v", err)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dataDir, "small_orphan")); !os.IsNotExist(statErr) {
+		t.Error("small_orphan should be removed")
+	}
+}
+
+// TestQuarantine_MovesInsteadOfDeleting verifies that the quarantine logic
+// moves corrupted database dirs to .quarantine/ instead of deleting them. (gt-xvh)
+func TestQuarantine_MovesInsteadOfDeleting(t *testing.T) {
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+
+	// Create a "corrupted" database: has .dolt/ but no noms/manifest
+	corruptDB := filepath.Join(dataDir, "corrupt_db", ".dolt")
+	if err := os.MkdirAll(corruptDB, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Write some data so it's not empty
+	if err := os.WriteFile(filepath.Join(corruptDB, "somefile"), []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the quarantine scan (same logic as Start)
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		doltDir := filepath.Join(dataDir, entry.Name(), ".dolt")
+		if _, statErr := os.Stat(doltDir); statErr != nil {
+			continue
+		}
+		manifest := filepath.Join(doltDir, "noms", "manifest")
+		if _, statErr := os.Stat(manifest); statErr == nil {
+			continue
+		}
+		// This is corrupted — verify quarantine moves it
+		quarantineDir := filepath.Join(dataDir, ".quarantine")
+		if mkErr := os.MkdirAll(quarantineDir, 0755); mkErr != nil {
+			t.Fatal(mkErr)
+		}
+		dest := filepath.Join(quarantineDir, entry.Name()+".test")
+		if renameErr := os.Rename(filepath.Join(dataDir, entry.Name()), dest); renameErr != nil {
+			t.Fatalf("quarantine move failed: %v", renameErr)
+		}
+	}
+
+	// Original should be gone
+	if _, err := os.Stat(filepath.Join(dataDir, "corrupt_db")); !os.IsNotExist(err) {
+		t.Error("corrupt_db should have been moved to quarantine")
+	}
+
+	// Quarantine should have it
+	quarantineEntries, err := os.ReadDir(filepath.Join(dataDir, ".quarantine"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(quarantineEntries) != 1 {
+		t.Errorf("expected 1 quarantined entry, got %d", len(quarantineEntries))
+	}
+}
+
+func TestGetLastCommitAge_NoServer(t *testing.T) {
+	// With no server running, GetLastCommitAge should return an error,
+	// not panic or hang.
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, ".dolt-data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := GetLastCommitAge(townRoot)
+	if err == nil {
+		// May succeed if a local Dolt is running; either outcome is valid.
+		return
+	}
+	t.Logf("GetLastCommitAge with no server: %v (expected)", err)
+}
+
+func TestGetLastCommitAge_NoDatabases(t *testing.T) {
+	townRoot := t.TempDir()
+
+	_, _, err := GetLastCommitAge(townRoot)
+	if err == nil {
+		t.Error("expected error with no databases, got nil")
+	}
+}
+
+func TestHealthMetrics_CommitFreshnessFields(t *testing.T) {
+	// Verify the new fields exist and are zero-valued when probe fails.
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, ".dolt-data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	metrics := GetHealthMetrics(townRoot)
+	if metrics.LastCommitAge < 0 {
+		t.Errorf("LastCommitAge = %v, want >= 0", metrics.LastCommitAge)
+	}
 }

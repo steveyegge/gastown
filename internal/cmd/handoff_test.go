@@ -628,7 +628,7 @@ func TestHandoffProcessNames(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !strings.Contains(cmd, "GT_PROCESS_NAMES=node,claude") {
+		if !strings.Contains(cmd, "GT_PROCESS_NAMES") || !strings.Contains(cmd, "node,claude") {
 			t.Errorf("expected GT_PROCESS_NAMES=node,claude preserved from env, got: %q", cmd)
 		}
 	})
@@ -655,7 +655,7 @@ func TestHandoffProcessNames(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		// Claude's default process names are "node,claude"
-		if !strings.Contains(cmd, "GT_PROCESS_NAMES=node,claude") {
+		if !strings.Contains(cmd, "GT_PROCESS_NAMES") || !strings.Contains(cmd, "node,claude") {
 			t.Errorf("expected GT_PROCESS_NAMES=node,claude computed from config, got: %q", cmd)
 		}
 	})

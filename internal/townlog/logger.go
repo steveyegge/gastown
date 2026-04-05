@@ -27,6 +27,9 @@ const (
 	EventCrash EventType = "crash"
 	// EventKill indicates an agent was killed intentionally.
 	EventKill EventType = "kill"
+	// EventHandoffNoPersist indicates a handoff failed to persist to Dolt.
+	// Distinct from EventHandoff so crash recovery can identify false handoffs.
+	EventHandoffNoPersist EventType = "handoff-NOPERSIST"
 	// EventCallback indicates a callback was processed during patrol.
 	EventCallback EventType = "callback"
 
@@ -135,6 +138,11 @@ func formatLogLine(e Event) string {
 		}
 	case EventHandoff:
 		detail = "handed off"
+		if e.Context != "" {
+			detail += fmt.Sprintf(" (%s)", e.Context)
+		}
+	case EventHandoffNoPersist:
+		detail = "handoff FAILED (Dolt persistence)"
 		if e.Context != "" {
 			detail += fmt.Sprintf(" (%s)", e.Context)
 		}

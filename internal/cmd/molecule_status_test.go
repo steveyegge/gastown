@@ -32,9 +32,7 @@ func TestOutputMoleculeStatus_StandaloneFormulaShowsVars(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	if err := outputMoleculeStatus(status); err != nil {
-		t.Fatalf("outputMoleculeStatus: %v", err)
-	}
+	outputMoleculeStatus(status)
 
 	w.Close()
 	var buf bytes.Buffer
@@ -69,9 +67,7 @@ func TestOutputMoleculeStatus_FormulaWispShowsWorkflowContext(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	if err := outputMoleculeStatus(status); err != nil {
-		t.Fatalf("outputMoleculeStatus: %v", err)
-	}
+	outputMoleculeStatus(status)
 
 	w.Close()
 	var buf bytes.Buffer

@@ -59,7 +59,12 @@ Gather all polecats and the deacon session. We check both crashed sessions
 echo "=== Stuck Agent Dog: Checking agent health ==="
 
 TOWN_ROOT="$HOME/gt"
-RIGS_JSON_PATH="${TOWN_ROOT}/mayor/rigs.json"
+RIGS_JSON_PATH="${TOWN_ROOT}/rigs.json"
+
+# Fallback for older/runtime-copied layouts that still expose rigs.json under mayor/.
+if [ ! -f "$RIGS_JSON_PATH" ] && [ -f "$TOWN_ROOT/mayor/rigs.json" ]; then
+  RIGS_JSON_PATH="$TOWN_ROOT/mayor/rigs.json"
+fi
 
 # Read rigs.json for rig names and beads prefixes
 # CRITICAL: We need both the rig name (for filesystem paths like $TOWN_ROOT/$RIG/polecats/)
@@ -70,15 +75,19 @@ if [ ! -f "$RIGS_JSON_PATH" ]; then
   exit 0
 fi
 
-RIGS_FILE=$(cat "$RIGS_JSON_PATH" 2>/dev/null)
-if [ -z "$RIGS_FILE" ]; then
-  echo "SKIP: could not read rigs.json"
+if ! RIG_PREFIX_MAP=$(jq -r '
+  if (.rigs | type) == "object" then
+    .rigs | to_entries[] | "\(.key)|\(.value.beads.prefix // .key)"
+  else
+    empty
+  end
+' "$RIGS_JSON_PATH" 2>/dev/null); then
+  echo "SKIP: could not parse rigs.json"
   exit 0
 fi
 
-# Build a mapping of rig_name -> beads_prefix for session name construction
-# Each line: rig_name|beads_prefix
-RIG_PREFIX_MAP=$(echo "$RIGS_FILE" | jq -r '.rigs | to_entries[] | "\(.key)|\(.value.beads.prefix // .key)"' 2>/dev/null)
+# Filter out any malformed/blank rows so partial registry state fails safe.
+RIG_PREFIX_MAP=$(printf '%s\n' "$RIG_PREFIX_MAP" | awk -F'|' 'NF >= 2 && $1 != "" && $2 != ""')
 if [ -z "$RIG_PREFIX_MAP" ]; then
   echo "SKIP: no rigs found in rigs.json"
   exit 0
@@ -178,20 +187,24 @@ if ! tmux has-session -t "$DEACON_SESSION" 2>/dev/null; then
   DEACON_ISSUE="crashed"
 else
   # Check deacon heartbeat file
-  HEARTBEAT_FILE="$TOWN_ROOT/deacon/.deacon-heartbeat"
+  HEARTBEAT_FILE="$TOWN_ROOT/deacon/heartbeat.json"
   if [ -f "$HEARTBEAT_FILE" ]; then
-    HEARTBEAT_TIME=$(stat -f %m "$HEARTBEAT_FILE" 2>/dev/null || stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null)
-    NOW=$(date +%s)
-    HEARTBEAT_AGE=$(( NOW - HEARTBEAT_TIME ))
+    HEARTBEAT_TIME=$(jq -r '(.timestamp // empty) | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601? // empty' "$HEARTBEAT_FILE" 2>/dev/null)
+    if [ -n "$HEARTBEAT_TIME" ]; then
+      NOW=$(date +%s)
+      HEARTBEAT_AGE=$(( NOW - HEARTBEAT_TIME ))
 
-    if [ "$HEARTBEAT_AGE" -gt 600 ]; then
-      echo "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, >10m threshold)"
-      DEACON_ISSUE="stuck_heartbeat_${HEARTBEAT_AGE}s"
+      if [ "$HEARTBEAT_AGE" -gt 900 ]; then
+        echo "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, >15m threshold)"
+        DEACON_ISSUE="stuck_heartbeat_${HEARTBEAT_AGE}s"
+      else
+        echo "  OK: Deacon heartbeat ${HEARTBEAT_AGE}s old"
+      fi
     else
-      echo "  OK: Deacon heartbeat ${HEARTBEAT_AGE}s old"
+      echo "  WARN: Could not parse heartbeat timestamp from $HEARTBEAT_FILE"
     fi
   else
-    echo "  WARN: No heartbeat file found"
+    echo "  WARN: No heartbeat file found at $HEARTBEAT_FILE"
   fi
 fi
 ```

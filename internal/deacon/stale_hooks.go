@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // StaleHookConfig holds configurable parameters for stale hook detection.
@@ -157,6 +158,7 @@ func ScanStaleHooks(townRoot string, cfg *StaleHookConfig) (*StaleHookScanResult
 func listHookedBeads(townRoot string) ([]*HookedBead, error) {
 	cmd := exec.Command("bd", "list", "--status=hooked", "--json", "--flat", "--limit=0")
 	cmd.Dir = townRoot
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -252,5 +254,6 @@ func assigneeToWorktreePath(townRoot, assignee string) string {
 func unhookBead(townRoot, beadID string) error {
 	cmd := exec.Command("bd", "update", beadID, "--status=open")
 	cmd.Dir = townRoot
+	util.SetDetachedProcessGroup(cmd)
 	return cmd.Run()
 }

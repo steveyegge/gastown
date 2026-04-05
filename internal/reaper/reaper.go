@@ -190,9 +190,9 @@ func parentExcludeJoin(dbName string) (joinClause, whereCondition string) {
 	joinClause = `LEFT JOIN (
 		SELECT DISTINCT wd.issue_id
 		FROM wisp_dependencies wd
-		INNER JOIN wisps parent ON parent.id = wd.depends_on_id
+		LEFT JOIN wisps pw ON pw.id = wd.depends_on_id LEFT JOIN issues pi ON pi.id = wd.depends_on_id
 		WHERE wd.type = 'parent-child'
-		AND parent.status IN ('open', 'hooked', 'in_progress')
+		AND (pw.status IN ('open', 'hooked', 'in_progress') OR pi.status IN ('open', 'in_progress'))
 	) open_parent ON open_parent.issue_id = w.id`
 	whereCondition = "open_parent.issue_id IS NULL"
 	return
@@ -287,8 +287,8 @@ func Scan(db *sql.DB, dbName string, maxAge, purgeAge, mailDeleteAge, staleIssue
 	// Anomaly detection: dangling parent references.
 	danglingQuery := `
 		SELECT COUNT(*) FROM wisp_dependencies wd
-		LEFT JOIN wisps parent ON parent.id = wd.depends_on_id
-		WHERE wd.type = 'parent-child' AND parent.id IS NULL`
+		LEFT JOIN wisps pw ON pw.id = wd.depends_on_id LEFT JOIN issues pi ON pi.id = wd.depends_on_id
+		WHERE wd.type = 'parent-child' AND pw.id IS NULL AND pi.id IS NULL`
 	var danglingCount int
 	if err := db.QueryRowContext(ctx, danglingQuery).Scan(&danglingCount); err == nil && danglingCount > 0 {
 		result.Anomalies = append(result.Anomalies, Anomaly{
@@ -820,6 +820,94 @@ func ClosePluginReceipts(db *sql.DB, dbName string, maxAge time.Duration, dryRun
 			result.Anomalies = append(result.Anomalies, Anomaly{
 				Type:    "dolt_commit_failed",
 				Message: fmt.Sprintf("dolt commit after plugin receipt close failed: %v", err),
+			})
+		}
+	}
+
+	return result, nil
+}
+
+// ClosePluginDispatches closes open dispatch mail beads created by the daemon
+// when sending plugin instructions to dogs. These beads are labeled "gt:message"
+// + "from:daemon" with a title prefix "Plugin:" and are never closed after the
+// dog completes. Without this, they accumulate at ~288/day (one per 5-minute
+// stuck-agent-dog run) and are only caught by AutoClose after 7 days.
+func ClosePluginDispatches(db *sql.DB, dbName string, maxAge time.Duration, dryRun bool) (*ClosePluginReceiptResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultQueryTimeout)
+	defer cancel()
+
+	cutoff := time.Now().UTC().Add(-maxAge)
+	result := &ClosePluginReceiptResult{Database: dbName, DryRun: dryRun}
+
+	// Find open issues with both "gt:message" and "from:daemon" labels whose
+	// title starts with "Plugin:", older than maxAge.
+	selectQuery := fmt.Sprintf(`
+		SELECT i.id FROM `+"`%s`"+`.issues i
+		INNER JOIN `+"`%s`"+`.labels l1 ON i.id = l1.issue_id
+		INNER JOIN `+"`%s`"+`.labels l2 ON i.id = l2.issue_id
+		WHERE i.status IN ('open', 'in_progress')
+		AND l1.label = 'gt:message'
+		AND l2.label = 'from:daemon'
+		AND i.title LIKE 'Plugin:%%'
+		AND i.created_at < ?`, dbName, dbName, dbName)
+
+	rows, err := db.QueryContext(ctx, selectQuery, cutoff)
+	if err != nil {
+		if isTableNotFound(err) {
+			return result, nil
+		}
+		return nil, fmt.Errorf("select plugin dispatches: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan plugin dispatch id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+
+	result.Closed = len(ids)
+	if len(ids) == 0 || dryRun {
+		return result, nil
+	}
+
+	if _, err := db.ExecContext(ctx, "SET @@autocommit = 0"); err != nil {
+		return nil, fmt.Errorf("disable autocommit: %w", err)
+	}
+	defer func() {
+		_, _ = db.ExecContext(context.Background(), "SET @@autocommit = 1")
+	}()
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	updateQuery := fmt.Sprintf(
+		"UPDATE `%s`.issues SET status = 'closed', closed_at = NOW() WHERE id IN (%s)",
+		dbName, strings.Join(placeholders, ","))
+	if _, err := db.ExecContext(ctx, updateQuery, args...); err != nil {
+		return nil, fmt.Errorf("close plugin dispatches: %w", err)
+	}
+
+	// Flush and commit.
+	if _, err := db.ExecContext(ctx, "COMMIT"); err != nil {
+		result.Anomalies = append(result.Anomalies, Anomaly{
+			Type:    "sql_commit_failed",
+			Message: fmt.Sprintf("sql commit after plugin dispatch close failed: %v", err),
+		})
+		return result, nil
+	}
+	commitMsg := fmt.Sprintf("reaper: close %d plugin dispatches in %s", len(ids), dbName)
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", commitMsg)); err != nil { //nolint:gosec // G201: commitMsg from safe values
+		if !isNothingToCommit(err) {
+			result.Anomalies = append(result.Anomalies, Anomaly{
+				Type:    "dolt_commit_failed",
+				Message: fmt.Sprintf("dolt commit after plugin dispatch close failed: %v", err),
 			})
 		}
 	}

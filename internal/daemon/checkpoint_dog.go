@@ -10,6 +10,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 const (
@@ -54,7 +55,7 @@ var runtimeExcludeDirs = []string{
 // compactor_dog's SQL operations). The daemon pours a molecule for
 // observability, then runs git commands via exec.Command.
 func (d *Daemon) runCheckpointDog() {
-	if !IsPatrolEnabled(d.patrolConfig, "checkpoint_dog") {
+	if !d.isPatrolActive("checkpoint_dog") {
 		return
 	}
 
@@ -163,6 +164,7 @@ func (d *Daemon) checkpointWorktree(workDir, rigName, polecatName string) bool {
 func runGitCmd(workDir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = workDir
+	util.SetDetachedProcessGroup(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

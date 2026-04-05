@@ -16,6 +16,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // convoyIDPattern validates convoy IDs.
@@ -93,6 +94,7 @@ func loadConvoys(townBeads string) ([]ConvoyItem, error) {
 	// Get list of open convoys
 	listArgs := []string{"list", "--type=convoy", "--json"}
 	listCmd := exec.CommandContext(ctx, "bd", listArgs...)
+	util.SetDetachedProcessGroup(listCmd)
 	listCmd.Dir = townBeads
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout
@@ -139,6 +141,7 @@ func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 
 	// Query tracked issues using bd dep list (returns full issue details)
 	cmd := exec.CommandContext(ctx, "bd", "dep", "list", convoyID, "-t", "tracks", "--json")
+	util.SetDetachedProcessGroup(cmd)
 	cmd.Dir = townBeads
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -210,6 +213,7 @@ func refreshIssueStatus(ctx context.Context, tracked []struct {
 	args = append(args, "--json")
 
 	cmd := exec.CommandContext(ctx, "bd", args...)
+	util.SetDetachedProcessGroup(cmd)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 

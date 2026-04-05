@@ -506,46 +506,45 @@ func TestIsRuntimeRunning(t *testing.T) {
 
 func TestIsRuntimeRunning_ShellWithNodeChild(t *testing.T) {
 	tm := newTestTmux(t)
-	sessionName := "gt-test-shell-child-" + t.Name()
 
-	// Clean up any existing session
-	_ = tm.KillSession(sessionName)
+	// Direct path: tmux runs the process as the pane command directly.
+	// This simulates a bundled agent binary (e.g. the standalone claude binary)
+	// where the pane command IS the agent process.
+	t.Run("direct", func(t *testing.T) {
+		sessionName := "gt-test-runtime-direct"
+		_ = tm.KillSession(sessionName)
 
-	// Create session with "bash -c" running a node process
-	// Use a simple node command that runs for a few seconds
-	cmd := `node -e "setTimeout(() => {}, 10000)"`
-	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
-		t.Fatalf("NewSessionWithCommand: %v", err)
-	}
-	defer func() { _ = tm.KillSession(sessionName) }()
-
-	// Give the node process time to start
-	// WaitForCommand waits until NOT running bash/zsh/sh
-	shellsToExclude := []string{"bash", "zsh", "sh"}
-	err := tm.WaitForCommand(sessionName, shellsToExclude, 2000*1000000) // 2 second timeout
-	if err != nil {
-		// If we timeout waiting, it means the pane command is still a shell
-		// This is the case we're testing - shell with a node child
-		paneCmd, _ := tm.GetPaneCommand(sessionName)
-		t.Logf("Pane command is %q - testing shell+child detection", paneCmd)
-	}
-
-	// Now test IsRuntimeRunning - it should detect node as a child process
-	processNames := []string{"node", "claude"}
-	paneCmd, _ := tm.GetPaneCommand(sessionName)
-	if paneCmd == "node" {
-		// Direct node detection should work
-		if !tm.IsRuntimeRunning(sessionName, processNames) {
-			t.Error("IsRuntimeRunning should return true when pane command is 'node'")
+		if err := tm.NewSessionWithCommand(sessionName, "", "sleep 10"); err != nil {
+			t.Fatalf("NewSessionWithCommand: %v", err)
 		}
-	} else {
-		// Pane is a shell (bash/zsh) with node as child
-		// The child process detection should catch this
-		got := tm.IsRuntimeRunning(sessionName, processNames)
-		t.Logf("Pane command: %q, IsRuntimeRunning: %v", paneCmd, got)
-		// Note: This may or may not detect depending on how tmux runs the command.
-		// On some systems, tmux runs the command directly; on others via a shell.
-	}
+		defer func() { _ = tm.KillSession(sessionName) }()
+
+		if !tm.IsRuntimeRunning(sessionName, []string{"sleep"}) {
+			paneCmd, _ := tm.GetPaneCommand(sessionName)
+			t.Errorf("IsRuntimeRunning should return true for direct process (pane cmd: %q)", paneCmd)
+		}
+	})
+
+	// Shell+child path: tmux runs a shell which spawns the agent as a child.
+	// This simulates an npm-installed agent (e.g. claude via node) where the
+	// pane command is sh/bash and the agent is a descendant process.
+	t.Run("shell_with_child", func(t *testing.T) {
+		sessionName := "gt-test-runtime-shell-child"
+		_ = tm.KillSession(sessionName)
+
+		if err := tm.NewSessionWithCommand(sessionName, "", "sh -c 'sleep 10'"); err != nil {
+			t.Fatalf("NewSessionWithCommand: %v", err)
+		}
+		defer func() { _ = tm.KillSession(sessionName) }()
+
+		// Give the child process a moment to start
+		time.Sleep(100 * time.Millisecond)
+
+		if !tm.IsRuntimeRunning(sessionName, []string{"sleep"}) {
+			paneCmd, _ := tm.GetPaneCommand(sessionName)
+			t.Errorf("IsRuntimeRunning should return true for child process (pane cmd: %q)", paneCmd)
+		}
+	})
 }
 
 // TestGetPaneCommand_MultiPane verifies that GetPaneCommand returns pane 0's
@@ -1309,14 +1308,13 @@ func TestFindAgentPane_MultiPaneWithNode(t *testing.T) {
 	}
 	defer func() { _ = tm.KillSession(sessionName) }()
 
-	// Split and run node in the new pane (simulating an agent)
-	_, err := tm.run("split-window", "-t", sessionName, "-d",
-		"node", "-e", "setTimeout(() => {}, 30000)")
+	// Split and run sleep in the new pane (simulating an agent process)
+	_, err := tm.run("split-window", "-t", sessionName, "-d", "sleep", "10")
 	if err != nil {
 		t.Fatalf("split-window: %v", err)
 	}
 
-	// Give node a moment to start
+	// Give sleep a moment to start
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify we have 2 panes
@@ -1330,28 +1328,28 @@ func TestFindAgentPane_MultiPaneWithNode(t *testing.T) {
 		t.Skipf("Expected 2 panes, got %d — skipping multi-pane test", len(lines))
 	}
 
-	// FindAgentPane should find the node pane
+	// FindAgentPane should find the sleep pane
 	paneID, err := tm.FindAgentPane(sessionName)
 	if err != nil {
 		t.Fatalf("FindAgentPane: %v", err)
 	}
 
-	// Verify it found the correct pane (the one running node)
+	// Verify it found the correct pane (the one running sleep)
 	if paneID == "" {
-		t.Log("FindAgentPane returned empty — node may not have started yet or detection missed it")
-		// Not a hard failure since node startup timing varies
+		t.Log("FindAgentPane returned empty — sleep may not have started yet or detection missed it")
+		// Not a hard failure since process startup timing varies
 		return
 	}
 
-	// Verify the returned pane is actually running node
+	// Verify the returned pane is actually running sleep
 	cmdOut, err := tm.run("display-message", "-t", paneID, "-p", "#{pane_current_command}")
 	if err != nil {
 		t.Fatalf("display-message: %v", err)
 	}
 	paneCmd := strings.TrimSpace(cmdOut)
 	t.Logf("Agent pane %s running: %s", paneID, paneCmd)
-	if paneCmd != "node" {
-		t.Errorf("FindAgentPane returned pane running %q, want 'node'", paneCmd)
+	if paneCmd != "sleep" {
+		t.Errorf("FindAgentPane returned pane running %q, want 'sleep'", paneCmd)
 	}
 }
 

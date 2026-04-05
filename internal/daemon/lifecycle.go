@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // BeadsMessage represents a message from gt mail inbox --json.
@@ -43,6 +43,7 @@ func (d *Daemon) ProcessLifecycleRequests() {
 	cmd := exec.Command(d.gtPath, "mail", "inbox", "--identity", "deacon/", "--json")
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find gt executable
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -559,13 +560,22 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 // setSessionEnvironment sets environment variables for the tmux session.
 // Uses centralized AgentEnv for consistency, plus custom env vars from role config if available.
 func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.RoleConfig, parsed *ParsedIdentity) {
+	// Resolve CLAUDE_CONFIG_DIR from accounts.json so daemon-restarted sessions
+	// use the correct account. Mirrors the crew startup path (start.go).
+	accountsPath := constants.MayorAccountsPath(d.config.TownRoot)
+	runtimeConfigDir, _, _ := config.ResolveAccountConfigDir(accountsPath, "")
+	if runtimeConfigDir == "" {
+		runtimeConfigDir = os.Getenv("CLAUDE_CONFIG_DIR")
+	}
+
 	// Use centralized AgentEnv for base environment variables
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:        parsed.RoleType,
-		Rig:         parsed.RigName,
-		AgentName:   parsed.AgentName,
-		TownRoot:    d.config.TownRoot,
-		SessionName: sessionName,
+		Role:             parsed.RoleType,
+		Rig:              parsed.RigName,
+		AgentName:        parsed.AgentName,
+		TownRoot:         d.config.TownRoot,
+		RuntimeConfigDir: runtimeConfigDir,
+		SessionName:      sessionName,
 	})
 	for k, v := range envVars {
 		_ = d.tmux.SetEnvironment(sessionName, k, v)
@@ -581,8 +591,7 @@ func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.Rol
 	// canonical qualified values (e.g., GT_ROLE). See: https://github.com/steveyegge/gastown/issues/2492
 	if roleConfig != nil {
 		for k, v := range roleConfig.EnvVars {
-			if existing, alreadySet := envVars[k]; alreadySet {
-				log.Printf("daemon env: skipping TOML %s=%q (AgentEnv already set %q)", k, v, existing)
+			if _, alreadySet := envVars[k]; alreadySet {
 				continue
 			}
 			expanded := beads.ExpandRolePattern(v, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType, session.PrefixFor(parsed.RigName))
@@ -635,6 +644,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 	fetchCmd.Dir = workDir
 	fetchCmd.Stderr = &stderr
 	fetchCmd.Env = os.Environ() // Inherit PATH to find git executable
+	util.SetDetachedProcessGroup(fetchCmd)
 	if err := fetchCmd.Run(); err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
 		if errMsg == "" {
@@ -657,6 +667,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 		stashCmd.Dir = workDir
 		stashCmd.Stderr = &stderr
 		stashCmd.Env = os.Environ()
+		util.SetDetachedProcessGroup(stashCmd)
 		if err := stashCmd.Run(); err != nil {
 			errMsg := strings.TrimSpace(stderr.String())
 			if errMsg == "" {
@@ -675,6 +686,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 	pullCmd.Dir = workDir
 	pullCmd.Stderr = &stderr
 	pullCmd.Env = os.Environ() // Inherit PATH to find git executable
+	util.SetDetachedProcessGroup(pullCmd)
 	if err := pullCmd.Run(); err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
 		if errMsg == "" {
@@ -700,6 +712,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 		popCmd.Dir = workDir
 		popCmd.Stderr = &stderr
 		popCmd.Env = os.Environ()
+		util.SetDetachedProcessGroup(popCmd)
 		if err := popCmd.Run(); err != nil {
 			errMsg := strings.TrimSpace(stderr.String())
 			if errMsg == "" {
@@ -718,6 +731,7 @@ func (d *Daemon) isWorkingTreeDirty(workDir string) bool {
 	cmd := exec.Command("git", "status", "--porcelain")
 	cmd.Dir = workDir
 	cmd.Env = os.Environ()
+	util.SetDetachedProcessGroup(cmd)
 	output, err := cmd.Output()
 	if err != nil {
 		// If we can't check, assume dirty to be safe
@@ -758,6 +772,7 @@ func (d *Daemon) closeMessage(id string) error {
 	cmd := exec.Command(d.gtPath, "mail", "delete", id)
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find gt executable
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -771,7 +786,7 @@ func (d *Daemon) closeMessage(id string) error {
 type AgentBeadInfo struct {
 	ID         string `json:"id"`
 	Type       string `json:"issue_type"`
-	State      string // From DB column (agent_state), fallback to description
+	State      string // From description agent_state, fallback to legacy DB column
 	HookBead   string // From DB column (hook_bead)
 	RoleType   string // Parsed from description: role_type
 	Rig        string // Parsed from description: rig
@@ -796,6 +811,7 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 	cmd := exec.Command(d.bdPath, "show", agentBeadID, "--json")
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find bd executable
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -840,15 +856,7 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 		info.Rig = fields.Rig
 	}
 
-	// Use AgentState from database column directly (not from description).
-	// UpdateAgentState updates the DB column but not the description text,
-	// so the description can contain stale state (e.g., "spawning" after
-	// the polecat has transitioned to "working"). Fall back to description
-	// only if the DB column is empty (legacy beads).
-	info.State = issue.AgentState
-	if info.State == "" && fields != nil {
-		info.State = fields.AgentState
-	}
+	info.State = beads.ResolveAgentState(issue.Description, issue.AgentState)
 
 	// Use HookBead from database column directly (not from description)
 	// The description may contain stale data - the slot is the source of truth.
@@ -864,6 +872,7 @@ func (d *Daemon) getAgentHookBead(agentBeadID string) string {
 	cmd := exec.Command(d.bdPath, "show", agentBeadID, "--json")
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ()
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -955,6 +964,7 @@ func (d *Daemon) listAgentBeadsJSON(dest interface{}) error {
 	cmd := exec.Command(d.bdPath, "list", "--label=gt:agent", "--json", "--flat") //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ()
+	util.SetDetachedProcessGroup(cmd)
 
 	issuesOutput, issuesErr := cmd.Output()
 
@@ -962,6 +972,7 @@ func (d *Daemon) listAgentBeadsJSON(dest interface{}) error {
 	wispCmd := exec.Command(d.bdPath, "mol", "wisp", "list", "--json") //nolint:gosec // G204: bd is a trusted internal tool
 	wispCmd.Dir = d.config.TownRoot
 	wispCmd.Env = os.Environ()
+	util.SetDetachedProcessGroup(wispCmd)
 
 	wispOutput, _ := wispCmd.Output() // Best-effort: wisps table may not exist
 
@@ -1086,9 +1097,11 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 			continue // No hooked work - no GUPP violation possible
 		}
 
+		agentState := beads.ResolveAgentState(agent.Description, agent.AgentState)
+
 		// Skip nuked agents — they're intentionally terminated and should not
 		// trigger alerts even if stale hook_bead data remains in the database.
-		if beads.AgentState(agent.AgentState) == beads.AgentStateNuked {
+		if beads.AgentState(agentState) == beads.AgentStateNuked {
 			continue
 		}
 
@@ -1132,6 +1145,7 @@ Action needed: Check if agent is alive and responsive. Consider restarting if st
 	cmd := exec.Command(d.gtPath, "mail", "send", witnessAddr, "-s", subject, "-m", body)
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find gt executable
+	util.SetDetachedProcessGroup(cmd)
 
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of GUPP violation: %v", err)
@@ -1168,11 +1182,12 @@ func (d *Daemon) checkOrphanedWork() {
 func (d *Daemon) checkRigOrphanedWork(rigName string) {
 	// List polecat agent beads (issues + wisps tables)
 	var agents []struct {
-		ID         string   `json:"id"`
-		HookBead   string   `json:"hook_bead"`
-		AgentState string   `json:"agent_state"`
-		Labels     []string `json:"labels"`
-		Type       string   `json:"issue_type"`
+		ID          string   `json:"id"`
+		HookBead    string   `json:"hook_bead"`
+		AgentState  string   `json:"agent_state"`
+		Description string   `json:"description"`
+		Labels      []string `json:"labels"`
+		Type        string   `json:"issue_type"`
 	}
 
 	if err := d.listAgentBeadsJSON(&agents); err != nil {
@@ -1195,9 +1210,11 @@ func (d *Daemon) checkRigOrphanedWork(rigName string) {
 			continue
 		}
 
+		agentState := beads.ResolveAgentState(agent.Description, agent.AgentState)
+
 		// Skip nuked agents — they're intentionally terminated and should not
 		// trigger alerts even if stale hook_bead data remains in the database.
-		if beads.AgentState(agent.AgentState) == beads.AgentStateNuked {
+		if beads.AgentState(agentState) == beads.AgentStateNuked {
 			continue
 		}
 
@@ -1255,6 +1272,7 @@ Action needed: Either restart the agent or reassign the work.`,
 	cmd := exec.Command(d.gtPath, "mail", "send", witnessAddr, "-s", subject, "-m", body)
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ() // Inherit PATH to find gt executable
+	util.SetDetachedProcessGroup(cmd)
 
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of orphaned work: %v", err)

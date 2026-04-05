@@ -204,18 +204,31 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get source issue for priority inheritance
+	// Get source issue for priority inheritance and dependency check
 	var priority int
+	var sourceIssue *beads.Issue
 	if mqSubmitPriority >= 0 {
 		priority = mqSubmitPriority
-	} else {
-		// Try to inherit from source issue
-		sourceIssue, err := bd.Show(issueID)
-		if err != nil {
-			// Issue not found, use default priority
+	}
+	// Always try to fetch source issue (needed for both priority and dep check)
+	sourceIssue, err = bd.Show(issueID)
+	if err != nil {
+		if mqSubmitPriority < 0 {
 			priority = 2
-		} else {
+		}
+	} else {
+		if mqSubmitPriority < 0 {
 			priority = sourceIssue.Priority
+		}
+	}
+
+	// Enforce molecule step dependencies before allowing submit.
+	// If the source issue has an attached molecule, verify that prerequisite
+	// steps are complete. This prevents polecats from skipping steps like
+	// self-review, build-check, or state-update.
+	if !mqSubmitSkipDeps && !mqSubmitResubmit && sourceIssue != nil {
+		if err := checkMoleculeStepDeps(bd, sourceIssue); err != nil {
+			return err
 		}
 	}
 
@@ -335,6 +348,89 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// checkMoleculeStepDeps verifies that all prerequisite molecule steps are closed
+// before allowing submission to the merge queue. Returns an error listing
+// incomplete steps if any prerequisites are not yet done.
+func checkMoleculeStepDeps(bd *beads.Beads, sourceIssue *beads.Issue) error {
+	// Check if issue has an attached molecule
+	fields := beads.ParseAttachmentFields(sourceIssue)
+	if fields == nil || fields.AttachedMolecule == "" {
+		return nil // No molecule attached — no enforcement needed
+	}
+
+	moleculeID := fields.AttachedMolecule
+
+	// List all molecule steps (children of the molecule)
+	children, err := bd.List(beads.ListOptions{
+		Parent:   moleculeID,
+		Status:   "all",
+		Priority: -1,
+	})
+	if err != nil {
+		// If we can't list steps, warn but don't block submission
+		style.PrintWarning("could not check molecule steps for %s: %v", moleculeID, err)
+		return nil
+	}
+
+	return validateMoleculePrereqs(children)
+}
+
+// validateMoleculePrereqs checks that all molecule steps that are prerequisites
+// of the submit step are closed. Returns an error listing incomplete steps.
+// Extracted for testability — accepts step data directly.
+func validateMoleculePrereqs(children []*beads.Issue) error {
+	if len(children) == 0 {
+		return nil // No steps to check
+	}
+
+	// Find the submit step — it's the step whose title contains "submit"
+	// (case-insensitive). All steps that come before it in the dependency
+	// chain must be closed.
+	submitSeq := 999999
+	for _, child := range children {
+		titleLower := strings.ToLower(child.Title)
+		if strings.Contains(titleLower, "submit") {
+			seq := extractStepSequence(child.ID)
+			if seq < submitSeq {
+				submitSeq = seq
+			}
+			break
+		}
+	}
+
+	// Collect incomplete prerequisite steps.
+	// A prerequisite is any step sequenced before the submit step (by step
+	// number suffix) that is not closed. Steps at or after the submit step
+	// are post-submit (await-verdict, self-clean) and don't need to be done.
+	var incompleteSteps []*beads.Issue
+	for _, child := range children {
+		seq := extractStepSequence(child.ID)
+		if seq >= submitSeq {
+			continue // This is the submit step or a post-submit step
+		}
+		if child.Status != "closed" {
+			incompleteSteps = append(incompleteSteps, child)
+		}
+	}
+
+	if len(incompleteSteps) == 0 {
+		return nil // All prerequisites are closed
+	}
+
+	// Sort by sequence for readable output
+	sortStepsBySequence(incompleteSteps)
+
+	// Build error message listing incomplete steps
+	var sb strings.Builder
+	sb.WriteString("molecule step dependencies not met — incomplete prerequisite steps:\n")
+	for _, step := range incompleteSteps {
+		sb.WriteString(fmt.Sprintf("  ✗ %s: %s [%s]\n", step.ID, step.Title, step.Status))
+	}
+	sb.WriteString(fmt.Sprintf("\nComplete these steps before submitting, or use --skip-deps to override."))
+
+	return fmt.Errorf("%s", sb.String())
 }
 
 // polecatCleanup sends a lifecycle shutdown request to the witness and waits for termination.

@@ -310,13 +310,15 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 		fmt.Printf("\n⏸️  Rig %s is %s — skipping patrol wisp generation.\n", ctx.Rig, reason)
 		return
 	}
+	extraVars := buildWitnessPatrolVars(ctx)
 	cfg := PatrolConfig{
 		RoleName:        "witness",
 		PatrolMolName:   constants.MolWitnessPatrol,
-		BeadsDir:        ctx.WorkDir,
+		BeadsDir:        ctx.TownRoot,
 		Assignee:        ctx.Rig + "/witness",
 		HeaderEmoji:     constants.EmojiWitness,
 		HeaderTitle:     "Witness Patrol Status",
+		ExtraVars:       extraVars,
 		WorkLoopSteps: []string{
 			"Work through each patrol step in sequence (see checklist below)",
 			"After completing each step, close it: `gt mol step done <step-id>`\n   This tracks step coverage — skipped steps are reported at cycle end.",
@@ -324,7 +326,7 @@ func outputWitnessPatrolContext(ctx RoleContext) {
 		},
 	}
 	outputPatrolContext(cfg)
-	showFormulaSteps(constants.MolWitnessPatrol, "Patrol Steps", ctx.TownRoot, ctx.Rig)
+	showFormulaSteps(constants.MolWitnessPatrol, "Patrol Steps", ctx.TownRoot, ctx.Rig, extraVars)
 }
 
 // outputRefineryPatrolContext shows patrol molecule status for the Refinery.
@@ -337,7 +339,7 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 	cfg := PatrolConfig{
 		RoleName:        "refinery",
 		PatrolMolName:   constants.MolRefineryPatrol,
-		BeadsDir:        ctx.WorkDir,
+		BeadsDir:        ctx.TownRoot,
 		Assignee:        ctx.Rig + "/refinery",
 		HeaderEmoji:     "🔧",
 		HeaderTitle:     "Refinery Patrol Status",
@@ -350,6 +352,20 @@ func outputRefineryPatrolContext(ctx RoleContext) {
 	}
 	outputPatrolContext(cfg)
 	showFormulaStepsFull(constants.MolRefineryPatrol, ctx.TownRoot, ctx.Rig, cfg.ExtraVars)
+}
+
+// buildWitnessPatrolVars returns --var key=value strings for the witness
+// patrol formula. Injects rig name and prefix so the formula can construct
+// agent bead IDs without hardcoding the "gt" prefix (gt-48ay).
+func buildWitnessPatrolVars(ctx RoleContext) []string {
+	var vars []string
+	if ctx.TownRoot == "" || ctx.Rig == "" {
+		return vars
+	}
+	vars = append(vars, fmt.Sprintf("rig=%s", ctx.Rig))
+	prefix := beads.GetPrefixForRig(ctx.TownRoot, ctx.Rig)
+	vars = append(vars, fmt.Sprintf("prefix=%s", prefix))
+	return vars
 }
 
 // buildRefineryPatrolVars loads rig MQ settings and returns --var key=value
@@ -398,6 +414,12 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 			vars = append(vars, fmt.Sprintf("build_command=%s", mq.BuildCommand))
 		}
 		vars = append(vars, fmt.Sprintf("delete_merged_branches=%t", mq.IsDeleteMergedBranchesEnabled()))
+		vars = append(vars, fmt.Sprintf("judgment_enabled=%t", mq.IsJudgmentEnabled()))
+		vars = append(vars, fmt.Sprintf("review_depth=%s", mq.GetReviewDepth()))
+		if mq.MergeStrategy != "" {
+			vars = append(vars, fmt.Sprintf("merge_strategy=%s", mq.MergeStrategy))
+		}
+		vars = append(vars, fmt.Sprintf("require_review=%t", mq.IsRequireReviewEnabled()))
 		return vars
 	}
 
@@ -415,7 +437,7 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 					labelMap[label[:idx]] = label[idx+1:]
 				}
 			}
-			for _, key := range []string{"integration_branch_refinery_enabled", "integration_branch_auto_land", "run_tests", "delete_merged_branches", "setup_command", "typecheck_command", "lint_command", "test_command", "build_command"} {
+			for _, key := range []string{"integration_branch_refinery_enabled", "integration_branch_auto_land", "run_tests", "delete_merged_branches", "setup_command", "typecheck_command", "lint_command", "test_command", "build_command", "merge_strategy", "require_review"} {
 				if val := labelMap[key]; val != "" {
 					vars = append(vars, fmt.Sprintf("%s=%s", key, val))
 				}

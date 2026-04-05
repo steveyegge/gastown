@@ -172,30 +172,33 @@ func (c *StaleDoltPortCheck) getCorrectPort(ctx *CheckContext) int {
 	return 0
 }
 
-// findPortFiles finds all dolt-server.port files.
+// findPortFiles finds all dolt-server.port files in known locations.
+// Avoids filepath.Walk over the entire town root, which is extremely slow
+// on Docker bind mounts (macOS VirtioFS).
 func (c *StaleDoltPortCheck) findPortFiles(townRoot string) []string {
 	var files []string
 
-	// Common locations for port files
+	// Known locations for port files
 	locations := []string{
 		filepath.Join(townRoot, ".beads", "dolt-server.port"),
 		filepath.Join(townRoot, ".dolt-data", ".beads", "dolt-server.port"),
 		filepath.Join(townRoot, "daemon", "dolt.port"),
 	}
 
-	// Also find port files in rig .beads directories
-	rigsDir := filepath.Join(townRoot, "mayor", "rigs.json")
-	if _, err := os.Stat(rigsDir); err == nil {
-		// Walk through directories looking for .beads/dolt-server.port
-		_ = filepath.Walk(townRoot, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return nil
+	// Rig .beads directories (same discovery pattern as findMetadataFiles)
+	rigsConfig := filepath.Join(townRoot, "mayor", "rigs.json")
+	if data, err := os.ReadFile(rigsConfig); err == nil {
+		var rigs struct {
+			Rigs map[string]struct{} `json:"rigs"`
+		}
+		if json.Unmarshal(data, &rigs) == nil {
+			for rigName := range rigs.Rigs {
+				locations = append(locations,
+					filepath.Join(townRoot, rigName, "mayor", "rig", ".beads", "dolt-server.port"),
+					filepath.Join(townRoot, rigName, ".beads", "dolt-server.port"),
+				)
 			}
-			if info.Name() == "dolt-server.port" {
-				files = append(files, path)
-			}
-			return nil
-		})
+		}
 	}
 
 	for _, loc := range locations {

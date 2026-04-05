@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,31 +36,52 @@ func NewStaleSQLServerInfoCheck() *StaleSQLServerInfoCheck {
 func (c *StaleSQLServerInfoCheck) Run(ctx *CheckContext) *CheckResult {
 	c.staleFiles = nil
 
-	// Find all sql-server.info files under the town root
+	// Find sql-server.info files in known .beads/dolt/.dolt/ locations.
+	// Avoids filepath.Walk over the entire town root, which is extremely slow
+	// on Docker bind mounts (macOS VirtioFS).
 	var details []string
-	_ = filepath.Walk(ctx.TownRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		// Skip .git directories and node_modules
-		if info.IsDir() && (info.Name() == ".git" || info.Name() == "node_modules") {
-			return filepath.SkipDir
-		}
-		if info.Name() != "sql-server.info" {
-			return nil
-		}
-		// Only care about files inside .dolt directories
-		if !strings.Contains(path, ".dolt") {
-			return nil
-		}
 
+	locations := []string{
+		filepath.Join(ctx.TownRoot, ".beads", "dolt", ".dolt", "sql-server.info"),
+	}
+
+	// Collect rig names from rigs.json and top-level directories.
+	rigNames := make(map[string]struct{})
+	rigsConfig := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
+	if data, err := os.ReadFile(rigsConfig); err == nil {
+		var rigs struct {
+			Rigs map[string]struct{} `json:"rigs"`
+		}
+		if json.Unmarshal(data, &rigs) == nil {
+			for name := range rigs.Rigs {
+				rigNames[name] = struct{}{}
+			}
+		}
+	}
+	// Also scan top-level directories as fallback (handles rigs not yet in rigs.json).
+	if entries, err := os.ReadDir(ctx.TownRoot); err == nil {
+		for _, e := range entries {
+			if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+				rigNames[e.Name()] = struct{}{}
+			}
+		}
+	}
+	for rigName := range rigNames {
+		locations = append(locations,
+			filepath.Join(ctx.TownRoot, rigName, ".beads", "dolt", ".dolt", "sql-server.info"),
+		)
+	}
+
+	for _, path := range locations {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
 		if c.isStale(path) {
 			c.staleFiles = append(c.staleFiles, path)
 			relPath, _ := filepath.Rel(ctx.TownRoot, path)
 			details = append(details, fmt.Sprintf("Stale sql-server.info: %s", relPath))
 		}
-		return nil
-	})
+	}
 
 	if len(c.staleFiles) == 0 {
 		return &CheckResult{

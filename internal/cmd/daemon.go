@@ -6,12 +6,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	agentconfig "github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -192,6 +195,7 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	daemonCmd.Stdin = nil
 	daemonCmd.Stdout = nil
 	daemonCmd.Stderr = nil
+	util.SetDetachedProcessGroup(daemonCmd)
 
 	if err := daemonCmd.Start(); err != nil {
 		return fmt.Errorf("starting daemon: %w", err)
@@ -211,6 +215,9 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if !started {
+		if msg := readDaemonStartupFailure(townRoot, daemonCmd.Process.Pid); msg != "" {
+			return fmt.Errorf("daemon failed to start: %s", msg)
+		}
 		return fmt.Errorf("daemon failed to start (check logs with 'gt daemon logs')")
 	}
 
@@ -310,6 +317,24 @@ func getBinaryModTime() (time.Time, error) {
 	return info.ModTime(), nil
 }
 
+func readDaemonStartupFailure(townRoot string, pid int) string {
+	logFile := filepath.Join(townRoot, "daemon", "daemon.log")
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		return ""
+	}
+
+	prefix := fmt.Sprintf("Daemon startup failed (PID %d): ", pid)
+	lines := strings.Split(string(data), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if idx := strings.Index(line, prefix); idx >= 0 {
+			return strings.TrimSpace(line[idx+len(prefix):])
+		}
+	}
+	return ""
+}
+
 func runDaemonLogs(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -342,6 +367,16 @@ func runDaemonRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
+
+	// Clear agent identity env vars inherited from the launch environment.
+	// When the daemon is started from an agent session (e.g. crew runs
+	// 'gt daemon start'), it inherits GT_ROLE/GT_CREW/etc. Any subprocess
+	// that derives sender identity from ambient env vars (e.g. gt mail send)
+	// would then be misattributed to the launching agent. GH#3006.
+	for _, k := range agentconfig.IdentityEnvVars {
+		os.Unsetenv(k)
+	}
+	os.Setenv("BD_ACTOR", "daemon")
 
 	config := daemon.DefaultConfig(townRoot)
 	d, err := daemon.New(config)

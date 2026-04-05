@@ -855,10 +855,10 @@ func TestProcessBatch_SingleMR_BranchNotFound(t *testing.T) {
 	if len(result.Conflicts) != 1 || result.Conflicts[0].ID != "mr-gone" {
 		t.Errorf("expected mr-gone in conflicts (skipped), got %v", stackedIDs(result.Conflicts))
 	}
-	// Verify the log message says "skipping" not "fatal".
+	// Verify the log message indicates the branch was not found (escalating, not fatal).
 	log := e.output.(*bytes.Buffer).String()
-	if !strings.Contains(log, "skipping") {
-		t.Errorf("expected 'skipping' in log output, got: %s", log)
+	if !strings.Contains(log, "not found") {
+		t.Errorf("expected 'not found' in log output, got: %s", log)
 	}
 }
 

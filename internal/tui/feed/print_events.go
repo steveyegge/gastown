@@ -142,7 +142,7 @@ func matchesFilters(event *Event, sinceTime time.Time, mol, eventType, rig strin
 // printEvent formats and prints a single event line.
 func printEvent(event Event) {
 	symbol := typeSymbol(event.Type)
-	ts := event.Time.Format("15:04:05")
+	ts := event.Time.Local().Format("15:04:05")
 	actor := event.Actor
 	if actor == "" {
 		actor = "system"

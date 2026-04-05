@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -102,6 +103,16 @@ type TownSettings struct {
 	// These were previously hardcoded as Go constants throughout the codebase.
 	// All values are optional — omitted values use compiled-in defaults.
 	Operational *OperationalConfig `json:"operational,omitempty"`
+
+	// DisabledPatrols lists patrol names to disable at the town level.
+	// This provides a simple way to turn off individual daemon patrol dogs
+	// without editing mayor/daemon.json. Patrol names match the keys used
+	// in daemon.json patrols section (e.g., "deacon", "witness", "refinery",
+	// "doctor_dog", "compactor_dog", "checkpoint_dog", "wisp_reaper",
+	// "dolt_remotes", "dolt_backup", "jsonl_git_backup", "scheduled_maintenance",
+	// "main_branch_test", "handler").
+	// Example: ["doctor_dog", "compactor_dog"]
+	DisabledPatrols []string `json:"disabled_patrols,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
@@ -298,6 +309,14 @@ type DaemonThresholds struct {
 	// is killed to prevent API slot burn (default "15m"). Polecats are ephemeral workers;
 	// unlike dogs, they should not persist when idle.
 	PolecatIdleSessionTimeout string `json:"polecat_idle_session_timeout,omitempty"`
+
+	// PolecatSelfTerminate controls whether polecats kill their own session after
+	// gt done completes (default false). When true, polecats terminate 3 seconds
+	// after work submission instead of transitioning to IDLE. This gives fresh
+	// context windows per task, reduces token waste, and eliminates stale state
+	// issues at scale. Worktree reuse is preserved — ReuseIdlePolecat creates
+	// a fresh branch on the existing worktree.
+	PolecatSelfTerminate *bool `json:"polecat_self_terminate,omitempty"`
 
 	// StaleWorkingTimeout is how long a dog in state=working with no activity
 	// before considered stuck (default "2h").
@@ -832,6 +851,13 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 		return base + " -i " + quoteForShell(p)
 	}
 
+	// Gemini requires -i (--prompt-interactive) to auto-execute the prompt
+	// while staying in interactive mode. Positional args populate the input
+	// field but don't execute, and -p runs headless (exits after completion).
+	if resolved.Command == "gemini" {
+		return base + " -i " + quoteForShell(p)
+	}
+
 	// Quote the prompt for shell safety (positional arg for claude and others)
 	return base + " " + quoteForShell(p)
 }
@@ -847,7 +873,14 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 	}
 
 	if p != "" && resolved.PromptMode != "none" {
-		args = append(args, p)
+		switch resolved.Command {
+		case "opencode":
+			args = append(args, "--prompt", p)
+		case "copilot", "gemini":
+			args = append(args, "-i", p)
+		default:
+			args = append(args, p)
+		}
 	}
 
 	return args
@@ -1090,11 +1123,11 @@ func defaultInstructionsFile(provider string) string {
 
 // quoteForShell quotes a string for safe shell usage.
 func quoteForShell(s string) string {
-	// Wrap in double quotes, escaping characters that are special in double-quoted strings:
-	// - backslash (escape character)
-	// - double quote (string delimiter)
-	// - backtick (command substitution)
-	// - dollar sign (variable expansion)
+	if runtime.GOOS == "windows" {
+		// PowerShell: use single quotes (no interpolation). Double embedded single quotes.
+		return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+	}
+	// POSIX shell: wrap in double quotes, escaping special characters.
 	escaped := strings.ReplaceAll(s, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
 	escaped = strings.ReplaceAll(escaped, "`", "\\`")
@@ -1212,6 +1245,15 @@ type MergeQueueConfig struct {
 	// Nil defaults to false (manual landing required).
 	IntegrationBranchAutoLand *bool `json:"integration_branch_auto_land,omitempty"`
 
+	// MergeStrategy controls how the refinery lands approved work: "direct" (default)
+	// merges directly to the base branch, "pr" creates a GitHub pull request.
+	MergeStrategy string `json:"merge_strategy,omitempty"`
+
+	// RequireReview controls whether the refinery requires at least one approving
+	// GitHub review before merging a PR. Only meaningful when merge_strategy="pr".
+	// Nil defaults to false (no review required).
+	RequireReview *bool `json:"require_review,omitempty"`
+
 	// OnConflict specifies conflict resolution strategy: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
 
@@ -1250,6 +1292,17 @@ type MergeQueueConfig struct {
 	// StaleClaimTimeout is how long a claimed MR can go without updates before
 	// being considered abandoned and eligible for re-claim (e.g., "30m").
 	StaleClaimTimeout string `json:"stale_claim_timeout,omitempty"`
+
+	// JudgmentEnabled controls whether the refinery performs quality review
+	// before merging. When true, the refinery patrol's quality-review step
+	// evaluates the diff for correctness, security, and code quality.
+	// Nil defaults to false (no quality review).
+	JudgmentEnabled *bool `json:"judgment_enabled,omitempty"`
+
+	// ReviewDepth controls the thoroughness of quality review when judgment
+	// is enabled. Valid values: "quick", "standard", "deep".
+	// Nil defaults to "standard".
+	ReviewDepth string `json:"review_depth,omitempty"`
 }
 
 // OnConflict strategy constants.
@@ -1302,6 +1355,33 @@ func (c *MergeQueueConfig) IsDeleteMergedBranchesEnabled() bool {
 		return true
 	}
 	return *c.DeleteMergedBranches
+}
+
+// IsJudgmentEnabled returns whether quality review is enabled for merges.
+// Nil-safe, defaults to false.
+func (c *MergeQueueConfig) IsJudgmentEnabled() bool {
+	if c.JudgmentEnabled == nil {
+		return false
+	}
+	return *c.JudgmentEnabled
+}
+
+// IsRequireReviewEnabled returns whether PR reviews are required before merging.
+// Nil-safe, defaults to false.
+func (c *MergeQueueConfig) IsRequireReviewEnabled() bool {
+	if c.RequireReview == nil {
+		return false
+	}
+	return *c.RequireReview
+}
+
+// GetReviewDepth returns the configured review depth.
+// Nil-safe, defaults to "standard".
+func (c *MergeQueueConfig) GetReviewDepth() string {
+	if c.ReviewDepth == "" {
+		return "standard"
+	}
+	return c.ReviewDepth
 }
 
 // boolPtr returns a pointer to a bool value.
@@ -1381,6 +1461,17 @@ func DefaultAccountsConfigDir() (string, error) {
 type QuotaState struct {
 	Version  int                          `json:"version"`  // schema version
 	Accounts map[string]AccountQuotaState `json:"accounts"` // handle -> quota state
+
+	// ActiveSwaps tracks keychain swap mappings from quota rotation.
+	// Key: target config dir (where the swapped token was written)
+	// Value: source account handle (whose token was swapped in)
+	//
+	// When a session is rotated, its config dir's keychain entry gets
+	// overwritten with the source account's token. If the source account
+	// later re-authenticates, the fresh token goes to the source's own
+	// keychain entry — not the target's. SyncSwappedTokens uses this map
+	// to propagate fresh tokens to all target keychain entries.
+	ActiveSwaps map[string]string `json:"active_swaps,omitempty"` // targetConfigDir -> sourceAccountHandle
 }
 
 // AccountQuotaStatus is the rate-limit status of an account.

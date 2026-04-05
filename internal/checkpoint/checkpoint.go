@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Filename is the checkpoint file name within the polecat directory.
@@ -123,6 +124,7 @@ func Capture(polecatDir string) (*Checkpoint, error) {
 	// Get modified files from git status
 	cmd := exec.Command("git", "status", "--porcelain")
 	cmd.Dir = polecatDir
+	util.SetDetachedProcessGroup(cmd)
 	output, err := cmd.Output()
 	if err == nil {
 		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
@@ -140,6 +142,7 @@ func Capture(polecatDir string) (*Checkpoint, error) {
 	// Get last commit SHA
 	cmd = exec.Command("git", "rev-parse", "HEAD")
 	cmd.Dir = polecatDir
+	util.SetDetachedProcessGroup(cmd)
 	output, err = cmd.Output()
 	if err == nil {
 		cp.LastCommit = strings.TrimSpace(string(output))
@@ -148,6 +151,7 @@ func Capture(polecatDir string) (*Checkpoint, error) {
 	// Get current branch
 	cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	cmd.Dir = polecatDir
+	util.SetDetachedProcessGroup(cmd)
 	output, err = cmd.Output()
 	if err == nil {
 		cp.Branch = strings.TrimSpace(string(output))

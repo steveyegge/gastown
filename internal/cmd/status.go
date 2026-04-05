@@ -958,6 +958,9 @@ func outputStatusText(w io.Writer, status TownStatus) error {
 	fmt.Fprintf(w, "%s %s\n", style.Bold.Render("Town:"), status.Name)
 	fmt.Fprintf(w, "%s\n\n", style.Dim.Render(status.Location))
 
+	// E-stop banner (if active)
+	addEstopToStatus(status.Location)
+
 	// Overseer info
 	if status.Overseer != nil {
 		overseerDisplay := status.Overseer.Name
@@ -1594,7 +1597,7 @@ func discoverGlobalAgents(townRoot string, allSessions map[string]bool, allAgent
 				// Prefer database columns over description parsing
 				// HookBead column is authoritative (cleared by unsling)
 				agent.HookBead = issue.HookBead
-				agent.State = issue.AgentState
+				agent.State = beads.ResolveAgentState(issue.Description, issue.AgentState)
 				if agent.HookBead != "" {
 					agent.HasWork = true
 					// Get hook title from preloaded map
@@ -1602,11 +1605,8 @@ func discoverGlobalAgents(townRoot string, allSessions map[string]bool, allAgent
 						agent.WorkTitle = pinnedIssue.Title
 					}
 				}
-				// Parse description fields for legacy slots (and notification level)
+				// Parse description fields for notification level
 				if fields := beads.ParseAgentFields(issue.Description); fields != nil {
-					if agent.State == "" {
-						agent.State = fields.AgentState
-					}
 					agent.NotificationLevel = fields.NotificationLevel
 				}
 			}
@@ -1772,7 +1772,7 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 				// Prefer database columns over description parsing
 				// HookBead column is authoritative (cleared by unsling)
 				agent.HookBead = issue.HookBead
-				agent.State = issue.AgentState
+				agent.State = beads.ResolveAgentState(issue.Description, issue.AgentState)
 				if agent.HookBead != "" {
 					agent.HasWork = true
 					// Get hook title from preloaded map
@@ -1780,11 +1780,8 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 						agent.WorkTitle = pinnedIssue.Title
 					}
 				}
-				// Parse description fields for legacy slots (and notification level)
+				// Parse description fields for notification level
 				if fields := beads.ParseAgentFields(issue.Description); fields != nil {
-					if agent.State == "" {
-						agent.State = fields.AgentState
-					}
 					agent.NotificationLevel = fields.NotificationLevel
 				}
 			}

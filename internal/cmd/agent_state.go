@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -257,11 +259,20 @@ func getAgentLabels(agentBead, beadsDir string) (map[string]string, error) {
 	return labels, nil
 }
 
+// bdCallTimeout is the per-call timeout for bd subprocess invocations in agent-bead
+// helpers. bd commands should be fast against a local Dolt server, but can hang
+// indefinitely if Dolt is unresponsive (e.g., connection pool exhausted). A 30s
+// ceiling prevents await-event/await-signal from stalling past the patrol timeout.
+const bdCallTimeout = 30 * time.Second
+
 // getAllAgentLabels retrieves all labels (including non-state) from an agent bead.
 func getAllAgentLabels(agentBead, beadsDir string) ([]string, error) {
 	args := []string{"show", agentBead, "--json"}
 
-	cmd := exec.Command("bd", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), bdCallTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
 
 	var stdout, stderr bytes.Buffer

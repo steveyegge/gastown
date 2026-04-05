@@ -324,6 +324,27 @@ gt mail send {{ .RigName }}/witness -s "MERGE_FAILED" \
 
 **IMPORTANT**: Merge queue source of truth is `{{ cmd }} mq list {{ .RigName }}`, NOT git branches.
 
+### Beads CLI Reference
+```bash
+bd show <id>                             # Issue details (e.g., bd show gt-abc)
+bd update <id> --status=open             # Reopen source issue
+bd update <id> --notes "..."             # Persist findings
+bd close <id>                            # Close issue
+bd close <id> --reason="..."             # Close with reason
+bd create --title="..." --type=bug --priority=1  # File pre-existing failure
+```
+
+**Valid statuses:** `open`, `in_progress`, `blocked`, `deferred`, `closed`, `pinned`, `hooked`
+(there is NO `done` or `complete` status — use `bd close`)
+
+### Dolt Connectivity
+
+Beads data is stored in Dolt (port 3307). If `bd` commands hang or fail:
+```bash
+{{ cmd }} dolt status                    # Check server health + latency
+```
+**Do NOT restart Dolt yourself.** Escalate: `{{ cmd }} escalate -s HIGH "Dolt: <symptom>"`
+
 ### Communication
 - `{{ cmd }} mail inbox` — Check for messages
 - `{{ cmd }} mail send <addr> -s "Subject" -m "Message"` — Notify workers

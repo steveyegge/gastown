@@ -11,6 +11,7 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/scheduler/capacity"
 	"github.com/steveyegge/gastown/internal/style"
@@ -84,8 +85,6 @@ func dispatchScheduledWork(townRoot, actor string, batchOverride int, dryRun boo
 	}
 	spawnDelay := schedulerCfg.GetSpawnDelay()
 
-	townBeads := beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
-
 	// Clean up invalid/stale contexts before querying for ready beads.
 	// Skip during dry-run to avoid mutating state.
 	if !dryRun {
@@ -98,7 +97,7 @@ func dispatchScheduledWork(townRoot, actor string, batchOverride int, dryRun boo
 	polecatNames := make(map[string]string)
 	cycle := &capacity.DispatchCycle{
 		AvailableCapacity: func() (int, error) {
-			active := countActivePolecats()
+			active := countWorkingPolecats()
 			cap := maxPolecats - active
 			if cap <= 0 {
 				return 0, nil // No free slots — PlanDispatch treats <= 0 as no capacity
@@ -126,7 +125,8 @@ func dispatchScheduledWork(townRoot, actor string, batchOverride int, dryRun boo
 		},
 		OnSuccess: func(b capacity.PendingBead) error {
 			// OnSuccess may be retried — only do the close here, no side effects.
-			return townBeads.CloseSlingContext(b.ID, "dispatched")
+			// Route to the correct rig's beads dir (GH#3468).
+			return beadsForContext(townRoot, b.Context).CloseSlingContext(b.ID, "dispatched")
 		},
 		OnFailure: func(b capacity.PendingBead, err error) {
 			var onSuccessErr *capacity.ErrOnSuccessFailed
@@ -137,7 +137,8 @@ func dispatchScheduledWork(townRoot, actor string, batchOverride int, dryRun boo
 					style.Warning.Render("⚠"), b.WorkBeadID, err)
 				// Last-resort close attempt to prevent double-dispatch on next cycle.
 				// OnSuccess already retried 2x; this is a final attempt before circuit-breaking.
-				if closeErr := townBeads.CloseSlingContext(b.ID, "dispatch-close-failed"); closeErr != nil {
+				ctxBeads := beadsForContext(townRoot, b.Context)
+				if closeErr := ctxBeads.CloseSlingContext(b.ID, "dispatch-close-failed"); closeErr != nil {
 					fmt.Fprintf(os.Stderr, "%s CRITICAL: last-resort close of %s failed — risk of double-dispatch for %s: %v\n",
 						style.Warning.Render("⚠"), b.ID, b.WorkBeadID, closeErr)
 				} else {
@@ -152,7 +153,7 @@ func dispatchScheduledWork(townRoot, actor string, batchOverride int, dryRun boo
 				_ = events.LogFeed(events.TypeSchedulerDispatchFailed, actor,
 					events.SchedulerDispatchFailedPayload(b.WorkBeadID, b.TargetRig, err.Error()))
 			}
-			recordDispatchFailure(townBeads, b, err)
+			recordDispatchFailure(beadsForContext(townRoot, b.Context), b, err)
 		},
 		BatchSize:  batchSize,
 		SpawnDelay: spawnDelay,
@@ -228,11 +229,24 @@ func printDryRunPlan(plan capacity.DispatchPlan, maxPolecats, batchSize int) {
 	}
 }
 
+// beadsForContext returns a Beads instance that can operate on a sling context
+// bead. Sling contexts live in the target rig's beads dir (GH#3468), so we
+// resolve the dir from the context's TargetRig field. Falls back to HQ if
+// the target rig is unknown (e.g., invalid context with nil fields).
+func beadsForContext(townRoot string, fields *capacity.SlingContextFields) *beads.Beads {
+	if fields != nil && fields.TargetRig != "" {
+		rigBeadsDir := doltserver.FindRigBeadsDir(townRoot, fields.TargetRig)
+		if rigBeadsDir != "" {
+			return beads.NewWithBeadsDir(townRoot, rigBeadsDir)
+		}
+	}
+	// Fallback to HQ for contexts without a valid TargetRig
+	return beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
+}
+
 // cleanupStaleContexts closes invalid and stale sling context beads.
 // Called explicitly before the dispatch cycle to separate cleanup from querying.
 func cleanupStaleContexts(townRoot string) {
-	townBeads := beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
-
 	contexts, err := listAllSlingContexts(townRoot)
 	if err != nil {
 		return
@@ -245,11 +259,13 @@ func cleanupStaleContexts(townRoot string) {
 	for _, ctx := range contexts {
 		fields := beads.ParseSlingContextFields(ctx.Description)
 		if fields == nil {
-			_ = townBeads.CloseSlingContext(ctx.ID, "invalid-context")
+			b := beadsForContext(townRoot, nil)
+			_ = b.CloseSlingContext(ctx.ID, "invalid-context")
 			continue
 		}
 		if fields.DispatchFailures >= maxDispatchFailures {
-			_ = townBeads.CloseSlingContext(ctx.ID, "circuit-broken")
+			b := beadsForContext(townRoot, fields)
+			_ = b.CloseSlingContext(ctx.ID, "circuit-broken")
 			continue
 		}
 		staleCheckContexts = append(staleCheckContexts, ctx)
@@ -278,7 +294,8 @@ func cleanupStaleContexts(townRoot string) {
 		fields := staleCheckFields[i]
 		info, found := workBeadInfo[fields.WorkBeadID]
 		if found && (info.Status == "hooked" || info.Status == "closed" || info.Status == "tombstone") {
-			_ = townBeads.CloseSlingContext(ctx.ID, "stale-work-bead")
+			b := beadsForContext(townRoot, fields)
+			_ = b.CloseSlingContext(ctx.ID, "stale-work-bead")
 		}
 	}
 }
@@ -494,15 +511,22 @@ func recordDispatchFailure(townBeads *beads.Beads, b capacity.PendingBead, dispa
 	}
 }
 
-// listAllSlingContexts returns all open sling context beads from HQ.
-// Sling contexts are always created in the town-root DB (HQ is authoritative),
-// so we query HQ only. This avoids partial-failure scenarios where a rig dir
-// succeeds but HQ fails, silently returning incomplete results.
-// Used by scheduler list/status/clear and cleanupStaleContexts.
+// listAllSlingContexts returns all open sling context beads across all rig
+// beads dirs. Sling contexts are created in the target rig's beads dir
+// (GH#3468), so we scan HQ plus all rig dirs.
+// Used by scheduler list/status/clear, cleanupStaleContexts, and areScheduled.
 // Does NOT filter by readiness or circuit breaker.
 func listAllSlingContexts(townRoot string) ([]*beads.Issue, error) {
-	townBeads := beads.NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
-	return townBeads.ListOpenSlingContexts()
+	var all []*beads.Issue
+	for _, dir := range beadsSearchDirs(townRoot) {
+		b := beads.NewWithBeadsDir(dir, beads.ResolveBeadsDir(dir))
+		contexts, err := b.ListOpenSlingContexts()
+		if err != nil {
+			continue // Partial failure is acceptable — skip unavailable dirs
+		}
+		all = append(all, contexts...)
+	}
+	return all, nil
 }
 
 // listReadyWorkBeadIDsWithError returns a set of work bead IDs that are unblocked.

@@ -16,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // MarkerFileName is the lock file for Boot startup coordination.
@@ -201,6 +202,7 @@ func (b *Boot) spawnDegraded() error {
 	// This performs the triage logic without a full Claude session
 	cmd := exec.Command("gt", "boot", "triage", "--degraded")
 	cmd.Dir = b.deaconDir
+	util.SetDetachedProcessGroup(cmd)
 
 	// Use centralized AgentEnv for consistency with tmux mode
 	envVars := config.AgentEnv(config.AgentEnvConfig{

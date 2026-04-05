@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // WIPCommitPrefix is the commit message prefix used by checkpoint_dog auto-commits.
@@ -109,6 +111,7 @@ func SquashWIPCommits(workDir, baseRef string) (int, error) {
 func gitOutput(workDir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = workDir
+	util.SetDetachedProcessGroup(cmd)
 
 	out, err := cmd.Output()
 	if err != nil {
