@@ -14,7 +14,7 @@ This formula orchestrates a complete release cycle:
 ## Usage
 
 ```bash
-bd mol wisp create beads-release --var version=0.37.0
+gt mol wisp create beads-release --var version=0.37.0
 ```
 
 Or assign to a polecat:

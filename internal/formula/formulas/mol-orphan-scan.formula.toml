@@ -74,12 +74,12 @@ Find issues marked in_progress with no active worker.
 
 **1. For each rig in scope, find in_progress issues:**
 ```bash
-bd list --status=in_progress
+gt bead list --status=in_progress
 ```
 
 **2. For each in_progress issue, check assignee:**
 ```bash
-bd show <issue-id>
+gt bead show <issue-id>
 # Get assignee field
 ```
 
@@ -119,12 +119,12 @@ Find molecules attached to dead sessions.
 
 **1. List active molecules:**
 ```bash
-bd mol list --active
+gt mol list --active
 ```
 
 **2. For each molecule, check owner session:**
 ```bash
-bd mol show <mol-id>
+gt mol show <mol-id>
 # Get agent/session info
 ```
 
@@ -213,7 +213,7 @@ Take action on each orphan based on triage.
 
 **1. RESET orphans:**
 ```bash
-bd update <issue> --status=open --assignee=""
+gt bead update <issue> --status=open --assignee=""
 # Clears in_progress, ready for dispatch
 ```
 
@@ -229,7 +229,7 @@ gt mail send <rig>/witness -s "Orphan needs assignment: <issue>" \
 # For issues with work on branch:
 # - Preserve the branch
 # - Create recovery note
-bd update <issue> --status=open \
+gt bead update <issue> --status=open \
   --note="Recovery: work exists on branch <branch>"
 ```
 

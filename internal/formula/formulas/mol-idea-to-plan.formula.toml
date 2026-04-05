@@ -697,7 +697,7 @@ cat .designs/<design-id>/design-doc.md
 
 For each task/phase in the plan, create a bead:
 ```bash
-bd create "Task title" --type=task --description="
+gt bead create "Task title" --type=task --description="
 ## Context
 From: {{problem}} implementation plan
 
@@ -719,12 +719,12 @@ sequencing:
 
 ```bash
 # X needs Y means Y blocks X:
-bd dep add <task-x-id> <task-y-id>  # x depends on y (y blocks x)
+gt bead dep add <task-x-id> <task-y-id>  # x depends on y (y blocks x)
 ```
 
 **4. Create a tracking epic:**
 ```bash
-bd create "{{problem}}" --type=epic --description="
+gt bead create "{{problem}}" --type=epic --description="
 Implementation of: {{problem}}
 
 ## Planning Artifacts
@@ -752,8 +752,8 @@ Output:
 <list of created beads with IDs>
 
 ### Next Steps
-- Review beads: bd list --type=task
-- Start work: bd ready (shows unblocked tasks)
+- Review beads: gt bead list --type=task
+- Start work: gt ready (shows unblocked tasks)
 - Kick off agent swarm: gt sling <first-bead-id> <rig>
 ```
 
@@ -774,12 +774,12 @@ cat .designs/<design-id>/design-doc.md
 
 **2. List all beads just created:**
 ```bash
-bd list --status=open
+gt bead list --status=open
 ```
 
 For each bead, read its full content:
 ```bash
-bd show <id>
+gt bead show <id>
 ```
 
 **3. Systematically compare:**
@@ -796,7 +796,7 @@ discrete work item, verify a corresponding bead exists that covers it. Check:
 
 For any plan item not covered by an existing bead, create one:
 ```bash
-bd create --title="<task>" --type=task --description="
+gt bead create --title="<task>" --type=task --description="
 ## Context
 Gap found in verify-beads pass 1. This was in the implementation plan but
 not captured in the initial bead creation.
@@ -811,7 +811,7 @@ not captured in the initial bead creation.
 
 Wire dependencies for any newly created beads:
 ```bash
-bd dep add <new-bead> <dependency-bead>
+gt bead dep add <new-bead> <dependency-bead>
 ```
 
 **5. Report:**
@@ -862,7 +862,7 @@ If you do find something, create the bead.
 **2. Validate the dependency graph:**
 ```bash
 bd blocked       # verify topological order makes sense
-bd ready         # verify at least one task is unblocked and ready to start
+gt ready         # verify at least one task is unblocked and ready to start
 bd stats         # summary of what was created
 ```
 
@@ -885,7 +885,7 @@ Output:
 - Added in verification pass 3: <count>
 
 ### Dependency Graph
-- Ready to start: <bd ready count>
+- Ready to start: <gt ready count>
 - Blocked: <bd blocked count>
 
 ### Confidence

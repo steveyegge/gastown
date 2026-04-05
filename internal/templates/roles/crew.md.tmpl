@@ -86,7 +86,7 @@ The overseer uses crew for two main patterns:
    Alongside the Mayor, crew are the primary agents that dispatch polecat work.
    When bugs or tasks surface during a session, file a bead and sling it:
    ```bash
-   bd new --type=bug "description of the problem"   # Creates e.g. gt-h8x
+   gt bead create --type=bug "description of the problem"   # Creates e.g. gt-h8x
    {{ cmd }} sling gt-h8x {{ .RigName }}             # Spawns a polecat to fix it
    ```
    The overseer also farms tasks to crew via `{{ cmd }} nudge` — a lightweight
@@ -112,7 +112,7 @@ auto-execute on handoff.
 ### Beads: Persistent by Default
 
 Most beads you file are **persistent** (durable). Wisps (`*-wisp-*`) are ephemeral
-and used for orchestration (patrols, molecules). When you `bd new` a bug or task,
+and used for orchestration (patrols, molecules). When you `gt bead create` a bug or task,
 it creates a persistent bead with an adaptive-hash ID (e.g., `gt-h8x`). Let the
 system choose the ID — don't force prefixes.
 
@@ -159,11 +159,11 @@ Town ({{ .TownRoot }})
 `bd` commands automatically route to the correct rig based on issue ID prefix:
 
 ```
-bd show {{ .IssuePrefix }}-xyz   # Routes to {{ .RigName }} beads (from anywhere in town)
-bd show hq-abc      # Routes to town beads
+gt bead show {{ .IssuePrefix }}-xyz   # Routes to {{ .RigName }} beads (from anywhere in town)
+gt bead show hq-abc      # Routes to town beads
 ```
 
-Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`. Debug with: `BD_DEBUG_ROUTING=1 bd show <id>`
+Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`. Debug with: `BD_DEBUG_ROUTING=1 gt bead show <id>`
 
 ## Your Workspace
 
@@ -204,18 +204,18 @@ go here by default. But if you discover bugs/issues in OTHER projects:
 
 | Issue is about... | File in | Command |
 |-------------------|---------|---------|
-| This rig's code ({{ .RigName }}) | Here (default) | `bd create "..."` |
-| `bd` CLI (beads tool) | **beads** | `bd create --rig beads "..."` |
-| `gt` CLI (gas town tool) | **gastown** | `bd create --rig gastown "..."` |
-| Cross-rig coordination | **HQ** | `bd create --prefix hq- "..."` |
+| This rig's code ({{ .RigName }}) | Here (default) | `gt bead create "..."` |
+| `bd` CLI (beads tool) | **beads** | `gt bead create --rig beads "..."` |
+| `gt` CLI (gas town tool) | **gastown** | `gt bead create --rig gastown "..."` |
+| Cross-rig coordination | **HQ** | `gt bead create --prefix hq- "..."` |
 
 **The test**: "Which repo would the fix be committed to?"
 
 ## Gotchas when Filing Beads
 
 **Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.
-- WRONG: `bd dep add phase1 phase2` (temporal: "1 before 2")
-- RIGHT: `bd dep add phase2 phase1` (requirement: "2 needs 1")
+- WRONG: `gt bead dep add phase1 phase2` (temporal: "1 before 2")
+- RIGHT: `gt bead dep add phase2 phase1` (requirement: "2 needs 1")
 
 **Rule**: Think "X needs Y", not "X comes before Y". Verify with `bd blocked`.
 
@@ -303,13 +303,13 @@ the work in one session if possible and submit to that rig's Refinery immediatel
 
 ### Finding Work
 - `{{ cmd }} mail inbox` — Check your inbox
-- `bd ready` — Available issues (if beads configured)
-- `bd list --status=in_progress` — Your active work
+- `gt ready` — Available issues (if beads configured)
+- `gt bead list --status=in_progress` — Your active work
 
 ### Working
-- `bd update <id> --status=in_progress` — Claim an issue
-- `bd show <id>` — View issue details
-- `bd close <id>` — Mark issue complete
+- `gt bead update <id> --status=in_progress` — Claim an issue
+- `gt bead show <id>` — View issue details
+- `gt close <id>` — Mark issue complete
 
 ### Planning New Features
 
@@ -453,7 +453,7 @@ succeeds. **YOU must push — NEVER say "ready to push when you are!"**
 ## Desire Paths: Improving the Tooling
 
 When a command fails but your guess felt reasonable, file a bead with `desire-path` label:
-`bd new -t task "Add gt mail hook alias" -l desire-path`
+`gt bead create -t task "Add gt mail hook alias" -l desire-path`
 
 See `{{ .TownRoot }}/docs/AGENT-ERGONOMICS.md` for the philosophy.
 
@@ -471,8 +471,8 @@ See `{{ .TownRoot }}/docs/AGENT-ERGONOMICS.md` for the philosophy.
 
 | Want to... | Correct command | Common mistake |
 |------------|----------------|----------------|
-| Close/complete a bead | `bd close <id>` | ~~bd complete~~ (not a command), ~~bd update --status done~~ (invalid status) |
-| Claim work | `bd update <id> --claim` | ~~bd update --status=in_progress~~ (works but --claim is atomic) |
+| Close/complete a bead | `gt close <id>` | ~~bd complete~~ (not a command), ~~gt bead update --status done~~ (invalid status) |
+| Claim work | `gt bead update <id> --claim` | ~~gt bead update --status=in_progress~~ (works but --claim is atomic) |
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
 | Dispatch work to polecat | `{{ cmd }} sling <bead> <rig>` | ~~gt sling <bead>~~ (no target = self-sling) |
 | Stop my session | `{{ cmd }} crew stop {{ .Polecat }}` | ~~gt rig stop~~ (stops rig agents, not crew) |

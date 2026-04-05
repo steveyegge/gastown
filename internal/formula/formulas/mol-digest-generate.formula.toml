@@ -87,8 +87,8 @@ gt rigs
 a) **Issues filed and closed:**
 ```bash
 # From rig beads
-bd list --created-after={{since}} --created-before={{until}}
-bd list --status=closed --updated-after={{since}}
+gt bead list --created-after={{since}} --created-before={{until}}
+gt bead list --status=closed --updated-after={{since}}
 ```
 
 b) **Agent activity:**
@@ -106,7 +106,7 @@ git -C <rig-path> log --merges --since={{since}} --oneline main
 d) **Incidents:**
 ```bash
 # Issues tagged as incident or high-priority
-bd list --label=incident --created-after={{since}}
+gt bead list --label=incident --created-after={{since}}
 ```
 
 **3. Aggregate across rigs:**
@@ -185,7 +185,7 @@ EOF
 **2. Archive as bead:**
 Create a digest bead for permanent record:
 ```bash
-bd create --title="Digest: {{date}}" --type=digest \
+gt bead create --title="Digest: {{date}}" --type=digest \
   --description="{{formatted_digest}}" \
   --label=digest,{{period}}
 ```

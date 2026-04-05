@@ -61,7 +61,7 @@ gt hook                     # Shows your pinned molecule and hook_bead
 
 **3. Read the conflict resolution task:**
 ```bash
-bd show {{task}}
+gt bead show {{task}}
 ```
 
 **4. Extract metadata from the task description:**
@@ -86,7 +86,7 @@ Parse and note:
 
 If the conflict seems complex, read the original issue:
 ```bash
-bd show <source-issue>      # What was the original work?
+gt bead show <source-issue>      # What was the original work?
 ```
 
 **Exit criteria:** You have all metadata and understand the conflict context."""
@@ -200,7 +200,7 @@ git rebase --continue
 ```
 
 **3. If stuck on a conflict:**
-- Read the original issue for context: `bd show <source-issue>`
+- Read the original issue for context: `gt bead show <source-issue>`
 - If still unclear, escalate to Witness:
   ```bash
   gt mail send <rig>/witness -s "HELP: Complex conflict" -m "Task: {{task}}
@@ -293,15 +293,15 @@ Close the beads to complete the work chain.
 
 **1. Close the original MR bead:**
 ```bash
-bd close {{original_mr}} --reason="merged after conflict resolution"
+gt close {{original_mr}} --reason="merged after conflict resolution"
 ```
 
 This completes the MR that was blocked on conflicts.
 
 **2. Close the source issue (if not already closed):**
 ```bash
-bd show <source-issue>      # Check status
-bd close <source-issue> --reason="merged via conflict resolution"
+gt bead show <source-issue>      # Check status
+gt close <source-issue> --reason="merged via conflict resolution"
 ```
 
 The Refinery normally closes issues after merge, but since we pushed
@@ -360,7 +360,7 @@ git stash list              # Empty
 
 **3. Close this task:**
 ```bash
-bd close {{task}} --reason="Conflicts resolved and merged to {{base_branch}}"
+gt close {{task}} --reason="Conflicts resolved and merged to {{base_branch}}"
 ```
 
 **4. Signal completion:**

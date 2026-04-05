@@ -69,12 +69,12 @@ bd prime                    # Load beads context
 **2. Preflight check (validate connectivity):**
 ```bash
 gt hook               # Shows your pinned molecule and hook_bead
-bd show {{issue}}           # Validates Dolt connectivity + reads your assignment
+gt bead show {{issue}}           # Validates Dolt connectivity + reads your assignment
 ```
-If `bd show` hangs or fails: run `gt dolt status` to check Dolt health.
+If `gt bead show` hangs or fails: run `gt dolt status` to check Dolt health.
 If Dolt is down: `gt escalate -s HIGH "Dolt: <symptom>"` — do NOT restart it yourself.
 
-The hook_bead is your assigned issue. Read the output of `bd show` carefully.
+The hook_bead is your assigned issue. Read the output of `gt bead show` carefully.
 
 **3. Check inbox for additional context:**
 ```bash
@@ -219,9 +219,9 @@ survive in git, but analysis, findings, and decisions exist only in your context
 window. Persist them to the bead so they survive session death:
 ```bash
 # After completing significant analysis or reaching conclusions:
-bd update {{issue}} --notes "Findings so far: <what you discovered>"
+gt bead update {{issue}} --notes "Findings so far: <what you discovered>"
 # For detailed reports, use --design:
-bd update {{issue}} --design "<structured findings>"
+gt bead update {{issue}} --design "<structured findings>"
 ```
 Do this BEFORE closing molecule steps, not after. If your session dies between
 persisting and closing, the findings survive. If you close first, they're lost.
@@ -243,7 +243,7 @@ Commit types: feat, fix, refactor, test, docs, chore
 **Discovered work:**
 If you find bugs or improvements outside your scope:
 ```bash
-bd create --title "Found: <description>" --type bug --priority 2
+gt bead create --title "Found: <description>" --type bug --priority 2
 # Note the ID, continue with your work
 ```
 
@@ -309,7 +309,7 @@ Must show "nothing to commit, working tree clean".
 **Report-only tasks (audits, reviews, research — no code changes):**
 If your task produced no code changes, verify your findings are persisted to the bead:
 ```bash
-bd show {{issue}}    # Check notes/design fields have your findings
+gt bead show {{issue}}    # Check notes/design fields have your findings
 ```
 If findings are persisted, proceed to review. Report-only tasks with findings
 persisted can skip commit verification.

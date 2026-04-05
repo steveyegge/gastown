@@ -47,7 +47,7 @@ Load the convoy bead and verify it's ready for archival.
 **1. Check your assignment:**
 ```bash
 gt hook               # Shows hook_bead = convoy ID
-bd show {{convoy}}          # Full convoy details
+gt bead show {{convoy}}          # Full convoy details
 ```
 
 **2. Verify convoy is complete:**
@@ -55,7 +55,7 @@ bd show {{convoy}}          # Full convoy details
 - If convoy is still open, exit - Deacon dispatched too early
 
 ```bash
-bd show {{convoy}}
+gt bead show {{convoy}}
 # Check 'tracks' or 'dependencies' field
 # All tracked issues should be closed
 ```
@@ -78,7 +78,7 @@ Create a summary of the convoy's completed work.
 **1. Collect tracked issue details:**
 ```bash
 # For each tracked issue
-bd show <tracked-id>
+gt bead show <tracked-id>
 # Extract: title, type, assignee, duration
 ```
 
@@ -120,12 +120,12 @@ Close the convoy to mark it complete. Beads retention handles archival.
 
 **1. Close convoy:**
 ```bash
-bd close {{convoy}} --reason="Convoy complete"
+gt close {{convoy}} --reason="Convoy complete"
 ```
 
 **2. Verify closure:**
 ```bash
-bd show {{convoy}}
+gt bead show {{convoy}}
 # Status should be "closed"
 ```
 
@@ -156,7 +156,7 @@ Convoy {{convoy}} has completed and been closed.
 - Issues: {{issue_count}}
 - Contributors: {{contributor_list}}
 
-This convoy has been closed. View details: bd show {{convoy}}
+This convoy has been closed. View details: gt bead show {{convoy}}
 EOF
 )"
 ```

@@ -127,20 +127,20 @@ git log origin/main..HEAD                # Check for unpushed commits
 
 ### Beads CLI Reference
 ```bash
-bd show <id>                             # Issue details (e.g., bd show gt-abc)
-bd list --status=in_progress             # Active work in rig
-bd list --status=open                    # Unassigned work
-bd update <id> --status=in_progress      # Claim work
-bd update <id> --notes "..."             # Persist findings
-bd close <id>                            # Close issue
-bd close <id> --reason="..."             # Close with reason
-bd create --title="..." --type=bug       # File discovered work
+gt bead show <id>                             # Issue details (e.g., gt bead show gt-abc)
+gt bead list --status=in_progress             # Active work in rig
+gt bead list --status=open                    # Unassigned work
+gt bead update <id> --status=in_progress      # Claim work
+gt bead update <id> --notes "..."             # Persist findings
+gt close <id>                            # Close issue
+gt close <id> --reason="..."             # Close with reason
+gt bead create --title="..." --type=bug       # File discovered work
 ```
 
 **Valid statuses:** `open`, `in_progress`, `blocked`, `deferred`, `closed`, `pinned`, `hooked`
-(there is NO `done` or `complete` status — use `bd close`)
+(there is NO `done` or `complete` status — use `gt close`)
 
-**Prefix-based routing:** `bd show gt-xyz` works from anywhere — routes via `{{ .TownRoot }}/.beads/routes.jsonl`.
+**Prefix-based routing:** `gt bead show gt-xyz` works from anywhere — routes via `{{ .TownRoot }}/.beads/routes.jsonl`.
 
 ### Dolt Connectivity
 
@@ -295,8 +295,8 @@ Your handoff state is tracked in a pinned bead: `witness Handoff`
 ## Gotchas
 
 **Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.
-- WRONG: `bd dep add phase1 phase2` (temporal: "1 before 2")
-- RIGHT: `bd dep add phase2 phase1` (requirement: "2 needs 1")
+- WRONG: `gt bead dep add phase1 phase2` (temporal: "1 before 2")
+- RIGHT: `gt bead dep add phase2 phase1` (requirement: "2 needs 1")
 
 **Use `{{ cmd }} nudge`, never raw `tmux send-keys`** — it drops the Enter key.
 
@@ -324,8 +324,8 @@ Never use `tmux has-session -t deacon` — that session does not exist.
 | Message a polecat | `{{ cmd }} nudge {{ .RigName }}/<name> "msg"` | ~~tmux send-keys~~ (unreliable) |
 | Kill stuck polecat | `{{ cmd }} polecat nuke {{ .RigName }}/<name> --force` | ~~gt polecat kill~~ (not a command) |
 | View polecat output | `{{ cmd }} peek {{ .RigName }}/<name> 50` | |
-| Close/complete a bead | `bd close <id>` | ~~bd complete~~ (not a command), ~~bd update --status done~~ (invalid status) |
-| Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
+| Close/complete a bead | `gt close <id>` | ~~bd complete~~ (not a command), ~~gt bead update --status done~~ (invalid status) |
+| Create issues | `gt bead create "title"` | ~~gt issue create~~ (not a command) |
 
 **Rig lifecycle commands (for reference):**
 - `park/unpark` — Temporary pause. Daemon skips parked rigs.

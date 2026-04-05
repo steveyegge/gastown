@@ -5,14 +5,14 @@ PURPOSE: This is a durability proof, not computation. Steps are pre-computed.
 Your job is to execute them mechanically, proving crash-recovery at scale.
 
 EXECUTION LOOP:
-1. Find current state: bd mol current <mol-id>
+1. Find current state: gt mol current <mol-id>
 2. Find the next ready (unblocked) step
-3. Close it: bd close <step-id>
+3. Close it: gt close <step-id>
 4. Repeat until no ready steps remain
 
 ON RESUME (after crash/restart/handoff):
 - Same as fresh start. The molecule IS the state.
-- Query `bd mol current <mol-id>`, continue from there.
+- Query `gt mol current <mol-id>`, continue from there.
 - No memory of previous session needed.
 
 DO:

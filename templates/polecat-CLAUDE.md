@@ -35,7 +35,7 @@ DO NOT:
 - Work on issues you weren't assigned
 - Get distracted by tangential discoveries
 
-File discovered work as beads (`bd create`) but don't fix it yourself.
+File discovered work as beads (`gt bead create`) but don't fix it yourself.
 
 ---
 
@@ -110,13 +110,13 @@ gt done                  # Submit and self-clean
 
 **If your assigned bead has nothing to implement** (already done, can't reproduce, not applicable):
 ```bash
-bd close <id> --reason="no-changes: <brief explanation>"
+gt close <id> --reason="no-changes: <brief explanation>"
 gt done
 ```
-**DO NOT** exit without closing the bead. Without an explicit `bd close`, the witness zombie
+**DO NOT** exit without closing the bead. Without an explicit `gt close`, the witness zombie
 patrol resets the bead to `open` and dispatches it to a new polecat — causing spawn storms
 (6-7 polecats assigned the same bead). Every session must end with either a branch push via
-`gt done` OR an explicit `bd close` on the hook bead.
+`gt done` OR an explicit `gt close` on the hook bead.
 
 ---
 
@@ -125,7 +125,7 @@ patrol resets the bead to `open` and dispatches it to a new polecat — causing 
 ### Work Management
 ```bash
 gt hook                         # Your assigned work
-bd show <issue-id>              # View your assigned issue
+gt bead show <issue-id>              # View your assigned issue
 gt prime                        # Shows formula checklist (inline steps)
 ```
 
@@ -144,9 +144,9 @@ gt mail send <addr> -s "Subject" -m "Body"
 
 ### Beads
 ```bash
-bd show <id>                    # View issue details
-bd close <id> --reason "..."    # Close issue when done
-bd create --title "..."         # File discovered work (don't fix it yourself)
+gt bead show <id>                    # View issue details
+gt close <id> --reason "..."    # Close issue when done
+gt bead create --title "..."         # File discovered work (don't fix it yourself)
 ```
 
 ## ⚡ Commonly Confused Commands
@@ -155,8 +155,8 @@ bd create --title "..."         # File discovered work (don't fix it yourself)
 |------------|----------------|----------------|
 | Signal work complete | `gt done` | ~~gt unsling~~ or sitting idle |
 | Message another agent | `gt nudge <target> "msg"` | ~~tmux send-keys~~ (drops Enter) |
-| See formula steps | `gt prime` (inline checklist) | ~~bd mol current~~ (steps not materialized) |
-| File discovered work | `bd create "title"` | Fixing it yourself |
+| See formula steps | `gt prime` (inline checklist) | ~~gt mol current~~ (steps not materialized) |
+| File discovered work | `gt bead create "title"` | Fixing it yourself |
 | Ask Witness for help | `gt mail send {{rig}}/witness -s "HELP" -m "..."` | ~~gt nudge witness~~ |
 
 ---
@@ -236,9 +236,9 @@ and decisions exist ONLY in your context window. **Persist to the bead as you wo
 
 ```bash
 # After significant analysis or conclusions:
-bd update <issue-id> --notes "Findings: <what you discovered>"
+gt bead update <issue-id> --notes "Findings: <what you discovered>"
 # For detailed reports:
-bd update <issue-id> --design "<structured findings>"
+gt bead update <issue-id> --design "<structured findings>"
 ```
 
 **Do this early and often.** If your session dies before persisting, the work is lost forever.
@@ -265,7 +265,7 @@ Your pinned molecule and hook persist — you'll continue from where you left of
 
 ## Dolt Health: Your Part
 
-Dolt is git, not Postgres. Every `bd create`, `bd update`, `gt mail send` generates
+Dolt is git, not Postgres. Every `gt bead create`, `gt bead update`, `gt mail send` generates
 a permanent Dolt commit. You contribute to Dolt health by:
 
 - **Nudge, don't mail.** `gt nudge` costs zero. `gt mail send` costs 1 commit forever.

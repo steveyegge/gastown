@@ -45,18 +45,18 @@ Load the closed issue and identify cross-rig dependents.
 **1. Check your assignment:**
 ```bash
 gt hook               # Shows hook_bead = resolved issue ID
-bd show {{resolved_issue}}  # Full issue details
+gt bead show {{resolved_issue}}  # Full issue details
 ```
 
 **2. Verify issue is closed:**
 ```bash
-bd show {{resolved_issue}}
+gt bead show {{resolved_issue}}
 # Status should be 'closed' or similar terminal state
 ```
 
 **3. Find dependents (issues blocked by this one):**
 ```bash
-bd show {{resolved_issue}}
+gt bead show {{resolved_issue}}
 # Look at 'blocks' field - these are issues waiting on this one
 ```
 
@@ -83,7 +83,7 @@ Update the blocked status for cross-rig dependents.
 # Navigate to the rig containing the dependent issue
 # Dogs have multi-rig worktrees for this
 
-bd show <dependent-id>
+gt bead show <dependent-id>
 # Check if this was the only blocker
 ```
 
@@ -98,7 +98,7 @@ Beads should auto-update blocked status when dependencies close.
 This step verifies and fixes if needed:
 ```bash
 # If still showing as blocked by resolved issue (shouldn't happen):
-bd dep remove <dependent-id> {{resolved_issue}}
+gt bead dep remove <dependent-id> {{resolved_issue}}
 ```
 
 **Exit criteria:** All cross-rig dependents have updated blocked status."""
@@ -130,7 +130,7 @@ External dependency has closed, unblocking work in your rig.
 - {{dependent.id}}: {{dependent.title}} ({{dependent.status}})
 {{end}}
 
-These issues may now proceed. Check bd ready for available work.
+These issues may now proceed. Check gt ready for available work.
 EOF
 )"
 ```
@@ -149,7 +149,7 @@ Trigger work dispatch for newly-unblocked issues if appropriate.
 
 **1. For each unblocked issue, check if ready for work:**
 ```bash
-bd show <issue-id>
+gt bead show <issue-id>
 # Check:
 # - Status: should be 'open' (not already in_progress)
 # - Priority: high priority may warrant immediate dispatch
