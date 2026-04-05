@@ -1,0 +1,16 @@
+feat: add OAuth2 Authorization Code server with PKCE (fl-3yj)
+
+Standalone pkg/oauth2 package implementing OAuth2 Authorization Code
+flow with PKCE support (RFC 7636) and token introspection (RFC 7662).
+No faultline-specific dependencies — reusable across projects.
+
+- Authorization Code flow with configurable consent callback
+- PKCE S256 + plain support, mandatory for public clients
+- Refresh token rotation with scope narrowing
+- Token introspection endpoint (RFC 7662)
+- Scopes: relay:read, relay:write, slack:send, account:read
+- Access token TTL: 1hr, refresh token TTL: 30 days
+- Pluggable Store interface with in-memory implementation
+- Single-use authorization codes
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

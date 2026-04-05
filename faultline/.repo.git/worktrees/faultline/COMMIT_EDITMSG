@@ -1,0 +1,11 @@
+feat: add cloud account registration and login (fl-0vl)
+
+Add POST /auth/register, POST /auth/login, GET /auth/profile endpoints
+for cloud mode with SQLite-backed account storage.
+
+- bcrypt password hashing
+- Session tokens with 30-day expiry
+- First account gets owner role automatically
+- Rate limiting on login (5 attempts per 15 min per IP)
+- Email normalization and validation
+- 11 passing tests covering all acceptance criteria

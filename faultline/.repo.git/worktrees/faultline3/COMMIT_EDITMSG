@@ -1,0 +1,8 @@
+feat: add cloud database migration infrastructure (fl-zf5)
+
+Add numbered SQL migration runner for faultline_cloud Dolt database.
+Migrations run automatically on cloud mode startup via embedded SQL
+files tracked in a schema_migrations table. Includes all Phase 1
+schema: projects, issue_groups, ft_events, releases, sessions.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

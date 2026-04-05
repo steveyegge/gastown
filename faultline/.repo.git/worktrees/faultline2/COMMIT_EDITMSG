@@ -1,0 +1,9 @@
+feat: add OAuth2 client with PKCE for faultline.live (fl-5jz)
+
+Add login/logout CLI commands and cloudauth package implementing
+OAuth2 Authorization Code flow with PKCE:
+- faultline login: opens browser, local callback server, code exchange
+- faultline logout: removes stored credentials
+- Token stored at ~/.faultline/cloud-token.json (0600 permissions)
+- Auto-refresh via LoadAndRefresh when token expires
+- Configurable issuer/client via FAULTLINE_CLOUD_ISSUER/CLIENT_ID env vars

@@ -14,8 +14,13 @@ import (
 	"syscall"
 	"time"
 
+	"os/exec"
+	"runtime"
+
 	"github.com/outdoorsea/faultline/internal/api"
+	"github.com/outdoorsea/faultline/internal/clouddb"
 	"github.com/outdoorsea/faultline/internal/ci"
+	"github.com/outdoorsea/faultline/internal/cloudauth"
 	"github.com/outdoorsea/faultline/internal/dashboard"
 	"github.com/outdoorsea/faultline/internal/crypto"
 	"github.com/outdoorsea/faultline/internal/db"
@@ -55,6 +60,12 @@ func main() {
 		case "relay":
 			cmdRelay()
 			return
+		case "login":
+			cmdLogin()
+			return
+		case "logout":
+			cmdLogout()
+			return
 		case "serve":
 			// Fall through to server startup below.
 		case "help", "-h", "--help":
@@ -67,6 +78,8 @@ func main() {
 			fmt.Println("  status     Show daemon status and health")
 			fmt.Println("  register   Register a new project")
 			fmt.Println("  relay      Run store-and-forward relay (SQLite, no Dolt)")
+			fmt.Println("  login      Authenticate to faultline.live (OAuth2)")
+			fmt.Println("  logout     Remove stored cloud credentials")
 			fmt.Println("  help       Show this help")
 			return
 		default:
@@ -465,12 +478,14 @@ func runServe() error {
 }
 
 // runCloud starts the server in cloud/relay mode: SQLite-backed envelope
-// storage with relay poll/ack API. No Dolt, no dashboard, no bridge, no monitors.
+// storage with relay poll/ack API, plus a Dolt-backed cloud database for
+// persistent project/issue/event data.
 func runCloud() error {
 	addr := envOr("FAULTLINE_ADDR", ":8080")
 	dbPath := envOr("FAULTLINE_RELAY_DB", "relay.db")
 	ttl := time.Duration(envOrInt("FAULTLINE_RELAY_TTL_HOURS", 72)) * time.Hour
 	pollToken := os.Getenv("FAULTLINE_RELAY_TOKEN")
+	cloudDSN := envOr("FAULTLINE_CLOUD_DSN", "root@tcp(127.0.0.1:3307)/faultline_cloud")
 	projectPairs := strings.Split(envOr("FAULTLINE_PROJECTS", ""), ",")
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -492,6 +507,13 @@ func runCloud() error {
 		return fmt.Errorf("invalid project config: %w", err)
 	}
 
+	// Run cloud database migrations (Dolt).
+	cloudDB, err := clouddb.Open(cloudDSN, log)
+	if err != nil {
+		return fmt.Errorf("open cloud database: %w", err)
+	}
+	defer func() { _ = cloudDB.Close() }()
+
 	store, err := relay.NewStore(dbPath, ttl)
 	if err != nil {
 		return fmt.Errorf("open relay store: %w", err)
@@ -509,8 +531,21 @@ func runCloud() error {
 		PollToken: pollToken,
 	}
 
+	// Cloud account management (SQLite-backed, same DB file).
+	accountStore, err := cloudauth.NewStore(dbPath)
+	if err != nil {
+		return fmt.Errorf("open cloud auth store: %w", err)
+	}
+	defer func() { _ = accountStore.Close() }()
+
+	authHandler := &cloudauth.Handler{
+		Store: accountStore,
+		Log:   log,
+	}
+
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
+	authHandler.RegisterRoutes(mux)
 
 	srv := &http.Server{
 		Addr:         addr,
@@ -594,6 +629,57 @@ func envOrFloat(key string, fallback float64) float64 {
 		}
 	}
 	return fallback
+}
+
+func cmdLogin() {
+	cfg := cloudauth.DefaultConfig()
+
+	// Check if already logged in.
+	existing, _ := cloudauth.LoadToken()
+	if existing != nil && existing.Valid() {
+		fmt.Println("Already authenticated to", cfg.Issuer)
+		fmt.Println("Token expires:", existing.ExpiresAt.Format(time.RFC3339))
+		fmt.Println("Run 'faultline logout' first to re-authenticate.")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	fmt.Println("Authenticating to", cfg.Issuer, "...")
+
+	token, err := cloudauth.Login(ctx, cfg, openBrowser)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Authenticated successfully.")
+	fmt.Println("Token expires:", token.ExpiresAt.Format(time.RFC3339))
+}
+
+func cmdLogout() {
+	if err := cloudauth.RemoveToken(); err != nil {
+		fmt.Fprintf(os.Stderr, "Logout failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Logged out. Cloud credentials removed.")
+}
+
+func openBrowser(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		fmt.Println("Open this URL in your browser:", url)
+		return nil
+	}
+	return cmd.Start()
 }
 
 // discardResponseWriter is a no-op http.ResponseWriter for internal handler calls.
