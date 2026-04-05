@@ -293,3 +293,15 @@
 [branch "polecat/onyx/fl-7vz@mnl7gkzy"]
 	remote = origin
 	merge = refs/heads/main
+[branch "polecat/obsidian/fl-0vl@mnlaiecu"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/quartz/fl-3yj@mnlajwb3"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/jasper/fl-5jz@mnlalhan"]
+	remote = origin
+	merge = refs/heads/main
+[branch "polecat/onyx/fl-zf5@mnlan1w5"]
+	remote = origin
+	merge = refs/heads/main
