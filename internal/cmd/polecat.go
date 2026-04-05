@@ -400,8 +400,11 @@ func effectivePolecatState(item PolecatListItem) polecat.State {
 	if item.SessionRunning && (state == polecat.StateDone || state == polecat.StateIdle) {
 		return polecat.StateWorking
 	}
+	// When session is dead but beads still says "working", mark as stalled
+	// (not done — work was interrupted, not completed). The manager's loadFromBeads
+	// now returns StateStalled for this case, but list reconciliation may override.
 	if !item.SessionRunning && !item.Zombie && state == polecat.StateWorking {
-		return polecat.StateDone
+		return polecat.StateStalled
 	}
 	return state
 }
@@ -524,6 +527,8 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 			stateStr = style.Info.Render(stateStr)
 		case polecat.StateStuck:
 			stateStr = style.Warning.Render(stateStr)
+		case polecat.StateStalled:
+			stateStr = style.Error.Render(stateStr)
 		case polecat.StateDone:
 			stateStr = style.Success.Render(stateStr)
 		case polecat.StateZombie:
@@ -713,6 +718,8 @@ func runPolecatStatus(cmd *cobra.Command, args []string) error {
 		stateStr = style.Info.Render(stateStr)
 	case polecat.StateStuck:
 		stateStr = style.Warning.Render(stateStr)
+	case polecat.StateStalled:
+		stateStr = style.Error.Render(stateStr)
 	case polecat.StateDone:
 		stateStr = style.Success.Render(stateStr)
 	default:

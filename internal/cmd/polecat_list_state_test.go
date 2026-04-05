@@ -21,12 +21,12 @@ func TestEffectivePolecatState(t *testing.T) {
 			want: polecat.StateWorking,
 		},
 		{
-			name: "session-dead-working-becomes-done",
+			name: "session-dead-working-becomes-stalled",
 			item: PolecatListItem{
 				State:          polecat.StateWorking,
 				SessionRunning: false,
 			},
-			want: polecat.StateDone,
+			want: polecat.StateStalled,
 		},
 		{
 			name: "zombie-is-never-rewritten",
@@ -52,6 +52,22 @@ func TestEffectivePolecatState(t *testing.T) {
 				SessionRunning: true,
 			},
 			want: polecat.StateWorking,
+		},
+		{
+			name: "stalled-stays-stalled-when-session-dead",
+			item: PolecatListItem{
+				State:          polecat.StateStalled,
+				SessionRunning: false,
+			},
+			want: polecat.StateStalled,
+		},
+		{
+			name: "stalled-becomes-working-when-session-alive",
+			item: PolecatListItem{
+				State:          polecat.StateStalled,
+				SessionRunning: true,
+			},
+			want: polecat.StateStalled, // stalled is a detected state, session running doesn't override
 		},
 	}
 

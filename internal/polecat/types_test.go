@@ -13,6 +13,7 @@ func TestState_IsWorking(t *testing.T) {
 		{StateWorking, true},
 		{StateDone, false},
 		{StateStuck, false},
+		{StateStalled, false},
 		{StateZombie, false},
 		{State("unknown"), false},
 	}
@@ -59,6 +60,28 @@ func TestPolecat_Summary_NoIssue(t *testing.T) {
 	s := p.Summary()
 	if s.Issue != "" {
 		t.Errorf("Summary.Issue = %q, want empty", s.Issue)
+	}
+}
+
+func TestState_IsStalled(t *testing.T) {
+	tests := []struct {
+		state  State
+		expect bool
+	}{
+		{StateStalled, true},
+		{StateWorking, false},
+		{StateIdle, false},
+		{StateDone, false},
+		{StateStuck, false},
+		{StateZombie, false},
+		{State("unknown"), false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.state), func(t *testing.T) {
+			if got := tt.state.IsStalled(); got != tt.expect {
+				t.Errorf("State(%q).IsStalled() = %v, want %v", tt.state, got, tt.expect)
+			}
+		})
 	}
 }
 

@@ -2050,7 +2050,7 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 			if pi.hasSession && displayState == polecat.StateDone {
 				displayState = polecat.StateWorking
 			} else if !pi.hasSession && displayState == polecat.StateWorking {
-				displayState = polecat.State("stalled")
+				displayState = polecat.StateStalled
 			}
 
 			stateStr := string(displayState)

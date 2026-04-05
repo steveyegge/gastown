@@ -115,6 +115,7 @@ var (
 	ErrShellInWorktree    = errors.New("shell working directory is inside polecat worktree")
 	ErrDoltUnhealthy      = errors.New("dolt health check failed")
 	ErrDoltAtCapacity     = errors.New("dolt server at connection capacity")
+	ErrDiskSpaceLow       = errors.New("insufficient disk space")
 )
 
 // UncommittedWorkError provides details about uncommitted work.
@@ -705,6 +706,11 @@ func (m *Manager) AllocateAndAdd(opts AddOptions) (string, *Polecat, error) {
 func (m *Manager) addWithOptionsLocked(name string, opts AddOptions, polecatDir string) (_ *Polecat, retErr error) {
 	defer func() { telemetry.RecordPolecatSpawn(context.Background(), name, retErr) }()
 
+	// Pre-check: Verify sufficient disk space before expensive worktree creation.
+	if level, msg, err := util.CheckDiskSpace(m.rig.Path); err == nil && level == util.DiskSpaceCritical {
+		return nil, fmt.Errorf("%w: %s", ErrDiskSpaceLow, msg)
+	}
+
 	clonePath := filepath.Join(polecatDir, m.rig.Name)
 	branchName := m.buildBranchName(name, opts.HookBead)
 
@@ -840,6 +846,15 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (_ *Polecat, retE
 
 	if m.exists(name) {
 		return nil, ErrPolecatExists
+	}
+
+	// Pre-check: Verify sufficient disk space before creating worktree.
+	// Spawning a polecat creates a git worktree, copies overlay files, and writes
+	// beads state — all requiring disk I/O. If the disk is nearly full, fail early
+	// with a clear message rather than leaving a half-created polecat.
+	// See: disk-space-resilience — 5 polecats died silently on disk exhaustion.
+	if level, msg, err := util.CheckDiskSpace(m.rig.Path); err == nil && level == util.DiskSpaceCritical {
+		return nil, fmt.Errorf("%w: %s", ErrDiskSpaceLow, msg)
 	}
 
 	// New structure: polecats/<name>/<rigname>/ for LLM ergonomics
@@ -1146,6 +1161,24 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) 
 			if strings.HasPrefix(cwdAbs, cloneAbs) || strings.HasPrefix(cwdAbs, polecatAbs) {
 				return fmt.Errorf("%w: your shell is in %s\n\nPlease cd elsewhere first, then retry:\n  cd ~/gt\n  gt polecat nuke %s/%s --force",
 					ErrShellInWorktree, cwd, m.rig.Name, name)
+			}
+		}
+	}
+
+	// Best-effort: Push the polecat's branch to remote before removing the worktree.
+	// This preserves committed work that hasn't been pushed yet — without this,
+	// nuking a stalled polecat (e.g., after disk space recovery) permanently loses
+	// any commits on the branch. The push is non-blocking: failures are warnings,
+	// not errors, so nuke still proceeds. See: disk-space-resilience.
+	polecatGit := git.NewGit(clonePath)
+	if branch, brErr := polecatGit.CurrentBranch(); brErr == nil && branch != "" {
+		pushed, unpushedCount, checkErr := polecatGit.BranchPushedToRemote(branch, "origin")
+		if checkErr == nil && !pushed && unpushedCount > 0 {
+			if pushErr := polecatGit.Push("origin", branch, false); pushErr != nil {
+				style.PrintWarning("could not push branch %s before removal (%d unpushed commit(s)): %v",
+					branch, unpushedCount, pushErr)
+				style.PrintWarning("WORK AT RISK: branch %s has %d unpushed commit(s) in worktree %s",
+					branch, unpushedCount, clonePath)
 			}
 		}
 	}
@@ -2144,6 +2177,14 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 
 	assignee := m.assigneeID(name)
 
+	// Cross-check tmux session liveness once for use in state derivation below.
+	// When a tmux session has died (e.g., due to disk space exhaustion or OOM),
+	// beads may still report the polecat as "working" because the bead state was
+	// never updated. Without this check, `gt polecat list` shows zombies as working.
+	// See: disk-space-resilience — all 5 polecats appeared "working" after sessions died.
+	sessionRunning, sessionStale := m.polecatSessionState(name)
+	sessionDead := !sessionRunning || sessionStale
+
 	// Primary source: the work bead itself (status=hooked + assignee).
 	// This is the direct-tracking model introduced in hq-l6mm5.
 	hookedBeads, hookedErr := m.beads.List(beads.ListOptions{
@@ -2152,10 +2193,14 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		Priority: -1,
 	})
 	if hookedErr == nil && len(hookedBeads) > 0 {
+		state := StateWorking
+		if sessionDead {
+			state = StateStalled
+		}
 		return &Polecat{
 			Name:      name,
 			Rig:       m.rig.Name,
-			State:     StateWorking,
+			State:     state,
 			ClonePath: clonePath,
 			Branch:    branchName,
 			Issue:     hookedBeads[0].ID,
@@ -2170,10 +2215,14 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 	if agentErr == nil && fields != nil && fields.HookBead != "" {
 		if hookIssue, err := m.beads.Show(fields.HookBead); err == nil &&
 			isCurrentHookedIssueForAssignee(hookIssue, assignee) {
+			state := StateWorking
+			if sessionDead {
+				state = StateStalled
+			}
 			return &Polecat{
 				Name:      name,
 				Rig:       m.rig.Name,
-				State:     StateWorking,
+				State:     state,
 				ClonePath: clonePath,
 				Branch:    branchName,
 				Issue:     fields.HookBead,
@@ -2185,12 +2234,16 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 	// or with empty hook_bead)
 	issue, beadsErr := m.beads.GetAssignedIssue(assignee)
 	if beadsErr != nil {
-		// If beads query fails, return basic polecat info as working
-		// (assume polecat is doing something if it exists)
+		// If beads query fails, cross-check tmux session state.
+		// Previously defaulted to StateWorking; now detects stalled sessions.
+		state := StateWorking
+		if sessionDead {
+			state = StateStalled
+		}
 		return &Polecat{
 			Name:      name,
 			Rig:       m.rig.Name,
-			State:     StateWorking,
+			State:     state,
 			ClonePath: clonePath,
 			Branch:    branchName,
 		}, nil

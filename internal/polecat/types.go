@@ -21,7 +21,8 @@ import "time"
 // history) and SANDBOX (worktree) persist across sessions. An idle polecat keeps
 // its worktree so it can be quickly reassigned without creating a new one.
 //
-// "Stalled" and "zombie" are detected conditions, not stored states. The Witness
+// "Stalled", "zombie", and related conditions are detected at query time by
+// cross-checking tmux session liveness against beads state. The Witness also
 // detects them through monitoring (tmux state, age in StateDone, etc.).
 type State string
 
@@ -47,6 +48,14 @@ const (
 	// Different from "stalled" (detected externally when session stops working).
 	StateStuck State = "stuck"
 
+	// StateStalled means the polecat's tmux session has died while work was still
+	// assigned. This is a detected condition: beads report the polecat as working
+	// (hooked bead, assigned issue) but the tmux session is gone or the agent
+	// process is dead. This typically happens after disk space exhaustion, OOM,
+	// or other system failures that kill sessions without cleanup.
+	// Unlike "stuck" (polecat self-reports), stalled is detected externally.
+	StateStalled State = "stalled"
+
 	// StateZombie means a tmux session exists but has no corresponding worktree directory.
 	// This is a detected condition: the polecat was incompletely nuked or has a
 	// session naming mismatch, leaving an orphaned tmux session.
@@ -56,6 +65,11 @@ const (
 // IsWorking returns true if the polecat is currently working.
 func (s State) IsWorking() bool {
 	return s == StateWorking
+}
+
+// IsStalled returns true if the polecat's session has died while work was assigned.
+func (s State) IsStalled() bool {
+	return s == StateStalled
 }
 
 // IsIdle returns true if the polecat has completed work and is available for reuse.
