@@ -124,3 +124,6 @@
 [branch "dog/alpha-herald-1775333486927"]
 	remote = origin
 	merge = refs/heads/main
+[branch "dog/alpha-herald-1775353269771"]
+	remote = origin
+	merge = refs/heads/main
