@@ -399,11 +399,28 @@ func closeDescendantsImpl(b *beads.Beads, parentID string, force bool) (int, err
 		}
 	}
 
-	// Then close direct children
+	// Then close direct children.
+	// In force mode, unhook work beads (status=hooked) instead of closing them so
+	// they can be re-dispatched. Closing a hooked bead destroys in-progress work;
+	// releasing it back to open preserves the bead for the next polecat (hq-c7d9k).
 	var idsToClose []string
+	var idsToUnhook []string
 	for _, child := range children {
-		if child.Status != "closed" {
+		if child.Status == "closed" {
+			continue
+		}
+		if force && child.Status == "hooked" {
+			idsToUnhook = append(idsToUnhook, child.ID)
+		} else {
 			idsToClose = append(idsToClose, child.ID)
+		}
+	}
+
+	for _, id := range idsToUnhook {
+		if releaseErr := b.ReleaseWithReason(id, "unhooked: polecat force-closed"); releaseErr != nil {
+			errs = append(errs, fmt.Errorf("unhooking child %s of %s: %w", id, parentID, releaseErr))
+		} else {
+			totalClosed++
 		}
 	}
 
