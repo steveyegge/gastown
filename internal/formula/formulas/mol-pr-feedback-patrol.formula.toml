@@ -198,7 +198,7 @@ For each finding in /tmp/patrol-findings.txt, create a work bead and sling a pol
 
 **Safety valve — check open bead count first:**
 ```bash
-OPEN_COUNT=$(bd list --label {{patrol_label}} --status open 2>/dev/null | wc -l || echo "0")
+OPEN_COUNT=$(gt bead list --label {{patrol_label}} --status open 2>/dev/null | wc -l || echo "0")
 if [ "$OPEN_COUNT" -ge {{max_open_beads}} ]; then
   echo "Safety valve: ${OPEN_COUNT} open patrol beads already exist (max {{max_open_beads}}). Skipping dispatch."
   exit 0
@@ -209,7 +209,7 @@ fi
 ```bash
 while IFS=: read -r TYPE PR_NUM PR_URL PR_TITLE EXTRA; do
   # Dedup guard: check for existing open bead for this PR + type
-  EXISTING=$(bd list --label "pr-num-${PR_NUM}" --label "{{patrol_label}}" --status open 2>/dev/null | wc -l || echo "0")
+  EXISTING=$(gt bead list --label "pr-num-${PR_NUM}" --label "{{patrol_label}}" --status open 2>/dev/null | wc -l || echo "0")
   if [ "$EXISTING" -gt 0 ]; then
     echo "Skipping PR #${PR_NUM} (${TYPE}): open bead already exists"
     continue
@@ -247,7 +247,7 @@ Dispatched by mol-pr-feedback-patrol."
   fi
 
   # Create the bead with dedup labels
-  BEAD_ID=$(bd create \
+  BEAD_ID=$(gt bead create \
     --title "$TITLE" \
     --type task \
     --priority 2 \
@@ -306,7 +306,7 @@ After sleep, close this step and immediately reopen list-open-prs to begin the n
 
 ```bash
 # Respawn: start the next patrol cycle
-bd mol step respawn --target list-open-prs
+gt mol step respawn --target list-open-prs
 ```
 
 **Context filling:** If the session is near context capacity, use `gt handoff` to

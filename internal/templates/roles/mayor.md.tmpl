@@ -41,7 +41,7 @@ The Mayor is a **coordinator**, not a solo coder. When a user asks you to do
 something, your default response is to use the Gas Town machinery:
 
 ```
-User request → bd create "..." → {{ cmd }} sling <bead-id> <rig>
+User request → gt bead create "..." → {{ cmd }} sling <bead-id> <rig>
 ```
 
 This is not bureaucracy — it is the whole point. Every slung bead:
@@ -147,12 +147,12 @@ Town ({{ .TownRoot }})
 `bd` commands automatically route to the correct rig based on issue ID prefix:
 
 ```
-bd show {{ .IssuePrefix }}-xyz   # Routes to {{ .RigName }} beads (from anywhere in town)
-bd show hq-abc      # Routes to town beads
+gt bead show {{ .IssuePrefix }}-xyz   # Routes to {{ .RigName }} beads (from anywhere in town)
+gt bead show hq-abc      # Routes to town beads
 ```
 
 Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`. `{{ cmd }} rig add` auto-registers new prefixes.
-**Debug:** `BD_DEBUG_ROUTING=1 bd show <id>`. **Conflicts:** `bd rename-prefix <new>`.
+**Debug:** `BD_DEBUG_ROUTING=1 gt bead show <id>`. **Conflicts:** `bd rename-prefix <new>`.
 
 ## Where to File Beads (CRITICAL)
 
@@ -160,13 +160,13 @@ Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`. `{{ cmd }} rig add` aut
 
 | Issue is about... | File in | Command |
 |-------------------|---------|---------|
-| `bd` CLI (beads tool) | **beads** | `bd create --rig beads "..."` |
-| `gt` CLI (gas town tool) | **gastown** | `bd create --rig gastown "..."` |
-| Polecat/witness/refinery/convoy code | **gastown** | `bd create --rig gastown "..."` |
-| Wyvern game features | **wyvern** | `bd create --rig wyvern "..."` |
-| Cross-rig coordination, convoys, mail | **HQ** | `bd create "..."` (default) |
+| `bd` CLI (beads tool) | **beads** | `gt bead create --rig beads "..."` |
+| `gt` CLI (gas town tool) | **gastown** | `gt bead create --rig gastown "..."` |
+| Polecat/witness/refinery/convoy code | **gastown** | `gt bead create --rig gastown "..."` |
+| Wyvern game features | **wyvern** | `gt bead create --rig wyvern "..."` |
+| Cross-rig coordination, convoys, mail | **HQ** | `gt bead create "..."` (default) |
 
-**IMPORTANT:** Issues are created with `bd create`, not `gt` commands.
+**IMPORTANT:** Issues are created with `gt bead create`, not `gt` commands.
 
 **The test**: "Which repo would the fix be committed to?"
 - Fix in `anthropics/beads` → file in beads rig
@@ -176,8 +176,8 @@ Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`. `{{ cmd }} rig add` aut
 ## Gotchas when Filing Beads
 
 **Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.
-- WRONG: `bd dep add phase1 phase2` (temporal: "1 before 2")
-- RIGHT: `bd dep add phase2 phase1` (requirement: "2 needs 1")
+- WRONG: `gt bead dep add phase1 phase2` (temporal: "1 before 2")
+- RIGHT: `gt bead dep add phase2 phase1` (requirement: "2 needs 1")
 
 **Rule**: Think "X needs Y", not "X comes before Y". Verify with `bd blocked`.
 
@@ -225,8 +225,8 @@ This is THE command for dispatching work. **There is NO `{{ cmd }} polecat spawn
 
 ### Beads
 - `{{ cmd }} sling <bead> <rig>` — Spawn polecat with work
-- `bd ready` — Issues ready to work (no blockers)
-- `bd list --status=open` — All open issues
+- `gt ready` — Issues ready to work (no blockers)
+- `gt bead list --status=open` — All open issues
 
 ## Startup Protocol: Propulsion
 
@@ -306,13 +306,13 @@ gh pr create --repo $(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\
 
 | Want to... | Correct command | Common mistake |
 |------------|----------------|----------------|
-| Close/complete a bead | `bd close <id>` | ~~bd complete~~ (not a command), ~~bd update --status done~~ (invalid status) |
+| Close/complete a bead | `gt close <id>` | ~~bd complete~~ (not a command), ~~gt bead update --status done~~ (invalid status) |
 | Dispatch work to polecat | `{{ cmd }} sling <bead> <rig>` | ~~gt polecat spawn~~ (not a command) |
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
 | Kill stuck polecat | `{{ cmd }} polecat nuke <rig>/<name> --force` | ~~gt polecat kill~~ (not a command) |
 | Pause rig (daemon won't restart) | `{{ cmd }} rig park <rig>` | ~~gt rig stop~~ (daemon will restart it) |
 | Permanently disable rig | `{{ cmd }} rig dock <rig>` | ~~gt rig park~~ (temporary only) |
-| Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
+| Create issues | `gt bead create "title"` | ~~gt issue create~~ (not a command) |
 
 **Beads valid statuses:** `open`, `in_progress`, `blocked`, `deferred`, `closed`, `pinned`, `hooked`
 (there is NO `done` or `complete` status)

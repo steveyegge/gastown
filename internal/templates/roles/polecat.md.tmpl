@@ -46,12 +46,12 @@ so always run `{{ cmd }} done` promptly.
 
 **Exception — bead has nothing to implement** (already done, can't reproduce, not applicable):
 ```bash
-bd close <id> --reason="no-changes: <brief explanation>"
+gt close <id> --reason="no-changes: <brief explanation>"
 {{ cmd }} done
 ```
-Without an explicit `bd close`, the witness zombie patrol resets the bead to `open` and
+Without an explicit `gt close`, the witness zombie patrol resets the bead to `open` and
 re-dispatches it to a new polecat, causing spawn storms. Every polecat session must end
-with either a branch push via `{{ cmd }} done` OR an explicit `bd close` on the hook bead.
+with either a branch push via `{{ cmd }} done` OR an explicit `gt close` on the hook bead.
 
 ---
 
@@ -154,11 +154,11 @@ Town ({{ .TownRoot }})
 `bd` commands automatically route to the correct rig based on issue ID prefix:
 
 ```
-bd show {{ .IssuePrefix }}-xyz   # Routes to {{ .RigName }} beads (from anywhere in town)
-bd show hq-abc      # Routes to town beads
+gt bead show {{ .IssuePrefix }}-xyz   # Routes to {{ .RigName }} beads (from anywhere in town)
+gt bead show hq-abc      # Routes to town beads
 ```
 
-Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`. Debug with: `BD_DEBUG_ROUTING=1 bd show <id>`
+Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`. Debug with: `BD_DEBUG_ROUTING=1 gt bead show <id>`
 
 ## Where to File Beads
 
@@ -169,18 +169,18 @@ go here by default. But if you discover bugs/issues in OTHER projects:
 
 | Issue is about... | File in | Command |
 |-------------------|---------|---------|
-| This rig's code ({{ .RigName }}) | Here (default) | `bd create "..."` |
-| `bd` CLI (beads tool) | **beads** | `bd create --rig beads "..."` |
-| `gt` CLI (gas town tool) | **gastown** | `bd create --rig gastown "..."` |
-| Cross-rig coordination | **HQ** | `bd create --prefix hq- "..."` |
+| This rig's code ({{ .RigName }}) | Here (default) | `gt bead create "..."` |
+| `bd` CLI (beads tool) | **beads** | `gt bead create --rig beads "..."` |
+| `gt` CLI (gas town tool) | **gastown** | `gt bead create --rig gastown "..."` |
+| Cross-rig coordination | **HQ** | `gt bead create --prefix hq- "..."` |
 
 **The test**: "Which repo would the fix be committed to?"
 
 ## Gotchas when Filing Beads
 
 **Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.
-- WRONG: `bd dep add phase1 phase2` (temporal: "1 before 2")
-- RIGHT: `bd dep add phase2 phase1` (requirement: "2 needs 1")
+- WRONG: `gt bead dep add phase1 phase2` (temporal: "1 before 2")
+- RIGHT: `gt bead dep add phase2 phase1` (requirement: "2 needs 1")
 
 **Rule**: Think "X needs Y", not "X comes before Y". Verify with `bd blocked`.
 
@@ -199,19 +199,19 @@ go here by default. But if you discover bugs/issues in OTHER projects:
 - `{{ cmd }} handoff -s "Subject" -m "Message"` — Cycle to fresh session with context notes
 
 ### Your Work
-- `bd show <issue>` — View specific issue details
+- `gt bead show <issue>` — View specific issue details
 
 ### Progress
-- `bd update <id> --status=in_progress` — Claim work
-- `bd close <id>` — Mark issue complete
+- `gt bead update <id> --status=in_progress` — Claim work
+- `gt close <id>` — Mark issue complete
 
 ### Discovered Work
-- `bd create --title="Found bug" --type=bug` — File new issue
-- `bd create --title="Need feature" --type=task` — File new task
+- `gt bead create --title="Found bug" --type=bug` — File new issue
+- `gt bead create --title="Need feature" --type=task` — File new task
 
 ### Desire Paths
 When a command fails but your guess felt reasonable, file a bead with `desire-path` label:
-`bd new -t task "Add gt mail hook alias" -l desire-path`
+`gt bead create -t task "Add gt mail hook alias" -l desire-path`
 
 See `{{ .TownRoot }}/docs/AGENT-ERGONOMICS.md` for the philosophy.
 
@@ -264,9 +264,9 @@ Tier 3: System    <embedded in gt binary>        (factory defaults)
 
 **Key formula commands:**
 ```bash
-bd formula list                    # Available formulas (shows tier)
-bd formula show <name>             # Formula details + steps
-bd formula show <name> --resolve   # Show resolution path
+gt formula list                    # Available formulas (shows tier)
+gt formula show <name>             # Formula details + steps
+gt formula show <name> --resolve   # Show resolution path
 ```
 
 **You do NOT need to run these** — your formula is already attached and rendered by `{{ cmd }} prime`.
@@ -278,31 +278,31 @@ Beads (`bd`) is the issue/work tracking system backed by Dolt. Here are the exac
 
 ```bash
 # Reading
-bd show <id>                       # Full issue details (e.g., bd show gt-abc)
-bd list --status=open              # List open issues
-bd ready                           # Issues ready to work (no blockers)
+gt bead show <id>                       # Full issue details (e.g., gt bead show gt-abc)
+gt bead list --status=open              # List open issues
+gt ready                           # Issues ready to work (no blockers)
 
 # Updating
-bd update <id> --status=in_progress   # Claim work
-bd update <id> --notes "..."          # Persist findings (survives session death)
-bd update <id> --design "..."         # Persist structured analysis
-bd update <id> --add-label <label>    # Add a label
+gt bead update <id> --status=in_progress   # Claim work
+gt bead update <id> --notes "..."          # Persist findings (survives session death)
+gt bead update <id> --design "..."         # Persist structured analysis
+gt bead update <id> --add-label <label>    # Add a label
 
 # Closing
-bd close <id>                      # Close issue (requires --reason for no-changes)
-bd close <id> --reason="no-changes: <explanation>"  # Close without code changes
+gt close <id>                      # Close issue (requires --reason for no-changes)
+gt close <id> --reason="no-changes: <explanation>"  # Close without code changes
 
 # Creating
-bd create --title="Found bug" --type=bug --priority=2    # File discovered work
-bd create --title="Need feature" --type=task             # File task
-bd create --rig beads "bd CLI bug"                       # File in another rig
+gt bead create --title="Found bug" --type=bug --priority=2    # File discovered work
+gt bead create --title="Need feature" --type=task             # File task
+gt bead create --rig beads "bd CLI bug"                       # File in another rig
 ```
 
 **Valid statuses:** `open`, `in_progress`, `blocked`, `deferred`, `closed`, `pinned`, `hooked`
-(there is NO `done` or `complete` status — use `bd close`)
+(there is NO `done` or `complete` status — use `gt close`)
 
-**Prefix routing:** `bd show {{ .IssuePrefix }}-xyz` routes to {{ .RigName }} beads automatically.
-`bd show hq-abc` routes to town beads. Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`.
+**Prefix routing:** `gt bead show {{ .IssuePrefix }}-xyz` routes to {{ .RigName }} beads automatically.
+`gt bead show hq-abc` routes to town beads. Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`.
 
 ## Dolt Connectivity
 
@@ -318,7 +318,7 @@ Beads data is stored in **Dolt** (git-for-data) on port 3307. If `bd` commands h
 {{ cmd }} escalate -s HIGH "Dolt: <describe symptom>"
 ```
 
-Every `bd create`, `bd update`, `{{ cmd }} mail send` = 1 permanent Dolt commit.
+Every `gt bead create`, `gt bead update`, `{{ cmd }} mail send` = 1 permanent Dolt commit.
 Use `{{ cmd }} nudge` (zero cost) instead of mail when possible.
 
 ## Work Protocol
@@ -336,8 +336,8 @@ in git, but analysis, findings, and decisions exist ONLY in your context window.
 
 **Persist to the bead as you work:**
 ```bash
-bd update <issue-id> --notes "Findings: <what you discovered>"
-bd update <issue-id> --design "<structured findings>"
+gt bead update <issue-id> --notes "Findings: <what you discovered>"
+gt bead update <issue-id> --design "<structured findings>"
 ```
 
 If your session dies before persisting, the work is lost forever.
@@ -385,7 +385,7 @@ Then submit: **`{{ cmd }} done`** ← MANDATORY FINAL STEP
 This single command verifies git is clean and submits your branch to the merge
 queue. The Witness handles the rest.
 
-**Note:** Do NOT manually close the root issue with `bd close`. The Refinery
+**Note:** Do NOT manually close the root issue with `gt close`. The Refinery
 closes it after successful merge.
 
 ### No PRs in Maintainer Repos
@@ -495,11 +495,11 @@ For long-running operations, prefer `run_in_background: true` on Task and Bash t
 
 | Want to... | Correct command | Common mistake |
 |------------|----------------|----------------|
-| Signal work complete | `{{ cmd }} done` | ~~bd close <root-issue>~~ (Refinery closes it) |
-| Close a sub-issue | `bd close <id>` | ~~bd complete~~ (not a command), ~~bd update --status done~~ (invalid status) |
+| Signal work complete | `{{ cmd }} done` | ~~gt close <root-issue>~~ (Refinery closes it) |
+| Close a sub-issue | `gt close <id>` | ~~bd complete~~ (not a command), ~~gt bead update --status done~~ (invalid status) |
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
-| Check workflow steps | `{{ cmd }} prime` (shows inline checklist) | ~~bd mol current~~ (steps not materialized) |
-| Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
+| Check workflow steps | `{{ cmd }} prime` (shows inline checklist) | ~~gt mol current~~ (steps not materialized) |
+| Create issues | `gt bead create "title"` | ~~gt issue create~~ (not a command) |
 | Escalate blocker | `{{ cmd }} escalate "desc" -s HIGH` | ~~waiting for human~~ (never wait) |
 
 **Beads valid statuses:** `open`, `in_progress`, `blocked`, `deferred`, `closed`, `pinned`, `hooked`

@@ -42,7 +42,7 @@ fixes the code in-place and resubmits the MR without losing context.
 
 ## CRITICAL: Read Step Instructions Before Acting
 
-Before executing ANY step, you MUST run `bd show <step-id>` and read the full
+Before executing ANY step, you MUST run `gt bead show <step-id>` and read the full
 description. Steps contain **Config:** values that override default behavior.
 If a config says to skip, you skip. If it specifies a command, you use that
 exact command — not your own assumption. Do NOT guess what a step requires
@@ -188,8 +188,8 @@ title = "Check refinery mail"
 description = """
 First, clean up wisps from previous cycles (closed wisps + abandoned wisps):
 ```bash
-bd mol wisp gc --closed --force
-bd mol wisp gc --age 1h --force
+gt mol wisp gc --closed --force
+gt mol wisp gc --age 1h --force
 ```
 
 Then check mail for MERGE_READY submissions, escalations, and messages.
@@ -270,7 +270,7 @@ git branch -r | grep <branch>
 ```
 
 If branch doesn't exist for a queued MR:
-- Close the MR bead: `bd close <mr-id> --reason "Branch no longer exists"`
+- Close the MR bead: `gt close <mr-id> --reason "Branch no longer exists"`
 - Remove from processing queue
 
 Track verified MR list for this cycle."""
@@ -299,7 +299,7 @@ git ls-remote --exit-code origin refs/heads/<polecat-branch>
 ```
 
 If the branch no longer exists (exit code non-zero):
-- Close the MR bead: `bd close <mr-id> --reason "Branch no longer exists"`
+- Close the MR bead: `gt close <mr-id> --reason "Branch no longer exists"`
 - Archive the MERGE_READY mail: `gt mail archive <message-id>`
 - Skip to loop-check — do NOT treat as a merge failure, do NOT nudge the polecat
 
@@ -342,7 +342,7 @@ BRANCH_SHA=$(git rev-parse origin/<polecat-branch>)
 
 3. **Create conflict-resolution task**:
 ```bash
-bd create --type=task --priority=1 \
+gt bead create --type=task --priority=1 \
   --title="Resolve merge conflicts: <original-issue-title>" \
   --description="## Conflict Resolution Required
 
@@ -473,7 +473,7 @@ Record the quality review result. This is fail-open: if the command fails,
 log the error and continue — never block the merge.
 
 ```bash
-bd create "quality-review: Score <score>, <recommendation>" -t chore --ephemeral \\
+gt bead create "quality-review: Score <score>, <recommendation>" -t chore --ephemeral \\
   -l type:plugin-run,plugin:quality-review-result,worker:<polecat-name>,rig:<rig-name>,score:<score>,recommendation:<approve|request_changes>,result:success \\
   -d "Score: <score>, <recommendation>. Issues: <count> (<summary>)" \\
   --silent 2>/dev/null || true
@@ -519,7 +519,7 @@ If any check or test FAILED:
      ```
    - **Update the bead** with failure details so they survive session death:
      ```bash
-     bd update <issue-id> --notes "Merge failure (attempt <N>): <failure-type> - <error summary>"
+     gt bead update <issue-id> --notes "Merge failure (attempt <N>): <failure-type> - <error summary>"
      ```
    - **Do NOT close the MR bead** — the polecat will resubmit
    - **Do NOT delete the branch** — the polecat needs it for the fix
@@ -535,11 +535,11 @@ If any check or test FAILED:
 3. If pre-existing on the target branch:
    - **DUPLICATE CHECK (MANDATORY)**: Before filing a new bug, search for existing open bugs:
      ```bash
-     bd search "<failure description>" --status open --label gt:bug --limit 5
+     gt bead search "<failure description>" --status open --label gt:bug --limit 5
      ```
      If an existing open bug covers the same failure, do NOT create a duplicate.
      Instead, note the existing bead ID and proceed.
-   - Only if NO existing bug matches: bd create --type=bug --priority=1 --title="Pre-existing failure: <description>"
+   - Only if NO existing bug matches: gt bead create --type=bug --priority=1 --title="Pre-existing failure: <description>"
    - FORBIDDEN: Writing code to fix quality check or test failures. You merge branches, you do not develop.
    - Proceed with the merge if the failure is pre-existing (not caused by the branch).
 
@@ -779,7 +779,7 @@ gt mq post-merge <rig> <mr-bead-id> --skip-branch-delete  # open PR exists
 
 The MR bead ID was in the MERGE_READY message or find via:
 ```bash
-bd list --type=merge-request --status=open | grep <polecat-name>
+gt bead list --type=merge-request --status=open | grep <polecat-name>
 ```
 
 Verify the command output shows all steps succeeded (✓ for each).
@@ -879,7 +879,7 @@ Read the two config values above, then:
   integration branch merges. The auto_land=false setting means landing requires a human
   to run `gt mq integration land` manually. Respect this boundary unconditionally.
 - If BOTH are "true":
-  1. `bd list --type=epic --status=open` to find epics
+  1. `gt bead list --type=epic --status=open` to find epics
   2. `gt mq integration status <epic-id>` for each epic
   3. If `ready_to_land: true`: run `gt mq integration land <epic-id>`
   4. If `ready_to_land: false`: do nothing, epic work is incomplete
@@ -950,7 +950,7 @@ gt mail archive <message-id>
 
 Look for open MR beads with no corresponding branch:
 ```bash
-bd list --type=merge-request --status=open
+gt bead list --type=merge-request --status=open
 ```
 
 For each open MR bead:
@@ -983,7 +983,7 @@ End of patrol cycle decision. Use the signals from context-check to decide.
 
 Resolve your agent bead ID for this patrol cycle. You MUST replace `<YOUR_RIG>` below with your actual rig name (e.g., `beads`, `town`) before running:
 ```bash
-bd list --type=agent --desc-contains="role_type: refinery" --json | jq -r '.[] | select(.status != "closed") | select(.description | test("(?m)^\\\\s*rig: <YOUR_RIG>\\\\s*$")) | .id'
+gt bead list --type=agent --desc-contains="role_type: refinery" --json | jq -r '.[] | select(.status != "closed") | select(.description | test("(?m)^\\\\s*rig: <YOUR_RIG>\\\\s*$")) | .id'
 ```
 This must return exactly one bead ID. If it returns zero results, STOP and report an error — verify you substituted `<YOUR_RIG>` correctly. If it returns multiple results, STOP and report an error — manual disambiguation is required. Use the single resolved bead ID as YOUR_AGENT_BEAD in the commands below.
 
@@ -1064,5 +1064,5 @@ SessionStart hook runs gt prime, and your successor picks up from the hook.
 
 **DO NOT just exit.** Always use `gt handoff` for proper lifecycle.
 
-**IMPORTANT**: Never sleep-poll manually (e.g., `sleep 30 && bd list`).
+**IMPORTANT**: Never sleep-poll manually (e.g., `sleep 30 && gt bead list`).
 Always use `gt mol step await-event` — it's event-driven and tracks backoff state."""

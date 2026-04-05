@@ -372,7 +372,7 @@ state = PARDONED
 
 **3. Cancel warrant bead:**
 ```bash
-bd close {warrant_id} --reason "Session responded at attempt {attempt}"
+gt close {warrant_id} --reason "Session responded at attempt {attempt}"
 ```
 
 **4. Notify requester:**
@@ -472,7 +472,7 @@ Note: Target session not found at warrant processing
 
 **2. Close warrant bead:**
 ```bash
-bd close {warrant_id} --reason "{epitaph_summary}"
+gt close {warrant_id} --reason "{epitaph_summary}"
 ```
 
 **3. Move state file to completed:**

@@ -23,10 +23,18 @@ Provides operations that span multiple beads repositories, such as
 moving beads between repos and viewing beads by ID with automatic
 prefix-based routing.
 
+ID-based commands (show, update, dep) route automatically by bead ID prefix.
+Non-ID commands (create, list, search) accept --rig <prefix> for routing.
+
 Subcommands:
-  move    Move a bead from one repository to another
-  show    Show details of a bead (routes by prefix)
-  read    Alias for show`,
+  show      Show details of a bead (routes by prefix)
+  read      Alias for show
+  create    Create a bead (routes by --rig)
+  update    Update a bead (routes by prefix)
+  dep       Manage dependencies (routes by prefix)
+  list      List beads (routes by --rig)
+  search    Search beads (routes by --rig)
+  move      Move a bead between repositories`,
 }
 
 var beadMoveCmd = &cobra.Command{
@@ -118,8 +126,7 @@ func runBeadMove(cmd *cobra.Command, args []string) error {
 	// Get source bead details — resolve rig directory from prefix so that
 	// rig-prefixed beads are found in their rig database (GH#2126).
 	output, err := BdCmd("show", sourceID, "--json").
-		Dir(resolveBeadDir(sourceID)).
-		StripBeadsDir().
+		RouteForBead(sourceID).
 		Output()
 	if err != nil {
 		return fmt.Errorf("getting bead %s: %w", sourceID, err)

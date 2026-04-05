@@ -11,7 +11,7 @@ opportunities. The output is a set of beads capturing actionable findings.
 
 You are a self-cleaning worker. You:
 1. Receive work via your hook (pinned molecule + review scope)
-2. Work through molecule steps using `bd mol current` / `bd close <step>`
+2. Work through molecule steps using `gt mol current` / `gt close <step>`
 3. Complete and self-clean via `gt done` (submit findings + nuke yourself)
 4. You are GONE - your findings are recorded in beads
 
@@ -19,7 +19,7 @@ You are a self-cleaning worker. You:
 sandbox, and exit. There is no idle state. Done means gone.
 
 **Important:** This formula defines the template. Your molecule already has step
-beads created from it. Use `bd mol current` to find them - do NOT read this file directly.
+beads created from it. Use `gt mol current` to find them - do NOT read this file directly.
 
 **You do NOT:**
 - Fix the issues yourself (file beads, let other polecats fix)
@@ -63,7 +63,7 @@ gt hook               # Shows your pinned molecule and hook_bead
 
 The hook_bead describes your review scope. Read the tracking issue:
 ```bash
-bd show {{issue}}           # Full issue details
+gt bead show {{issue}}           # Full issue details
 ```
 
 **3. Understand the scope:**
@@ -206,7 +206,7 @@ Create beads for each finding.
 
 **1. For bugs (P0, P1):**
 ```bash
-bd create --type=bug --priority=1 \
+gt bead create --type=bug --priority=1 \
   --title="<clear description of bug>" \
   --description="Found during code review of {{scope}}.
 
@@ -224,7 +224,7 @@ Suggested fix:
 
 **2. For code quality issues (P2, P3):**
 ```bash
-bd create --type=task --priority=2 \
+gt bead create --type=task --priority=2 \
   --title="<clear description>" \
   --description="Found during code review of {{scope}}.
 
@@ -254,7 +254,7 @@ Update the tracking issue with review summary.
 
 **1. Create summary:**
 ```bash
-bd update {{issue}} --notes "Code review complete.
+gt bead update {{issue}} --notes "Code review complete.
 
 Scope: {{scope}}
 Focus: {{focus}}

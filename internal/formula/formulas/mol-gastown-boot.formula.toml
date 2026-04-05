@@ -14,7 +14,7 @@ Each step has action + verification - steps stay open until outcome is confirmed
 
 ## Execution
 ```bash
-bd mol wisp mol-gastown-boot  # Create wisp
+gt mol wisp mol-gastown-boot  # Create wisp
 ```"""
 formula = "mol-gastown-boot"
 version = 1

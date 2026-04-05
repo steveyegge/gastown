@@ -141,7 +141,7 @@ Print the startup banner:
 
 ```bash
 gt hook                          # Check for hooked patrol
-bd list --status=in_progress --assignee=refinery
+gt bead list --status=in_progress --assignee=refinery
 # If no patrol:
 {{ cmd }} patrol new                  # Creates root-only wisp with config vars and hooks it
 ```
@@ -214,7 +214,7 @@ If conflicts unresolvable: reopen source issue, notify witness (MERGE_FAILED), c
 
 **run-tests**: Run each configured command (skip empty ones):
 setup → typecheck → lint → build → test.
-Read `bd show <step-id>` for exact commands.
+Read `gt bead show <step-id>` for exact commands.
 
 **handle-failures**: **VERIFICATION GATE**
 ```
@@ -222,7 +222,7 @@ Tests PASSED → proceed to merge
 
 Tests FAILED:
 ├── Branch caused it? → Abort, reopen source issue, notify witness (MERGE_FAILED), close MR, delete branch
-└── Pre-existing? → File bead (bd create --type=bug --priority=1 --title="..."), then proceed
+└── Pre-existing? → File bead (gt bead create --type=bug --priority=1 --title="..."), then proceed
 
 GATE: Cannot proceed to merge without fix OR bead filed
 ```
@@ -304,7 +304,7 @@ git rebase --continue
 # If too messy:
 git rebase --abort
 # Reopen source issue, close MR, notify witness (NOT the polecat — it's dead)
-bd update <source-issue> --status=open
+gt bead update <source-issue> --status=open
 gt mq close <mr-id> --reason="Unresolvable conflicts"
 gt mail send {{ .RigName }}/witness -s "MERGE_FAILED" \
   -m "Branch polecat/<worker> has unresolvable conflicts with target. Source issue reopened for re-slinging."
@@ -326,16 +326,16 @@ gt mail send {{ .RigName }}/witness -s "MERGE_FAILED" \
 
 ### Beads CLI Reference
 ```bash
-bd show <id>                             # Issue details (e.g., bd show gt-abc)
-bd update <id> --status=open             # Reopen source issue
-bd update <id> --notes "..."             # Persist findings
-bd close <id>                            # Close issue
-bd close <id> --reason="..."             # Close with reason
-bd create --title="..." --type=bug --priority=1  # File pre-existing failure
+gt bead show <id>                             # Issue details (e.g., gt bead show gt-abc)
+gt bead update <id> --status=open             # Reopen source issue
+gt bead update <id> --notes "..."             # Persist findings
+gt close <id>                            # Close issue
+gt close <id> --reason="..."             # Close with reason
+gt bead create --title="..." --type=bug --priority=1  # File pre-existing failure
 ```
 
 **Valid statuses:** `open`, `in_progress`, `blocked`, `deferred`, `closed`, `pinned`, `hooked`
-(there is NO `done` or `complete` status — use `bd close`)
+(there is NO `done` or `complete` status — use `gt close`)
 
 ### Dolt Connectivity
 
@@ -359,7 +359,7 @@ Beads data is stored in Dolt (port 3307). If `bd` commands hang or fail:
 |------------|----------------|----------------|
 | Check merge queue | `{{ cmd }} mq list {{ .RigName }}` | ~~git branch -r \| grep polecat~~ (misses MRs) |
 | Message a polecat | `{{ cmd }} nudge {{ .RigName }}/<name> "msg"` | ~~tmux send-keys~~ (unreliable) |
-| Create issues | `bd create "title"` | ~~gt issue create~~ (not a command) |
+| Create issues | `gt bead create "title"` | ~~gt issue create~~ (not a command) |
 
 **Rig lifecycle commands (for reference):**
 - `park/unpark` — Temporary pause. Daemon skips parked rigs.

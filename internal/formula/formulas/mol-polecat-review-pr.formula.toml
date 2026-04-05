@@ -9,7 +9,7 @@ standards, then approves, requests changes, or files followup beads.
 
 You are a self-cleaning worker. You:
 1. Receive work via your hook (pinned molecule + PR reference)
-2. Work through molecule steps using `bd mol current` / `bd close <step>`
+2. Work through molecule steps using `gt mol current` / `gt close <step>`
 3. Complete and self-clean via `gt done` (submit findings + nuke yourself)
 4. You are GONE - your review is recorded in beads
 
@@ -17,7 +17,7 @@ You are a self-cleaning worker. You:
 sandbox, and exit. There is no idle state. Done means gone.
 
 **Important:** This formula defines the template. Your molecule already has step
-beads created from it. Use `bd mol current` to find them - do NOT read this file directly.
+beads created from it. Use `gt mol current` to find them - do NOT read this file directly.
 
 **You do NOT:**
 - Merge the PR yourself (maintainer or Refinery does that)
@@ -61,7 +61,7 @@ gt hook               # Shows your pinned molecule and hook_bead
 
 The hook_bead references the PR to review. Read the tracking issue:
 ```bash
-bd show {{issue}}           # Full issue details including PR URL
+gt bead show {{issue}}           # Full issue details including PR URL
 ```
 
 **3. Fetch the PR:**
@@ -223,7 +223,7 @@ Create beads for any followup work discovered during review.
 
 **1. For issues found that are outside PR scope:**
 ```bash
-bd create --type=bug --title="Found during PR review: <description>" \
+gt bead create --type=bug --title="Found during PR review: <description>" \
   --description="Discovered while reviewing {{pr_url}}.
 
   <details of the issue>"
@@ -231,7 +231,7 @@ bd create --type=bug --title="Found during PR review: <description>" \
 
 **2. For improvements suggested but not required:**
 ```bash
-bd create --type=task --title="Improvement: <description>" \
+gt bead create --type=task --title="Improvement: <description>" \
   --description="Suggested during review of {{pr_url}}.
 
   <details of the improvement>"
@@ -239,7 +239,7 @@ bd create --type=task --title="Improvement: <description>" \
 
 **3. Update the tracking issue:**
 ```bash
-bd update {{issue}} --notes "Review complete. Decision: <APPROVE|REQUEST_CHANGES|etc>
+gt bead update {{issue}} --notes "Review complete. Decision: <APPROVE|REQUEST_CHANGES|etc>
 Followups filed: <list of bead IDs if any>"
 ```
 

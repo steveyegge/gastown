@@ -101,7 +101,7 @@ git log origin/$(git branch --show-current)..HEAD  # Should be empty
 
 **3. Verify issue is closed:**
 ```bash
-bd show {{issue}}             # Status should be 'closed'
+gt bead show {{issue}}             # Status should be 'closed'
 ```
 
 **4. Spot-check quality (ZFC - your judgment):**
@@ -139,7 +139,7 @@ Verified: clean git state, issue closed"
 
 **Update cleanup wisp state:**
 ```bash
-bd update <wisp-id> --labels cleanup,polecat:{{polecat}},state:merge-requested
+gt bead update <wisp-id> --labels cleanup,polecat:{{polecat}},state:merge-requested
 ```
 
 **Wait for MERGED response:**
@@ -180,7 +180,7 @@ git branch -D polecat/{{polecat}} 2>/dev/null || true
 
 **4. Close this lease:**
 ```bash
-bd close <this-lease-id>
+gt close <this-lease-id>
 ```
 
 **Exit criteria:** Polecat session killed, worktree removed, lease closed."""

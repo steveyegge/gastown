@@ -81,7 +81,7 @@ Before killing ANY polecat session:
 ```
 [ ] 1. gt polecat check-recovery {{RIG}}/<name>  # Must be SAFE_TO_NUKE
 [ ] 2. gt polecat git-state <name>               # Must be clean
-[ ] 3. bd show <issue-id>                        # Should show 'closed'
+[ ] 3. gt bead show <issue-id>                        # Should show 'closed'
 [ ] 4. Check merge queue or PR status
 ```
 
@@ -143,7 +143,7 @@ gt mail send {{RIG}}/refinery -s "MERGE_READY <polecat>" -m "..."
 | Kill stuck polecat | `gt polecat nuke {{RIG}}/<name> --force` | ~~gt polecat kill~~ (not a command) |
 | View polecat output | `gt peek {{RIG}}/<name> 50` | ~~tmux capture-pane~~ (gt peek is simpler) |
 | Check merge queue | `gt mq list {{RIG}}` | ~~git branch -r \| grep polecat~~ |
-| Create issue | `bd create "title"` | ~~gt issue create~~ (not a command) |
+| Create issue | `gt bead create "title"` | ~~gt issue create~~ (not a command) |
 
 ---
 

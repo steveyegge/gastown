@@ -107,8 +107,8 @@ needs = ["heartbeat"]
 description = """
 First, clean up wisps from previous cycles (closed wisps + abandoned wisps):
 ```bash
-bd mol wisp gc --closed --force
-bd mol wisp gc --age 1h --force
+gt mol wisp gc --closed --force
+gt mol wisp gc --age 1h --force
 ```
 
 Then handle callbacks from agents.
@@ -377,7 +377,7 @@ The molecule state IS the waiter - patrol discovers reality each cycle.
 
 **Step 1: Find gate-ready molecules**
 ```bash
-bd ready --gated --json
+gt ready --gated --json
 ```
 
 This returns molecules where:
@@ -389,7 +389,7 @@ This returns molecules where:
 **Step 2: For each ready molecule, dispatch to the appropriate rig**
 ```bash
 # Determine target rig from molecule metadata
-bd mol show <mol-id> --json
+gt mol show <mol-id> --json
 # Look for rig field or infer from prefix
 
 # Dispatch to that rig's polecat pool
@@ -417,7 +417,7 @@ Check convoy completion status.
 
 Convoys are coordination beads that track multiple issues across rigs. When all tracked issues close, the convoy auto-closes.
 
-**IMPORTANT**: Use `gt convoy` commands (not `bd list`) because convoys are stored in
+**IMPORTANT**: Use `gt convoy` commands (not `gt bead list`) because convoys are stored in
 town-level HQ beads and the Deacon runs from ~/gt/deacon/. The `gt` commands are
 town-aware and will find convoys regardless of current directory.
 
@@ -460,7 +460,7 @@ gt feed --since 10m --plain | grep "✓"
 
 **Step 2: For each closed issue, check cross-rig dependents**
 ```bash
-bd show <closed-issue>
+gt bead show <closed-issue>
 # Look at 'blocks' field - these are issues that were waiting on this one
 # If any blocked issue is in a different rig/prefix, it may now be unblocked
 ```
@@ -514,7 +514,7 @@ gt mail send gastown/witness -s "Dependency resolved: <bd-xxx>" \\
 - Convoy complete → mayor/ (for strategic visibility)
 - Cross-rig dep resolved → <rig>/witness (for operational awareness)
 
-Keep notifications brief and actionable. The recipient can run bd show for details."""
+Keep notifications brief and actionable. The recipient can run gt bead show for details."""
 
 [[steps]]
 id = "heartbeat-mid"
@@ -554,7 +554,7 @@ A docked rig is NOT broken. It is off on purpose. Skip it entirely.
 Before sending health check nudges, check if the town is idle:
 ```bash
 # Check for active work
-bd list --status=in_progress --limit=5
+gt bead list --status=in_progress --limit=5
 ```
 
 If NO active work (empty result or only patrol molecules):
@@ -896,7 +896,7 @@ description = """
 **Step 1: Quick orphan scan**
 ```bash
 # Check for in_progress issues with dead assignees
-bd list --status=in_progress --json | head -20
+gt bead list --status=in_progress --json | head -20
 ```
 
 For each in_progress issue, check if assignee session exists:
@@ -930,7 +930,7 @@ description = """
 # Fast orphan session check only
 tmux list-sessions 2>/dev/null | wc -l
 # Count open wisps as a proxy for system load
-bd list --status=open --json 2>/dev/null | jq length
+gt bead list --status=open --json 2>/dev/null | jq length
 ```
 
 **Step 2: If cleanup needed, dispatch to dog**
@@ -983,7 +983,7 @@ This runs the compaction algorithm:
 Note promoted/deleted/skipped counts for the patrol digest.
 
 **Performance:**
-Compaction runs every patrol cycle. The query is fast (single bd list + filter).
+Compaction runs every patrol cycle. The query is fast (single gt bead list + filter).
 If performance becomes an issue, add a cooldown gate (e.g., run once per hour).
 
 **Exit criteria:** Wisps compacted (or nothing to compact)."""

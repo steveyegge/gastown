@@ -2,7 +2,7 @@
 
 This file defines the prose template embedded in every gate bead's description.
 The `mol-decompose-with-gates` formula reads this template, populates the
-placeholders, and passes it as the `--description` to `bd create`.
+placeholders, and passes it as the `--description` to `gt bead create`.
 
 ## Placeholders
 
@@ -62,7 +62,7 @@ When a review step finds issues, do NOT close this gate bead. Instead:
 **1. File one fix bead per issue found:**
 
 ```bash
-bd create "Fix: <concise issue description>" \
+gt bead create "Fix: <concise issue description>" \
   --type=task \
   --description="## Context
 Found during gate review of {{plan_title}} ({{plan_bead}}).
@@ -85,7 +85,7 @@ Review step: <which step found this>
 **2. Add each fix as a blocking dependency on THIS gate bead:**
 
 ```bash
-bd dep add {{gate_id}} <fix-bead-id>
+gt bead dep add {{gate_id}} <fix-bead-id>
 ```
 
 This ensures the gate bead becomes blocked again until all fixes are closed.
@@ -119,7 +119,7 @@ ambiguity.
 When ALL review steps pass with no issues found:
 
 ```bash
-bd close {{gate_id}} --reason="Gate passed: all review steps clean"
+gt close {{gate_id}} --reason="Gate passed: all review steps clean"
 ```
 
 Closing the gate bead signals that the plan's implementation has passed

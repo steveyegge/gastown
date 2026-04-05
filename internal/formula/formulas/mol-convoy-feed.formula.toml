@@ -67,7 +67,7 @@ gt convoy status {{convoy}} --json
 
 For each tracked issue in the convoy:
 ```bash
-bd show <issue-id> --json
+gt bead show <issue-id> --json
 ```
 
 An issue is "ready" if ALL of these are true:
