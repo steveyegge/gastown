@@ -1060,3 +1060,78 @@ a.infra-link:hover {
 .dolt-good { color: var(--dormant); }
 .dolt-warn { color: var(--tremor); }
 .dolt-bad { color: var(--rupture); }
+
+/* Container monitoring cards */
+.ct-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.ct-card {
+  background: white;
+  border-radius: var(--radius);
+  border: 1px solid #e5e2df;
+  overflow: hidden;
+  transition: box-shadow 0.15s;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+.ct-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-decoration: none; }
+.ct-card-status-bar { height: 3px; }
+.ct-bar-dormant { background: var(--dormant); }
+.ct-bar-tremor { background: var(--tremor); }
+.ct-bar-rupture { background: var(--rupture); }
+.ct-bar-sediment { background: var(--sediment); }
+.ct-card-body { padding: 1rem; }
+.ct-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+.ct-card-name { font-weight: 600; font-size: 0.95rem; }
+.ct-status { font-size: 0.8rem; font-weight: 500; }
+.ct-status-dormant { color: var(--dormant); }
+.ct-status-tremor { color: var(--tremor); }
+.ct-status-rupture { color: var(--rupture); }
+.ct-status-sediment { color: var(--sediment); }
+.ct-card-meta { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.ct-service-badge {
+  display: inline-block;
+  background: #e0e8f0;
+  color: var(--bedrock);
+  padding: 0.1em 0.5em;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.ct-image-tag {
+  font-size: 0.75rem;
+  color: var(--sediment);
+  font-family: var(--font-mono);
+}
+.ct-card-stats { display: flex; gap: 1rem; }
+
+/* Container detail page */
+.ct-detail-summary {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: white;
+  border-radius: var(--radius);
+  border: 1px solid #e5e2df;
+}
+.ct-detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+.ct-detail-meta code { font-size: 0.8rem; background: #f5f0eb; padding: 0.1em 0.3em; border-radius: 3px; }
+
+/* Docker settings threshold form */
+.threshold-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}

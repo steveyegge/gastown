@@ -171,3 +171,19 @@ func isOrphanDatabase(name string) bool {
 	}
 	return false
 }
+
+// NewDoltInternalChecker returns a CheckFunc that checks Dolt health using an
+// existing *sql.DB connection (no connection string needed). This is used for
+// faultline's own Dolt instance (system-level, project_id=NULL).
+func NewDoltInternalChecker(conn *sql.DB) CheckFunc {
+	return func(ctx context.Context, target DatabaseTarget) []CheckResult {
+		thresholds := parseDoltThresholds(target.Thresholds)
+
+		var results []CheckResult
+		results = append(results, checkDoltPing(ctx, conn, target.ID))
+		results = append(results, checkDoltQueryLatency(ctx, conn, target.ID))
+		results = append(results, checkDoltCommitLag(ctx, conn, target.ID, thresholds))
+		results = append(results, checkDoltOrphanCount(ctx, conn, target.ID))
+		return results
+	}
+}

@@ -52,7 +52,7 @@ func layout(title string, account *AccountView) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if account.Role == "admin" || account.Role == "owner" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<a href=\"/dashboard/dolt-health\">Dolt</a>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<a href=\"/dashboard/infrastructure\">Infrastructure</a> <a href=\"/dashboard/dolt-health\">Dolt</a>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -74,7 +74,7 @@ func layout(title string, account *AccountView) templ.Component {
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(account.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/layout.templ`, Line: 29, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/layout.templ`, Line: 30, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {

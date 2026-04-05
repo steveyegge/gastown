@@ -1,0 +1,442 @@
+package dashboard
+
+import (
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"strings"
+
+	"github.com/outdoorsea/faultline/internal/db"
+	"github.com/outdoorsea/faultline/internal/dockermon"
+)
+
+// ContainerCardView is a monitored container formatted for the list page.
+type ContainerCardView struct {
+	ID                  string
+	ProjectID           int64
+	ContainerName       string
+	ServiceName         string
+	Image               string
+	Enabled             bool
+	Status              string // healthy, degraded, down
+	LastCheckAgo        string
+	ConsecutiveFailures int
+	LastSeenAgo         string
+}
+
+// ContainerDetailView holds data for the container detail page.
+type ContainerDetailView struct {
+	ID                  string
+	ProjectID           int64
+	ProjectName         string
+	ContainerName       string
+	ServiceName         string
+	Image               string
+	Enabled             bool
+	Status              string
+	LastCheckAgo        string
+	ConsecutiveFailures int
+	LastSeenAgo         string
+	Checks              []db.ContainerCheck
+}
+
+// DockerSettingsView holds Docker threshold overrides for the settings tab.
+type DockerSettingsView struct {
+	ProjectID   int64
+	ProjectName string
+	Thresholds  dockermon.Thresholds
+}
+
+func containerStatusClass(status string) string {
+	switch status {
+	case "healthy":
+		return "dormant"
+	case "degraded":
+		return "tremor"
+	case "down":
+		return "rupture"
+	default:
+		return "sediment"
+	}
+}
+
+func containerStatusIcon(status string) string {
+	switch status {
+	case "healthy":
+		return "●"
+	case "degraded":
+		return "△"
+	case "down":
+		return "◉"
+	default:
+		return "○"
+	}
+}
+
+func containerCheckStatusClass(status string) string {
+	switch status {
+	case "ok", "healthy":
+		return "badge-green"
+	case "warning", "degraded":
+		return "badge-yellow"
+	case "critical", "down":
+		return "badge-red"
+	default:
+		return "badge-muted"
+	}
+}
+
+// containerCheckTimelineSVG generates a simple SVG bar chart of recent container check statuses.
+func containerCheckTimelineSVG(checks []db.ContainerCheck) string {
+	maxBars := 60
+	if len(checks) < maxBars {
+		maxBars = len(checks)
+	}
+
+	width := 600
+	height := 40
+	barW := width / maxBars
+	if barW < 2 {
+		barW = 2
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`<svg viewBox="0 0 %d %d" class="check-timeline-svg" preserveAspectRatio="none">`, width, height))
+
+	for i := 0; i < maxBars; i++ {
+		c := checks[maxBars-1-i]
+		color := "var(--dormant)"
+		switch c.Status {
+		case "warning", "degraded":
+			color = "var(--tremor)"
+		case "critical", "down":
+			color = "var(--rupture)"
+		}
+		x := i * barW
+		b.WriteString(fmt.Sprintf(`<rect x="%d" y="0" width="%d" height="%d" fill="%s" rx="1"/>`, x, barW-1, height, color))
+	}
+
+	b.WriteString(`</svg>`)
+	return b.String()
+}
+
+// parseThresholds decodes JSON bytes into Thresholds, falling back to defaults.
+func parseThresholds(raw []byte) dockermon.Thresholds {
+	if len(raw) == 0 {
+		return dockermon.DefaultThresholds()
+	}
+	var th dockermon.Thresholds
+	if err := json.Unmarshal(raw, &th); err != nil {
+		return dockermon.DefaultThresholds()
+	}
+	return th
+}
+
+// imageName returns the short image name (without registry/tag clutter).
+func imageName(img string) string {
+	// Strip registry prefix (e.g. docker.io/library/).
+	if idx := strings.LastIndex(img, "/"); idx >= 0 {
+		img = img[idx+1:]
+	}
+	// Truncate long image:tag combos.
+	if len(img) > 40 {
+		img = img[:37] + "..."
+	}
+	return img
+}
+
+templ containersPage(account *AccountView, projectName string, projectID int64, containers []ContainerCardView) {
+	@layout(projectName + " — Containers", account) {
+		<div class="page-header">
+			<div class="page-header-row">
+				<div>
+					<h2>{ projectName } — Containers</h2>
+					<p class="page-subtitle">
+						<a href="/dashboard/">All Projects</a> / <a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues", projectID)) }>{ projectName }</a> / Containers
+					</p>
+				</div>
+				<div class="action-buttons">
+					<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues?platform=docker", projectID)) } class="btn btn-sm">Docker Issues</a>
+					<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/settings/docker", projectID)) } class="btn btn-sm">Docker Settings</a>
+				</div>
+			</div>
+		</div>
+
+		if len(containers) == 0 {
+			<div class="empty">
+				<p>No containers discovered yet.</p>
+				<p class="form-hint" style="margin-top:0.5rem">Containers are discovered automatically when the Docker monitor is running.</p>
+			</div>
+		} else {
+			<div class="ct-cards">
+				for _, c := range containers {
+					<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/containers/%s", projectID, c.ID)) } class="ct-card">
+						@templ.Raw(fmt.Sprintf(`<div class="ct-card-status-bar ct-bar-%s"></div>`, containerStatusClass(c.Status)))
+						<div class="ct-card-body">
+							<div class="ct-card-header">
+								<span class="ct-card-name">{ c.ContainerName }</span>
+								@templ.Raw(fmt.Sprintf(`<span class="ct-status ct-status-%s">%s %s</span>`, containerStatusClass(c.Status), containerStatusIcon(c.Status), template.HTMLEscapeString(c.Status)))
+							</div>
+							<div class="ct-card-meta">
+								if c.ServiceName != "" {
+									<span class="ct-service-badge">{ c.ServiceName }</span>
+								}
+								if c.Image != "" {
+									<span class="ct-image-tag">{ imageName(c.Image) }</span>
+								}
+								if !c.Enabled {
+									<span class="badge badge-muted">disabled</span>
+								}
+							</div>
+							<div class="ct-card-stats">
+								if c.LastCheckAgo != "" {
+									<div class="project-stat">
+										<span class="stat-value stat-muted">{ c.LastCheckAgo }</span>
+										<span class="stat-label">last check</span>
+									</div>
+								}
+								if c.ConsecutiveFailures > 0 {
+									<div class="project-stat">
+										<span class="stat-value stat-danger">{ fmt.Sprintf("%d", c.ConsecutiveFailures) }</span>
+										<span class="stat-label">failures</span>
+									</div>
+								}
+							</div>
+						</div>
+					</a>
+				}
+			</div>
+		}
+	}
+}
+
+templ containerDetailPage(account *AccountView, c ContainerDetailView) {
+	@layout(c.ContainerName + " — Container", account) {
+		<div class="page-header">
+			<div class="page-header-row">
+				<div>
+					<h2>{ c.ContainerName }</h2>
+					<p class="page-subtitle">
+						<a href="/dashboard/">All Projects</a> / <a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues", c.ProjectID)) }>{ c.ProjectName }</a> / <a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/containers", c.ProjectID)) }>Containers</a> / { c.ContainerName }
+					</p>
+				</div>
+			</div>
+		</div>
+
+		<div class="ct-detail-summary">
+			<div class="ct-detail-status">
+				@templ.Raw(fmt.Sprintf(`<span class="db-status-large db-status-%s">%s %s</span>`, containerStatusClass(c.Status), containerStatusIcon(c.Status), template.HTMLEscapeString(c.Status)))
+			</div>
+			<div class="ct-detail-meta">
+				if c.ServiceName != "" {
+					<span><strong>Service:</strong> { c.ServiceName }</span>
+				}
+				if c.Image != "" {
+					<span><strong>Image:</strong> <code>{ c.Image }</code></span>
+				}
+				if c.LastSeenAgo != "" {
+					<span><strong>Last seen:</strong> { c.LastSeenAgo }</span>
+				}
+				if c.LastCheckAgo != "" {
+					<span><strong>Last check:</strong> { c.LastCheckAgo }</span>
+				}
+				if c.ConsecutiveFailures > 0 {
+					<span><strong>Consecutive failures:</strong> { fmt.Sprintf("%d", c.ConsecutiveFailures) }</span>
+				}
+				if !c.Enabled {
+					<span class="badge badge-muted">disabled</span>
+				}
+			</div>
+		</div>
+
+		<hr/>
+		<h3>Check History</h3>
+
+		if len(c.Checks) == 0 {
+			<p class="empty">No checks recorded yet.</p>
+		} else {
+			<div class="check-timeline">
+				@templ.Raw(containerCheckTimelineSVG(c.Checks))
+			</div>
+
+			<table class="events-table">
+				<thead>
+					<tr>
+						<th>Type</th>
+						<th>Status</th>
+						<th>Value</th>
+						<th>Message</th>
+						<th>Checked</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, ch := range c.Checks {
+						<tr>
+							<td>{ ch.CheckType }</td>
+							<td>
+								@templ.Raw(fmt.Sprintf(`<span class="badge %s">%s</span>`, containerCheckStatusClass(ch.Status), template.HTMLEscapeString(ch.Status)))
+							</td>
+							<td>
+								if ch.Value != nil {
+									{ fmt.Sprintf("%.1f", *ch.Value) }
+								}
+							</td>
+							<td class="check-message">{ truncateStr(ch.Message, 80) }</td>
+							<td>{ timeAgo(ch.CheckedAt) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+	}
+}
+
+templ dockerSettingsPage(account *AccountView, s DockerSettingsView) {
+	@layout(s.ProjectName + " — Docker Settings", account) {
+		<div class="page-header">
+			<div class="page-header-row">
+				<div>
+					<h2>{ s.ProjectName } — Docker Settings</h2>
+					<p class="page-subtitle">
+						<a href="/dashboard/">All Projects</a> / <a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues", s.ProjectID)) }>{ s.ProjectName }</a> / <a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/containers", s.ProjectID)) }>Containers</a> / Settings
+					</p>
+				</div>
+			</div>
+		</div>
+
+		<p class="form-hint" style="margin-bottom:1.5rem">
+			Override default monitoring thresholds for Docker containers in this project. Changes apply to all containers unless overridden at the container level.
+		</p>
+
+		<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/settings/docker", s.ProjectID)) } class="settings-form">
+			@csrfField(account.CSRFToken)
+
+			<h3>Memory Thresholds</h3>
+			<div class="threshold-row">
+				<div class="form-group">
+					<label for="memory_warning">Warning (%)</label>
+					<input type="number" id="memory_warning" name="memory_warning" min="1" max="100" step="1" value={ fmt.Sprintf("%.0f", s.Thresholds.MemoryWarning*100) }/>
+					<span class="form-hint">Alert when memory usage exceeds this percentage.</span>
+				</div>
+				<div class="form-group">
+					<label for="memory_critical">Critical (%)</label>
+					<input type="number" id="memory_critical" name="memory_critical" min="1" max="100" step="1" value={ fmt.Sprintf("%.0f", s.Thresholds.MemoryCritical*100) }/>
+					<span class="form-hint">Critical alert threshold.</span>
+				</div>
+			</div>
+
+			<h3>CPU Thresholds</h3>
+			<div class="threshold-row">
+				<div class="form-group">
+					<label for="cpu_warning">Warning (%)</label>
+					<input type="number" id="cpu_warning" name="cpu_warning" min="1" max="100" step="1" value={ fmt.Sprintf("%.0f", s.Thresholds.CPUWarning*100) }/>
+					<span class="form-hint">Alert when CPU throttle ratio exceeds this percentage.</span>
+				</div>
+				<div class="form-group">
+					<label for="cpu_critical">Critical (%)</label>
+					<input type="number" id="cpu_critical" name="cpu_critical" min="1" max="100" step="1" value={ fmt.Sprintf("%.0f", s.Thresholds.CPUCritical*100) }/>
+					<span class="form-hint">Critical alert threshold.</span>
+				</div>
+			</div>
+
+			<h3>Restart Thresholds</h3>
+			<div class="threshold-row">
+				<div class="form-group">
+					<label for="restart_warning">Warning (count)</label>
+					<input type="number" id="restart_warning" name="restart_warning" min="1" max="100" value={ fmt.Sprintf("%d", s.Thresholds.RestartWarning) }/>
+					<span class="form-hint">Restarts in monitoring window before warning.</span>
+				</div>
+				<div class="form-group">
+					<label for="restart_critical">Critical (count)</label>
+					<input type="number" id="restart_critical" name="restart_critical" min="1" max="100" value={ fmt.Sprintf("%d", s.Thresholds.RestartCritical) }/>
+					<span class="form-hint">Restarts in monitoring window before critical.</span>
+				</div>
+			</div>
+
+			<h3>Health Check Thresholds</h3>
+			<div class="threshold-row">
+				<div class="form-group">
+					<label for="health_fail_warning">Warning (failures)</label>
+					<input type="number" id="health_fail_warning" name="health_fail_warning" min="1" max="100" value={ fmt.Sprintf("%d", s.Thresholds.HealthFailWarning) }/>
+					<span class="form-hint">Consecutive health check failures before warning.</span>
+				</div>
+				<div class="form-group">
+					<label for="health_fail_critical">Critical (failures)</label>
+					<input type="number" id="health_fail_critical" name="health_fail_critical" min="1" max="100" value={ fmt.Sprintf("%d", s.Thresholds.HealthFailCritical) }/>
+					<span class="form-hint">Consecutive health check failures before critical.</span>
+				</div>
+			</div>
+
+			<div class="form-actions">
+				<button type="submit" class="btn btn-primary">Save Thresholds</button>
+				<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/containers", s.ProjectID)) } class="btn">Cancel</a>
+			</div>
+		</form>
+	}
+}
+
+templ infrastructurePage(account *AccountView, containers []InfraContainerView) {
+	@layout("Infrastructure", account) {
+		<div class="page-header">
+			<h2>Infrastructure</h2>
+			<p class="page-subtitle">All monitored Docker containers across projects.</p>
+		</div>
+
+		if len(containers) == 0 {
+			<div class="empty">
+				<p>No containers discovered yet.</p>
+			</div>
+		} else {
+			<table class="events-table">
+				<thead>
+					<tr>
+						<th>Container</th>
+						<th>Service</th>
+						<th>Image</th>
+						<th>Project</th>
+						<th>Status</th>
+						<th>Last Seen</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, c := range containers {
+						<tr>
+							<td>
+								if c.ProjectID > 0 {
+									<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/containers/%s", c.ProjectID, c.ID)) }>{ c.ContainerName }</a>
+								} else {
+									{ c.ContainerName }
+								}
+							</td>
+							<td>{ c.ServiceName }</td>
+							<td><code>{ imageName(c.Image) }</code></td>
+							<td>
+								if c.ProjectID > 0 {
+									<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/issues", c.ProjectID)) }>{ c.ProjectName }</a>
+								} else {
+									<span class="badge badge-muted">unlinked</span>
+								}
+							</td>
+							<td>
+								@templ.Raw(fmt.Sprintf(`<span class="badge %s">%s %s</span>`, containerCheckStatusClass(c.Status), containerStatusIcon(c.Status), template.HTMLEscapeString(c.Status)))
+							</td>
+							<td>{ c.LastSeenAgo }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+	}
+}
+
+// InfraContainerView combines container data with project name for the system-level page.
+type InfraContainerView struct {
+	ID            string
+	ProjectID     int64
+	ProjectName   string
+	ContainerName string
+	ServiceName   string
+	Image         string
+	Status        string
+	LastSeenAgo   string
+}

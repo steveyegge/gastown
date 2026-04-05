@@ -345,6 +345,11 @@ func runServe() error {
 	}
 	go um.Run(ctx)
 
+	// Auto-register system Dolt monitor (zero-config, project_id=NULL).
+	if err := dolt.EnsureSystemDoltMonitor(context.Background()); err != nil {
+		log.Warn("failed to register system dolt monitor", "err", err)
+	}
+
 	// Start database monitor — periodic health checks for monitored databases.
 	dm := dbmon.New(
 		&dbmon.SQLDBProvider{DB: dolt.DB},
@@ -352,6 +357,7 @@ func runServe() error {
 		10*time.Second,
 	)
 	dm.RegisterChecker("postgres", dbmon.NewPostgresChecker())
+	dm.RegisterChecker("dolt", dbmon.NewDoltInternalChecker(dolt.DB))
 	dm.OnStateChange = func(target dbmon.DatabaseTarget, oldStatus, newStatus dbmon.Status, results []dbmon.CheckResult) {
 		if target.ProjectID == nil {
 			log.Warn("dbmon: state change for target without project_id, skipping event",
@@ -508,7 +514,7 @@ func runCloud() error {
 
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      server.SecurityHeaders(mux),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,

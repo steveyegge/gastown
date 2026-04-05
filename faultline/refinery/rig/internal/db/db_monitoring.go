@@ -203,6 +203,52 @@ func (d *DB) GetDBMonitorState(ctx context.Context, databaseID string) (*DBMonit
 	return &s, nil
 }
 
+// SystemDoltID is the fixed ID for faultline's own Dolt monitor entry.
+const SystemDoltID = "system-dolt"
+
+// EnsureSystemDoltMonitor creates the monitored_databases entry for faultline's
+// own Dolt instance if it doesn't already exist. The entry has project_id=NULL
+// (system-level) and an empty connection string (uses the internal connection).
+func (d *DB) EnsureSystemDoltMonitor(ctx context.Context) error {
+	var exists int
+	err := d.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM monitored_databases WHERE id = ?`, SystemDoltID,
+	).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("check system dolt monitor: %w", err)
+	}
+	if exists > 0 {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	_, err = d.ExecContext(ctx, `
+		INSERT INTO monitored_databases (id, project_id, name, db_type, connection_string, enabled, check_interval_secs, created_at, updated_at)
+		VALUES (?, NULL, ?, ?, ?, true, 60, ?, ?)`,
+		SystemDoltID, "faultline-dolt", "dolt", []byte{}, now, now,
+	)
+	if err != nil {
+		return fmt.Errorf("insert system dolt monitor: %w", err)
+	}
+	d.MarkDirty()
+	return nil
+}
+
+// GetSystemDBHealth returns the current health status and recent checks for the
+// system Dolt monitor. Returns nil state if no checks have run yet.
+func (d *DB) GetSystemDBHealth(ctx context.Context) (*DBMonitorState, []DBCheck, error) {
+	state, err := d.GetDBMonitorState(ctx, SystemDoltID)
+	if err != nil {
+		// No state yet — that's fine, return nil state.
+		state = nil
+	}
+	checks, err := d.ListDBChecksByDatabase(ctx, SystemDoltID, 20)
+	if err != nil {
+		return state, nil, fmt.Errorf("list system db checks: %w", err)
+	}
+	return state, checks, nil
+}
+
 // ListDBMonitorStatesByProject returns monitor states for all databases in a project.
 func (d *DB) ListDBMonitorStatesByProject(ctx context.Context, projectID int64) (map[string]*DBMonitorState, error) {
 	rows, err := d.QueryContext(ctx,

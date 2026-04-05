@@ -803,6 +803,7 @@ templ seismographPage(account *AccountView, issues []IssueView, total int, proje
 					</p>
 				</div>
 				<div class="action-buttons">
+					<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/containers", projectID)) } class="btn btn-sm">Containers</a>
 					<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/databases", projectID)) } class="btn btn-sm">Databases</a>
 					<a href={ templ.SafeURL(fmt.Sprintf("/dashboard/projects/%d/settings", projectID)) } class="btn btn-sm">Settings</a>
 				</div>

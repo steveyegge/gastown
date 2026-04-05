@@ -21,6 +21,7 @@ templ layout(title string, account *AccountView) {
 						<a href="/dashboard/teams">Teams</a>
 						<a href="/dashboard/live">Live</a>
 						if account.Role == "admin" || account.Role == "owner" {
+							<a href="/dashboard/infrastructure">Infrastructure</a>
 							<a href="/dashboard/dolt-health">Dolt</a>
 						}
 						if account.Role == "owner" {

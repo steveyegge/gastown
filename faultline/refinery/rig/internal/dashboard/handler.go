@@ -23,6 +23,7 @@ import (
 
 	"github.com/outdoorsea/faultline/internal/crypto"
 	"github.com/outdoorsea/faultline/internal/db"
+	"github.com/outdoorsea/faultline/internal/dockermon"
 	"github.com/outdoorsea/faultline/internal/slackdm"
 )
 
@@ -136,6 +137,20 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /dashboard/projects/{project_id}/databases/", h.requireAuth(admin(h.saveDatabaseMonitor)))
 	mux.HandleFunc("POST /dashboard/projects/{project_id}/databases/{database_id}/delete", h.requireAuth(admin(h.deleteDatabaseMonitor)))
 	mux.HandleFunc("POST /dashboard/projects/{project_id}/databases/{database_id}/test", h.requireAuth(admin(h.testDatabaseConnectionDash)))
+
+	// Docker container monitoring (admin).
+	mux.HandleFunc("GET /dashboard/projects/{project_id}/containers", h.requireAuth(admin(h.showContainers)))
+	mux.HandleFunc("GET /dashboard/projects/{project_id}/containers/", h.requireAuth(admin(h.showContainers)))
+	mux.HandleFunc("GET /dashboard/projects/{project_id}/containers/{container_id}", h.requireAuth(admin(h.showContainerDetail)))
+	mux.HandleFunc("GET /dashboard/projects/{project_id}/containers/{container_id}/", h.requireAuth(admin(h.showContainerDetail)))
+	mux.HandleFunc("GET /dashboard/projects/{project_id}/settings/docker", h.requireAuth(admin(h.showDockerSettings)))
+	mux.HandleFunc("GET /dashboard/projects/{project_id}/settings/docker/", h.requireAuth(admin(h.showDockerSettings)))
+	mux.HandleFunc("POST /dashboard/projects/{project_id}/settings/docker", h.requireAuth(admin(h.saveDockerSettings)))
+	mux.HandleFunc("POST /dashboard/projects/{project_id}/settings/docker/", h.requireAuth(admin(h.saveDockerSettings)))
+
+	// System-level: Infrastructure (admin).
+	mux.HandleFunc("GET /dashboard/infrastructure", h.requireAuth(admin(h.showInfrastructure)))
+	mux.HandleFunc("GET /dashboard/infrastructure/", h.requireAuth(admin(h.showInfrastructure)))
 
 	// System-level: Dolt health (admin).
 	mux.HandleFunc("GET /dashboard/dolt-health", h.requireAuth(admin(h.showDoltHealth)))
@@ -2347,4 +2362,222 @@ func testDBPing(ctx context.Context, driver, connStr string) error {
 	}
 	defer func() { _ = testDB.Close() }()
 	return testDB.PingContext(ctx)
+}
+
+// --- Docker container monitoring handlers ---
+
+func (h *Handler) showContainers(w http.ResponseWriter, r *http.Request) {
+	account := h.currentAccount(r)
+	projectID := pathInt64(r, "project_id")
+
+	project, err := h.DB.GetProject(r.Context(), projectID)
+	if err != nil {
+		http.Error(w, "project not found", http.StatusNotFound)
+		return
+	}
+
+	containers, err := h.DB.ListContainersByProject(r.Context(), projectID)
+	if err != nil {
+		h.Log.Error("list containers", "err", err)
+		containers = nil
+	}
+
+	var views []ContainerCardView
+	for _, c := range containers {
+		cv := ContainerCardView{
+			ID:            c.ID,
+			ProjectID:     projectID,
+			ContainerName: c.ContainerName,
+			ServiceName:   c.ServiceName,
+			Image:         c.Image,
+			Enabled:       c.Enabled,
+			Status:        "healthy",
+			LastSeenAgo:   timeAgo(c.LastSeenAt),
+		}
+		state, err := h.DB.GetContainerMonitorState(r.Context(), c.ID)
+		if err == nil {
+			cv.Status = state.Status
+			if state.LastCheckAt != nil {
+				cv.LastCheckAgo = timeAgo(*state.LastCheckAt)
+			}
+			cv.ConsecutiveFailures = state.ConsecutiveFailures
+		}
+		views = append(views, cv)
+	}
+
+	_ = containersPage(account, project.Name, projectID, views).Render(r.Context(), w)
+}
+
+func (h *Handler) showContainerDetail(w http.ResponseWriter, r *http.Request) {
+	account := h.currentAccount(r)
+	projectID := pathInt64(r, "project_id")
+	containerID := r.PathValue("container_id")
+
+	project, err := h.DB.GetProject(r.Context(), projectID)
+	if err != nil {
+		http.Error(w, "project not found", http.StatusNotFound)
+		return
+	}
+
+	c, err := h.DB.GetContainer(r.Context(), projectID, containerID)
+	if err != nil {
+		http.Error(w, "container not found", http.StatusNotFound)
+		return
+	}
+
+	checks, err := h.DB.ListContainerChecks(r.Context(), containerID, 100)
+	if err != nil {
+		h.Log.Error("list container checks", "err", err)
+		checks = nil
+	}
+
+	status := "healthy"
+	var lastCheckAgo string
+	var consecutiveFailures int
+	state, err := h.DB.GetContainerMonitorState(r.Context(), containerID)
+	if err == nil {
+		status = state.Status
+		if state.LastCheckAt != nil {
+			lastCheckAgo = timeAgo(*state.LastCheckAt)
+		}
+		consecutiveFailures = state.ConsecutiveFailures
+	}
+
+	dv := ContainerDetailView{
+		ID:                  c.ID,
+		ProjectID:           projectID,
+		ProjectName:         project.Name,
+		ContainerName:       c.ContainerName,
+		ServiceName:         c.ServiceName,
+		Image:               c.Image,
+		Enabled:             c.Enabled,
+		Status:              status,
+		LastCheckAgo:        lastCheckAgo,
+		ConsecutiveFailures: consecutiveFailures,
+		LastSeenAgo:         timeAgo(c.LastSeenAt),
+		Checks:              checks,
+	}
+
+	_ = containerDetailPage(account, dv).Render(r.Context(), w)
+}
+
+func (h *Handler) showDockerSettings(w http.ResponseWriter, r *http.Request) {
+	account := h.currentAccount(r)
+	projectID := pathInt64(r, "project_id")
+
+	project, err := h.DB.GetProject(r.Context(), projectID)
+	if err != nil {
+		http.Error(w, "project not found", http.StatusNotFound)
+		return
+	}
+
+	raw, _ := h.DB.GetProjectDockerThresholds(r.Context(), projectID)
+	th := parseThresholds(raw)
+
+	sv := DockerSettingsView{
+		ProjectID:   projectID,
+		ProjectName: project.Name,
+		Thresholds:  th,
+	}
+
+	_ = dockerSettingsPage(account, sv).Render(r.Context(), w)
+}
+
+func (h *Handler) saveDockerSettings(w http.ResponseWriter, r *http.Request) {
+	projectID := pathInt64(r, "project_id")
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	if !validateCSRF(r) {
+		http.Error(w, "invalid CSRF token", http.StatusForbidden)
+		return
+	}
+
+	if _, err := h.DB.GetProject(r.Context(), projectID); err != nil {
+		http.Error(w, "project not found", http.StatusNotFound)
+		return
+	}
+
+	parseFloat := func(name string) float64 {
+		v, _ := strconv.ParseFloat(r.FormValue(name), 64)
+		return v / 100.0
+	}
+	parseInt := func(name string) int {
+		v, _ := strconv.Atoi(r.FormValue(name))
+		return v
+	}
+
+	th := dockermon.Thresholds{
+		MemoryWarning:      parseFloat("memory_warning"),
+		MemoryCritical:     parseFloat("memory_critical"),
+		CPUWarning:         parseFloat("cpu_warning"),
+		CPUCritical:        parseFloat("cpu_critical"),
+		RestartWarning:     parseInt("restart_warning"),
+		RestartCritical:    parseInt("restart_critical"),
+		HealthFailWarning:  parseInt("health_fail_warning"),
+		HealthFailCritical: parseInt("health_fail_critical"),
+	}
+
+	raw, err := json.Marshal(th)
+	if err != nil {
+		http.Error(w, "failed to encode thresholds", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.DB.UpdateProjectDockerThresholds(r.Context(), projectID, raw); err != nil {
+		h.Log.Error("save docker thresholds", "err", err)
+		http.Error(w, "failed to save", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, fmt.Sprintf("/dashboard/projects/%d/containers", projectID), http.StatusSeeOther)
+}
+
+func (h *Handler) showInfrastructure(w http.ResponseWriter, r *http.Request) {
+	account := h.currentAccount(r)
+
+	containers, err := h.DB.ListAllContainers(r.Context())
+	if err != nil {
+		h.Log.Error("list all containers", "err", err)
+		containers = nil
+	}
+
+	// Build a project name cache.
+	projectNames := make(map[int64]string)
+	for _, c := range containers {
+		if c.ProjectID != nil && *c.ProjectID > 0 {
+			if _, ok := projectNames[*c.ProjectID]; !ok {
+				p, err := h.DB.GetProject(r.Context(), *c.ProjectID)
+				if err == nil {
+					projectNames[*c.ProjectID] = p.Name
+				}
+			}
+		}
+	}
+
+	var views []InfraContainerView
+	for _, c := range containers {
+		iv := InfraContainerView{
+			ID:            c.ID,
+			ContainerName: c.ContainerName,
+			ServiceName:   c.ServiceName,
+			Image:         c.Image,
+			Status:        "healthy",
+			LastSeenAgo:   timeAgo(c.LastSeenAt),
+		}
+		if c.ProjectID != nil && *c.ProjectID > 0 {
+			iv.ProjectID = *c.ProjectID
+			iv.ProjectName = projectNames[*c.ProjectID]
+		}
+		state, err := h.DB.GetContainerMonitorState(r.Context(), c.ID)
+		if err == nil {
+			iv.Status = state.Status
+		}
+		views = append(views, iv)
+	}
+
+	_ = infrastructurePage(account, views).Render(r.Context(), w)
 }
