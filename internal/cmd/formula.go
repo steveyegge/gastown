@@ -827,10 +827,22 @@ func executeWorkflowFormula(f *formula.Formula, formulaName, targetRig string) e
 		fmt.Printf("  %s %s: %s%s\n", style.Dim.Render("○"), step.ID, stepBeadID, needsStr)
 	}
 
-	// Step 3: Identify and sling ready steps (those with no dependencies)
+	// Step 3: Identify and dispatch ready steps (those with no dependencies)
+	// Interactive steps are hooked to the current session; others are slung to polecats.
 	fmt.Printf("\n%s Dispatching ready steps...\n\n", style.Bold.Render("→"))
 
+	// Check if any step in the workflow is interactive — if so, we'll need
+	// to handle the molecule lifecycle in the current session.
+	hasInteractive := false
+	for _, step := range f.Steps {
+		if step.Interactive {
+			hasInteractive = true
+			break
+		}
+	}
+
 	slingCount := 0
+	interactiveCount := 0
 	for _, step := range f.Steps {
 		if len(step.Needs) > 0 {
 			continue // has unmet dependencies — will be auto-dispatched
@@ -841,6 +853,23 @@ func executeWorkflowFormula(f *formula.Formula, formulaName, targetRig string) e
 			continue
 		}
 
+		if step.Interactive || hasInteractive {
+			// Interactive step: hook to current session instead of slinging to a polecat.
+			// The user will execute this step in their current crew session.
+			_ = BdCmd("update", stepBeadID, "--status=hooked").
+				WithAutoCommit().
+				Dir(rigBeadsDir).
+				Run()
+
+			fmt.Printf("  %s %s: %s (interactive — hooked to current session)\n",
+				style.Bold.Render("⇨"), step.ID, stepBeadID)
+			fmt.Printf("    %s\n", step.Title)
+			fmt.Printf("    When done: bd close %s\n\n", stepBeadID)
+			interactiveCount++
+			continue
+		}
+
+		// Non-interactive step: sling to a polecat
 		// Agent precedence: CLI --agent > formula-level
 		stepAgent := formulaRunAgent
 		if stepAgent == "" {
@@ -873,11 +902,19 @@ func executeWorkflowFormula(f *formula.Formula, formulaName, targetRig string) e
 	}
 
 	// Summary
-	blockedCount := len(f.Steps) - slingCount
+	blockedCount := len(f.Steps) - slingCount - interactiveCount
 	fmt.Printf("\n%s Workflow dispatched!\n", style.Bold.Render("✓"))
 	fmt.Printf("  Workflow: %s\n", workflowID)
-	fmt.Printf("  Steps:    %d total, %d dispatched, %d awaiting dependencies\n",
-		len(f.Steps), slingCount, blockedCount)
+	if interactiveCount > 0 {
+		fmt.Printf("  Steps:    %d total, %d interactive (current session), %d dispatched, %d awaiting dependencies\n",
+			len(f.Steps), interactiveCount, slingCount, blockedCount)
+		fmt.Printf("\n  This workflow has interactive steps. Work through them sequentially:\n")
+		fmt.Printf("    bd mol current <molecule-id>   — find current step\n")
+		fmt.Printf("    bd close <step-id>             — advance to next step\n")
+	} else {
+		fmt.Printf("  Steps:    %d total, %d dispatched, %d awaiting dependencies\n",
+			len(f.Steps), slingCount, blockedCount)
+	}
 	fmt.Printf("\n  Track progress: gt convoy status %s\n", workflowID)
 
 	return nil
