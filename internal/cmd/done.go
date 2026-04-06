@@ -1050,6 +1050,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				Priority:    priority,
 				Description: description,
 				Ephemeral:   true,
+				Rig:         rigName, // Ensure MR bead is created in the rig's database (gt-7y7)
 			})
 			if err != nil {
 				// Non-fatal: record the error and skip to notifyWitness.
@@ -1083,6 +1084,14 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				doneErrors = append(doneErrors, errMsg)
 				style.PrintWarning("%s\nBranch is pushed but MR bead not confirmed. Preserving worktree.", errMsg)
 				goto notifyWitness
+			}
+
+			// gt-gpy: Validate that the MR bead landed in the rig's database.
+			// If the source bead has a cross-rig prefix (e.g., hq-), the routing
+			// could still resolve to the wrong database despite Rig: rigName.
+			// This is a warning-only guard — mrFailed is NOT set on mismatch.
+			if prefixErr := beads.ValidateRigPrefix(townRoot, rigName, mrID); prefixErr != nil {
+				style.PrintWarning("MR bead prefix mismatch: %v\nThe refinery may not find this MR — check 'gt mq list %s'", prefixErr, rigName)
 			}
 
 			// GH#3032: Supersede older open MRs for the same source issue.

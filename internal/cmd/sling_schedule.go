@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -329,16 +328,7 @@ func areScheduled(beadIDs []string) map[string]bool {
 	}
 
 	// Scan all rig beads dirs (sling contexts live in target rig's DB). (GH#3468)
-	contexts, err := listAllSlingContexts(townRoot)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s Warning: could not list sling contexts: %v (treating all as scheduled)\n",
-			style.Dim.Render("⚠"), err)
-		// Fail closed: treat all as scheduled to avoid duplicate scheduling
-		for _, id := range beadIDs {
-			result[id] = true
-		}
-		return result
-	}
+	contexts := listAllSlingContexts(townRoot)
 
 	// Build lookup of work bead IDs from open contexts, skipping stale ones.
 	scheduledWorkBeads := make(map[string]bool)

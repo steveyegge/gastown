@@ -273,9 +273,15 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 			Priority:    priority,
 			Description: description,
 			Ephemeral:   true,
+			Rig:         rigName, // Ensure MR bead is created in the rig's database (gt-7y7)
 		})
 		if err != nil {
 			return fmt.Errorf("creating merge request bead: %w", err)
+		}
+
+		// gt-gpy: Validate MR bead landed in the rig's database (warning only).
+		if prefixErr := beads.ValidateRigPrefix(townRoot, rigName, mrIssue.ID); prefixErr != nil {
+			style.PrintWarning("MR bead prefix mismatch: %v\nThe refinery may not find this MR — check 'gt mq list %s'", prefixErr, rigName)
 		}
 
 		// Nudge refinery to pick up the new MR

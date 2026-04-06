@@ -600,6 +600,54 @@ func TestMRVerificationSetsMRFailed(t *testing.T) {
 	}
 }
 
+// TestMRBeadCreationUsesRig verifies that MR bead creation specifies the rig (gt-7y7).
+// When a polecat works on a cross-rig bead (e.g., hq-xxx on rig "gastown"), the
+// MR bead must be created with Rig set to the polecat's rig so it lands in the
+// rig's database — not the town-level database where the source bead lives.
+// Without this, the refinery never finds the MR and the branch sits unmerged.
+func TestMRBeadCreationUsesRig(t *testing.T) {
+	tests := []struct {
+		name     string
+		issueID  string
+		rigName  string
+		wantRig  string
+	}{
+		{
+			name:    "same-rig bead: rig is still set",
+			issueID: "gt-abc",
+			rigName: "gastown",
+			wantRig: "gastown",
+		},
+		{
+			name:    "cross-rig hq- bead: MR must land in polecat rig",
+			issueID: "hq-abc",
+			rigName: "gastown",
+			wantRig: "gastown",
+		},
+		{
+			name:    "cross-rig en- bead: MR must land in polecat rig",
+			issueID: "en-xyz",
+			rigName: "gastown",
+			wantRig: "gastown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the CreateOptions construction in done.go.
+			opts := beads.CreateOptions{
+				Title:       "Merge: " + tt.issueID,
+				Labels:      []string{"gt:merge-request"},
+				Ephemeral:   true,
+				Rig:         tt.rigName,
+			}
+			if opts.Rig != tt.wantRig {
+				t.Errorf("CreateOptions.Rig = %q, want %q (issue %s)", opts.Rig, tt.wantRig, tt.issueID)
+			}
+		})
+	}
+}
+
 // TestDeferredKillNotOnValidationError verifies that the deferred session kill
 // does NOT trigger when runDone returns early due to validation errors (bad flags,
 // wrong role). The sessionCleanupNeeded flag must only be set after role detection

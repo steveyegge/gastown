@@ -707,7 +707,10 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 // doMergePR handles merging via GitHub's PR merge API (merge_strategy=pr).
 // This respects branch protection rules including required reviews.
 // Called from doMerge after quality gates have passed.
+//
+//nolint:unparam // ctx is reserved for future use when git methods accept context
 func (e *Engineer) doMergePR(ctx context.Context, branch, target string) ProcessResult {
+	_ = ctx
 	_, _ = fmt.Fprintln(e.output, "[Engineer] Using PR merge strategy (merge_strategy=pr)")
 
 	// Step PR.1: Find the GitHub PR for this branch
@@ -1431,10 +1434,17 @@ The Refinery will automatically retry the merge after you force-push.`,
 		Priority:    mr.Priority,
 		Description: description,
 		Actor:       e.rig.Name + "/refinery",
+		Rig:         e.rig.Name, // Ensure task lands in the rig's database (gt-7y7)
 	})
 	if err != nil {
 		releaseSlotOnError()
 		return "", fmt.Errorf("creating conflict resolution task: %w", err)
+	}
+
+	// gt-gpy: Validate task bead landed in the rig's database (warning only).
+	townRoot := filepath.Dir(e.rig.Path)
+	if prefixErr := beads.ValidateRigPrefix(townRoot, e.rig.Name, task.ID); prefixErr != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] WARNING: conflict task prefix mismatch: %v\n", prefixErr)
 	}
 
 	// The conflict task's ID is returned so the MR can be blocked on it.

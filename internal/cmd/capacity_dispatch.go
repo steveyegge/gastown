@@ -247,10 +247,7 @@ func beadsForContext(townRoot string, fields *capacity.SlingContextFields) *bead
 // cleanupStaleContexts closes invalid and stale sling context beads.
 // Called explicitly before the dispatch cycle to separate cleanup from querying.
 func cleanupStaleContexts(townRoot string) {
-	contexts, err := listAllSlingContexts(townRoot)
-	if err != nil {
-		return
-	}
+	contexts := listAllSlingContexts(townRoot)
 
 	// First pass: close invalid and circuit-broken contexts, collect work bead IDs
 	// that need status checks for stale detection.
@@ -351,10 +348,7 @@ func batchFetchBeadInfoByIDs(townRoot string, ids []string) map[string]beadStatu
 // is checked across all rig dirs since work beads live in rig-local DBs.
 func getReadySlingContexts(townRoot string) ([]capacity.PendingBead, error) {
 	// 1. List all open sling context beads from HQ (authoritative)
-	allContexts, err := listAllSlingContexts(townRoot)
-	if err != nil {
-		return nil, fmt.Errorf("listing sling contexts: %w", err)
-	}
+	allContexts := listAllSlingContexts(townRoot)
 
 	if len(allContexts) == 0 {
 		return nil, nil
@@ -495,7 +489,7 @@ func recordDispatchFailure(townBeads *beads.Beads, b capacity.PendingBead, dispa
 // (GH#3468), so we scan HQ plus all rig dirs.
 // Used by scheduler list/status/clear, cleanupStaleContexts, and areScheduled.
 // Does NOT filter by readiness or circuit breaker.
-func listAllSlingContexts(townRoot string) ([]*beads.Issue, error) {
+func listAllSlingContexts(townRoot string) []*beads.Issue {
 	var all []*beads.Issue
 	for _, dir := range beadsSearchDirs(townRoot) {
 		b := beads.NewWithBeadsDir(dir, beads.ResolveBeadsDir(dir))
@@ -505,7 +499,7 @@ func listAllSlingContexts(townRoot string) ([]*beads.Issue, error) {
 		}
 		all = append(all, contexts...)
 	}
-	return all, nil
+	return all
 }
 
 // listReadyWorkBeadIDsWithError returns a set of work bead IDs that are unblocked.

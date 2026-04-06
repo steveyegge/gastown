@@ -446,3 +446,61 @@ func TestAgentBeadIDsWithPrefix(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateRigPrefix verifies the post-creation prefix guard (gt-gpy).
+func TestValidateRigPrefix(t *testing.T) {
+	// Set up a town root with routes.jsonl.
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	routesContent := `{"prefix": "gt-", "path": "gastown/mayor/rig"}
+{"prefix": "bd-", "path": "beads/mayor/rig"}
+{"prefix": "hq-", "path": "."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		rigName string
+		beadID  string
+		wantErr bool
+	}{
+		{
+			name:    "same-rig bead: no error",
+			rigName: "gastown",
+			beadID:  "gt-wisp-abc",
+			wantErr: false,
+		},
+		{
+			name:    "cross-rig: hq- bead on gastown rig returns error",
+			rigName: "gastown",
+			beadID:  "hq-wisp-xyz",
+			wantErr: true,
+		},
+		{
+			name:    "bd- bead on beads rig: no error",
+			rigName: "beads",
+			beadID:  "bd-wisp-123",
+			wantErr: false,
+		},
+		{
+			name:    "empty bead ID: no error (can't determine prefix)",
+			rigName: "gastown",
+			beadID:  "",
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateRigPrefix(tmpDir, tc.rigName, tc.beadID)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("ValidateRigPrefix(%q, %q) error = %v, wantErr %v", tc.rigName, tc.beadID, err, tc.wantErr)
+			}
+		})
+	}
+}

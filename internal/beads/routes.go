@@ -342,6 +342,26 @@ func ResolveBeadsDirForID(currentBeadsDir, beadID string) string {
 	return currentBeadsDir
 }
 
+// ValidateRigPrefix checks that a newly created bead landed in the expected rig's
+// database (gt-gpy). This is a POST-creation guard: the bead already exists, so
+// callers MUST treat a non-nil return as a warning, not a hard failure.
+//
+// A mismatch means the bead's prefix doesn't match the expected rig prefix, which
+// typically indicates the bd create routing resolved to the town-level database
+// instead of the rig's database. Callers should log the warning and continue.
+func ValidateRigPrefix(townRoot, rigName, beadID string) error {
+	expectedPrefix := GetPrefixForRig(townRoot, rigName) // e.g., "gt"
+	actualPrefix := strings.TrimSuffix(ExtractPrefix(beadID), "-") // e.g., "gt"
+	if actualPrefix == "" {
+		return nil // Can't determine prefix — not an error
+	}
+	if actualPrefix != expectedPrefix {
+		return fmt.Errorf("bead %s has prefix %q but rig %q expects prefix %q — bead may have landed in wrong database",
+			beadID, actualPrefix, rigName, expectedPrefix)
+	}
+	return nil
+}
+
 // ResolveHookDir determines the directory for running bd update on a bead.
 // Since bd update doesn't support routing or redirects, we must resolve the
 // actual rig directory from the bead's prefix. hookWorkDir is only used as
