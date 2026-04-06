@@ -201,15 +201,25 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// this empty value with intentional settings like --max-old-space-size.
 	env["NODE_OPTIONS"] = ""
 
-	// Set Claude Code effort level for all agents. Opus 4.6 defaults to "medium"
-	// which under-utilizes the model's reasoning capability. Propagate any
-	// user-level override (from shell env); otherwise default to "high".
-	// Users can set CLAUDE_CODE_EFFORT_LEVEL=max in their profile for maximum
-	// reasoning depth (Opus 4.6 only, more expensive).
-	if effortLevel := os.Getenv("CLAUDE_CODE_EFFORT_LEVEL"); effortLevel != "" {
-		env["CLAUDE_CODE_EFFORT_LEVEL"] = effortLevel
-	} else {
-		env["CLAUDE_CODE_EFFORT_LEVEL"] = "high"
+	// Resolve effort level from per-role config (role_effort in town/rig settings,
+	// or cost-tier presets). Falls back to "high" when no config exists.
+	// The CLAUDE_CODE_EFFORT_LEVEL env var is deprecated — effort is now configured
+	// per-role through config, matching the pattern used for model selection.
+	rigPath := ""
+	if cfg.Rig != "" && cfg.TownRoot != "" {
+		rigPath = filepath.Join(cfg.TownRoot, cfg.Rig)
+	}
+	effort := ResolveRoleEffort(cfg.Role, cfg.TownRoot, rigPath)
+	if effort == "" {
+		effort = "high"
+	}
+	env["CLAUDE_CODE_EFFORT_LEVEL"] = effort
+	if shellEffort := os.Getenv("CLAUDE_CODE_EFFORT_LEVEL"); shellEffort != "" {
+		fmt.Fprintf(os.Stderr,
+			"notice: CLAUDE_CODE_EFFORT_LEVEL=%s env var is deprecated and ignored; "+
+				"%s effort resolved to %q via config. "+
+				"Set per-role effort with role_effort in settings or gt config cost-tier.\n",
+			shellEffort, cfg.Role, effort)
 	}
 
 	// Clear CLAUDECODE to prevent nested session detection in Claude Code v2.x.

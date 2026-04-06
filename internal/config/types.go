@@ -91,6 +91,13 @@ type TownSettings struct {
 	// Convoy configures convoy behavior settings.
 	Convoy *ConvoyConfig `json:"convoy,omitempty"`
 
+	// RoleEffort maps role names to effort levels for per-role effort configuration.
+	// Keys are role names: "mayor", "deacon", "witness", "refinery", "polecat", "crew", "boot", "dog".
+	// Values are effort levels: "low", "medium", "high", "max".
+	// Allows cost/speed optimization by using lower effort for simpler roles.
+	// Managed by cost-tier presets alongside RoleAgents.
+	RoleEffort map[string]string `json:"role_effort,omitempty"`
+
 	// CostTier tracks which cost tier preset was applied (informational).
 	// Actual model assignments live in RoleAgents and Agents.
 	// Values: "standard", "economy", "budget", or empty for custom configs.
@@ -670,6 +677,12 @@ type RigSettings struct {
 	// Takes precedence over RoleAgents["crew"] but is overridden by explicit --agent flags.
 	// Example: {"denali": "codex", "glacier": "gemini"}
 	WorkerAgents map[string]string `json:"worker_agents,omitempty"`
+
+	// RoleEffort maps role names to effort levels, overriding TownSettings.RoleEffort for this rig.
+	// Keys are role names: "witness", "refinery", "polecat", "crew".
+	// Values are effort levels: "low", "medium", "high", "max".
+	// Example: {"crew": "max", "witness": "low"}
+	RoleEffort map[string]string `json:"role_effort,omitempty"`
 }
 
 // CrewConfig represents crew workspace settings for a rig.

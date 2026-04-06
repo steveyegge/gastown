@@ -1279,3 +1279,38 @@ func TestClaudeConfigDir_EnvVar(t *testing.T) {
 		t.Errorf("ClaudeConfigDir() = %q, want %q", got, customDir)
 	}
 }
+
+func TestAgentEnv_EffortLevel(t *testing.T) {
+	t.Run("defaults to high when no config exists", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE_EFFORT_LEVEL", "")
+		env := AgentEnv(AgentEnvConfig{
+			Role:     "crew",
+			TownRoot: "/tmp/nonexistent-town",
+		})
+		if got := env["CLAUDE_CODE_EFFORT_LEVEL"]; got != "high" {
+			t.Errorf("CLAUDE_CODE_EFFORT_LEVEL = %q, want %q", got, "high")
+		}
+	})
+
+	t.Run("ignores shell env var", func(t *testing.T) {
+		// The env var is deprecated — config takes over, falling back to "high"
+		t.Setenv("CLAUDE_CODE_EFFORT_LEVEL", "max")
+		env := AgentEnv(AgentEnvConfig{
+			Role:     "crew",
+			TownRoot: "/tmp/nonexistent-town",
+		})
+		if got := env["CLAUDE_CODE_EFFORT_LEVEL"]; got != "high" {
+			t.Errorf("CLAUDE_CODE_EFFORT_LEVEL = %q, want %q (env var should be ignored)", got, "high")
+		}
+	})
+
+	t.Run("always sets the key", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE_EFFORT_LEVEL", "")
+		env := AgentEnv(AgentEnvConfig{
+			Role: "witness",
+		})
+		if _, ok := env["CLAUDE_CODE_EFFORT_LEVEL"]; !ok {
+			t.Error("CLAUDE_CODE_EFFORT_LEVEL should always be set")
+		}
+	})
+}

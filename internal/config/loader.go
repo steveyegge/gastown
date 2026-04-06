@@ -1399,6 +1399,52 @@ func ResolveWorkerAgentConfig(workerName, townRoot, rigPath string) *RuntimeConf
 	return withRoleSettingsFlag(rc, "crew", rigPath)
 }
 
+// ResolveRoleEffort resolves the effort level for a role.
+// Resolution order:
+//  1. Rig's RoleEffort[role]
+//  2. Town's RoleEffort[role]
+//  3. Returns "" (caller falls back to env var / default "high")
+//
+// Invalid effort levels are warned about and skipped.
+func ResolveRoleEffort(role, townRoot, rigPath string) string {
+	// Tier 1: ephemeral cost tier override (mirrors agent resolution)
+	if tierName := os.Getenv("GT_COST_TIER"); tierName != "" && IsValidTier(tierName) {
+		if roleEffort := CostTierRoleEffort(CostTier(tierName)); roleEffort != nil {
+			if effort, ok := roleEffort[role]; ok {
+				return effort
+			}
+		}
+	}
+
+	// Tier 2: rig-level override
+	if rigPath != "" {
+		if rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath)); err == nil && rigSettings != nil {
+			if effort, ok := rigSettings.RoleEffort[role]; ok && effort != "" {
+				if !IsValidEffortLevel(effort) {
+					fmt.Fprintf(os.Stderr, "warning: rig role_effort[%s]=%q is not a valid effort level, ignoring\n", role, effort)
+				} else {
+					return effort
+				}
+			}
+		}
+	}
+
+	// Tier 3: town-level setting
+	if townRoot != "" {
+		if townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot)); err == nil && townSettings != nil {
+			if effort, ok := townSettings.RoleEffort[role]; ok && effort != "" {
+				if !IsValidEffortLevel(effort) {
+					fmt.Fprintf(os.Stderr, "warning: town role_effort[%s]=%q is not a valid effort level, ignoring\n", role, effort)
+				} else {
+					return effort
+				}
+			}
+		}
+	}
+
+	return "" // Caller uses env var fallback, then "high" default
+}
+
 // IsResolvedAgentClaude returns true if the RuntimeConfig represents a Claude agent.
 // Exported for use in witness/daemon code that needs to skip hardcoded
 // Claude start commands when a non-Claude agent is configured.

@@ -85,6 +85,64 @@ func CostTierRoleAgents(tier CostTier) map[string]string {
 	}
 }
 
+// CostTierRoleEffort returns the role_effort mapping for a given tier.
+// Workers get the highest effort for the tier; patrol roles drop effort since
+// they do simpler, more repetitive work. Returns nil if the tier is invalid.
+func CostTierRoleEffort(tier CostTier) map[string]string {
+	switch tier {
+	case TierStandard:
+		return map[string]string{
+			"mayor":    "high",
+			"deacon":   "high",
+			"witness":  "high",
+			"refinery": "high",
+			"polecat":  "high",
+			"crew":     "high",
+			"boot":     "high",
+			"dog":      "high",
+		}
+	case TierEconomy:
+		return map[string]string{
+			"mayor":    "medium",
+			"deacon":   "low",
+			"witness":  "low",
+			"refinery": "medium",
+			"polecat":  "high",
+			"crew":     "high",
+			"boot":     "low",
+			"dog":      "low",
+		}
+	case TierBudget:
+		return map[string]string{
+			"mayor":    "low",
+			"deacon":   "low",
+			"witness":  "low",
+			"refinery": "low",
+			"polecat":  "medium",
+			"crew":     "medium",
+			"boot":     "low",
+			"dog":      "low",
+		}
+	default:
+		return nil
+	}
+}
+
+// ValidEffortLevels returns all valid effort level values.
+func ValidEffortLevels() []string {
+	return []string{"low", "medium", "high", "max"}
+}
+
+// IsValidEffortLevel checks if a string is a valid effort level.
+func IsValidEffortLevel(level string) bool {
+	switch level {
+	case "low", "medium", "high", "max":
+		return true
+	default:
+		return false
+	}
+}
+
 // CostTierAgents returns the custom agent definitions needed for a given tier.
 // These define the claude-sonnet and claude-haiku agent presets.
 // Standard tier returns an empty map (no custom agents needed).
@@ -163,6 +221,21 @@ func ApplyCostTier(settings *TownSettings, tier CostTier) error {
 		}
 	}
 
+	// Apply effort level defaults for the tier
+	roleEffort := CostTierRoleEffort(tier)
+	if settings.RoleEffort == nil {
+		settings.RoleEffort = make(map[string]string)
+	}
+	for _, role := range TierManagedRoles {
+		effort := roleEffort[role]
+		if effort == "" || effort == "high" {
+			// "high" is the default — don't persist it
+			delete(settings.RoleEffort, role)
+		} else {
+			settings.RoleEffort[role] = effort
+		}
+	}
+
 	// Track the tier for display purposes
 	settings.CostTier = string(tier)
 
@@ -222,12 +295,13 @@ func TierDescription(tier CostTier) string {
 	}
 }
 
-// FormatTierRoleTable returns a formatted string showing role→model assignments for a tier.
+// FormatTierRoleTable returns a formatted string showing role→model and effort assignments for a tier.
 func FormatTierRoleTable(tier CostTier) string {
 	roleAgents := CostTierRoleAgents(tier)
 	if roleAgents == nil {
 		return ""
 	}
+	roleEffort := CostTierRoleEffort(tier)
 
 	roles := []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew", "boot", "dog"}
 	var lines []string
@@ -236,7 +310,11 @@ func FormatTierRoleTable(tier CostTier) string {
 		if agent == "" {
 			agent = "(default/opus)"
 		}
-		lines = append(lines, fmt.Sprintf("  %-10s %s", role+":", agent))
+		effort := roleEffort[role]
+		if effort == "" {
+			effort = "high"
+		}
+		lines = append(lines, fmt.Sprintf("  %-10s %-16s effort: %s", role+":", agent, effort))
 	}
 	return strings.Join(lines, "\n")
 }

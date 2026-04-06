@@ -539,3 +539,164 @@ func containsSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+func TestCostTierRoleEffort(t *testing.T) {
+	t.Parallel()
+
+	t.Run("standard tier all high", func(t *testing.T) {
+		t.Parallel()
+		re := CostTierRoleEffort(TierStandard)
+		if re == nil {
+			t.Fatal("CostTierRoleEffort(standard) returned nil")
+		}
+		for _, role := range TierManagedRoles {
+			if re[role] != "high" {
+				t.Errorf("standard tier role_effort[%s] = %q, want %q", role, re[role], "high")
+			}
+		}
+	})
+
+	t.Run("economy tier workers high, patrol low/medium", func(t *testing.T) {
+		t.Parallel()
+		re := CostTierRoleEffort(TierEconomy)
+		if re == nil {
+			t.Fatal("CostTierRoleEffort(economy) returned nil")
+		}
+		// Workers should be high
+		for _, role := range []string{"polecat", "crew"} {
+			if re[role] != "high" {
+				t.Errorf("economy tier role_effort[%s] = %q, want %q", role, re[role], "high")
+			}
+		}
+		// Patrol roles should be low
+		for _, role := range []string{"deacon", "witness", "boot", "dog"} {
+			if re[role] != "low" {
+				t.Errorf("economy tier role_effort[%s] = %q, want %q", role, re[role], "low")
+			}
+		}
+		// Mayor and refinery should be medium
+		for _, role := range []string{"mayor", "refinery"} {
+			if re[role] != "medium" {
+				t.Errorf("economy tier role_effort[%s] = %q, want %q", role, re[role], "medium")
+			}
+		}
+	})
+
+	t.Run("budget tier workers medium, patrol low", func(t *testing.T) {
+		t.Parallel()
+		re := CostTierRoleEffort(TierBudget)
+		if re == nil {
+			t.Fatal("CostTierRoleEffort(budget) returned nil")
+		}
+		for _, role := range []string{"polecat", "crew"} {
+			if re[role] != "medium" {
+				t.Errorf("budget tier role_effort[%s] = %q, want %q", role, re[role], "medium")
+			}
+		}
+		for _, role := range []string{"mayor", "deacon", "witness", "refinery", "boot", "dog"} {
+			if re[role] != "low" {
+				t.Errorf("budget tier role_effort[%s] = %q, want %q", role, re[role], "low")
+			}
+		}
+	})
+
+	t.Run("invalid tier returns nil", func(t *testing.T) {
+		t.Parallel()
+		if re := CostTierRoleEffort("invalid"); re != nil {
+			t.Errorf("CostTierRoleEffort(invalid) = %v, want nil", re)
+		}
+	})
+}
+
+func TestIsValidEffortLevel(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		level string
+		want  bool
+	}{
+		{"low", true},
+		{"medium", true},
+		{"high", true},
+		{"max", true},
+		{"", false},
+		{"extreme", false},
+		{"High", false}, // case-sensitive
+	}
+	for _, tt := range tests {
+		t.Run(tt.level, func(t *testing.T) {
+			t.Parallel()
+			if got := IsValidEffortLevel(tt.level); got != tt.want {
+				t.Errorf("IsValidEffortLevel(%q) = %v, want %v", tt.level, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyCostTier_SetsRoleEffort(t *testing.T) {
+	t.Parallel()
+
+	t.Run("economy tier sets non-high effort levels", func(t *testing.T) {
+		t.Parallel()
+		settings := NewTownSettings()
+		if err := ApplyCostTier(settings, TierEconomy); err != nil {
+			t.Fatalf("ApplyCostTier: %v", err)
+		}
+		// Workers have high effort — should NOT be in the map (high is default)
+		for _, role := range []string{"polecat", "crew"} {
+			if _, ok := settings.RoleEffort[role]; ok {
+				t.Errorf("RoleEffort[%s] should not be set (high is default)", role)
+			}
+		}
+		// Patrol roles should have low
+		for _, role := range []string{"deacon", "witness", "boot", "dog"} {
+			if settings.RoleEffort[role] != "low" {
+				t.Errorf("RoleEffort[%s] = %q, want %q", role, settings.RoleEffort[role], "low")
+			}
+		}
+		// Mayor and refinery should have medium
+		for _, role := range []string{"mayor", "refinery"} {
+			if settings.RoleEffort[role] != "medium" {
+				t.Errorf("RoleEffort[%s] = %q, want %q", role, settings.RoleEffort[role], "medium")
+			}
+		}
+	})
+
+	t.Run("standard tier clears role effort entries", func(t *testing.T) {
+		t.Parallel()
+		settings := NewTownSettings()
+		// Apply economy first
+		if err := ApplyCostTier(settings, TierEconomy); err != nil {
+			t.Fatalf("ApplyCostTier economy: %v", err)
+		}
+		// Then switch to standard
+		if err := ApplyCostTier(settings, TierStandard); err != nil {
+			t.Fatalf("ApplyCostTier standard: %v", err)
+		}
+		// All roles should be cleared (high is default, not persisted)
+		for _, role := range TierManagedRoles {
+			if val, ok := settings.RoleEffort[role]; ok {
+				t.Errorf("RoleEffort[%s] = %q, want deleted (standard tier)", role, val)
+			}
+		}
+	})
+}
+
+func TestFormatTierRoleTable_IncludesEffort(t *testing.T) {
+	t.Parallel()
+	table := FormatTierRoleTable(TierEconomy)
+	if table == "" {
+		t.Fatal("FormatTierRoleTable(economy) returned empty string")
+	}
+	// Workers should show "effort: high"
+	if !containsSubstring(table, "effort: high") {
+		t.Error("economy tier table should contain 'effort: high' for workers")
+	}
+	// Should contain effort: low for patrol roles
+	if !containsSubstring(table, "effort: low") {
+		t.Error("economy tier table should contain 'effort: low' for patrol roles")
+	}
+	// Should contain effort: medium for mayor/refinery
+	if !containsSubstring(table, "effort: medium") {
+		t.Error("economy tier table should contain 'effort: medium' for mayor/refinery")
+	}
+}
