@@ -225,7 +225,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 			"--id=" + id,
 			"--title=" + title,
 			"--description=" + description,
-			"--type=agent",
+			"--type=task",
 			"--labels=gt:agent",
 		}
 		if NeedsForceForID(id) {
@@ -330,8 +330,9 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		}
 	}
 
-	// Update the bead with new fields and ensure type=agent (gt-dr02sy:
-	// old beads may have type=task, which breaks bd slot set).
+	// Update the bead with new fields and ensure gt:agent label is set.
+	// Agent beads use type=task (a valid built-in type) and are identified
+	// by the gt:agent label, not by type (see IsAgentBead).
 	description := FormatAgentDescription(title, fields)
 	updateOpts := UpdateOptions{
 		Title:       &title,
@@ -340,10 +341,6 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	}
 	if err := target.Update(id, updateOpts); err != nil {
 		return nil, fmt.Errorf("updating agent bead: %w", err)
-	}
-	// Fix type separately — UpdateOptions doesn't support type changes
-	if _, err := target.run("update", id, "--type=agent"); err != nil {
-		return nil, fmt.Errorf("fixing agent bead type: %w", err)
 	}
 
 	// Note: role slot no longer set - role definitions are config-based
