@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`gt dog done` closes accumulated plugin mails** — Plugin dispatch mails sent
+  by the daemon to dogs were never closed after execution, causing dog inboxes
+  to accumulate hundreds of open "Plugin: X" beads. On every UserPromptSubmit
+  hook, `gt mail check --inject` re-injected ALL open mails, ballooning agent
+  context to 60-70% and causing compaction/hook conflicts that froze the deacon.
+  `gt dog done` now archives all open "Plugin: " mails from the dog's inbox
+  before clearing work and terminating the session.
+
 ## [1.0.0] - 2026-04-02
 
 ### Added
