@@ -202,8 +202,10 @@ func (r *Rotator) executeOne(state *config.QuotaState, mu *sync.Mutex, session, 
 		}
 	}
 
-	// 6. Prepend CLAUDE_CONFIG_DIR export.
-	respawnCmd = fmt.Sprintf("export CLAUDE_CONFIG_DIR=%q && %s", newConfigDir, respawnCmd)
+	// 6. Prepend CLAUDE_CONFIG_DIR using OS-aware env syntax.
+	respawnCmd = config.PrependEnv(respawnCmd, map[string]string{
+		"CLAUDE_CONFIG_DIR": newConfigDir,
+	})
 
 	// 7. Validate target pane exists.
 	pane, err := r.tmuxExec.GetPaneID(session)

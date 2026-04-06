@@ -125,13 +125,30 @@ git status --porcelain                   # Must be empty for clean
 git log origin/main..HEAD                # Check for unpushed commits
 ```
 
-### Beads (read-mostly)
+### Beads CLI Reference
 ```bash
-bd show <id>                             # Issue details
+bd show <id>                             # Issue details (e.g., bd show gt-abc)
 bd list --status=in_progress             # Active work in rig
+bd list --status=open                    # Unassigned work
+bd update <id> --status=in_progress      # Claim work
+bd update <id> --notes "..."             # Persist findings
+bd close <id>                            # Close issue
+bd close <id> --reason="..."             # Close with reason
+bd create --title="..." --type=bug       # File discovered work
 ```
 
+**Valid statuses:** `open`, `in_progress`, `blocked`, `deferred`, `closed`, `pinned`, `hooked`
+(there is NO `done` or `complete` status — use `bd close`)
+
 **Prefix-based routing:** `bd show gt-xyz` works from anywhere — routes via `{{ .TownRoot }}/.beads/routes.jsonl`.
+
+### Dolt Connectivity
+
+Beads data is stored in Dolt (port 3307). If `bd` commands hang or fail:
+```bash
+{{ cmd }} dolt status                    # Check server health + latency
+```
+**Do NOT restart Dolt yourself.** Escalate: `{{ cmd }} escalate -s HIGH "Dolt: <symptom>"`
 
 ---
 
@@ -227,13 +244,13 @@ Process mail in your inbox-check mol step.
 1. Read `state.json` for `patrol_count` and `extraordinary_action`
 2. If `extraordinary_action == true` → hand off immediately
 3. If `patrol_count >= 15` → hand off
-4. Otherwise → use `await-signal` to sleep until activity (30s-5m backoff when idle)
+4. Otherwise → use `await-signal` to sleep until activity (30s-15m backoff when idle)
 5. After waking, increment `patrol_count`, save state, then:
    - Report and loop: `{{ cmd }} patrol report --summary "<summary>"`
    - This closes the current patrol and starts a new cycle
 
 **Idle sleep prevents crash loops**: await-signal ensures minimum time between
-patrols (30s base, exponential backoff to 5m max).
+patrols (30s base, exponential backoff to 15m max).
 
 **Handoff command:** `{{ cmd }} handoff -s "Witness cycle" -m "Completed N patrols, no incidents"`
 

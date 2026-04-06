@@ -11,27 +11,18 @@ set -euo pipefail
 
 # --- Configuration -----------------------------------------------------------
 
-TOWN_ROOT="${GT_TOWN_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-DOLT_DATA_DIR="${DOLT_DATA_DIR:-$TOWN_ROOT/.dolt-data}"
-BACKUP_DIR="${DOLT_BACKUP_DIR:-$TOWN_ROOT/.dolt-backup}"
-# Auto-discover databases from data dir if not overridden
-if [[ -z "${DOLT_DATABASES:-}" ]]; then
-  PROD_DBS=()
-  while IFS= read -r _db; do
-    [[ -n "$_db" ]] && PROD_DBS+=("$_db")
-  done < <(find "$DOLT_DATA_DIR" -maxdepth 1 -mindepth 1 -type d -not -name '.*' 2>/dev/null | xargs -I{} basename {} | sort)
-else
-  IFS=',' read -ra PROD_DBS <<< "$DOLT_DATABASES"
-fi
+DOLT_DATA_DIR="${DOLT_DATA_DIR:-$HOME/gt/.dolt-data}"
+BACKUP_DIR="${DOLT_BACKUP_DIR:-$HOME/gt/.dolt-backup}"
 BACKUP_TIMEOUT=60
 
 # --- Argument parsing ---------------------------------------------------------
 
 DRY_RUN=false
+EXPLICIT_DBS=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --databases) IFS=',' read -ra PROD_DBS <<< "$2"; shift 2 ;;
+    --databases) EXPLICIT_DBS="$2"; shift 2 ;;
     --dry-run)   DRY_RUN=true; shift ;;
     --help|-h)
       echo "Usage: $0 [--databases db1,db2,...] [--dry-run]"
@@ -47,7 +38,31 @@ log() {
   echo "[dolt-backup] $*"
 }
 
-# --- Step 1: Backup each database ---------------------------------------------
+# --- Step 1: Discover databases -----------------------------------------------
+
+# Use explicit list if provided, otherwise auto-discover by scanning
+# DOLT_DATA_DIR for directories that contain a .dolt subdirectory,
+# excluding system and test databases.
+if [[ -n "$EXPLICIT_DBS" ]]; then
+  IFS=',' read -ra PROD_DBS <<< "$EXPLICIT_DBS"
+else
+  mapfile -t PROD_DBS < <(
+    for d in "$DOLT_DATA_DIR"/*/; do
+      name="$(basename "$d")"
+      [[ -d "$d/.dolt" ]] || continue
+      [[ "$name" =~ ^(testdb_|beads_t|beads_pt|doctest_) ]] && continue
+      echo "$name"
+    done | sort
+  )
+  if [[ ${#PROD_DBS[@]} -eq 0 ]]; then
+    log "ERROR: No databases found in $DOLT_DATA_DIR"
+    exit 1
+  fi
+fi
+
+log "Databases to backup (${#PROD_DBS[@]}): ${PROD_DBS[*]}"
+
+# --- Step 2: Backup each database ---------------------------------------------
 
 SYNCED=0
 SKIPPED=0
@@ -119,12 +134,12 @@ for DB in "${PROD_DBS[@]}"; do
   fi
 done
 
-# --- Step 2: Report results ---------------------------------------------------
+# --- Step 3: Report results ---------------------------------------------------
 
 SUMMARY="Backup: $SYNCED synced, $SKIPPED unchanged, $FAILED failed (of ${#PROD_DBS[@]} DBs)"
 log "$SUMMARY"
 
-# --- Step 3: Record result and escalate if needed -----------------------------
+# --- Step 4: Record result and escalate if needed -----------------------------
 
 if [[ "$FAILED" -eq 0 ]]; then
   # Success — record quietly

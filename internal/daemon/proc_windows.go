@@ -5,24 +5,31 @@ package daemon
 import (
 	"os"
 	"os/exec"
+	"syscall"
 )
 
 // setSysProcAttr sets platform-specific process attributes.
-// On Windows, no special attributes needed for process group detachment.
+// On Windows, detach the child into a new process group and suppress
+// console-window creation so background subprocesses don't flash a
+// visible window (the daemon itself runs with CREATE_NO_WINDOW).
 func setSysProcAttr(cmd *exec.Cmd) {
-	// No-op on Windows - process will run independently
+	const CREATE_NO_WINDOW = 0x08000000
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+	}
 }
 
 // isProcessAlive checks if a process is still running.
-// On Windows, we try to open the process with minimal access.
+// On Windows, Signal(0) is not supported, so we open the process handle
+// with minimal access to verify it exists.
 func isProcessAlive(p *os.Process) bool {
-	// On Windows, FindProcess always succeeds, and Signal(0) may not work.
-	// The best we can do is try to signal and see if it fails.
-	// A killed process will return an error.
-	err := p.Signal(os.Signal(nil))
-	// If err is nil or "not supported", process may still be alive
-	// If err mentions "finished" or similar, process is dead
-	return err == nil
+	const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+	h, err := syscall.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(p.Pid))
+	if err != nil {
+		return false
+	}
+	syscall.CloseHandle(h)
+	return true
 }
 
 // sendTermSignal sends a termination signal.

@@ -733,11 +733,15 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string, title strin
 	}
 
 	// Track each slingable bead via bd dep add.
+	// Cross-rig tracking may fail because bd validates both IDs exist in the
+	// same database (beads v0.62 removed cross-rig routing). Non-fatal: the
+	// convoy still works without tracking deps.
 	for _, beadID := range slingableIDs {
 		if out, err := BdCmd("dep", "add", convoyID, beadID, "--type=tracks").
 			Dir(townBeads).WithAutoCommit().StripBeadsDir().
 			CombinedOutput(); err != nil {
-			return "", fmt.Errorf("bd dep add %s %s: %w\noutput: %s", convoyID, beadID, err, out)
+			fmt.Printf("  Warning: could not track %s in convoy: %v\n", beadID, err)
+			_ = out
 		}
 	}
 
@@ -770,12 +774,14 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 	}
 
 	// Add new beads not currently tracked.
+	// Cross-rig tracking may fail (bd validates both IDs in same DB). Non-fatal.
 	for _, id := range desiredIDs {
 		if !currentIDs[id] {
 			if out, err := BdCmd("dep", "add", existingConvoyID, id, "--type=tracks").
 				Dir(townBeads).WithAutoCommit().StripBeadsDir().
 				CombinedOutput(); err != nil {
-				return fmt.Errorf("bd dep add %s %s: %w\noutput: %s", existingConvoyID, id, err, out)
+				fmt.Printf("  Warning: could not track %s in convoy: %v\n", id, err)
+				_ = out
 			}
 		}
 	}
@@ -786,7 +792,8 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 			if out, err := BdCmd("dep", "remove", existingConvoyID, id, "--type=tracks").
 				Dir(townBeads).WithAutoCommit().StripBeadsDir().
 				CombinedOutput(); err != nil {
-				return fmt.Errorf("bd dep remove %s %s: %w\noutput: %s", existingConvoyID, id, err, out)
+				fmt.Printf("  Warning: could not untrack %s from convoy: %v\n", id, err)
+				_ = out
 			}
 		}
 	}
@@ -1104,11 +1111,13 @@ func appendValidationWave(dag *ConvoyDAG, waves []Wave, epicID string) ([]Wave, 
 	}
 
 	// Add blocking edges: every slingable bead blocks the validation bead.
+	// Cross-rig deps may fail (bd validates both IDs in same DB). Non-fatal.
 	for _, beadID := range slingableIDs {
 		if out, err := BdCmd("dep", "add", beadID, validationID, "--type=blocks").
 			Dir(townBeads).WithAutoCommit().StripBeadsDir().
 			CombinedOutput(); err != nil {
-			return waves, "", fmt.Errorf("bd dep add blocks %s → %s: %w\noutput: %s", beadID, validationID, err, out)
+			fmt.Printf("  Warning: could not add blocking dep %s → %s: %v\n", beadID, validationID, err)
+			_ = out
 		}
 	}
 
@@ -1439,7 +1448,13 @@ type bdDepResult struct {
 // bdShow runs `bd show <id> --json` and returns the parsed bead info.
 // Returns error if bd exits non-zero or returns no results.
 func bdShow(beadID string) (*bdShowResult, error) {
-	out, err := exec.Command("bd", "show", beadID, "--json").Output()
+	cmd := exec.Command("bd", "show", beadID, "--json")
+	// Route to the correct rig database via prefix resolution.
+	if dir := resolveBeadDir(beadID); dir != "" && dir != "." {
+		cmd.Dir = dir
+		cmd.Env = filterEnvKey(os.Environ(), "BEADS_DIR")
+	}
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bd show %s: %w", beadID, err)
 	}
@@ -1459,7 +1474,13 @@ func bdShow(beadID string) (*bdShowResult, error) {
 // bd dep list returns the beads that <id> depends on. Each result's
 // DependsOnID is the dependency target; IssueID is set to <id> by this func.
 func bdDepList(beadID string) ([]bdDepResult, error) {
-	out, err := exec.Command("bd", "dep", "list", beadID, "--json").Output()
+	cmd := exec.Command("bd", "dep", "list", beadID, "--json")
+	// Route to the correct rig database via prefix resolution.
+	if dir := resolveBeadDir(beadID); dir != "" && dir != "." {
+		cmd.Dir = dir
+		cmd.Env = filterEnvKey(os.Environ(), "BEADS_DIR")
+	}
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bd dep list %s: %w", beadID, err)
 	}

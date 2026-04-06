@@ -10,6 +10,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 const (
@@ -163,6 +164,7 @@ func (d *Daemon) checkpointWorktree(workDir, rigName, polecatName string) bool {
 func runGitCmd(workDir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = workDir
+	util.SetDetachedProcessGroup(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -8,6 +8,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/reaper"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 const (
@@ -17,11 +18,11 @@ const (
 	// Wisps older than this are reaped (closed). Configurable via formula var max_age.
 	defaultWispMaxAge = 24 * time.Hour
 	// Closed wisps older than this are permanently deleted. Formula var: purge_age.
-	defaultWispDeleteAge = 3 * 24 * time.Hour
+	defaultWispDeleteAge = 7 * 24 * time.Hour
 	// Alert threshold: if open wisp count exceeds this, the Dog should escalate.
 	wispAlertThreshold = 500
 	// Closed mail older than this is permanently deleted. Formula var: mail_delete_age.
-	defaultMailDeleteAge = 3 * 24 * time.Hour
+	defaultMailDeleteAge = 7 * 24 * time.Hour
 	// Issues stale longer than this are auto-closed. Formula var: stale_issue_age.
 	defaultStaleIssueAge = 7 * 24 * time.Hour
 )
@@ -128,6 +129,7 @@ func (d *Daemon) dispatchReaperDog(vars map[string]string) error {
 
 	cmd := exec.Command("gt", args...)
 	cmd.Dir = d.config.TownRoot
+	util.SetDetachedProcessGroup(cmd)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("gt sling: %w", err)
 	}

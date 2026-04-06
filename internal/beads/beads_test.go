@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -149,33 +148,51 @@ func TestBdSupportsAllowStale_ReprobesWhenBinaryPathChanges(t *testing.T) {
 	}
 }
 
+// writeAllowStaleBDStub creates a mock bd binary in dir.
+//
+// The detection function (BdSupportsAllowStaleWithEnv) ignores the exit code
+// and checks output for "unknown flag" (matching real bd v0.60+ behavior where
+// unknown flags exit 0 but print an error to stderr). The stubs must match:
+//   - Supporting: exit 0, no output
+//   - Non-supporting: exit 0, print "unknown flag" to stderr
 func writeAllowStaleBDStub(t *testing.T, dir string, supportsAllowStale bool) {
 	t.Helper()
 
+	// bd v0.60+ exits 0 even on unknown flags, printing the error to stderr.
+	// Detection now checks output for "unknown flag" rather than exit code.
 	var scriptPath, script string
 	if runtime.GOOS == "windows" {
 		scriptPath = filepath.Join(dir, "bd.bat")
-		exitCode := "1"
 		if supportsAllowStale {
-			exitCode = "0"
-		}
-		script = fmt.Sprintf(`@echo off
+			script = `@echo off
 setlocal enableextensions
-if "%%1"=="--allow-stale" exit /b %s
-exit /b 1
-`, exitCode)
+if "%1"=="--allow-stale" exit /b 0
+exit /b 0
+`
+		} else {
+			script = `@echo off
+setlocal enableextensions
+if "%1"=="--allow-stale" (
+  echo Error: unknown flag: --allow-stale 1>&2
+  exit /b 0
+)
+exit /b 0
+`
+		}
 	} else {
 		scriptPath = filepath.Join(dir, "bd")
-		exitCode := "1"
 		if supportsAllowStale {
-			exitCode = "0"
-		}
-		script = fmt.Sprintf(`#!/bin/sh
+			script = `#!/bin/sh
+exit 0
+`
+		} else {
+			script = `#!/bin/sh
 if [ "$1" = "--allow-stale" ]; then
-  exit %s
+  echo "Error: unknown flag: --allow-stale" >&2
 fi
-exit 1
-`, exitCode)
+exit 0
+`
+		}
 	}
 
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
@@ -2970,20 +2987,15 @@ func TestBdBranch_SystemScenario_FilterBeadsEnvIsolation(t *testing.T) {
 	t.Setenv("BEADS_DIR", "/tmp/filter-test-beads")
 	t.Setenv("GT_ROOT", "/tmp/filter-test-gt")
 
-	cmd := exec.Command("env")
-	cmd.Env = filterBeadsEnv(os.Environ())
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("env command failed: %v", err)
-	}
+	filtered := filterBeadsEnv(os.Environ())
 
-	output := string(out)
-	// Note: HOME= is stripped by filterBeadsEnv, but on macOS the kernel may
-	// re-inject HOME into subprocesses. Only check beads-specific vars here.
+	// Verify beads-specific vars are stripped from the filtered env.
 	forbidden := []string{"BD_ACTOR=", "BEADS_DIR=", "GT_ROOT="}
-	for _, prefix := range forbidden {
-		if strings.Contains(output, prefix) {
-			t.Errorf("filterBeadsEnv subprocess still contains %s", prefix)
+	for _, entry := range filtered {
+		for _, prefix := range forbidden {
+			if strings.HasPrefix(entry, prefix) {
+				t.Errorf("filterBeadsEnv result still contains %s", entry)
+			}
 		}
 	}
 }
@@ -3098,6 +3110,62 @@ func TestBuildRoutingEnv(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildRunEnv_OverridesStaleDoltPortFromBeadsDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(beadsDir, "dolt-server.port"), []byte("43113\n"), 0644); err != nil {
+		t.Fatalf("write dolt-server.port: %v", err)
+	}
+
+	t.Setenv("BEADS_DOLT_PORT", "3307")
+
+	env := (&Beads{workDir: tmpDir}).buildRunEnv()
+
+	found := false
+	for _, e := range env {
+		switch e {
+		case "BEADS_DOLT_PORT=43113":
+			found = true
+		case "BEADS_DOLT_PORT=3307":
+			t.Fatalf("stale BEADS_DOLT_PORT preserved in env: %v", env)
+		}
+	}
+	if !found {
+		t.Fatalf("expected BEADS_DOLT_PORT=43113 in env, got %v", env)
+	}
+}
+
+func TestBuildRoutingEnv_OverridesStaleDoltPortFromBeadsDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(beadsDir, "dolt-server.port"), []byte("43113\n"), 0644); err != nil {
+		t.Fatalf("write dolt-server.port: %v", err)
+	}
+
+	t.Setenv("BEADS_DOLT_PORT", "3307")
+
+	env := (&Beads{workDir: tmpDir}).buildRoutingEnv()
+
+	found := false
+	for _, e := range env {
+		switch e {
+		case "BEADS_DOLT_PORT=43113":
+			found = true
+		case "BEADS_DOLT_PORT=3307":
+			t.Fatalf("stale BEADS_DOLT_PORT preserved in env: %v", env)
+		}
+	}
+	if !found {
+		t.Fatalf("expected BEADS_DOLT_PORT=43113 in env, got %v", env)
 	}
 }
 

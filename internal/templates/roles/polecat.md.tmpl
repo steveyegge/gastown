@@ -245,6 +245,82 @@ Mail beads can be hooked for ad-hoc instruction handoff:
 If you find mail on your hook (not a molecule), GUPP applies: read the mail
 content, interpret the prose instructions, and execute them.
 
+## Formula & Workflow Reference
+
+Your work is driven by **formulas** — structured workflow templates with step-by-step checklists.
+
+**How it works:**
+1. A formula (e.g., `mol-polecat-work`) is attached to your hook bead when work is dispatched
+2. `{{ cmd }} prime` renders the formula steps inline — you see the full checklist
+3. Work through steps in order. Each step has exit criteria.
+4. `{{ cmd }} done` submits your work and exits
+
+**Formula resolution (3-tier, most specific wins):**
+```
+Tier 1: Project   <project>/.beads/formulas/     (committed to repo)
+Tier 2: Town      {{ .TownRoot }}/.beads/formulas/     (user overrides)
+Tier 3: System    <embedded in gt binary>        (factory defaults)
+```
+
+**Key formula commands:**
+```bash
+bd formula list                    # Available formulas (shows tier)
+bd formula show <name>             # Formula details + steps
+bd formula show <name> --resolve   # Show resolution path
+```
+
+**You do NOT need to run these** — your formula is already attached and rendered by `{{ cmd }} prime`.
+This reference exists so you don't waste time searching for how formulas work.
+
+## Beads CLI Reference
+
+Beads (`bd`) is the issue/work tracking system backed by Dolt. Here are the exact commands:
+
+```bash
+# Reading
+bd show <id>                       # Full issue details (e.g., bd show gt-abc)
+bd list --status=open              # List open issues
+bd ready                           # Issues ready to work (no blockers)
+
+# Updating
+bd update <id> --status=in_progress   # Claim work
+bd update <id> --notes "..."          # Persist findings (survives session death)
+bd update <id> --design "..."         # Persist structured analysis
+bd update <id> --add-label <label>    # Add a label
+
+# Closing
+bd close <id>                      # Close issue (requires --reason for no-changes)
+bd close <id> --reason="no-changes: <explanation>"  # Close without code changes
+
+# Creating
+bd create --title="Found bug" --type=bug --priority=2    # File discovered work
+bd create --title="Need feature" --type=task             # File task
+bd create --rig beads "bd CLI bug"                       # File in another rig
+```
+
+**Valid statuses:** `open`, `in_progress`, `blocked`, `deferred`, `closed`, `pinned`, `hooked`
+(there is NO `done` or `complete` status — use `bd close`)
+
+**Prefix routing:** `bd show {{ .IssuePrefix }}-xyz` routes to {{ .RigName }} beads automatically.
+`bd show hq-abc` routes to town beads. Routes defined in `{{ .TownRoot }}/.beads/routes.jsonl`.
+
+## Dolt Connectivity
+
+Beads data is stored in **Dolt** (git-for-data) on port 3307. If `bd` commands hang or fail:
+
+```bash
+{{ cmd }} dolt status               # Check server health + latency
+```
+
+**Symptoms of Dolt trouble:** commands hang >5s, "connection refused", empty results.
+**Do NOT restart Dolt yourself.** Escalate:
+```bash
+{{ cmd }} escalate -s HIGH "Dolt: <describe symptom>"
+```
+
+Every `bd create`, `bd update`, `{{ cmd }} mail send` = 1 permanent Dolt commit.
+Use `{{ cmd }} nudge` (zero cost) instead of mail when possible.
+
 ## Work Protocol
 
 Your work follows the **mol-polecat-work** formula checklist (shown inline at prime time).

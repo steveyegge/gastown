@@ -324,7 +324,10 @@ func (c *PatrolNotStuckCheck) checkStuckWispsDolt(rigPath string, rigName string
 	}
 
 	var stuck []string
-	cutoff := time.Now().Add(-c.stuckThreshold)
+	// Use UTC for cutoff: Dolt stores timestamps in UTC, and time.Parse
+	// without timezone info returns UTC times. Using local time here caused
+	// false "future timestamp" alarms every evening PDT (gt-ty4).
+	cutoff := time.Now().UTC().Add(-c.stuckThreshold)
 
 	for _, rec := range records[1:] { // Skip CSV header
 		if len(rec) < 4 {
@@ -344,8 +347,8 @@ func (c *PatrolNotStuckCheck) checkStuckWispsDolt(rigPath string, rigName string
 		}
 
 		if !t.IsZero() && t.Before(cutoff) {
-			stuck = append(stuck, fmt.Sprintf("%s: %s (%s) - stale since %s",
-				rigName, id, title, t.Format("2006-01-02 15:04")))
+			stuck = append(stuck, fmt.Sprintf("%s: %s (%s) - stale since %s UTC",
+				rigName, id, title, t.UTC().Format("2006-01-02 15:04")))
 		}
 	}
 

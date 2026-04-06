@@ -212,7 +212,7 @@ func collectGitCommits(townRoot, actor string, since time.Time) ([]AuditEntry, e
 			Type:      "commit",
 			Actor:     author,
 			Summary:   subject,
-			ID:        hash[:8],
+			ID:        shortHash(hash),
 		})
 	}
 
@@ -380,6 +380,8 @@ func formatTownlogSummary(e townlog.Event) string {
 		return "Completed work"
 	case townlog.EventHandoff:
 		return "Handed off session"
+	case townlog.EventHandoffNoPersist:
+		return "Handoff FAILED (Dolt persistence)"
 	case townlog.EventCrash:
 		if e.Context != "" {
 			return fmt.Sprintf("Crashed: %s", e.Context)

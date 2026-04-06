@@ -134,6 +134,12 @@ type LiveConvoyFetcher struct {
 	// bdBin is the bd binary name or path. Defaults to "bd" if empty.
 	bdBin string
 
+	// registry is a prefix registry built from the town's rigs.json.
+	// Used for parsing tmux session names instead of relying on the
+	// package-level DefaultRegistry, which may not be initialized in
+	// the dashboard process context.
+	registry *session.PrefixRegistry
+
 	// Configurable timeouts (from TownSettings.WebTimeouts)
 	cmdTimeout     time.Duration
 	ghCmdTimeout   time.Duration
@@ -171,9 +177,19 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 		}
 	}
 
+	// Build a local prefix registry from the town's rigs.json so session
+	// name parsing works regardless of whether the package-level
+	// DefaultRegistry was initialized (gt-y24).
+	registry, regErr := session.BuildPrefixRegistryFromTown(townRoot)
+	if regErr != nil {
+		log.Printf("dashboard: failed to build prefix registry: %v (falling back to default)", regErr)
+		registry = session.DefaultRegistry()
+	}
+
 	return &LiveConvoyFetcher{
 		townRoot:                townRoot,
 		townBeads:               filepath.Join(townRoot, ".beads"),
+		registry:                registry,
 		cmdTimeout:              config.ParseDurationOrDefault(webCfg.CmdTimeout, 15*time.Second),
 		ghCmdTimeout:            config.ParseDurationOrDefault(webCfg.GhCmdTimeout, 10*time.Second),
 		tmuxCmdTimeout:          config.ParseDurationOrDefault(webCfg.TmuxCmdTimeout, 2*time.Second),
@@ -543,8 +559,10 @@ func (f *LiveConvoyFetcher) getAllPolecatActivity() *time.Time {
 		}
 
 		sessionName := parts[0]
-		// Check if it's a polecat or crew session (skip infrastructure roles)
-		identity, err := session.ParseSessionName(sessionName)
+		// Check if it's a polecat or crew session (skip infrastructure roles).
+		// Use the fetcher's own registry to avoid dependency on global
+		// DefaultRegistry initialization (gt-y24).
+		identity, err := session.ParseSessionNameWithRegistry(sessionName, f.registry)
 		if err != nil {
 			continue
 		}
@@ -807,10 +825,11 @@ func (f *LiveConvoyFetcher) FetchWorkers() ([]WorkerRow, error) {
 
 		sessionName := parts[0]
 
-		// Filter for gt-<rig>-<polecat> pattern
-		// Parse session name using canonical parser
-		identity, err := session.ParseSessionName(sessionName)
+		// Parse session name using the fetcher's own registry to avoid
+		// dependency on global DefaultRegistry initialization (gt-y24).
+		identity, err := session.ParseSessionNameWithRegistry(sessionName, f.registry)
 		if err != nil {
+			log.Printf("dashboard: FetchWorkers: skipping session %q: %v", sessionName, err)
 			continue
 		}
 
@@ -1437,8 +1456,8 @@ func (f *LiveConvoyFetcher) FetchSessions() ([]SessionRow, error) {
 			}
 		}
 
-		// Detect role from session name using canonical parser
-		if identity, err := session.ParseSessionName(name); err == nil {
+		// Detect role from session name using fetcher's own registry (gt-y24)
+		if identity, err := session.ParseSessionNameWithRegistry(name, f.registry); err == nil {
 			row.Rig = identity.Rig
 			row.Role = string(identity.Role)
 			row.Worker = identity.Name

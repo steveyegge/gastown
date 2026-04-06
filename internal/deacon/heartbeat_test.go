@@ -160,14 +160,21 @@ func TestHeartbeat_IsStale(t *testing.T) {
 			hb: &Heartbeat{
 				Timestamp: time.Now().Add(-7 * time.Minute),
 			},
-			expected: true, // Stale (5-15 minutes)
+			expected: true, // Stale (5-20 minutes)
 		},
 		{
 			name: "16 minutes old",
 			hb: &Heartbeat{
 				Timestamp: time.Now().Add(-16 * time.Minute),
 			},
-			expected: false, // Very stale, not stale (>15 minutes)
+			expected: true, // Stale (5-20 minutes)
+		},
+		{
+			name: "21 minutes old",
+			hb: &Heartbeat{
+				Timestamp: time.Now().Add(-21 * time.Minute),
+			},
+			expected: false, // Very stale, not stale (>20 minutes)
 		},
 	}
 
@@ -211,7 +218,14 @@ func TestHeartbeat_IsVeryStale(t *testing.T) {
 			hb: &Heartbeat{
 				Timestamp: time.Now().Add(-16 * time.Minute),
 			},
-			expected: true, // Very stale (>15 minutes)
+			expected: false, // Stale but not very stale (threshold is 20m)
+		},
+		{
+			name: "21 minutes old",
+			hb: &Heartbeat{
+				Timestamp: time.Now().Add(-21 * time.Minute),
+			},
+			expected: true, // Very stale (>20 minutes)
 		},
 	}
 
@@ -307,6 +321,31 @@ func TestWriteHeartbeat_CreatesDirectory(t *testing.T) {
 	// Verify directory was created
 	if _, err := os.Stat(deaconDir); err != nil {
 		t.Errorf("deacon directory should exist: %v", err)
+	}
+}
+
+func TestWriteHeartbeat_TouchesLegacyFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "deacon-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	hb := &Heartbeat{Cycle: 1}
+	if err := WriteHeartbeat(tmpDir, hb); err != nil {
+		t.Fatalf("WriteHeartbeat error: %v", err)
+	}
+
+	// Legacy .deacon-heartbeat should also exist so shell scripts (stuck-agent-dog)
+	// that check this file's mtime get accurate data.
+	legacyFile := filepath.Join(tmpDir, "deacon", ".deacon-heartbeat")
+	info, err := os.Stat(legacyFile)
+	if err != nil {
+		t.Errorf(".deacon-heartbeat not created: %v", err)
+		return
+	}
+	if time.Since(info.ModTime()) > time.Minute {
+		t.Error(".deacon-heartbeat mtime should be recent")
 	}
 }
 

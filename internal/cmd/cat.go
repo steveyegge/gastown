@@ -51,6 +51,11 @@ func runCat(cmd *cobra.Command, args []string) error {
 	bdCmd := exec.Command("bd", bdArgs...)
 	bdCmd.Stdout = os.Stdout
 	bdCmd.Stderr = os.Stderr
+	// Route to the correct rig database via prefix resolution.
+	if dir := resolveBeadDir(beadID); dir != "" && dir != "." {
+		bdCmd.Dir = dir
+		bdCmd.Env = filterEnvKey(os.Environ(), "BEADS_DIR")
+	}
 
 	return bdCmd.Run()
 }

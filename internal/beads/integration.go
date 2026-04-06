@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Integration branch template constants
@@ -169,6 +171,7 @@ func ExtractEpicPrefix(epicID string) string {
 // getGitUserName returns the git user.name config value, or empty if not set.
 func getGitUserName() string {
 	cmd := exec.Command("git", "config", "user.name")
+	util.SetDetachedProcessGroup(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""

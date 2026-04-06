@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 const (
@@ -148,6 +150,7 @@ func (d *Daemon) runDoltSQL(dataDir, query string) error {
 
 	cmd := exec.CommandContext(ctx, "dolt", "sql", "-q", query)
 	cmd.Dir = dataDir
+	util.SetDetachedProcessGroup(cmd)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -173,6 +176,7 @@ func (d *Daemon) hasStagedChanges(dataDir, db string) bool {
 	query := fmt.Sprintf("USE `%s`; SELECT COUNT(*) FROM dolt_status WHERE staged = 1", db)
 	cmd := exec.CommandContext(ctx, "dolt", "sql", "-r", "csv", "-q", query)
 	cmd.Dir = dataDir
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -219,14 +223,21 @@ func (d *Daemon) discoverDatabasesWithRemotes(dataDir, remote string) ([]string,
 	return databases, nil
 }
 
+// escapeSQL escapes single quotes and backslashes for safe SQL string interpolation.
+func escapeSQL(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	return strings.ReplaceAll(s, "'", "''")
+}
+
 // databaseHasRemote checks if a database has the specified remote configured.
 func (d *Daemon) databaseHasRemote(dataDir, db, remote string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), doltCmdTimeout)
 	defer cancel()
 
-	query := fmt.Sprintf("USE `%s`; SELECT name FROM dolt_remotes WHERE name = '%s'", db, remote)
+	query := fmt.Sprintf("USE `%s`; SELECT name FROM dolt_remotes WHERE name = '%s'", db, escapeSQL(remote))
 	cmd := exec.CommandContext(ctx, "dolt", "sql", "-r", "csv", "-q", query)
 	cmd.Dir = dataDir
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -246,6 +257,7 @@ func (d *Daemon) databaseHasAnyRemote(dataDir, db string) bool {
 	query := fmt.Sprintf("USE `%s`; SELECT name FROM dolt_remotes LIMIT 1", db)
 	cmd := exec.CommandContext(ctx, "dolt", "sql", "-r", "csv", "-q", query)
 	cmd.Dir = dataDir
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -265,6 +277,7 @@ func (d *Daemon) findDatabaseRemote(dataDir, db string) string {
 	query := fmt.Sprintf("USE `%s`; SELECT name FROM dolt_remotes LIMIT 1", db)
 	cmd := exec.CommandContext(ctx, "dolt", "sql", "-r", "csv", "-q", query)
 	cmd.Dir = dataDir
+	util.SetDetachedProcessGroup(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {

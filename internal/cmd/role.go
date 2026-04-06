@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -672,7 +673,11 @@ func runRoleEnv(cmd *cobra.Command, args []string) error {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		fmt.Printf("export %s=%s\n", k, envVars[k])
+		if runtime.GOOS == "windows" {
+			fmt.Printf("$env:%s=%s\n", k, envVars[k])
+		} else {
+			fmt.Printf("export %s=%s\n", k, envVars[k])
+		}
 	}
 
 	return nil

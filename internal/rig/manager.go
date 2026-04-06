@@ -346,6 +346,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		opts.BeadsPrefix = deriveBeadsPrefix(opts.Name)
 	}
 
+	// Check for prefix collision with existing rigs before expensive operations.
+	if err := beads.CheckPrefixAvailable(m.townRoot, opts.BeadsPrefix+"-", opts.Name); err != nil {
+		return nil, fmt.Errorf("prefix collision (derived prefix %q): %w", opts.BeadsPrefix, err)
+	}
+
 	localRepo, warn := resolveLocalRepo(opts.LocalRepo, opts.GitURL)
 	if warn != "" {
 		fmt.Printf("  Warning: %s\n", warn)
@@ -1486,6 +1491,11 @@ func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, erro
 	}
 	if opts.BeadsPrefix != "" {
 		result.BeadsPrefix = opts.BeadsPrefix
+	}
+
+	// Check for prefix collision with existing rigs.
+	if err := beads.CheckPrefixAvailable(m.townRoot, result.BeadsPrefix+"-", opts.Name); err != nil {
+		return nil, fmt.Errorf("prefix collision (prefix %q): %w", result.BeadsPrefix, err)
 	}
 
 	// Determine push URL: explicit option > existing config > auto-detect from remotes.

@@ -63,7 +63,7 @@ const (
 	DefaultDeaconConsecutiveFailures       = 3
 	DefaultDeaconCooldown                  = 5 * time.Minute
 	DefaultDeaconHeartbeatStaleThreshold   = 5 * time.Minute
-	DefaultDeaconHeartbeatVeryStale        = 15 * time.Minute
+	DefaultDeaconHeartbeatVeryStale        = 20 * time.Minute
 	DefaultMaxRedispatches                 = 3
 	DefaultRedispatchCooldown              = 5 * time.Minute
 	DefaultMaxFeedsPerCycle                = 3

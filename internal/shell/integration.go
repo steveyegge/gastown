@@ -151,7 +151,7 @@ func updateRCFile(path, content string) error {
 	return os.WriteFile(path, []byte(newContent), 0644)
 }
 
-var shellHookScript = `#!/bin/bash
+var shellHookScript = `#!/bin/zsh
 # Gas Town Shell Integration
 # Installed by: gt install --shell
 # Location: ~/.config/gastown/shell-hook.sh
@@ -190,18 +190,18 @@ _gastown_offer_add() {
 
     [[ "${GASTOWN_DISABLE_OFFER_ADD:-}" == "1" ]] && return 0
     _gastown_already_asked "$repo_root" && return 0
-    
+
     [[ -t 0 ]] || return 0
-    
+
     local repo_name
     repo_name=$(basename "$repo_root")
-    
+
     echo ""
     echo -n "Add '$repo_name' to Gas Town? [y/N/never] "
     read -r response </dev/tty
-    
+
     _gastown_mark_asked "$repo_root"
-    
+
     case "$response" in
         y|Y|yes)
             echo "Adding to Gas Town..."
@@ -209,7 +209,7 @@ _gastown_offer_add() {
             output=$(gt rig quick-add "$repo_root" --yes 2>&1)
             local exit_code=$?
             echo "$output"
-            
+
             if [[ $exit_code -eq 0 ]]; then
                 local crew_path
                 crew_path=$(echo "$output" | grep "^GT_CREW_PATH=" | cut -d= -f2)
@@ -270,7 +270,7 @@ _gastown_hook() {
         local detect_output
         detect_output=$(gt rig detect "$repo_root" 2>/dev/null)
         eval "$detect_output"
-        
+
         if [[ -n "$GT_TOWN_ROOT" ]]; then
             (gt rig detect --cache "$repo_root" &>/dev/null &)
         elif [[ -n "$_GASTOWN_OFFER_ADD" ]]; then

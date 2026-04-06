@@ -60,16 +60,15 @@ var reaperDatabasesCmd = &cobra.Command{
 
 var reaperScanCmd = &cobra.Command{
 	Use:   "scan",
-	Short: "Scan a database for reaper candidates",
-	Long: `Count reap, purge, auto-close, and mail candidates in a database.
+	Short: "Scan databases for reaper candidates",
+	Long: `Count reap, purge, auto-close, and mail candidates in databases.
+
+When --db is provided, scans a single database. When omitted, auto-discovers
+all databases on the Dolt server and scans each one, printing a summary.
 
 Returns counts and anomaly detection results without modifying any data.
 The Dog uses this to understand the state before deciding what to reap.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if reaperDB == "" {
-			return fmt.Errorf("--db is required")
-		}
-
 		maxAge, err := time.ParseDuration(reaperMaxAge)
 		if err != nil {
 			return fmt.Errorf("invalid --max-age: %w", err)
@@ -87,34 +86,69 @@ The Dog uses this to understand the state before deciding what to reap.`,
 			return fmt.Errorf("invalid --stale-age: %w", err)
 		}
 
-		db, err := reaper.OpenDB(reaperHost, reaperPort, reaperDB, 10*time.Second, 10*time.Second)
-		if err != nil {
-			return fmt.Errorf("connect to %s: %w", reaperDB, err)
-		}
-		defer db.Close()
-
-		if ok, err := reaper.HasReaperSchema(db); err != nil {
-			return fmt.Errorf("check reaper schema on %s: %w", reaperDB, err)
-		} else if !ok {
-			return fmt.Errorf("database %s missing wisps/issues tables (beads schema not initialized on this server)", reaperDB)
+		databases := reaper.DiscoverDatabases(reaperHost, reaperPort)
+		if reaperDB != "" {
+			databases = strings.Split(reaperDB, ",")
 		}
 
-		result, err := reaper.Scan(db, reaperDB, maxAge, purgeAge, mailAge, staleAge)
-		if err != nil {
-			return fmt.Errorf("scan %s: %w", reaperDB, err)
+		var results []*reaper.ScanResult
+		for _, dbName := range databases {
+			if err := reaper.ValidateDBName(dbName); err != nil {
+				fmt.Fprintf(os.Stderr, "skip invalid db: %s\n", dbName)
+				continue
+			}
+
+			db, err := reaper.OpenDB(reaperHost, reaperPort, dbName, 10*time.Second, 10*time.Second)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: connect error: %v\n", dbName, err)
+				continue
+			}
+
+			if ok, err := reaper.HasReaperSchema(db); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: schema check error: %v\n", dbName, err)
+				db.Close()
+				continue
+			} else if !ok {
+				db.Close()
+				continue
+			}
+
+			result, err := reaper.Scan(db, dbName, maxAge, purgeAge, mailAge, staleAge)
+			db.Close()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: scan error: %v\n", dbName, err)
+				continue
+			}
+			results = append(results, result)
 		}
 
 		if reaperJSON {
-			fmt.Println(reaper.FormatJSON(result))
+			fmt.Println(reaper.FormatJSON(results))
 		} else {
-			fmt.Printf("Database: %s\n", result.Database)
-			fmt.Printf("  Reap candidates:  %d\n", result.ReapCandidates)
-			fmt.Printf("  Purge candidates: %d\n", result.PurgeCandidates)
-			fmt.Printf("  Mail candidates:  %d\n", result.MailCandidates)
-			fmt.Printf("  Stale candidates: %d\n", result.StaleCandidates)
-			fmt.Printf("  Open wisps:       %d\n", result.OpenWisps)
-			for _, a := range result.Anomalies {
-				fmt.Printf("  %s %s\n", style.Warning.Render("ANOMALY:"), a.Message)
+			var totalReap, totalPurge, totalMail, totalStale, totalOpen int
+			for _, r := range results {
+				fmt.Printf("Database: %s\n", r.Database)
+				fmt.Printf("  Reap candidates:  %d\n", r.ReapCandidates)
+				fmt.Printf("  Purge candidates: %d\n", r.PurgeCandidates)
+				fmt.Printf("  Mail candidates:  %d\n", r.MailCandidates)
+				fmt.Printf("  Stale candidates: %d\n", r.StaleCandidates)
+				fmt.Printf("  Open wisps:       %d\n", r.OpenWisps)
+				for _, a := range r.Anomalies {
+					fmt.Printf("  %s %s\n", style.Warning.Render("ANOMALY:"), a.Message)
+				}
+				totalReap += r.ReapCandidates
+				totalPurge += r.PurgeCandidates
+				totalMail += r.MailCandidates
+				totalStale += r.StaleCandidates
+				totalOpen += r.OpenWisps
+			}
+			if len(results) > 1 {
+				fmt.Printf("\nScan summary (%d databases):\n", len(results))
+				fmt.Printf("  Reap candidates:  %d\n", totalReap)
+				fmt.Printf("  Purge candidates: %d\n", totalPurge)
+				fmt.Printf("  Mail candidates:  %d\n", totalMail)
+				fmt.Printf("  Stale candidates: %d\n", totalStale)
+				fmt.Printf("  Open wisps:       %d\n", totalOpen)
 			}
 		}
 		return nil
@@ -127,43 +161,77 @@ var reaperReapCmd = &cobra.Command{
 	Long: `Close wisps that are past the max-age threshold and whose parent
 molecule is already closed (or missing/orphaned).
 
+When --db is provided, reaps a single database. When omitted, auto-discovers
+all databases on the Dolt server and reaps each one.
+
 Returns the count of reaped wisps. Use --dry-run to preview.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if reaperDB == "" {
-			return fmt.Errorf("--db is required")
-		}
-
 		maxAge, err := time.ParseDuration(reaperMaxAge)
 		if err != nil {
 			return fmt.Errorf("invalid --max-age: %w", err)
 		}
 
-		db, err := reaper.OpenDB(reaperHost, reaperPort, reaperDB, 10*time.Second, 10*time.Second)
-		if err != nil {
-			return fmt.Errorf("connect to %s: %w", reaperDB, err)
-		}
-		defer db.Close()
-
-		if ok, err := reaper.HasReaperSchema(db); err != nil {
-			return fmt.Errorf("check reaper schema on %s: %w", reaperDB, err)
-		} else if !ok {
-			return fmt.Errorf("database %s missing wisps/issues tables (beads schema not initialized on this server)", reaperDB)
+		databases := reaper.DiscoverDatabases(reaperHost, reaperPort)
+		if reaperDB != "" {
+			databases = strings.Split(reaperDB, ",")
 		}
 
-		result, err := reaper.Reap(db, reaperDB, maxAge, reaperDryRun)
-		if err != nil {
-			return fmt.Errorf("reap %s: %w", reaperDB, err)
+		var results []*reaper.ReapResult
+		for _, dbName := range databases {
+			if err := reaper.ValidateDBName(dbName); err != nil {
+				fmt.Fprintf(os.Stderr, "skip invalid db: %s\n", dbName)
+				continue
+			}
+
+			db, err := reaper.OpenDB(reaperHost, reaperPort, dbName, 10*time.Second, 10*time.Second)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: connect error: %v\n", dbName, err)
+				continue
+			}
+
+			if ok, err := reaper.HasReaperSchema(db); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: schema check error: %v\n", dbName, err)
+				db.Close()
+				continue
+			} else if !ok {
+				db.Close()
+				continue
+			}
+
+			result, err := reaper.Reap(db, dbName, maxAge, reaperDryRun)
+			db.Close()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: reap error: %v\n", dbName, err)
+				continue
+			}
+			results = append(results, result)
 		}
 
 		if reaperJSON {
-			fmt.Println(reaper.FormatJSON(result))
+			fmt.Println(reaper.FormatJSON(results))
 		} else {
-			prefix := ""
-			if result.DryRun {
-				prefix = "[DRY RUN] would "
+			var totalReaped, totalOpen int
+			for _, r := range results {
+				prefix := ""
+				if r.DryRun {
+					prefix = "[DRY RUN] would "
+				}
+				fmt.Printf("%s: %sreaped %d wisps, %d open remain\n",
+					r.Database, prefix, r.Reaped, r.OpenRemain)
+				totalReaped += r.Reaped
+				totalOpen += r.OpenRemain
 			}
-			fmt.Printf("%s: %sreaped %d wisps, %d open remain\n",
-				result.Database, prefix, result.Reaped, result.OpenRemain)
+			if len(results) > 1 {
+				prefix := ""
+				if reaperDryRun {
+					prefix = "[DRY RUN] "
+				}
+				fmt.Printf("\n%sReap summary (%d databases): reaped %d wisps, %d open remain\n",
+					prefix, len(results), totalReaped, totalOpen)
+				if totalOpen > 500 {
+					fmt.Fprintf(os.Stderr, "WARNING: %d open wisps exceed alert threshold (500)\n", totalOpen)
+				}
+			}
 		}
 		return nil
 	},
@@ -175,12 +243,11 @@ var reaperPurgeCmd = &cobra.Command{
 	Long: `Delete closed wisps past the purge-age threshold and closed mail
 past the mail-age threshold. Irreversible operation.
 
+When --db is provided, purges a single database. When omitted, auto-discovers
+all databases on the Dolt server and purges each one.
+
 Returns counts of purged rows. Use --dry-run to preview.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if reaperDB == "" {
-			return fmt.Errorf("--db is required")
-		}
-
 		purgeAge, err := time.ParseDuration(reaperPurgeAge)
 		if err != nil {
 			return fmt.Errorf("invalid --purge-age: %w", err)
@@ -190,34 +257,66 @@ Returns counts of purged rows. Use --dry-run to preview.`,
 			return fmt.Errorf("invalid --mail-age: %w", err)
 		}
 
-		db, err := reaper.OpenDB(reaperHost, reaperPort, reaperDB, 30*time.Second, 30*time.Second)
-		if err != nil {
-			return fmt.Errorf("connect to %s: %w", reaperDB, err)
-		}
-		defer db.Close()
-
-		if ok, err := reaper.HasReaperSchema(db); err != nil {
-			return fmt.Errorf("check reaper schema on %s: %w", reaperDB, err)
-		} else if !ok {
-			return fmt.Errorf("database %s missing wisps/issues tables (beads schema not initialized on this server)", reaperDB)
+		databases := reaper.DiscoverDatabases(reaperHost, reaperPort)
+		if reaperDB != "" {
+			databases = strings.Split(reaperDB, ",")
 		}
 
-		result, err := reaper.Purge(db, reaperDB, purgeAge, mailAge, reaperDryRun)
-		if err != nil {
-			return fmt.Errorf("purge %s: %w", reaperDB, err)
+		var results []*reaper.PurgeResult
+		for _, dbName := range databases {
+			if err := reaper.ValidateDBName(dbName); err != nil {
+				fmt.Fprintf(os.Stderr, "skip invalid db: %s\n", dbName)
+				continue
+			}
+
+			db, err := reaper.OpenDB(reaperHost, reaperPort, dbName, 30*time.Second, 30*time.Second)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: connect error: %v\n", dbName, err)
+				continue
+			}
+
+			if ok, err := reaper.HasReaperSchema(db); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: schema check error: %v\n", dbName, err)
+				db.Close()
+				continue
+			} else if !ok {
+				db.Close()
+				continue
+			}
+
+			result, err := reaper.Purge(db, dbName, purgeAge, mailAge, reaperDryRun)
+			db.Close()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: purge error: %v\n", dbName, err)
+				continue
+			}
+			results = append(results, result)
 		}
 
 		if reaperJSON {
-			fmt.Println(reaper.FormatJSON(result))
+			fmt.Println(reaper.FormatJSON(results))
 		} else {
-			prefix := ""
-			if result.DryRun {
-				prefix = "[DRY RUN] would "
+			var totalWisps, totalMail int
+			for _, r := range results {
+				prefix := ""
+				if r.DryRun {
+					prefix = "[DRY RUN] would "
+				}
+				fmt.Printf("%s: %spurged %d wisps, %d mail\n",
+					r.Database, prefix, r.WispsPurged, r.MailPurged)
+				for _, a := range r.Anomalies {
+					fmt.Printf("  %s %s\n", style.Warning.Render("ANOMALY:"), a.Message)
+				}
+				totalWisps += r.WispsPurged
+				totalMail += r.MailPurged
 			}
-			fmt.Printf("%s: %spurged %d wisps, %d mail\n",
-				result.Database, prefix, result.WispsPurged, result.MailPurged)
-			for _, a := range result.Anomalies {
-				fmt.Printf("  %s %s\n", style.Warning.Render("ANOMALY:"), a.Message)
+			if len(results) > 1 {
+				prefix := ""
+				if reaperDryRun {
+					prefix = "[DRY RUN] "
+				}
+				fmt.Printf("\n%sPurge summary (%d databases): purged %d wisps, %d mail\n",
+					prefix, len(results), totalWisps, totalMail)
 			}
 		}
 		return nil
@@ -230,37 +329,77 @@ var reaperAutoCloseCmd = &cobra.Command{
 	Long: `Close issues open with no updates past the stale-age threshold.
 Excludes P0/P1 priority, epics, and issues with active dependencies.
 
+When --db is provided, auto-closes in a single database. When omitted,
+auto-discovers all databases on the Dolt server and auto-closes in each one.
+
 Returns the count of closed issues. Use --dry-run to preview.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if reaperDB == "" {
-			return fmt.Errorf("--db is required")
-		}
-
 		staleAge, err := time.ParseDuration(reaperStaleAge)
 		if err != nil {
 			return fmt.Errorf("invalid --stale-age: %w", err)
 		}
 
-		db, err := reaper.OpenDB(reaperHost, reaperPort, reaperDB, 10*time.Second, 10*time.Second)
-		if err != nil {
-			return fmt.Errorf("connect to %s: %w", reaperDB, err)
+		databases := reaper.DiscoverDatabases(reaperHost, reaperPort)
+		if reaperDB != "" {
+			databases = strings.Split(reaperDB, ",")
 		}
-		defer db.Close()
 
-		result, err := reaper.AutoClose(db, reaperDB, staleAge, reaperDryRun)
-		if err != nil {
-			return fmt.Errorf("auto-close %s: %w", reaperDB, err)
+		var results []*reaper.AutoCloseResult
+		for _, dbName := range databases {
+			if err := reaper.ValidateDBName(dbName); err != nil {
+				fmt.Fprintf(os.Stderr, "skip invalid db: %s\n", dbName)
+				continue
+			}
+
+			db, err := reaper.OpenDB(reaperHost, reaperPort, dbName, 10*time.Second, 10*time.Second)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: connect error: %v\n", dbName, err)
+				continue
+			}
+
+			if ok, err := reaper.HasReaperSchema(db); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: schema check error: %v\n", dbName, err)
+				db.Close()
+				continue
+			} else if !ok {
+				db.Close()
+				continue
+			}
+
+			result, err := reaper.AutoClose(db, dbName, staleAge, reaperDryRun)
+			db.Close()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: auto-close error: %v\n", dbName, err)
+				continue
+			}
+			results = append(results, result)
 		}
 
 		if reaperJSON {
-			fmt.Println(reaper.FormatJSON(result))
+			fmt.Println(reaper.FormatJSON(results))
 		} else {
-			prefix := ""
-			if result.DryRun {
-				prefix = "[DRY RUN] would "
+			var totalClosed int
+			for _, r := range results {
+				prefix := ""
+				if r.DryRun {
+					prefix = "[DRY RUN] would "
+				}
+				for _, entry := range r.ClosedEntries {
+					fmt.Printf("  %s %s (%dd stale, db:%s)\n",
+						entry.ID, entry.Title, entry.AgeDays, entry.Database)
+				}
+				fmt.Printf("%s: %sauto-closed %d stale issues\n",
+					r.Database, prefix, r.Closed)
+				totalClosed += r.Closed
 			}
-			fmt.Printf("%s: %sauto-closed %d stale issues\n",
-				result.Database, prefix, result.Closed)
+			if len(results) > 1 {
+				prefix := ""
+				if reaperDryRun {
+					prefix = "[DRY RUN] "
+				}
+				fmt.Printf("\n%sAuto-close summary (%d databases): auto-closed %d stale issues\n",
+					prefix, len(results), totalClosed)
+			}
 		}
 		return nil
 	},
@@ -354,6 +493,10 @@ Normally the daemon dispatches a Dog to execute the mol-dog-reaper formula.`,
 			if err != nil {
 				fmt.Printf("%s: auto-close error: %v\n", dbName, err)
 			} else {
+				for _, entry := range closeResult.ClosedEntries {
+					fmt.Printf("  %s %s (%dd stale, db:%s)\n",
+						entry.ID, entry.Title, entry.AgeDays, entry.Database)
+				}
 				totalClosed += closeResult.Closed
 			}
 

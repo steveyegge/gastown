@@ -11,6 +11,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/acp"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -119,13 +120,6 @@ func (m *Manager) Start(agentOverride string) error {
 		case ModeACP, ModeBoth:
 			return ErrACPActive
 		case ModeTMUX:
-			// Return immediately if a TMUX session already exists.
-			// Previously this fell through to StartTMUX which would kill
-			// "zombie" sessions (tmux alive, agent dead) and replace them.
-			// But during handoffs the agent is briefly undetectable, causing
-			// StartTMUX to kill a healthy session and spawn a duplicate.
-			// Callers that need zombie restart should use Stop() + Start()
-			// explicitly (e.g., gt mayor restart).
 			return ErrAlreadyRunning
 		}
 	}
@@ -155,14 +149,23 @@ func (m *Manager) StartTMUX(agentOverride string) error {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
+	// Resolve CLAUDE_CONFIG_DIR from accounts.json so the mayor session
+	// uses the correct account. Same pattern as crew startup (start.go).
+	accountsPath := constants.MayorAccountsPath(m.townRoot)
+	claudeConfigDir, _, _ := config.ResolveAccountConfigDir(accountsPath, "")
+	if claudeConfigDir == "" {
+		claudeConfigDir = os.Getenv("CLAUDE_CONFIG_DIR")
+	}
+
 	// Use unified session lifecycle for config → settings → command → create → env → theme → wait.
 	theme := tmux.ResolveSessionTheme(m.townRoot, "", "mayor")
 	_, err = session.StartSession(t, session.SessionConfig{
-		SessionID: sessionID,
-		WorkDir:   mayorDir,
-		Role:      "mayor",
-		TownRoot:  m.townRoot,
-		AgentName: "Mayor",
+		SessionID:        sessionID,
+		WorkDir:          mayorDir,
+		Role:             "mayor",
+		TownRoot:         m.townRoot,
+		AgentName:        "Mayor",
+		RuntimeConfigDir: claudeConfigDir,
 		Beacon: session.BeaconConfig{
 			Recipient: "mayor",
 			Sender:    "human",

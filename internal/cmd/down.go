@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -470,6 +471,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 }
 
 // stopAllPolecats stops all polecat sessions across all rigs.
+// Stops are performed in parallel for faster teardown.
 // Returns the number of polecats stopped (or would be stopped in dry-run).
 func stopAllPolecats(t *tmux.Tmux, townRoot string, rigNames []string, force bool, dryRun bool) int {
 	stopped := 0
@@ -484,6 +486,36 @@ func stopAllPolecats(t *tmux.Tmux, townRoot string, rigNames []string, force boo
 	g := git.NewGit(townRoot)
 	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
 
+	if dryRun {
+		for _, rigName := range rigNames {
+			r, err := rigMgr.GetRig(rigName)
+			if err != nil {
+				continue
+			}
+			polecatMgr := polecat.NewSessionManager(t, r)
+			infos, err := polecatMgr.ListPolecats()
+			if err != nil {
+				continue
+			}
+			for _, info := range infos {
+				stopped++
+				fmt.Printf("  %s [%s] %s would stop\n", style.Dim.Render("○"), rigName, info.Polecat)
+			}
+		}
+		return stopped
+	}
+
+	// Collect targets and stop all in parallel.
+	type polecatResult struct {
+		rigName string
+		name    string
+		err     error
+	}
+
+	var results []polecatResult
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
 	for _, rigName := range rigNames {
 		r, err := rigMgr.GetRig(rigName)
 		if err != nil {
@@ -497,18 +529,24 @@ func stopAllPolecats(t *tmux.Tmux, townRoot string, rigNames []string, force boo
 		}
 
 		for _, info := range infos {
-			if dryRun {
-				stopped++
-				fmt.Printf("  %s [%s] %s would stop\n", style.Dim.Render("○"), rigName, info.Polecat)
-				continue
-			}
-			err := polecatMgr.Stop(info.Polecat, force)
-			if err == nil {
-				stopped++
-				fmt.Printf("  %s [%s] %s stopped\n", style.SuccessPrefix, rigName, info.Polecat)
-			} else {
-				fmt.Printf("  %s [%s] %s: %s\n", style.ErrorPrefix, rigName, info.Polecat, err.Error())
-			}
+			wg.Add(1)
+			go func(rn, name string, mgr *polecat.SessionManager) {
+				defer wg.Done()
+				err := mgr.Stop(name, force)
+				mu.Lock()
+				results = append(results, polecatResult{rigName: rn, name: name, err: err})
+				mu.Unlock()
+			}(rigName, info.Polecat, polecatMgr)
+		}
+	}
+	wg.Wait()
+
+	for _, res := range results {
+		if res.err == nil {
+			stopped++
+			fmt.Printf("  %s [%s] %s stopped\n", style.SuccessPrefix, res.rigName, res.name)
+		} else {
+			fmt.Printf("  %s [%s] %s: %s\n", style.ErrorPrefix, res.rigName, res.name, res.err.Error())
 		}
 	}
 
@@ -516,6 +554,7 @@ func stopAllPolecats(t *tmux.Tmux, townRoot string, rigNames []string, force boo
 }
 
 // stopAllCrew stops all crew member sessions across all rigs.
+// Stops are performed in parallel for faster teardown.
 // Returns the number of crew sessions stopped (or would be stopped in dry-run).
 func stopAllCrew(t *tmux.Tmux, townRoot string, rigNames []string, dryRun bool) int {
 	stopped := 0
@@ -528,6 +567,14 @@ func stopAllCrew(t *tmux.Tmux, townRoot string, rigNames []string, dryRun bool) 
 
 	g := git.NewGit(townRoot)
 	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+
+	// Collect all running crew sessions to stop.
+	type crewTarget struct {
+		rigName   string
+		name      string
+		sessionID string
+	}
+	var targets []crewTarget
 
 	for _, rigName := range rigNames {
 		r, err := rigMgr.GetRig(rigName)
@@ -553,14 +600,39 @@ func stopAllCrew(t *tmux.Tmux, townRoot string, rigNames []string, dryRun bool) 
 				fmt.Printf("  %s [%s] crew/%s would stop\n", style.Dim.Render("○"), rigName, worker.Name)
 				continue
 			}
+			targets = append(targets, crewTarget{rigName: rigName, name: worker.Name, sessionID: sessionID})
+		}
+	}
 
-			_, err = stopSession(t, sessionID)
-			if err == nil {
-				stopped++
-				fmt.Printf("  %s [%s] crew/%s stopped\n", style.SuccessPrefix, rigName, worker.Name)
-			} else {
-				fmt.Printf("  %s [%s] crew/%s: %s\n", style.ErrorPrefix, rigName, worker.Name, err.Error())
-			}
+	if len(targets) == 0 {
+		return stopped
+	}
+
+	// Stop all crew sessions in parallel.
+	type crewResult struct {
+		rigName string
+		name    string
+		err     error
+	}
+	results := make([]crewResult, len(targets))
+	var wg sync.WaitGroup
+
+	for i, tgt := range targets {
+		wg.Add(1)
+		go func(i int, tgt crewTarget) {
+			defer wg.Done()
+			_, err := stopSession(t, tgt.sessionID)
+			results[i] = crewResult{rigName: tgt.rigName, name: tgt.name, err: err}
+		}(i, tgt)
+	}
+	wg.Wait()
+
+	for _, res := range results {
+		if res.err == nil {
+			stopped++
+			fmt.Printf("  %s [%s] crew/%s stopped\n", style.SuccessPrefix, res.rigName, res.name)
+		} else {
+			fmt.Printf("  %s [%s] crew/%s: %s\n", style.ErrorPrefix, res.rigName, res.name, res.err.Error())
 		}
 	}
 

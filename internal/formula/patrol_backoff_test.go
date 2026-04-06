@@ -172,12 +172,69 @@ func TestPatrolFormulasHaveWispGC(t *testing.T) {
 	}
 }
 
+// TestPatrolFormulasUseDynamicBeadResolution verifies that patrol formulas
+// resolve their agent bead ID dynamically at runtime via `bd list`, rather
+// than hardcoding a prefix like `gt-<rig>-refinery`.
+//
+// Hardcoded IDs break when AgentBeadIDWithPrefix collapses the rig component
+// (prefix == rig), producing e.g. "cp-refinery" instead of "gt-cp-refinery".
+//
+// Regression test for hq-9xs.
+func TestPatrolFormulasUseDynamicBeadResolution(t *testing.T) {
+	patrolFormulas := []string{
+		"mol-witness-patrol.formula.toml",
+		"mol-refinery-patrol.formula.toml",
+	}
+
+	for _, name := range patrolFormulas {
+		t.Run(name, func(t *testing.T) {
+			content, err := formulasFS.ReadFile("formulas/" + name)
+			if err != nil {
+				t.Fatalf("reading %s: %v", name, err)
+			}
+
+			f, err := Parse(content)
+			if err != nil {
+				t.Fatalf("parsing %s: %v", name, err)
+			}
+
+			// Find the loop/exit step
+			var loopDesc string
+			for _, step := range f.Steps {
+				if step.ID == "loop-or-exit" || step.ID == "burn-or-loop" {
+					loopDesc = step.Description
+					break
+				}
+			}
+			if loopDesc == "" {
+				t.Fatalf("%s: loop step not found or has empty description", name)
+			}
+
+			// Must use dynamic resolution via bd list
+			if !strings.Contains(loopDesc, "bd list --type=agent") {
+				t.Errorf("%s loop step missing dynamic agent bead resolution (bd list --type=agent).\n"+
+					"Agent bead IDs must be resolved at runtime, not hardcoded.\n"+
+					"See hq-9xs.",
+					name)
+			}
+
+			// Must NOT hardcode gt-<rig> prefix pattern
+			if strings.Contains(loopDesc, "gt-<rig>") {
+				t.Errorf("%s loop step hardcodes gt-<rig> prefix.\n"+
+					"This breaks when AgentBeadIDWithPrefix collapses the ID (prefix == rig).\n"+
+					"See hq-9xs.",
+					name)
+			}
+		})
+	}
+}
+
 // TestDeaconPatrolHasHeartbeatSteps verifies the deacon patrol formula
 // includes heartbeat refresh steps to prevent the daemon from killing a
 // healthy Deacon mid-cycle.
 //
-// Without heartbeat refreshes, a patrol cycle that exceeds 15 minutes
-// (HeartbeatVeryStaleThreshold) causes the daemon to consider the Deacon
+// Without heartbeat refreshes, a patrol cycle that exceeds 20 minutes
+// (HeartbeatVeryStaleThreshold = 20m) causes the daemon to consider the Deacon
 // stuck and kill it, even though the Deacon is actively executing steps.
 func TestDeaconPatrolHasHeartbeatSteps(t *testing.T) {
 	content, err := formulasFS.ReadFile("formulas/mol-deacon-patrol.formula.toml")
@@ -220,16 +277,32 @@ func TestDeaconPatrolHasHeartbeatSteps(t *testing.T) {
 
 	// There should be a mid-cycle heartbeat step
 	foundMid := false
+	foundPreAwait := false
 	for _, step := range f.Steps {
 		if step.ID == "heartbeat-mid" {
 			foundMid = true
 			if !strings.Contains(step.Description, "gt deacon heartbeat") {
 				t.Error("heartbeat-mid step must contain \"gt deacon heartbeat\" command")
 			}
-			break
+		}
+		if step.ID == "loop-or-exit" && strings.Contains(step.Description, "pre-await checkpoint") {
+			foundPreAwait = true
+			if !strings.Contains(step.Description, "gt deacon heartbeat") {
+				t.Error("loop-or-exit step must refresh heartbeat before await-signal")
+			}
+			heartbeatPos := strings.Index(step.Description, "gt deacon heartbeat \"pre-await checkpoint\"")
+			awaitPos := strings.Index(step.Description, "gt mol step await-signal")
+			if heartbeatPos == -1 || awaitPos == -1 {
+				t.Error("loop-or-exit step must contain both pre-await heartbeat and await-signal commands")
+			} else if heartbeatPos > awaitPos {
+				t.Error("pre-await heartbeat must appear before await-signal to close the stale-heartbeat window")
+			}
 		}
 	}
 	if !foundMid {
 		t.Error("deacon patrol formula must have a \"heartbeat-mid\" step for mid-cycle refresh")
+	}
+	if !foundPreAwait {
+		t.Error("deacon patrol formula must refresh heartbeat again before await-signal")
 	}
 }

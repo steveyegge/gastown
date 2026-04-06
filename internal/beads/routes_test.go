@@ -335,6 +335,85 @@ func TestGetRigNameForPrefix(t *testing.T) {
 	}
 }
 
+func TestCheckPrefixAvailable(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix": "gt-", "path": "gastown/mayor/rig"}
+{"prefix": "bd-", "path": "beads/mayor/rig"}
+{"prefix": "hq-", "path": "."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		prefix  string
+		newPath string
+		wantErr bool
+	}{
+		{
+			name:    "new prefix is available",
+			prefix:  "cr-",
+			newPath: "crucible",
+			wantErr: false,
+		},
+		{
+			name:    "same rig re-registering same prefix",
+			prefix:  "gt-",
+			newPath: "gastown",
+			wantErr: false,
+		},
+		{
+			name:    "same rig different path variant",
+			prefix:  "gt-",
+			newPath: "gastown/mayor/rig",
+			wantErr: false,
+		},
+		{
+			name:    "collision with different rig",
+			prefix:  "gt-",
+			newPath: "getresearch",
+			wantErr: true,
+		},
+		{
+			name:    "collision with beads prefix",
+			prefix:  "bd-",
+			newPath: "boardgame",
+			wantErr: true,
+		},
+		{
+			name:    "town-level prefix not blocked",
+			prefix:  "hq-",
+			newPath: "headquarters",
+			wantErr: true, // "." rig name conflicts with "headquarters"
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckPrefixAvailable(tmpDir, tc.prefix, tc.newPath)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("CheckPrefixAvailable(%q, %q) error = %v, wantErr %v",
+					tc.prefix, tc.newPath, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestCheckPrefixAvailable_NoRoutes(t *testing.T) {
+	tmpDir := t.TempDir()
+	// No .beads directory — all prefixes should be available
+	err := CheckPrefixAvailable(tmpDir, "gt-", "gastown")
+	if err != nil {
+		t.Errorf("expected no error with no routes file, got: %v", err)
+	}
+}
+
 func TestAgentBeadIDsWithPrefix(t *testing.T) {
 	tests := []struct {
 		name     string

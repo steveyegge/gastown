@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -37,8 +38,16 @@ func TestUpgradeCLAUDEMD_CreatesMissingFile(t *testing.T) {
 	result := upgradeCLAUDEMD(tmpDir)
 
 	// 2 changes: CLAUDE.md created + AGENTS.md symlink created
-	if result.changed != 2 {
-		t.Errorf("expected 2 changes for new CLAUDE.md + AGENTS.md, got %d", result.changed)
+	if runtime.GOOS == "windows" {
+		// On Windows, symlink creation requires elevated privileges.
+		// Only CLAUDE.md is created; AGENTS.md symlink may fail silently.
+		if result.changed < 1 {
+			t.Errorf("expected at least 1 change for new CLAUDE.md, got %d", result.changed)
+		}
+	} else {
+		if result.changed != 2 {
+			t.Errorf("expected 2 changes for new CLAUDE.md + AGENTS.md, got %d", result.changed)
+		}
 	}
 
 	// Verify file was created
@@ -55,12 +64,14 @@ func TestUpgradeCLAUDEMD_CreatesMissingFile(t *testing.T) {
 
 	// Verify AGENTS.md symlink was created
 	agentsPath := filepath.Join(tmpDir, "AGENTS.md")
-	target, err := os.Readlink(agentsPath)
-	if err != nil {
-		t.Fatalf("AGENTS.md symlink not created: %v", err)
-	}
-	if target != "CLAUDE.md" {
-		t.Errorf("AGENTS.md symlink target = %q, want %q", target, "CLAUDE.md")
+	if runtime.GOOS != "windows" {
+		target, err := os.Readlink(agentsPath)
+		if err != nil {
+			t.Fatalf("AGENTS.md symlink not created: %v", err)
+		}
+		if target != "CLAUDE.md" {
+			t.Errorf("AGENTS.md symlink target = %q, want %q", target, "CLAUDE.md")
+		}
 	}
 }
 

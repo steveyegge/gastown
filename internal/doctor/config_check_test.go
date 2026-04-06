@@ -405,6 +405,11 @@ func TestParseConfigOutput(t *testing.T) {
 			input: "note: lowercase should not match\n",
 			want:  "note: lowercase should not match",
 		},
+		{
+			name:  "not set message filtered",
+			input: "status.custom (not set)\n",
+			want:  "",
+		},
 	}
 
 	for _, tt := range tests {

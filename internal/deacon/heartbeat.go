@@ -19,7 +19,9 @@ const (
 
 	// HeartbeatVeryStaleThreshold is the age at which a heartbeat is considered
 	// very stale, meaning the Deacon should be poked or restarted.
-	HeartbeatVeryStaleThreshold = 15 * time.Minute
+	// Must be greater than patrol backoff-max (15m) to avoid false positives
+	// during legitimate await-signal sleep.
+	HeartbeatVeryStaleThreshold = 20 * time.Minute
 )
 
 // Heartbeat represents the Deacon's heartbeat file contents.
@@ -67,7 +69,17 @@ func WriteHeartbeat(townRoot string, hb *Heartbeat) error {
 		return err
 	}
 
-	return os.WriteFile(hbFile, data, 0600)
+	if err := os.WriteFile(hbFile, data, 0600); err != nil {
+		return err
+	}
+
+	// Also touch .deacon-heartbeat for backward compatibility with shell scripts
+	// that check this file's mtime for liveness detection (stuck-agent-dog).
+	// These scripts predate heartbeat.json and check mtime, not file contents.
+	legacyFile := filepath.Join(filepath.Dir(hbFile), ".deacon-heartbeat")
+	_ = os.WriteFile(legacyFile, []byte(""), 0644) //nolint:gosec // G306: world-readable liveness file is intentional
+
+	return nil
 }
 
 // ReadHeartbeat reads the Deacon heartbeat from disk.
@@ -103,7 +115,7 @@ func (hb *Heartbeat) IsFresh() bool {
 	return hb != nil && hb.Age() < HeartbeatStaleThreshold
 }
 
-// IsStale returns true if the heartbeat is 5-15 minutes old.
+// IsStale returns true if the heartbeat is 5-20 minutes old.
 // A stale heartbeat may indicate the Deacon is doing a long operation.
 func (hb *Heartbeat) IsStale() bool {
 	if hb == nil {
@@ -113,7 +125,7 @@ func (hb *Heartbeat) IsStale() bool {
 	return age >= HeartbeatStaleThreshold && age < HeartbeatVeryStaleThreshold
 }
 
-// IsVeryStale returns true if the heartbeat is more than 15 minutes old.
+// IsVeryStale returns true if the heartbeat is more than 20 minutes old.
 // A very stale heartbeat means the Deacon should be poked.
 func (hb *Heartbeat) IsVeryStale() bool {
 	return hb == nil || hb.Age() >= HeartbeatVeryStaleThreshold

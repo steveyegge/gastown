@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -204,7 +205,7 @@ func Merge(base, override *HooksConfig) *HooksConfig {
 // context (which degrades quality), the session is replaced with a fresh one.
 // The successor picks up hooked work via SessionStart hook (gt prime --hook).
 func DefaultOverrides() map[string]*HooksConfig {
-	pathSetup := `export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"`
+	pathSetup := pathSetupCmd()
 
 	return map[string]*HooksConfig{
 		// Polecats: auto-run gt done on session Stop (gas-lob).
@@ -219,7 +220,7 @@ func DefaultOverrides() map[string]*HooksConfig {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf("%s && gt tap polecat-stop-check", pathSetup),
+							Command: hookChain(pathSetup, "gt tap polecat-stop-check"),
 						},
 					},
 				},
@@ -236,7 +237,7 @@ func DefaultOverrides() map[string]*HooksConfig {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf("%s && gt handoff --cycle --reason compaction", pathSetup),
+							Command: hookChain(pathSetup, "gt handoff --cycle --reason compaction"),
 						},
 					},
 				},
@@ -810,7 +811,7 @@ func ValidTarget(target string) bool {
 // DefaultBase returns a sensible default base configuration.
 // This includes PATH setup and gt prime hooks that all agents need.
 func DefaultBase() *HooksConfig {
-	pathSetup := `export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"`
+	pathSetup := pathSetupCmd()
 
 	return &HooksConfig{
 		PreToolUse: []HookEntry{
@@ -818,42 +819,42 @@ func DefaultBase() *HooksConfig {
 				Matcher: "Bash(gh pr create*)",
 				Hooks: []Hook{{
 					Type:    "command",
-					Command: fmt.Sprintf("%s && gt tap guard pr-workflow", pathSetup),
+					Command: hookChain(pathSetup, "gt tap guard pr-workflow"),
 				}},
 			},
 			{
 				Matcher: "Bash(git checkout -b*)",
 				Hooks: []Hook{{
 					Type:    "command",
-					Command: fmt.Sprintf("%s && gt tap guard pr-workflow", pathSetup),
+					Command: hookChain(pathSetup, "gt tap guard pr-workflow"),
 				}},
 			},
 			{
 				Matcher: "Bash(git switch -c*)",
 				Hooks: []Hook{{
 					Type:    "command",
-					Command: fmt.Sprintf("%s && gt tap guard pr-workflow", pathSetup),
+					Command: hookChain(pathSetup, "gt tap guard pr-workflow"),
 				}},
 			},
 			{
 				Matcher: "Bash(rm -rf /*)",
 				Hooks: []Hook{{
 					Type:    "command",
-					Command: fmt.Sprintf("%s && gt tap guard dangerous-command", pathSetup),
+					Command: hookChain(pathSetup, "gt tap guard dangerous-command"),
 				}},
 			},
 			{
 				Matcher: "Bash(git push --force*)",
 				Hooks: []Hook{{
 					Type:    "command",
-					Command: fmt.Sprintf("%s && gt tap guard dangerous-command", pathSetup),
+					Command: hookChain(pathSetup, "gt tap guard dangerous-command"),
 				}},
 			},
 			{
 				Matcher: "Bash(git push -f*)",
 				Hooks: []Hook{{
 					Type:    "command",
-					Command: fmt.Sprintf("%s && gt tap guard dangerous-command", pathSetup),
+					Command: hookChain(pathSetup, "gt tap guard dangerous-command"),
 				}},
 			},
 		},
@@ -863,7 +864,7 @@ func DefaultBase() *HooksConfig {
 				Hooks: []Hook{
 					{
 						Type:    "command",
-						Command: fmt.Sprintf("%s && gt prime --hook", pathSetup),
+						Command: hookChain(pathSetup, "gt prime --hook"),
 					},
 				},
 			},
@@ -874,7 +875,7 @@ func DefaultBase() *HooksConfig {
 				Hooks: []Hook{
 					{
 						Type:    "command",
-						Command: fmt.Sprintf("%s && gt prime --hook", pathSetup),
+						Command: hookChain(pathSetup, "gt prime --hook"),
 					},
 				},
 			},
@@ -885,7 +886,7 @@ func DefaultBase() *HooksConfig {
 				Hooks: []Hook{
 					{
 						Type:    "command",
-						Command: fmt.Sprintf("%s && gt mail check --inject", pathSetup),
+						Command: hookChain(pathSetup, "gt mail check --inject"),
 					},
 				},
 			},
@@ -896,7 +897,7 @@ func DefaultBase() *HooksConfig {
 				Hooks: []Hook{
 					{
 						Type:    "command",
-						Command: fmt.Sprintf("%s && gt costs record &", pathSetup),
+						Command: hookChain(pathSetup, "gt costs record &"),
 					},
 				},
 			},
@@ -972,4 +973,25 @@ func saveConfig(path string, cfg *HooksConfig) error {
 	}
 
 	return nil
+}
+
+// pathSetupCmd returns an OS-appropriate command to add Go and local bin
+// directories to PATH. On Unix this is a bash export; on Windows it
+// prepends to $env:PATH for PowerShell.
+func pathSetupCmd() string {
+	if runtime.GOOS == "windows" {
+		home := os.Getenv("USERPROFILE")
+		return fmt.Sprintf(`$env:PATH="%s\go\bin;%s\.local\bin;$env:PATH"`, home, home)
+	}
+	return `export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"`
+}
+
+// hookChain joins a path setup command with a gt command using an
+// OS-appropriate separator (&& for bash, ; for PowerShell).
+func hookChain(parts ...string) string {
+	sep := " && "
+	if runtime.GOOS == "windows" {
+		sep = "; "
+	}
+	return strings.Join(parts, sep)
 }

@@ -107,7 +107,8 @@ func (c *WispGCCheck) countAbandonedWisps(rigPath string) int {
 		return 0
 	}
 
-	cutoff := time.Now().Add(-c.threshold)
+	// Use UTC for cutoff: Dolt stores timestamps in UTC (gt-ty4).
+	cutoff := time.Now().UTC().Add(-c.threshold)
 	count := 0
 	for _, w := range wisps {
 		if w.Status == "closed" {

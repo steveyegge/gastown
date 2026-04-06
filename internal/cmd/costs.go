@@ -684,9 +684,11 @@ func getClaudeProjectDir(workDir string) (string, error) {
 		return "", err
 	}
 
-	// Convert path to Claude's directory naming: replace / with -
-	// Keep leading slash - it becomes a leading dash in Claude's encoding
+	// Convert path to Claude's directory naming: replace / and _ with -
+	// Claude Code encodes both path separators and underscores as hyphens.
+	// Keep leading slash - it becomes a leading dash in Claude's encoding.
 	projectName := strings.ReplaceAll(workDir, "/", "-")
+	projectName = strings.ReplaceAll(projectName, "_", "-")
 	return filepath.Join(configDir, "projects", projectName), nil
 }
 

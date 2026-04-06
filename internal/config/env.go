@@ -6,12 +6,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/constants"
 )
+
+// IdentityEnvVars are agent identity env vars that must not leak across
+// process or session boundaries. Used by daemon sanitization (clearing
+// inherited vars), tmux global cleanup, and prime session env repair.
+// See GH#3006.
+var IdentityEnvVars = []string{
+	"GT_ROLE", "GT_RIG", "GT_CREW", "GT_POLECAT", "GT_DOG_NAME",
+	"GT_SESSION", "GT_AGENT", "BD_ACTOR", "GIT_AUTHOR_NAME", "BEADS_AGENT_NAME",
+}
 
 // AgentEnvConfig specifies the configuration for generating agent environment variables.
 // This is the single source of truth for all agent environment configuration.
@@ -190,6 +200,17 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// In BuildStartupCommand, rc.Env is merged after AgentEnv and can override
 	// this empty value with intentional settings like --max-old-space-size.
 	env["NODE_OPTIONS"] = ""
+
+	// Set Claude Code effort level for all agents. Opus 4.6 defaults to "medium"
+	// which under-utilizes the model's reasoning capability. Propagate any
+	// user-level override (from shell env); otherwise default to "high".
+	// Users can set CLAUDE_CODE_EFFORT_LEVEL=max in their profile for maximum
+	// reasoning depth (Opus 4.6 only, more expensive).
+	if effortLevel := os.Getenv("CLAUDE_CODE_EFFORT_LEVEL"); effortLevel != "" {
+		env["CLAUDE_CODE_EFFORT_LEVEL"] = effortLevel
+	} else {
+		env["CLAUDE_CODE_EFFORT_LEVEL"] = "high"
+	}
 
 	// Clear CLAUDECODE to prevent nested session detection in Claude Code v2.x.
 	// When gt sling is invoked from within a Claude Code session, CLAUDECODE=1
@@ -513,6 +534,12 @@ func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
+// psQuote quotes a value for use in PowerShell $env: assignments.
+// Uses single quotes with embedded single quotes doubled ('').
+func psQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
 // ExportPrefix builds an export statement prefix for shell commands.
 // Returns a string like "export GT_ROLE=mayor BD_ACTOR=mayor && "
 // The keys are sorted for deterministic output.
@@ -529,11 +556,18 @@ func ExportPrefix(env map[string]string) string {
 	}
 	sort.Strings(keys)
 
+	if runtime.GOOS == "windows" {
+		var parts []string
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("$env:%s=%s", k, psQuote(env[k])))
+		}
+		return strings.Join(parts, "; ") + "; "
+	}
+
 	var parts []string
 	for _, k := range keys {
 		parts = append(parts, fmt.Sprintf("%s=%s", k, ShellQuote(env[k])))
 	}
-
 	return "export " + strings.Join(parts, " ") + " && "
 }
 

@@ -66,15 +66,15 @@ gt prime                    # Load role context
 bd prime                    # Load beads context
 ```
 
-**2. Check your hook:**
+**2. Preflight check (validate connectivity):**
 ```bash
 gt hook               # Shows your pinned molecule and hook_bead
+bd show {{issue}}           # Validates Dolt connectivity + reads your assignment
 ```
+If `bd show` hangs or fails: run `gt dolt status` to check Dolt health.
+If Dolt is down: `gt escalate -s HIGH "Dolt: <symptom>"` — do NOT restart it yourself.
 
-The hook_bead is your assigned issue. Read it carefully:
-```bash
-bd show {{issue}}           # Full issue details
-```
+The hook_bead is your assigned issue. Read the output of `bd show` carefully.
 
 **3. Check inbox for additional context:**
 ```bash
@@ -202,6 +202,16 @@ Do the actual implementation work.
 - Make atomic, focused commits
 - Keep changes scoped to the assigned issue
 - Don't gold-plate or scope-creep
+- **Scope is a contract.** The bead description defines what you build. If you believe \
+the issue requires work beyond what is described, mail the mayor BEFORE implementing it:
+  ```bash
+  gt mail send mayor/ -s "Scope question: {{issue}}" -m "I think we also need X because Y. Proceed?"
+  ```
+  Wait for a response before expanding scope. Do NOT build unrequested features and \
+present them as complete.
+- **NEVER run `sudo` or install system packages** (apt, dnf, yum, pacman, brew install,
+  pip install --system, npm install -g). Use the tools already in your workspace.
+  If a dependency is missing, file a bead — do not modify the host OS.
 
 **Persist findings as you go (CRITICAL for session survival):**
 Your session can die at any time (context limit, crash, SIGKILL). Code changes

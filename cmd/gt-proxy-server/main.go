@@ -16,6 +16,7 @@ import (
 	"syscall"
 
 	"github.com/steveyegge/gastown/internal/proxy"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // defaultAllowedSubcmds lists the safe subcommands for gt and bd.
@@ -155,7 +156,9 @@ func main() {
 // subcommand list. Falls back to defaultAllowedSubcmds if the command is
 // unavailable or returns empty output.
 func discoverAllowedSubcmds() string {
-	out, err := exec.Command("gt", "proxy-subcmds").Output()
+	cmd := exec.Command("gt", "proxy-subcmds")
+	util.SetDetachedProcessGroup(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		slog.Debug("gt proxy-subcmds discovery failed, using built-in default", "err", err)
 		return defaultAllowedSubcmds

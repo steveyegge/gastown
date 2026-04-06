@@ -884,7 +884,7 @@ func TestPrimingCheck_FixNoPrimeHook(t *testing.T) {
 		t.Fatalf("settings.json should exist after fix: %v", err)
 	}
 
-	if !strings.Contains(string(newData), "gt prime") {
-		t.Errorf("recreated settings.json should contain 'gt prime', got: %s", string(newData))
+	if !strings.Contains(string(newData), "prime --hook") {
+		t.Errorf("recreated settings.json should contain 'prime --hook', got: %s", string(newData))
 	}
 }

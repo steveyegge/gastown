@@ -18,6 +18,44 @@ import (
 	"github.com/steveyegge/gastown/internal/testutil"
 )
 
+func TestBuildWitnessPatrolVars_NilContext(t *testing.T) {
+	ctx := RoleContext{}
+	vars := buildWitnessPatrolVars(ctx)
+	if len(vars) != 0 {
+		t.Errorf("expected empty vars for nil context, got %v", vars)
+	}
+}
+
+func TestBuildWitnessPatrolVars_InjectsRigAndPrefix(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigDir := filepath.Join(tmpDir, "testrig")
+	if err := os.MkdirAll(rigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := RoleContext{
+		TownRoot: tmpDir,
+		Rig:      "testrig",
+	}
+	vars := buildWitnessPatrolVars(ctx)
+	if len(vars) != 2 {
+		t.Fatalf("expected 2 vars (rig, prefix), got %v", vars)
+	}
+	varMap := make(map[string]string)
+	for _, v := range vars {
+		parts := splitFirstEquals(v)
+		if len(parts) == 2 {
+			varMap[parts[0]] = parts[1]
+		}
+	}
+	if got := varMap["rig"]; got != "testrig" {
+		t.Errorf("rig = %q, want %q", got, "testrig")
+	}
+	if got := varMap["prefix"]; got != "gt" {
+		t.Errorf("prefix = %q, want %q (default fallback)", got, "gt")
+	}
+}
+
 func TestBuildRefineryPatrolVars_NilContext(t *testing.T) {
 	ctx := RoleContext{}
 	vars := buildRefineryPatrolVars(ctx)
@@ -126,14 +164,20 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 	vars := buildRefineryPatrolVars(ctx)
 
 	// DefaultMergeQueueConfig: refinery_enabled=true, auto_land=false, run_tests=true,
-	// test_command="" (language-agnostic), target_branch="main" (from rig config), delete_merged_branches=true
+	// test_command="" (language-agnostic), target_branch="main" (from rig config),
+	// delete_merged_branches=true, judgment_enabled=false, review_depth="standard"
+	// merge_strategy is omitted when not explicitly set (formula default "direct" applies)
 	// New commands (setup, typecheck, lint, build) default to empty = omitted
+	// judgment_enabled defaults to false, review_depth defaults to "standard"
 	expected := map[string]string{
 		"integration_branch_refinery_enabled": "true",
 		"integration_branch_auto_land":        "false",
 		"run_tests":                           "true",
 		"target_branch":                       "main",
 		"delete_merged_branches":              "true",
+		"judgment_enabled":                    "false",
+		"review_depth":                        "standard",
+		"require_review":                      "false",
 	}
 
 	varMap := make(map[string]string)
@@ -155,10 +199,10 @@ func TestBuildRefineryPatrolVars_FullConfig(t *testing.T) {
 		}
 	}
 
-	// Verify empty commands are NOT included
-	for _, shouldBeAbsent := range []string{"setup_command", "typecheck_command", "lint_command", "build_command"} {
+	// Verify empty commands and unset strategy are NOT included
+	for _, shouldBeAbsent := range []string{"setup_command", "typecheck_command", "lint_command", "build_command", "merge_strategy"} {
 		if _, ok := varMap[shouldBeAbsent]; ok {
-			t.Errorf("%q should be omitted when empty", shouldBeAbsent)
+			t.Errorf("%q should be omitted when empty/unset", shouldBeAbsent)
 		}
 	}
 
@@ -397,6 +441,129 @@ func TestBuildRefineryPatrolVars_DefaultBranchWithoutMQ(t *testing.T) {
 	}
 	if got := varMap["target_branch"]; got != "gastown" {
 		t.Errorf("target_branch = %q, want %q (should read rig config even without MQ settings)", got, "gastown")
+	}
+}
+
+func TestBuildRefineryPatrolVars_MergeStrategy(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigDir := filepath.Join(tmpDir, "testrig")
+	settingsDir := filepath.Join(rigDir, "settings")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	mq := config.DefaultMergeQueueConfig()
+	mq.MergeStrategy = "pr"
+	settings := config.RigSettings{
+		Type:       "rig-settings",
+		Version:    1,
+		MergeQueue: mq,
+	}
+	data, _ := json.Marshal(settings)
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := RoleContext{
+		TownRoot: tmpDir,
+		Rig:      "testrig",
+	}
+	vars := buildRefineryPatrolVars(ctx)
+
+	varMap := make(map[string]string)
+	for _, v := range vars {
+		parts := splitFirstEquals(v)
+		if len(parts) == 2 {
+			varMap[parts[0]] = parts[1]
+		}
+	}
+
+	if got := varMap["merge_strategy"]; got != "pr" {
+		t.Errorf("merge_strategy = %q, want %q (rig-level config must override formula default)", got, "pr")
+	}
+}
+
+func TestBuildRefineryPatrolVars_MergeStrategyDefaultOmitted(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigDir := filepath.Join(tmpDir, "testrig")
+	settingsDir := filepath.Join(rigDir, "settings")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// MergeStrategy not set — should not be injected (formula default "direct" applies)
+	mq := config.DefaultMergeQueueConfig()
+	settings := config.RigSettings{
+		Type:       "rig-settings",
+		Version:    1,
+		MergeQueue: mq,
+	}
+	data, _ := json.Marshal(settings)
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := RoleContext{
+		TownRoot: tmpDir,
+		Rig:      "testrig",
+	}
+	vars := buildRefineryPatrolVars(ctx)
+
+	varMap := make(map[string]string)
+	for _, v := range vars {
+		parts := splitFirstEquals(v)
+		if len(parts) == 2 {
+			varMap[parts[0]] = parts[1]
+		}
+	}
+
+	// merge_strategy should be absent when not explicitly configured
+	if _, ok := varMap["merge_strategy"]; ok {
+		t.Error("merge_strategy should be omitted when not configured (let formula default apply)")
+	}
+}
+
+func TestBuildRefineryPatrolVars_RequireReview(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigDir := filepath.Join(tmpDir, "testrig")
+	settingsDir := filepath.Join(rigDir, "settings")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	mq := config.DefaultMergeQueueConfig()
+	mq.MergeStrategy = "pr"
+	requireReview := true
+	mq.RequireReview = &requireReview
+	settings := config.RigSettings{
+		Type:       "rig-settings",
+		Version:    1,
+		MergeQueue: mq,
+	}
+	data, _ := json.Marshal(settings)
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := RoleContext{
+		TownRoot: tmpDir,
+		Rig:      "testrig",
+	}
+	vars := buildRefineryPatrolVars(ctx)
+
+	varMap := make(map[string]string)
+	for _, v := range vars {
+		parts := splitFirstEquals(v)
+		if len(parts) == 2 {
+			varMap[parts[0]] = parts[1]
+		}
+	}
+
+	if got := varMap["require_review"]; got != "true" {
+		t.Errorf("require_review = %q, want %q", got, "true")
+	}
+	if got := varMap["merge_strategy"]; got != "pr" {
+		t.Errorf("merge_strategy = %q, want %q", got, "pr")
 	}
 }
 

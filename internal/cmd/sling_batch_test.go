@@ -951,9 +951,12 @@ exit 0
 	}
 }
 
-// TestCreateAutoConvoy_DepFailCleansUpOrphan verifies that when the dep add
-// fails, the convoy is closed to prevent orphans.
-func TestCreateAutoConvoy_DepFailCleansUpOrphan(t *testing.T) {
+// TestCreateAutoConvoy_DepFailIsNonFatal verifies that when the dep add fails
+// (e.g., cross-rig bead), createAutoConvoy succeeds with a warning rather than
+// returning an error. Tracking failure is non-fatal since commit 103b6aaa because
+// beads v0.62 removed cross-rig routing from bd dep add. The convoy still works
+// without the tracking dep — witness and daemon provide backup tracking.
+func TestCreateAutoConvoy_DepFailIsNonFatal(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows")
 	}
@@ -973,9 +976,6 @@ case "$cmd" in
   dep)
     exit 1
     ;;
-  close)
-    exit 0
-    ;;
 esac
 exit 0
 `
@@ -985,25 +985,25 @@ exit 0
 		t.Fatalf("rewrite bd stub: %v", err)
 	}
 
-	_, err := createAutoConvoy("gt-aaa", "My task", false, "", "")
-	if err == nil {
-		t.Fatal("expected error when dep add fails, got nil")
+	convoyID, err := createAutoConvoy("gt-aaa", "My task", false, "", "")
+	if err != nil {
+		t.Fatalf("expected no error (dep fail is non-fatal), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "tracking relation") {
-		t.Errorf("error should mention tracking relation, got: %v", err)
+	if convoyID == "" {
+		t.Fatal("expected non-empty convoy ID")
 	}
 
-	// Verify close was called (orphan cleanup)
+	// Verify create was called but close was NOT called (convoy is not orphaned)
 	logBytes, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
 	logContent := string(logBytes)
-	if !strings.Contains(logContent, "CMD:close") {
-		t.Errorf("expected close command for orphan cleanup:\n%s", logContent)
+	if !strings.Contains(logContent, "CMD:create") {
+		t.Errorf("expected create command in log:\n%s", logContent)
 	}
-	if !strings.Contains(logContent, "tracking dep failed") {
-		t.Errorf("close should include 'tracking dep failed' reason:\n%s", logContent)
+	if strings.Contains(logContent, "CMD:close") {
+		t.Errorf("close should NOT be called (dep fail is non-fatal):\n%s", logContent)
 	}
 }
 

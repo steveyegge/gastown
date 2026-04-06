@@ -110,6 +110,7 @@ func AddRemote(dbDir, org, repo string) error {
 	url := DoltHubRemoteURL(org, repo)
 	cmd := exec.Command("dolt", "remote", "add", "origin", url)
 	cmd.Dir = dbDir
+	setProcessGroup(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(output))

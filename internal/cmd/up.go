@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -107,7 +109,13 @@ const maxConcurrentAgentStarts = 10
 
 // daemonStartupGrace is how long to wait after spawning the daemon process
 // before verifying it started. The daemon needs time to write its PID file.
-const daemonStartupGrace = 300 * time.Millisecond
+// On Windows, DETACHED_PROCESS startup is slower so we allow extra time.
+var daemonStartupGrace = func() time.Duration {
+	if runtime.GOOS == "windows" {
+		return 2 * time.Second
+	}
+	return 300 * time.Millisecond
+}()
 
 var upCmd = &cobra.Command{
 	Use:     "up",
@@ -536,6 +544,7 @@ func ensureDaemon(townRoot string) error {
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil
+	util.SetDetachedProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
 		return err
