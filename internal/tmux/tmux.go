@@ -1289,6 +1289,18 @@ func (t *Tmux) IsSessionAttached(target string) bool {
 // Note: This always performs the resize. Use WakePaneIfDetached to skip
 // attached sessions where the wake is unnecessary.
 func (t *Tmux) WakePane(target string) {
+	// Resolve the window ID from the target. The target may be a pane ID
+	// (e.g., "%73") which works with display-message but not resize-window.
+	// resize-window requires a window target (e.g., "@73").
+	winID, err := t.run("display-message", "-p", "-t", target, "#{window_id}")
+	if err != nil {
+		return // session may be dead
+	}
+	winID = strings.TrimSpace(winID)
+	if winID == "" {
+		return
+	}
+
 	// Use resize-window to trigger SIGWINCH. resize-pane doesn't work on
 	// single-pane sessions because the pane already fills the window.
 	// resize-window changes the window dimensions, which sends SIGWINCH to
@@ -1296,9 +1308,9 @@ func (t *Tmux) WakePane(target string) {
 	//
 	// Get current width, bump +1, then restore. This avoids permanent size
 	// changes even if the second resize fails.
-	widthStr, err := t.run("display-message", "-p", "-t", target, "#{window_width}")
+	widthStr, err := t.run("display-message", "-p", "-t", winID, "#{window_width}")
 	if err != nil {
-		return // session may be dead
+		return
 	}
 	width := strings.TrimSpace(widthStr)
 	if width == "" {
@@ -1309,16 +1321,16 @@ func (t *Tmux) WakePane(target string) {
 	if _, err := fmt.Sscanf(width, "%d", &w); err != nil || w < 1 {
 		return
 	}
-	_, _ = t.run("resize-window", "-t", target, "-x", fmt.Sprintf("%d", w+1))
+	_, _ = t.run("resize-window", "-t", winID, "-x", fmt.Sprintf("%d", w+1))
 	time.Sleep(50 * time.Millisecond)
-	_, _ = t.run("resize-window", "-t", target, "-x", width)
+	_, _ = t.run("resize-window", "-t", winID, "-x", width)
 
 	// Reset window-size to "latest" after the resize dance. tmux automatically
 	// sets window-size to "manual" whenever resize-window is called, which
 	// permanently locks the window at the current dimensions. This prevents
 	// the window from auto-sizing to a client when a human later attaches,
 	// causing dots around the edges as if another smaller client is viewing.
-	_, _ = t.run("set-option", "-w", "-t", target, "window-size", "latest")
+	_, _ = t.run("set-option", "-w", "-t", winID, "window-size", "latest")
 }
 
 // WakePaneIfDetached triggers a SIGWINCH only if the session is detached.
@@ -1646,12 +1658,13 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 	// running the agent rather than sending to the focused pane.
 	target := session
 	if agentPane, err := t.FindAgentPane(session); err == nil && agentPane != "" {
-		// Qualify the pane ID with the session name (e.g., "hq-dog-alpha:%1")
-		// to avoid ambiguity. On some tmux versions (e.g., 3.3 on Windows),
-		// pane IDs are NOT globally unique — every session may have "%1".
-		// A bare "send-keys -t %1" targets the attached session's pane,
-		// not necessarily this session's.
-		target = session + ":" + agentPane
+		// Use the bare pane ID (e.g., "%95") as the target. Pane IDs are
+		// globally unique in tmux, so no session qualification is needed.
+		//
+		// Previous code used session + ":" + paneID (e.g., "session:%95"),
+		// but tmux parses "session:X" as "session:window" — so "%95" was
+		// treated as a window name, causing "can't find window: %95".
+		target = agentPane
 	}
 
 	// 0. Pre-delivery: dismiss Rewind menu if the session is stuck in it.
@@ -1723,8 +1736,10 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 		return fmt.Errorf("nudge to session %q: %w", session, err)
 	}
 
-	// 8. Wake the pane to trigger SIGWINCH for detached sessions
-	t.WakePaneIfDetached(session)
+	// 8. Wake the pane to trigger SIGWINCH for detached sessions.
+	// Use target (resolved pane ID) rather than session so WakePane
+	// resizes the correct window in multi-window sessions.
+	t.WakePaneIfDetached(target)
 	return nil
 }
 
