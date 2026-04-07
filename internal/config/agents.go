@@ -342,7 +342,8 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		},
 		ProcessNames:        []string{"opencode", "node", "bun"}, // Runs as Node.js or Bun
 		SessionIDEnv:        "",                                  // OpenCode manages sessions internally
-		ResumeFlag:          "",                                  // No resume support yet
+		ResumeFlag:          "",                                  // Session-specific resume not wired yet
+		ContinueFlag:        "--continue",
 		ResumeStyle:         "",
 		SupportsHooks:       true, // Uses .opencode/plugins/gastown.js
 		SupportsForkSession: false,

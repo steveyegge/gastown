@@ -840,14 +840,17 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 		return base
 	}
 
+	commandBase := filepath.Base(resolved.Command)
+
 	// OpenCode requires --prompt flag for initial prompt in interactive mode.
-	// Positional argument causes opencode to exit immediately.
-	if resolved.Command == "opencode" {
+	// Positional argument is treated as the project path, which breaks wrapped
+	// commands like gt-opencode during handoff/resume.
+	if resolved.Provider == "opencode" || commandBase == "opencode" || commandBase == "gt-opencode" {
 		return base + " --prompt " + quoteForShell(p)
 	}
 
 	// Copilot  requires -i flag for initial prompt in interactive mode.
-	if resolved.Command == "copilot" {
+	if resolved.Provider == "copilot" || commandBase == "copilot" {
 		return base + " -i " + quoteForShell(p)
 	}
 
@@ -873,10 +876,11 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 	}
 
 	if p != "" && resolved.PromptMode != "none" {
-		switch resolved.Command {
-		case "opencode":
+		commandBase := filepath.Base(resolved.Command)
+		switch {
+		case resolved.Provider == "opencode" || commandBase == "opencode" || commandBase == "gt-opencode":
 			args = append(args, "--prompt", p)
-		case "copilot", "gemini":
+		case resolved.Provider == "copilot" || commandBase == "copilot":
 			args = append(args, "-i", p)
 		default:
 			args = append(args, p)

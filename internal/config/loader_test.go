@@ -1113,6 +1113,13 @@ func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
 			wantContains: []string{"copilot", "--yolo", "-i", `"test prompt"`},
 			isClaudeCmd:  false,
 		},
+		{
+			name:         "gt-opencode wrapper uses --prompt flag",
+			rc:           &RuntimeConfig{Provider: "opencode", Command: "gt-opencode", PromptMode: "arg"},
+			prompt:       "test prompt",
+			wantContains: []string{"gt-opencode", "--prompt", `"test prompt"`},
+			isClaudeCmd:  false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1309,6 +1316,20 @@ func TestResolveAgentConfigWithOverride(t *testing.T) {
 		args := rc.BuildArgsWithPrompt("start here")
 		if len(args) == 0 || args[len(args)-1] != "start here" {
 			t.Fatalf("BuildArgsWithPrompt should append prompt positionally, got %v", args)
+		}
+	})
+
+	t.Run("opencode wrapper uses prompt flag in args", func(t *testing.T) {
+		rc := &RuntimeConfig{Provider: "opencode", Command: "gt-opencode", PromptMode: "arg"}
+		args := rc.BuildArgsWithPrompt("start here")
+		want := []string{"gt-opencode", "--prompt", "start here"}
+		if len(args) != len(want) {
+			t.Fatalf("BuildArgsWithPrompt len=%d, want %d: %v", len(args), len(want), args)
+		}
+		for i := range want {
+			if args[i] != want[i] {
+				t.Fatalf("BuildArgsWithPrompt[%d] = %q, want %q (full: %v)", i, args[i], want[i], args)
+			}
 		}
 	})
 
