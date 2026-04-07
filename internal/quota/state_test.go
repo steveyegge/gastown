@@ -542,6 +542,95 @@ func TestParseResetTime_InvalidInput(t *testing.T) {
 	}
 }
 
+func TestParseResetTime_Duration(t *testing.T) {
+	ref := time.Date(2026, 4, 7, 10, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		input    string
+		expected time.Time
+	}{
+		{"4h", ref.Add(4 * time.Hour)},
+		{"2d", ref.Add(48 * time.Hour)},
+		{"1d12h", ref.Add(36 * time.Hour)},
+		{"30m", ref.Add(30 * time.Minute)},
+		{"2d6h30m", ref.Add(54*time.Hour + 30*time.Minute)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			got, err := ParseResetTime(tc.input, ref)
+			if err != nil {
+				t.Fatalf("ParseResetTime(%q) error: %v", tc.input, err)
+			}
+			if !got.Equal(tc.expected) {
+				t.Errorf("ParseResetTime(%q) = %v, want %v", tc.input, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestParseResetTime_RFC3339(t *testing.T) {
+	ref := time.Now()
+	input := "2026-04-08T13:00:00-07:00"
+	got, err := ParseResetTime(input, ref)
+	if err != nil {
+		t.Fatalf("ParseResetTime(%q) error: %v", input, err)
+	}
+	expected, _ := time.Parse(time.RFC3339, input)
+	if !got.Equal(expected) {
+		t.Errorf("ParseResetTime(%q) = %v, want %v", input, got, expected)
+	}
+}
+
+func TestParseResetTime_RelativeDay(t *testing.T) {
+	// Tuesday April 7, 2026 at 10am UTC
+	ref := time.Date(2026, 4, 7, 10, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		input       string
+		expectedDay int // day of month
+		expectedHr  int
+	}{
+		{"tomorrow 7am", 8, 7},
+		{"tomorrow 1pm", 8, 13},
+		{"wednesday 3pm", 8, 15},   // April 7 is Tuesday → Wednesday = April 8
+		{"friday 11am", 10, 11},    // Friday = April 10
+		{"sunday 9pm", 12, 21},     // Sunday = April 12
+		{"tuesday 8am", 14, 8},     // Next Tuesday = April 14 (not today)
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			got, err := ParseResetTime(tc.input, ref)
+			if err != nil {
+				t.Fatalf("ParseResetTime(%q) error: %v", tc.input, err)
+			}
+			if got.Day() != tc.expectedDay {
+				t.Errorf("day: got %d, want %d", got.Day(), tc.expectedDay)
+			}
+			if got.Hour() != tc.expectedHr {
+				t.Errorf("hour: got %d, want %d", got.Hour(), tc.expectedHr)
+			}
+		})
+	}
+}
+
+func TestParseResetTime_RelativeDayWithTimezone(t *testing.T) {
+	la, _ := time.LoadLocation("America/Los_Angeles")
+	ref := time.Date(2026, 4, 7, 10, 0, 0, 0, la)
+
+	got, err := ParseResetTime("tomorrow 1pm (America/Los_Angeles)", ref)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if got.Day() != 8 || got.Hour() != 13 {
+		t.Errorf("got day=%d hour=%d, want day=8 hour=13", got.Day(), got.Hour())
+	}
+	if got.Location().String() != "America/Los_Angeles" {
+		t.Errorf("got location=%s, want America/Los_Angeles", got.Location())
+	}
+}
+
 // --- ClearExpired tests ---
 
 func TestClearExpired_ClearsPassedResetTime(t *testing.T) {

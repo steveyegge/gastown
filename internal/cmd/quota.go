@@ -768,7 +768,10 @@ Examples:
   gt quota pause work                                    # Pause indefinitely
   gt quota pause work --until "1pm"                      # Pause until 1pm local time
   gt quota pause work --until "1pm (America/Los_Angeles)" # Pause until 1pm Pacific
-  gt quota pause work --until "7:00pm"                   # Pause until 7pm local time`,
+  gt quota pause work --until "2d"                       # Pause for 2 days
+  gt quota pause work --until "1d12h"                    # Pause for 36 hours
+  gt quota pause work --until "tomorrow 7am"             # Pause until tomorrow 7am
+  gt quota pause work --until "friday 1pm"               # Pause until next Friday 1pm`,
 	Args: cobra.ExactArgs(1),
 	RunE: runQuotaPause,
 }
@@ -792,11 +795,19 @@ func runQuotaPause(cmd *cobra.Command, args []string) error {
 			handle, strings.Join(accountHandles(acctCfg), ", "))
 	}
 
-	// Validate --until format if provided
+	// Validate and resolve --until to an absolute time string.
+	// Durations and relative times ("2d", "tomorrow 7pm") must be converted
+	// to a format that ClearExpired can re-parse without knowing "now".
+	var resetsAt string
+	var resolvedTime time.Time
 	if pauseUntil != "" {
-		if _, err := quota.ParseResetTime(pauseUntil, time.Now()); err != nil {
-			return fmt.Errorf("invalid --until time %q: %w (examples: \"1pm\", \"7:00pm\", \"1pm (America/Los_Angeles)\")", pauseUntil, err)
+		var err error
+		resolvedTime, err = quota.ParseResetTime(pauseUntil, time.Now())
+		if err != nil {
+			return fmt.Errorf("invalid --until time %q: %w\n  examples: \"1pm\", \"2d\", \"tomorrow 7am\", \"friday 1pm (America/Los_Angeles)\"", pauseUntil, err)
 		}
+		// Store as RFC3339 so ClearExpired can always parse it unambiguously
+		resetsAt = resolvedTime.Format(time.RFC3339)
 	}
 
 	mgr := quota.NewManager(townRoot)
@@ -811,7 +822,7 @@ func runQuotaPause(cmd *cobra.Command, args []string) error {
 		state.Accounts[handle] = config.AccountQuotaState{
 			Status:    config.QuotaStatusLimited,
 			LimitedAt: now,
-			ResetsAt:  pauseUntil,
+			ResetsAt:  resetsAt,
 			LastUsed:  existing.LastUsed,
 		}
 
@@ -820,8 +831,8 @@ func runQuotaPause(cmd *cobra.Command, args []string) error {
 		}
 
 		suffix := ""
-		if pauseUntil != "" {
-			suffix = fmt.Sprintf(" (until %s)", pauseUntil)
+		if resetsAt != "" {
+			suffix = fmt.Sprintf(" (until %s)", resolvedTime.Local().Format("Mon Jan 2 3:04pm"))
 		}
 		fmt.Printf(" %s %s → paused%s\n", style.SuccessPrefix, handle, suffix)
 		return nil
@@ -1189,7 +1200,7 @@ func init() {
 	quotaWatchCmd.Flags().DurationVar(&watchInterval, "interval", 5*time.Minute, "Poll interval")
 	quotaWatchCmd.Flags().BoolVar(&watchDryRun, "dry-run", false, "Show detections without executing rotation")
 
-	quotaPauseCmd.Flags().StringVar(&pauseUntil, "until", "", "Auto-unpause time (e.g. \"1pm\", \"7:00pm (America/Los_Angeles)\")")
+	quotaPauseCmd.Flags().StringVar(&pauseUntil, "until", "", "Auto-unpause time (e.g. \"1pm\", \"2d\", \"tomorrow 7am\", \"friday 1pm\")")
 
 	quotaCmd.AddCommand(quotaStatusCmd)
 	quotaCmd.AddCommand(quotaScanCmd)

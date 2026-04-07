@@ -273,17 +273,42 @@ func clearExpiredAt(_ *Manager, state *config.QuotaState, now time.Time) int {
 // parseResetTimePattern matches formats like "7pm", "11am", "3:30pm", "7:00pm"
 var parseResetTimePattern = regexp.MustCompile(`(?i)^(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b`)
 
+// parseDurationPattern matches formats like "4h", "2d", "1d12h", "30m", "2d6h30m"
+var parseDurationPattern = regexp.MustCompile(`(?i)^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?$`)
+
+// parseRelativeDayPattern matches "tomorrow 7pm", "wednesday 1pm", etc.
+var parseRelativeDayPattern = regexp.MustCompile(`(?i)^(tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+(.+)$`)
+
 // ParseResetTime parses a human-readable reset time string into a time.Time.
-// Supported formats:
+// Supported formats (tried in order):
 //
-//	"7pm (America/Los_Angeles)" → today at 7pm in that timezone
-//	"11am (America/Los_Angeles)" → today at 11am in that timezone
-//	"3:30pm (America/Los_Angeles)" → today at 3:30pm in that timezone
-//	"7pm" → today at 7pm in local timezone
+//	"2026-04-08T13:00:00-07:00"              → RFC3339 absolute time
+//	"4h", "2d", "1d12h", "2d6h30m"          → duration from reference time
+//	"tomorrow 7pm", "wednesday 1pm"          → relative day + time-of-day
+//	"7pm (America/Los_Angeles)"              → today at 7pm in that timezone
+//	"11am"                                   → today at 11am in local timezone
+//	"3:30pm"                                 → today at 3:30pm in local timezone
 //
-// The reference time is used to determine "today".
+// The reference time is used to determine "today" and as the base for durations.
 func ParseResetTime(resetsAt string, reference time.Time) (time.Time, error) {
 	resetsAt = strings.TrimSpace(resetsAt)
+
+	// Try RFC3339 first — unambiguous absolute time
+	if t, err := time.Parse(time.RFC3339, resetsAt); err == nil {
+		return t, nil
+	}
+
+	// Try duration format: "4h", "2d", "1d12h", "2d6h30m"
+	if t, ok := parseDuration(resetsAt, reference); ok {
+		return t, nil
+	}
+
+	// Try relative day + time: "tomorrow 7pm", "wednesday 1pm"
+	if t, ok := parseRelativeDay(resetsAt, reference); ok {
+		return t, nil
+	}
+
+	// Fall through to original time-of-day parsing
 
 	// Extract timezone if present: "7pm (America/Los_Angeles)" or "7pm"
 	loc := reference.Location()
@@ -325,4 +350,76 @@ func ParseResetTime(resetsAt string, reference time.Time) (time.Time, error) {
 		hour, minute, 0, 0, loc)
 
 	return resetTime, nil
+}
+
+// parseDuration parses duration strings like "4h", "2d", "1d12h", "2d6h30m".
+// Returns the resulting time and true if the input matched.
+func parseDuration(s string, reference time.Time) (time.Time, bool) {
+	m := parseDurationPattern.FindStringSubmatch(s)
+	if m == nil || (m[1] == "" && m[2] == "" && m[3] == "") {
+		return time.Time{}, false
+	}
+
+	var days, hours, minutes int
+	if m[1] != "" {
+		fmt.Sscanf(m[1], "%d", &days)
+	}
+	if m[2] != "" {
+		fmt.Sscanf(m[2], "%d", &hours)
+	}
+	if m[3] != "" {
+		fmt.Sscanf(m[3], "%d", &minutes)
+	}
+
+	d := time.Duration(days)*24*time.Hour +
+		time.Duration(hours)*time.Hour +
+		time.Duration(minutes)*time.Minute
+	return reference.Add(d), true
+}
+
+// parseRelativeDay parses "tomorrow 7pm", "wednesday 1pm (America/Los_Angeles)", etc.
+// Returns the resulting time and true if the input matched.
+func parseRelativeDay(s string, reference time.Time) (time.Time, bool) {
+	m := parseRelativeDayPattern.FindStringSubmatch(s)
+	if m == nil {
+		return time.Time{}, false
+	}
+
+	dayWord := strings.ToLower(m[1])
+	timePart := m[2]
+
+	// Parse the time portion using the existing parser
+	timeResult, err := ParseResetTime(timePart, reference)
+	if err != nil {
+		return time.Time{}, false
+	}
+
+	// Calculate the target day
+	var targetDate time.Time
+	if dayWord == "tomorrow" {
+		targetDate = reference.AddDate(0, 0, 1)
+	} else {
+		// Map day name to time.Weekday
+		dayMap := map[string]time.Weekday{
+			"sunday": time.Sunday, "monday": time.Monday,
+			"tuesday": time.Tuesday, "wednesday": time.Wednesday,
+			"thursday": time.Thursday, "friday": time.Friday,
+			"saturday": time.Saturday,
+		}
+		targetDay := dayMap[dayWord]
+		currentDay := reference.Weekday()
+		daysAhead := int(targetDay) - int(currentDay)
+		if daysAhead <= 0 {
+			daysAhead += 7 // Always go forward to the next occurrence
+		}
+		targetDate = reference.AddDate(0, 0, daysAhead)
+	}
+
+	// Combine the target date with the parsed time
+	loc := timeResult.Location()
+	targetInLoc := targetDate.In(loc)
+	result := time.Date(targetInLoc.Year(), targetInLoc.Month(), targetInLoc.Day(),
+		timeResult.Hour(), timeResult.Minute(), 0, 0, loc)
+
+	return result, true
 }
