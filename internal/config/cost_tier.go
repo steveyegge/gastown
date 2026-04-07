@@ -15,17 +15,24 @@ const (
 	TierEconomy CostTier = "economy"
 	// TierBudget uses haiku/sonnet for patrols, sonnet for workers.
 	TierBudget CostTier = "budget"
+	// TierCustomGroqOpus uses Opus for mayor/polecat/crew and Groq Compound for the rest.
+	TierCustomGroqOpus CostTier = "custom-groq-opus"
 )
 
 // ValidCostTiers returns all valid tier names.
 func ValidCostTiers() []string {
-	return []string{string(TierStandard), string(TierEconomy), string(TierBudget)}
+	return []string{
+		string(TierStandard),
+		string(TierEconomy),
+		string(TierBudget),
+		string(TierCustomGroqOpus),
+	}
 }
 
 // IsValidTier checks if a string is a valid cost tier name.
 func IsValidTier(tier string) bool {
 	switch CostTier(tier) {
-	case TierStandard, TierEconomy, TierBudget:
+	case TierStandard, TierEconomy, TierBudget, TierCustomGroqOpus:
 		return true
 	default:
 		return false
@@ -79,6 +86,20 @@ func CostTierRoleAgents(tier CostTier) map[string]string {
 			"crew":     "claude-sonnet",
 			"boot":     "claude-haiku",
 			"dog":      "claude-haiku",
+		}
+	case TierCustomGroqOpus:
+		// Mayor, polecat, and crew keep the default (opus) for highest-quality work.
+		// All patrol and utility roles (deacon, witness, refinery, boot, dog) use
+		// Groq Compound for fast, low-cost background orchestration.
+		return map[string]string{
+			"mayor":    "",              // use default (opus)
+			"deacon":   "groq-compound",
+			"witness":  "groq-compound",
+			"refinery": "groq-compound",
+			"polecat":  "",              // use default (opus)
+			"crew":     "",              // use default (opus)
+			"boot":     "groq-compound",
+			"dog":      "groq-compound",
 		}
 	default:
 		return nil
@@ -144,7 +165,7 @@ func IsValidEffortLevel(level string) bool {
 }
 
 // CostTierAgents returns the custom agent definitions needed for a given tier.
-// These define the claude-sonnet and claude-haiku agent presets.
+// These define the claude-sonnet, claude-haiku, and groq-compound agent presets.
 // Standard tier returns an empty map (no custom agents needed).
 func CostTierAgents(tier CostTier) map[string]*RuntimeConfig {
 	switch tier {
@@ -154,6 +175,10 @@ func CostTierAgents(tier CostTier) map[string]*RuntimeConfig {
 		return map[string]*RuntimeConfig{
 			"claude-sonnet": claudeSonnetPreset(),
 			"claude-haiku":  claudeHaikuPreset(),
+		}
+	case TierCustomGroqOpus:
+		return map[string]*RuntimeConfig{
+			"groq-compound": groqCompoundPreset(),
 		}
 	default:
 		return nil
@@ -177,6 +202,15 @@ func claudeHaikuPreset() *RuntimeConfig {
 	return &RuntimeConfig{
 		Command: "claude",
 		Args:    []string{"--dangerously-skip-permissions", "--model", "haiku"},
+	}
+}
+
+// groqCompoundPreset returns a RuntimeConfig for the Groq Compound model.
+// Adjust Command/Args if your Gastown runtime uses a different launcher for Groq.
+func groqCompoundPreset() *RuntimeConfig {
+	return &RuntimeConfig{
+		Command: "claude",
+		Args:    []string{"--dangerously-skip-permissions", "--model", "compound"},
 	}
 }
 
@@ -214,10 +248,11 @@ func ApplyCostTier(settings *TownSettings, tier CostTier) error {
 		settings.Agents = make(map[string]*RuntimeConfig)
 	}
 
-	// For standard tier, remove tier-specific agent presets if they exist
+	// For standard tier, remove all tier-specific agent presets if they exist
 	if tier == TierStandard {
 		delete(settings.Agents, "claude-sonnet")
 		delete(settings.Agents, "claude-haiku")
+		delete(settings.Agents, "groq-compound")
 	} else {
 		// Add/update tier-specific agent presets
 		for name, rc := range agents {
@@ -276,7 +311,7 @@ func GetCurrentTier(settings *TownSettings) string {
 // An empty or missing value in actual matches an empty expected value (both mean "use default").
 func tierRolesMatch(actual, expected map[string]string) bool {
 	for _, role := range TierManagedRoles {
-		actualVal := actual[role]   // "" if not present
+		actualVal := actual[role]     // "" if not present
 		expectedVal := expected[role] // "" means "use default"
 		if actualVal != expectedVal {
 			return false
@@ -294,6 +329,8 @@ func TierDescription(tier CostTier) string {
 		return "Patrol roles use Sonnet/Haiku, workers use Opus"
 	case TierBudget:
 		return "Patrol roles use Haiku, workers use Sonnet"
+	case TierCustomGroqOpus:
+		return "Mayor, Polecat, and Crew use Opus; the rest use Groq Compound"
 	default:
 		return "Unknown tier"
 	}
