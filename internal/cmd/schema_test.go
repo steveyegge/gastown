@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestSchemaDetail(t *testing.T) {
@@ -108,5 +111,58 @@ func TestSchemaIndex(t *testing.T) {
 	}
 	if len(data) == 0 {
 		t.Fatal("marshaled JSON is empty")
+	}
+}
+
+func TestSchemaDetailIncludesOutputSchema(t *testing.T) {
+	// Create a test command with an output schema annotation
+	testCmd := &cobra.Command{
+		Use:   "test-enriched",
+		Short: "Test command with output schema",
+		Annotations: map[string]string{
+			AnnotationOutputSchema: `{"type":"object","properties":{"ok":{"type":"boolean"}}}`,
+		},
+		RunE: func(cmd *cobra.Command, args []string) error { return nil },
+	}
+
+	rootCmd.AddCommand(testCmd)
+	t.Cleanup(func() {
+		rootCmd.RemoveCommand(testCmd)
+	})
+
+	detail, err := buildSchemaDetail(rootCmd, []string{"test-enriched"})
+	if err != nil {
+		t.Fatalf("buildSchemaDetail: %v", err)
+	}
+
+	if detail.OutputSchema == nil {
+		t.Fatal("expected outputSchema to be set from annotation")
+	}
+
+	// Verify it round-trips as valid JSON
+	data, err := json.Marshal(detail.OutputSchema)
+	if err != nil {
+		t.Fatalf("outputSchema marshal failed: %v", err)
+	}
+	if !strings.Contains(string(data), `"boolean"`) {
+		t.Errorf("outputSchema missing expected content, got: %s", data)
+	}
+}
+
+func TestSchemaIndexHiddenCommandsIncluded(t *testing.T) {
+	index := buildSchemaIndex(rootCmd)
+
+	// Hidden commands should be included (with hidden:true flag)
+	// so harnesses can discover internal commands if needed
+	hasHidden := false
+	for _, c := range index.Commands {
+		if c.Hidden {
+			hasHidden = true
+			break
+		}
+	}
+	// proxy-subcmds is hidden, so this should be true
+	if !hasHidden {
+		t.Error("expected at least one hidden command in index")
 	}
 }

@@ -35,9 +35,10 @@ type SchemaDetail struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
 	Long        string                 `json:"long,omitempty"`
-	Flags       map[string]interface{} `json:"flags,omitempty"`
-	Arguments   *SchemaArguments       `json:"arguments,omitempty"`
-	Annotations map[string]interface{} `json:"annotations,omitempty"`
+	Flags        map[string]interface{} `json:"flags,omitempty"`
+	OutputSchema interface{}            `json:"outputSchema,omitempty"`
+	Arguments    *SchemaArguments       `json:"arguments,omitempty"`
+	Annotations  map[string]interface{} `json:"annotations,omitempty"`
 }
 
 // SchemaArguments describes positional arguments for a command.
@@ -66,6 +67,11 @@ type SchemaItems struct {
 }
 
 const jsonSchemaDraft = "https://json-schema.org/draft/2020-12/schema"
+
+// AnnotationOutputSchema holds a JSON Schema string describing the command's
+// JSON output. Commands add this to their Annotations map to provide typed
+// output contracts.
+const AnnotationOutputSchema = "outputSchema"
 
 // buildSchemaIndex walks the Cobra command tree and returns an index of all commands.
 func buildSchemaIndex(root *cobra.Command) SchemaIndex {
@@ -188,6 +194,14 @@ func buildSchemaDetail(root *cobra.Command, path []string) (*SchemaDetail, error
 			}
 		}
 		detail.Annotations = annotations
+	}
+
+	// Output schema from annotation (if present)
+	if raw, ok := cmd.Annotations[AnnotationOutputSchema]; ok {
+		var parsed interface{}
+		if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
+			detail.OutputSchema = parsed
+		}
 	}
 
 	return detail, nil
