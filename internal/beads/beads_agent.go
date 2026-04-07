@@ -248,14 +248,9 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		return a
 	}
 
-	// Create agent bead in the target database. Use a routed Beads instance
-	// when the bead's prefix routes to a different rig than our own database.
-	// Without this, agent beads for rig polecats (e.g., be-beads-polecat-rust)
-	// would be created in the wrong database, failing type validation.
-	target := b
-	if targetDir != b.getResolvedBeadsDir() {
-		target = NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
-	}
+	// Create agent bead in the issues table. For routed cross-rig IDs we run from
+	// the town root so bd's prefix router resolves the destination once instead
+	// of double-stacking imported-rig paths.
 
 	out, err := target.run(buildArgs()...)
 	if err != nil {
@@ -271,7 +266,12 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	}
 
 	// Note: role slot no longer set - role definitions are config-based
-	// Note: hook_bead slot no longer set - bd slot removed in v0.62 (hq-l6mm5)
+	// Restore hook slot so hooked-work lookup remains reliable across routed DBs.
+	if fields != nil && fields.HookBead != "" {
+		if _, slotErr := target.run("slot", "set", id, "hook", fields.HookBead); slotErr != nil {
+			// Non-fatal: fallback lookup may still find the work bead.
+		}
+	}
 
 	return &issue, nil
 }

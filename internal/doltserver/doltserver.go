@@ -1737,6 +1737,12 @@ func cleanStaleSocket(socketPath string) {
 		// lsof exit code 1 = no process holds it → stale, safe to remove
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			_ = os.Remove(socketPath)
+			return
+		}
+		// Some minimal images don't ship lsof. Fall back to best-effort removal
+		// so a stale leftover file can't block server startup indefinitely.
+		if errors.Is(err, exec.ErrNotFound) {
+			_ = os.Remove(socketPath)
 		}
 	}
 	// If lsof succeeds (exit 0), a process is using it — leave it alone.

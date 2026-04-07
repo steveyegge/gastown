@@ -26,7 +26,7 @@ func TestWispTypeToCategory(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.wispType, func(t *testing.T) {
-			got := wispTypeToCategory(tc.wispType)
+			got := wispTypeToCategory(tc.wispType, "")
 			if got != tc.want {
 				t.Errorf("wispTypeToCategory(%q) = %q, want %q", tc.wispType, got, tc.want)
 			}

@@ -1272,7 +1272,6 @@ func nudgeFlockPath(townRoot, session string) string {
 	return filepath.Join(townRoot, constants.DirRuntime, "nudge_queue", safe, ".lock")
 }
 
-
 // IsSessionAttached returns true if the session has any clients attached.
 func (t *Tmux) IsSessionAttached(target string) bool {
 	attached, err := t.run("display-message", "-t", target, "-p", "#{session_attached}")
@@ -1433,9 +1432,9 @@ func (t *Tmux) dismissRewindMode(target string) {
 // Falls back to best-effort (no verification) if pane capture fails.
 func (t *Tmux) sendEnterVerified(target string) error {
 	const (
-		maxRetries       = 3
-		initialBackoff   = 500 * time.Millisecond
-		verifyLines      = 5 // capture last N lines for comparison
+		maxRetries     = 3
+		initialBackoff = 500 * time.Millisecond
+		verifyLines    = 5 // capture last N lines for comparison
 	)
 
 	// Snapshot pane content before Enter so we can detect processing.
@@ -1646,12 +1645,15 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 	// running the agent rather than sending to the focused pane.
 	target := session
 	if agentPane, err := t.FindAgentPane(session); err == nil && agentPane != "" {
-		// Qualify the pane ID with the session name (e.g., "hq-dog-alpha:%1")
-		// to avoid ambiguity. On some tmux versions (e.g., 3.3 on Windows),
-		// pane IDs are NOT globally unique — every session may have "%1".
-		// A bare "send-keys -t %1" targets the attached session's pane,
-		// not necessarily this session's.
-		target = session + ":" + agentPane
+		// On Unix tmux, pane IDs are globally addressable (%13) and qualifying
+		// them as session:%13 makes tmux interpret the pane ID as a window token,
+		// producing errors like "can't find window: %13". On Windows/psmux, pane
+		// IDs may not be globally unique, so keep the qualified form there.
+		if runtime.GOOS == "windows" {
+			target = session + ":" + agentPane
+		} else {
+			target = agentPane
+		}
 	}
 
 	// 0. Pre-delivery: dismiss Rewind menu if the session is stuck in it.
