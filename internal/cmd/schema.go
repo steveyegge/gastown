@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // Schema output types
@@ -26,6 +27,42 @@ type SchemaIndexEntry struct {
 	Aliases     []string `json:"aliases,omitempty"`
 	Subcommands []string `json:"subcommands,omitempty"`
 	Hidden      bool     `json:"hidden,omitempty"`
+}
+
+// SchemaDetail is the full JSON Schema for a single command.
+type SchemaDetail struct {
+	Schema      string                 `json:"$schema"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Long        string                 `json:"long,omitempty"`
+	Flags       map[string]interface{} `json:"flags,omitempty"`
+	Arguments   *SchemaArguments       `json:"arguments,omitempty"`
+	Annotations map[string]interface{} `json:"annotations,omitempty"`
+}
+
+// SchemaArguments describes positional arguments for a command.
+type SchemaArguments struct {
+	Type  string          `json:"type"`
+	Items []SchemaArgItem `json:"items,omitempty"`
+}
+
+// SchemaArgItem describes a single positional argument.
+type SchemaArgItem struct {
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+}
+
+// SchemaFlag describes a single flag's JSON Schema entry.
+type SchemaFlag struct {
+	Type        string      `json:"type"`
+	Description string      `json:"description,omitempty"`
+	Default     interface{} `json:"default,omitempty"`
+	Items       *SchemaItems `json:"items,omitempty"`
+}
+
+// SchemaItems is used for array-type flags.
+type SchemaItems struct {
+	Type string `json:"type"`
 }
 
 const jsonSchemaDraft = "https://json-schema.org/draft/2020-12/schema"
@@ -109,8 +146,143 @@ func runSchema(cmd *cobra.Command, args []string) error {
 }
 
 func runSchemaDetail(args []string) error {
-	// Placeholder — implemented in Task 2
-	return fmt.Errorf("detail mode not yet implemented")
+	detail, err := buildSchemaDetail(rootCmd, args)
+	if err != nil {
+		return err
+	}
+	return schemaOutputJSON(detail)
+}
+
+// buildSchemaDetail resolves a command path and returns its full JSON Schema.
+func buildSchemaDetail(root *cobra.Command, path []string) (*SchemaDetail, error) {
+	cmd, err := findCommand(root, path)
+	if err != nil {
+		return nil, err
+	}
+
+	fullName := root.Name() + " " + strings.Join(path, " ")
+
+	detail := &SchemaDetail{
+		Schema:      jsonSchemaDraft,
+		Name:        fullName,
+		Description: cmd.Short,
+	}
+
+	if cmd.Long != "" {
+		detail.Long = cmd.Long
+	}
+
+	detail.Flags = buildFlagProperties(cmd)
+	detail.Arguments = extractArgSchema(cmd)
+
+	if len(cmd.Annotations) > 0 {
+		annotations := make(map[string]interface{}, len(cmd.Annotations))
+		for k, v := range cmd.Annotations {
+			switch v {
+			case "true":
+				annotations[k] = true
+			case "false":
+				annotations[k] = false
+			default:
+				annotations[k] = v
+			}
+		}
+		detail.Annotations = annotations
+	}
+
+	return detail, nil
+}
+
+// buildFlagProperties converts a command's flags into a JSON Schema properties map.
+func buildFlagProperties(cmd *cobra.Command) map[string]interface{} {
+	properties := make(map[string]interface{})
+
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		if f.Hidden {
+			return
+		}
+
+		sf := SchemaFlag{
+			Type:        flagTypeToJSONSchema(f.Value.Type()),
+			Description: f.Usage,
+		}
+
+		// Set default only if non-zero
+		def := f.DefValue
+		if def != "" && def != "false" && def != "0" && def != "[]" {
+			sf.Default = def
+		}
+
+		// Array types get items
+		if sf.Type == "array" {
+			sf.Items = &SchemaItems{Type: "string"}
+		}
+
+		properties[f.Name] = sf
+	})
+
+	if len(properties) == 0 {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"type":       "object",
+		"properties": properties,
+	}
+}
+
+// flagTypeToJSONSchema maps pflag type strings to JSON Schema types.
+func flagTypeToJSONSchema(flagType string) string {
+	switch flagType {
+	case "bool":
+		return "boolean"
+	case "int", "int32", "int64":
+		return "integer"
+	case "float32", "float64":
+		return "number"
+	case "stringSlice", "stringArray":
+		return "array"
+	default:
+		return "string"
+	}
+}
+
+// extractArgSchema parses cmd.Use to extract positional argument names and optionality.
+func extractArgSchema(cmd *cobra.Command) *SchemaArguments {
+	use := cmd.Use
+	// Strip the command name (first word)
+	idx := strings.Index(use, " ")
+	if idx < 0 {
+		return nil
+	}
+	argPart := strings.TrimSpace(use[idx+1:])
+	if argPart == "" {
+		return nil
+	}
+
+	var items []SchemaArgItem
+	for _, token := range strings.Fields(argPart) {
+		// Skip variadic/repeat indicators
+		if token == "..." || token == "[...]" {
+			continue
+		}
+		required := !strings.HasPrefix(token, "[")
+		name := strings.Trim(token, "<>[]")
+		name = strings.TrimSuffix(name, "...")
+		if name == "" {
+			continue
+		}
+		items = append(items, SchemaArgItem{Name: name, Required: required})
+	}
+
+	if len(items) == 0 {
+		return nil
+	}
+
+	return &SchemaArguments{
+		Type:  "array",
+		Items: items,
+	}
 }
 
 func schemaOutputJSON(v interface{}) error {
