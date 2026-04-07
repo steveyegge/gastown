@@ -31,14 +31,16 @@ type SchemaIndexEntry struct {
 
 // SchemaDetail is the full JSON Schema for a single command.
 type SchemaDetail struct {
-	Schema      string                 `json:"$schema"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	Long        string                 `json:"long,omitempty"`
+	Schema       string                 `json:"$schema"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description,omitempty"`
+	Group        string                 `json:"group,omitempty"`
+	Aliases      []string               `json:"aliases,omitempty"`
+	Annotations  map[string]interface{} `json:"annotations,omitempty"`
+	Arguments    *SchemaArguments       `json:"arguments,omitempty"`
 	Flags        map[string]interface{} `json:"flags,omitempty"`
 	OutputSchema interface{}            `json:"outputSchema,omitempty"`
-	Arguments    *SchemaArguments       `json:"arguments,omitempty"`
-	Annotations  map[string]interface{} `json:"annotations,omitempty"`
+	Subcommands  []string               `json:"subcommands,omitempty"`
 }
 
 // SchemaArguments describes positional arguments for a command.
@@ -55,9 +57,10 @@ type SchemaArgItem struct {
 
 // SchemaFlag describes a single flag's JSON Schema entry.
 type SchemaFlag struct {
-	Type        string      `json:"type"`
-	Description string      `json:"description,omitempty"`
-	Default     interface{} `json:"default,omitempty"`
+	Type        string       `json:"type"`
+	Description string       `json:"description,omitempty"`
+	Shorthand   string       `json:"shorthand,omitempty"`
+	Default     interface{}  `json:"default,omitempty"`
 	Items       *SchemaItems `json:"items,omitempty"`
 }
 
@@ -172,14 +175,22 @@ func buildSchemaDetail(root *cobra.Command, path []string) (*SchemaDetail, error
 		Schema:      jsonSchemaDraft,
 		Name:        fullName,
 		Description: cmd.Short,
+		Group:       cmd.GroupID,
 	}
 
-	if cmd.Long != "" {
-		detail.Long = cmd.Long
+	if len(cmd.Aliases) > 0 {
+		detail.Aliases = cmd.Aliases
 	}
 
 	detail.Flags = buildFlagProperties(cmd)
 	detail.Arguments = extractArgSchema(cmd)
+
+	// Subcommands
+	for _, sub := range cmd.Commands() {
+		if !sub.Hidden {
+			detail.Subcommands = append(detail.Subcommands, sub.Name())
+		}
+	}
 
 	if len(cmd.Annotations) > 0 {
 		annotations := make(map[string]interface{}, len(cmd.Annotations))
@@ -219,6 +230,7 @@ func buildFlagProperties(cmd *cobra.Command) map[string]interface{} {
 		sf := SchemaFlag{
 			Type:        flagTypeToJSONSchema(f.Value.Type()),
 			Description: f.Usage,
+			Shorthand:   f.Shorthand,
 		}
 
 		// Set default only if non-zero
