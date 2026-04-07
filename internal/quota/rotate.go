@@ -49,6 +49,10 @@ type PlanOpts struct {
 	// rate-limit status (preemptive rotation). Empty string = default behavior.
 	FromAccount string
 
+	// ToAccount forces all assignments to use this specific account instead
+	// of the LRU selection from the available pool. Empty string = default LRU.
+	ToAccount string
+
 	// IncludeNearLimit includes sessions approaching their rate limit
 	// (not just hard-limited sessions) as rotation candidates.
 	IncludeNearLimit bool
@@ -112,27 +116,43 @@ func PlanRotation(scanner *Scanner, mgr *Manager, acctCfg *config.AccountsConfig
 	// The caller persists confirmed rate-limit state after execution.
 	available := mgr.AvailableAccounts(state)
 
-	// Validate tokens for available accounts — skip accounts with expired or
-	// revoked tokens. This prevents swapping a bad token into the target's
-	// keychain entry, which would leave the session non-functional.
+	// When --to is specified, force that single account as the only candidate.
+	// Still validate its token — don't swap a broken credential.
 	skipped := make(map[string]string)
-	var validAvailable []string
-	for _, handle := range available {
-		if handle == opts.FromAccount {
-			continue // rotating away from this account, not a candidate
-		}
-		acct, ok := acctCfg.Accounts[handle]
+	if opts.ToAccount != "" {
+		acct, ok := acctCfg.Accounts[opts.ToAccount]
 		if !ok {
-			continue
+			return nil, fmt.Errorf("target account %q not found in config", opts.ToAccount)
 		}
 		configDir := util.ExpandHome(acct.ConfigDir)
 		if err := ValidateKeychainToken(configDir); err != nil {
-			skipped[handle] = err.Error()
-			continue
+			skipped[opts.ToAccount] = err.Error()
+			available = nil
+		} else {
+			available = []string{opts.ToAccount}
 		}
-		validAvailable = append(validAvailable, handle)
+	} else {
+		// Validate tokens for available accounts — skip accounts with expired or
+		// revoked tokens. This prevents swapping a bad token into the target's
+		// keychain entry, which would leave the session non-functional.
+		var validAvailable []string
+		for _, handle := range available {
+			if handle == opts.FromAccount {
+				continue // rotating away from this account, not a candidate
+			}
+			acct, ok := acctCfg.Accounts[handle]
+			if !ok {
+				continue
+			}
+			configDir := util.ExpandHome(acct.ConfigDir)
+			if err := ValidateKeychainToken(configDir); err != nil {
+				skipped[handle] = err.Error()
+				continue
+			}
+			validAvailable = append(validAvailable, handle)
+		}
+		available = validAvailable
 	}
-	available = validAvailable
 
 	// Collect unique config dirs from target sessions.
 	// Multiple sessions can share the same config dir (via the same account).

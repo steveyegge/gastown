@@ -811,3 +811,171 @@ func TestPlanRotation_MixedHardAndNearLimit(t *testing.T) {
 		t.Fatalf("expected 2 assignments, got %d", len(plan.Assignments))
 	}
 }
+
+// --- ToAccount tests ---
+
+func TestPlanRotation_ToAccount_ForcesTarget(t *testing.T) {
+	setupTestRegistry(t)
+
+	// Session on alpha is rate-limited. Three available accounts: beta, gamma, delta.
+	// Without --to, LRU would pick gamma (oldest LastUsed).
+	// With --to delta, it should force delta.
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "You've hit your limit · resets 7pm",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/alpha"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"alpha": {ConfigDir: "/home/user/.claude-accounts/alpha"},
+			"beta":  {ConfigDir: "/home/user/.claude-accounts/beta"},
+			"gamma": {ConfigDir: "/home/user/.claude-accounts/gamma"},
+			"delta": {ConfigDir: "/home/user/.claude-accounts/delta"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+	state := &config.QuotaState{
+		Version: config.CurrentQuotaVersion,
+		Accounts: map[string]config.AccountQuotaState{
+			"alpha": {Status: config.QuotaStatusLimited, LastUsed: "2025-01-01T04:00:00Z"},
+			"beta":  {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T03:00:00Z"},
+			"gamma": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T01:00:00Z"},
+			"delta": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T02:00:00Z"},
+		},
+	}
+	if err := mgr.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{ToAccount: "delta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(plan.Assignments) != 1 {
+		t.Fatalf("expected 1 assignment, got %d", len(plan.Assignments))
+	}
+	if plan.Assignments["gt-crew-bear"] != "delta" {
+		t.Errorf("expected assignment to delta, got %s", plan.Assignments["gt-crew-bear"])
+	}
+	// Available pool should only contain the forced account
+	if len(plan.AvailableAccounts) != 1 || plan.AvailableAccounts[0] != "delta" {
+		t.Errorf("expected available=[delta], got %v", plan.AvailableAccounts)
+	}
+}
+
+func TestPlanRotation_ToAccount_WithFromAccount(t *testing.T) {
+	setupTestRegistry(t)
+
+	// Preemptive: rotate all sessions on alpha to gamma specifically.
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear", "gt-crew-wolf"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "working normally...",
+			"gt-crew-wolf": "also working...",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/alpha"},
+			"gt-crew-wolf": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/beta"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"alpha": {ConfigDir: "/home/user/.claude-accounts/alpha"},
+			"beta":  {ConfigDir: "/home/user/.claude-accounts/beta"},
+			"gamma": {ConfigDir: "/home/user/.claude-accounts/gamma"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+	state := &config.QuotaState{
+		Version: config.CurrentQuotaVersion,
+		Accounts: map[string]config.AccountQuotaState{
+			"alpha": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T03:00:00Z"},
+			"beta":  {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T02:00:00Z"},
+			"gamma": {Status: config.QuotaStatusAvailable, LastUsed: "2025-01-01T01:00:00Z"},
+		},
+	}
+	if err := mgr.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanRotation(scanner, mgr, accounts, PlanOpts{
+		FromAccount: "alpha",
+		ToAccount:   "gamma",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should target alpha session only (from), assigned to gamma (to)
+	if len(plan.LimitedSessions) != 1 {
+		t.Fatalf("expected 1 targeted session, got %d", len(plan.LimitedSessions))
+	}
+	if plan.Assignments["gt-crew-bear"] != "gamma" {
+		t.Errorf("expected assignment to gamma, got %s", plan.Assignments["gt-crew-bear"])
+	}
+}
+
+func TestPlanRotation_ToAccount_NotFound(t *testing.T) {
+	setupTestRegistry(t)
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "You've hit your limit",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/alpha"},
+		},
+	}
+
+	accounts := &config.AccountsConfig{
+		Accounts: map[string]config.Account{
+			"alpha": {ConfigDir: "/home/user/.claude-accounts/alpha"},
+			"beta":  {ConfigDir: "/home/user/.claude-accounts/beta"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	townRoot := setupTestTown(t)
+	mgr := NewManager(townRoot)
+	state := &config.QuotaState{
+		Version: config.CurrentQuotaVersion,
+		Accounts: map[string]config.AccountQuotaState{
+			"alpha": {Status: config.QuotaStatusLimited},
+			"beta":  {Status: config.QuotaStatusAvailable},
+		},
+	}
+	if err := mgr.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = PlanRotation(scanner, mgr, accounts, PlanOpts{ToAccount: "nonexistent"})
+	if err == nil {
+		t.Fatal("expected error for nonexistent --to account")
+	}
+}

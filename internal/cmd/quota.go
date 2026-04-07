@@ -49,6 +49,8 @@ Commands:
   gt quota status            Show account quota status
   gt quota scan              Detect rate-limited sessions
   gt quota rotate            Swap blocked sessions to available accounts
+  gt quota pause             Pause an account (prevent rotation to it)
+  gt quota unpause           Make a paused account available again
   gt quota clear             Mark account(s) as available again`,
 }
 
@@ -437,6 +439,7 @@ func printScanText(results []quota.ScanResult) error {
 var (
 	rotateDryRun bool
 	rotateFrom   string
+	rotateTo     string
 	rotateIdle   bool
 )
 
@@ -449,22 +452,23 @@ Scans all sessions for rate limits, plans account assignments using
 least-recently-used ordering, and restarts blocked sessions with fresh accounts.
 
 Use --from to preemptively rotate sessions using a specific account before
-it hits its rate limit. This is useful for switching idle sessions while
-it's not disruptive.
+it hits its rate limit. Use --to to force a specific target account instead
+of the default LRU selection. Combine both for precise control.
 
 The rotation process:
   1. Scans all Gas Town sessions for rate-limit indicators
-  2. Selects available accounts (LRU order)
+  2. Selects available accounts (LRU order, or --to if specified)
   3. Swaps macOS Keychain credentials (same config dir preserved)
   4. Restarts blocked sessions via respawn-pane
   5. Sends /resume to recover conversation context
 
 Examples:
-  gt quota rotate                    # Rotate all blocked sessions
-  gt quota rotate --from work        # Preemptively rotate sessions on 'work' account
-  gt quota rotate --from work --idle # Only rotate idle sessions on 'work' account
-  gt quota rotate --dry-run          # Show plan without executing
-  gt quota rotate --json             # JSON output`,
+  gt quota rotate                          # Rotate all blocked sessions
+  gt quota rotate --from work              # Preemptively rotate sessions on 'work' account
+  gt quota rotate --from work --to personal # Rotate from work to personal specifically
+  gt quota rotate --from work --idle       # Only rotate idle sessions on 'work' account
+  gt quota rotate --dry-run                # Show plan without executing
+  gt quota rotate --json                   # JSON output`,
 	RunE: runQuotaRotate,
 }
 
@@ -492,6 +496,17 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Validate --to account if specified
+	if rotateTo != "" {
+		if _, ok := acctCfg.Accounts[rotateTo]; !ok {
+			return fmt.Errorf("account %q not found (available: %s)",
+				rotateTo, strings.Join(accountHandles(acctCfg), ", "))
+		}
+		if rotateTo == rotateFrom {
+			return fmt.Errorf("--to and --from cannot be the same account (%s)", rotateTo)
+		}
+	}
+
 	// Create scanner and plan rotation
 	t := ttmux.NewTmux()
 	scanner, err := quota.NewScanner(t, nil, acctCfg)
@@ -500,7 +515,10 @@ func runQuotaRotate(cmd *cobra.Command, args []string) error {
 	}
 
 	mgr := quota.NewManager(townRoot)
-	plan, err := quota.PlanRotation(scanner, mgr, acctCfg, quota.PlanOpts{FromAccount: rotateFrom})
+	plan, err := quota.PlanRotation(scanner, mgr, acctCfg, quota.PlanOpts{
+		FromAccount: rotateFrom,
+		ToAccount:   rotateTo,
+	})
 	if err != nil {
 		return fmt.Errorf("planning rotation: %w", err)
 	}
@@ -724,6 +742,119 @@ func runQuotaClear(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf(" %s %s → available\n", style.SuccessPrefix, handle)
 	}
+	return nil
+}
+
+// Pause command flags
+var (
+	pauseUntil string
+)
+
+var quotaPauseCmd = &cobra.Command{
+	Use:   "pause <handle>",
+	Short: "Pause an account to prevent rotation to it",
+	Long: `Mark an account as limited so it won't be selected as a rotation target.
+
+Use --until to specify when the account should automatically become available
+again. Without --until, the account stays paused until manually unpaused.
+
+This is useful when an account is approaching its rate limit and you want to
+rest it proactively. Agents can also call this from inside their session to
+signal that their current account is nearing its limit.
+
+The account's existing LastUsed timestamp is preserved.
+
+Examples:
+  gt quota pause work                                    # Pause indefinitely
+  gt quota pause work --until "1pm"                      # Pause until 1pm local time
+  gt quota pause work --until "1pm (America/Los_Angeles)" # Pause until 1pm Pacific
+  gt quota pause work --until "7:00pm"                   # Pause until 7pm local time`,
+	Args: cobra.ExactArgs(1),
+	RunE: runQuotaPause,
+}
+
+func runQuotaPause(cmd *cobra.Command, args []string) error {
+	handle := args[0]
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Validate account exists
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	acctCfg, err := config.LoadAccountsConfig(accountsPath)
+	if err != nil {
+		return fmt.Errorf("no accounts configured: %w", err)
+	}
+	if _, ok := acctCfg.Accounts[handle]; !ok {
+		return fmt.Errorf("account %q not found (available: %s)",
+			handle, strings.Join(accountHandles(acctCfg), ", "))
+	}
+
+	// Validate --until format if provided
+	if pauseUntil != "" {
+		if _, err := quota.ParseResetTime(pauseUntil, time.Now()); err != nil {
+			return fmt.Errorf("invalid --until time %q: %w (examples: \"1pm\", \"7:00pm\", \"1pm (America/Los_Angeles)\")", pauseUntil, err)
+		}
+	}
+
+	mgr := quota.NewManager(townRoot)
+	return mgr.WithLock(func() error {
+		state, err := mgr.Load()
+		if err != nil {
+			return err
+		}
+
+		now := time.Now().UTC().Format(time.RFC3339)
+		existing := state.Accounts[handle]
+		state.Accounts[handle] = config.AccountQuotaState{
+			Status:    config.QuotaStatusLimited,
+			LimitedAt: now,
+			ResetsAt:  pauseUntil,
+			LastUsed:  existing.LastUsed,
+		}
+
+		if err := mgr.SaveUnlocked(state); err != nil {
+			return err
+		}
+
+		suffix := ""
+		if pauseUntil != "" {
+			suffix = fmt.Sprintf(" (until %s)", pauseUntil)
+		}
+		fmt.Printf(" %s %s → paused%s\n", style.SuccessPrefix, handle, suffix)
+		return nil
+	})
+}
+
+var quotaUnpauseCmd = &cobra.Command{
+	Use:   "unpause <handle>",
+	Short: "Unpause an account, making it available for rotation",
+	Long: `Clear the paused/limited status for an account, making it available again.
+
+This is equivalent to 'gt quota clear' for a single account but communicates
+intent more clearly when used after 'gt quota pause'.
+
+Examples:
+  gt quota unpause work    # Make 'work' account available again`,
+	Args: cobra.ExactArgs(1),
+	RunE: runQuotaUnpause,
+}
+
+func runQuotaUnpause(cmd *cobra.Command, args []string) error {
+	handle := args[0]
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	mgr := quota.NewManager(townRoot)
+	if err := mgr.MarkAvailable(handle); err != nil {
+		return fmt.Errorf("unpausing %s: %w", handle, err)
+	}
+	fmt.Printf(" %s %s → available\n", style.SuccessPrefix, handle)
 	return nil
 }
 
@@ -1052,16 +1183,21 @@ func init() {
 	quotaRotateCmd.Flags().BoolVar(&rotateDryRun, "dry-run", false, "Show plan without executing")
 	quotaRotateCmd.Flags().BoolVar(&quotaJSON, "json", false, "Output as JSON")
 	quotaRotateCmd.Flags().StringVar(&rotateFrom, "from", "", "Preemptively rotate sessions using this account")
+	quotaRotateCmd.Flags().StringVar(&rotateTo, "to", "", "Force rotation to this specific account (skip LRU selection)")
 	quotaRotateCmd.Flags().BoolVar(&rotateIdle, "idle", false, "Only rotate sessions at the idle prompt (skip busy agents)")
 
 	quotaWatchCmd.Flags().DurationVar(&watchInterval, "interval", 5*time.Minute, "Poll interval")
 	quotaWatchCmd.Flags().BoolVar(&watchDryRun, "dry-run", false, "Show detections without executing rotation")
+
+	quotaPauseCmd.Flags().StringVar(&pauseUntil, "until", "", "Auto-unpause time (e.g. \"1pm\", \"7:00pm (America/Los_Angeles)\")")
 
 	quotaCmd.AddCommand(quotaStatusCmd)
 	quotaCmd.AddCommand(quotaScanCmd)
 	quotaCmd.AddCommand(quotaRotateCmd)
 	quotaCmd.AddCommand(quotaClearCmd)
 	quotaCmd.AddCommand(quotaWatchCmd)
+	quotaCmd.AddCommand(quotaPauseCmd)
+	quotaCmd.AddCommand(quotaUnpauseCmd)
 
 	rootCmd.AddCommand(quotaCmd)
 }
