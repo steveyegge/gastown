@@ -48,6 +48,33 @@ func init() {
 	repairCmd.AddCommand(repairBootstrapCmd)
 }
 
+func rigRepairChecks() []doctor.Check {
+	return []doctor.Check{
+		doctor.NewRigConfigSyncCheck(),
+		doctor.NewRoutesCheck(),
+		doctor.NewDatabasePrefixCheck(),
+		doctor.NewStaleBeadsRedirectCheck(),
+		doctor.NewBeadsRedirectTargetCheck(),
+		doctor.NewRigBeadsCheck(),
+		doctor.NewAgentBeadsCheck(),
+		doctor.NewStaleDoltPortCheck(),
+	}
+}
+
+func bootstrapRepairChecks() []doctor.Check {
+	return []doctor.Check{
+		doctor.NewTownConfigExistsCheck(),
+		doctor.NewTownConfigValidCheck(),
+		doctor.NewRigsRegistryExistsCheck(),
+		doctor.NewMayorExistsCheck(),
+		doctor.NewTownBeadsConfigCheck(),
+		doctor.NewRoutesCheck(),
+		doctor.NewTmuxGlobalEnvCheck(),
+		doctor.NewStaleDoltPortCheck(),
+		doctor.NewDatabasePrefixCheck(),
+	}
+}
+
 func runRepairChecks(townRoot, rigName, title string, checks ...doctor.Check) error {
 	ctx := &doctor.CheckContext{
 		TownRoot: townRoot,
@@ -80,13 +107,7 @@ func runRepair(cmd *cobra.Command, args []string) error {
 		townRoot,
 		"",
 		"Repairing rig identity and convergence...",
-		doctor.NewRigConfigSyncCheck(),
-		doctor.NewRoutesCheck(),
-		doctor.NewDatabasePrefixCheck(),
-		doctor.NewStaleBeadsRedirectCheck(),
-		doctor.NewRigBeadsCheck(),
-		doctor.NewAgentBeadsCheck(),
-		doctor.NewStaleDoltPortCheck(),
+		rigRepairChecks()...,
 	)
 }
 
@@ -100,15 +121,6 @@ func runRepairBootstrap(cmd *cobra.Command, args []string) error {
 		townRoot,
 		"",
 		"Repairing HQ bootstrap state...",
-		doctor.NewTownConfigExistsCheck(),
-		doctor.NewTownConfigValidCheck(),
-		doctor.NewRigsRegistryExistsCheck(),
-		doctor.NewRigsRegistryValidCheck(),
-		doctor.NewMayorExistsCheck(),
-		doctor.NewTownBeadsConfigCheck(),
-		doctor.NewRoutesCheck(),
-		doctor.NewTmuxGlobalEnvCheck(),
-		doctor.NewStaleDoltPortCheck(),
-		doctor.NewDatabasePrefixCheck(),
+		bootstrapRepairChecks()...,
 	)
 }

@@ -2,10 +2,19 @@ package cmd
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/doctor"
 )
+
+func checkNames(checks []doctor.Check) []string {
+	names := make([]string, 0, len(checks))
+	for _, check := range checks {
+		names = append(names, check.Name())
+	}
+	return names
+}
 
 type fakeRepairCheck struct {
 	name      string
@@ -58,5 +67,30 @@ func TestRunRepairChecks_FailsWhenBlockingIssueRemains(t *testing.T) {
 
 	if err := runRepairChecks(t.TempDir(), "", "", check); err == nil {
 		t.Fatal("expected runRepairChecks to return blocking error")
+	}
+}
+
+func TestBootstrapRepairChecks_HQOnlySurface(t *testing.T) {
+	names := checkNames(bootstrapRepairChecks())
+
+	for _, required := range []string{"town-config-exists", "town-config-valid", "rigs-registry-exists", "mayor-exists", "town-beads-config", "routes-config", "tmux-global-env", "stale-dolt-port", "database-prefix"} {
+		if !slices.Contains(names, required) {
+			t.Fatalf("bootstrapRepairChecks missing %q: %v", required, names)
+		}
+	}
+	for _, forbidden := range []string{"rigs-registry-valid", "rig-config-sync", "stale-beads-redirect", "beads-redirect-target", "rig-beads-exist", "agent-beads-exist"} {
+		if slices.Contains(names, forbidden) {
+			t.Fatalf("bootstrapRepairChecks unexpectedly includes %q: %v", forbidden, names)
+		}
+	}
+}
+
+func TestRigRepairChecks_IncludeRedirectAndAgentInvariantCoverage(t *testing.T) {
+	names := checkNames(rigRepairChecks())
+
+	for _, required := range []string{"rig-config-sync", "routes-config", "database-prefix", "stale-beads-redirect", "beads-redirect-target", "rig-beads-exist", "agent-beads-exist", "stale-dolt-port"} {
+		if !slices.Contains(names, required) {
+			t.Fatalf("rigRepairChecks missing %q: %v", required, names)
+		}
 	}
 }
