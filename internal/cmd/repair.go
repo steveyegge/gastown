@@ -12,7 +12,7 @@ import (
 var repairCmd = &cobra.Command{
 	Use:     "repair",
 	GroupID: GroupDiag,
-	Short:   "Repair database identity and configuration issues",
+	Short:   "Repair bootstrap, routing, and configuration issues",
 	Long: `Repair common database identity mismatches and configuration issues.
 
 This is a focused version of 'gt doctor --fix' that targets the most common
@@ -32,8 +32,42 @@ For a full diagnostic with auto-fix, use 'gt doctor --fix'.`,
 	RunE: runRepair,
 }
 
+var repairBootstrapCmd = &cobra.Command{
+	Use:   "bootstrap",
+	Short: "Repair the narrow HQ bootstrap contract",
+	Long: `Repair the minimal HQ/bootstrap state needed for first-login control-plane bring-up.
+
+This targets canonical town markers, town-level beads configuration, routing,
+tmux town-root environment, and Dolt metadata needed for HQ control-plane
+commands to function from the canonical town root.`,
+	RunE: runRepairBootstrap,
+}
+
 func init() {
 	rootCmd.AddCommand(repairCmd)
+	repairCmd.AddCommand(repairBootstrapCmd)
+}
+
+func runRepairChecks(townRoot, rigName, title string, checks ...doctor.Check) error {
+	ctx := &doctor.CheckContext{
+		TownRoot: townRoot,
+		RigName:  rigName,
+		Verbose:  true,
+	}
+
+	d := doctor.NewDoctor()
+	d.RegisterAll(checks...)
+
+	if title != "" {
+		fmt.Println(title)
+		fmt.Println()
+	}
+
+	report := d.FixStreaming(ctx, os.Stdout, 0)
+	if report.HasErrors() {
+		return fmt.Errorf("repair left %d blocking issue(s)", report.Summary.Errors)
+	}
+	return nil
 }
 
 func runRepair(cmd *cobra.Command, args []string) error {
@@ -42,50 +76,39 @@ func runRepair(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	ctx := &doctor.CheckContext{
-		TownRoot: townRoot,
-		Verbose:  true,
-	}
-
-	// Run the identity/config repair checks
-	checks := []doctor.Check{
+	return runRepairChecks(
+		townRoot,
+		"",
+		"Repairing rig identity and convergence...",
 		doctor.NewRigConfigSyncCheck(),
+		doctor.NewRoutesCheck(),
+		doctor.NewDatabasePrefixCheck(),
+		doctor.NewStaleBeadsRedirectCheck(),
+		doctor.NewRigBeadsCheck(),
+		doctor.NewAgentBeadsCheck(),
 		doctor.NewStaleDoltPortCheck(),
+	)
+}
+
+func runRepairBootstrap(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	fmt.Println("Repairing database identity and configuration...")
-	fmt.Println()
-
-	hasIssues := false
-	for _, check := range checks {
-		result := check.Run(ctx)
-		if result.Status == doctor.StatusOK {
-			fmt.Printf("  ✓ %s: %s\n", result.Name, result.Message)
-			continue
-		}
-
-		hasIssues = true
-		fmt.Printf("  ⚠ %s: %s\n", result.Name, result.Message)
-		for _, d := range result.Details {
-			fmt.Printf("    - %s\n", d)
-		}
-
-		// Auto-fix
-		if check.CanFix() {
-			fmt.Printf("    Fixing...\n")
-			if err := check.Fix(ctx); err != nil {
-				fmt.Fprintf(os.Stderr, "    ✗ Fix failed: %v\n", err)
-			} else {
-				fmt.Printf("    ✓ Fixed\n")
-			}
-		}
-	}
-
-	if !hasIssues {
-		fmt.Println("\nAll identity checks passed — no repairs needed.")
-	} else {
-		fmt.Println("\nRepair complete. Run 'gt doctor' for a full diagnostic.")
-	}
-
-	return nil
+	return runRepairChecks(
+		townRoot,
+		"",
+		"Repairing HQ bootstrap state...",
+		doctor.NewTownConfigExistsCheck(),
+		doctor.NewTownConfigValidCheck(),
+		doctor.NewRigsRegistryExistsCheck(),
+		doctor.NewRigsRegistryValidCheck(),
+		doctor.NewMayorExistsCheck(),
+		doctor.NewTownBeadsConfigCheck(),
+		doctor.NewRoutesCheck(),
+		doctor.NewTmuxGlobalEnvCheck(),
+		doctor.NewStaleDoltPortCheck(),
+		doctor.NewDatabasePrefixCheck(),
+	)
 }
