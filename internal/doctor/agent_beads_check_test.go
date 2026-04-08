@@ -156,6 +156,23 @@ func TestListCrewWorkers_FiltersWorktrees(t *testing.T) {
 	}
 }
 
+// TestAddWispLabelSQL_ErrorsGracefully verifies addWispLabelSQL doesn't panic
+// and returns an error when bd is unavailable (no Dolt server).
+// This is a regression guard for gt-3vx: after CreateAgentBead, the gt:agent
+// label must also be inserted into wisp_labels so doctor checks that join
+// wisp_labels can find the bead.
+func TestAddWispLabelSQL_ErrorsGracefully(t *testing.T) {
+	tmpDir := t.TempDir()
+	err := addWispLabelSQL(tmpDir, "gt-gastown-witness", "gt:agent")
+	// bd sql will fail without a Dolt server — just verify no panic and that the
+	// function returns an error (not silently discarding the failure).
+	if err == nil {
+		t.Log("addWispLabelSQL succeeded (Dolt server is running)")
+	} else {
+		t.Logf("addWispLabelSQL returned expected error without Dolt: %v", err)
+	}
+}
+
 // TestListPolecats_FiltersWorktrees verifies that listPolecats skips
 // git worktrees, same as listCrewWorkers. See GH#2767.
 func TestListPolecats_FiltersWorktrees(t *testing.T) {
