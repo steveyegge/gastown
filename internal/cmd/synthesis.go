@@ -598,11 +598,8 @@ func createSynthesisBead(convoyID string, meta *ConvoyMeta, f *formula.Formula,
 		return "", fmt.Errorf("parsing created bead: %w", err)
 	}
 
-	// Add tracking relation: convoy tracks synthesis
-	depArgs := []string{"dep", "add", convoyID, result.ID, "--type=tracks"}
-	depCmd := exec.Command("bd", depArgs...)
-	depCmd.Dir = townBeads
-	_ = depCmd.Run() // Non-fatal if this fails
+	// Add tracking relation: convoy tracks synthesis.
+	_ = addTrackingRelationFn(townBeads, convoyID, result.ID) // Non-fatal if this fails
 
 	return result.ID, nil
 }
