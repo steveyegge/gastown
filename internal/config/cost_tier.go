@@ -161,10 +161,14 @@ func CostTierAgents(tier CostTier) map[string]*RuntimeConfig {
 }
 
 // claudeSonnetPreset returns a RuntimeConfig for Claude Sonnet.
+// Uses "sonnet[1m]" to enable 1M context window on Max/Team plans.
+// Without the [1m] suffix, --model sonnet resolves to 200K context
+// because the explicit --model flag bypasses Claude Code's built-in
+// plan-based auto-detection that would otherwise enable 1M.
 func claudeSonnetPreset() *RuntimeConfig {
 	return &RuntimeConfig{
 		Command: "claude",
-		Args:    []string{"--dangerously-skip-permissions", "--model", "sonnet"},
+		Args:    []string{"--dangerously-skip-permissions", "--model", "sonnet[1m]"},
 	}
 }
 

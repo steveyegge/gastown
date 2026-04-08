@@ -178,13 +178,13 @@ func TestCostTierAgents(t *testing.T) {
 		}
 		found := false
 		for i, arg := range sonnet.Args {
-			if arg == "--model" && i+1 < len(sonnet.Args) && sonnet.Args[i+1] == "sonnet" {
+			if arg == "--model" && i+1 < len(sonnet.Args) && sonnet.Args[i+1] == "sonnet[1m]" {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("sonnet Args %v missing --model sonnet", sonnet.Args)
+			t.Errorf("sonnet Args %v missing --model sonnet[1m]", sonnet.Args)
 		}
 	})
 
