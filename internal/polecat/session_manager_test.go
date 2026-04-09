@@ -13,6 +13,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/rig"
+	gtruntime "github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -384,7 +385,8 @@ func TestSessionManager_resolveBeadsDir(t *testing.T) {
 //
 // Without the fallback, GT_AGENT is never written to the tmux session table,
 // and the post-startup validation kills the session with:
-//   "GT_AGENT not set in session ... witness patrol will misidentify this polecat"
+//
+//	"GT_AGENT not set in session ... witness patrol will misidentify this polecat"
 //
 // Regression test for the bug introduced in PR #1776 which removed the
 // unconditional runtimeConfig.ResolvedAgent → SetEnvironment("GT_AGENT") logic
@@ -394,23 +396,23 @@ func TestAgentEnvOmitsGTAgent_FallbackRequired(t *testing.T) {
 
 	// Simulate what session_manager.Start calls for each dispatch scenario.
 	cases := []struct {
-		name       string
-		agent      string // opts.Agent value
-		wantGTAgent bool  // whether GT_AGENT should be in AgentEnv output
+		name        string
+		agent       string // opts.Agent value
+		wantGTAgent bool   // whether GT_AGENT should be in AgentEnv output
 	}{
 		{
-			name:       "default dispatch (no --agent flag)",
-			agent:      "",
+			name:        "default dispatch (no --agent flag)",
+			agent:       "",
 			wantGTAgent: false, // fallback needed
 		},
 		{
-			name:       "explicit --agent codex",
-			agent:      "codex",
+			name:        "explicit --agent codex",
+			agent:       "codex",
 			wantGTAgent: true,
 		},
 		{
-			name:       "explicit --agent gemini",
-			agent:      "gemini",
+			name:        "explicit --agent gemini",
+			agent:       "gemini",
 			wantGTAgent: true,
 		},
 	}
@@ -483,7 +485,7 @@ func TestVerifyStartupNudgeDelivery_IdleAgent(t *testing.T) {
 	// plus overhead = ~60s. Use 90s for safety.
 	done := make(chan struct{})
 	go func() {
-		m.verifyStartupNudgeDelivery(sessionName, rc)
+		m.verifyStartupNudgeDelivery(sessionName, rc, "check your hook")
 		close(done)
 	}()
 
@@ -504,7 +506,7 @@ func TestVerifyStartupNudgeDelivery_NilConfig(t *testing.T) {
 	m := NewSessionManager(tmux.NewTmux(), r)
 
 	// Should return immediately without error for nil config
-	m.verifyStartupNudgeDelivery("nonexistent-session", nil)
+	m.verifyStartupNudgeDelivery("nonexistent-session", nil, "")
 
 	// And for config without prompt prefix
 	rc := &config.RuntimeConfig{
@@ -513,7 +515,27 @@ func TestVerifyStartupNudgeDelivery_NilConfig(t *testing.T) {
 			ReadyDelayMs:      1000,
 		},
 	}
-	m.verifyStartupNudgeDelivery("nonexistent-session", rc)
+	m.verifyStartupNudgeDelivery("nonexistent-session", rc, "")
+}
+
+func TestPromptlessFallbackIncludesPrimeAndWorkInstructions(t *testing.T) {
+	beaconConfig := session.BeaconConfig{
+		Recipient:               session.BeaconRecipient("polecat", "toast", "demo"),
+		Sender:                  "witness",
+		Topic:                   "assigned",
+		MolID:                   "demo-123",
+		IncludePrimeInstruction: true,
+		ExcludeWorkInstructions: true,
+	}
+
+	prompt := session.BuildStartupPrompt(beaconConfig, gtruntime.StartupNudgeContent())
+
+	if !strings.Contains(prompt, "Run `gt prime`") {
+		t.Fatalf("prompt missing gt prime instruction: %q", prompt)
+	}
+	if !strings.Contains(prompt, gtruntime.StartupNudgeContent()) {
+		t.Fatalf("prompt missing startup nudge content: %q", prompt)
+	}
 }
 
 func TestValidateSessionName(t *testing.T) {

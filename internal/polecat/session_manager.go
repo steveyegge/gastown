@@ -300,6 +300,8 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
 	}
 	beacon := session.FormatStartupBeacon(beaconConfig)
+	startupNudgeContent := runtime.StartupNudgeContent()
+	startupPromptFallback := session.BuildStartupPrompt(beaconConfig, startupNudgeContent)
 
 	command := opts.Command
 	if command == "" {
@@ -460,26 +462,23 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	// Handle fallback nudges for non-hook agents.
 	// See StartupFallbackInfo in runtime package for the fallback matrix.
-	if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
-		// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
-		combined := beacon + "\n\n" + runtime.StartupNudgeContent()
-		debugSession("SendCombinedNudge", m.tmux.NudgeSession(sessionID, combined))
+	if fallbackInfo.SendBeaconNudge {
+		// Promptless runtimes need the full startup prompt delivered via nudge so
+		// the agent sees both the beacon and the initial work instructions.
+		debugSession("DeliverStartupPromptFallback",
+			runtime.DeliverStartupPromptFallback(m.tmux, sessionID, startupPromptFallback, runtimeConfig, constants.ClaudeStartTimeout))
 	} else {
-		if fallbackInfo.SendBeaconNudge {
-			// Agent doesn't support CLI prompt - send beacon via nudge
-			debugSession("SendBeaconNudge", m.tmux.NudgeSession(sessionID, beacon))
-		}
-
 		if fallbackInfo.StartupNudgeDelayMs > 0 {
-			// Wait for agent to finish processing beacon + gt prime before sending work instructions.
-			// Uses prompt-based detection where available; falls back to max(ReadyDelayMs, StartupNudgeDelayMs).
+			// Wait for agent to finish processing the beacon + gt prime before sending
+			// work instructions. Prompt-capable runtimes already got the beacon as the
+			// initial CLI prompt, so they only need the delayed startup nudge here.
 			primeWaitRC := runtime.RuntimeConfigWithMinDelay(runtimeConfig, fallbackInfo.StartupNudgeDelayMs)
 			debugSession("WaitForPrimeReady", m.tmux.WaitForRuntimeReady(sessionID, primeWaitRC, constants.ClaudeStartTimeout))
 		}
 
 		if fallbackInfo.SendStartupNudge {
 			// Send work instructions via nudge
-			debugSession("SendStartupNudge", m.tmux.NudgeSession(sessionID, runtime.StartupNudgeContent()))
+			debugSession("SendStartupNudge", m.tmux.NudgeSession(sessionID, startupNudgeContent))
 		}
 	}
 
@@ -487,7 +486,11 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// This fixes the Mode B race where the nudge arrives before Claude Code is ready,
 	// causing the polecat to sit idle at an empty prompt. See GH#1379.
 	if fallbackInfo.SendStartupNudge {
-		m.verifyStartupNudgeDelivery(sessionID, runtimeConfig)
+		verifyContent := startupNudgeContent
+		if fallbackInfo.SendBeaconNudge {
+			verifyContent = startupPromptFallback
+		}
+		m.verifyStartupNudgeDelivery(sessionID, runtimeConfig, verifyContent)
 	}
 
 	// Legacy fallback for other startup paths (non-fatal)
@@ -816,7 +819,7 @@ func (m *SessionManager) validateIssue(issueID, workDir string) error {
 //
 // Non-fatal: if verification fails or times out, the session is left running.
 // The witness zombie patrol will eventually detect and handle truly idle polecats.
-func (m *SessionManager) verifyStartupNudgeDelivery(sessionID string, rc *config.RuntimeConfig) {
+func (m *SessionManager) verifyStartupNudgeDelivery(sessionID string, rc *config.RuntimeConfig, retryContent string) {
 	// Only verify for agents with prompt detection. Without ReadyPromptPrefix,
 	// we can't distinguish "idle at prompt" from "busy processing".
 	if rc == nil || rc.Tmux == nil || rc.Tmux.ReadyPromptPrefix == "" {
@@ -832,7 +835,9 @@ func (m *SessionManager) verifyStartupNudgeDelivery(sessionID string, rc *config
 	verifyDelay := sessionCfg.StartupNudgeVerifyDelayD()
 	maxRetries := sessionCfg.StartupNudgeMaxRetriesV()
 
-	nudgeContent := runtime.StartupNudgeContent()
+	if strings.TrimSpace(retryContent) == "" {
+		retryContent = runtime.StartupNudgeContent()
+	}
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		// Wait for the agent to process the nudge before checking.
@@ -856,7 +861,7 @@ func (m *SessionManager) verifyStartupNudgeDelivery(sessionID string, rc *config
 		// Agent is truly idle (no busy indicator, prompt visible) — nudge was likely lost. Retry.
 		fmt.Fprintf(os.Stderr, "[startup-nudge] attempt %d/%d: agent %s idle at prompt, retrying nudge\n",
 			attempt, maxRetries, sessionID)
-		if err := m.tmux.NudgeSession(sessionID, nudgeContent); err != nil {
+		if err := m.tmux.NudgeSession(sessionID, retryContent); err != nil {
 			fmt.Fprintf(os.Stderr, "[startup-nudge] retry nudge failed for %s: %v\n", sessionID, err)
 			return
 		}
