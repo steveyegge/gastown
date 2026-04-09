@@ -648,16 +648,90 @@ func TestInstallDoctorClean(t *testing.T) {
 		assertDirExists(t, crewPath, "testrig/crew/jayne/")
 	})
 
-	// 8. Basic commands should work
-	// Note: mail inbox and hook are omitted — fresh Dolt databases lack the
-	// issues table, so these commands error with "table not found" until
-	// the first bead is created.
+	// 8. Verify installed-town mail can reach mayor.
+	t.Run("mayor-mail-delivery", func(t *testing.T) {
+		senderDir := filepath.Join(hqPath, "testrig", "crew", "jayne")
+		subject := "installed-town mayor mail regression"
+		body := "mail smoke test from installed town"
+
+		runGTCmd(t, gtBinary, senderDir, env,
+			"mail", "send", "mayor/",
+			"-s", subject,
+			"-m", body,
+		)
+
+		messages := readMailInboxJSON(t, gtBinary, filepath.Join(hqPath, "mayor"), env, "mayor/")
+		msg := findInboxMessageBySubject(messages, subject)
+		if msg == nil {
+			t.Fatalf("mayor inbox missing subject %q; inbox=%+v", subject, messages)
+		}
+		if msg.From != "testrig/jayne" {
+			t.Fatalf("mail sender = %q, want %q", msg.From, "testrig/jayne")
+		}
+		if msg.To != "mayor/" {
+			t.Fatalf("mail recipient = %q, want %q", msg.To, "mayor/")
+		}
+		if msg.Body != body {
+			t.Fatalf("mail body = %q, want %q", msg.Body, body)
+		}
+	})
+
+	// 9. Verify escalation delivery reaches mayor with structured mail metadata.
+	t.Run("escalation-delivery", func(t *testing.T) {
+		senderDir := filepath.Join(hqPath, "testrig", "crew", "jayne")
+		description := "installed-town escalation regression"
+
+		out := runGTCmdOutput(t, gtBinary, senderDir, env,
+			"escalate", description,
+			"-s", "medium",
+			"--json",
+		)
+
+		var result installEscalationResult
+		if err := json.Unmarshal([]byte(out), &result); err != nil {
+			t.Fatalf("parse escalate --json output: %v\nraw: %s", err, out)
+		}
+		if result.ID == "" {
+			t.Fatalf("escalate result missing ID: %+v", result)
+		}
+		if result.Status != "ok" {
+			t.Fatalf("escalate status = %q, want %q\nresult=%+v", result.Status, "ok", result)
+		}
+		if !containsString(result.Targets, "mayor") {
+			t.Fatalf("escalate targets %v missing mayor", result.Targets)
+		}
+
+		mailDelivery := findEscalationDelivery(result.Delivery, "mail", "mayor")
+		if mailDelivery == nil {
+			t.Fatalf("escalate delivery %#v missing mayor mail status", result.Delivery)
+		}
+		if !mailDelivery.Persisted || !mailDelivery.RuntimeNotified || !mailDelivery.Annotated {
+			t.Fatalf("mail delivery flags = %+v, want persisted/runtime_notified/annotated", *mailDelivery)
+		}
+
+		messages := readMailInboxJSON(t, gtBinary, filepath.Join(hqPath, "mayor"), env, "mayor/")
+		msg := findInboxMessageByThread(messages, result.ID)
+		if msg == nil {
+			t.Fatalf("mayor inbox missing escalation thread %q; inbox=%+v", result.ID, messages)
+		}
+		if msg.Type != "escalation" {
+			t.Fatalf("escalation mail type = %q, want %q", msg.Type, "escalation")
+		}
+		if !strings.Contains(msg.Subject, description) {
+			t.Fatalf("escalation mail subject = %q, want to contain %q", msg.Subject, description)
+		}
+	})
+
+	// 10. Basic commands should work.
+	// Mail inbox is safe here because the earlier regression checks seed the
+	// town beads database with a direct message and an escalation.
 	t.Run("commands", func(t *testing.T) {
 		runGTCmd(t, gtBinary, hqPath, env, "rig", "list")
 		runGTCmd(t, gtBinary, hqPath, env, "crew", "list", "--rig", "testrig")
+		runGTCmd(t, gtBinary, filepath.Join(hqPath, "mayor"), env, "mail", "inbox", "mayor/")
 	})
 
-	// 9. Doctor runs without crashing (may have warnings/errors but should not panic)
+	// 11. Doctor runs without crashing (may have warnings/errors but should not panic)
 	t.Run("doctor-runs", func(t *testing.T) {
 		cmd := exec.Command(gtBinary, "doctor", "-v")
 		cmd.Dir = hqPath
@@ -797,6 +871,77 @@ func configureGitIdentity(t *testing.T, env []string) {
 			t.Fatalf("git %v failed: %v\n%s", args, err, out)
 		}
 	}
+}
+
+type installInboxMessage struct {
+	ID       string `json:"id"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Subject  string `json:"subject"`
+	Body     string `json:"body"`
+	Type     string `json:"type"`
+	ThreadID string `json:"thread_id"`
+}
+
+type installEscalationResult struct {
+	ID       string                      `json:"id"`
+	Status   string                      `json:"status"`
+	Targets  []string                    `json:"targets"`
+	Delivery []installEscalationDelivery `json:"delivery"`
+}
+
+type installEscalationDelivery struct {
+	Target          string `json:"target,omitempty"`
+	Channel         string `json:"channel"`
+	Persisted       bool   `json:"persisted,omitempty"`
+	RuntimeNotified bool   `json:"runtime_notified,omitempty"`
+	Annotated       bool   `json:"annotated,omitempty"`
+}
+
+func readMailInboxJSON(t *testing.T, binary, dir string, env []string, address string) []installInboxMessage {
+	t.Helper()
+	out := runGTCmdOutput(t, binary, dir, env, "mail", "inbox", address, "--json")
+	var messages []installInboxMessage
+	if err := json.Unmarshal([]byte(out), &messages); err != nil {
+		t.Fatalf("parse mail inbox JSON: %v\nraw: %s", err, out)
+	}
+	return messages
+}
+
+func findInboxMessageBySubject(messages []installInboxMessage, subject string) *installInboxMessage {
+	for i := range messages {
+		if messages[i].Subject == subject {
+			return &messages[i]
+		}
+	}
+	return nil
+}
+
+func findInboxMessageByThread(messages []installInboxMessage, threadID string) *installInboxMessage {
+	for i := range messages {
+		if messages[i].ThreadID == threadID {
+			return &messages[i]
+		}
+	}
+	return nil
+}
+
+func findEscalationDelivery(deliveries []installEscalationDelivery, channel, target string) *installEscalationDelivery {
+	for i := range deliveries {
+		if deliveries[i].Channel == channel && deliveries[i].Target == target {
+			return &deliveries[i]
+		}
+	}
+	return nil
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // runGTCmd runs a gt command and fails the test if it fails.
