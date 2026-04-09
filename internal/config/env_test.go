@@ -17,7 +17,10 @@ func TestAgentEnv_Mayor(t *testing.T) {
 	assertEnv(t, env, "GT_ROLE", "mayor")
 	assertEnv(t, env, "BD_ACTOR", "mayor")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "mayor")
+	assertEnv(t, env, "GT_TOWN_ROOT", "/town")
 	assertEnv(t, env, "GT_ROOT", "/town")
+	assertEnv(t, env, "GT_DOLT_DATA", "/town/.dolt-data")
+	assertEnv(t, env, "BEADS_DOLT_DATA_DIR", "/town/.dolt-data")
 	assertEnv(t, env, "GIT_CEILING_DIRECTORIES", "/town") // prevents git walking to umbrella
 	assertEnv(t, env, "NODE_OPTIONS", "")                 // cleared to prevent debugger inheritance
 	assertEnv(t, env, "CLAUDECODE", "")                   // cleared to prevent nested session detection
@@ -51,6 +54,9 @@ func TestAgentEnv_Polecat(t *testing.T) {
 	assertEnv(t, env, "GT_ROLE", "myrig/polecats/Toast") // compound format
 	assertEnv(t, env, "GT_RIG", "myrig")
 	assertEnv(t, env, "GT_POLECAT", "Toast")
+	assertEnv(t, env, "GT_TOWN_ROOT", "/town")
+	assertEnv(t, env, "GT_DOLT_DATA", "/town/.dolt-data")
+	assertEnv(t, env, "BEADS_DOLT_DATA_DIR", "/town/.dolt-data")
 	assertEnv(t, env, "BD_ACTOR", "myrig/polecats/Toast")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "Toast")
 	assertEnv(t, env, "BEADS_AGENT_NAME", "myrig/Toast")
@@ -233,7 +239,10 @@ func TestAgentEnv_EmptyTownRootOmitted(t *testing.T) {
 	})
 
 	// Key should be absent, not empty string
+	assertNotSet(t, env, "GT_TOWN_ROOT")
 	assertNotSet(t, env, "GT_ROOT")
+	assertNotSet(t, env, "GT_DOLT_DATA")
+	assertNotSet(t, env, "BEADS_DOLT_DATA_DIR")
 	assertNotSet(t, env, "GIT_CEILING_DIRECTORIES") // also not set when TownRoot empty
 
 	// Other keys should still be set

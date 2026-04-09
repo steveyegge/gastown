@@ -149,6 +149,9 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// Empty values would override tmux session environment
 	if cfg.TownRoot != "" {
 		env["GT_ROOT"] = cfg.TownRoot
+		env["GT_TOWN_ROOT"] = cfg.TownRoot
+		env["GT_DOLT_DATA"] = filepath.Join(cfg.TownRoot, ".dolt-data")
+		env["BEADS_DOLT_DATA_DIR"] = env["GT_DOLT_DATA"]
 		// Prevent git from walking up to umbrella repo when running in rig worktrees.
 		// This stops accidental commits to the umbrella when running git commands from
 		// intermediate directories (e.g., polecats/) that don't have their own .git.
