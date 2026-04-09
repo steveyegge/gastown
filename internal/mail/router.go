@@ -34,6 +34,9 @@ var ErrUnknownAnnounce = errors.New("unknown announce channel")
 // session to become idle before falling back to a queued nudge.
 const DefaultIdleNotifyTimeout = 3 * time.Second
 
+// startNudgePoller is overridden in tests to verify queued delivery starts a drain path.
+var startNudgePoller = nudge.StartPoller
+
 // Router handles message delivery via beads.
 // It routes messages to the correct beads database based on address:
 // - Town-level (mayor/, deacon/) -> {townRoot}/.beads
@@ -1660,6 +1663,12 @@ func (r *Router) notifyRecipient(msg *Message) error {
 				Severity: prioritySeverityLabel(msg.Priority),
 			}); err != nil {
 				return err
+			}
+			// Mail delivery can queue nudges for sessions that were started outside the
+			// usual manager paths. Ensure a poller exists so queued mail and escalations
+			// reach promptless or idle tmux sessions instead of sitting forever.
+			if _, err := startNudgePoller(r.townRoot, sessionID); err != nil {
+				return fmt.Errorf("starting nudge poller for queued mail: %w", err)
 			}
 			r.enqueueReplyReminder(msg, sessionID)
 			return nil

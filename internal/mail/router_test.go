@@ -1723,6 +1723,47 @@ func TestNotifyRecipient_BusyAgent(t *testing.T) {
 	}
 }
 
+func TestNotifyRecipient_BusyAgentStartsPollerForQueuedDelivery(t *testing.T) {
+	socket := requireNotifyTestSocket(t)
+	sessionName := "gt-crew-busy-poller"
+	createNotifyTestSession(t, socket, sessionName, "sleep 300")
+
+	townRoot := t.TempDir()
+	r := &Router{
+		workDir:           t.TempDir(),
+		townRoot:          townRoot,
+		tmux:              tmux.NewTmuxWithSocket(socket),
+		IdleNotifyTimeout: 1 * time.Second,
+	}
+
+	called := false
+	oldStartNudgePoller := startNudgePoller
+	startNudgePoller = func(gotTownRoot, gotSession string) (int, error) {
+		called = true
+		if gotTownRoot != townRoot {
+			t.Fatalf("startNudgePoller townRoot = %q, want %q", gotTownRoot, townRoot)
+		}
+		if gotSession != sessionName {
+			t.Fatalf("startNudgePoller session = %q, want %q", gotSession, sessionName)
+		}
+		return 1234, nil
+	}
+	t.Cleanup(func() { startNudgePoller = oldStartNudgePoller })
+
+	msg := &Message{
+		From:    "mayor/",
+		To:      "gastown/crew/busy-poller",
+		Subject: "queued mail should wake promptless session",
+	}
+
+	if err := r.notifyRecipient(msg); err != nil {
+		t.Fatalf("notifyRecipient returned error: %v", err)
+	}
+	if !called {
+		t.Fatal("expected queued delivery to start nudge poller")
+	}
+}
+
 func TestNotifyRecipient_BusyAgentEscalationUsesUrgentQueuedNudge(t *testing.T) {
 	socket := requireNotifyTestSocket(t)
 	sessionName := "gt-crew-busy-escalation"
