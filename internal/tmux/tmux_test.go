@@ -1703,6 +1703,30 @@ func TestNudgeSession_WithRetry(t *testing.T) {
 	}
 }
 
+func TestNudgeSession_WithStoredPaneID(t *testing.T) {
+	tm := newTestTmux(t)
+	sessionName := "gt-test-nudge-paneid-" + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
+
+	if err := tm.NewSession(sessionName, os.TempDir()); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	time.Sleep(200 * time.Millisecond)
+
+	paneID, err := tm.GetPaneID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneID: %v", err)
+	}
+	if err := tm.SetEnvironment(sessionName, "GT_PANE_ID", paneID); err != nil {
+		t.Fatalf("SetEnvironment GT_PANE_ID: %v", err)
+	}
+
+	if err := tm.NudgeSession(sessionName, "test message"); err != nil {
+		t.Fatalf("NudgeSession() with GT_PANE_ID = %v, want nil", err)
+	}
+}
+
 // TestAdaptiveTextDelay verifies the delay scaling logic for post-text delivery.
 func TestAdaptiveTextDelay(t *testing.T) {
 	t.Parallel()

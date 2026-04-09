@@ -1618,6 +1618,25 @@ type NudgeOpts struct {
 	TownRoot string
 }
 
+// canonicalPaneTarget converts a pane identifier like "%23" into a tmux target
+// that send-keys can resolve reliably. Bare pane IDs work for display-message,
+// but for send-keys we prefer an explicit session:window.pane target.
+func (t *Tmux) canonicalPaneTarget(session, pane string) string {
+	if pane == "" {
+		return session
+	}
+
+	out, err := t.run("display-message", "-t", pane, "-p", "#{session_name}:#{window_index}.#{pane_index}")
+	if err == nil {
+		target := strings.TrimSpace(out)
+		if target != "" {
+			return target
+		}
+	}
+
+	return pane
+}
+
 // NudgeSessionWithOpts is like NudgeSession but accepts delivery options.
 // See NudgeOpts for available options.
 func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) error {
@@ -1645,15 +1664,7 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 	// running the agent rather than sending to the focused pane.
 	target := session
 	if agentPane, err := t.FindAgentPane(session); err == nil && agentPane != "" {
-		// On Unix tmux, pane IDs are globally addressable (%13) and qualifying
-		// them as session:%13 makes tmux interpret the pane ID as a window token,
-		// producing errors like "can't find window: %13". On Windows/psmux, pane
-		// IDs may not be globally unique, so keep the qualified form there.
-		if runtime.GOOS == "windows" {
-			target = session + ":" + agentPane
-		} else {
-			target = agentPane
-		}
+		target = t.canonicalPaneTarget(session, agentPane)
 	}
 
 	// 0. Pre-delivery: dismiss Rewind menu if the session is stuck in it.
