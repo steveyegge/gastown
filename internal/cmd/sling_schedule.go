@@ -62,6 +62,8 @@ type ScheduleOptions struct {
 	Agent       string   // Agent override (e.g., "gemini", "codex")
 	HookRawBead bool     // Hook raw bead without default formula
 	Ralph       bool     // Ralph Wiggum loop mode
+	MCPs        []string // MCP proxy access specs (name:mode)
+	GCPs        []string // GCP SA impersonation profile names
 }
 
 // scheduleBead schedules a bead for deferred dispatch via the capacity scheduler.

@@ -37,6 +37,8 @@ type SlingParams struct {
 	NoBoot     bool     // --no-boot
 	Mode       string   // --ralph: "" (normal) or "ralph"
 	ReviewOnly bool     // --review-only: review and report back only, no merge/commit/push
+	MCPs       []string // --mcp: MCP proxy access specs (name:mode)
+	GCPs       []string // --gcp: GCP SA impersonation profile names
 
 	// Execution behavior (set by caller, not serialized to queue)
 	SkipCook         bool   // Batch optimization: formula already cooked
@@ -243,6 +245,14 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 
 	targetAgent := spawnInfo.AgentID()
 	hookWorkDir := spawnInfo.ClonePath
+
+	// 3b. Inject authz-proxy config (MCP + GCP credentials) into polecat worktree
+	if len(params.MCPs) > 0 || len(params.GCPs) > 0 {
+		if err := injectAuthzProxy(townRoot, hookWorkDir, targetAgent, params.BeadID, params.MCPs, params.GCPs); err != nil {
+			fmt.Printf("  %s Could not inject authz-proxy config: %v\n", style.Warning.Render("⚠"), err)
+			// Non-fatal: polecat can still work without MCP access
+		}
+	}
 
 	// 4. Auto-convoy (if !NoConvoy)
 	convoyID := ""

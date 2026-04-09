@@ -113,6 +113,26 @@ type TownSettings struct {
 	// "main_branch_test", "handler").
 	// Example: ["doctor_dog", "compactor_dog"]
 	DisabledPatrols []string `json:"disabled_patrols,omitempty"`
+
+	// AuthzProxy configures the authz-proxy for MCP and GCP credential delegation.
+	// When set, gt sling --mcp and --gcp flags generate authz files and .mcp.json
+	// in polecat worktrees, giving dispatched polecats scoped MCP access.
+	AuthzProxy *AuthzProxyConfig `json:"authz_proxy,omitempty"`
+}
+
+// AuthzProxyConfig configures the authz-proxy for delegating MCP and GCP credentials.
+type AuthzProxyConfig struct {
+	// Binary is the absolute path to the authz-proxy binary.
+	// Example: "/path/to/sandboxx-bridge/cmd/authz-proxy/authz-proxy"
+	Binary string `json:"binary"`
+
+	// Socket is the absolute path to the authz-proxy daemon's Unix socket.
+	// Example: "/path/to/sandboxx-bridge/.gastown/mcp-proxy.sock"
+	Socket string `json:"socket"`
+
+	// SecretsPath is the absolute path to .mcp-secrets.json for GCP profile resolution.
+	// Example: "/path/to/sandboxx-bridge/.mcp-secrets.json"
+	SecretsPath string `json:"secrets_path,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.

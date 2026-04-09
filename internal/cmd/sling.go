@@ -133,8 +133,10 @@ var (
 	slingBaseBranch    string // --base-branch: override base branch for polecat worktree
 	slingRalph         bool   // --ralph: enable Ralph Wiggum loop mode for multi-step workflows
 	slingFormula       string // --formula: override formula for dispatch (default: mol-polecat-work)
-	slingCrew          string // --crew: target a crew member in the specified rig
-	slingReviewOnly    bool   // --review-only: mark work as review-only (no merge/commit/push)
+	slingCrew          string   // --crew: target a crew member in the specified rig
+	slingReviewOnly    bool     // --review-only: mark work as review-only (no merge/commit/push)
+	slingMCPs          []string // --mcp: MCP proxy access (name:mode), can be repeated
+	slingGCPs          []string // --gcp: GCP SA impersonation profiles, can be repeated
 )
 
 func init() {
@@ -163,6 +165,8 @@ func init() {
 	slingCmd.Flags().StringVar(&slingFormula, "formula", "", "Formula to apply (default: mol-polecat-work for polecat targets)")
 	slingCmd.Flags().StringVar(&slingCrew, "crew", "", "Target a crew member in the specified rig (e.g., --crew mel with target gastown → gastown/crew/mel)")
 	slingCmd.Flags().BoolVar(&slingReviewOnly, "review-only", false, "Mark work as review-only: assignee evaluates and reports back, must NOT merge/commit/push")
+	slingCmd.Flags().StringArrayVar(&slingMCPs, "mcp", nil, "MCP proxy access (name:mode), can be repeated (e.g., --mcp github:read --mcp linear:read,write)")
+	slingCmd.Flags().StringArrayVar(&slingGCPs, "gcp", nil, "GCP SA impersonation profile, can be repeated (e.g., --gcp terraform-plan)")
 
 	slingCmd.AddCommand(slingRespawnResetCmd)
 	rootCmd.AddCommand(slingCmd)
@@ -366,6 +370,8 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 				Agent:       slingAgent,
 				HookRawBead: slingHookRawBead,
 				Ralph:       slingRalph,
+			MCPs:        slingMCPs,
+			GCPs:        slingGCPs,
 			})
 		}
 	}
@@ -443,6 +449,8 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 				Agent:       slingAgent,
 				HookRawBead: slingHookRawBead,
 				Ralph:       slingRalph,
+			MCPs:        slingMCPs,
+			GCPs:        slingGCPs,
 			})
 		}
 		// Non-rig target in deferred mode — reject to prevent bypassing capacity control
@@ -983,6 +991,15 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 			return fmt.Errorf("starting delayed dog session: %w", err)
 		}
 		targetPane = pane
+	}
+
+	// Inject authz-proxy config (MCP + GCP credentials) into polecat worktree.
+	// Must happen before StartSession so the polecat sees .mcp.json on boot.
+	if newPolecatInfo != nil && (len(slingMCPs) > 0 || len(slingGCPs) > 0) {
+		if err := injectAuthzProxy(townRoot, newPolecatInfo.ClonePath, newPolecatInfo.AgentID(), beadID, slingMCPs, slingGCPs); err != nil {
+			fmt.Printf("%s Could not inject authz-proxy config: %v\n", style.Warning.Render("⚠"), err)
+			// Non-fatal: polecat can still work without MCP access
+		}
 	}
 
 	// Start polecat session now that attached_molecule is set.
