@@ -24,6 +24,16 @@ const (
 	DeliveryLabelAckedAtPrefix = "delivery-acked-at:"
 )
 
+var (
+	readBeadLabelsFn     = readBeadLabelsShared
+	writeDeliveryLabelFn = func(workDir, beadsDir string, args []string) error {
+		ctx, cancel := bdWriteCtx()
+		defer cancel()
+		_, err := runBdCommand(ctx, args, workDir, beadsDir)
+		return err
+	}
+)
+
 // DeliverySendLabels returns labels written during phase-1 (send).
 func DeliverySendLabels() []string {
 	return []string{DeliveryLabelPending}
@@ -82,8 +92,8 @@ func DeliveryAckLabelSequenceIdempotent(recipientIdentity string, at time.Time, 
 // then writes the ack label sequence. Uses runBdCommand with timeouts.
 // Resolves the correct beadsDir based on the bead ID prefix (GH#2423).
 func AcknowledgeDeliveryBead(workDir, beadsDir, beadID, recipientIdentity string) error {
-	beadsDir = beads.ResolveBeadsDirForID(beadsDir, beadID)
-	existingLabels, readErr := readBeadLabelsShared(workDir, beadsDir, beadID)
+	primary := beads.ResolveBeadsDirForID(beadsDir, beadID)
+	existingLabels, readErr := readBeadLabelsWithFallback(workDir, primary, beadsDir, beadID)
 	if readErr != nil {
 		// Log but proceed with empty labels — fresh timestamp is acceptable
 		// degradation vs blocking the ack entirely.
@@ -92,9 +102,7 @@ func AcknowledgeDeliveryBead(workDir, beadsDir, beadID, recipientIdentity string
 
 	for _, label := range DeliveryAckLabelSequenceIdempotent(recipientIdentity, timeNow().UTC(), existingLabels) {
 		args := []string{"label", "add", beadID, label}
-		ctx, cancel := bdWriteCtx()
-		_, err := runBdCommand(ctx, args, workDir, beadsDir)
-		cancel()
+		err := addDeliveryLabelWithFallback(workDir, primary, beadsDir, args)
 		if err == nil {
 			continue // bd label add silently succeeds on duplicate labels.
 		}
@@ -104,6 +112,22 @@ func AcknowledgeDeliveryBead(workDir, beadsDir, beadID, recipientIdentity string
 		return err
 	}
 	return nil
+}
+
+func addDeliveryLabelWithFallback(workDir, primaryBeadsDir, fallbackBeadsDir string, args []string) error {
+	err := writeDeliveryLabelFn(workDir, primaryBeadsDir, args)
+	if err == nil || !isBdNotFoundError(err) || primaryBeadsDir == fallbackBeadsDir {
+		return err
+	}
+	return writeDeliveryLabelFn(workDir, fallbackBeadsDir, args)
+}
+
+func readBeadLabelsWithFallback(workDir, primaryBeadsDir, fallbackBeadsDir, id string) ([]string, error) {
+	labels, err := readBeadLabelsFn(workDir, primaryBeadsDir, id)
+	if err == nil || !isBdNotFoundError(err) || primaryBeadsDir == fallbackBeadsDir {
+		return labels, err
+	}
+	return readBeadLabelsFn(workDir, fallbackBeadsDir, id)
 }
 
 // readBeadLabelsShared reads the labels for a bead, returning an error on failure

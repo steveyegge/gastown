@@ -1,7 +1,12 @@
 package mail
 
 import (
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -189,6 +194,52 @@ func TestBdError_WithAllFields(t *testing.T) {
 	}
 	if bdErr.ContainsError("not present") {
 		t.Error("ContainsError should return false for non-existent substring")
+	}
+}
+
+func TestRunBdCommand_UsesBeadsDirParentAsWorkingDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a bash bd stub")
+	}
+
+	tmpDir := t.TempDir()
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+
+	beadsDir := filepath.Join(tmpDir, "town", ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir beads dir: %v", err)
+	}
+
+	stubPath := filepath.Join(binDir, "bd")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+printf 'cwd=%s\n' "$PWD"
+printf 'beads=%s\n' "$BEADS_DIR"
+printf 'db=%s\n' "${BEADS_DOLT_SERVER_DATABASE-}"
+printf 'args=%s\n' "$*"
+`
+	if err := os.WriteFile(stubPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stdout, err := runBdCommand(context.Background(), []string{"show", "gs-wisp-ext", "--json"}, filepath.Join(tmpDir, "repo"), beadsDir)
+	if err != nil {
+		t.Fatalf("runBdCommand() error = %v, want nil", err)
+	}
+
+	out := string(stdout)
+	if !strings.Contains(out, "cwd="+filepath.Dir(beadsDir)) {
+		t.Fatalf("runBdCommand() output %q missing cwd=%s", out, filepath.Dir(beadsDir))
+	}
+	if !strings.Contains(out, "beads="+beadsDir) {
+		t.Fatalf("runBdCommand() output %q missing beads=%s", out, beadsDir)
+	}
+	if !strings.Contains(out, "db=\n") {
+		t.Fatalf("runBdCommand() output %q should leave BEADS_DOLT_SERVER_DATABASE unset", out)
 	}
 }
 

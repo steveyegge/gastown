@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -177,6 +178,95 @@ func TestDeliveryAckLabelSequenceIdempotent(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("got %v, want %v", got, want)
+		}
+	})
+}
+
+func TestReadBeadLabelsWithFallback(t *testing.T) {
+	original := readBeadLabelsFn
+	defer func() { readBeadLabelsFn = original }()
+
+	t.Run("falls back from routed rig to home beads on not found", func(t *testing.T) {
+		var calls []string
+		readBeadLabelsFn = func(_ string, beadsDir string, _ string) ([]string, error) {
+			calls = append(calls, beadsDir)
+			switch beadsDir {
+			case "/tmp/rig/.beads":
+				return nil, &bdError{Err: errors.New("missing"), Stderr: "no issue found"}
+			case "/tmp/town/.beads":
+				return []string{"delivery:pending"}, nil
+			default:
+				return nil, errors.New("unexpected beads dir")
+			}
+		}
+
+		got, err := readBeadLabelsWithFallback("/tmp/town", "/tmp/rig/.beads", "/tmp/town/.beads", "gs-wisp-ext")
+		if err != nil {
+			t.Fatalf("readBeadLabelsWithFallback() error = %v, want nil", err)
+		}
+		if !reflect.DeepEqual(got, []string{"delivery:pending"}) {
+			t.Fatalf("readBeadLabelsWithFallback() = %v, want pending label", got)
+		}
+		if !reflect.DeepEqual(calls, []string{"/tmp/rig/.beads", "/tmp/town/.beads"}) {
+			t.Fatalf("readBeadLabelsWithFallback() called %v, want primary then fallback", calls)
+		}
+	})
+
+	t.Run("does not fall back on non not-found errors", func(t *testing.T) {
+		var calls []string
+		wantErr := errors.New("permission denied")
+		readBeadLabelsFn = func(_ string, beadsDir string, _ string) ([]string, error) {
+			calls = append(calls, beadsDir)
+			return nil, wantErr
+		}
+
+		_, err := readBeadLabelsWithFallback("/tmp/town", "/tmp/rig/.beads", "/tmp/town/.beads", "gs-wisp-ext")
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("readBeadLabelsWithFallback() error = %v, want %v", err, wantErr)
+		}
+		if !reflect.DeepEqual(calls, []string{"/tmp/rig/.beads"}) {
+			t.Fatalf("readBeadLabelsWithFallback() called %v, want only primary", calls)
+		}
+	})
+}
+
+func TestAddDeliveryLabelWithFallback(t *testing.T) {
+	original := writeDeliveryLabelFn
+	defer func() { writeDeliveryLabelFn = original }()
+
+	t.Run("falls back from routed rig to home beads on not found", func(t *testing.T) {
+		var calls []string
+		writeDeliveryLabelFn = func(_ string, beadsDir string, _ []string) error {
+			calls = append(calls, beadsDir)
+			if beadsDir == "/tmp/rig/.beads" {
+				return &bdError{Err: errors.New("missing"), Stderr: "no issue found"}
+			}
+			return nil
+		}
+
+		err := addDeliveryLabelWithFallback("/tmp/town", "/tmp/rig/.beads", "/tmp/town/.beads", []string{"label", "add", "gs-wisp-ext", DeliveryLabelAcked})
+		if err != nil {
+			t.Fatalf("addDeliveryLabelWithFallback() error = %v, want nil", err)
+		}
+		if !reflect.DeepEqual(calls, []string{"/tmp/rig/.beads", "/tmp/town/.beads"}) {
+			t.Fatalf("addDeliveryLabelWithFallback() called %v, want primary then fallback", calls)
+		}
+	})
+
+	t.Run("does not fall back on other errors", func(t *testing.T) {
+		var calls []string
+		wantErr := errors.New("write failed")
+		writeDeliveryLabelFn = func(_ string, beadsDir string, _ []string) error {
+			calls = append(calls, beadsDir)
+			return wantErr
+		}
+
+		err := addDeliveryLabelWithFallback("/tmp/town", "/tmp/rig/.beads", "/tmp/town/.beads", []string{"label", "add", "gs-wisp-ext", DeliveryLabelAcked})
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("addDeliveryLabelWithFallback() error = %v, want %v", err, wantErr)
+		}
+		if !reflect.DeepEqual(calls, []string{"/tmp/rig/.beads"}) {
+			t.Fatalf("addDeliveryLabelWithFallback() called %v, want only primary", calls)
 		}
 	})
 }

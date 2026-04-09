@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -90,12 +91,12 @@ func runBdCommand(ctx context.Context, args []string, workDir, beadsDir string, 
 
 	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = workDir
+	if beadsDir != "" {
+		cmd.Dir = filepath.Dir(beadsDir)
+	}
 	util.SetDetachedProcessGroup(cmd)
 
 	env := append(cmd.Environ(), "BEADS_DIR="+beadsDir)
-	if dbEnv := beads.DatabaseEnv(beadsDir); dbEnv != "" {
-		env = append(env, dbEnv)
-	}
 	env = append(env, extraEnv...)
 	env = append(env, telemetry.OTELEnvForSubprocess()...)
 	cmd.Env = env
