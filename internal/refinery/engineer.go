@@ -26,6 +26,17 @@ import (
 	"github.com/steveyegge/gastown/internal/util"
 )
 
+func stripEnvKey(env []string, key string) []string {
+	prefix := key + "="
+	filtered := env[:0]
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
 // shortSHA returns at most 8 characters of a SHA for display.
 func shortSHA(sha string) string {
 	if len(sha) > 8 {
@@ -1871,10 +1882,14 @@ type convoyInfo struct {
 // checkAndCloseCompletedConvoys finds and closes convoys where all tracked issues
 // are complete. Returns the list of convoys that were closed.
 func (e *Engineer) checkAndCloseCompletedConvoys(townRoot, townBeads string) []convoyInfo {
+	bdEnv := stripEnvKey(os.Environ(), "BEADS_DIR")
+
 	// List all open convoys
-	listCmd := exec.Command("bd", "list", "--type=convoy", "--status=open", "--json")
+	listArgs := beads.MaybePrependAllowStaleWithEnv(bdEnv, []string{"list", "--type=convoy", "--status=open", "--json"})
+	listCmd := exec.Command("bd", listArgs...)
 	util.SetDetachedProcessGroup(listCmd)
 	listCmd.Dir = townBeads
+	listCmd.Env = bdEnv
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout
 
@@ -1898,9 +1913,11 @@ func (e *Engineer) checkAndCloseCompletedConvoys(townRoot, townBeads string) []c
 
 	for _, convoy := range convoys {
 		// Get tracked issues for this convoy via bd dep list
-		depCmd := exec.Command("bd", "dep", "list", convoy.ID, "--direction=down", "--type=tracks", "--json")
+		depArgs := beads.MaybePrependAllowStaleWithEnv(bdEnv, []string{"dep", "list", convoy.ID, "--direction=down", "--type=tracks", "--json"})
+		depCmd := exec.Command("bd", depArgs...)
 		util.SetDetachedProcessGroup(depCmd)
 		depCmd.Dir = townRoot
+		depCmd.Env = bdEnv
 		var depOut bytes.Buffer
 		depCmd.Stdout = &depOut
 
@@ -1929,9 +1946,11 @@ func (e *Engineer) checkAndCloseCompletedConvoys(townRoot, townBeads string) []c
 			}
 
 			// Get fresh status from home rig via bd show with routing
-			showCmd := exec.Command("bd", "show", depID, "--json")
+			showArgs := beads.MaybePrependAllowStaleWithEnv(bdEnv, []string{"show", depID, "--json"})
+			showCmd := exec.Command("bd", showArgs...)
 			util.SetDetachedProcessGroup(showCmd)
 			showCmd.Dir = townRoot
+			showCmd.Env = bdEnv
 			var showOut bytes.Buffer
 			showCmd.Stdout = &showOut
 
@@ -1965,9 +1984,11 @@ func (e *Engineer) checkAndCloseCompletedConvoys(townRoot, townBeads string) []c
 			reason = "Empty convoy — auto-closed as definitionally complete"
 		}
 
-		closeCmd := exec.Command("bd", "close", convoy.ID, "-r", reason)
+		closeArgs := beads.MaybePrependAllowStaleWithEnv(bdEnv, []string{"close", convoy.ID, "-r", reason})
+		closeCmd := exec.Command("bd", closeArgs...)
 		util.SetDetachedProcessGroup(closeCmd)
 		closeCmd.Dir = townBeads
+		closeCmd.Env = bdEnv
 
 		if err := closeCmd.Run(); err != nil {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close convoy %s: %v\n", convoy.ID, err)
