@@ -682,12 +682,14 @@ gh pr checks <polecat-branch> --repo "$REPO_URL" --watch --fail-fast
 Do NOT merge. Send FIX_NEEDED back to the polecat:
 ```bash
 FAILURE_OUTPUT=$(gh pr checks <polecat-branch> --repo "$REPO_URL" 2>&1)
-gt mail send <rig>/witness -s "FIX_NEEDED <polecat-name>" -m "Branch: <branch>
+gt mail send <rig>/polecats/<polecat-name> -s "FIX_NEEDED <polecat-name>" --stdin <<'BODY'
+Branch: <branch>
 Issue: <issue-id>
 PR: ${PR_URL}
 Failure-Type: ci-checks
 Error: $FAILURE_OUTPUT
-Attempt-Number: 1"
+Attempt-Number: 1
+BODY
 ```
 Then skip to Step 4 (archive mail) and continue patrol.
 
