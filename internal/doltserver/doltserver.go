@@ -1024,24 +1024,12 @@ func VerifyServerDataDir(townRoot string) (bool, error) {
 		return true, nil
 	}
 
-	served, _, verifyErr := VerifyDatabases(townRoot)
+	served, missing, verifyErr := VerifyDatabases(townRoot)
 	if verifyErr != nil {
 		return false, fmt.Errorf("could not query server databases: %w", verifyErr)
 	}
-
-	// If the server is serving none of our expected databases, it's an imposter
-	servedSet := make(map[string]bool, len(served))
-	for _, db := range served {
-		servedSet[strings.ToLower(db)] = true
-	}
-	matchCount := 0
-	for _, db := range fsDatabases {
-		if servedSet[strings.ToLower(db)] {
-			matchCount++
-		}
-	}
-	if matchCount == 0 && len(fsDatabases) > 0 {
-		return false, fmt.Errorf("server serves none of the expected %d databases — likely an imposter", len(fsDatabases))
+	if err := verifyServedDatabaseSet(served, fsDatabases, missing); err != nil {
+		return false, err
 	}
 
 	return true, nil
@@ -2241,6 +2229,25 @@ func findMissingDatabases(served, fsDatabases []string) []string {
 		}
 	}
 	return missing
+}
+
+func verifyServedDatabaseSet(served, expected, missing []string) error {
+	if len(expected) == 0 {
+		return nil
+	}
+	if len(missing) == 0 {
+		missing = findMissingDatabases(served, expected)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("server missing expected databases %v — likely serving the wrong town data dir", missing)
+	}
+
+	unexpected := findMissingDatabases(expected, served)
+	if len(unexpected) > 0 {
+		return fmt.Errorf("server exposes unexpected databases %v — likely serving the wrong town data dir", unexpected)
+	}
+
+	return nil
 }
 
 // jsonKeys returns the top-level keys from a JSON object map, for diagnostics.

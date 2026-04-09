@@ -2925,6 +2925,39 @@ func TestFindMissingDatabases_BothEmpty(t *testing.T) {
 	}
 }
 
+func TestVerifyServedDatabaseSet_AllExpectedServed(t *testing.T) {
+	err := verifyServedDatabaseSet([]string{"HQ", "gastown"}, []string{"hq", "Gastown"}, nil)
+	if err != nil {
+		t.Fatalf("verifyServedDatabaseSet returned unexpected error: %v", err)
+	}
+}
+
+func TestVerifyServedDatabaseSet_RejectsMissingExpectedDatabases(t *testing.T) {
+	err := verifyServedDatabaseSet([]string{"hq"}, []string{"hq", "gastown"}, nil)
+	if err == nil {
+		t.Fatal("expected missing-database error")
+	}
+	if !strings.Contains(err.Error(), "missing expected databases") {
+		t.Fatalf("expected missing-database error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "gastown") {
+		t.Fatalf("expected missing database in error, got %v", err)
+	}
+}
+
+func TestVerifyServedDatabaseSet_RejectsUnexpectedDatabases(t *testing.T) {
+	err := verifyServedDatabaseSet([]string{"hq", "foreign"}, []string{"hq"}, nil)
+	if err == nil {
+		t.Fatal("expected unexpected-database error")
+	}
+	if !strings.Contains(err.Error(), "unexpected databases") {
+		t.Fatalf("expected unexpected-database error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "foreign") {
+		t.Fatalf("expected unexpected database in error, got %v", err)
+	}
+}
+
 func TestVerifyDatabases_NoServer(t *testing.T) {
 	townRoot := t.TempDir()
 
