@@ -84,3 +84,8 @@ __pycache__/
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Town-specific config (private, not committed to public repo)
+mayor/
+directives/
+*/directives/
