@@ -603,6 +603,9 @@ func TestServicesConfig_NilIsAllEnabled(t *testing.T) {
 	if !s.IsRogueDetectionEnabled() {
 		t.Error("nil ServicesConfig should have rogue detection enabled")
 	}
+	if !s.IsAdmissionControlEnabled() {
+		t.Error("nil ServicesConfig should have admission control enabled")
+	}
 }
 
 func TestServicesConfig_EmptyIsAllEnabled(t *testing.T) {
@@ -623,17 +626,21 @@ func TestServicesConfig_EmptyIsAllEnabled(t *testing.T) {
 	if !s.IsRogueDetectionEnabled() {
 		t.Error("empty ServicesConfig should have rogue detection enabled")
 	}
+	if !s.IsAdmissionControlEnabled() {
+		t.Error("empty ServicesConfig should have admission control enabled")
+	}
 }
 
 func TestServicesConfig_Disabled(t *testing.T) {
 	t.Parallel()
 	f := false
 	s := &ServicesConfig{
-		Deacon:         "disabled",
-		Mayor:          "disabled",
-		Witnesses:      "disabled",
-		Refineries:     "disabled",
-		RogueDetection: &f,
+		Deacon:           "disabled",
+		Mayor:            "disabled",
+		Witnesses:        "disabled",
+		Refineries:       "disabled",
+		RogueDetection:   &f,
+		AdmissionControl: &f,
 	}
 	if s.IsDeaconEnabled() {
 		t.Error("deacon should be disabled")
@@ -649,6 +656,9 @@ func TestServicesConfig_Disabled(t *testing.T) {
 	}
 	if s.IsRogueDetectionEnabled() {
 		t.Error("rogue detection should be disabled")
+	}
+	if s.IsAdmissionControlEnabled() {
+		t.Error("admission control should be disabled")
 	}
 }
 
@@ -668,11 +678,12 @@ func TestServicesConfig_RoundTrip(t *testing.T) {
 	f := false
 	original := NewTownSettings()
 	original.Services = &ServicesConfig{
-		Deacon:         "disabled",
-		Mayor:          "disabled",
-		Witnesses:      "on-demand",
-		Refineries:     "disabled",
-		RogueDetection: &f,
+		Deacon:           "disabled",
+		Mayor:            "disabled",
+		Witnesses:        "on-demand",
+		Refineries:       "disabled",
+		RogueDetection:   &f,
+		AdmissionControl: &f,
 	}
 
 	if err := SaveTownSettings(settingsPath, original); err != nil {
@@ -701,6 +712,9 @@ func TestServicesConfig_RoundTrip(t *testing.T) {
 	}
 	if loaded.Services.RogueDetection == nil || *loaded.Services.RogueDetection != false {
 		t.Error("RogueDetection should be false")
+	}
+	if loaded.Services.AdmissionControl == nil || *loaded.Services.AdmissionControl != false {
+		t.Error("AdmissionControl should be false")
 	}
 }
 
