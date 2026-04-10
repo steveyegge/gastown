@@ -775,6 +775,42 @@ func (m *SessionManager) resolveBeadsDir(issueID, fallbackDir string) string {
 	return beads.ResolveHookDir(townRoot, issueID, fallbackDir)
 }
 
+func (m *SessionManager) bdCommandEnv(workDir string) []string {
+	townRoot := filepath.Dir(m.rig.Path)
+	doltDataDir := filepath.Join(townRoot, ".dolt-data")
+	beadsDir := beads.ResolveBeadsDir(workDir)
+
+	filtered := make([]string, 0, len(os.Environ())+6)
+	for _, entry := range os.Environ() {
+		switch {
+		case strings.HasPrefix(entry, "GT_TOWN_ROOT="),
+			strings.HasPrefix(entry, "GT_ROOT="),
+			strings.HasPrefix(entry, "GT_DOLT_DATA="),
+			strings.HasPrefix(entry, "BEADS_DOLT_DATA_DIR="),
+			strings.HasPrefix(entry, "BEADS_DIR="),
+			strings.HasPrefix(entry, "BEADS_DB="),
+			strings.HasPrefix(entry, "BEADS_DOLT_SERVER_DATABASE="):
+			continue
+		default:
+			filtered = append(filtered, entry)
+		}
+	}
+
+	filtered = append(filtered,
+		"GT_TOWN_ROOT="+townRoot,
+		"GT_ROOT="+townRoot,
+		"GT_DOLT_DATA="+doltDataDir,
+		"BEADS_DOLT_DATA_DIR="+doltDataDir,
+		"BEADS_DIR="+beadsDir,
+	)
+
+	if dbEnv := beads.DatabaseEnv(beadsDir); dbEnv != "" {
+		filtered = append(filtered, dbEnv)
+	}
+
+	return filtered
+}
+
 // validateIssue checks that an issue exists and is not in a terminal state.
 // This must be called before starting a session to avoid CPU spin loops
 // from agents retrying work on invalid issues.
@@ -786,6 +822,7 @@ func (m *SessionManager) validateIssue(issueID, workDir string) error {
 	cmd := exec.CommandContext(ctx, "bd", "show", issueID, "--json") //nolint:gosec // G204: bd is a trusted internal tool
 	util.SetDetachedProcessGroup(cmd)
 	cmd.Dir = bdWorkDir
+	cmd.Env = m.bdCommandEnv(bdWorkDir)
 	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrIssueInvalid, issueID)
@@ -884,6 +921,7 @@ func (m *SessionManager) hookIssue(issueID, agentID, workDir string) error {
 	cmd := exec.CommandContext(ctx, "bd", "update", issueID, "--status=hooked", "--assignee="+agentID) //nolint:gosec // G204: bd is a trusted internal tool
 	util.SetDetachedProcessGroup(cmd)
 	cmd.Dir = bdWorkDir
+	cmd.Env = m.bdCommandEnv(bdWorkDir)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("bd update failed: %w", err)

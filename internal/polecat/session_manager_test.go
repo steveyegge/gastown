@@ -377,6 +377,48 @@ func TestSessionManager_resolveBeadsDir(t *testing.T) {
 	}
 }
 
+func TestSessionManager_bdCommandEnv_StripsStaleTownDoltEnv(t *testing.T) {
+	t.Setenv("GT_TOWN_ROOT", "/wrong/town")
+	t.Setenv("GT_ROOT", "/wrong/town")
+	t.Setenv("GT_DOLT_DATA", "/wrong/town/.dolt-data")
+	t.Setenv("BEADS_DOLT_DATA_DIR", "/wrong/town/.dolt-data")
+	t.Setenv("BEADS_DIR", "/wrong/town/.beads")
+	t.Setenv("BEADS_DB", "/wrong/town/issues.db")
+	t.Setenv("BEADS_DOLT_SERVER_DATABASE", "wrongdb")
+
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "coder_dotfiles")
+	if err := os.MkdirAll(filepath.Join(rigPath, "mayor", "rig", ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rigPath, "mayor", "rig", ".beads", "metadata.json"), []byte(`{"backend":"dolt","database":"dolt","dolt_mode":"server","dolt_database":"coder_dotfiles"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewSessionManager(tmux.NewTmux(), &rig.Rig{Name: "coder_dotfiles", Path: rigPath})
+	env := m.bdCommandEnv(filepath.Join(rigPath, "mayor", "rig"))
+
+	joined := strings.Join(env, "\n")
+	if strings.Contains(joined, "/wrong/town") {
+		t.Fatalf("bdCommandEnv preserved stale town env: %s", joined)
+	}
+	if !strings.Contains(joined, "GT_TOWN_ROOT="+townRoot) {
+		t.Fatalf("bdCommandEnv missing authoritative GT_TOWN_ROOT: %s", joined)
+	}
+	if !strings.Contains(joined, "GT_DOLT_DATA="+filepath.Join(townRoot, ".dolt-data")) {
+		t.Fatalf("bdCommandEnv missing authoritative GT_DOLT_DATA: %s", joined)
+	}
+	if !strings.Contains(joined, "BEADS_DOLT_DATA_DIR="+filepath.Join(townRoot, ".dolt-data")) {
+		t.Fatalf("bdCommandEnv missing authoritative BEADS_DOLT_DATA_DIR: %s", joined)
+	}
+	if !strings.Contains(joined, "BEADS_DIR="+filepath.Join(rigPath, "mayor", "rig", ".beads")) {
+		t.Fatalf("bdCommandEnv missing resolved BEADS_DIR: %s", joined)
+	}
+	if !strings.Contains(joined, "BEADS_DOLT_SERVER_DATABASE=coder_dotfiles") {
+		t.Fatalf("bdCommandEnv missing database env: %s", joined)
+	}
+}
+
 // TestAgentEnvOmitsGTAgent_FallbackRequired verifies that the AgentEnv path
 // used by session_manager.Start does NOT include GT_AGENT when opts.Agent is
 // empty (the default dispatch path). This confirms the session_manager must
