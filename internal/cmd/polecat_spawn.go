@@ -86,16 +86,25 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	t := tmux.NewTmux()
 	polecatMgr := polecat.NewManager(r, polecatGit, t)
 
-	// Pre-spawn Dolt health check (gt-94llt7): verify Dolt is reachable before
-	// allocating a polecat. Prevents orphaned polecats when Dolt is down.
-	if err := polecatMgr.CheckDoltHealth(); err != nil {
-		return nil, fmt.Errorf("pre-spawn health check failed: %w", err)
-	}
+	// Load town settings to check admission control config.
+	townSettings, _ := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot))
 
-	// Pre-spawn admission control (gt-1obzke): verify Dolt server has connection
-	// capacity before spawning. Prevents connection storms during mass sling.
-	if err := polecatMgr.CheckDoltServerCapacity(); err != nil {
-		return nil, fmt.Errorf("admission control: %w", err)
+	// Pre-spawn Dolt health check and admission control are gated behind
+	// services.admission_control (sbx-gastown-kof7). Deployments without a local
+	// Dolt server (e.g., flat-namespace bridge rigs) can set admission_control: false
+	// to skip these checks entirely.
+	if townSettings.Services.IsAdmissionControlEnabled() {
+		// Pre-spawn Dolt health check (gt-94llt7): verify Dolt is reachable before
+		// allocating a polecat. Prevents orphaned polecats when Dolt is down.
+		if err := polecatMgr.CheckDoltHealth(); err != nil {
+			return nil, fmt.Errorf("pre-spawn health check failed: %w", err)
+		}
+
+		// Pre-spawn admission control (gt-1obzke): verify Dolt server has connection
+		// capacity before spawning. Prevents connection storms during mass sling.
+		if err := polecatMgr.CheckDoltServerCapacity(); err != nil {
+			return nil, fmt.Errorf("admission control: %w", err)
+		}
 	}
 
 	// Polecat count cap (clown show #22): refuse to spawn if there are already

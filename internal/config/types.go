@@ -155,6 +155,13 @@ type ServicesConfig struct {
 	// during gt up. When false, gt up will not scan for or kill unrecognized agents.
 	// Default: true (when nil pointer or field omitted).
 	RogueDetection *bool `json:"rogue_detection,omitempty"`
+
+	// AdmissionControl controls pre-spawn Dolt health and capacity checks.
+	// When false, gt sling skips CheckDoltHealth and CheckDoltServerCapacity
+	// before spawning polecats. Useful for deployments without a local Dolt server
+	// or when using an external database.
+	// Default: true (when nil pointer or field omitted).
+	AdmissionControl *bool `json:"admission_control,omitempty"`
 }
 
 // IsDeaconEnabled returns true if the deacon should be started by gt up.
@@ -198,6 +205,15 @@ func (s *ServicesConfig) IsRogueDetectionEnabled() bool {
 		return true
 	}
 	return *s.RogueDetection
+}
+
+// IsAdmissionControlEnabled returns true if pre-spawn Dolt health and capacity
+// checks should run before spawning polecats.
+func (s *ServicesConfig) IsAdmissionControlEnabled() bool {
+	if s == nil || s.AdmissionControl == nil {
+		return true
+	}
+	return *s.AdmissionControl
 }
 
 // AuthzProxyConfig configures the authz-proxy for delegating MCP and GCP credentials.
