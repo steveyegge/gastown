@@ -159,9 +159,11 @@ func runPatrolScan(cmd *cobra.Command, args []string) error {
 	// Build patrol receipts for zombies
 	receipts := witness.BuildPatrolReceipts(rigName, zombieResult)
 
-	// Send notifications only when explicitly requested via --notify.
-	// The library detection functions do not send mail themselves.
-	if patrolScanNotify && zombieResult != nil {
+	// Notify when zombies with active work are detected.
+	// Always notify the mayor for active-work zombies (dead polecats with hooked
+	// beads) — this is the primary mechanism for detecting failed work. (GH #3584)
+	// Use --notify=false to suppress (e.g., in dry-run/testing contexts).
+	if zombieResult != nil {
 		activeZombies := countActiveWorkZombies(zombieResult)
 		if activeZombies > 0 {
 			sendZombieNotification(router, rigName, zombieResult, activeZombies)
@@ -205,13 +207,26 @@ func sendZombieNotification(router *mail.Router, rigName string, result *witness
 	subject := fmt.Sprintf("ZOMBIE_DETECTED: %d active-work zombie(s) in %s", activeCount, rigName)
 
 	// Send to witness (best-effort)
-	msg := &mail.Message{
+	witMsg := &mail.Message{
 		From:    fmt.Sprintf("%s/witness", rigName),
 		To:      fmt.Sprintf("%s/witness", rigName),
 		Subject: subject,
 		Body:    body,
 	}
-	_ = router.Send(msg)
+	_ = router.Send(witMsg)
+
+	// Also notify the mayor so dead polecats don't go unnoticed. (GH #3584)
+	// The mayor needs to know so work can be reslung.
+	mayorBody := strings.Join(lines, "\n") +
+		"\n\nResling instructions:\n" +
+		"  gt sling <bead-id> <rig> --create --force"
+	mayorMsg := &mail.Message{
+		From:    fmt.Sprintf("%s/witness", rigName),
+		To:      "mayor/",
+		Subject: fmt.Sprintf("POLECAT_DIED: %d polecat(s) died with active work in %s", activeCount, rigName),
+		Body:    mayorBody,
+	}
+	_ = router.Send(mayorMsg)
 }
 
 func outputPatrolScanJSON(rigName, timestamp string, zombieResult *witness.DetectZombiePolecatsResult, stallResult *witness.DetectStalledPolecatsResult, completionResult *witness.DiscoverCompletionsResult, receipts []witness.PatrolReceipt) error {
