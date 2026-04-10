@@ -162,6 +162,38 @@ func MintGCPToken(townRoot string, gcpProfiles []string) (map[string]string, err
 	return env, nil
 }
 
+// InjectBeadsEnv sets BEADS_DIR in the polecat's .claude/settings.json env block.
+// This ensures the polecat resolves beads from the town-root database, not per-rig.
+func InjectBeadsEnv(worktreeRoot, townRoot string) error {
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+		return nil // No town-root beads, skip
+	}
+
+	settingsPath := filepath.Join(worktreeRoot, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Join(worktreeRoot, ".claude"), 0755); err != nil {
+		return err
+	}
+
+	var settings map[string]interface{}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		settings = map[string]interface{}{}
+	} else {
+		json.Unmarshal(data, &settings)
+	}
+
+	env, ok := settings["env"].(map[string]interface{})
+	if !ok {
+		env = map[string]interface{}{}
+	}
+	env["BEADS_DIR"] = beadsDir
+	settings["env"] = env
+
+	out, _ := json.MarshalIndent(settings, "", "  ")
+	return os.WriteFile(settingsPath, append(out, '\n'), 0644)
+}
+
 // addMCPPermissionsToSettings adds MCP tool permission patterns and enables
 // project MCP servers in the polecat's .claude/settings.json.
 func addMCPPermissionsToSettings(worktreeRoot string, mcpNames []string) error {

@@ -246,7 +246,12 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	targetAgent := spawnInfo.AgentID()
 	hookWorkDir := spawnInfo.ClonePath
 
-	// 3b. Inject authz-proxy config (MCP + GCP credentials) into polecat worktree
+	// 3b. Inject BEADS_DIR so polecat resolves beads from town root
+	if err := InjectBeadsEnv(hookWorkDir, townRoot); err != nil {
+		fmt.Printf("  %s Could not inject BEADS_DIR: %v\n", style.Warning.Render("⚠"), err)
+	}
+
+	// 3c. Inject authz-proxy config (MCP + GCP credentials) into polecat worktree
 	if len(params.MCPs) > 0 || len(params.GCPs) > 0 {
 		if err := injectAuthzProxy(townRoot, hookWorkDir, targetAgent, params.BeadID, params.MCPs, params.GCPs); err != nil {
 			fmt.Printf("  %s Could not inject authz-proxy config: %v\n", style.Warning.Render("⚠"), err)
