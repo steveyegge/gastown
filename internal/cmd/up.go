@@ -559,7 +559,10 @@ func ensureDaemon(townRoot string) error {
 		return err
 	}
 	if !running {
-		return fmt.Errorf("daemon failed to start")
+		if msg := readDaemonStartupFailure(townRoot, cmd.Process.Pid); msg != "" {
+			return fmt.Errorf("daemon failed to start: %s", msg)
+		}
+		return fmt.Errorf("daemon failed to start (check logs with 'gt daemon logs')")
 	}
 
 	return nil
