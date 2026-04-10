@@ -242,6 +242,17 @@ func ClassifyMessage(subject string) ProtocolType {
 		return ProtoDispatchFail
 	case PatternIdlePassivated.MatchString(subject):
 		return ProtoIdlePassivated
+	// Step orchestrator protocol messages
+	case PatternStepAdvanced.MatchString(subject):
+		return ProtoStepAdvanced
+	case PatternStepFailed.MatchString(subject):
+		return ProtoStepFailed
+	case PatternStepRetry.MatchString(subject):
+		return ProtoStepRetry
+	case PatternStepTriaged.MatchString(subject):
+		return ProtoStepTriaged
+	case PatternStepEscalated.MatchString(subject):
+		return ProtoStepEscalated
 	default:
 		return ProtoUnknown
 	}

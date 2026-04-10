@@ -93,6 +93,10 @@ type Daemon struct {
 	// Restart tracking with exponential backoff to prevent crash loops
 	restartTracker *RestartTracker
 
+	// orchestratorPatrol drives multi-turn formula workflows by detecting
+	// STEP_COMPLETE markers in polecat tmux output. Opt-in via patrol config.
+	orchestratorPatrol *OrchestratorPatrol
+
 	// telemetry exports metrics and logs to VictoriaMetrics / VictoriaLogs.
 	// Nil when telemetry is disabled (GT_OTEL_METRICS_URL / GT_OTEL_LOGS_URL not set).
 	otelProvider *telemetry.Provider
@@ -848,6 +852,12 @@ func (d *Daemon) heartbeat(state *State) {
 		}
 	} else {
 		d.logger.Printf("Handler patrol disabled in config, skipping")
+	}
+
+	// 6.7. Tick orchestrator (multi-turn formula step driver).
+	// Opt-in: only runs if orchestrator patrol is enabled in daemon config.
+	if d.isPatrolActive("orchestrator") {
+		d.ensureOrchestratorRunning()
 	}
 
 	// 7. Process lifecycle requests
