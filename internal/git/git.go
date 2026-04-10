@@ -1362,8 +1362,8 @@ func (g *Git) submoduleReferencePath() string {
 	}
 
 	// For regular clones (workDir-based), the workDir itself could be mayor/rig
-	// but we don't want to reference ourselves. Check for a sibling .repo.git
-	// to find the rig root, then use mayor/rig.
+	// but we don't want to reference ourselves. Check for a sibling bare repo
+	// (.repo.git or repo.git) to find the rig root, then use mayor/rig.
 	if g.workDir != "" {
 		dir := g.workDir
 		for i := 0; i < 4; i++ {
@@ -1371,7 +1371,14 @@ func (g *Git) submoduleReferencePath() string {
 			if parent == dir {
 				break
 			}
-			if _, err := os.Stat(filepath.Join(parent, ".repo.git")); err == nil {
+			hasBareRepo := false
+			for _, name := range []string{".repo.git", "repo.git"} {
+				if _, err := os.Stat(filepath.Join(parent, name)); err == nil {
+					hasBareRepo = true
+					break
+				}
+			}
+			if hasBareRepo {
 				mayorRig := filepath.Join(parent, "mayor", "rig")
 				if mayorRig != g.workDir && isValidSubmoduleReference(mayorRig) {
 					return mayorRig

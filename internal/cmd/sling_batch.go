@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -341,10 +340,9 @@ func resolveRigFromBeadIDs(beadIDs []string, townRoot string) (string, error) {
 }
 
 // getRepoGitForRig creates a Git client for the rig's repository.
-// It tries the bare repo first, then falls back to the mayor/rig directory.
+// It tries the bare repo (.repo.git or repo.git) first, then falls back to mayor/rig.
 func getRepoGitForRig(rigPath string) *git.Git {
-	bareRepoPath := filepath.Join(rigPath, ".repo.git")
-	if info, statErr := os.Stat(bareRepoPath); statErr == nil && info.IsDir() {
+	if bareRepoPath := rig.FindBareRepo(rigPath); bareRepoPath != "" {
 		return git.NewGitWithDir(bareRepoPath, "")
 	}
 	return git.NewGit(filepath.Join(rigPath, "mayor", "rig"))

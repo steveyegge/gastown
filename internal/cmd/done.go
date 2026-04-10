@@ -678,8 +678,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			// (.repo.git) because worktree commits share the same object database.
 			style.PrintWarning("primary push failed: %v — trying bare repo fallback...", pushErr)
 			rigPath := filepath.Join(townRoot, rigName)
-			bareRepoPath := filepath.Join(rigPath, ".repo.git")
-			if _, statErr := os.Stat(bareRepoPath); statErr == nil {
+			if bareRepoPath := rig.FindBareRepo(rigPath); bareRepoPath != "" {
 				bareGit := git.NewGitWithDir(bareRepoPath, "")
 				pushErr = bareGit.Push("origin", refspec, false)
 				if pushErr != nil {
@@ -724,8 +723,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			// verification (worktree git may not see the pushed ref).
 			// The branch is a local ref in the bare repo, not a remote ref.
 			rigPath := filepath.Join(townRoot, rigName)
-			bareRepoPath := filepath.Join(rigPath, ".repo.git")
-			if _, statErr := os.Stat(bareRepoPath); statErr == nil {
+			if bareRepoPath := rig.FindBareRepo(rigPath); bareRepoPath != "" {
 				bareGit := git.NewGitWithDir(bareRepoPath, "")
 				exists, verifyErr = bareGit.BranchExists(branch)
 			}

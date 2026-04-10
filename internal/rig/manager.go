@@ -1521,10 +1521,10 @@ func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, erro
 	}
 
 	// Apply push URL to existing repos (mirrors AddRig behavior).
-	bareRepoPath := filepath.Join(rigPath, ".repo.git")
+	bareRepoPath := FindBareRepo(rigPath)
 	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
 	if pushURL != "" {
-		if _, err := os.Stat(bareRepoPath); err == nil {
+		if bareRepoPath != "" {
 			bareGit := git.NewGitWithDir(bareRepoPath, "")
 			if cfgErr := bareGit.ConfigurePushURL("origin", pushURL); cfgErr != nil {
 				return nil, fmt.Errorf("configuring push URL on bare repo: %w", cfgErr)
@@ -1541,7 +1541,7 @@ func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, erro
 		// Auto-detection returning empty could be a git error — don't clear in that case.
 		// Note: currently unreachable — authoritative sources always set non-empty pushURL.
 		// Retained for future --no-push-url flag support.
-		if _, err := os.Stat(bareRepoPath); err == nil {
+		if bareRepoPath != "" {
 			bareGit := git.NewGitWithDir(bareRepoPath, "")
 			if clrErr := bareGit.ClearPushURL("origin"); clrErr != nil {
 				return nil, fmt.Errorf("clearing stale push URL on bare repo: %w", clrErr)
@@ -1598,10 +1598,11 @@ func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, erro
 // Returns empty string if push URL matches fetch URL (no custom push URL configured).
 func (m *Manager) detectPushURL(rigPath string) string {
 	// Check bare repo first (polecat-preferred source of truth), then clones.
-	// .repo.git is a bare repo and requires NewGitWithDir; the rest are regular clones.
-	bareRepoPath := filepath.Join(rigPath, ".repo.git")
-	if pushURL := detectPushURLFrom(git.NewGitWithDir(bareRepoPath, "")); pushURL != "" {
-		return pushURL
+	// The bare repo requires NewGitWithDir; the rest are regular clones.
+	if bareRepoPath := FindBareRepo(rigPath); bareRepoPath != "" {
+		if pushURL := detectPushURLFrom(git.NewGitWithDir(bareRepoPath, "")); pushURL != "" {
+			return pushURL
+		}
 	}
 
 	clonePaths := []string{
@@ -1778,6 +1779,7 @@ See docs/deacon-plugins.md for full documentation.
 		// Existing patterns
 		"plugins/",
 		".repo.git/",
+		"repo.git/",
 		".land-worktree/",
 		// GT infrastructure directories
 		".beads/",
