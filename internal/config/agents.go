@@ -432,7 +432,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 	AgentMistral: {
 		Name:                AgentMistral,
 		Command:             "vibe",
-		Args:                []string{},
+		Args:                []string{"--agent", "auto-approve"},
 		ProcessNames:        []string{"vibe"},
 		SessionIDEnv:        "VIBE_SESSION_ID",
 		ResumeFlag:          "--resume",

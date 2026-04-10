@@ -1,9 +1,6 @@
 # Gas Town Vibe Configuration
 # Provisioned by Gas Town for agent integration
 
-# Enable auto-approve for autonomous mode
-auto_approve = true
-
 # Model configuration
 active_model = "devstral-2"
 
