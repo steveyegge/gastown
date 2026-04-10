@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -82,15 +83,14 @@ func getIntegrationBranchField(description string) string {
 }
 
 // getRigGit returns a Git object for the rig's repository.
-// Prefers .repo.git (bare repo) if it exists, falls back to mayor/rig.
+// Prefers bare repo (.repo.git or repo.git) if it exists, falls back to mayor/rig.
 func getRigGit(rigPath string) (*git.Git, error) {
-	bareRepoPath := filepath.Join(rigPath, ".repo.git")
-	if info, err := os.Stat(bareRepoPath); err == nil && info.IsDir() {
+	if bareRepoPath := rig.FindBareRepo(rigPath); bareRepoPath != "" {
 		return git.NewGitWithDir(bareRepoPath, ""), nil
 	}
 	mayorPath := filepath.Join(rigPath, "mayor", "rig")
 	if _, err := os.Stat(mayorPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("no repo base found (neither .repo.git nor mayor/rig exists)")
+		return nil, fmt.Errorf("no repo base found (neither .repo.git/repo.git nor mayor/rig exists)")
 	}
 	return git.NewGit(mayorPath), nil
 }

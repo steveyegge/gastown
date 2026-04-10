@@ -195,18 +195,17 @@ func (m *Manager) createRigWorktree(dogPath, dogName, rigName string) (string, e
 }
 
 // findRepoBase locates the git repo base for a rig.
-// Prefers .repo.git (bare repo), falls back to mayor/rig.
+// Prefers .repo.git/repo.git (bare repo), falls back to mayor/rig.
 func (m *Manager) findRepoBase(rigPath string) (*git.Git, error) {
-	// Check for shared bare repo
-	bareRepoPath := filepath.Join(rigPath, ".repo.git")
-	if info, err := os.Stat(bareRepoPath); err == nil && info.IsDir() {
+	// Check for shared bare repo (standard or bridge rig layout)
+	if bareRepoPath := rig.FindBareRepo(rigPath); bareRepoPath != "" {
 		return git.NewGitWithDir(bareRepoPath, ""), nil
 	}
 
 	// Fall back to mayor/rig
 	mayorPath := filepath.Join(rigPath, "mayor", "rig")
 	if _, err := os.Stat(mayorPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("no repo base found (neither .repo.git nor mayor/rig exists)")
+		return nil, fmt.Errorf("no repo base found (neither .repo.git/repo.git nor mayor/rig exists)")
 	}
 	return git.NewGit(mayorPath), nil
 }

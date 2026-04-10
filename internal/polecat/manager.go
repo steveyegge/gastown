@@ -435,20 +435,18 @@ func (m *Manager) checkCleanupStatus(name string, status CleanupStatus, force bo
 }
 
 // repoBase returns the git directory and Git object to use for worktree operations.
-// Prefers the shared bare repo (.repo.git) if it exists, otherwise falls back to mayor/rig.
+// Prefers the shared bare repo (.repo.git or repo.git) if it exists, otherwise falls back to mayor/rig.
 // The bare repo architecture allows all worktrees (refinery, polecats) to share branch visibility.
 func (m *Manager) repoBase() (*git.Git, error) {
-	// First check for shared bare repo (new architecture)
-	bareRepoPath := filepath.Join(m.rig.Path, ".repo.git")
-	if info, err := os.Stat(bareRepoPath); err == nil && info.IsDir() {
-		// Bare repo exists - use it
+	// First check for shared bare repo (standard or bridge rig layout)
+	if bareRepoPath := rig.FindBareRepo(m.rig.Path); bareRepoPath != "" {
 		return git.NewGitWithDir(bareRepoPath, ""), nil
 	}
 
 	// Fall back to mayor/rig (legacy architecture)
 	mayorPath := filepath.Join(m.rig.Path, "mayor", "rig")
 	if _, err := os.Stat(mayorPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("no repo base found (neither .repo.git nor mayor/rig exists)")
+		return nil, fmt.Errorf("no repo base found (neither .repo.git/repo.git nor mayor/rig exists)")
 	}
 	return git.NewGit(mayorPath), nil
 }
@@ -748,7 +746,7 @@ func (m *Manager) addWithOptionsLocked(name string, opts AddOptions, polecatDir 
 			"  - default_branch is misconfigured (check %s/config.json)\n"+
 			"  - Bare repo fetch failed (try: git -C %s fetch origin)\n\n"+
 			"Run 'gt doctor' to diagnose.",
-			startPoint, m.rig.Path, filepath.Join(m.rig.Path, ".repo.git"))
+			startPoint, m.rig.Path, m.rig.Path)
 	}
 
 	if err := repoGit.WorktreeAddFromRef(clonePath, branchName, startPoint); err != nil {
@@ -916,7 +914,7 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (_ *Polecat, retE
 			"  - default_branch is misconfigured (check %s/config.json)\n"+
 			"  - Bare repo fetch failed (try: git -C %s fetch origin)\n\n"+
 			"Run 'gt doctor' to diagnose.",
-			startPoint, m.rig.Path, filepath.Join(m.rig.Path, ".repo.git"))
+			startPoint, m.rig.Path, m.rig.Path)
 	}
 
 	// Always create fresh branch - unique name guarantees no collision
@@ -1143,10 +1141,9 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) 
 	// Get repo base to remove the worktree properly
 	repoGit, err := m.repoBase()
 	if err != nil {
-		// Best-effort: try to prune stale worktree entries from both possible repo locations.
+		// Best-effort: try to prune stale worktree entries from all possible repo locations.
 		// This handles edge cases where the repo base is corrupted but worktree entries exist.
-		bareRepoPath := filepath.Join(m.rig.Path, ".repo.git")
-		if info, statErr := os.Stat(bareRepoPath); statErr == nil && info.IsDir() {
+		if bareRepoPath := rig.FindBareRepo(m.rig.Path); bareRepoPath != "" {
 			bareGit := git.NewGitWithDir(bareRepoPath, "")
 			_ = bareGit.WorktreePrune()
 		}
@@ -1401,7 +1398,7 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 			"  - default_branch is misconfigured (check %s/config.json)\n"+
 			"  - Bare repo fetch failed (try: git -C %s fetch origin)\n\n"+
 			"Run 'gt doctor' to diagnose.",
-			startPoint, m.rig.Path, filepath.Join(m.rig.Path, ".repo.git"))
+			startPoint, m.rig.Path, m.rig.Path)
 	}
 
 	// Create fresh worktree to a temporary path first, so we can roll back if it fails.
