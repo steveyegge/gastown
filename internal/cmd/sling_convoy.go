@@ -345,13 +345,13 @@ func createBatchConvoy(beadIDs []string, rigName string, owned bool, mergeStrate
 	}
 
 	// Add tracking relations for all beads, recording which succeed.
-	// Use WithAutoCommit for the same reason as above.
+	// Use raw SQL INSERT to bypass bd dep add's same-database validation,
+	// which fails for cross-rig beads. See GH #3581.
 	var tracked []string
 	for _, beadID := range beadIDs {
-		depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
-		if out, err := BdCmd(depArgs...).Dir(townRoot).WithAutoCommit().StripBeadsDir().CombinedOutput(); err != nil {
+		if err := bdDepAddRawSQL(townBeads, convoyID, beadID, "tracks"); err != nil {
 			// Log but continue — partial tracking is better than no tracking
-			fmt.Printf("  Warning: could not track %s in convoy: %v\nOutput: %s\n", beadID, err, out)
+			fmt.Printf("  Warning: could not track %s in convoy: %v\n", beadID, err)
 		} else {
 			tracked = append(tracked, beadID)
 		}
@@ -412,14 +412,11 @@ func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy, baseB
 
 	// Add tracking relation: convoy tracks the issue.
 	// bd dep add validates both IDs exist in the same database, which fails for
-	// cross-rig beads (e.g., gas-xyz tracked by an hq-cv- convoy). Since beads
-	// v0.62 removed cross-rig routing from bd, this validation cannot be satisfied
-	// for rig-prefixed beads. We treat tracking failure as non-fatal: the convoy
-	// still works, the witness and daemon provide backup tracking, and PR #3166
-	// will replace this with the Go module API which can route cross-rig.
-	depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
-	if out, err := BdCmd(depArgs...).Dir(townRoot).WithAutoCommit().StripBeadsDir().CombinedOutput(); err != nil {
-		fmt.Printf("Warning: Could not create auto-convoy tracking: %v\noutput: %s\n", err, out)
+	// cross-rig beads (e.g., bh-xyz tracked by an hq-cv- convoy). Use raw SQL
+	// INSERT to bypass the validation — same approach bdDepListRawIDs uses for
+	// reads. See GH #3581.
+	if err := bdDepAddRawSQL(townBeads, convoyID, beadID, "tracks"); err != nil {
+		fmt.Printf("Warning: Could not create auto-convoy tracking: %v\n", err)
 	}
 
 	return convoyID, nil

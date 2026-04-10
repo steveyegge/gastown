@@ -531,6 +531,39 @@ func bdDepListRawIDs(dir, issueID, direction, depType string) ([]string, error) 
 	return ids, nil
 }
 
+// bdDepAddRawSQL inserts a dependency row via bd sql, bypassing bd dep add's
+// same-database validation that fails for cross-rig beads. This is the write
+// counterpart to bdDepListRawIDs (which reads deps via raw SQL). See GH #3581.
+//
+// dir should be the town beads directory (.beads) where the convoy lives.
+// The dependency target (dependsOnID) may live in a different rig database —
+// this is fine because we only need the ID stored, not validated.
+func bdDepAddRawSQL(dir, issueID, dependsOnID, depType string) error {
+	if !isValidBeadID(issueID) {
+		return fmt.Errorf("invalid issue ID: %q", issueID)
+	}
+	if !isValidBeadID(dependsOnID) {
+		return fmt.Errorf("invalid depends_on ID: %q", dependsOnID)
+	}
+	if depType != "" && !isValidBeadID(depType) {
+		return fmt.Errorf("invalid dep type: %q", depType)
+	}
+	if depType == "" {
+		depType = "tracks"
+	}
+
+	query := fmt.Sprintf(
+		"INSERT INTO dependencies (issue_id, depends_on_id, type, created_at, created_by) "+
+			"VALUES ('%s', '%s', '%s', NOW(), 'gt-sling')",
+		issueID, dependsOnID, depType,
+	)
+
+	if _, err := runBdJSON(dir, "sql", query); err != nil {
+		return fmt.Errorf("inserting dep %s -> %s: %w", issueID, dependsOnID, err)
+	}
+	return nil
+}
+
 // isValidBeadID checks that a string is safe for SQL interpolation in dep queries.
 // Bead IDs contain only alphanumeric chars, hyphens, dots, and underscores.
 func isValidBeadID(s string) bool {
@@ -723,22 +756,13 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	// routes.jsonl. getTownBeadsDir() already returns the town root.
 	// StripBeadsDir prevents inherited BEADS_DIR from overriding routing.
 
-	// Add 'tracks' relations for each tracked issue
+	// Add 'tracks' relations for each tracked issue.
+	// Use raw SQL INSERT to bypass bd dep add's same-database validation,
+	// which fails for cross-rig beads. See GH #3581.
 	trackedCount := 0
 	for _, issueID := range trackedIssues {
-		// Use --type=tracks for non-blocking tracking relation
-		var depStderr bytes.Buffer
-		if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
-			WithAutoCommit().
-			Dir(townBeads).
-			StripBeadsDir().
-			Stderr(&depStderr).
-			Run(); err != nil {
-			errMsg := strings.TrimSpace(depStderr.String())
-			if errMsg == "" {
-				errMsg = err.Error()
-			}
-			style.PrintWarning("couldn't track %s: %s", issueID, errMsg)
+		if err := bdDepAddRawSQL(townBeads, convoyID, issueID, "tracks"); err != nil {
+			style.PrintWarning("couldn't track %s: %s", issueID, err)
 		} else {
 			trackedCount++
 		}
@@ -843,20 +867,12 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 	// routes.jsonl. getTownBeadsDir() already returns the town root.
 
 	// Add 'tracks' relations for each issue
+	// Use raw SQL INSERT to bypass bd dep add's same-database validation,
+	// which fails for cross-rig beads. See GH #3581.
 	addedCount := 0
 	for _, issueID := range issuesToAdd {
-		var depStderr bytes.Buffer
-		if err := BdCmd("dep", "add", convoyID, issueID, "--type=tracks").
-			Dir(townBeads).
-			WithAutoCommit().
-			StripBeadsDir().
-			Stderr(&depStderr).
-			Run(); err != nil {
-			errMsg := strings.TrimSpace(depStderr.String())
-			if errMsg == "" {
-				errMsg = err.Error()
-			}
-			style.PrintWarning("couldn't add %s: %s", issueID, errMsg)
+		if err := bdDepAddRawSQL(townBeads, convoyID, issueID, "tracks"); err != nil {
+			style.PrintWarning("couldn't add %s: %s", issueID, err)
 		} else {
 			addedCount++
 		}
