@@ -2220,7 +2220,15 @@ func isCurrentHookedIssueForAssignee(issue *beads.Issue, assignee string) bool {
 // This eliminates the need for git sync between polecat clones - all polecats share one database.
 // Also propagates beads git config (role, issue_prefix) so bd commands work without warnings.
 func (m *Manager) setupSharedBeads(clonePath string) error {
+	// Discover the town root for beads redirect setup. The rig may be nested
+	// under a subdirectory (e.g., <town>/rigs/<rig>) so filepath.Dir alone
+	// would give the wrong answer. Use workspace.Find to locate the real town
+	// root; fall back to filepath.Dir for flat layouts and test environments
+	// where no town root exists above the rig. (sbx-gastown-qepp)
 	townRoot := filepath.Dir(m.rig.Path)
+	if found, err := workspace.Find(m.rig.Path); err == nil && found != "" && found != m.rig.Path {
+		townRoot = found
+	}
 	if err := beads.SetupRedirect(townRoot, clonePath); err != nil {
 		return err
 	}
