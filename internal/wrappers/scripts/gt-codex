@@ -1,5 +1,5 @@
 #!/bin/bash
-# ABOUTME: Wrapper script that runs gt prime before launching codex.
+# ABOUTME: Wrapper script that runs gt prime --hook before launching codex.
 # ABOUTME: Ensures Gas Town context is available in Codex sessions.
 
 set -e
@@ -12,7 +12,7 @@ gastown_enabled() {
 }
 
 if gastown_enabled && command -v gt &>/dev/null; then
-    gt prime 2>/dev/null || true
+    gt prime --hook 2>/dev/null || true
 fi
 
 exec codex "$@"

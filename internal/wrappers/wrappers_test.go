@@ -64,7 +64,7 @@ func TestEmbeddedScripts_HaveExecLine(t *testing.T) {
 	}
 }
 
-func TestEmbeddedScripts_HaveGtPrime(t *testing.T) {
+func TestEmbeddedScripts_HaveHookedGtPrime(t *testing.T) {
 	t.Parallel()
 	for _, name := range expectedWrappers {
 		t.Run(name, func(t *testing.T) {
@@ -73,8 +73,8 @@ func TestEmbeddedScripts_HaveGtPrime(t *testing.T) {
 				t.Fatalf("Failed to read %s: %v", name, err)
 			}
 
-			if !strings.Contains(string(content), "gt prime") {
-				t.Errorf("Script %s should run 'gt prime' before launching agent", name)
+			if !strings.Contains(string(content), "gt prime --hook") {
+				t.Errorf("Script %s should run 'gt prime --hook' before launching agent", name)
 			}
 		})
 	}
