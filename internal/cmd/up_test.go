@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/rig"
 )
@@ -85,12 +86,103 @@ func TestSemaphoreLimitsConcurrency(t *testing.T) {
 	}
 }
 
+func TestStartRigAgentsWithPrefetch_DisabledWitnesses(t *testing.T) {
+	// When witnesses are disabled, they should be reported as disabled
+	svcCfg := &config.ServicesConfig{Witnesses: "disabled"}
+	witnessResults, refineryResults := startRigAgentsWithPrefetch(
+		[]string{"badrig"},
+		make(map[string]*rig.Rig),
+		map[string]error{"badrig": fmt.Errorf("rig not found")},
+		svcCfg,
+	)
+
+	if result, ok := witnessResults["badrig"]; !ok {
+		t.Error("should have badrig witness entry")
+	} else if !result.ok {
+		t.Error("disabled witness should report ok=true")
+	} else if result.detail != "disabled (services config)" {
+		t.Errorf("detail = %q, want %q", result.detail, "disabled (services config)")
+	}
+
+	// Refineries should still use the error from rigErrors
+	if result, ok := refineryResults["badrig"]; !ok {
+		t.Error("should have badrig refinery entry")
+	} else if result.ok {
+		t.Error("badrig refinery should not be ok (rig failed to load)")
+	}
+}
+
+func TestStartRigAgentsWithPrefetch_DisabledRefineries(t *testing.T) {
+	svcCfg := &config.ServicesConfig{Refineries: "disabled"}
+	witnessResults, refineryResults := startRigAgentsWithPrefetch(
+		[]string{"badrig"},
+		make(map[string]*rig.Rig),
+		map[string]error{"badrig": fmt.Errorf("rig not found")},
+		svcCfg,
+	)
+
+	// Witnesses should still use the error from rigErrors
+	if result, ok := witnessResults["badrig"]; !ok {
+		t.Error("should have badrig witness entry")
+	} else if result.ok {
+		t.Error("badrig witness should not be ok (rig failed to load)")
+	}
+
+	if result, ok := refineryResults["badrig"]; !ok {
+		t.Error("should have badrig refinery entry")
+	} else if !result.ok {
+		t.Error("disabled refinery should report ok=true")
+	} else if result.detail != "disabled (services config)" {
+		t.Errorf("detail = %q, want %q", result.detail, "disabled (services config)")
+	}
+}
+
+func TestStartRigAgentsWithPrefetch_AllDisabled(t *testing.T) {
+	svcCfg := &config.ServicesConfig{
+		Witnesses:  "disabled",
+		Refineries: "disabled",
+	}
+	witnessResults, refineryResults := startRigAgentsWithPrefetch(
+		[]string{"rig-a"},
+		make(map[string]*rig.Rig),
+		map[string]error{"rig-a": fmt.Errorf("rig not found")},
+		svcCfg,
+	)
+
+	if result := witnessResults["rig-a"]; !result.ok || result.detail != "disabled (services config)" {
+		t.Errorf("witness: ok=%v detail=%q", result.ok, result.detail)
+	}
+	if result := refineryResults["rig-a"]; !result.ok || result.detail != "disabled (services config)" {
+		t.Errorf("refinery: ok=%v detail=%q", result.ok, result.detail)
+	}
+}
+
+func TestStartRigAgentsWithPrefetch_OnDemandWitnesses(t *testing.T) {
+	// "on-demand" witnesses should not be started by gt up
+	svcCfg := &config.ServicesConfig{Witnesses: "on-demand"}
+	witnessResults, _ := startRigAgentsWithPrefetch(
+		[]string{"badrig"},
+		make(map[string]*rig.Rig),
+		map[string]error{"badrig": fmt.Errorf("rig not found")},
+		svcCfg,
+	)
+
+	if result, ok := witnessResults["badrig"]; !ok {
+		t.Error("should have badrig witness entry")
+	} else if !result.ok {
+		t.Error("on-demand witness should report ok=true")
+	} else if result.detail != "disabled (services config)" {
+		t.Errorf("detail = %q, want %q", result.detail, "disabled (services config)")
+	}
+}
+
 func TestStartRigAgentsWithPrefetch_EmptyRigs(t *testing.T) {
 	// Test with empty inputs
 	witnessResults, refineryResults := startRigAgentsWithPrefetch(
 		[]string{},
 		make(map[string]*rig.Rig),
 		make(map[string]error),
+		nil, // nil ServicesConfig = all enabled (default)
 	)
 
 	if len(witnessResults) != 0 {
@@ -111,6 +203,7 @@ func TestStartRigAgentsWithPrefetch_RecordsErrors(t *testing.T) {
 		[]string{"badrig"},
 		make(map[string]*rig.Rig),
 		rigErrors,
+		nil, // nil ServicesConfig = all enabled (default)
 	)
 
 	if len(witnessResults) != 1 {

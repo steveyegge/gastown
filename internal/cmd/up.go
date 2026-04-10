@@ -181,6 +181,10 @@ func runUp(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Load town settings for services config (controls which agents gt up starts).
+	townSettings, _ := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot))
+	svcCfg := townSettings.Services // may be nil — methods are nil-safe
+
 	allOK := true
 	var services []ServiceStatus
 
@@ -243,9 +247,13 @@ func runUp(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// 2. Deacon
+	// 2. Deacon (gated by services config)
 	go func() {
 		defer startupWg.Done()
+		if !svcCfg.IsDeaconEnabled() {
+			deaconResult = agentStartResult{name: "Deacon", ok: true, detail: "disabled (services config)"}
+			return
+		}
 		deaconMgr := deacon.NewManager(townRoot)
 		if err := deaconMgr.Start(""); err != nil {
 			if err == deacon.ErrAlreadyRunning {
@@ -258,9 +266,13 @@ func runUp(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// 3. Mayor
+	// 3. Mayor (gated by services config)
 	go func() {
 		defer startupWg.Done()
+		if !svcCfg.IsMayorEnabled() {
+			mayorResult = agentStartResult{name: "Mayor", ok: true, detail: "disabled (services config)"}
+			return
+		}
 		mayorMgr := mayor.NewManager(townRoot)
 		if err := mayorMgr.Start(""); err != nil {
 			if errors.Is(err, mayor.ErrAlreadyRunning) {
@@ -340,29 +352,38 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// assigned to polecats that no longer exist (session dead + directory gone).
 	// After a crash, these beads sit orphaned until someone manually resets them.
 	// Running this before witnesses start avoids duplicate recovery. (gas-udp)
-	if !doltSkipped && doltOK {
+	// Gated by services.rogue_detection — when false, skip all orphan/zombie scanning.
+	if !doltSkipped && doltOK && svcCfg.IsRogueDetectionEnabled() {
 		orphanServices := recoverOrphanedBeads(townRoot, rigs, prefetchedRigs)
 		services = append(services, orphanServices...)
 	}
 
-	// 5 & 6. Witnesses and Refineries (using prefetched rigs)
-	witnessResults, refineryResults := startRigAgentsWithPrefetch(rigs, prefetchedRigs, rigErrors)
+	// 5 & 6. Witnesses and Refineries (using prefetched rigs, gated by services config)
+	if svcCfg.IsWitnessEnabled() || svcCfg.IsRefineryEnabled() {
+		witnessResults, refineryResults := startRigAgentsWithPrefetch(rigs, prefetchedRigs, rigErrors, svcCfg)
 
-	// Collect results in order: all witnesses first, then all refineries
-	for _, rigName := range rigs {
-		if result, ok := witnessResults[rigName]; ok {
-			services = append(services, ServiceStatus{Name: result.name, Type: constants.RoleWitness, Rig: rigName, OK: result.ok, Detail: result.detail})
-			if !result.ok {
-				allOK = false
+		// Collect results in order: all witnesses first, then all refineries
+		for _, rigName := range rigs {
+			if result, ok := witnessResults[rigName]; ok {
+				services = append(services, ServiceStatus{Name: result.name, Type: constants.RoleWitness, Rig: rigName, OK: result.ok, Detail: result.detail})
+				if !result.ok {
+					allOK = false
+				}
 			}
 		}
-	}
-	for _, rigName := range rigs {
-		if result, ok := refineryResults[rigName]; ok {
-			services = append(services, ServiceStatus{Name: result.name, Type: constants.RoleRefinery, Rig: rigName, OK: result.ok, Detail: result.detail})
-			if !result.ok {
-				allOK = false
+		for _, rigName := range rigs {
+			if result, ok := refineryResults[rigName]; ok {
+				services = append(services, ServiceStatus{Name: result.name, Type: constants.RoleRefinery, Rig: rigName, OK: result.ok, Detail: result.detail})
+				if !result.ok {
+					allOK = false
+				}
 			}
+		}
+	} else {
+		// Both witnesses and refineries disabled — report them as skipped
+		for _, rigName := range rigs {
+			services = append(services, ServiceStatus{Name: "Witness (" + rigName + ")", Type: constants.RoleWitness, Rig: rigName, OK: true, Detail: "disabled (services config)"})
+			services = append(services, ServiceStatus{Name: "Refinery (" + rigName + ")", Type: constants.RoleRefinery, Rig: rigName, OK: true, Detail: "disabled (services config)"})
 		}
 	}
 
@@ -623,7 +644,8 @@ type agentResultMsg struct {
 
 // startRigAgentsWithPrefetch starts all Witnesses and Refineries using pre-loaded rig configs.
 // Uses a worker pool with fixed goroutine count to limit concurrency and reduce overhead.
-func startRigAgentsWithPrefetch(rigNames []string, prefetchedRigs map[string]*rig.Rig, rigErrors map[string]error) (witnessResults, refineryResults map[string]agentStartResult) {
+// The svcCfg parameter gates which agent types are actually started.
+func startRigAgentsWithPrefetch(rigNames []string, prefetchedRigs map[string]*rig.Rig, rigErrors map[string]error, svcCfg *config.ServicesConfig) (witnessResults, refineryResults map[string]agentStartResult) {
 	n := len(rigNames)
 	witnessResults = make(map[string]agentStartResult, n)
 	refineryResults = make(map[string]agentStartResult, n)
@@ -632,22 +654,45 @@ func startRigAgentsWithPrefetch(rigNames []string, prefetchedRigs map[string]*ri
 		return
 	}
 
-	// Record errors for rigs that failed to load
+	// Record errors for rigs that failed to load (respecting services config)
 	for rigName, err := range rigErrors {
 		errDetail := err.Error()
-		witnessResults[rigName] = agentStartResult{
-			name:   "Witness (" + rigName + ")",
-			ok:     false,
-			detail: errDetail,
+		if svcCfg.IsWitnessEnabled() {
+			witnessResults[rigName] = agentStartResult{
+				name:   "Witness (" + rigName + ")",
+				ok:     false,
+				detail: errDetail,
+			}
+		} else {
+			witnessResults[rigName] = agentStartResult{
+				name:   "Witness (" + rigName + ")",
+				ok:     true,
+				detail: "disabled (services config)",
+			}
 		}
-		refineryResults[rigName] = agentStartResult{
-			name:   "Refinery (" + rigName + ")",
-			ok:     false,
-			detail: errDetail,
+		if svcCfg.IsRefineryEnabled() {
+			refineryResults[rigName] = agentStartResult{
+				name:   "Refinery (" + rigName + ")",
+				ok:     false,
+				detail: errDetail,
+			}
+		} else {
+			refineryResults[rigName] = agentStartResult{
+				name:   "Refinery (" + rigName + ")",
+				ok:     true,
+				detail: "disabled (services config)",
+			}
 		}
 	}
 
-	numTasks := len(prefetchedRigs) * 2 // witness + refinery per rig
+	tasksPerRig := 0
+	if svcCfg.IsWitnessEnabled() {
+		tasksPerRig++
+	}
+	if svcCfg.IsRefineryEnabled() {
+		tasksPerRig++
+	}
+	numTasks := len(prefetchedRigs) * tasksPerRig
 	if numTasks == 0 {
 		return
 	}
@@ -683,10 +728,26 @@ func startRigAgentsWithPrefetch(rigNames []string, prefetchedRigs map[string]*ri
 		}()
 	}
 
-	// Enqueue all tasks
+	// Enqueue tasks, respecting services config gating
 	for rigName, r := range prefetchedRigs {
-		tasks <- agentTask{rigName: rigName, rigObj: r, isWitness: true}
-		tasks <- agentTask{rigName: rigName, rigObj: r, isWitness: false}
+		if svcCfg.IsWitnessEnabled() {
+			tasks <- agentTask{rigName: rigName, rigObj: r, isWitness: true}
+		} else {
+			witnessResults[rigName] = agentStartResult{
+				name:   "Witness (" + rigName + ")",
+				ok:     true,
+				detail: "disabled (services config)",
+			}
+		}
+		if svcCfg.IsRefineryEnabled() {
+			tasks <- agentTask{rigName: rigName, rigObj: r, isWitness: false}
+		} else {
+			refineryResults[rigName] = agentStartResult{
+				name:   "Refinery (" + rigName + ")",
+				ok:     true,
+				detail: "disabled (services config)",
+			}
+		}
 	}
 	close(tasks)
 

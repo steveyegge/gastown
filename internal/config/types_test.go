@@ -583,6 +583,139 @@ func TestTownSettings_DisabledPatrols_OmitemptyWhenNil(t *testing.T) {
 	}
 }
 
+// --- ServicesConfig tests ---
+
+func TestServicesConfig_NilIsAllEnabled(t *testing.T) {
+	t.Parallel()
+	var s *ServicesConfig
+	if !s.IsDeaconEnabled() {
+		t.Error("nil ServicesConfig should have deacon enabled")
+	}
+	if !s.IsMayorEnabled() {
+		t.Error("nil ServicesConfig should have mayor enabled")
+	}
+	if !s.IsWitnessEnabled() {
+		t.Error("nil ServicesConfig should have witnesses enabled")
+	}
+	if !s.IsRefineryEnabled() {
+		t.Error("nil ServicesConfig should have refineries enabled")
+	}
+	if !s.IsRogueDetectionEnabled() {
+		t.Error("nil ServicesConfig should have rogue detection enabled")
+	}
+}
+
+func TestServicesConfig_EmptyIsAllEnabled(t *testing.T) {
+	t.Parallel()
+	s := &ServicesConfig{}
+	if !s.IsDeaconEnabled() {
+		t.Error("empty ServicesConfig should have deacon enabled")
+	}
+	if !s.IsMayorEnabled() {
+		t.Error("empty ServicesConfig should have mayor enabled")
+	}
+	if !s.IsWitnessEnabled() {
+		t.Error("empty ServicesConfig should have witnesses enabled")
+	}
+	if !s.IsRefineryEnabled() {
+		t.Error("empty ServicesConfig should have refineries enabled")
+	}
+	if !s.IsRogueDetectionEnabled() {
+		t.Error("empty ServicesConfig should have rogue detection enabled")
+	}
+}
+
+func TestServicesConfig_Disabled(t *testing.T) {
+	t.Parallel()
+	f := false
+	s := &ServicesConfig{
+		Deacon:         "disabled",
+		Mayor:          "disabled",
+		Witnesses:      "disabled",
+		Refineries:     "disabled",
+		RogueDetection: &f,
+	}
+	if s.IsDeaconEnabled() {
+		t.Error("deacon should be disabled")
+	}
+	if s.IsMayorEnabled() {
+		t.Error("mayor should be disabled")
+	}
+	if s.IsWitnessEnabled() {
+		t.Error("witnesses should be disabled")
+	}
+	if s.IsRefineryEnabled() {
+		t.Error("refineries should be disabled")
+	}
+	if s.IsRogueDetectionEnabled() {
+		t.Error("rogue detection should be disabled")
+	}
+}
+
+func TestServicesConfig_WitnessOnDemand(t *testing.T) {
+	t.Parallel()
+	s := &ServicesConfig{Witnesses: "on-demand"}
+	if s.IsWitnessEnabled() {
+		t.Error("on-demand witnesses should not be started by gt up")
+	}
+}
+
+func TestServicesConfig_RoundTrip(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	settingsPath := filepath.Join(tmpDir, "config.json")
+
+	f := false
+	original := NewTownSettings()
+	original.Services = &ServicesConfig{
+		Deacon:         "disabled",
+		Mayor:          "disabled",
+		Witnesses:      "on-demand",
+		Refineries:     "disabled",
+		RogueDetection: &f,
+	}
+
+	if err := SaveTownSettings(settingsPath, original); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	loaded, err := LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("LoadOrCreateTownSettings: %v", err)
+	}
+
+	if loaded.Services == nil {
+		t.Fatal("loaded Services should not be nil")
+	}
+	if loaded.Services.Deacon != "disabled" {
+		t.Errorf("Deacon = %q, want %q", loaded.Services.Deacon, "disabled")
+	}
+	if loaded.Services.Mayor != "disabled" {
+		t.Errorf("Mayor = %q, want %q", loaded.Services.Mayor, "disabled")
+	}
+	if loaded.Services.Witnesses != "on-demand" {
+		t.Errorf("Witnesses = %q, want %q", loaded.Services.Witnesses, "on-demand")
+	}
+	if loaded.Services.Refineries != "disabled" {
+		t.Errorf("Refineries = %q, want %q", loaded.Services.Refineries, "disabled")
+	}
+	if loaded.Services.RogueDetection == nil || *loaded.Services.RogueDetection != false {
+		t.Error("RogueDetection should be false")
+	}
+}
+
+func TestServicesConfig_OmitemptyWhenNil(t *testing.T) {
+	t.Parallel()
+	ts := NewTownSettings()
+	data, err := json.MarshalIndent(ts, "", "  ")
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "services") {
+		t.Error("JSON should not contain services when nil")
+	}
+}
+
 // --- Edge cases for config values ---
 
 func TestParseDurationOrDefault_AllWebTimeoutDefaults(t *testing.T) {

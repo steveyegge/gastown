@@ -118,6 +118,79 @@ type TownSettings struct {
 	// When set, gt sling --mcp and --gcp flags generate authz files and .mcp.json
 	// in polecat worktrees, giving dispatched polecats scoped MCP access.
 	AuthzProxy *AuthzProxyConfig `json:"authz_proxy,omitempty"`
+
+	// Services controls which long-lived services gt up starts.
+	// This allows fork-level customization of which Claude agents are spawned
+	// at startup. When nil, all services use their default behavior (enabled).
+	Services *ServicesConfig `json:"services,omitempty"`
+}
+
+// ServicesConfig controls which long-lived services gt up starts.
+// String fields use "enabled" (default), "disabled", or service-specific values.
+type ServicesConfig struct {
+	// Deacon controls the deacon (town-level watchdog) Claude agent.
+	// Values: "enabled" (default), "disabled".
+	Deacon string `json:"deacon,omitempty"`
+
+	// Mayor controls the mayor (global work coordinator) Claude agent.
+	// Values: "enabled" (default), "disabled".
+	Mayor string `json:"mayor,omitempty"`
+
+	// Witnesses controls per-rig witness Claude agents.
+	// Values: "enabled" (default), "on-demand" (only via gt sling), "disabled".
+	Witnesses string `json:"witnesses,omitempty"`
+
+	// Refineries controls per-rig merge queue processor Claude agents.
+	// Values: "enabled" (default), "disabled".
+	Refineries string `json:"refineries,omitempty"`
+
+	// RogueDetection controls orphaned bead recovery and zombie polecat detection
+	// during gt up. When false, gt up will not scan for or kill unrecognized agents.
+	// Default: true (when nil pointer or field omitted).
+	RogueDetection *bool `json:"rogue_detection,omitempty"`
+}
+
+// IsDeaconEnabled returns true if the deacon should be started by gt up.
+func (s *ServicesConfig) IsDeaconEnabled() bool {
+	if s == nil || s.Deacon == "" || s.Deacon == "enabled" {
+		return true
+	}
+	return false
+}
+
+// IsMayorEnabled returns true if the mayor should be started by gt up.
+func (s *ServicesConfig) IsMayorEnabled() bool {
+	if s == nil || s.Mayor == "" || s.Mayor == "enabled" {
+		return true
+	}
+	return false
+}
+
+// IsWitnessEnabled returns true if persistent witnesses should be started by gt up.
+// Returns false for both "disabled" and "on-demand" (on-demand witnesses are
+// created per-dispatch by gt sling, not by gt up).
+func (s *ServicesConfig) IsWitnessEnabled() bool {
+	if s == nil || s.Witnesses == "" || s.Witnesses == "enabled" {
+		return true
+	}
+	return false
+}
+
+// IsRefineryEnabled returns true if refineries should be started by gt up.
+func (s *ServicesConfig) IsRefineryEnabled() bool {
+	if s == nil || s.Refineries == "" || s.Refineries == "enabled" {
+		return true
+	}
+	return false
+}
+
+// IsRogueDetectionEnabled returns true if orphan recovery / zombie detection
+// should run during gt up.
+func (s *ServicesConfig) IsRogueDetectionEnabled() bool {
+	if s == nil || s.RogueDetection == nil {
+		return true
+	}
+	return *s.RogueDetection
 }
 
 // AuthzProxyConfig configures the authz-proxy for delegating MCP and GCP credentials.
