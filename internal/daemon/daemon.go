@@ -518,6 +518,18 @@ func (d *Daemon) Run() (err error) {
 		d.logger.Printf("Wisp reaper ticker started (interval %v)", interval)
 	}
 
+	// Start polecat reaper ticker if configured.
+	// Scans for completed polecats (bead closed, agent not running) and reaps them.
+	var polecatReaperTicker *time.Ticker
+	var polecatReaperChan <-chan time.Time
+	if d.isPatrolActive("polecat_reaper") {
+		interval := polecatReaperInterval(d.patrolConfig)
+		polecatReaperTicker = time.NewTicker(interval)
+		polecatReaperChan = polecatReaperTicker.C
+		defer polecatReaperTicker.Stop()
+		d.logger.Printf("Polecat reaper ticker started (interval %v)", interval)
+	}
+
 	// Start doctor dog ticker if configured.
 	// Health monitor: TCP check, latency, DB count, gc, zombie detection, backup/disk checks.
 	var doctorDogTicker *time.Ticker
@@ -657,6 +669,13 @@ func (d *Daemon) Run() (err error) {
 			// old patrol data) to prevent unbounded table growth (Clown Show audit).
 			if !d.isShutdownInProgress() {
 				d.reapWisps()
+			}
+
+		case <-polecatReaperChan:
+			// Periodic polecat reaper — scans for completed polecats (bead closed,
+			// agent not running) and reaps them: kills tmux session, removes worktree.
+			if !d.isShutdownInProgress() {
+				d.reapCompletedPolecats()
 			}
 
 		case <-doctorDogChan:

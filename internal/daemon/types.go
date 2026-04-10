@@ -132,6 +132,7 @@ type PatrolsConfig struct {
 	QuotaDog               *QuotaDogConfig                `json:"quota_dog,omitempty"`
 	RestartTracker         *RestartTrackerConfig          `json:"restart_tracker,omitempty"`
 	Orchestrator           *OrchestratorPatrolConfig      `json:"orchestrator,omitempty"`
+	PolecatReaper          *PolecatReaperConfig           `json:"polecat_reaper,omitempty"`
 }
 
 // DoltRemotesConfig holds configuration for the dolt_remotes patrol.
@@ -314,6 +315,12 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 			return false
 		}
 		return config.Patrols.Orchestrator.Enabled
+	}
+	if patrol == "polecat_reaper" {
+		if config == nil || config.Patrols == nil || config.Patrols.PolecatReaper == nil {
+			return false
+		}
+		return config.Patrols.PolecatReaper.Enabled
 	}
 
 	if config == nil || config.Patrols == nil {

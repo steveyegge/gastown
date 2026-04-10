@@ -58,6 +58,10 @@ func DefaultLifecycleConfig() *DaemonPatrolConfig {
 				IntervalStr: "30m",
 				TimeoutStr:  "10m",
 			},
+			PolecatReaper: &PolecatReaperConfig{
+				Enabled:     true,
+				IntervalStr: "60s",
+			},
 			Handler: &PatrolConfig{
 				Enabled: true,
 			},
@@ -116,6 +120,10 @@ func EnsureLifecycleDefaults(config *DaemonPatrolConfig) bool {
 	}
 	if p.MainBranchTest == nil {
 		p.MainBranchTest = d.MainBranchTest
+		changed = true
+	}
+	if p.PolecatReaper == nil {
+		p.PolecatReaper = d.PolecatReaper
 		changed = true
 	}
 	if p.Handler == nil {

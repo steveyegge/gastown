@@ -165,6 +165,7 @@ func TestEnsureLifecycleDefaults_FullyConfigured(t *testing.T) {
 			DoltBackup:           &DoltBackupConfig{Enabled: false},
 			ScheduledMaintenance: &ScheduledMaintenanceConfig{Enabled: false, Threshold: &threshold},
 			MainBranchTest:       &MainBranchTestConfig{Enabled: false},
+			PolecatReaper:        &PolecatReaperConfig{Enabled: false},
 			Handler:              &PatrolConfig{Enabled: false},
 		},
 	}
