@@ -123,6 +123,13 @@ type TownSettings struct {
 	// This allows fork-level customization of which Claude agents are spawned
 	// at startup. When nil, all services use their default behavior (enabled).
 	Services *ServicesConfig `json:"services,omitempty"`
+
+	// FlatBeadNamespace disables the cross-rig prefix guard in gt sling.
+	// When true, beads are not required to have a prefix matching the target rig.
+	// This supports flat bead namespaces where all beads share a single prefix
+	// (e.g., "sbx-gastown-*") and are dispatched to any rig via labels.
+	// Default: false (cross-rig guard is active).
+	FlatBeadNamespace bool `json:"flat_bead_namespace,omitempty"`
 }
 
 // ServicesConfig controls which long-lived services gt up starts.

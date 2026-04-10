@@ -1610,6 +1610,103 @@ func TestCheckCrossRigGuard(t *testing.T) {
 	}
 }
 
+// TestCheckCrossRigGuard_FlatBeadNamespace verifies that the cross-rig guard
+// is skipped when flat_bead_namespace is enabled in town settings.
+// Fixes: sbx-gastown-f55l
+func TestCheckCrossRigGuard_FlatBeadNamespace(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up routes that would normally cause cross-rig rejection
+	routesContent := `{"prefix":"gt-","path":"gastown/mayor/rig"}
+{"prefix":"bd-","path":"beads/mayor/rig"}
+{"prefix":"sbx-gastown-","path":"gastown/mayor/rig"}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Enable flat_bead_namespace in town settings
+	settingsDir := filepath.Join(tmpDir, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	ts := config.NewTownSettings()
+	ts.FlatBeadNamespace = true
+	if err := config.SaveTownSettings(filepath.Join(settingsDir, "config.json"), ts); err != nil {
+		t.Fatal(err)
+	}
+
+	// These would all fail without flat_bead_namespace
+	tests := []struct {
+		name        string
+		beadID      string
+		targetAgent string
+	}{
+		{
+			name:        "cross-rig: bd bead to gastown polecat (allowed with flat namespace)",
+			beadID:      "bd-ka761",
+			targetAgent: "gastown/polecats/Toast",
+		},
+		{
+			name:        "cross-rig: gt bead to beads polecat (allowed with flat namespace)",
+			beadID:      "gt-abc123",
+			targetAgent: "beads/polecats/obsidian",
+		},
+		{
+			name:        "bridge-prefix bead to any rig (allowed with flat namespace)",
+			beadID:      "sbx-gastown-f55l",
+			targetAgent: "beads/polecats/obsidian",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkCrossRigGuard(tc.beadID, tc.targetAgent, tmpDir)
+			if err != nil {
+				t.Errorf("checkCrossRigGuard(%q, %q) with flat_bead_namespace=true: unexpected error: %v",
+					tc.beadID, tc.targetAgent, err)
+			}
+		})
+	}
+}
+
+// TestCheckCrossRigGuard_FlatBeadNamespaceDisabled verifies the guard still
+// rejects cross-rig beads when flat_bead_namespace is false (default).
+func TestCheckCrossRigGuard_FlatBeadNamespaceDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix":"gt-","path":"gastown/mayor/rig"}
+{"prefix":"bd-","path":"beads/mayor/rig"}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write settings with flat_bead_namespace=false (default)
+	settingsDir := filepath.Join(tmpDir, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	ts := config.NewTownSettings()
+	if err := config.SaveTownSettings(filepath.Join(settingsDir, "config.json"), ts); err != nil {
+		t.Fatal(err)
+	}
+
+	// Cross-rig should still be rejected
+	err := checkCrossRigGuard("bd-ka761", "gastown/polecats/Toast", tmpDir)
+	if err == nil {
+		t.Error("checkCrossRigGuard should reject cross-rig bead when flat_bead_namespace is false")
+	}
+}
+
 func TestIsHookedAgentDead_UnknownFormat(t *testing.T) {
 	// Unknown assignee formats should return false (conservative)
 	tests := []struct {

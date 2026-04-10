@@ -29,38 +29,45 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 	}
 
 	// Cross-rig guard: check all beads match the target rig before spawning (gt-myecw)
+	// Skipped when flat_bead_namespace is enabled or --force is set.
 	if !slingForce {
 		townRoot := filepath.Dir(townBeadsDir)
-		for _, beadID := range beadIDs {
-			prefix := beads.ExtractPrefix(beadID)
-			beadRig := beads.GetRigNameForPrefix(townRoot, prefix)
-			if prefix != "" && beadRig != "" && beadRig != rigName {
-				others := make([]string, 0, len(beadIDs)-1)
-				for _, id := range beadIDs {
-					if id != beadID {
-						others = append(others, id)
+		flatNS := false
+		if ts, err := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot)); err == nil {
+			flatNS = ts.FlatBeadNamespace
+		}
+		if !flatNS {
+			for _, beadID := range beadIDs {
+				prefix := beads.ExtractPrefix(beadID)
+				beadRig := beads.GetRigNameForPrefix(townRoot, prefix)
+				if prefix != "" && beadRig != "" && beadRig != rigName {
+					others := make([]string, 0, len(beadIDs)-1)
+					for _, id := range beadIDs {
+						if id != beadID {
+							others = append(others, id)
+						}
 					}
+					// Build the full command suggestion safely — avoid appending to
+					// beadIDs which may share a backing array with the caller's args.
+					allArgs := make([]string, len(beadIDs)+1)
+					copy(allArgs, beadIDs)
+					allArgs[len(beadIDs)] = rigName
+					return fmt.Errorf("bead %s (prefix %q) belongs to rig %q, but target is %q\n\n"+
+						"  Options:\n"+
+						"    1. Remove the mismatched bead from this batch:\n"+
+						"         gt sling %s\n"+
+						"    2. Sling the mismatched bead to its own rig:\n"+
+						"         gt sling %s %s\n"+
+						"    3. Use --force to override the cross-rig guard:\n"+
+						"         gt sling %s --force\n",
+						beadID, strings.TrimSuffix(prefix, "-"), beadRig, rigName,
+						strings.Join(others, " "),
+						beadID, beadRig,
+						strings.Join(allArgs, " "))
+				} else if err := checkCrossRigGuard(beadID, rigName+"/polecats/_", townRoot); err != nil {
+					// Fall back to generic guard for edge cases (empty prefix, town-level beads)
+					return err
 				}
-				// Build the full command suggestion safely — avoid appending to
-				// beadIDs which may share a backing array with the caller's args.
-				allArgs := make([]string, len(beadIDs)+1)
-				copy(allArgs, beadIDs)
-				allArgs[len(beadIDs)] = rigName
-				return fmt.Errorf("bead %s (prefix %q) belongs to rig %q, but target is %q\n\n"+
-					"  Options:\n"+
-					"    1. Remove the mismatched bead from this batch:\n"+
-					"         gt sling %s\n"+
-					"    2. Sling the mismatched bead to its own rig:\n"+
-					"         gt sling %s %s\n"+
-					"    3. Use --force to override the cross-rig guard:\n"+
-					"         gt sling %s --force\n",
-					beadID, strings.TrimSuffix(prefix, "-"), beadRig, rigName,
-					strings.Join(others, " "),
-					beadID, beadRig,
-					strings.Join(allArgs, " "))
-			} else if err := checkCrossRigGuard(beadID, rigName+"/polecats/_", townRoot); err != nil {
-				// Fall back to generic guard for edge cases (empty prefix, town-level beads)
-				return err
 			}
 		}
 	}

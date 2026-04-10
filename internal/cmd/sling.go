@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/mail"
@@ -1056,6 +1057,14 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 // Returns an error if the bead belongs to a different rig than the target polecat.
 // Town-root beads (hq-*) are rejected — tasks must be created in the target rig.
 func checkCrossRigGuard(beadID, targetAgent, townRoot string) error {
+	// Flat bead namespace: all beads share a single prefix and are dispatched
+	// to any rig via labels. Skip the cross-rig guard entirely.
+	if townRoot != "" {
+		if ts, err := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot)); err == nil && ts.FlatBeadNamespace {
+			return nil
+		}
+	}
+
 	beadPrefix := beads.ExtractPrefix(beadID)
 	if beadPrefix == "" {
 		return nil // Can't determine prefix, skip check
