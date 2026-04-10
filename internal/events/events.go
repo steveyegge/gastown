@@ -74,6 +74,9 @@ const (
 	TypeSchedulerDispatch       = "scheduler_dispatch"        // Bead dispatched from scheduler
 	TypeSchedulerDispatchFailed = "scheduler_dispatch_failed" // Bead dispatch failed (requeued)
 	TypeSchedulerCloseRetry     = "scheduler_close_retry"     // Context close needed last-resort attempt
+
+	// Deacon reap events
+	TypeReap = "reap" // Completed polecat reaped (session killed + worktree removed)
 )
 
 // EventsFile is the name of the raw events log.
@@ -367,4 +370,23 @@ func SchedulerDispatchFailedPayload(beadID, rig, errMsg string) map[string]inter
 		"rig":   rig,
 		"error": errMsg,
 	}
+}
+
+// ReapPayload creates a payload for completed polecat reap events.
+// rig: the rig the polecat belongs to
+// polecat: polecat name
+// beadID: the bead that was completed (empty if no bead)
+// sessionKilled: whether the tmux session was killed
+// worktreeRemoved: whether the worktree directory was removed
+func ReapPayload(rig, polecat, beadID string, sessionKilled, worktreeRemoved bool) map[string]interface{} {
+	p := map[string]interface{}{
+		"rig":              rig,
+		"polecat":          polecat,
+		"session_killed":   sessionKilled,
+		"worktree_removed": worktreeRemoved,
+	}
+	if beadID != "" {
+		p["bead"] = beadID
+	}
+	return p
 }
