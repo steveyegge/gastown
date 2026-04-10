@@ -2560,6 +2560,87 @@ func TestSetupRedirect(t *testing.T) {
 			t.Errorf("redirect content = %q, want %q", string(content), want)
 		}
 	})
+
+	t.Run("nested rig layout with town-level beads", func(t *testing.T) {
+		// Setup: town/<subdir>/<rig>/polecats/<name> — rig is NOT a direct child of town root.
+		// This is the sandboxx-bridge layout: <bridge>/rigs/<rig>/polecats/<name>.
+		// The beads database is at town root (.beads/), not per-rig.
+		// ComputeRedirectTarget must produce a correct relative path even when
+		// the rig is nested 2+ levels below the town root.
+		townRoot := t.TempDir()
+		townBeads := filepath.Join(townRoot, ".beads")
+		rigRoot := filepath.Join(townRoot, "rigs", "gastown-prime")
+		polecatPath := filepath.Join(rigRoot, "polecats", "toast")
+
+		// Create town-level beads with config.yaml (Dolt server config marker)
+		if err := os.MkdirAll(townBeads, 0755); err != nil {
+			t.Fatalf("mkdir town beads: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(townBeads, "config.yaml"), []byte("prefix: hq"), 0644); err != nil {
+			t.Fatalf("write config.yaml: %v", err)
+		}
+		if err := os.MkdirAll(polecatPath, 0755); err != nil {
+			t.Fatalf("mkdir polecat: %v", err)
+		}
+
+		if err := SetupRedirect(townRoot, polecatPath); err != nil {
+			t.Fatalf("SetupRedirect failed: %v", err)
+		}
+
+		redirectPath := filepath.Join(polecatPath, ".beads", "redirect")
+		content, err := os.ReadFile(redirectPath)
+		if err != nil {
+			t.Fatalf("read redirect: %v", err)
+		}
+
+		// 4 levels up from polecatPath to townRoot: polecats/toast -> gastown-prime -> rigs -> townRoot
+		want := "../../../../.beads\n"
+		if string(content) != want {
+			t.Errorf("redirect content = %q, want %q", string(content), want)
+		}
+
+		// Verify redirect resolves to town-level beads
+		resolved := ResolveBeadsDir(polecatPath)
+		if resolved != townBeads {
+			t.Errorf("resolved = %q, want %q (town-level)", resolved, townBeads)
+		}
+	})
+
+	t.Run("nested rig layout crew with town-level beads", func(t *testing.T) {
+		// Same as above but for crew workers instead of polecats.
+		townRoot := t.TempDir()
+		townBeads := filepath.Join(townRoot, ".beads")
+		rigRoot := filepath.Join(townRoot, "rigs", "gastown-prime")
+		crewPath := filepath.Join(rigRoot, "crew", "max")
+
+		if err := os.MkdirAll(filepath.Join(townBeads, "dolt"), 0755); err != nil {
+			t.Fatalf("mkdir town beads: %v", err)
+		}
+		if err := os.MkdirAll(crewPath, 0755); err != nil {
+			t.Fatalf("mkdir crew: %v", err)
+		}
+
+		if err := SetupRedirect(townRoot, crewPath); err != nil {
+			t.Fatalf("SetupRedirect failed: %v", err)
+		}
+
+		redirectPath := filepath.Join(crewPath, ".beads", "redirect")
+		content, err := os.ReadFile(redirectPath)
+		if err != nil {
+			t.Fatalf("read redirect: %v", err)
+		}
+
+		// 4 levels up: crew/max -> gastown-prime -> rigs -> townRoot
+		want := "../../../../.beads\n"
+		if string(content) != want {
+			t.Errorf("redirect content = %q, want %q", string(content), want)
+		}
+
+		resolved := ResolveBeadsDir(crewPath)
+		if resolved != townBeads {
+			t.Errorf("resolved = %q, want %q (town-level)", resolved, townBeads)
+		}
+	})
 }
 
 // TestResetAgentBeadForReuse_NukeRespawnCycle tests the preferred nuke→respawn
