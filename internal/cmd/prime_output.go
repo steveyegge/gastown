@@ -62,12 +62,16 @@ func outputPrimeContext(ctx RoleContext) (string, error) {
 	// Get town name for session names
 	townName, _ := workspace.GetTownName(ctx.TownRoot)
 
-	// Get default branch from rig config (default to "main" if not set)
+	// Get default branch: rig config.json → rigs.json registry → "main"
 	defaultBranch := "main"
 	if ctx.Rig != "" && ctx.TownRoot != "" {
 		rigPath := filepath.Join(ctx.TownRoot, ctx.Rig)
 		if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
 			defaultBranch = rigCfg.DefaultBranch
+		} else if rigsConfig, err := config.LoadRigsConfig(filepath.Join(ctx.TownRoot, "mayor", "rigs.json")); err == nil {
+			if entry, ok := rigsConfig.Rigs[ctx.Rig]; ok && entry.DefaultBranch != "" {
+				defaultBranch = entry.DefaultBranch
+			}
 		}
 	}
 

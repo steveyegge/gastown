@@ -41,6 +41,10 @@ type Rig struct {
 
 	// HasMayor indicates if the rig has a mayor clone.
 	HasMayor bool `json:"has_mayor"`
+
+	// RegistryDefaultBranch is the default_branch from rigs.json (registry level).
+	// Used as fallback when per-rig config.json doesn't specify default_branch.
+	RegistryDefaultBranch string `json:"registry_default_branch,omitempty"`
 }
 
 // AgentDirs are the standard agent directories in a rig.
@@ -88,11 +92,14 @@ func (r *Rig) BeadsPath() string {
 }
 
 // DefaultBranch returns the configured default branch for this rig.
-// Falls back to "main" if not configured or if config cannot be loaded.
+// Checks in order: rig-level config.json, registry-level rigs.json, then "main".
 func (r *Rig) DefaultBranch() string {
 	cfg, err := LoadRigConfig(r.Path)
-	if err != nil || cfg.DefaultBranch == "" {
-		return "main"
+	if err == nil && cfg.DefaultBranch != "" {
+		return cfg.DefaultBranch
 	}
-	return cfg.DefaultBranch
+	if r.RegistryDefaultBranch != "" {
+		return r.RegistryDefaultBranch
+	}
+	return "main"
 }

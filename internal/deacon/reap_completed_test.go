@@ -317,9 +317,10 @@ func TestScanCompletedPolecats_DryRunDoesNotKill(t *testing.T) {
 }
 
 func TestRemovePolecatWorktree_NonexistentPath(t *testing.T) {
-	// removePolecatWorktree should handle nonexistent paths gracefully
+	// removePolecatWorktree should handle nonexistent paths gracefully.
+	// git worktree remove fails silently, os.RemoveAll is no-op for missing paths.
 	err := removePolecatWorktree("/nonexistent/worktree", "/nonexistent/polecat")
-	if err == nil {
-		t.Error("expected error for nonexistent worktree path")
+	if err != nil {
+		t.Errorf("expected no error for nonexistent path (graceful cleanup), got: %v", err)
 	}
 }

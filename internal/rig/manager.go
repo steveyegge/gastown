@@ -188,12 +188,13 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 	}
 
 	rig := &Rig{
-		Name:      name,
-		Path:      rigPath,
-		GitURL:    entry.GitURL,
-		PushURL:   strings.TrimSpace(entry.PushURL),
-		LocalRepo: entry.LocalRepo,
-		Config:    entry.BeadsConfig,
+		Name:                  name,
+		Path:                  rigPath,
+		GitURL:                entry.GitURL,
+		PushURL:               strings.TrimSpace(entry.PushURL),
+		LocalRepo:             entry.LocalRepo,
+		Config:                entry.BeadsConfig,
+		RegistryDefaultBranch: entry.DefaultBranch,
 	}
 
 	// Scan for polecats

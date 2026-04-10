@@ -630,7 +630,7 @@ func checkSlungWork(ctx RoleContext, hookedBead *beads.Issue) bool {
 	hasWorkflow := hasWorkflowAttachment(attachment)
 
 	outputAutonomousDirective(ctx, hookedBead, hasWorkflow)
-	outputHookedBeadDetails(hookedBead)
+	outputHookedBeadDetails(hookedBead, hasWorkflow)
 
 	if hasWorkflow {
 		outputMoleculeWorkflow(ctx, attachment)
@@ -844,21 +844,32 @@ func outputAutonomousDirective(ctx RoleContext, hookedBead *beads.Issue, hasMole
 	fmt.Println()
 }
 
-// outputHookedBeadDetails displays the hooked bead's ID, title, and description summary.
-func outputHookedBeadDetails(hookedBead *beads.Issue) {
+// outputHookedBeadDetails displays the hooked bead's ID, title, and description.
+// When hasFormula is true, the full description is shown (replaces bridge-lease
+// context injection). When false, the description is truncated to 5 lines.
+func outputHookedBeadDetails(hookedBead *beads.Issue, hasFormula bool) {
 	fmt.Printf("%s\n\n", style.Bold.Render("## Hooked Work"))
 	fmt.Printf("  Bead ID: %s\n", style.Bold.Render(hookedBead.ID))
 	fmt.Printf("  Title: %s\n", hookedBead.Title)
 	if hookedBead.Description != "" {
-		lines := strings.Split(hookedBead.Description, "\n")
-		maxLines := 5
-		if len(lines) > maxLines {
-			lines = lines[:maxLines]
-			lines = append(lines, "...")
-		}
-		fmt.Println("  Description:")
-		for _, line := range lines {
-			fmt.Printf("    %s\n", line)
+		if hasFormula {
+			// Formula mode: show full description — this IS the work specification.
+			// Replaces the context that bridge-lease would otherwise inject.
+			fmt.Println("  Description:")
+			for _, line := range strings.Split(hookedBead.Description, "\n") {
+				fmt.Printf("    %s\n", line)
+			}
+		} else {
+			lines := strings.Split(hookedBead.Description, "\n")
+			maxLines := 5
+			if len(lines) > maxLines {
+				lines = lines[:maxLines]
+				lines = append(lines, "...")
+			}
+			fmt.Println("  Description:")
+			for _, line := range lines {
+				fmt.Printf("    %s\n", line)
+			}
 		}
 	}
 	fmt.Println()

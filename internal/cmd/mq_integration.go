@@ -83,16 +83,24 @@ func getIntegrationBranchField(description string) string {
 }
 
 // getRigGit returns a Git object for the rig's repository.
-// Prefers bare repo (.repo.git or repo.git) if it exists, falls back to mayor/rig.
+// Prefers bare repo (.repo.git or repo.git) if it exists, then mayor/rig,
+// then checks if the rig directory itself is a git repo (for rigs that ARE
+// the actual repo, e.g. gastown-prime).
 func getRigGit(rigPath string) (*git.Git, error) {
 	if bareRepoPath := rig.FindBareRepo(rigPath); bareRepoPath != "" {
 		return git.NewGitWithDir(bareRepoPath, ""), nil
 	}
 	mayorPath := filepath.Join(rigPath, "mayor", "rig")
-	if _, err := os.Stat(mayorPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("no repo base found (neither .repo.git/repo.git nor mayor/rig exists)")
+	if _, err := os.Stat(mayorPath); err == nil {
+		return git.NewGit(mayorPath), nil
 	}
-	return git.NewGit(mayorPath), nil
+	// Check if the rig directory itself is a git repo (no bare clone layout).
+	// This handles rigs like gastown-prime where the rig IS the actual repo.
+	gitDir := filepath.Join(rigPath, ".git")
+	if _, err := os.Stat(gitDir); err == nil {
+		return git.NewGit(rigPath), nil
+	}
+	return nil, fmt.Errorf("no repo base found (neither .repo.git/repo.git, mayor/rig, nor .git exists in %s)", rigPath)
 }
 
 // createLandWorktree creates a temporary worktree from .repo.git for land operations.

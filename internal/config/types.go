@@ -703,12 +703,13 @@ type RigsConfig struct {
 
 // RigEntry represents a single rig in the registry.
 type RigEntry struct {
-	GitURL      string       `json:"git_url"`
-	PushURL     string       `json:"push_url,omitempty"`
-	UpstreamURL string       `json:"upstream_url,omitempty"` // optional upstream URL (for fork workflows)
-	LocalRepo   string       `json:"local_repo,omitempty"`
-	AddedAt     time.Time    `json:"added_at"`
-	BeadsConfig *BeadsConfig `json:"beads,omitempty"`
+	GitURL        string       `json:"git_url"`
+	PushURL       string       `json:"push_url,omitempty"`
+	UpstreamURL   string       `json:"upstream_url,omitempty"` // optional upstream URL (for fork workflows)
+	LocalRepo     string       `json:"local_repo,omitempty"`
+	DefaultBranch string       `json:"default_branch,omitempty"` // main, develop, etc. — used by polecat spawn
+	AddedAt       time.Time    `json:"added_at"`
+	BeadsConfig   *BeadsConfig `json:"beads,omitempty"`
 }
 
 // BeadsConfig represents beads configuration for a rig.

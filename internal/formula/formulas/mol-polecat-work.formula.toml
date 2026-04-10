@@ -52,7 +52,7 @@ stale, the refinery falls through to normal gate execution.
 | Context filling | Use gt handoff to cycle to fresh session |
 | Unsure what to do | Mail Witness, don't guess |"""
 formula = "mol-polecat-work"
-version = 10
+version = 11
 
 [[steps]]
 id = "load-context"
@@ -117,7 +117,12 @@ gt mail send <rig>/witness -s "HELP: Unclear requirements" -m "Issue: {{issue}}
 Question: <what you need clarified>"
 ```
 
-**Exit criteria:** You understand the work and can begin implementation."""
+**Exit criteria:** You understand the work and can begin implementation.
+
+When this step is complete, output the marker:
+```
+STEP_COMPLETE load-context
+```"""
 
 [[steps]]
 id = "branch-setup"
@@ -188,7 +193,12 @@ If setup_command is set, run it to install dependencies:
 This ensures dependencies are installed before you start work.
 Empty setup_command means "not configured" — skip this step.
 
-**Exit criteria:** You're on a clean feature branch, rebased on latest {{base_branch}}, dependencies installed."""
+**Exit criteria:** You're on a clean feature branch, rebased on latest {{base_branch}}, dependencies installed.
+
+When this step is complete, output the marker:
+```
+STEP_COMPLETE branch-setup
+```"""
 
 [[steps]]
 id = "implement"
@@ -261,7 +271,12 @@ Tried: <what you've attempted>"
 **Exit criteria (HARD GATE):** Implementation complete AND code committed to git.
 - Code tasks: `git status` shows clean working tree, `git log origin/{{base_branch}}..HEAD` shows at least 1 commit
 - Report tasks: all findings persisted to bead via --notes or --design
-Do NOT proceed to the next step with uncommitted changes."""
+Do NOT proceed to the next step with uncommitted changes.
+
+When this step is complete, output the marker:
+```
+STEP_COMPLETE implement
+```"""
 
 [[steps]]
 id = "commit-changes"
@@ -314,7 +329,12 @@ bd show {{issue}}    # Check notes/design fields have your findings
 If findings are persisted, proceed to review. Report-only tasks with findings
 persisted can skip commit verification.
 
-**Exit criteria:** Working tree clean AND either (a) at least 1 commit ahead of origin/{{base_branch}}, or (b) report-only task with findings persisted to bead."""
+**Exit criteria:** Working tree clean AND either (a) at least 1 commit ahead of origin/{{base_branch}}, or (b) report-only task with findings persisted to bead.
+
+When this step is complete, output the marker:
+```
+STEP_COMPLETE commit-changes
+```"""
 
 [[steps]]
 id = "self-review"
@@ -361,7 +381,12 @@ git diff --stat origin/{{base_branch}}...HEAD
 If you accidentally modified unrelated files, remove those changes.
 
 **Exit criteria:** Changes are clean, reviewed (Grade B or better if using /review),
-and ready for build check."""
+and ready for build check.
+
+When this step is complete, output the marker:
+```
+STEP_COMPLETE self-review
+```"""
 
 [[steps]]
 id = "build-check"
@@ -416,7 +441,12 @@ If lint_command is set:
 {{lint_command}}
 ```
 
-**Exit criteria:** Code compiles. Obvious regressions caught. Ready to submit."""
+**Exit criteria:** Code compiles. Obvious regressions caught. Ready to submit.
+
+When this step is complete, output the marker:
+```
+STEP_COMPLETE build-check
+```"""
 
 [[steps]]
 id = "pre-verify"
@@ -476,7 +506,12 @@ that you ran the full gate suite on a rebased branch, enabling fast-path merge.
 project, you may skip this step and use `gt done` without --pre-verified.
 The refinery will run gates normally (slower but still correct).
 
-**Exit criteria:** Branch rebased onto latest origin/{{base_branch}}, all configured gates pass."""
+**Exit criteria:** Branch rebased onto latest origin/{{base_branch}}, all configured gates pass.
+
+When this step is complete, output the marker:
+```
+STEP_COMPLETE pre-verify
+```"""
 
 [[steps]]
 id = "submit-and-exit"
@@ -531,7 +566,12 @@ You should see output like:
 
 You are NOT involved in any of that. You're gone. Done means gone.
 
-**Exit criteria:** Work submitted, sandbox nuked, session exited."""
+**Exit criteria:** Work submitted, sandbox nuked, session exited.
+
+When this step is complete, output the marker:
+```
+STEP_COMPLETE submit-and-exit
+```"""
 
 [vars]
 [vars.issue]
