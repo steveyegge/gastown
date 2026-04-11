@@ -77,12 +77,17 @@ var schedulerResumeCmd = &cobra.Command{
 }
 
 var schedulerClearCmd = &cobra.Command{
-	Use:   "clear",
+	Use:   "clear [bead-id]",
 	Short: "Remove beads from the scheduler",
 	Long: `Remove beads from the scheduler by closing sling context beads.
 
-Without --bead, removes ALL beads from the scheduler.
-With --bead, removes only the specified bead.`,
+Without a bead ID, removes ALL beads from the scheduler.
+With a bead ID (positional or --bead), removes only that bead.
+
+  gt scheduler clear              # Remove all beads
+  gt scheduler clear be-abc123    # Remove one bead (positional)
+  gt scheduler clear --bead be-abc123  # Remove one bead (flag)`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runSchedulerClear,
 }
 
@@ -344,7 +349,14 @@ func runSchedulerClear(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if schedulerClearBead != "" {
+	// Resolve target bead: positional arg takes precedence over --bead flag.
+	// This matches the UX of `gt scheduler promote/demote` (positional args).
+	targetBead := schedulerClearBead
+	if len(args) > 0 {
+		targetBead = args[0]
+	}
+
+	if targetBead != "" {
 		// Close ALL sling contexts for this specific work bead (there may be
 		// duplicates if concurrent scheduleBead calls raced past idempotency).
 		// Scan all rig dirs since contexts live in target rig beads. (GH#3468)
@@ -356,7 +368,7 @@ func runSchedulerClear(cmd *cobra.Command, args []string) error {
 		closed := 0
 		for _, ctx := range contexts {
 			fields := beads.ParseSlingContextFields(ctx.Description)
-			if fields != nil && fields.WorkBeadID == schedulerClearBead {
+			if fields != nil && fields.WorkBeadID == targetBead {
 				b := beadsForContext(townRoot, fields)
 				if err := b.CloseSlingContext(ctx.ID, "cleared"); err != nil {
 					fmt.Printf("  %s Could not close context %s: %v\n", style.Dim.Render("Warning:"), ctx.ID, err)
@@ -367,10 +379,10 @@ func runSchedulerClear(cmd *cobra.Command, args []string) error {
 		}
 
 		if closed == 0 {
-			fmt.Printf("%s No sling context found for %s\n", style.Dim.Render("○"), schedulerClearBead)
+			fmt.Printf("%s No sling context found for %s\n", style.Dim.Render("○"), targetBead)
 		} else {
 			fmt.Printf("%s Removed %s from scheduler (closed %d context(s))\n",
-				style.Bold.Render("✓"), schedulerClearBead, closed)
+				style.Bold.Render("✓"), targetBead, closed)
 		}
 		return nil
 	}
@@ -433,7 +445,7 @@ func runSchedulerRunBead(townRoot, beadID string, dryRun bool) error {
 	}
 
 	if fields.DispatchFailures >= maxDispatchFailures {
-		return fmt.Errorf("bead %s is circuit-broken (%d failures) — use 'gt scheduler clear --bead %s' to reset",
+		return fmt.Errorf("bead %s is circuit-broken (%d failures) — use 'gt scheduler clear %s' to reset",
 			beadID, fields.DispatchFailures, beadID)
 	}
 

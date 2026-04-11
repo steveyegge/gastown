@@ -182,6 +182,95 @@ func TestSchedulerReorderInvalidField(t *testing.T) {
 	}
 }
 
+// TestSchedulerClearPositionalArg verifies that `gt scheduler clear <bead-id>` (positional)
+// removes only the specified bead from the scheduler, not the entire queue.
+// This is a regression test for the desire-path bug where users typed the bead ID as
+// a positional arg (matching `gt scheduler promote/demote` UX), cobra silently ignored
+// it, and the entire queue was cleared.
+func TestSchedulerClearPositionalArg(t *testing.T) {
+	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
+
+	bead1 := createTestBead(t, rigPath, "First bead")
+	bead2 := createTestBead(t, rigPath, "Second bead")
+
+	createSlingContext(t, hqPath, &capacity.SlingContextFields{
+		Version:    1,
+		WorkBeadID: bead1,
+		TargetRig:  "testrig",
+		EnqueuedAt: "2025-01-01T00:00:00Z",
+	})
+	createSlingContext(t, hqPath, &capacity.SlingContextFields{
+		Version:    1,
+		WorkBeadID: bead2,
+		TargetRig:  "testrig",
+		EnqueuedAt: "2025-01-02T00:00:00Z",
+	})
+
+	// Clear only bead1 using positional arg (not --bead flag)
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "scheduler", "clear", bead1)
+	if !strings.Contains(out, bead1) {
+		t.Errorf("clear output should mention %s, got: %s", bead1, out)
+	}
+
+	// bead2 sling context should still be open
+	fields2 := findSlingContext(t, hqPath, bead2)
+	if fields2 == nil {
+		t.Error("bead2 sling context was closed — positional-arg clear nuked entire queue")
+	}
+
+	// bead1 sling context should be gone
+	fields1 := findSlingContext(t, hqPath, bead1)
+	if fields1 != nil {
+		t.Error("bead1 sling context still open after clear")
+	}
+}
+
+// TestSchedulerClearFlagStillWorks verifies the --bead flag form still works.
+func TestSchedulerClearFlagStillWorks(t *testing.T) {
+	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
+
+	bead1 := createTestBead(t, rigPath, "Flag bead")
+	bead2 := createTestBead(t, rigPath, "Survivor bead")
+
+	createSlingContext(t, hqPath, &capacity.SlingContextFields{
+		Version:    1,
+		WorkBeadID: bead1,
+		TargetRig:  "testrig",
+		EnqueuedAt: "2025-01-01T00:00:00Z",
+	})
+	createSlingContext(t, hqPath, &capacity.SlingContextFields{
+		Version:    1,
+		WorkBeadID: bead2,
+		TargetRig:  "testrig",
+		EnqueuedAt: "2025-01-02T00:00:00Z",
+	})
+
+	// Clear only bead1 using --bead flag
+	runGTCmdOutput(t, gtBinary, hqPath, env, "scheduler", "clear", "--bead", bead1)
+
+	// bead2 should still be scheduled
+	fields2 := findSlingContext(t, hqPath, bead2)
+	if fields2 == nil {
+		t.Error("bead2 sling context was closed — --bead clear nuked entire queue")
+	}
+
+	// bead1 should be cleared
+	fields1 := findSlingContext(t, hqPath, bead1)
+	if fields1 != nil {
+		t.Error("bead1 sling context still open after --bead clear")
+	}
+}
+
+// TestSchedulerClearNotFound verifies the error message when clearing a bead not in scheduler.
+func TestSchedulerClearNotFound(t *testing.T) {
+	hqPath, _, gtBinary, env := setupSchedulerIntegrationTown(t)
+
+	out := runGTCmdOutput(t, gtBinary, hqPath, env, "scheduler", "clear", "nonexistent-bead")
+	if !strings.Contains(out, "No sling context found") {
+		t.Errorf("expected 'No sling context found' in output, got: %s", out)
+	}
+}
+
 // bdUpdate updates a bead's priority using bd update.
 func bdUpdate(t *testing.T, dir, beadID, priority string) {
 	t.Helper()
