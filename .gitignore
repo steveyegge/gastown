@@ -88,3 +88,7 @@ __pycache__/
 
 # Beads / Dolt files (added by bd init)
 .beads-credential-key
+
+# Gas Town (added by gt)
+.runtime/
+CLAUDE.local.md
