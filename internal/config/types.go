@@ -842,19 +842,20 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 
 	// OpenCode requires --prompt flag for initial prompt in interactive mode.
 	// Positional argument causes opencode to exit immediately.
-	if resolved.Command == "opencode" {
+	// Match both "opencode" and full paths like "/home/user/.opencode/bin/opencode".
+	if resolved.Command == "opencode" || filepath.Base(resolved.Command) == "opencode" {
 		return base + " --prompt " + quoteForShell(p)
 	}
 
-	// Copilot  requires -i flag for initial prompt in interactive mode.
-	if resolved.Command == "copilot" {
+	// Copilot requires -i flag for initial prompt in interactive mode.
+	if resolved.Command == "copilot" || filepath.Base(resolved.Command) == "copilot" {
 		return base + " -i " + quoteForShell(p)
 	}
 
 	// Gemini requires -i (--prompt-interactive) to auto-execute the prompt
 	// while staying in interactive mode. Positional args populate the input
 	// field but don't execute, and -p runs headless (exits after completion).
-	if resolved.Command == "gemini" {
+	if resolved.Command == "gemini" || filepath.Base(resolved.Command) == "gemini" {
 		return base + " -i " + quoteForShell(p)
 	}
 
