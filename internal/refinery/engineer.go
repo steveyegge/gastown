@@ -172,12 +172,16 @@ type MergeQueueConfig struct {
 	AutoPush bool `json:"auto_push"`
 
 	// MergeStrategy controls how the refinery lands work: "direct" (default)
-	// does local squash merge + git push; "pr" uses gh pr merge via GitHub API
-	// which respects branch protection rules.
+	// does local squash merge + git push; "pr" uses the VCS provider's merge API
+	// which respects branch protection/restriction rules.
 	MergeStrategy string `json:"merge_strategy,omitempty"`
 
+	// VCSProvider selects the VCS platform for PR operations when
+	// MergeStrategy="pr". Valid values: "github" (default), "bitbucket".
+	VCSProvider string `json:"vcs_provider,omitempty"`
+
 	// RequireReview controls whether the refinery requires at least one approving
-	// GitHub review before merging a PR. Only meaningful when MergeStrategy="pr".
+	// review before merging a PR. Only meaningful when MergeStrategy="pr".
 	// Nil defaults to false (no review required).
 	RequireReview *bool `json:"require_review,omitempty"`
 
@@ -266,6 +270,7 @@ type Engineer struct {
 	beads                 *beads.Beads
 	git                   *git.Git
 	config                *MergeQueueConfig
+	prProvider            PRProvider   // VCS-specific PR operations (nil when MergeStrategy != "pr")
 	workDir               string
 	output                io.Writer    // Output destination for user-facing messages
 	router                *mail.Router // Mail router for sending protocol messages
@@ -358,6 +363,7 @@ func (e *Engineer) LoadConfig() error {
 		GatesParallel        *bool                      `json:"gates_parallel"`
 		AutoPush             *bool                      `json:"auto_push"`
 		MergeStrategy        *string                    `json:"merge_strategy"`
+		VCSProvider          *string                    `json:"vcs_provider"`
 		RequireReview        *bool                      `json:"require_review"`
 	}
 
@@ -440,10 +446,38 @@ func (e *Engineer) LoadConfig() error {
 	if mqRaw.MergeStrategy != nil {
 		e.config.MergeStrategy = *mqRaw.MergeStrategy
 	}
+	if mqRaw.VCSProvider != nil {
+		e.config.VCSProvider = *mqRaw.VCSProvider
+	}
 	if mqRaw.RequireReview != nil {
 		e.config.RequireReview = mqRaw.RequireReview
 	}
 
+	// Initialize the PR provider when merge_strategy=pr.
+	if e.config.MergeStrategy == "pr" {
+		if err := e.initPRProvider(); err != nil {
+			return fmt.Errorf("initializing PR provider: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// initPRProvider creates the appropriate PRProvider based on vcs_provider config.
+// Defaults to GitHub when vcs_provider is empty or "github".
+func (e *Engineer) initPRProvider() error {
+	switch e.config.VCSProvider {
+	case "", "github":
+		e.prProvider = newGitHubPRProvider(e.git)
+	case "bitbucket":
+		p, err := newBitbucketPRProvider(e.git)
+		if err != nil {
+			return err
+		}
+		e.prProvider = p
+	default:
+		return fmt.Errorf("unknown vcs_provider %q (supported: github, bitbucket)", e.config.VCSProvider)
+	}
 	return nil
 }
 
@@ -595,15 +629,12 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		_, _ = fmt.Fprintln(e.output, "[Engineer] Tests passed")
 	}
 
-	// PR merge path: when merge_strategy is "pr" or "bitbucket", use the
-	// platform's merge API instead of local squash merge + direct push.
-	// This respects branch protection/restriction rules and preserves
-	// the PR audit trail.
-	switch e.config.MergeStrategy {
-	case "pr":
+	// PR merge path: when merge_strategy=pr, use the VCS provider's merge API
+	// instead of local squash merge + direct push. This respects branch
+	// protection/restriction rules and preserves the PR audit trail.
+	// The VCS provider (GitHub, Bitbucket) is selected via vcs_provider config.
+	if e.config.MergeStrategy == "pr" {
 		return e.doMergePR(ctx, branch, target)
-	case "bitbucket":
-		return e.doMergeBitbucket(ctx, branch, target)
 	}
 
 	// Step 5: Perform the actual merge using squash merge
@@ -719,17 +750,29 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 	}
 }
 
-// doMergePR handles merging via GitHub's PR merge API (merge_strategy=pr).
-// This respects branch protection rules including required reviews.
+// doMergePR handles merging via the VCS provider's PR merge API (merge_strategy=pr).
+// This respects branch protection/restriction rules including required reviews.
+// The VCS provider (GitHub, Bitbucket) is selected via vcs_provider config.
 // Called from doMerge after quality gates have passed.
 //
 //nolint:unparam // ctx is reserved for future use when git methods accept context
 func (e *Engineer) doMergePR(ctx context.Context, branch, target string) ProcessResult {
 	_ = ctx
-	_, _ = fmt.Fprintln(e.output, "[Engineer] Using PR merge strategy (merge_strategy=pr)")
+	provider := e.config.VCSProvider
+	if provider == "" {
+		provider = "github"
+	}
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Using PR merge strategy (vcs_provider=%s)\n", provider)
 
-	// Step PR.1: Find the GitHub PR for this branch
-	prNumber, err := e.git.FindPRNumber(branch)
+	if e.prProvider == nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("no PR provider configured for vcs_provider=%s", provider),
+		}
+	}
+
+	// Step PR.1: Find the PR for this branch
+	prNumber, err := e.prProvider.FindPRNumber(branch)
 	if err != nil {
 		return ProcessResult{
 			Success: false,
@@ -747,7 +790,7 @@ func (e *Engineer) doMergePR(ctx context.Context, branch, target string) Process
 	// Step PR.2: Check approval status if require_review is enabled
 	requireReview := e.config.RequireReview != nil && *e.config.RequireReview
 	if requireReview {
-		approved, err := e.git.IsPRApproved(prNumber)
+		approved, err := e.prProvider.IsPRApproved(prNumber)
 		if err != nil {
 			return ProcessResult{
 				Success: false,
@@ -765,27 +808,23 @@ func (e *Engineer) doMergePR(ctx context.Context, branch, target string) Process
 		_, _ = fmt.Fprintf(e.output, "[Engineer] PR #%d has approving review\n", prNumber)
 	}
 
-	// Step PR.3: Merge via GitHub API using squash merge
-	// gh pr merge respects branch protection rules — if protection requires
-	// reviews and the PR doesn't have them, the merge will fail.
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Merging PR #%d via gh pr merge --squash...\n", prNumber)
-	mergeCommit, err := e.git.GhPrMerge(prNumber, "squash")
+	// Step PR.3: Merge via VCS provider API using squash merge
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Merging PR #%d via %s API (squash)...\n", prNumber, provider)
+	mergeCommit, err := e.prProvider.MergePR(prNumber, "squash")
 	if err != nil {
 		return ProcessResult{
 			Success: false,
-			Error:   fmt.Sprintf("gh pr merge failed for PR #%d: %v", prNumber, err),
+			Error:   fmt.Sprintf("PR merge failed for PR #%d: %v", prNumber, err),
 		}
 	}
 
-	// Step PR.4: Sync local target branch after GitHub merge
-	// Reset local target to match origin so subsequent operations see the merged state.
+	// Step PR.4: Sync local target branch after remote merge
 	if err := e.git.Checkout(target); err != nil {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to checkout %s after PR merge: %v\n", target, err)
 	} else if err := e.git.Pull("origin", target); err != nil {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to pull %s after PR merge: %v\n", target, err)
 	}
 
-	// Get the actual merge commit SHA if GhPrMerge couldn't determine it
 	if mergeCommit == "" {
 		if sha, err := e.git.Rev("HEAD"); err == nil {
 			mergeCommit = sha
@@ -799,116 +838,6 @@ func (e *Engineer) doMergePR(ctx context.Context, branch, target string) Process
 	}
 }
 
-// doMergeBitbucket handles merging via Bitbucket Cloud's PR merge API (merge_strategy=bitbucket).
-// This respects branch restriction rules including required approvals.
-// Called from doMerge after quality gates have passed.
-func (e *Engineer) doMergeBitbucket(ctx context.Context, branch, target string) ProcessResult {
-	_, _ = fmt.Fprintln(e.output, "[Engineer] Using Bitbucket merge strategy (merge_strategy=bitbucket)")
-
-	// Step BB.1: Determine workspace and repo slug from git remote URL
-	remoteURL, err := e.git.RemoteURL("origin")
-	if err != nil {
-		return ProcessResult{
-			Success: false,
-			Error:   fmt.Sprintf("failed to get origin remote URL: %v", err),
-		}
-	}
-	workspace, repoSlug, err := parseBitbucketRemote(remoteURL)
-	if err != nil {
-		return ProcessResult{
-			Success: false,
-			Error:   fmt.Sprintf("failed to parse Bitbucket remote: %v", err),
-		}
-	}
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Bitbucket repo: %s/%s\n", workspace, repoSlug)
-
-	// Step BB.2: Find the Bitbucket PR for this branch
-	prID, err := e.git.FindBitbucketPRNumber(workspace, repoSlug, branch)
-	if err != nil {
-		return ProcessResult{
-			Success: false,
-			Error:   fmt.Sprintf("failed to find Bitbucket PR for branch %s: %v", branch, err),
-		}
-	}
-	if prID == 0 {
-		return ProcessResult{
-			Success: false,
-			Error:   fmt.Sprintf("no open PR found for branch %s — merge_strategy=bitbucket requires a PR", branch),
-		}
-	}
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Found Bitbucket PR #%d for branch %s\n", prID, branch)
-
-	// Step BB.3: Check approval status if require_review is enabled
-	requireReview := e.config.RequireReview != nil && *e.config.RequireReview
-	if requireReview {
-		approved, err := e.git.IsBitbucketPRApproved(workspace, repoSlug, prID)
-		if err != nil {
-			return ProcessResult{
-				Success: false,
-				Error:   fmt.Sprintf("failed to check Bitbucket PR #%d approval status: %v", prID, err),
-			}
-		}
-		if !approved {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Bitbucket PR #%d awaiting approval — deferring merge\n", prID)
-			return ProcessResult{
-				Success:       false,
-				NeedsApproval: true,
-				Error:         fmt.Sprintf("Bitbucket PR #%d requires approving review before merge", prID),
-			}
-		}
-		_, _ = fmt.Fprintf(e.output, "[Engineer] Bitbucket PR #%d has approving review\n", prID)
-	}
-
-	// Step BB.4: Merge via Bitbucket API using squash merge
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Merging Bitbucket PR #%d via API (squash)...\n", prID)
-	mergeCommit, err := e.git.BitbucketPRMerge(workspace, repoSlug, prID, "squash")
-	if err != nil {
-		return ProcessResult{
-			Success: false,
-			Error:   fmt.Sprintf("Bitbucket merge failed for PR #%d: %v", prID, err),
-		}
-	}
-
-	// Step BB.5: Sync local target branch after Bitbucket merge
-	if err := e.git.Checkout(target); err != nil {
-		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to checkout %s after Bitbucket merge: %v\n", target, err)
-	} else if err := e.git.Pull("origin", target); err != nil {
-		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to pull %s after Bitbucket merge: %v\n", target, err)
-	}
-
-	if mergeCommit == "" {
-		if sha, err := e.git.Rev("HEAD"); err == nil {
-			mergeCommit = sha
-		}
-	}
-
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Successfully merged Bitbucket PR #%d: %s\n", prID, shortSHA(mergeCommit))
-	return ProcessResult{
-		Success:     true,
-		MergeCommit: mergeCommit,
-	}
-}
-
-// parseBitbucketRemote extracts workspace and repo_slug from a Bitbucket git remote URL.
-func parseBitbucketRemote(remoteURL string) (workspace, repoSlug string, err error) {
-	remoteURL = strings.TrimSpace(remoteURL)
-	var path string
-	switch {
-	case strings.HasPrefix(remoteURL, "https://bitbucket.org/"):
-		path = strings.TrimPrefix(remoteURL, "https://bitbucket.org/")
-	case strings.HasPrefix(remoteURL, "git@bitbucket.org:"):
-		path = strings.TrimPrefix(remoteURL, "git@bitbucket.org:")
-	default:
-		return "", "", fmt.Errorf("not a Bitbucket URL: %s", remoteURL)
-	}
-	path = strings.TrimSuffix(path, ".git")
-	path = strings.TrimSuffix(path, "/")
-	parts := strings.SplitN(path, "/", 3)
-	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("cannot parse workspace/repo from: %s", remoteURL)
-	}
-	return parts[0], parts[1], nil
-}
 
 func (e *Engineer) acquireMainPushSlot(ctx context.Context) (string, error) {
 	slotID, err := e.mergeSlotEnsureExists()
