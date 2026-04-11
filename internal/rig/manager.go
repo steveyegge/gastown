@@ -77,6 +77,15 @@ func convertToSSH(httpsURL string) string {
 		return "git@gitlab.com:" + path
 	}
 
+	// Handle Bitbucket: https://bitbucket.org/workspace/repo.git -> git@bitbucket.org:workspace/repo.git
+	if strings.HasPrefix(httpsURL, "https://bitbucket.org/") {
+		path := strings.TrimPrefix(httpsURL, "https://bitbucket.org/")
+		if !strings.HasSuffix(path, ".git") {
+			path += ".git"
+		}
+		return "git@bitbucket.org:" + path
+	}
+
 	return ""
 }
 

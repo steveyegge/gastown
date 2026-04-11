@@ -595,11 +595,15 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		_, _ = fmt.Fprintln(e.output, "[Engineer] Tests passed")
 	}
 
-	// PR merge path: when merge_strategy=pr, use GitHub's merge API instead of
-	// local squash merge + direct push. This respects branch protection rules
-	// and preserves the PR audit trail.
-	if e.config.MergeStrategy == "pr" {
+	// PR merge path: when merge_strategy is "pr" or "bitbucket", use the
+	// platform's merge API instead of local squash merge + direct push.
+	// This respects branch protection/restriction rules and preserves
+	// the PR audit trail.
+	switch e.config.MergeStrategy {
+	case "pr":
 		return e.doMergePR(ctx, branch, target)
+	case "bitbucket":
+		return e.doMergeBitbucket(ctx, branch, target)
 	}
 
 	// Step 5: Perform the actual merge using squash merge
@@ -793,6 +797,117 @@ func (e *Engineer) doMergePR(ctx context.Context, branch, target string) Process
 		Success:     true,
 		MergeCommit: mergeCommit,
 	}
+}
+
+// doMergeBitbucket handles merging via Bitbucket Cloud's PR merge API (merge_strategy=bitbucket).
+// This respects branch restriction rules including required approvals.
+// Called from doMerge after quality gates have passed.
+func (e *Engineer) doMergeBitbucket(ctx context.Context, branch, target string) ProcessResult {
+	_, _ = fmt.Fprintln(e.output, "[Engineer] Using Bitbucket merge strategy (merge_strategy=bitbucket)")
+
+	// Step BB.1: Determine workspace and repo slug from git remote URL
+	remoteURL, err := e.git.RemoteURL("origin")
+	if err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to get origin remote URL: %v", err),
+		}
+	}
+	workspace, repoSlug, err := parseBitbucketRemote(remoteURL)
+	if err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to parse Bitbucket remote: %v", err),
+		}
+	}
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Bitbucket repo: %s/%s\n", workspace, repoSlug)
+
+	// Step BB.2: Find the Bitbucket PR for this branch
+	prID, err := e.git.FindBitbucketPRNumber(workspace, repoSlug, branch)
+	if err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to find Bitbucket PR for branch %s: %v", branch, err),
+		}
+	}
+	if prID == 0 {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("no open PR found for branch %s — merge_strategy=bitbucket requires a PR", branch),
+		}
+	}
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Found Bitbucket PR #%d for branch %s\n", prID, branch)
+
+	// Step BB.3: Check approval status if require_review is enabled
+	requireReview := e.config.RequireReview != nil && *e.config.RequireReview
+	if requireReview {
+		approved, err := e.git.IsBitbucketPRApproved(workspace, repoSlug, prID)
+		if err != nil {
+			return ProcessResult{
+				Success: false,
+				Error:   fmt.Sprintf("failed to check Bitbucket PR #%d approval status: %v", prID, err),
+			}
+		}
+		if !approved {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Bitbucket PR #%d awaiting approval — deferring merge\n", prID)
+			return ProcessResult{
+				Success:       false,
+				NeedsApproval: true,
+				Error:         fmt.Sprintf("Bitbucket PR #%d requires approving review before merge", prID),
+			}
+		}
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Bitbucket PR #%d has approving review\n", prID)
+	}
+
+	// Step BB.4: Merge via Bitbucket API using squash merge
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Merging Bitbucket PR #%d via API (squash)...\n", prID)
+	mergeCommit, err := e.git.BitbucketPRMerge(workspace, repoSlug, prID, "squash")
+	if err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("Bitbucket merge failed for PR #%d: %v", prID, err),
+		}
+	}
+
+	// Step BB.5: Sync local target branch after Bitbucket merge
+	if err := e.git.Checkout(target); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to checkout %s after Bitbucket merge: %v\n", target, err)
+	} else if err := e.git.Pull("origin", target); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to pull %s after Bitbucket merge: %v\n", target, err)
+	}
+
+	if mergeCommit == "" {
+		if sha, err := e.git.Rev("HEAD"); err == nil {
+			mergeCommit = sha
+		}
+	}
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Successfully merged Bitbucket PR #%d: %s\n", prID, shortSHA(mergeCommit))
+	return ProcessResult{
+		Success:     true,
+		MergeCommit: mergeCommit,
+	}
+}
+
+// parseBitbucketRemote extracts workspace and repo_slug from a Bitbucket git remote URL.
+func parseBitbucketRemote(remoteURL string) (workspace, repoSlug string, err error) {
+	remoteURL = strings.TrimSpace(remoteURL)
+	var path string
+	switch {
+	case strings.HasPrefix(remoteURL, "https://bitbucket.org/"):
+		path = strings.TrimPrefix(remoteURL, "https://bitbucket.org/")
+	case strings.HasPrefix(remoteURL, "git@bitbucket.org:"):
+		path = strings.TrimPrefix(remoteURL, "git@bitbucket.org:")
+	default:
+		return "", "", fmt.Errorf("not a Bitbucket URL: %s", remoteURL)
+	}
+	path = strings.TrimSuffix(path, ".git")
+	path = strings.TrimSuffix(path, "/")
+	parts := strings.SplitN(path, "/", 3)
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("cannot parse workspace/repo from: %s", remoteURL)
+	}
+	return parts[0], parts[1], nil
 }
 
 func (e *Engineer) acquireMainPushSlot(ctx context.Context) (string, error) {

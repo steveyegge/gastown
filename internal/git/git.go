@@ -1025,6 +1025,115 @@ func (g *Git) GhPrMerge(prNumber int, method string) (string, error) {
 	return sha, nil
 }
 
+// FindBitbucketPRNumber returns the Bitbucket PR ID for the given branch, or 0 if none exists.
+// It queries the Bitbucket REST API for open PRs with the branch as source.
+func (g *Git) FindBitbucketPRNumber(workspace, repoSlug, branch string) (int, error) {
+	// Use curl since there is no official Bitbucket CLI equivalent to gh.
+	// The BITBUCKET_TOKEN env var provides authentication.
+	token := os.Getenv("BITBUCKET_TOKEN")
+	if token == "" {
+		return 0, fmt.Errorf("BITBUCKET_TOKEN is required for Bitbucket PR operations")
+	}
+	url := fmt.Sprintf("https://api.bitbucket.org/2.0/repositories/%s/%s/pullrequests?q=source.branch.name%%3D%%22%s%%22+AND+state%%3D%%22OPEN%%22&pagelen=1",
+		workspace, repoSlug, branch)
+	cmd := exec.Command("curl", "-s", "-H", "Authorization: Bearer "+token, url)
+	cmd.Dir = g.workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("bitbucket API request failed: %w", err)
+	}
+	var resp struct {
+		Values []struct {
+			ID int `json:"id"`
+		} `json:"values"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(out), &resp); err != nil {
+		return 0, fmt.Errorf("failed to parse Bitbucket response: %w", err)
+	}
+	if len(resp.Values) == 0 {
+		return 0, nil
+	}
+	return resp.Values[0].ID, nil
+}
+
+// IsBitbucketPRApproved checks whether a Bitbucket PR has at least one approving reviewer.
+func (g *Git) IsBitbucketPRApproved(workspace, repoSlug string, prID int) (bool, error) {
+	token := os.Getenv("BITBUCKET_TOKEN")
+	if token == "" {
+		return false, fmt.Errorf("BITBUCKET_TOKEN is required for Bitbucket PR operations")
+	}
+	url := fmt.Sprintf("https://api.bitbucket.org/2.0/repositories/%s/%s/pullrequests/%d",
+		workspace, repoSlug, prID)
+	cmd := exec.Command("curl", "-s", "-H", "Authorization: Bearer "+token, url)
+	cmd.Dir = g.workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("bitbucket API request failed: %w", err)
+	}
+	var pr struct {
+		Participants []struct {
+			Role     string `json:"role"`
+			Approved bool   `json:"approved"`
+		} `json:"participants"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(out), &pr); err != nil {
+		return false, fmt.Errorf("failed to parse Bitbucket response: %w", err)
+	}
+	for _, p := range pr.Participants {
+		if p.Role == "REVIEWER" && p.Approved {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// BitbucketPRMerge merges a Bitbucket PR via the REST API.
+// The strategy parameter should be "merge_commit", "squash", or "fast_forward".
+// Returns the merge commit SHA on success (if available).
+func (g *Git) BitbucketPRMerge(workspace, repoSlug string, prID int, strategy string) (string, error) {
+	token := os.Getenv("BITBUCKET_TOKEN")
+	if token == "" {
+		return "", fmt.Errorf("BITBUCKET_TOKEN is required for Bitbucket PR operations")
+	}
+	url := fmt.Sprintf("https://api.bitbucket.org/2.0/repositories/%s/%s/pullrequests/%d/merge",
+		workspace, repoSlug, prID)
+	body := fmt.Sprintf(`{"merge_strategy":"%s","close_source_branch":true}`, strategy)
+	cmd := exec.Command("curl", "-s", "-X", "POST",
+		"-H", "Authorization: Bearer "+token,
+		"-H", "Content-Type: application/json",
+		"-d", body, url)
+	cmd.Dir = g.workDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("bitbucket merge failed: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	var resp struct {
+		MergeCommit struct {
+			Hash string `json:"hash"`
+		} `json:"merge_commit"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(out), &resp); err != nil {
+		// Merge may have succeeded but response parsing failed — pull to get SHA.
+		if _, pullErr := g.run("pull", "origin"); pullErr == nil {
+			if sha, revErr := g.Rev("HEAD"); revErr == nil {
+				return sha, nil
+			}
+		}
+		return "", nil
+	}
+
+	// Sync local state after remote merge.
+	if _, pullErr := g.run("pull", "origin"); pullErr != nil {
+		return resp.MergeCommit.Hash, nil
+	}
+	if resp.MergeCommit.Hash != "" {
+		return resp.MergeCommit.Hash, nil
+	}
+	sha, _ := g.Rev("HEAD")
+	return sha, nil
+}
+
 // ListRemoteRefs returns remote ref names matching a prefix using ls-remote.
 // The prefix filters refs (e.g., "refs/heads/polecat/" for all polecat branches).
 // Returns full ref names like "refs/heads/polecat/furiosa-abc123".

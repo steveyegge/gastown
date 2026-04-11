@@ -1277,11 +1277,12 @@ type MergeQueueConfig struct {
 	IntegrationBranchAutoLand *bool `json:"integration_branch_auto_land,omitempty"`
 
 	// MergeStrategy controls how the refinery lands approved work: "direct" (default)
-	// merges directly to the base branch, "pr" creates a GitHub pull request.
+	// merges directly to the base branch, "pr" creates a GitHub pull request,
+	// "bitbucket" creates a Bitbucket Cloud pull request.
 	MergeStrategy string `json:"merge_strategy,omitempty"`
 
 	// RequireReview controls whether the refinery requires at least one approving
-	// GitHub review before merging a PR. Only meaningful when merge_strategy="pr".
+	// review before merging a PR. Only meaningful when merge_strategy="pr" or "bitbucket".
 	// Nil defaults to false (no review required).
 	RequireReview *bool `json:"require_review,omitempty"`
 

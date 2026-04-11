@@ -900,8 +900,18 @@ func TestConvertToSSH(t *testing.T) {
 			wantSSH: "git@gitlab.com:owner/repo.git",
 		},
 		{
-			name:    "Unknown host returns empty",
+			name:    "Bitbucket with .git suffix",
 			https:   "https://bitbucket.org/owner/repo.git",
+			wantSSH: "git@bitbucket.org:owner/repo.git",
+		},
+		{
+			name:    "Bitbucket without .git suffix",
+			https:   "https://bitbucket.org/owner/repo",
+			wantSSH: "git@bitbucket.org:owner/repo.git",
+		},
+		{
+			name:    "Unknown host returns empty",
+			https:   "https://gitlab.example.com/owner/repo.git",
 			wantSSH: "",
 		},
 		{
