@@ -24,6 +24,7 @@ var (
 type tmuxOps interface {
 	HasSession(name string) (bool, error)
 	IsAgentAlive(session string) bool
+	IsIdle(session string) bool
 	KillSessionWithProcesses(name string) error
 	NewSessionWithCommand(name, workDir, command string) error
 	SetRemainOnExit(pane string, on bool) error
@@ -31,10 +32,12 @@ type tmuxOps interface {
 	GetPaneID(session string) (string, error)
 	ConfigureGasTownSession(session string, theme *tmux.Theme, rig, worker, role string) error
 	WaitForCommand(session string, excludeCommands []string, timeout time.Duration) error
+	WaitForRuntimeReady(session string, rc *config.RuntimeConfig, timeout time.Duration) error
 	SetAutoRespawnHook(session string) error
 	AcceptStartupDialogs(session string) error
 	AcceptWorkspaceTrustDialog(session string) error
 	AcceptBypassPermissionsWarning(session string) error
+	NudgeSession(sessionID, message string) error
 	SendKeysRaw(session, keys string) error
 	GetSessionInfo(name string) (*tmux.SessionInfo, error)
 }
@@ -101,6 +104,13 @@ func (m *Manager) Start(agentOverride string) error {
 
 	// Ensure runtime settings exist in deaconDir where session runs.
 	runtimeConfig := config.ResolveRoleAgentConfig("deacon", m.townRoot, deaconDir)
+	if agentOverride != "" {
+		overrideConfig, _, err := config.ResolveAgentConfigWithOverride(m.townRoot, "", agentOverride)
+		if err != nil {
+			return fmt.Errorf("resolving deacon runtime config: %w", err)
+		}
+		runtimeConfig = overrideConfig
+	}
 	if err := runtime.EnsureSettingsForRole(deaconDir, deaconDir, "deacon", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
@@ -178,6 +188,15 @@ func (m *Manager) Start(agentOverride string) error {
 
 	// Accept startup dialogs (workspace trust + bypass permissions) if they appear.
 	_ = t.AcceptStartupDialogs(sessionID)
+
+	if err := t.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
+		_ = t.KillSessionWithProcesses(sessionID)
+		return fmt.Errorf("waiting for deacon runtime to become ready: %w", err)
+	}
+
+	_ = runtime.RunStartupFallback(t, sessionID, "deacon", runtimeConfig)
+	_ = runtime.DeliverStartupPromptFallback(t, sessionID, initialPrompt, runtimeConfig, constants.ClaudeStartTimeout)
+	_ = runtime.VerifyStartupPromptFallbackDelivery(t, m.townRoot, sessionID, initialPrompt, runtimeConfig)
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 

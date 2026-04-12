@@ -2,10 +2,14 @@ package deacon
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -17,9 +21,14 @@ type mockTmux struct {
 	killErr          error
 	newSessionErr    error
 	waitErr          error
+	waitReadyErr     error
 	sessionInfo      *tmux.SessionInfo
 	sessionInfoErr   error
 	sendKeysErr      error
+	idle             bool
+	nudges           []string
+	waitReadyCalls   int
+	waitReadyRCs     []*config.RuntimeConfig
 
 	// Call tracking
 	killCalls       []string
@@ -32,6 +41,10 @@ func (m *mockTmux) HasSession(name string) (bool, error) {
 
 func (m *mockTmux) IsAgentAlive(_ string) bool {
 	return m.agentAlive
+}
+
+func (m *mockTmux) IsIdle(_ string) bool {
+	return m.idle
 }
 
 func (m *mockTmux) KillSessionWithProcesses(name string) error {
@@ -55,11 +68,21 @@ func (m *mockTmux) WaitForCommand(_ string, _ []string, _ time.Duration) error {
 	return m.waitErr
 }
 
+func (m *mockTmux) WaitForRuntimeReady(_ string, rc *config.RuntimeConfig, _ time.Duration) error {
+	m.waitReadyCalls++
+	m.waitReadyRCs = append(m.waitReadyRCs, rc)
+	return m.waitReadyErr
+}
+
 func (m *mockTmux) SetAutoRespawnHook(_ string) error             { return nil }
 func (m *mockTmux) AcceptStartupDialogs(_ string) error           { return nil }
 func (m *mockTmux) AcceptWorkspaceTrustDialog(_ string) error     { return nil }
 func (m *mockTmux) AcceptBypassPermissionsWarning(_ string) error { return nil }
-func (m *mockTmux) SendKeysRaw(_, _ string) error                 { return m.sendKeysErr }
+func (m *mockTmux) NudgeSession(_, message string) error {
+	m.nudges = append(m.nudges, message)
+	return nil
+}
+func (m *mockTmux) SendKeysRaw(_, _ string) error { return m.sendKeysErr }
 func (m *mockTmux) GetSessionInfo(_ string) (*tmux.SessionInfo, error) {
 	return m.sessionInfo, m.sessionInfoErr
 }
@@ -246,6 +269,59 @@ func TestStart_WaitForCommandFails(t *testing.T) {
 	}
 	// If config failed before reaching NewSessionWithCommand, that's
 	// acceptable - the WaitForCommand path isn't reachable in test env.
+}
+
+func TestStart_PromptNoneBootstrapWaitsAndNudges(t *testing.T) {
+	townRoot := t.TempDir()
+	settingsDir := filepath.Join(townRoot, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("mkdir settings: %v", err)
+	}
+	cfg := `{"operational":{"session":{"startup_nudge_verify_delay":"1ms","startup_nudge_max_retries":1}}}`
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), []byte(cfg), 0600); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	mock := &mockTmux{}
+	m := newTestManager(townRoot, mock)
+
+	if err := m.Start("codex"); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	if mock.waitReadyCalls != 2 {
+		t.Fatalf("waitReadyCalls = %d, want 2", mock.waitReadyCalls)
+	}
+	if len(mock.waitReadyRCs) != 2 {
+		t.Fatalf("waitReadyRCs = %d, want 2", len(mock.waitReadyRCs))
+	}
+	if mock.waitReadyRCs[0] == nil || mock.waitReadyRCs[0].PromptMode != "none" {
+		t.Fatalf("first runtime wait rc = %#v, want prompt_mode none", mock.waitReadyRCs[0])
+	}
+	if mock.waitReadyRCs[1] == nil || mock.waitReadyRCs[1].Tmux == nil {
+		t.Fatalf("second runtime wait rc missing tmux config: %#v", mock.waitReadyRCs[1])
+	}
+	if mock.waitReadyRCs[1].Tmux.ReadyPromptPrefix != "" {
+		t.Fatalf("second wait ReadyPromptPrefix = %q, want empty", mock.waitReadyRCs[1].Tmux.ReadyPromptPrefix)
+	}
+	if mock.waitReadyRCs[1].Tmux.ReadyDelayMs < runtime.DefaultPrimeWaitMs {
+		t.Fatalf("second wait ReadyDelayMs = %d, want >= %d", mock.waitReadyRCs[1].Tmux.ReadyDelayMs, runtime.DefaultPrimeWaitMs)
+	}
+
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	}, "I am Deacon. Start patrol: run gt deacon heartbeat, then check gt hook. If no hook, create mol-deacon-patrol wisp and execute it.")
+	if len(mock.nudges) != 2 {
+		t.Fatalf("nudges = %#v, want fallback command plus startup prompt", mock.nudges)
+	}
+	if mock.nudges[0] != "gt prime && gt mail check --inject" {
+		t.Fatalf("nudges[0] = %q, want startup fallback command", mock.nudges[0])
+	}
+	if mock.nudges[1] != initialPrompt {
+		t.Fatalf("nudges[1] = %q, want initial prompt", mock.nudges[1])
+	}
 }
 
 func TestStop_NotRunning(t *testing.T) {

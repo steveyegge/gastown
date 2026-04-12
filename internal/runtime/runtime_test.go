@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -14,6 +16,10 @@ type fakeStartupPromptSession struct {
 	waitRC    *config.RuntimeConfig
 	waitErr   error
 	nudgeErr  error
+	idle      bool
+
+	hasSessionResult bool
+	hasSessionErr    error
 }
 
 func (f *fakeStartupPromptSession) NudgeSession(_ string, message string) error {
@@ -28,6 +34,29 @@ func (f *fakeStartupPromptSession) WaitForRuntimeReady(_ string, rc *config.Runt
 	f.waitCalls++
 	f.waitRC = rc
 	return f.waitErr
+}
+
+func (f *fakeStartupPromptSession) HasSession(_ string) (bool, error) {
+	return f.hasSessionResult, f.hasSessionErr
+}
+
+func (f *fakeStartupPromptSession) IsIdle(_ string) bool {
+	return f.idle
+}
+
+func writeStartupPromptVerifyConfig(t *testing.T, townRoot string, retries int) {
+	t.Helper()
+	settingsDir := filepath.Join(townRoot, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("mkdir settings: %v", err)
+	}
+	cfg := []byte(
+		`{"operational":{"session":{"startup_nudge_verify_delay":"1ms","startup_nudge_max_retries":` +
+			strconv.Itoa(retries) + `}}}`,
+	)
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), cfg, 0600); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
 }
 
 func TestSessionIDFromEnv_Default(t *testing.T) {
@@ -513,6 +542,65 @@ func TestDeliverStartupPromptFallback_WaitError(t *testing.T) {
 	}
 	if len(tm.nudges) != 0 {
 		t.Fatalf("nudges = %#v, want none after wait failure", tm.nudges)
+	}
+}
+
+func TestVerifyStartupPromptFallbackDelivery_IdleSessionRetries(t *testing.T) {
+	townRoot := t.TempDir()
+	writeStartupPromptVerifyConfig(t, townRoot, 2)
+
+	rc := &config.RuntimeConfig{
+		PromptMode: "none",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "none",
+		},
+		Tmux: &config.RuntimeTmuxConfig{
+			ReadyPromptPrefix: "› ",
+		},
+	}
+	tm := &fakeStartupPromptSession{
+		hasSessionResult: true,
+		idle:             true,
+	}
+
+	err := VerifyStartupPromptFallbackDelivery(tm, townRoot, "sess-1", "begin patrol", rc)
+	if err != nil {
+		t.Fatalf("VerifyStartupPromptFallbackDelivery() error = %v", err)
+	}
+	if len(tm.nudges) != 2 {
+		t.Fatalf("nudges = %#v, want two retries", tm.nudges)
+	}
+	for i, got := range tm.nudges {
+		if got != "begin patrol" {
+			t.Fatalf("nudges[%d] = %q, want %q", i, got, "begin patrol")
+		}
+	}
+}
+
+func TestVerifyStartupPromptFallbackDelivery_BusySessionStopsRetry(t *testing.T) {
+	townRoot := t.TempDir()
+	writeStartupPromptVerifyConfig(t, townRoot, 1)
+
+	rc := &config.RuntimeConfig{
+		PromptMode: "none",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "none",
+		},
+		Tmux: &config.RuntimeTmuxConfig{
+			ReadyPromptPrefix: "› ",
+		},
+	}
+	tm := &fakeStartupPromptSession{
+		hasSessionResult: true,
+		idle:             false,
+	}
+
+	err := VerifyStartupPromptFallbackDelivery(tm, townRoot, "sess-1", "begin patrol", rc)
+	if err != nil {
+		t.Fatalf("VerifyStartupPromptFallbackDelivery() error = %v", err)
+	}
+	if len(tm.nudges) != 0 {
+		t.Fatalf("nudges = %#v, want none for busy session", tm.nudges)
 	}
 }
 
