@@ -2,7 +2,7 @@
 # docker build -t gastown:latest -f Dockerfile .
 FROM docker/sandbox-templates:claude-code
 
-ARG GO_VERSION=1.25.6
+ARG GO_VERSION=1.25.8
 
 USER root
 
