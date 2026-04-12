@@ -573,11 +573,7 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("adding rig: %w", err)
 	}
-
-	// Save updated rigs config
-	if err := config.SaveRigsConfig(rigsPath, rigsConfig); err != nil {
-		return fmt.Errorf("saving rigs config: %w", err)
-	}
+	// rigs.json is saved atomically inside AddRig; no separate save needed here.
 
 	// Add new rig to daemon.json patrol config (witness + refinery rigs arrays)
 	if err := config.AddRigToDaemonPatrols(townRoot, name); err != nil {

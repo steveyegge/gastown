@@ -720,10 +720,7 @@ func TestRigAddUpdatesRigsJson(t *testing.T) {
 		t.Fatalf("AddRig: %v", err)
 	}
 
-	// Save rigs config (normally done by the command)
-	if err := config.SaveRigsConfig(rigsPath, rigsConfig); err != nil {
-		t.Fatalf("save rigs.json: %v", err)
-	}
+	// AddRig saves rigs.json atomically — no separate save needed.
 
 	// Reload and verify
 	rigsConfig2, err := config.LoadRigsConfig(rigsPath)

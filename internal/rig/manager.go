@@ -861,6 +861,16 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 		fmt.Fprintf(os.Stderr, "  Run 'gt doctor --fix' to repair if needed.\n")
 	}
 
+	// Persist rigs.json atomically before marking success.
+	// This ensures directory creation and rigs.json registration are an atomic unit:
+	// if the save fails, success remains false and the deferred cleanup removes the dir.
+	// Without this, a failure after AddRig returns (but before the caller saves) would
+	// leave a directory that is not registered in rigs.json.
+	rigsPath := filepath.Join(m.townRoot, "mayor", "rigs.json")
+	if err := config.SaveRigsConfig(rigsPath, m.config); err != nil {
+		return nil, fmt.Errorf("registering rig in rigs.json: %w", err)
+	}
+
 	success = true
 	return m.loadRig(opts.Name, m.config.Rigs[opts.Name])
 }
