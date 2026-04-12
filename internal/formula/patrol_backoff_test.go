@@ -211,8 +211,8 @@ func TestPatrolFormulasUseDynamicBeadResolution(t *testing.T) {
 			}
 
 			// Must use dynamic resolution via bd list
-			if !strings.Contains(loopDesc, "bd list --type=agent") {
-				t.Errorf("%s loop step missing dynamic agent bead resolution (bd list --type=agent).\n"+
+			if !strings.Contains(loopDesc, "bd list --label=gt:agent") {
+				t.Errorf("%s loop step missing dynamic agent bead resolution (bd list --label=gt:agent).\n"+
 					"Agent bead IDs must be resolved at runtime, not hardcoded.\n"+
 					"See hq-9xs.",
 					name)
