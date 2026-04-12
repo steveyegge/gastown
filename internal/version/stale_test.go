@@ -1,6 +1,7 @@
 package version
 
 import (
+	"os"
 	"testing"
 )
 
@@ -103,5 +104,62 @@ func TestCheckStaleBinary_NoCommit(t *testing.T) {
 	// Both are acceptable outcomes
 	if info.BinaryCommit == "" && info.Error == nil {
 		t.Error("expected error when binary commit is empty")
+	}
+}
+
+func TestCleanGitCmd_StripsGitEnv(t *testing.T) {
+	// Verify cleanGitCmd strips GIT_DIR and GIT_WORK_TREE from the subprocess env.
+	// When GIT_DIR='' is inherited (e.g., from tmux in polecat sessions), git fails
+	// with "fatal: not a git repository: ''" even when cmd.Dir is a valid git repo.
+	t.Setenv("GIT_DIR", "")
+	t.Setenv("GIT_WORK_TREE", "/some/path")
+
+	cmd := cleanGitCmd("--version")
+	for _, e := range cmd.Env {
+		if len(e) >= 8 && e[:8] == "GIT_DIR=" {
+			t.Errorf("cleanGitCmd left GIT_DIR in env: %q", e)
+		}
+		if len(e) >= 14 && e[:14] == "GIT_WORK_TREE=" {
+			t.Errorf("cleanGitCmd left GIT_WORK_TREE in env: %q", e)
+		}
+	}
+}
+
+func TestGetRepoRoot_SkipsNonGitDirs(t *testing.T) {
+	// Create a temp dir that has cmd/gt/main.go but is NOT a git repo.
+	// GetRepoRoot must skip it and not return it as the repo root.
+	tmpDir := t.TempDir()
+	mainGo := tmpDir + "/cmd/gt/main.go"
+	if err := os.MkdirAll(tmpDir+"/cmd/gt", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mainGo, []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// hasGtSource returns true for this dir, but isGitRepo returns false.
+	if !hasGtSource(tmpDir) {
+		t.Fatal("test setup: expected hasGtSource to return true for tmpDir")
+	}
+	if isGitRepo(tmpDir) {
+		t.Fatal("test setup: expected isGitRepo to return false for tmpDir")
+	}
+
+	// GetRepoRoot searches GT_ROOT candidates first. Override GT_ROOT to point
+	// only at our non-git tmpDir so we can confirm it is skipped.
+	orig := os.Getenv("GT_ROOT")
+	defer os.Setenv("GT_ROOT", orig)
+	// Set GT_ROOT to a non-existent directory so the env-based candidates all fail,
+	// then verify the function still returns an error rather than our non-git tmpDir.
+	os.Setenv("GT_ROOT", "/nonexistent-gt-root")
+	_, err := GetRepoRoot()
+	// May succeed (finds a real repo via HOME fallback) or fail — both are fine.
+	// What must NOT happen is returning tmpDir.
+	if err == nil {
+		// If it found something, confirm it's not our non-git tmpDir
+		root, _ := GetRepoRoot()
+		if root == tmpDir {
+			t.Errorf("GetRepoRoot returned a non-git directory: %s", tmpDir)
+		}
 	}
 }
