@@ -528,8 +528,7 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 
 // checkSettings compares a settings file against the expected template.
 // Returns a list of what's missing.
-// agentType is reserved for future role-specific validation.
-func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
+func (c *ClaudeSettingsCheck) checkSettings(path, agentType string) []string {
 	var missing []string
 
 	// Read the actual settings
@@ -564,8 +563,19 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 		missing = append(missing, "SessionStart hook (prime --hook)")
 	}
 
-	// Check Stop hook exists with costs record (for all roles)
-	if !c.hookHasPattern(hooks, "Stop", "costs record") {
+	// Polecats use a stop-turn guard hook instead of the generic costs recorder.
+	stopPatterns := []string{"costs record"}
+	if agentType == "polecat" {
+		stopPatterns = append(stopPatterns, "polecat-stop-check")
+	}
+	hasStopHook := false
+	for _, pattern := range stopPatterns {
+		if c.hookHasPattern(hooks, "Stop", pattern) {
+			hasStopHook = true
+			break
+		}
+	}
+	if !hasStopHook {
 		missing = append(missing, "Stop hook")
 	}
 

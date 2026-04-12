@@ -16,6 +16,7 @@ type ConfigSource string
 const (
 	SourceWisp    ConfigSource = "wisp"    // Local wisp layer (.beads-wisp/config/)
 	SourceBead    ConfigSource = "bead"    // Rig identity bead labels
+	SourceRig     ConfigSource = "rig"     // Rig root config.json
 	SourceTown    ConfigSource = "town"    // Town defaults (~/gt/settings/config.json)
 	SourceSystem  ConfigSource = "system"  // Compiled-in system defaults
 	SourceBlocked ConfigSource = "blocked" // Explicitly blocked at wisp layer
@@ -73,12 +74,17 @@ func (r *Rig) GetConfigWithSource(key string) ConfigResult {
 		return ConfigResult{Value: val, Source: SourceBead}
 	}
 
-	// Layer 3: Town defaults
+	// Layer 3: Rig root config (config.json)
+	if val := r.getRigRootConfig(key); val != nil {
+		return ConfigResult{Value: val, Source: SourceRig}
+	}
+
+	// Layer 4: Town defaults
 	// Note: Town defaults for operational state would typically be in
 	// ~/gt/settings/config.json. For now, we skip directly to system defaults.
 	// Future: load from config.TownSettings
 
-	// Layer 4: System defaults
+	// Layer 5: System defaults
 	if val, ok := SystemDefaults[key]; ok {
 		return ConfigResult{Value: val, Source: SourceSystem}
 	}
@@ -189,6 +195,23 @@ func (r *Rig) getBeadLabel(key string) interface{} {
 		// Labels are in format "key:value"
 		if len(label) > len(key)+1 && label[:len(key)+1] == key+":" {
 			return label[len(key)+1:]
+		}
+	}
+
+	return nil
+}
+
+// getRigRootConfig reads supported config keys from the rig root config.json.
+func (r *Rig) getRigRootConfig(key string) interface{} {
+	cfg, err := LoadRigConfig(r.Path)
+	if err != nil {
+		return nil
+	}
+
+	switch key {
+	case "default_branch":
+		if cfg.DefaultBranch != "" {
+			return cfg.DefaultBranch
 		}
 	}
 
