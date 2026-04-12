@@ -120,15 +120,15 @@ type DNDInfo struct {
 
 // AgentRuntime represents the runtime state of an agent.
 type AgentRuntime struct {
-	Name         string `json:"name"`                    // Display name (e.g., "mayor", "witness")
-	Address      string `json:"address"`                 // Full address (e.g., "greenplace/witness")
-	Session      string `json:"session"`                 // tmux session name
-	Role         string `json:"role"`                    // Role type
-	Running      bool   `json:"running"`                 // Is tmux session running?
-	ACP          bool   `json:"acp"`                     // Is ACP session active?
-	HasWork      bool   `json:"has_work"`                // Has pinned work?
-	WorkTitle    string `json:"work_title,omitempty"`    // Title of pinned work
-	HookBead     string `json:"hook_bead,omitempty"`     // Pinned bead ID from agent bead
+	Name              string `json:"name"`                         // Display name (e.g., "mayor", "witness")
+	Address           string `json:"address"`                      // Full address (e.g., "greenplace/witness")
+	Session           string `json:"session"`                      // tmux session name
+	Role              string `json:"role"`                         // Role type
+	Running           bool   `json:"running"`                      // Is tmux session running?
+	ACP               bool   `json:"acp"`                          // Is ACP session active?
+	HasWork           bool   `json:"has_work"`                     // Has pinned work?
+	WorkTitle         string `json:"work_title,omitempty"`         // Title of pinned work
+	HookBead          string `json:"hook_bead,omitempty"`          // Pinned bead ID from agent bead
 	State             string `json:"state,omitempty"`              // Agent state from agent bead
 	NotificationLevel string `json:"notification_level,omitempty"` // Notification level (verbose, normal, muted)
 	UnreadMail        int    `json:"unread_mail"`                  // Number of unread messages
@@ -673,6 +673,10 @@ func gatherStatus() (TownStatus, error) {
 	// In --fast mode, parallelize these fetches for better performance.
 	allAgentBeads := make(map[string]*beads.Issue)
 	allHookBeads := make(map[string]*beads.Issue)
+	// Keep a direct assignee->hooked bead index because status=hooked + assignee
+	// is now the durable source of truth for work-on-hook. The legacy agent
+	// hook_bead slot is no longer maintained on every sling.
+	allHookedByAssignee := make(map[string]*beads.Issue)
 	var beadsMu sync.Mutex // Protects allAgentBeads and allHookBeads
 
 	// Helper to safely merge beads into the shared maps
@@ -690,6 +694,18 @@ func gatherStatus() (TownStatus, error) {
 		}
 		beadsMu.Unlock()
 	}
+	// Keep the newest hooked issue for each assignee so status output stays
+	// deterministic even if stale duplicate hooks exist during recovery.
+	mergeHookedAssignments := func(issues []*beads.Issue) {
+		beadsMu.Lock()
+		for _, issue := range issues {
+			if issue == nil || issue.Assignee == "" {
+				continue
+			}
+			allHookedByAssignee[issue.Assignee] = preferredHookedIssue(allHookedByAssignee[issue.Assignee], issue)
+		}
+		beadsMu.Unlock()
+	}
 
 	var beadsWg sync.WaitGroup
 
@@ -701,6 +717,12 @@ func gatherStatus() (TownStatus, error) {
 		townBeadsClient := beads.New(townBeadsPath)
 		townAgentBeads, _ := townBeadsClient.ListAgentBeads()
 		mergeAgentBeads(townAgentBeads)
+		if townHookedBeads, err := townBeadsClient.List(beads.ListOptions{
+			Status:   beads.StatusHooked,
+			Priority: -1,
+		}); err == nil {
+			mergeHookedAssignments(townHookedBeads)
+		}
 
 		// Fetch hook beads from town beads
 		var townHookIDs []string
@@ -734,6 +756,12 @@ func gatherStatus() (TownStatus, error) {
 				return
 			}
 			mergeAgentBeads(rigAgentBeads)
+			if rigHookedBeads, err := rigBeads.List(beads.ListOptions{
+				Status:   beads.StatusHooked,
+				Priority: -1,
+			}); err == nil {
+				mergeHookedAssignments(rigHookedBeads)
+			}
 
 			var hookIDs []string
 			for _, issue := range rigAgentBeads {
@@ -857,7 +885,7 @@ func gatherStatus() (TownStatus, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		status.Agents = discoverGlobalAgents(townRoot, allSessions, allAgentBeads, allHookBeads, mailRouter, statusFast)
+		status.Agents = discoverGlobalAgents(townRoot, allSessions, allAgentBeads, allHookBeads, allHookedByAssignee, mailRouter, statusFast)
 	}()
 
 	// Process all rigs in parallel
@@ -890,16 +918,13 @@ func gatherStatus() (TownStatus, error) {
 			// independent bd/beads calls.
 			var rigWg sync.WaitGroup
 
-			// Discover hooks for all agents in this rig
-			// In --fast mode, skip expensive handoff bead lookups. Hook info comes from
-			// preloaded agent beads via discoverRigAgents instead.
-			if !statusFast {
-				rigWg.Add(1)
-				go func() {
-					defer rigWg.Done()
-					rs.Hooks = discoverRigHooks(r, rs.Crews)
-				}()
-			}
+			// Build hook info from the preloaded hooked-bead index so JSON/status
+			// reflects the same source of truth as gt hook show without extra bd IO.
+			rigWg.Add(1)
+			go func() {
+				defer rigWg.Done()
+				rs.Hooks = discoverRigHooks(r, rs.Crews, allHookedByAssignee)
+			}()
 
 			// Get MQ summary if rig has a refinery
 			// Skip in --fast mode to avoid expensive bd queries
@@ -916,7 +941,7 @@ func gatherStatus() (TownStatus, error) {
 			rigWg.Add(1)
 			go func() {
 				defer rigWg.Done()
-				rs.Agents = discoverRigAgents(allSessions, r, rs.Crews, allAgentBeads, allHookBeads, mailRouter, statusFast)
+				rs.Agents = discoverRigAgents(allSessions, r, rs.Crews, allAgentBeads, allHookBeads, allHookedByAssignee, mailRouter, statusFast)
 			}()
 
 			rigWg.Wait()
@@ -1523,78 +1548,108 @@ func capitalizeFirst(s string) string {
 	return string(s[0]-32) + s[1:]
 }
 
-// discoverRigHooks finds all hook attachments for agents in a rig.
-// It fetches all pinned handoff beads in a single bd call, then resolves
-// each agent's hook in-memory. This replaces the previous N+1 pattern where
-// each agent triggered a separate bd subprocess.
-func discoverRigHooks(r *rig.Rig, crews []string) []AgentHookInfo {
-	var hooks []AgentHookInfo
+// canonicalPolecatAddress keeps status output aligned with real assignee values.
+// Hooked work is assigned to rig/polecats/name, so using the legacy rig/name
+// shorthand here makes status miss real hooks and drift from gt hook show.
+func canonicalPolecatAddress(rigName, polecatName string) string {
+	return rigName + "/polecats/" + polecatName
+}
 
-	// Create beads instance for the rig
-	b := beads.New(r.Path)
-
-	// Batch-fetch all handoff beads in one bd call
-	allHandoffs, err := b.FindAllHandoffBeads()
-	if err != nil {
-		// On error, return empty hooks for all agents rather than failing
-		allHandoffs = make(map[string]*beads.Issue)
+// preferredHookedIssue keeps status deterministic when recovery leaves multiple
+// hooked beads on the same assignee. We prefer the most recently updated one.
+func preferredHookedIssue(existing, candidate *beads.Issue) *beads.Issue {
+	if existing == nil {
+		return candidate
 	}
+	if candidate == nil {
+		return existing
+	}
+	if candidate.UpdatedAt > existing.UpdatedAt {
+		return candidate
+	}
+	if candidate.UpdatedAt < existing.UpdatedAt {
+		return existing
+	}
+	if candidate.CreatedAt > existing.CreatedAt {
+		return candidate
+	}
+	return existing
+}
+
+// applyHookState prefers direct hooked-bead lookups over the legacy agent slot.
+// Status drifted because updateAgentHookBead is intentionally a no-op now, so
+// agent.HookBead is only a backward-compatibility fallback.
+func applyHookState(agent *AgentRuntime, allHookBeads map[string]*beads.Issue, allHookedByAssignee map[string]*beads.Issue) {
+	if hookedIssue, ok := allHookedByAssignee[agent.Address]; ok && hookedIssue != nil {
+		agent.HasWork = true
+		agent.HookBead = hookedIssue.ID
+		agent.WorkTitle = hookedIssue.Title
+		return
+	}
+
+	if agent.HookBead != "" {
+		agent.HasWork = true
+		if pinnedIssue, ok := allHookBeads[agent.HookBead]; ok {
+			agent.WorkTitle = pinnedIssue.Title
+		}
+	}
+}
+
+// buildHookInfoForAddress maps the hooked-bead index back into the compact hook
+// summary structure so gt status and gt hook show report the same assignment.
+func buildHookInfoForAddress(address, role string, allHookedByAssignee map[string]*beads.Issue) AgentHookInfo {
+	hook := AgentHookInfo{
+		Agent: address,
+		Role:  role,
+	}
+	if hookedIssue, ok := allHookedByAssignee[address]; ok && hookedIssue != nil {
+		hook.HasWork = true
+		hook.Molecule = hookedIssue.ID
+		hook.Title = hookedIssue.Title
+	}
+	return hook
+}
+
+// discoverRigHooks builds hook summaries from the preloaded hooked-bead index.
+// The older handoff-bead scan misses modern slings because direct hooked issues
+// are now the authoritative record of work-on-hook.
+func discoverRigHooks(r *rig.Rig, crews []string, allHookedByAssignee map[string]*beads.Issue) []AgentHookInfo {
+	var hooks []AgentHookInfo
 
 	// Check polecats
 	for _, name := range r.Polecats {
-		hooks = append(hooks, resolveHookFromMap(allHandoffs, name, r.Name+"/"+name, constants.RolePolecat))
+		hook := buildHookInfoForAddress(canonicalPolecatAddress(r.Name, name), constants.RolePolecat, allHookedByAssignee)
+		hooks = append(hooks, hook)
 	}
 
 	// Check crew workers
 	for _, name := range crews {
-		hooks = append(hooks, resolveHookFromMap(allHandoffs, name, r.Name+"/crew/"+name, constants.RoleCrew))
+		hook := buildHookInfoForAddress(r.Name+"/crew/"+name, constants.RoleCrew, allHookedByAssignee)
+		hooks = append(hooks, hook)
 	}
 
 	// Check witness
 	if r.HasWitness {
-		hooks = append(hooks, resolveHookFromMap(allHandoffs, constants.RoleWitness, r.Name+"/witness", constants.RoleWitness))
+		hook := buildHookInfoForAddress(r.Name+"/witness", constants.RoleWitness, allHookedByAssignee)
+		hooks = append(hooks, hook)
 	}
 
 	// Check refinery
 	if r.HasRefinery {
-		hooks = append(hooks, resolveHookFromMap(allHandoffs, constants.RoleRefinery, r.Name+"/refinery", constants.RoleRefinery))
+		hook := buildHookInfoForAddress(r.Name+"/refinery", constants.RoleRefinery, allHookedByAssignee)
+		hooks = append(hooks, hook)
 	}
 
 	return hooks
-}
-
-// resolveHookFromMap builds an AgentHookInfo from a pre-fetched map of handoff beads.
-// This is the in-memory equivalent of getAgentHook, avoiding per-agent bd subprocess calls.
-func resolveHookFromMap(allHandoffs map[string]*beads.Issue, role, agentAddress, roleType string) AgentHookInfo {
-	hook := AgentHookInfo{
-		Agent: agentAddress,
-		Role:  roleType,
-	}
-
-	handoff, ok := allHandoffs[role]
-	if !ok || handoff == nil {
-		return hook
-	}
-
-	attachment := beads.ParseAttachmentFields(handoff)
-	if attachment != nil && attachment.AttachedMolecule != "" {
-		hook.HasWork = true
-		hook.Molecule = attachment.AttachedMolecule
-		hook.Title = handoff.Title
-	} else if handoff.Description != "" {
-		hook.HasWork = true
-		hook.Title = handoff.Title
-	}
-
-	return hook
 }
 
 // discoverGlobalAgents checks runtime state for town-level agents (Mayor, Deacon).
 // Uses parallel fetching for performance. If skipMail is true, mail lookups are skipped.
 // allSessions is a preloaded map of tmux sessions for O(1) lookup.
 // allAgentBeads is a preloaded map of agent beads for O(1) lookup.
-// allHookBeads is a preloaded map of hook beads for O(1) lookup.
-func discoverGlobalAgents(townRoot string, allSessions map[string]bool, allAgentBeads map[string]*beads.Issue, allHookBeads map[string]*beads.Issue, mailRouter *mail.Router, skipMail bool) []AgentRuntime {
+// allHookBeads is a preloaded map of hook beads for legacy fallback.
+// allHookedByAssignee is the authoritative map of current hooked work.
+func discoverGlobalAgents(townRoot string, allSessions map[string]bool, allAgentBeads map[string]*beads.Issue, allHookBeads map[string]*beads.Issue, allHookedByAssignee map[string]*beads.Issue, mailRouter *mail.Router, skipMail bool) []AgentRuntime {
 	// Get session names dynamically
 	mayorSession := getMayorSessionName()
 	deaconSession := getDeaconSessionName()
@@ -1646,22 +1701,16 @@ func discoverGlobalAgents(townRoot string, allSessions map[string]bool, allAgent
 
 			// Look up agent bead from preloaded map (O(1))
 			if issue, ok := allAgentBeads[d.beadID]; ok {
-				// Prefer database columns over description parsing
-				// HookBead column is authoritative (cleared by unsling)
 				agent.HookBead = issue.HookBead
 				agent.State = beads.ResolveAgentState(issue.Description, issue.AgentState)
-				if agent.HookBead != "" {
-					agent.HasWork = true
-					// Get hook title from preloaded map
-					if pinnedIssue, ok := allHookBeads[agent.HookBead]; ok {
-						agent.WorkTitle = pinnedIssue.Title
-					}
-				}
 				// Parse description fields for notification level
 				if fields := beads.ParseAgentFields(issue.Description); fields != nil {
 					agent.NotificationLevel = fields.NotificationLevel
 				}
 			}
+			// Prefer direct hooked-bead assignment so status stays correct after
+			// the agent hook_bead slot was retired from normal sling writes.
+			applyHookState(&agent, allHookBeads, allHookedByAssignee)
 
 			// Get mail info (skip if --fast)
 			if !skipMail {
@@ -1745,8 +1794,9 @@ type agentDef struct {
 // Uses parallel fetching for performance. If skipMail is true, mail lookups are skipped.
 // allSessions is a preloaded map of tmux sessions for O(1) lookup.
 // allAgentBeads is a preloaded map of agent beads for O(1) lookup.
-// allHookBeads is a preloaded map of hook beads for O(1) lookup.
-func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, allAgentBeads map[string]*beads.Issue, allHookBeads map[string]*beads.Issue, mailRouter *mail.Router, skipMail bool) []AgentRuntime {
+// allHookBeads is a preloaded map of hook beads for legacy fallback.
+// allHookedByAssignee is the authoritative map of current hooked work.
+func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, allAgentBeads map[string]*beads.Issue, allHookBeads map[string]*beads.Issue, allHookedByAssignee map[string]*beads.Issue, mailRouter *mail.Router, skipMail bool) []AgentRuntime {
 	// Build list of all agents to discover
 	var defs []agentDef
 	townRoot := filepath.Dir(r.Path)
@@ -1777,8 +1827,10 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 	// Polecats
 	for _, name := range r.Polecats {
 		defs = append(defs, agentDef{
-			name:    name,
-			address: r.Name + "/" + name,
+			name: name,
+			// Use the canonical polecat address so assignee-based hook lookups match
+			// real slung work instead of the old display shorthand.
+			address: canonicalPolecatAddress(r.Name, name),
 			session: session.PolecatSessionName(session.PrefixFor(r.Name), name),
 			role:    constants.RolePolecat,
 			beadID:  beads.PolecatBeadIDWithPrefix(prefix, r.Name, name),
@@ -1821,22 +1873,16 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 
 			// Look up agent bead from preloaded map (O(1))
 			if issue, ok := allAgentBeads[d.beadID]; ok {
-				// Prefer database columns over description parsing
-				// HookBead column is authoritative (cleared by unsling)
 				agent.HookBead = issue.HookBead
 				agent.State = beads.ResolveAgentState(issue.Description, issue.AgentState)
-				if agent.HookBead != "" {
-					agent.HasWork = true
-					// Get hook title from preloaded map
-					if pinnedIssue, ok := allHookBeads[agent.HookBead]; ok {
-						agent.WorkTitle = pinnedIssue.Title
-					}
-				}
 				// Parse description fields for notification level
 				if fields := beads.ParseAgentFields(issue.Description); fields != nil {
 					agent.NotificationLevel = fields.NotificationLevel
 				}
 			}
+			// Prefer direct hooked-bead assignment so status matches gt hook show
+			// even when the legacy agent hook_bead slot is empty by design.
+			applyHookState(&agent, allHookBeads, allHookedByAssignee)
 
 			// Get mail info (skip if --fast)
 			if !skipMail {
