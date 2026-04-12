@@ -2012,21 +2012,7 @@ func VerifyExpectedDatabasesAtConfig(config *Config, expected []string) (served,
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		args := []string{
-			"sql",
-			"--host", config.EffectiveHost(),
-			"--port", strconv.Itoa(config.Port),
-			"--user", config.User,
-			"--no-tls",
-			"-r", "json",
-			"-q", "SHOW DATABASES",
-		}
-		cmd := exec.CommandContext(ctx, "dolt", args...)
-		cmd.Dir = config.DataDir
-		if config.Password != "" {
-			cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+config.Password)
-		}
-
+		cmd := buildServerSQLCmd(ctx, config, "-r", "json", "-q", "SHOW DATABASES")
 		var stderrBuf bytes.Buffer
 		cmd.Stderr = &stderrBuf
 		output, queryErr := cmd.Output()
