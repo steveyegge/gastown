@@ -148,6 +148,57 @@ func TestBdSupportsAllowStale_ReprobesWhenBinaryPathChanges(t *testing.T) {
 	}
 }
 
+func TestBuildListMergeRequestsWispQuery_UsesLegacyAndWispLabels(t *testing.T) {
+	query := buildListMergeRequestsWispQuery(ListOptions{Label: "gt:merge-request", Status: "open"})
+
+	if !strings.Contains(query, "SELECT issue_id, label FROM wisp_labels UNION SELECT issue_id, label FROM labels") {
+		t.Fatalf("query missing legacy+wisp label source: %s", query)
+	}
+	if !strings.Contains(query, "l.label = 'gt:merge-request'") {
+		t.Fatalf("query missing merge-request label filter: %s", query)
+	}
+	if !strings.Contains(query, "w.status = 'open'") {
+		t.Fatalf("query missing open status filter: %s", query)
+	}
+}
+
+func TestAppendMergeRequestWispRows_IncludesCanaryAndNormalWisps(t *testing.T) {
+	issues := appendMergeRequestWispRows(nil, []mergeRequestWispRow{
+		{
+			ID:          "mr-normal",
+			Title:       "Merge: normal",
+			Description: "branch: polecat/normal/gt-001\ntarget: main\nrig: test-rig",
+			Status:      "open",
+			Priority:    1,
+			LabelsCSV:   "gt:merge-request",
+		},
+		{
+			ID:          "mr-canary",
+			Title:       "Merge: mq visibility canary",
+			Description: "branch: polecat/canary/gt-canary\ntarget: main\nrig: test-rig",
+			Status:      "open",
+			Priority:    1,
+			LabelsCSV:   "gt:merge-request",
+		},
+	})
+
+	if len(issues) != 2 {
+		t.Fatalf("appendMergeRequestWispRows() returned %d issues, want 2", len(issues))
+	}
+
+	got := map[string]*Issue{}
+	for _, issue := range issues {
+		got[issue.ID] = issue
+	}
+
+	if got["mr-normal"] == nil || !got["mr-normal"].Ephemeral {
+		t.Fatalf("normal MR wisp missing or not marked ephemeral: %#v", got["mr-normal"])
+	}
+	if got["mr-canary"] == nil || !got["mr-canary"].Ephemeral {
+		t.Fatalf("canary MR wisp missing or not marked ephemeral: %#v", got["mr-canary"])
+	}
+}
+
 // writeAllowStaleBDStub creates a mock bd binary in dir.
 //
 // The detection function (BdSupportsAllowStaleWithEnv) ignores the exit code

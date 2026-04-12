@@ -903,13 +903,33 @@ func (b *Beads) ListMergeRequests(opts ListOptions) ([]*Issue, error) {
 		return nil, err
 	}
 
-	// Build dedup map from issues
-	seen := make(map[string]bool, len(issueResults))
-	for _, issue := range issueResults {
-		seen[issue.ID] = true
+	// 2. Query wisps table via SQL for merge-request wisps with full data.
+	query := buildListMergeRequestsWispQuery(opts)
+	sqlOut, sqlErr := b.run("sql", "--json", query)
+	if sqlErr == nil && len(sqlOut) > 0 && isJSONBytes(sqlOut) {
+		var rows []mergeRequestWispRow
+		if jsonErr := json.Unmarshal(sqlOut, &rows); jsonErr == nil {
+			issueResults = appendMergeRequestWispRows(issueResults, rows)
+		}
 	}
 
-	// 2. Query wisps table via SQL for merge-request wisps with full data
+	return issueResults, nil
+}
+
+type mergeRequestWispRow struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+	Priority    int    `json:"priority"`
+	Assignee    string `json:"assignee"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+	CreatedBy   string `json:"created_by"`
+	LabelsCSV   string `json:"labels_csv"`
+}
+
+func buildListMergeRequestsWispQuery(opts ListOptions) string {
 	statusFilter := "w.status = 'open'"
 	if opts.Status != "" && strings.EqualFold(opts.Status, "all") {
 		statusFilter = "1=1"
@@ -922,57 +942,55 @@ func (b *Beads) ListMergeRequests(opts ListOptions) ([]*Issue, error) {
 		labelFilter = fmt.Sprintf("l.label = '%s'", strings.ReplaceAll(opts.Label, "'", "''"))
 	}
 
-	query := fmt.Sprintf(
+	return fmt.Sprintf(
 		"SELECT w.id, w.title, w.description, w.status, w.priority, w.assignee, "+
 			"w.created_at, w.updated_at, w.created_by, "+
 			"GROUP_CONCAT(al.label) as labels_csv "+
 			"FROM wisps w "+
-			"JOIN wisp_labels l ON w.id = l.issue_id "+
-			"LEFT JOIN wisp_labels al ON w.id = al.issue_id "+
+			"JOIN (%s) l ON w.id = l.issue_id "+
+			"LEFT JOIN (%s) al ON w.id = al.issue_id "+
 			"WHERE %s AND %s "+
 			"GROUP BY w.id, w.title, w.description, w.status, w.priority, w.assignee, w.created_at, w.updated_at, w.created_by",
-		labelFilter, statusFilter)
+		mergeRequestWispLabelSourceQuery(), mergeRequestWispLabelSourceQuery(), labelFilter, statusFilter)
+}
 
-	sqlOut, sqlErr := b.run("sql", "--json", query)
-	if sqlErr == nil && len(sqlOut) > 0 && isJSONBytes(sqlOut) {
-		var rows []struct {
-			ID          string `json:"id"`
-			Title       string `json:"title"`
-			Description string `json:"description"`
-			Status      string `json:"status"`
-			Priority    int    `json:"priority"`
-			Assignee    string `json:"assignee"`
-			CreatedAt   string `json:"created_at"`
-			UpdatedAt   string `json:"updated_at"`
-			CreatedBy   string `json:"created_by"`
-			LabelsCSV   string `json:"labels_csv"`
-		}
-		if jsonErr := json.Unmarshal(sqlOut, &rows); jsonErr == nil {
-			for _, row := range rows {
-				if seen[row.ID] {
-					continue
-				}
-				issue := &Issue{
-					ID:          row.ID,
-					Title:       row.Title,
-					Description: row.Description,
-					Status:      row.Status,
-					Priority:    row.Priority,
-					Assignee:    row.Assignee,
-					CreatedAt:   row.CreatedAt,
-					UpdatedAt:   row.UpdatedAt,
-					CreatedBy:   row.CreatedBy,
-					Ephemeral:   true,
-				}
-				if row.LabelsCSV != "" {
-					issue.Labels = strings.Split(row.LabelsCSV, ",")
-				}
-				issueResults = append(issueResults, issue)
-			}
-		}
+func appendMergeRequestWispRows(issueResults []*Issue, rows []mergeRequestWispRow) []*Issue {
+	seen := make(map[string]bool, len(issueResults))
+	for _, issue := range issueResults {
+		seen[issue.ID] = true
 	}
 
-	return issueResults, nil
+	for _, row := range rows {
+		if seen[row.ID] {
+			continue
+		}
+		issue := &Issue{
+			ID:          row.ID,
+			Title:       row.Title,
+			Description: row.Description,
+			Status:      row.Status,
+			Priority:    row.Priority,
+			Assignee:    row.Assignee,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+			CreatedBy:   row.CreatedBy,
+			Ephemeral:   true,
+		}
+		if row.LabelsCSV != "" {
+			issue.Labels = strings.Split(row.LabelsCSV, ",")
+		}
+		issueResults = append(issueResults, issue)
+		seen[row.ID] = true
+	}
+
+	return issueResults
+}
+
+func mergeRequestWispLabelSourceQuery() string {
+	// Some legacy/validation-created wisps still carry labels in the shared
+	// issues labels table instead of wisp_labels. Query both so queue visibility
+	// does not depend on which auxiliary label table the writer used.
+	return "SELECT issue_id, label FROM wisp_labels UNION SELECT issue_id, label FROM labels"
 }
 
 // ListByAssignee returns all issues assigned to a specific assignee.
