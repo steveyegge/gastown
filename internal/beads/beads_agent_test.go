@@ -1,6 +1,7 @@
 package beads
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -345,4 +346,120 @@ func TestMergeAgentBeadSources(t *testing.T) {
 			t.Fatalf("len(merged) = %d, want 0", len(merged))
 		}
 	})
+}
+
+func installMockBDCreateRecorder(t *testing.T, logPath string) {
+	t.Helper()
+
+	binDir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Skip("cross-rig create recorder test not implemented on Windows")
+	}
+
+	script := `#!/bin/sh
+printf 'pwd=%s\n' "$(pwd)" >> "$MOCK_BD_LOG"
+printf 'beads_dir=%s\n' "$BEADS_DIR" >> "$MOCK_BD_LOG"
+printf 'args=%s\n' "$*" >> "$MOCK_BD_LOG"
+
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    --*) ;;
+    *) cmd="$arg"; break ;;
+  esac
+done
+
+case "$cmd" in
+  create)
+    printf '{"id":"pt-imported-polecat-shiny","title":"shiny","status":"open"}\n'
+    exit 0
+    ;;
+  slot|config|migrate|init|show|update)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`
+	scriptPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write mock bd: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("MOCK_BD_LOG", logPath)
+}
+
+func TestCreateAgentBead_UsesTownRootForCrossRigRoutes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("path assertions are Unix-oriented")
+	}
+
+	// Resolve symlinks so path assertions match shell pwd output.
+	// On macOS, t.TempDir() returns /var/... but pwd resolves to /private/var/...
+	townRoot, _ := filepath.EvalSymlinks(t.TempDir())
+	for _, dir := range []string{
+		filepath.Join(townRoot, "mayor"),
+		filepath.Join(townRoot, ".beads"),
+		filepath.Join(townRoot, "imported", "mayor", "rig", ".beads"),
+	} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", "town.json"), []byte(`{"name":"test"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte("{\"prefix\":\"pt-\",\"path\":\"imported/mayor/rig\"}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	logPath := filepath.Join(townRoot, "bd.log")
+	installMockBDCreateRecorder(t, logPath)
+
+	workerDir := filepath.Join(townRoot, "imported", "mayor", "rig")
+	bd := NewWithBeadsDir(workerDir, filepath.Join(workerDir, ".beads"))
+
+	issue, err := bd.CreateAgentBead("pt-imported-polecat-shiny", "shiny", &AgentFields{
+		RoleType:   "polecat",
+		Rig:        "imported",
+		AgentState: "spawning",
+		HookBead:   "pt-task-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateAgentBead: %v", err)
+	}
+	if issue == nil {
+		t.Fatal("CreateAgentBead returned nil issue")
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read mock bd log: %v", err)
+	}
+	logOutput := string(logData)
+	if !strings.Contains(logOutput, "pwd="+townRoot) {
+		t.Fatalf("mock bd log missing town root cwd:\n%s", logOutput)
+	}
+	if !strings.Contains(logOutput, "beads_dir="+filepath.Join(townRoot, ".beads")) {
+		t.Fatalf("mock bd log missing town-root BEADS_DIR:\n%s", logOutput)
+	}
+	if !strings.Contains(logOutput, "create --json --id=pt-imported-polecat-shiny") {
+		t.Fatalf("mock bd log missing create call:\n%s", logOutput)
+	}
+	if !strings.Contains(logOutput, "slot set pt-imported-polecat-shiny hook pt-task-1") {
+		t.Fatalf("mock bd log missing slot set call:\n%s", logOutput)
+	}
+}
+
+func TestCreateAgentBead_ParsesMockCreateOutput(t *testing.T) {
+	raw := []byte(`{"id":"pt-imported-polecat-shiny","title":"shiny","status":"open"}`)
+	var issue Issue
+	if err := json.Unmarshal(raw, &issue); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if issue.ID != "pt-imported-polecat-shiny" {
+		t.Fatalf("issue.ID = %q", issue.ID)
+	}
 }
