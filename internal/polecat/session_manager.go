@@ -186,64 +186,88 @@ func (m *SessionManager) freshBranchName(polecatName, issue string) string {
 	return fmt.Sprintf("polecat/%s-%s", polecatName, ts)
 }
 
-func (m *SessionManager) canonicalSessionStartPoint(g *git.Git) string {
-	defaultBranch := ""
-	if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
-		defaultBranch = rigCfg.DefaultBranch
-	}
-	if defaultBranch == "" {
-		defaultBranch = g.RemoteDefaultBranch()
-	}
-	return fmt.Sprintf("origin/%s", defaultBranch)
+type freshBranchPlan struct {
+	Create     bool
+	StartPoint string
+	MergeBase  string
 }
 
-func shouldCreateFreshSessionBranch(currentBranch, issue, canonicalBranch string) bool {
-	if issue != "" && strings.Contains(currentBranch, "/"+issue+"@") {
-		return false
+func chooseFreshBranchPlan(currentBranch, configuredBaseBranch, rigDefaultBranch, remoteDefaultBranch string, refExists func(string) bool) freshBranchPlan {
+	currentBranch = strings.TrimSpace(currentBranch)
+	if currentBranch == "" || currentBranch == "HEAD" {
+		return freshBranchPlan{}
 	}
 
-	if currentBranch == canonicalBranch || currentBranch == "main" || currentBranch == "master" {
-		return true
+	isBaseBranch := false
+	for _, candidate := range []string{configuredBaseBranch, rigDefaultBranch, remoteDefaultBranch, "main", "master"} {
+		if candidate != "" && currentBranch == candidate {
+			isBaseBranch = true
+			break
+		}
+	}
+	if !isBaseBranch {
+		return freshBranchPlan{}
 	}
 
-	return issue != "" && strings.HasPrefix(currentBranch, "polecat/")
+	mergeBase := currentBranch
+	if configuredBaseBranch != "" {
+		mergeBase = configuredBaseBranch
+	}
+
+	startPoint := currentBranch
+	if refExists != nil && mergeBase != "" {
+		switch {
+		case refExists(mergeBase):
+			startPoint = mergeBase
+		case refExists("origin/" + mergeBase):
+			startPoint = "origin/" + mergeBase
+		}
+	}
+
+	return freshBranchPlan{
+		Create:     true,
+		StartPoint: startPoint,
+		MergeBase:  mergeBase,
+	}
 }
 
-func (m *SessionManager) ensureCanonicalSessionBranch(g *git.Git, polecat string, opts SessionStartOptions) string {
-	currentBranch, err := g.CurrentBranch()
-	if err != nil {
-		return ""
+func (m *SessionManager) planFreshBranch(g *git.Git, currentBranch string) freshBranchPlan {
+	if g == nil {
+		return freshBranchPlan{}
 	}
 
-	startPoint := m.canonicalSessionStartPoint(g)
-	canonicalBranch := strings.TrimPrefix(startPoint, "origin/")
-	if !shouldCreateFreshSessionBranch(currentBranch, opts.Issue, canonicalBranch) {
-		return currentBranch
+	configuredBaseBranch, _ := g.ConfigGet(fmt.Sprintf("branch.%s.gh-merge-base", currentBranch))
+	if configuredBaseBranch == "" {
+		configuredBaseBranch, _ = g.ConfigGet("thgames.default-base-branch")
 	}
 
-	// Refresh origin refs before branching so recovered sessions start from the
-	// canonical remote base instead of any preserved local polecat branch.
-	if err := g.Fetch("origin"); err != nil {
-		debugSession("fetch origin for canonical session branch", err)
+	return chooseFreshBranchPlan(
+		currentBranch,
+		configuredBaseBranch,
+		m.rig.DefaultBranch(),
+		g.RemoteDefaultBranch(),
+		func(ref string) bool {
+			exists, err := g.RefExists(ref)
+			return err == nil && exists
+		},
+	)
+}
+
+func setBranchMergeBase(workDir, branch, mergeBase string) error {
+	if workDir == "" || branch == "" || mergeBase == "" {
+		return nil
 	}
 
-	exists, err := g.RefExists(startPoint)
-	if err != nil {
-		debugSession("check canonical session start point", err)
-		return currentBranch
-	}
-	if !exists {
-		debugSession("missing canonical session start point", fmt.Errorf("%s", startPoint))
-		return currentBranch
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	newBranch := m.freshBranchName(polecat, opts.Issue)
-	if err := g.CheckoutNewBranch(newBranch, startPoint); err != nil {
-		debugSession("auto-checkout fresh branch on canonical base", err)
-		return currentBranch
+	cmd := exec.CommandContext(ctx, "git", "config", fmt.Sprintf("branch.%s.gh-merge-base", branch), mergeBase) //nolint:gosec // G204: git is a trusted internal tool
+	util.SetDetachedProcessGroup(cmd)
+	cmd.Dir = workDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git config branch.%s.gh-merge-base=%s: %w (%s)", branch, mergeBase, err, strings.TrimSpace(string(out)))
 	}
-
-	return newBranch
+	return nil
 }
 
 // hasPolecat checks if the polecat exists in this rig.
@@ -398,7 +422,23 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// branch detection and path resolution without a working directory.
 	polecatGitBranch := ""
 	if g := git.NewGit(workDir); g != nil {
-		polecatGitBranch = m.ensureCanonicalSessionBranch(g, polecat, opts)
+		if b, err := g.CurrentBranch(); err == nil {
+			polecatGitBranch = b
+			// Auto-checkout a fresh branch only when the worktree is sitting on a
+			// base branch (repo default branch, configured integration branch, etc.).
+			// This preserves existing issue branches across restarts instead of
+			// churning them into anonymous polecat/<name>-<timestamp> branches.
+			if plan := m.planFreshBranch(g, polecatGitBranch); plan.Create {
+				newBranch := m.freshBranchName(polecat, opts.Issue)
+				if err := g.CheckoutNewBranch(newBranch, plan.StartPoint); err != nil {
+					// Non-fatal: PRIME.md guard remains as a fallback; log for debugging.
+					debugSession("auto-checkout fresh branch on default", err)
+				} else {
+					debugSession("set gh-merge-base on fresh branch", setBranchMergeBase(workDir, newBranch, plan.MergeBase))
+					polecatGitBranch = newBranch
+				}
+			}
+		}
 	}
 	// Generate the GASTA run ID — the root identifier for all telemetry emitted
 	// by this polecat session and its subprocesses (bd, mail, …).

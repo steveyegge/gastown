@@ -534,6 +534,101 @@ func TestAgentEnvOmitsGTAgent_FallbackRequired(t *testing.T) {
 	}
 }
 
+func TestChooseFreshBranchPlan(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		currentBranch  string
+		configuredBase string
+		rigDefault     string
+		remoteDefault  string
+		existingRefs   map[string]bool
+		wantCreate     bool
+		wantStartPoint string
+		wantMergeBase  string
+	}{
+		{
+			name:           "issue branch is preserved",
+			currentBranch:  "polecat/furiosa/gj-er8.11@mk123",
+			configuredBase: "codex/gamejam-webgpu-rig",
+			rigDefault:     "main",
+			remoteDefault:  "main",
+			wantCreate:     false,
+		},
+		{
+			name:           "configured integration branch creates fresh issue branch",
+			currentBranch:  "codex/gamejam-webgpu-rig",
+			configuredBase: "codex/gamejam-webgpu-rig",
+			rigDefault:     "main",
+			remoteDefault:  "main",
+			existingRefs: map[string]bool{
+				"codex/gamejam-webgpu-rig": true,
+			},
+			wantCreate:     true,
+			wantStartPoint: "codex/gamejam-webgpu-rig",
+			wantMergeBase:  "codex/gamejam-webgpu-rig",
+		},
+		{
+			name:           "main falls back to configured base when ref exists remotely",
+			currentBranch:  "main",
+			configuredBase: "codex/gamejam-webgpu-rig",
+			rigDefault:     "main",
+			remoteDefault:  "main",
+			existingRefs: map[string]bool{
+				"origin/codex/gamejam-webgpu-rig": true,
+			},
+			wantCreate:     true,
+			wantStartPoint: "origin/codex/gamejam-webgpu-rig",
+			wantMergeBase:  "codex/gamejam-webgpu-rig",
+		},
+		{
+			name:           "main still records configured merge base when ref is missing",
+			currentBranch:  "main",
+			configuredBase: "codex/gamejam-webgpu-rig",
+			rigDefault:     "main",
+			remoteDefault:  "main",
+			wantCreate:     true,
+			wantStartPoint: "main",
+			wantMergeBase:  "codex/gamejam-webgpu-rig",
+		},
+		{
+			name:          "plain default branch keeps itself as merge base",
+			currentBranch: "main",
+			rigDefault:    "main",
+			remoteDefault: "main",
+			existingRefs: map[string]bool{
+				"main": true,
+			},
+			wantCreate:     true,
+			wantStartPoint: "main",
+			wantMergeBase:  "main",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := chooseFreshBranchPlan(
+				tt.currentBranch,
+				tt.configuredBase,
+				tt.rigDefault,
+				tt.remoteDefault,
+				func(ref string) bool { return tt.existingRefs[ref] },
+			)
+
+			if plan.Create != tt.wantCreate {
+				t.Fatalf("Create = %v, want %v", plan.Create, tt.wantCreate)
+			}
+			if plan.StartPoint != tt.wantStartPoint {
+				t.Errorf("StartPoint = %q, want %q", plan.StartPoint, tt.wantStartPoint)
+			}
+			if plan.MergeBase != tt.wantMergeBase {
+				t.Errorf("MergeBase = %q, want %q", plan.MergeBase, tt.wantMergeBase)
+			}
+		})
+	}
+}
+
 // TestVerifyStartupNudgeDelivery_IdleAgent tests that verifyStartupNudgeDelivery
 // detects an idle agent (at prompt, no busy indicator) and retries the nudge.
 // Uses a real tmux session with a shell prompt that matches the ReadyPromptPrefix.
