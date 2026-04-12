@@ -1622,6 +1622,12 @@ type NudgeOpts struct {
 // that send-keys can resolve reliably. Bare pane IDs work for display-message,
 // but for send-keys we prefer an explicit session:window.pane target.
 func (t *Tmux) canonicalPaneTarget(session, pane string) string {
+	return t.ResolvePaneTarget(session, pane)
+}
+
+// ResolvePaneTarget converts a pane identifier into a tmux target string that
+// send-keys can address reliably.
+func (t *Tmux) ResolvePaneTarget(session, pane string) string {
 	if pane == "" {
 		return session
 	}
@@ -1664,7 +1670,11 @@ func (t *Tmux) NudgeSessionWithOpts(session, message string, opts NudgeOpts) err
 	// running the agent rather than sending to the focused pane.
 	target := session
 	if agentPane, err := t.FindAgentPane(session); err == nil && agentPane != "" {
-		target = t.canonicalPaneTarget(session, agentPane)
+		// Why: tmux parses "session:%pane" as a window target, which is the exact
+		// source of the observed "can't find window: %270" nudge failures. Resolve
+		// the pane to a canonical session:window.pane target instead of inventing
+		// the invalid "session:%pane" form.
+		target = t.ResolvePaneTarget(session, agentPane)
 	}
 
 	// 0. Pre-delivery: dismiss Rewind menu if the session is stuck in it.

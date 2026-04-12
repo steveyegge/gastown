@@ -521,8 +521,14 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		}
 
 		if fallbackInfo.SendStartupNudge {
-			// Send work instructions via nudge
-			debugSession("SendStartupNudge", m.tmux.NudgeSession(sessionID, startupNudgeContent))
+			// Why: a lost startup nudge is not a harmless warning for prompt-less
+			// agents; it leaves the polecat marked "working" while sitting at the
+			// stock agent prompt. Treat delivery failure as startup failure instead of
+			// swallowing it behind debug-only logging.
+			if err := m.tmux.NudgeSession(sessionID, startupNudgeContent); err != nil {
+				_ = m.tmux.KillSessionWithProcesses(sessionID)
+				return fmt.Errorf("delivering startup nudge: %w", err)
+			}
 		}
 	}
 

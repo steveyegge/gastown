@@ -285,8 +285,12 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			Subcommand: "exec",
 			OutputFlag: "--json",
 		},
-		// Runtime defaults
-		PromptMode:        "none",
+		// Why: Codex now supports an initial interactive prompt as a positional
+		// CLI argument, and relying on the fallback nudge path here is what let
+		// sessions boot to Codex's stock starter prompt instead of entering the
+		// GT loop. Starting Codex with the task prompt directly removes that
+		// startup race for the default Gastown path.
+		PromptMode:        "arg",
 		ReadyPromptPrefix: "› ",
 		ReadyDelayMs:      3000,
 		InstructionsFile:  "AGENTS.md",
