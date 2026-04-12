@@ -582,6 +582,10 @@ func sessionBranchIssue(branch string) string {
 	return parseBranchName(branch).Issue
 }
 
+// Fork note: restarts need to recover the active issue from the polecat state,
+// branch metadata, or the agent bead hook. Without this, restarted Codex
+// sessions wake up detached from their work bead and the next lifecycle step
+// loses the task context.
 func recoverSessionIssue(rigName, polecatName string, r *rig.Rig) string {
 	var (
 		polecatIssue  string

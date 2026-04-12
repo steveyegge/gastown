@@ -8,6 +8,9 @@ import (
 )
 
 func TestWispTypeToCategory(t *testing.T) {
+	// Fork note: sentifold keeps this cleanup because upstream main still had
+	// the stale one-arg callsite after wispTypeToCategory grew a title
+	// parameter.
 	tests := []struct {
 		wispType string
 		title    string

@@ -192,6 +192,10 @@ type freshBranchPlan struct {
 	MergeBase  string
 }
 
+// Fork note: restarts were losing issue/base metadata whenever a polecat came
+// back on an integration branch. Treat any known base branch as "needs a fresh
+// work branch" and carry the configured merge base forward so later restarts
+// and merge tooling can recover the original intent.
 func chooseFreshBranchPlan(currentBranch, configuredBaseBranch, rigDefaultBranch, remoteDefaultBranch string, refExists func(string) bool) freshBranchPlan {
 	currentBranch = strings.TrimSpace(currentBranch)
 	if currentBranch == "" || currentBranch == "HEAD" {
@@ -258,6 +262,9 @@ func setBranchMergeBase(workDir, branch, mergeBase string) error {
 		return nil
 	}
 
+	// Fork note: persist the intended base branch onto the fresh polecat branch
+	// so queue/restart recovery can reconstruct the branch plan even after tmux
+	// or in-memory polecat state is gone.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
