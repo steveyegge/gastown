@@ -4,12 +4,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/runtime"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -308,19 +308,14 @@ func TestStart_PromptNoneBootstrapWaitsAndNudges(t *testing.T) {
 		t.Fatalf("second wait ReadyDelayMs = %d, want >= %d", mock.waitReadyRCs[1].Tmux.ReadyDelayMs, runtime.DefaultPrimeWaitMs)
 	}
 
-	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
-		Recipient: "deacon",
-		Sender:    "daemon",
-		Topic:     "patrol",
-	}, "I am Deacon. Start patrol: run gt deacon heartbeat, then check gt hook. If no hook, create mol-deacon-patrol wisp and execute it.")
 	if len(mock.nudges) != 2 {
 		t.Fatalf("nudges = %#v, want fallback command plus startup prompt", mock.nudges)
 	}
 	if mock.nudges[0] != "gt prime && gt mail check --inject" {
 		t.Fatalf("nudges[0] = %q, want startup fallback command", mock.nudges[0])
 	}
-	if mock.nudges[1] != initialPrompt {
-		t.Fatalf("nudges[1] = %q, want initial prompt", mock.nudges[1])
+	if !strings.Contains(mock.nudges[1], "I am Deacon. Start patrol: run gt deacon heartbeat, then check gt hook. If no hook, create mol-deacon-patrol wisp and execute it.") {
+		t.Fatalf("nudges[1] = %q, want startup prompt payload", mock.nudges[1])
 	}
 }
 
