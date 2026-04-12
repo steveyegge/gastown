@@ -1776,11 +1776,11 @@ func TestCleanExcludingRuntime(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "stashes block",
+			name: "stashes ignored (survive worktree deletion)",
 			s: UncommittedWorkStatus{
 				StashCount: 1,
 			},
-			want: false,
+			want: true,
 		},
 		{
 			// Unpushed commits alone do not affect CleanExcludingRuntime — this
