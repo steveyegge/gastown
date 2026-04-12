@@ -220,8 +220,7 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 // directory, which caused rig-prefixed beads to fail (GH#2126).
 func verifyBeadExists(beadID string) error {
 	out, err := BdCmd("show", beadID, "--json", "--allow-stale").
-		Dir(resolveBeadDir(beadID)).
-		StripBeadsDir().
+		RouteForBead(beadID).
 		Stderr(io.Discard).
 		Output()
 	if err != nil {
@@ -237,8 +236,7 @@ func verifyBeadExists(beadID string) error {
 // Resolves the rig directory from the bead's prefix for correct dolt access.
 func getBeadInfo(beadID string) (*beadInfo, error) {
 	out, err := BdCmd("show", beadID, "--json", "--allow-stale").
-		Dir(resolveBeadDir(beadID)).
-		StripBeadsDir().
+		RouteForBead(beadID).
 		Stderr(io.Discard).
 		Output()
 	if err != nil {
@@ -287,8 +285,7 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 	if logPath == "" {
 		// Read the bead once
 		out, err := BdCmd("show", beadID, "--json", "--allow-stale").
-			Dir(resolveBeadDir(beadID)).
-			StripBeadsDir().
+			RouteForBead(beadID).
 			Stderr(io.Discard).
 			Output()
 		if err != nil {
@@ -363,8 +360,7 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 	}
 
 	if err := BdCmd("update", beadID, "--description="+newDesc).
-		Dir(resolveBeadDir(beadID)).
-		StripBeadsDir().
+		RouteForBead(beadID).
 		Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
 	}
