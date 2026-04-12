@@ -253,11 +253,6 @@ func getConfigKeys(townRoot string, r *rig.Rig) []string {
 		}
 	}
 
-	// Rig root config.json keys that are not layered through wisp/beads.
-	if r.DefaultBranch() != "main" {
-		keySet["default_branch"] = true
-	}
-
 	// Sort keys
 	keys := make([]string, 0, len(keySet))
 	for k := range keySet {
