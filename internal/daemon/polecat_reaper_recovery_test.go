@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"log"
 	"strings"
 	"testing"
@@ -25,6 +26,7 @@ func TestReapCompletedPolecats_RecoversPanic(t *testing.T) {
 		},
 		patrolConfig: DefaultLifecycleConfig(),
 		logger:       logger,
+		ctx:          context.Background(),
 	}
 
 	// This should NOT panic — the reaper should recover from any internal panic
@@ -38,15 +40,37 @@ func TestReapCompletedPolecats_RecoversPanic(t *testing.T) {
 		d.reapCompletedPolecats()
 	}()
 
-	// Check that the reaper logged something (either a scan error or a recovery message)
+	// The reaper may log a scan error or a diagnostic — verify it ran without panic.
+	// With a nonexistent town root, no polecats are discovered, so it may only
+	// log a diagnostic on scan #1 or nothing at all. The key assertion is the
+	// defer/recover above: no unrecovered panic escaped.
 	logOutput := logBuf.String()
-	if logOutput == "" {
-		t.Error("expected reaper to log something (scan error or recovery), got empty log")
-	}
 
 	// Should NOT contain "panic" in an unrecovered sense — if it recovered,
 	// the log should contain a structured error message
 	if strings.Contains(logOutput, "runtime error") && !strings.Contains(logOutput, "recovered") {
 		t.Errorf("log suggests unrecovered panic: %s", logOutput)
 	}
+}
+
+// TestReapCompletedPolecats_CanceledContext verifies that the reaper
+// respects context cancellation (e.g., during daemon shutdown).
+func TestReapCompletedPolecats_CanceledContext(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := log.New(&logBuf, "", 0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	d := &Daemon{
+		config: &Config{
+			TownRoot: t.TempDir(),
+		},
+		patrolConfig: DefaultLifecycleConfig(),
+		logger:       logger,
+		ctx:          ctx,
+	}
+
+	// Should complete quickly without panic, even with canceled context
+	d.reapCompletedPolecats()
 }

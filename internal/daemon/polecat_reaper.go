@@ -45,7 +45,18 @@ func polecatReaperInterval(config *DaemonPatrolConfig) time.Duration {
 
 // reapCompletedPolecats is the daemon patrol method that delegates to the
 // deacon's ScanCompletedPolecats. Called on each ticker fire.
+//
+// This method includes panic recovery to prevent a crash in the reaper from
+// killing the entire daemon process. The daemon's main select loop has no
+// recovery wrapper, so an unrecovered panic in any patrol handler terminates
+// the daemon — which is exactly the bug this fixes (sbx-gastown-fa1k).
 func (d *Daemon) reapCompletedPolecats() {
+	defer func() {
+		if r := recover(); r != nil {
+			d.logger.Printf("polecat_reaper: recovered from panic: %v", r)
+		}
+	}()
+
 	if !d.isPatrolActive("polecat_reaper") {
 		return
 	}
@@ -67,7 +78,8 @@ func (d *Daemon) reapCompletedPolecats() {
 		}
 	}
 
-	result, err := deacon.ScanCompletedPolecats(d.config.TownRoot, cfg)
+	// Use the daemon's context so subprocess calls are bounded by daemon lifecycle.
+	result, err := deacon.ScanCompletedPolecatsCtx(d.ctx, d.config.TownRoot, cfg)
 	if err != nil {
 		d.logger.Printf("polecat_reaper: scan error: %v", err)
 		return
