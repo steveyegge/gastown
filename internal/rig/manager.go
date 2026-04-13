@@ -1413,6 +1413,19 @@ func detectBeadsPrefixFromConfig(configPath string) string {
 	return ""
 }
 
+func detectExistingRigBeadsPrefix(rigPath string) string {
+	configCandidates := []string{
+		filepath.Join(rigPath, "mayor", "rig", ".beads", "config.yaml"),
+		filepath.Join(rigPath, ".beads", "config.yaml"),
+	}
+	for _, configPath := range configCandidates {
+		if prefix := detectBeadsPrefixFromConfig(configPath); prefix != "" {
+			return prefix
+		}
+	}
+	return ""
+}
+
 // RemoveRig unregisters a rig (does not delete files).
 func (m *Manager) RemoveRig(name string) error {
 	if !m.RigExists(name) {
@@ -1504,7 +1517,14 @@ func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, erro
 		result.GitURL = opts.GitURL
 	}
 
-	// Derive beads prefix
+	// Prefer the tracked beads prefix when adopting an existing rig so routes,
+	// config, and database finalization all converge on the canonical identity.
+	if detectedPrefix := detectExistingRigBeadsPrefix(rigPath); detectedPrefix != "" {
+		if opts.BeadsPrefix != "" && strings.TrimSuffix(opts.BeadsPrefix, "-") != detectedPrefix {
+			return nil, fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided", detectedPrefix, opts.BeadsPrefix)
+		}
+		result.BeadsPrefix = detectedPrefix
+	}
 	if result.BeadsPrefix == "" && opts.BeadsPrefix == "" {
 		result.BeadsPrefix = deriveBeadsPrefix(opts.Name)
 	}
@@ -1580,6 +1600,23 @@ func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, erro
 		if saveErr := m.saveRigConfig(rigPath, existingConfig); saveErr != nil {
 			// Non-fatal: town.json has the value, but doctor may flag a mismatch
 			fmt.Fprintf(os.Stderr, "Warning: could not update config.json with push URL: %v\n", saveErr)
+		}
+	}
+
+	if existingConfig != nil {
+		needsSave := false
+		if existingConfig.Beads == nil {
+			existingConfig.Beads = &BeadsConfig{}
+			needsSave = true
+		}
+		if existingConfig.Beads.Prefix != result.BeadsPrefix {
+			existingConfig.Beads.Prefix = result.BeadsPrefix
+			needsSave = true
+		}
+		if needsSave {
+			if saveErr := m.saveRigConfig(rigPath, existingConfig); saveErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not update config.json with beads prefix: %v\n", saveErr)
+			}
 		}
 	}
 

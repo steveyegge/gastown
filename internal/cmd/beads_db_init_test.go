@@ -304,9 +304,9 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		}
 	})
 
-	t.Run("TrackedRepoWithNoIssuesFallsBackToDerivedPrefix", func(t *testing.T) {
-		// Test the fallback behavior: when a tracked beads repo has NO issues
-		// and NO --prefix is provided, gt rig add should derive prefix from rig name.
+	t.Run("TrackedRepoWithNoIssuesPreservesTrackedPrefix", func(t *testing.T) {
+		// Even without issues, config.yaml still carries the canonical prefix.
+		// Adopt should preserve that prefix so routes and metadata stay aligned.
 
 		townRoot := filepath.Join(tmpDir, "town-derived")
 
@@ -324,7 +324,7 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		rigDir := filepath.Join(townRoot, "testrig")
 		createTrackedBeadsRepoWithNoIssues(t, rigDir, "original-prefix")
 
-		// Add rig WITHOUT --prefix - should derive from rig name "testrig"
+		// Add rig WITHOUT --prefix - should preserve the tracked prefix.
 		cmd = exec.Command(gtBinary, "rig", "add", "testrig", "--adopt", "--force")
 		cmd.Dir = townRoot
 		cmd.Env = append(os.Environ(), "HOME="+tmpDir)
@@ -333,7 +333,15 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 			t.Fatalf("gt rig add (no --prefix) failed: %v\nOutput: %s", err, output)
 		}
 
-		// Verify bd operations work - the key test is that the database was initialized
+		routesContent, err := os.ReadFile(filepath.Join(townRoot, ".beads", "routes.jsonl"))
+		if err != nil {
+			t.Fatalf("read routes.jsonl: %v", err)
+		}
+		if !strings.Contains(string(routesContent), `"prefix":"original-prefix-"`) {
+			t.Fatalf("routes.jsonl should contain original-prefix-, got:\n%s", routesContent)
+		}
+
+		// Verify bd operations work from the adopted rig using the preserved prefix.
 		cmd = exec.Command("bd", "--json", "-q", "create",
 			"--type", "task", "--title", "test-derived-prefix")
 		cmd.Dir = rigDir
@@ -349,12 +357,9 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 			t.Fatalf("parse output: %v", err)
 		}
 
-		// The ID should have SOME prefix (derived from "testrig")
-		// We don't care exactly what it is, just that bd works
-		if result.ID == "" {
-			t.Error("expected non-empty issue ID")
+		if !strings.HasPrefix(result.ID, "original-prefix-") {
+			t.Fatalf("expected original-prefix- prefix, got %s", result.ID)
 		}
-		t.Logf("Created issue with derived prefix: %s", result.ID)
 	})
 
 	t.Run("MissingMetadataTriggersReInit", func(t *testing.T) {

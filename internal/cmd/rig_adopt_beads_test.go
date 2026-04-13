@@ -3,6 +3,8 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -76,7 +78,7 @@ func TestRigAdoptBeadsCandidateDetection(t *testing.T) {
 // and a prefix is available, the fallback init path is triggered.
 func TestRigAdoptFallbackInitNeeded(t *testing.T) {
 	tests := []struct {
-		name       string
+		name         string
 		hasDotBeads  bool
 		hasPrefix    bool
 		wantFallback bool
@@ -117,5 +119,65 @@ func TestRigAdoptFallbackInitNeeded(t *testing.T) {
 					needsFallback, tt.wantFallback, foundBeadsCandidate, beadsPrefix)
 			}
 		})
+	}
+}
+
+func TestFinalizeBeadsAfterInitUsesBoundEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake bd stub is bash-only")
+	}
+
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "demo")
+	beadsDir := filepath.Join(rigPath, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(`{"backend":"dolt","database":"dolt","dolt_mode":"server","dolt_database":"wrongdb"}`), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+
+	logPath := filepath.Join(t.TempDir(), "bd-env.log")
+	binDir := t.TempDir()
+	bdPath := filepath.Join(binDir, "bd")
+	script := `#!/usr/bin/env bash
+set -e
+printf '%s|%s|%s\n' "${BEADS_DIR:-<unset>}" "${BEADS_DB:-<unset>}" "${BEADS_DOLT_SERVER_DATABASE:-<unset>}" >> "$BD_ENV_LOG"
+exit 0
+`
+	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake bd: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BD_ENV_LOG", logPath)
+	t.Setenv("BEADS_DIR", "/wrong/.beads")
+	t.Setenv("BEADS_DB", "wrong")
+	t.Setenv("BEADS_DOLT_SERVER_DATABASE", "wrongdb")
+
+	finalizeBeadsAfterInit(townRoot, rigPath, "dp", "demo")
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read env log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(logData)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 bd config calls, got %d (%q)", len(lines), string(logData))
+	}
+	for _, line := range lines {
+		parts := strings.Split(line, "|")
+		if len(parts) != 3 {
+			t.Fatalf("unexpected env log line %q", line)
+		}
+		if parts[0] != beadsDir {
+			t.Fatalf("BEADS_DIR = %q, want %q", parts[0], beadsDir)
+		}
+		if parts[1] != "<unset>" {
+			t.Fatalf("BEADS_DB = %q, want <unset>", parts[1])
+		}
+		if parts[2] != "demo" {
+			t.Fatalf("BEADS_DOLT_SERVER_DATABASE = %q, want %q", parts[2], "demo")
+		}
 	}
 }

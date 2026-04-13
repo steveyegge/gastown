@@ -1244,6 +1244,49 @@ func TestRegisterRig_LegacyConfigPreservesExistingPushURL(t *testing.T) {
 	_ = result
 }
 
+func TestRegisterRig_PrefersTrackedBeadsPrefixAndSyncsConfig(t *testing.T) {
+	root, rigsConfig := setupTestTown(t)
+	manager := NewManager(root, rigsConfig, git.NewGit(root))
+
+	rigName := "trackedrig"
+	rigPath := filepath.Join(root, rigName)
+	if err := os.MkdirAll(filepath.Join(rigPath, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rigPath, ".beads", "config.yaml"), []byte("prefix: canonical-prefix\nissue-prefix: canonical-prefix\n"), 0644); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+
+	configData := `{"type":"rig","version":1,"name":"trackedrig","git_url":"","default_branch":"main","beads":{"prefix":"stale-prefix"}}`
+	if err := os.WriteFile(filepath.Join(rigPath, "config.json"), []byte(configData), 0644); err != nil {
+		t.Fatalf("write config.json: %v", err)
+	}
+
+	result, err := manager.RegisterRig(RegisterRigOptions{Name: rigName, Force: true})
+	if err != nil {
+		t.Fatalf("RegisterRig: %v", err)
+	}
+	if result.BeadsPrefix != "canonical-prefix" {
+		t.Fatalf("BeadsPrefix = %q, want %q", result.BeadsPrefix, "canonical-prefix")
+	}
+
+	entry, ok := rigsConfig.Rigs[rigName]
+	if !ok {
+		t.Fatalf("rig entry %q missing from config", rigName)
+	}
+	if entry.BeadsConfig == nil || entry.BeadsConfig.Prefix != "canonical-prefix" {
+		t.Fatalf("rigs config prefix = %#v, want canonical-prefix", entry.BeadsConfig)
+	}
+
+	updatedConfig, err := LoadRigConfig(rigPath)
+	if err != nil {
+		t.Fatalf("LoadRigConfig: %v", err)
+	}
+	if updatedConfig.Beads == nil || updatedConfig.Beads.Prefix != "canonical-prefix" {
+		t.Fatalf("config.json prefix = %#v, want canonical-prefix", updatedConfig.Beads)
+	}
+}
+
 func TestEnsureMetadata_SetsRequiredFields(t *testing.T) {
 	// Verify that EnsureMetadata writes the fields that AddRig depends on:
 	// dolt_mode=server, dolt_database=<rigName>, backend=dolt
