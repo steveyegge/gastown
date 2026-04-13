@@ -1267,22 +1267,13 @@ notifyWitness:
 		fmt.Printf("  Witness will handle cleanup.\n")
 	}
 
-	// Self-terminate AFTER all cleanup is complete (opt-in via config).
-	// When enabled, polecats kill their session after gt done finishes
-	// instead of transitioning to IDLE. This gives fresh context windows
-	// per task, reduces token waste, and eliminates stale state bugs.
+	// Self-terminate AFTER all cleanup is complete.
+	// Polecats always kill their session after gt done finishes.
+	// This gives fresh context windows per task, reduces token waste,
+	// and eliminates stale state bugs where polecats stay at the prompt.
 	// Must be the LAST thing gt done does — everything above must complete first.
 	if isPolecat {
-		daemonCfg := config.LoadOperationalConfig(townRoot).GetDaemonConfig()
-		if daemonCfg.PolecatSelfTerminate != nil && *daemonCfg.PolecatSelfTerminate {
-			fmt.Printf("%s Self-terminating session (polecat_self_terminate=true)\n", style.Bold.Render("✓"))
-			sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
-			go func() {
-				time.Sleep(3 * time.Second)
-				t := tmux.NewTmux()
-				_ = t.KillSessionWithProcesses(sessionName)
-			}()
-		}
+		triggerPolecatSelfTerminate(townRoot, rigName, polecatName)
 	}
 
 	return nil
@@ -1726,6 +1717,30 @@ func selfNukePolecat(roleInfo RoleInfo, _ string) error {
 func isPolecatActor(actor string) bool {
 	parts := strings.Split(actor, "/")
 	return len(parts) >= 2 && parts[1] == "polecats"
+}
+
+// polecatSelfTerminateFn is the function that kills a polecat's tmux session.
+// Replaceable in tests to verify self-terminate is called unconditionally.
+var polecatSelfTerminateFn = defaultPolecatSelfTerminate
+
+// triggerPolecatSelfTerminate fires the self-terminate for a polecat session.
+// Called unconditionally from gt done for polecats — session cleanup is not
+// optional since polecats staying at the Claude prompt waste resources and
+// block the reaper from detecting completion.
+func triggerPolecatSelfTerminate(townRoot, rigName, polecatName string) {
+	polecatSelfTerminateFn(townRoot, rigName, polecatName)
+}
+
+// defaultPolecatSelfTerminate kills the polecat's tmux session after a 3-second
+// grace period to allow gt done output to reach the user/logs.
+func defaultPolecatSelfTerminate(townRoot, rigName, polecatName string) {
+	fmt.Printf("%s Self-terminating session\n", style.Bold.Render("✓"))
+	sessionName := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
+	go func() {
+		time.Sleep(3 * time.Second)
+		t := tmux.NewTmux()
+		_ = t.KillSessionWithProcesses(sessionName)
+	}()
 }
 
 // selfKillSession terminates the polecat's own tmux session after logging the event.

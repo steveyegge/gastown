@@ -619,7 +619,10 @@ func (d *Daemon) Run() (err error) {
 			return d.shutdown(state)
 
 		case sig := <-sigChan:
-			if isLifecycleSignal(sig) {
+			if isNoopSignal(sig) {
+				// SIGHUP: parent session exited. Daemon is independent — ignore.
+				d.logger.Printf("Received %v (parent session exit), ignoring", sig)
+			} else if isLifecycleSignal(sig) {
 				// Lifecycle signal: immediate lifecycle processing (from gt handoff)
 				d.logger.Println("Received lifecycle signal, processing lifecycle requests immediately")
 				d.processLifecycleRequests()
