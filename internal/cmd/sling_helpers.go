@@ -215,15 +215,16 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 }
 
 // verifyBeadExists checks that the bead exists using bd show.
-// Resolves the rig directory from the bead's prefix for correct dolt access.
-// StripBeadsDir prevents inherited BEADS_DIR from overriding the resolved
-// directory, which caused rig-prefixed beads to fail (GH#2126).
+// When BEADS_DIR is set, uses it directly (e.g., town-root beads from a
+// polecat worktree). Otherwise falls back to prefix-based Dir routing,
+// stripping inherited BEADS_DIR to avoid GH#2126.
 func verifyBeadExists(beadID string) error {
-	out, err := BdCmd("show", beadID, "--json", "--allow-stale").
-		Dir(resolveBeadDir(beadID)).
-		StripBeadsDir().
-		Stderr(io.Discard).
-		Output()
+	cmd := BdCmd("show", beadID, "--json", "--allow-stale").
+		Stderr(io.Discard)
+	if os.Getenv("BEADS_DIR") == "" {
+		cmd.Dir(resolveBeadDir(beadID)).StripBeadsDir()
+	}
+	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("bead '%s' not found (bd show failed)", beadID)
 	}
@@ -234,13 +235,16 @@ func verifyBeadExists(beadID string) error {
 }
 
 // getBeadInfo returns status and assignee for a bead.
-// Resolves the rig directory from the bead's prefix for correct dolt access.
+// When BEADS_DIR is set, uses it directly (e.g., town-root beads from a
+// polecat worktree). Otherwise falls back to prefix-based Dir routing,
+// stripping inherited BEADS_DIR to avoid GH#2126.
 func getBeadInfo(beadID string) (*beadInfo, error) {
-	out, err := BdCmd("show", beadID, "--json", "--allow-stale").
-		Dir(resolveBeadDir(beadID)).
-		StripBeadsDir().
-		Stderr(io.Discard).
-		Output()
+	cmd := BdCmd("show", beadID, "--json", "--allow-stale").
+		Stderr(io.Discard)
+	if os.Getenv("BEADS_DIR") == "" {
+		cmd.Dir(resolveBeadDir(beadID)).StripBeadsDir()
+	}
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bead '%s' not found", beadID)
 	}
