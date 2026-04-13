@@ -46,7 +46,7 @@ while IFS='|' read -r RIG PREFIX; do
     if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
       # Session dead — check hook
       HOOK_BEAD=$(gt hook show "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
-        | awk '{print $2}' | grep -v '(empty)' | head -1)
+        | awk '{print $2}' | grep -v '(empty)' | head -1 || true)
 
       if [ -n "$HOOK_BEAD" ]; then
         # Check agent_state
@@ -68,7 +68,7 @@ while IFS='|' read -r RIG PREFIX; do
         if [ -z "$PROC_COMM" ]; then
           # Zombie: process dead, session alive
           HOOK_BEAD=$(gt hook show "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
-            | awk '{print $2}' | grep -v '(empty)' | head -1)
+            | awk '{print $2}' | grep -v '(empty)' | head -1 || true)
           if [ -n "$HOOK_BEAD" ]; then
             STUCK+=("$SESSION_NAME|$RIG|$PCAT_NAME|$HOOK_BEAD|agent_dead")
             log "  ZOMBIE: $SESSION_NAME (pid=$PANE_PID dead, hook=$HOOK_BEAD)"
