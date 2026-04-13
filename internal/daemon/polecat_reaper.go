@@ -98,6 +98,18 @@ func (d *Daemon) reapCompletedPolecats() {
 			scanNum, result.TotalPolecats)
 	}
 
+	// Log decision for each polecat so operators can diagnose classification issues.
+	// This is verbose by design — the original bug was silent skip decisions.
+	for _, dec := range result.Decisions {
+		if dec.Eligible {
+			d.logger.Printf("polecat_reaper: %s/%s: eligible (reason=%s bead=%s bead_status=%s)",
+				dec.Rig, dec.Polecat, dec.Reason, dec.BeadID, dec.BeadStatus)
+		} else {
+			d.logger.Printf("polecat_reaper: %s/%s: skip (reason=%s session=%v agent_alive=%v bead=%s bead_status=%s)",
+				dec.Rig, dec.Polecat, dec.Reason, dec.HasSession, dec.AgentAlive, dec.BeadID, dec.BeadStatus)
+		}
+	}
+
 	// Log details for reaped polecats and errors (including bead query failures).
 	for _, r := range result.Results {
 		if r.Error != "" {
