@@ -588,10 +588,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 		}
 
 		// Track the leg with the convoy
-		if err := BdCmd("dep", "add", convoyID, legBeadID, "--type=tracks").
-			WithAutoCommit().
-			Dir(townBeads).
-			Run(); err != nil {
+		if err := addTrackingRelationFn(townBeads, convoyID, legBeadID); err != nil {
 			fmt.Printf("%s Failed to track leg %s: %v\n",
 				style.Dim.Render("Warning:"), leg.ID, err)
 		}
@@ -630,10 +627,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 				style.Dim.Render("Warning:"), err)
 		} else {
 			// Track synthesis with convoy
-			_ = BdCmd("dep", "add", convoyID, synthesisBeadID, "--type=tracks").
-				WithAutoCommit().
-				Dir(townBeads).
-				Run()
+			_ = addTrackingRelationFn(townBeads, convoyID, synthesisBeadID)
 
 			// Add dependencies: synthesis depends on all legs
 			for _, legBeadID := range legBeads {
@@ -808,10 +802,7 @@ func executeWorkflowFormula(f *formula.Formula, formulaName, targetRig string) e
 		}
 
 		// Track the step with the workflow
-		_ = BdCmd("dep", "add", workflowID, stepBeadID, "--type=tracks").
-			WithAutoCommit().
-			Dir(townBeads).
-			Run()
+		_ = addTrackingRelationFn(townBeads, workflowID, stepBeadID)
 
 		// Wire dependencies: this step depends on its needs
 		for _, needID := range step.Needs {

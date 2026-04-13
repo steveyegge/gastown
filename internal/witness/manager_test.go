@@ -13,7 +13,7 @@ func TestBuildWitnessStartCommand_UsesRoleConfig(t *testing.T) {
 		StartCommand: "exec run --town {town} --rig {rig} --role {role}",
 	}
 
-	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", "", roleCfg)
+	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", "", roleCfg, "")
 	if err != nil {
 		t.Fatalf("buildWitnessStartCommand: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestBuildWitnessStartCommand_UsesRoleConfig(t *testing.T) {
 
 func TestBuildWitnessStartCommand_DefaultsToRuntime(t *testing.T) {
 	t.Parallel()
-	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", "", nil)
+	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("buildWitnessStartCommand: %v", err)
 	}
@@ -68,13 +68,25 @@ func TestRoleConfigEnvVars_NilConfig(t *testing.T) {
 	}
 }
 
+func TestBuildWitnessStartCommand_IncludesConfigDir(t *testing.T) {
+	t.Parallel()
+	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", "", nil, "/home/user/.claude-accounts/work")
+	if err != nil {
+		t.Fatalf("buildWitnessStartCommand: %v", err)
+	}
+
+	if !strings.Contains(got, "CLAUDE_CONFIG_DIR=/home/user/.claude-accounts/work") {
+		t.Errorf("expected CLAUDE_CONFIG_DIR in command, got %q", got)
+	}
+}
+
 func TestBuildWitnessStartCommand_AgentOverrideWins(t *testing.T) {
 	t.Parallel()
 	roleCfg := &beads.RoleConfig{
 		StartCommand: "exec run --role {role}",
 	}
 
-	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", "codex", roleCfg)
+	got, err := buildWitnessStartCommand("/town/rig", "gastown", "/town", "", "codex", roleCfg, "")
 	if err != nil {
 		t.Fatalf("buildWitnessStartCommand: %v", err)
 	}

@@ -45,9 +45,9 @@ func init() {
 
 // StageResult is the top-level JSON output for gt convoy stage --json.
 type StageResult struct {
-	Status           string          `json:"status"`              // "staged_ready", "staged_warnings", or "error"
-	ConvoyID         string          `json:"convoy_id"`           // empty if errors prevented creation
-	Restaged         bool            `json:"restaged"`            // true if an existing convoy was updated in place
+	Status           string          `json:"status"`                       // "staged_ready", "staged_warnings", or "error"
+	ConvoyID         string          `json:"convoy_id"`                    // empty if errors prevented creation
+	Restaged         bool            `json:"restaged"`                     // true if an existing convoy was updated in place
 	ValidationBeadID string          `json:"validation_bead_id,omitempty"` // capstone validation bead (epic input only)
 	Errors           []FindingJSON   `json:"errors"`
 	Warnings         []FindingJSON   `json:"warnings"`
@@ -733,15 +733,9 @@ func createStagedConvoy(dag *ConvoyDAG, waves []Wave, status string, title strin
 	}
 
 	// Track each slingable bead via bd dep add.
-	// Cross-rig tracking may fail because bd validates both IDs exist in the
-	// same database (beads v0.62 removed cross-rig routing). Non-fatal: the
-	// convoy still works without tracking deps.
 	for _, beadID := range slingableIDs {
-		if out, err := BdCmd("dep", "add", convoyID, beadID, "--type=tracks").
-			Dir(townBeads).WithAutoCommit().StripBeadsDir().
-			CombinedOutput(); err != nil {
+		if err := addTrackingRelationFn(townBeads, convoyID, beadID); err != nil {
 			fmt.Printf("  Warning: could not track %s in convoy: %v\n", beadID, err)
-			_ = out
 		}
 	}
 
@@ -774,14 +768,10 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 	}
 
 	// Add new beads not currently tracked.
-	// Cross-rig tracking may fail (bd validates both IDs in same DB). Non-fatal.
 	for _, id := range desiredIDs {
 		if !currentIDs[id] {
-			if out, err := BdCmd("dep", "add", existingConvoyID, id, "--type=tracks").
-				Dir(townBeads).WithAutoCommit().StripBeadsDir().
-				CombinedOutput(); err != nil {
+			if err := addTrackingRelationFn(townBeads, existingConvoyID, id); err != nil {
 				fmt.Printf("  Warning: could not track %s in convoy: %v\n", id, err)
-				_ = out
 			}
 		}
 	}
@@ -789,11 +779,8 @@ func updateStagedConvoy(existingConvoyID string, dag *ConvoyDAG, waves []Wave, s
 	// Remove stale beads no longer in the DAG.
 	for id := range currentIDs {
 		if !desiredSet[id] {
-			if out, err := BdCmd("dep", "remove", existingConvoyID, id, "--type=tracks").
-				Dir(townBeads).WithAutoCommit().StripBeadsDir().
-				CombinedOutput(); err != nil {
+			if err := removeTrackingRelationFn(townBeads, existingConvoyID, id); err != nil {
 				fmt.Printf("  Warning: could not untrack %s from convoy: %v\n", id, err)
-				_ = out
 			}
 		}
 	}

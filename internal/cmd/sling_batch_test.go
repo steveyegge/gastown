@@ -859,7 +859,8 @@ func setupTownWithBdStub(t *testing.T, bdScript string) (townRoot, logPath strin
 }
 
 // TestCreateAutoConvoy_BasicSuccess verifies that createAutoConvoy creates a
-// convoy with "Work: <title>" title, adds a tracking dep, and returns hq-cv-* ID.
+// convoy with "Work: <title>" title, delegates tracking to the helper, and
+// returns an hq-cv-* ID.
 func TestCreateAutoConvoy_BasicSuccess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows")
@@ -877,6 +878,16 @@ exit 0
 	if err := os.WriteFile(filepath.Join(townRoot, "bin", "bd"), []byte(bdScript), 0755); err != nil {
 		t.Fatalf("rewrite bd stub: %v", err)
 	}
+
+	var helperTownRoot, helperConvoyID, helperBeadID string
+	oldAddTracking := addTrackingRelationFn
+	addTrackingRelationFn = func(townRoot, convoyID, issueID string) error {
+		helperTownRoot = townRoot
+		helperConvoyID = convoyID
+		helperBeadID = issueID
+		return nil
+	}
+	t.Cleanup(func() { addTrackingRelationFn = oldAddTracking })
 
 	convoyID, err := createAutoConvoy("gt-aaa", "Fix the widget", false, "mr", "")
 	if err != nil {
@@ -898,12 +909,14 @@ exit 0
 		t.Errorf("create should include 'Work: Fix the widget' in args:\n%s", logContent)
 	}
 
-	// Verify dep add was called
-	if !strings.Contains(logContent, "dep add") {
-		t.Errorf("expected dep add command in log:\n%s", logContent)
+	if helperTownRoot != townRoot {
+		t.Errorf("tracking helper townRoot = %q, want %q", helperTownRoot, townRoot)
 	}
-	if !strings.Contains(logContent, "gt-aaa") {
-		t.Errorf("dep add should reference gt-aaa:\n%s", logContent)
+	if helperConvoyID != convoyID {
+		t.Errorf("tracking helper convoyID = %q, want %q", helperConvoyID, convoyID)
+	}
+	if helperBeadID != "gt-aaa" {
+		t.Errorf("tracking helper issueID = %q, want %q", helperBeadID, "gt-aaa")
 	}
 }
 

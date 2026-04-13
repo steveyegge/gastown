@@ -177,6 +177,24 @@ func TestFindTownRoot(t *testing.T) {
 		{"nested rig dir prefers outermost", rigDir, tmpDir},
 	}
 
+	// Add nested town test case: inner town inside outer town
+	innerTown := filepath.Join(tmpDir, "imported", "gastown")
+	if err := os.MkdirAll(filepath.Join(innerTown, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(innerTown, "mayor", "town.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	innerDeepDir := filepath.Join(innerTown, "crew", "worker2")
+	if err := os.MkdirAll(innerDeepDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	tests = append(tests, struct {
+		name     string
+		startDir string
+		expected string
+	}{"prefers outermost town root", innerDeepDir, tmpDir})
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			result := FindTownRoot(tc.startDir)
