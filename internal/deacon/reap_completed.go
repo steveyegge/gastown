@@ -65,13 +65,28 @@ type ReapResult struct {
 	Error           string `json:"error,omitempty"`
 }
 
+// ReapDecision captures the reaper's decision for a single polecat.
+// Every scanned polecat gets exactly one decision entry, regardless of outcome.
+// This provides the visibility needed to diagnose why polecats are or aren't reaped.
+type ReapDecision struct {
+	Rig        string `json:"rig"`
+	Polecat    string `json:"polecat"`
+	Eligible   bool   `json:"eligible"`
+	Reason     string `json:"reason"`      // no_session, agent_alive, bead_open, bead_query_error, bead_closed, no_bead
+	HasSession bool   `json:"has_session"`
+	AgentAlive bool   `json:"agent_alive,omitempty"`
+	BeadID     string `json:"bead_id,omitempty"`
+	BeadStatus string `json:"bead_status,omitempty"`
+}
+
 // ReapScanResult contains the full results of a completed polecat scan.
 type ReapScanResult struct {
-	ScannedAt     time.Time     `json:"scanned_at"`
-	TotalPolecats int           `json:"total_polecats"`
-	Completed     int           `json:"completed"`
-	Reaped        int           `json:"reaped"`
-	Results       []*ReapResult `json:"results"`
+	ScannedAt     time.Time       `json:"scanned_at"`
+	TotalPolecats int             `json:"total_polecats"`
+	Completed     int             `json:"completed"`
+	Reaped        int             `json:"reaped"`
+	Results       []*ReapResult   `json:"results"`
+	Decisions     []*ReapDecision `json:"decisions"`
 }
 
 // polecatDir holds information about a discovered polecat directory.
@@ -105,6 +120,7 @@ func ScanCompletedPolecatsCtx(ctx context.Context, townRoot string, cfg *ReapCon
 	result := &ReapScanResult{
 		ScannedAt: time.Now().UTC(),
 		Results:   make([]*ReapResult, 0),
+		Decisions: make([]*ReapDecision, 0),
 	}
 
 	// Discover all polecat directories across rigs
@@ -127,11 +143,21 @@ func ScanCompletedPolecatsCtx(ctx context.Context, townRoot string, cfg *ReapCon
 		if !alive {
 			// No session — nothing to reap. Worktree-only cleanup is out of scope
 			// (that's polecat nuke territory).
+			result.Decisions = append(result.Decisions, &ReapDecision{
+				Rig: dir.Rig, Polecat: dir.Polecat,
+				Reason: "no_session",
+			})
 			continue
 		}
 
 		// 2. Check if agent is still running (not just a shell)
-		if t.IsAgentAlive(sessionName) {
+		agentAlive := t.IsAgentAlive(sessionName)
+		if agentAlive {
+			result.Decisions = append(result.Decisions, &ReapDecision{
+				Rig: dir.Rig, Polecat: dir.Polecat,
+				HasSession: true, AgentAlive: true,
+				Reason: "agent_alive",
+			})
 			continue // Agent actively working — don't reap
 		}
 
@@ -141,6 +167,11 @@ func ScanCompletedPolecatsCtx(ctx context.Context, townRoot string, cfg *ReapCon
 			// Can't determine bead status — don't reap (could be a transient failure).
 			// Previously this silently returned ("","") which treated bd failures as
 			// "no bead" and incorrectly made the polecat eligible for reaping.
+			result.Decisions = append(result.Decisions, &ReapDecision{
+				Rig: dir.Rig, Polecat: dir.Polecat,
+				HasSession: true,
+				Reason: "bead_query_error",
+			})
 			result.Results = append(result.Results, &ReapResult{
 				Rig:     dir.Rig,
 				Polecat: dir.Polecat,
@@ -149,10 +180,25 @@ func ScanCompletedPolecatsCtx(ctx context.Context, townRoot string, cfg *ReapCon
 			continue
 		}
 		if beadID != "" && !isClosedStatus(beadStatus) {
+			result.Decisions = append(result.Decisions, &ReapDecision{
+				Rig: dir.Rig, Polecat: dir.Polecat,
+				HasSession: true, BeadID: beadID, BeadStatus: beadStatus,
+				Reason: "bead_open",
+			})
 			continue // Bead still open — work not done
 		}
 
 		// Polecat is completed: session exists, agent not running, bead closed or absent
+		decisionReason := "no_bead"
+		if beadID != "" {
+			decisionReason = "bead_closed"
+		}
+		result.Decisions = append(result.Decisions, &ReapDecision{
+			Rig: dir.Rig, Polecat: dir.Polecat,
+			Eligible: true, HasSession: true,
+			BeadID: beadID, BeadStatus: beadStatus,
+			Reason: decisionReason,
+		})
 		result.Completed++
 
 		reapResult := &ReapResult{
