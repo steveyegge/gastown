@@ -102,7 +102,10 @@ func TestGetBeadInfo_DerivesBeadsDirFromTownRoot(t *testing.T) {
 	beads.ResetBdAllowStaleCacheForTest()
 	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
 
-	townRoot := t.TempDir()
+	townRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("eval symlinks: %v", err)
+	}
 
 	// Create workspace structure (mayor/town.json is the primary marker)
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
@@ -196,7 +199,10 @@ func TestVerifyBeadExists_DerivesBeadsDirFromTownRoot(t *testing.T) {
 	beads.ResetBdAllowStaleCacheForTest()
 	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
 
-	townRoot := t.TempDir()
+	townRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("eval symlinks: %v", err)
+	}
 
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
 		t.Fatalf("mkdir mayor: %v", err)

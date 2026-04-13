@@ -214,11 +214,28 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 	return nil
 }
 
+// ensureBeadsDir derives BEADS_DIR from the town root when not explicitly set.
+// This makes gt self-contained — no external env config needed for bd calls.
+func ensureBeadsDir() {
+	if os.Getenv("BEADS_DIR") != "" {
+		return
+	}
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil || townRoot == "" {
+		return
+	}
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if info, err := os.Stat(beadsDir); err == nil && info.IsDir() {
+		os.Setenv("BEADS_DIR", beadsDir)
+	}
+}
+
 // verifyBeadExists checks that the bead exists using bd show.
-// When BEADS_DIR is set, uses it directly (e.g., town-root beads from a
-// polecat worktree). Otherwise falls back to prefix-based Dir routing,
-// stripping inherited BEADS_DIR to avoid GH#2126.
+// When BEADS_DIR is set (or auto-derived from town root), uses it directly.
+// Otherwise falls back to prefix-based Dir routing, stripping inherited
+// BEADS_DIR to avoid GH#2126.
 func verifyBeadExists(beadID string) error {
+	ensureBeadsDir()
 	cmd := BdCmd("show", beadID, "--json", "--allow-stale").
 		Stderr(io.Discard)
 	if os.Getenv("BEADS_DIR") == "" {
@@ -235,10 +252,11 @@ func verifyBeadExists(beadID string) error {
 }
 
 // getBeadInfo returns status and assignee for a bead.
-// When BEADS_DIR is set, uses it directly (e.g., town-root beads from a
-// polecat worktree). Otherwise falls back to prefix-based Dir routing,
-// stripping inherited BEADS_DIR to avoid GH#2126.
+// When BEADS_DIR is set (or auto-derived from town root), uses it directly.
+// Otherwise falls back to prefix-based Dir routing, stripping inherited
+// BEADS_DIR to avoid GH#2126.
 func getBeadInfo(beadID string) (*beadInfo, error) {
+	ensureBeadsDir()
 	cmd := BdCmd("show", beadID, "--json", "--allow-stale").
 		Stderr(io.Discard)
 	if os.Getenv("BEADS_DIR") == "" {
