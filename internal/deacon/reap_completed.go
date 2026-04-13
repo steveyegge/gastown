@@ -205,7 +205,16 @@ func listPolecatDirs(townRoot string) []polecatDir {
 	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		// Use os.Stat (not entry.IsDir) to follow symlinks. In production,
+		// rig directories at the town root are symlinks — entry.IsDir()
+		// returns false for symlinks, which caused the reaper to skip all rigs.
+		entryPath := filepath.Join(townRoot, entry.Name())
+		info, err := os.Stat(entryPath)
+		if err != nil || !info.IsDir() {
 			continue
 		}
 
