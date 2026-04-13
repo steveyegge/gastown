@@ -14,6 +14,20 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 )
 
+// bdStubPreamble strips --db <path> from the argument list so that bd stubs
+// written before the --db flag migration continue to work. This is injected
+// automatically by writeBDStub into every Unix stub script.
+const bdStubPreamble = `# Auto-injected: strip --db <path> global flag
+_bd_args=""
+_bd_skip_next=false
+for _bd_arg in "$@"; do
+  if $_bd_skip_next; then _bd_skip_next=false; continue; fi
+  case "$_bd_arg" in --db) _bd_skip_next=true; continue ;; esac
+  _bd_args="$_bd_args $_bd_arg"
+done
+set -- $_bd_args
+`
+
 func writeBDStub(t *testing.T, binDir string, unixScript string, windowsScript string) string {
 	t.Helper()
 
@@ -26,8 +40,14 @@ func writeBDStub(t *testing.T, binDir string, unixScript string, windowsScript s
 		return path
 	}
 
+	// Inject preamble after shebang line to strip --db flag from args.
+	injected := unixScript
+	if strings.HasPrefix(unixScript, "#!/bin/sh\n") {
+		injected = "#!/bin/sh\n" + bdStubPreamble + strings.TrimPrefix(unixScript, "#!/bin/sh\n")
+	}
+
 	path = filepath.Join(binDir, "bd")
-	if err := os.WriteFile(path, []byte(unixScript), 0755); err != nil {
+	if err := os.WriteFile(path, []byte(injected), 0755); err != nil {
 		t.Fatalf("write bd stub: %v", err)
 	}
 	return path

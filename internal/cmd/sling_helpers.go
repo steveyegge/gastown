@@ -214,33 +214,32 @@ func burnExistingMolecules(molecules []string, beadID, townRoot string) error {
 	return nil
 }
 
-// ensureBeadsDir derives BEADS_DIR from the town root when not explicitly set.
-// This makes gt self-contained — no external env config needed for bd calls.
-func ensureBeadsDir() {
-	if os.Getenv("BEADS_DIR") != "" {
-		return
-	}
+// resolveBeadsDirPath returns the .beads directory path for a given bead ID.
+// Uses prefix-based routing via routes.jsonl to resolve the correct database.
+// Returns empty string if the town root or beads dir cannot be found.
+func resolveBeadsDirPath(beadID string) string {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil || townRoot == "" {
-		return
+		return ""
 	}
-	beadsDir := filepath.Join(townRoot, ".beads")
-	if info, err := os.Stat(beadsDir); err == nil && info.IsDir() {
-		os.Setenv("BEADS_DIR", beadsDir)
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if info, err := os.Stat(townBeadsDir); err != nil || !info.IsDir() {
+		return ""
 	}
+	return beads.ResolveBeadsDirForID(townBeadsDir, beadID)
 }
 
 // verifyBeadExists checks that the bead exists using bd show.
-// When BEADS_DIR is set (or auto-derived from town root), uses it directly.
-// Otherwise falls back to prefix-based Dir routing, stripping inherited
-// BEADS_DIR to avoid GH#2126.
+// Uses --db flag to target the correct database per-command without
+// polluting the process environment (which breaks gt's redirect mechanism).
 func verifyBeadExists(beadID string) error {
-	ensureBeadsDir()
-	cmd := BdCmd("show", beadID, "--json", "--allow-stale").
-		Stderr(io.Discard)
-	if os.Getenv("BEADS_DIR") == "" {
-		cmd.Dir(resolveBeadDir(beadID)).StripBeadsDir()
+	args := []string{"show", beadID, "--json", "--allow-stale"}
+	if dbPath := resolveBeadsDirPath(beadID); dbPath != "" {
+		args = append([]string{"--db", dbPath}, args...)
 	}
+	cmd := BdCmd(args...).
+		StripBeadsDir().
+		Stderr(io.Discard)
 	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("bead '%s' not found (bd show failed)", beadID)
@@ -252,16 +251,16 @@ func verifyBeadExists(beadID string) error {
 }
 
 // getBeadInfo returns status and assignee for a bead.
-// When BEADS_DIR is set (or auto-derived from town root), uses it directly.
-// Otherwise falls back to prefix-based Dir routing, stripping inherited
-// BEADS_DIR to avoid GH#2126.
+// Uses --db flag to target the correct database per-command without
+// polluting the process environment (which breaks gt's redirect mechanism).
 func getBeadInfo(beadID string) (*beadInfo, error) {
-	ensureBeadsDir()
-	cmd := BdCmd("show", beadID, "--json", "--allow-stale").
-		Stderr(io.Discard)
-	if os.Getenv("BEADS_DIR") == "" {
-		cmd.Dir(resolveBeadDir(beadID)).StripBeadsDir()
+	args := []string{"show", beadID, "--json", "--allow-stale"}
+	if dbPath := resolveBeadsDirPath(beadID); dbPath != "" {
+		args = append([]string{"--db", dbPath}, args...)
 	}
+	cmd := BdCmd(args...).
+		StripBeadsDir().
+		Stderr(io.Discard)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bead '%s' not found", beadID)
