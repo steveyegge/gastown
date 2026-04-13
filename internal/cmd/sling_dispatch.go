@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -38,6 +42,8 @@ type SlingParams struct {
 	Mode       string   // --ralph: "" (normal) or "ralph"
 	ReviewOnly bool     // --review-only: review and report back only, no merge/commit/push
 
+	SwarmConfig *SwarmConfig `json:"swarm_config,omitempty"`
+
 	// Execution behavior (set by caller, not serialized to queue)
 	SkipCook         bool   // Batch optimization: formula already cooked
 	FormulaFailFatal bool   // true=rollback+error (single/queue), false=hook raw bead (batch)
@@ -55,6 +61,28 @@ type SlingResult struct {
 	ErrMsg           string
 	AttachedMolecule string
 }
+
+// SwarmConfig opts a sling invocation into multi-agent consensus via nostown.
+// When nil, executeSling behaves as today. When set, execution is delegated
+// to the nostown binary via subprocess JSON protocol.
+type SwarmConfig struct {
+	N           int     `json:"n"`                      // number of parallel agents (min 3, odd)
+	Strategy    string  `json:"strategy"`               // "majority", "unanimous", "first_quorum"
+	QuorumRatio float64 `json:"quorum_ratio,omitempty"` // fraction for first_quorum, default 0.6
+}
+
+// NonInteractiveConfig holds flags for headless agent invocations (swarm, doctor probe).
+type NonInteractiveConfig struct {
+	OutputFormat string `json:"output_format,omitempty"` // e.g. "json"
+	NoColor      bool   `json:"no_color,omitempty"`
+	MaxTurns     int    `json:"max_turns,omitempty"`
+}
+
+// groqJSONEnforcement is appended to prompts for groq-compound non-interactive
+// invocations to enforce JSON-only output from the compound model.
+const groqJSONEnforcement = "\n\n---\nRESPONSE FORMAT: Respond ONLY with a single " +
+	"valid JSON object. No text, markdown, or code fences outside the JSON. " +
+	"If unable to comply, return: {\"error\": \"<reason>\"}"
 
 // executeSling performs the unified per-bead polecat/rig dispatch.
 // Batch sling and queue dispatch call this function. The single-sling path
@@ -84,6 +112,13 @@ type SlingResult struct {
 //  11. Create Dolt branch
 //  12. Start polecat session
 func executeSling(params SlingParams) (*SlingResult, error) {
+	if params.SwarmConfig != nil {
+		if result, err := trySwarmDelegate(params); result != nil || err != nil {
+			return result, err
+		}
+		fmt.Fprintf(os.Stderr, "warning: SwarmConfig set but nostown binary not found; running single-agent\n")
+	}
+
 	townRoot := params.TownRoot
 	if townRoot == "" {
 		var err error
@@ -379,6 +414,29 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 
 	result.Success = true
 	return result, nil
+}
+
+// trySwarmDelegate calls the nostown binary if available.
+// Returns (nil, nil) if nostown is not installed — caller falls through to single-agent.
+func trySwarmDelegate(params SlingParams) (*SlingResult, error) {
+	if _, err := exec.LookPath("nostown"); err != nil {
+		return nil, nil
+	}
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return nil, fmt.Errorf("swarm: marshaling params: %w", err)
+	}
+	cmd := exec.Command("nostown", "swarm", "--stdin-params")
+	cmd.Stdin = bytes.NewReader(paramsJSON)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("swarm: nostown failed: %w", err)
+	}
+	var result SlingResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		return nil, fmt.Errorf("swarm: parsing nostown output: %w", err)
+	}
+	return &result, nil
 }
 
 // findTownRoot is defined in hook.go
