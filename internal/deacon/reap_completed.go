@@ -3,6 +3,7 @@ package deacon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,6 +18,13 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
+)
+
+const (
+	// beadStatusTimeout is the maximum time to wait for a bd subprocess call.
+	// If bd hangs (e.g., waiting for a Dolt lock), this prevents the daemon's
+	// main goroutine from blocking forever and halting all event processing.
+	beadStatusTimeout = 30 * time.Second
 )
 
 // Default parameters for completed polecat reaping.
@@ -75,6 +83,13 @@ type polecatDir struct {
 
 // ScanCompletedPolecats finds polecats that have completed work (bead closed,
 // session idle) and reaps them: kills tmux session, removes worktree, logs event.
+// Uses a background context with default timeout for subprocess calls.
+func ScanCompletedPolecats(townRoot string, cfg *ReapConfig) (*ReapScanResult, error) {
+	return ScanCompletedPolecatsCtx(context.Background(), townRoot, cfg)
+}
+
+// ScanCompletedPolecatsCtx is the context-aware variant of ScanCompletedPolecats.
+// The context is used for subprocess timeouts (bd queries, git operations).
 //
 // A polecat is considered completed when:
 //  1. A tmux session exists for the polecat
@@ -82,7 +97,7 @@ type polecatDir struct {
 //  3. The agent process is not running (session is idle)
 //
 // This is the counterpart to gt sling --create: sling creates, deacon reaps.
-func ScanCompletedPolecats(townRoot string, cfg *ReapConfig) (*ReapScanResult, error) {
+func ScanCompletedPolecatsCtx(ctx context.Context, townRoot string, cfg *ReapConfig) (*ReapScanResult, error) {
 	if cfg == nil {
 		cfg = DefaultReapConfig()
 	}
@@ -99,6 +114,11 @@ func ScanCompletedPolecats(townRoot string, cfg *ReapConfig) (*ReapScanResult, e
 	t := tmux.NewTmux()
 
 	for _, dir := range dirs {
+		// Check context before each polecat to bail early on shutdown/timeout
+		if ctx.Err() != nil {
+			return result, ctx.Err()
+		}
+
 		prefix := session.PrefixFor(dir.Rig)
 		sessionName := session.PolecatSessionName(prefix, dir.Polecat)
 
@@ -116,7 +136,7 @@ func ScanCompletedPolecats(townRoot string, cfg *ReapConfig) (*ReapScanResult, e
 		}
 
 		// 3. Check bead status — is the work done?
-		beadID, beadStatus, beadErr := getPolecatBeadStatus(townRoot, dir.Rig, dir.Polecat)
+		beadID, beadStatus, beadErr := getPolecatBeadStatusCtx(ctx, townRoot, dir.Rig, dir.Polecat)
 		if beadErr != nil {
 			// Can't determine bead status — don't reap (could be a transient failure).
 			// Previously this silently returned ("","") which treated bd failures as
@@ -266,12 +286,22 @@ func polecatWorktreePath(townRoot, rigName, polecatName string) string {
 }
 
 // getPolecatBeadStatus queries the agent bead for a polecat to get its hook bead status.
+// Uses a default timeout to prevent blocking the daemon indefinitely.
+func getPolecatBeadStatus(townRoot, rigName, polecatName string) (string, string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), beadStatusTimeout)
+	defer cancel()
+	return getPolecatBeadStatusCtx(ctx, townRoot, rigName, polecatName)
+}
+
+// getPolecatBeadStatusCtx queries the agent bead for a polecat to get its hook bead status.
 // Returns (beadID, status, err) where beadID is the hooked bead and status is its current state.
 // Returns ("", "", nil) if no bead is assigned. Returns non-nil error if the query itself failed.
-func getPolecatBeadStatus(townRoot, rigName, polecatName string) (string, string, error) {
+// The context controls the subprocess timeout — if bd hangs (e.g., waiting for a Dolt lock),
+// the context deadline prevents the caller from blocking forever.
+func getPolecatBeadStatusCtx(ctx context.Context, townRoot, rigName, polecatName string) (string, string, error) {
 	// Query bd for the agent bead's hook_bead field
 	assignee := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
-	cmd := exec.Command("bd", "list", "--assignee="+assignee, "--json", "--flat", "--limit=1")
+	cmd := exec.CommandContext(ctx, "bd", "list", "--assignee="+assignee, "--json", "--flat", "--limit=1")
 	cmd.Dir = townRoot
 	// Set BEADS_DIR explicitly so bd finds the correct database regardless of
 	// the daemon's inherited environment. Matches pattern in plugin/recording.go.
