@@ -268,7 +268,7 @@ func runSlingFormula(ctx context.Context, args []string) error {
 	// Dog sessions need a nudge sent to their session (not to the bare pane ID
 	// from StartDelayedSession, which is ambiguous on platforms where tmux pane
 	// IDs are not globally unique). Use NudgeSession which qualifies the target
-	// with the session name. (gt-ect)
+	// with the session name. (gt-etc)
 	if delayedDogInfo != nil {
 		dogSession := fmt.Sprintf("hq-dog-%s", delayedDogInfo.DogName)
 		if err := t.NudgeSession(dogSession, prompt); err != nil {
