@@ -106,6 +106,87 @@ esac
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
+func setupCanonicalBranchManagerTest(t *testing.T) (*Manager, string) {
+	t.Helper()
+	installMockBd(t)
+
+	root := t.TempDir()
+	mayorRig := filepath.Join(root, "mayor", "rig")
+	if err := os.MkdirAll(mayorRig, 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	rigBeads := filepath.Join(root, ".beads")
+	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		t.Fatalf("mkdir rig .beads: %v", err)
+	}
+	mayorBeads := filepath.Join(mayorRig, ".beads")
+	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig/.beads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rigBeads, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
+		t.Fatalf("write rig redirect: %v", err)
+	}
+
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+
+	readmePath := filepath.Join(mayorRig, "README.md")
+	if err := os.WriteFile(readmePath, []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write README.md: %v", err)
+	}
+	mayorGit := git.NewGit(mayorRig)
+	if err := mayorGit.Add("README.md"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := mayorGit.Commit("Initial commit"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	cmd = exec.Command("git", "remote", "add", "origin", mayorRig)
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "update-ref", "refs/remotes/origin/main", "HEAD")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git update-ref: %v\n%s", err, out)
+	}
+
+	r := &rig.Rig{Name: "rig", Path: root}
+	return NewManager(r, git.NewGit(root), nil), mayorRig
+}
+
+func createStalePolecatCommit(t *testing.T, repoPath, startPoint, branchName string) string {
+	t.Helper()
+
+	repoGit := git.NewGit(repoPath)
+	if err := repoGit.CheckoutNewBranch(branchName, startPoint); err != nil {
+		t.Fatalf("checkout stale branch %s from %s: %v", branchName, startPoint, err)
+	}
+
+	fileName := strings.NewReplacer("/", "-", "@", "-").Replace(branchName) + ".txt"
+	if err := os.WriteFile(filepath.Join(repoPath, fileName), []byte(branchName+"\n"), 0644); err != nil {
+		t.Fatalf("write stale branch marker: %v", err)
+	}
+	if err := repoGit.Add(fileName); err != nil {
+		t.Fatalf("git add stale branch marker: %v", err)
+	}
+	if err := repoGit.Commit("Create stale polecat branch"); err != nil {
+		t.Fatalf("git commit stale branch marker: %v", err)
+	}
+
+	sha, err := repoGit.Rev("HEAD")
+	if err != nil {
+		t.Fatalf("resolve stale branch commit: %v", err)
+	}
+	return sha
+}
+
 func TestStateIsWorking(t *testing.T) {
 	tests := []struct {
 		state   State
@@ -982,6 +1063,78 @@ func TestAddWithOptions_NoPrimeMDCreatedLocally(t *testing.T) {
 	mayorPrimeMD := filepath.Join(mayorBeads, "PRIME.md")
 	if _, err := os.Stat(mayorPrimeMD); os.IsNotExist(err) {
 		t.Errorf("PRIME.md should exist at mayor/rig/.beads/: %s", mayorPrimeMD)
+	}
+}
+
+func TestAddWithOptions_UsesCanonicalOriginDefaultBranch(t *testing.T) {
+	mgr, mayorRig := setupCanonicalBranchManagerTest(t)
+
+	mayorGit := git.NewGit(mayorRig)
+	baseSHA, err := mayorGit.Rev("origin/main")
+	if err != nil {
+		t.Fatalf("resolve origin/main: %v", err)
+	}
+	staleSHA := createStalePolecatCommit(t, mayorRig, "main", "polecat/stale-source")
+
+	polecat, err := mgr.AddWithOptions("toast", AddOptions{})
+	if err != nil {
+		t.Fatalf("AddWithOptions: %v", err)
+	}
+
+	worktreeGit := git.NewGit(polecat.ClonePath)
+	staleAncestor, err := worktreeGit.IsAncestor(staleSHA, polecat.Branch)
+	if err != nil {
+		t.Fatalf("check stale ancestry: %v", err)
+	}
+	if staleAncestor {
+		t.Fatalf("new polecat branch %q unexpectedly includes stale local commit %s", polecat.Branch, staleSHA)
+	}
+
+	baseAncestor, err := worktreeGit.IsAncestor(baseSHA, polecat.Branch)
+	if err != nil {
+		t.Fatalf("check canonical ancestry: %v", err)
+	}
+	if !baseAncestor {
+		t.Fatalf("new polecat branch %q should descend from origin/main commit %s", polecat.Branch, baseSHA)
+	}
+}
+
+func TestReuseIdlePolecat_UsesCanonicalOriginDefaultBranch(t *testing.T) {
+	mgr, mayorRig := setupCanonicalBranchManagerTest(t)
+
+	mayorGit := git.NewGit(mayorRig)
+	baseSHA, err := mayorGit.Rev("origin/main")
+	if err != nil {
+		t.Fatalf("resolve origin/main: %v", err)
+	}
+
+	polecat, err := mgr.AddWithOptions("toast", AddOptions{})
+	if err != nil {
+		t.Fatalf("AddWithOptions: %v", err)
+	}
+
+	staleSHA := createStalePolecatCommit(t, polecat.ClonePath, "HEAD", "polecat/toast-stale")
+
+	reused, err := mgr.ReuseIdlePolecat("toast", AddOptions{HookBead: "gt-next"})
+	if err != nil {
+		t.Fatalf("ReuseIdlePolecat: %v", err)
+	}
+
+	worktreeGit := git.NewGit(reused.ClonePath)
+	staleAncestor, err := worktreeGit.IsAncestor(staleSHA, reused.Branch)
+	if err != nil {
+		t.Fatalf("check stale ancestry: %v", err)
+	}
+	if staleAncestor {
+		t.Fatalf("reused polecat branch %q unexpectedly includes stale local commit %s", reused.Branch, staleSHA)
+	}
+
+	baseAncestor, err := worktreeGit.IsAncestor(baseSHA, reused.Branch)
+	if err != nil {
+		t.Fatalf("check canonical ancestry: %v", err)
+	}
+	if !baseAncestor {
+		t.Fatalf("reused polecat branch %q should descend from origin/main commit %s", reused.Branch, baseSHA)
 	}
 }
 

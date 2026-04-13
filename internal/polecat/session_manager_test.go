@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	gtruntime "github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -41,6 +42,41 @@ func requireTmux(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not installed")
 	}
+}
+
+func setupSessionBranchTestRepo(t *testing.T) (string, *git.Git) {
+	t.Helper()
+
+	workDir := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = workDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+
+	repoGit := git.NewGit(workDir)
+	if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write README.md: %v", err)
+	}
+	if err := repoGit.Add("README.md"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := repoGit.Commit("Initial commit"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	cmd = exec.Command("git", "remote", "add", "origin", workDir)
+	cmd.Dir = workDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "update-ref", "refs/remotes/origin/main", "HEAD")
+	cmd.Dir = workDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git update-ref: %v\n%s", err, out)
+	}
+
+	return workDir, repoGit
 }
 
 func TestSessionName(t *testing.T) {
@@ -297,6 +333,68 @@ func TestPolecatStartInjectsFallbackEnvVars(t *testing.T) {
 	// Verify GT_BRANCH matches expected branch
 	if envVars["GT_BRANCH"] != branchName {
 		t.Errorf("GT_BRANCH = %q, want %q", envVars["GT_BRANCH"], branchName)
+	}
+}
+
+func TestEnsureCanonicalSessionBranch_UsesOriginDefaultBranch(t *testing.T) {
+	workDir, repoGit := setupSessionBranchTestRepo(t)
+
+	baseSHA, err := repoGit.Rev("origin/main")
+	if err != nil {
+		t.Fatalf("resolve origin/main: %v", err)
+	}
+	if err := repoGit.CheckoutNewBranch("polecat/toast-old", "main"); err != nil {
+		t.Fatalf("checkout stale polecat branch: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "stale.txt"), []byte("stale\n"), 0644); err != nil {
+		t.Fatalf("write stale.txt: %v", err)
+	}
+	if err := repoGit.Add("stale.txt"); err != nil {
+		t.Fatalf("git add stale.txt: %v", err)
+	}
+	if err := repoGit.Commit("stale local polecat commit"); err != nil {
+		t.Fatalf("git commit stale.txt: %v", err)
+	}
+	staleSHA, err := repoGit.Rev("HEAD")
+	if err != nil {
+		t.Fatalf("resolve stale HEAD: %v", err)
+	}
+
+	sm := NewSessionManager(tmux.NewTmux(), &rig.Rig{Name: "gastown", Path: workDir})
+	branch := sm.ensureCanonicalSessionBranch(repoGit, "toast", SessionStartOptions{Issue: "gt-9qb"})
+	if !strings.Contains(branch, "/gt-9qb@") {
+		t.Fatalf("fresh session branch = %q, want issue-scoped branch", branch)
+	}
+
+	staleAncestor, err := repoGit.IsAncestor(staleSHA, branch)
+	if err != nil {
+		t.Fatalf("check stale ancestry: %v", err)
+	}
+	if staleAncestor {
+		t.Fatalf("fresh session branch %q unexpectedly includes stale local commit %s", branch, staleSHA)
+	}
+
+	baseAncestor, err := repoGit.IsAncestor(baseSHA, branch)
+	if err != nil {
+		t.Fatalf("check canonical ancestry: %v", err)
+	}
+	if !baseAncestor {
+		t.Fatalf("fresh session branch %q should descend from origin/main commit %s", branch, baseSHA)
+	}
+}
+
+func TestEnsureCanonicalSessionBranch_KeepsCurrentIssueBranch(t *testing.T) {
+	workDir, repoGit := setupSessionBranchTestRepo(t)
+
+	currentBranch := "polecat/toast/gt-9qb@seed"
+	if err := repoGit.CheckoutNewBranch(currentBranch, "main"); err != nil {
+		t.Fatalf("checkout current issue branch: %v", err)
+	}
+
+	sm := NewSessionManager(tmux.NewTmux(), &rig.Rig{Name: "gastown", Path: workDir})
+	branch := sm.ensureCanonicalSessionBranch(repoGit, "toast", SessionStartOptions{Issue: "gt-9qb"})
+	if branch != currentBranch {
+		t.Fatalf("ensureCanonicalSessionBranch changed active issue branch: got %q want %q", branch, currentBranch)
 	}
 }
 

@@ -186,6 +186,66 @@ func (m *SessionManager) freshBranchName(polecatName, issue string) string {
 	return fmt.Sprintf("polecat/%s-%s", polecatName, ts)
 }
 
+func (m *SessionManager) canonicalSessionStartPoint(g *git.Git) string {
+	defaultBranch := ""
+	if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+	if defaultBranch == "" {
+		defaultBranch = g.RemoteDefaultBranch()
+	}
+	return fmt.Sprintf("origin/%s", defaultBranch)
+}
+
+func shouldCreateFreshSessionBranch(currentBranch, issue, canonicalBranch string) bool {
+	if issue != "" && strings.Contains(currentBranch, "/"+issue+"@") {
+		return false
+	}
+
+	if currentBranch == canonicalBranch || currentBranch == "main" || currentBranch == "master" {
+		return true
+	}
+
+	return issue != "" && strings.HasPrefix(currentBranch, "polecat/")
+}
+
+func (m *SessionManager) ensureCanonicalSessionBranch(g *git.Git, polecat string, opts SessionStartOptions) string {
+	currentBranch, err := g.CurrentBranch()
+	if err != nil {
+		return ""
+	}
+
+	startPoint := m.canonicalSessionStartPoint(g)
+	canonicalBranch := strings.TrimPrefix(startPoint, "origin/")
+	if !shouldCreateFreshSessionBranch(currentBranch, opts.Issue, canonicalBranch) {
+		return currentBranch
+	}
+
+	// Refresh origin refs before branching so recovered sessions start from the
+	// canonical remote base instead of any preserved local polecat branch.
+	if err := g.Fetch("origin"); err != nil {
+		debugSession("fetch origin for canonical session branch", err)
+	}
+
+	exists, err := g.RefExists(startPoint)
+	if err != nil {
+		debugSession("check canonical session start point", err)
+		return currentBranch
+	}
+	if !exists {
+		debugSession("missing canonical session start point", fmt.Errorf("%s", startPoint))
+		return currentBranch
+	}
+
+	newBranch := m.freshBranchName(polecat, opts.Issue)
+	if err := g.CheckoutNewBranch(newBranch, startPoint); err != nil {
+		debugSession("auto-checkout fresh branch on canonical base", err)
+		return currentBranch
+	}
+
+	return newBranch
+}
+
 // hasPolecat checks if the polecat exists in this rig.
 func (m *SessionManager) hasPolecat(polecat string) bool {
 	polecatPath := m.polecatDir(polecat)
@@ -338,23 +398,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// branch detection and path resolution without a working directory.
 	polecatGitBranch := ""
 	if g := git.NewGit(workDir); g != nil {
-		if b, err := g.CurrentBranch(); err == nil {
-			polecatGitBranch = b
-			// Auto-checkout a fresh branch if the worktree is on the default branch.
-			// After gt done merges a polecat's work, the worktree reverts to main/master.
-			// Starting a new session on main triggers the PRIME.md branch guard, which
-			// nukes the polecat — causing the zombie loop seen in production (hq-h01n8).
-			defaultBranch := g.DefaultBranch()
-			if polecatGitBranch == defaultBranch || polecatGitBranch == "master" || polecatGitBranch == "main" {
-				newBranch := m.freshBranchName(polecat, opts.Issue)
-				if err := g.CheckoutNewBranch(newBranch, defaultBranch); err != nil {
-					// Non-fatal: PRIME.md guard remains as a fallback; log for debugging.
-					debugSession("auto-checkout fresh branch on default", err)
-				} else {
-					polecatGitBranch = newBranch
-				}
-			}
-		}
+		polecatGitBranch = m.ensureCanonicalSessionBranch(g, polecat, opts)
 	}
 	// Generate the GASTA run ID — the root identifier for all telemetry emitted
 	// by this polecat session and its subprocesses (bd, mail, …).
