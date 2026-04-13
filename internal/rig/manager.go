@@ -1,6 +1,7 @@
 package rig
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -147,6 +149,10 @@ func (m *Manager) DiscoverRigs() ([]*Rig, error) {
 		rigs = append(rigs, rig)
 	}
 
+	slices.SortFunc(rigs, func(a, b *Rig) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
+
 	return rigs, nil
 }
 
@@ -253,16 +259,16 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 
 // AddRigOptions configures rig creation.
 type AddRigOptions struct {
-	Name            string   // Rig name (directory name)
-	GitURL          string   // Repository URL (fetch/pull)
-	PushURL         string   // Optional push URL (fork for read-only upstreams)
-	UpstreamURL     string   // Optional upstream URL (for fork workflows)
-	BeadsPrefix     string   // Beads issue prefix (defaults to derived from name)
-	LocalRepo       string   // Optional local repo for reference clones
-	DefaultBranch   string   // Default branch (defaults to auto-detected from remote)
-	SkipDoltCheck   bool     // Skip Dolt server availability check (for tests with mocked beads)
-	CloneFilter     string   // Git clone filter spec (e.g. "blob:none", "tree:0") for partial clones
-	SparseCheckout  []string // Sparse checkout paths (cone mode); empty means no sparse checkout
+	Name           string   // Rig name (directory name)
+	GitURL         string   // Repository URL (fetch/pull)
+	PushURL        string   // Optional push URL (fork for read-only upstreams)
+	UpstreamURL    string   // Optional upstream URL (for fork workflows)
+	BeadsPrefix    string   // Beads issue prefix (defaults to derived from name)
+	LocalRepo      string   // Optional local repo for reference clones
+	DefaultBranch  string   // Default branch (defaults to auto-detected from remote)
+	SkipDoltCheck  bool     // Skip Dolt server availability check (for tests with mocked beads)
+	CloneFilter    string   // Git clone filter spec (e.g. "blob:none", "tree:0") for partial clones
+	SparseCheckout []string // Sparse checkout paths (cone mode); empty means no sparse checkout
 }
 
 func resolveLocalRepo(path, gitURL string) (string, string) {
