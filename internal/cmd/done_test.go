@@ -1475,6 +1475,28 @@ func TestSyncGuardWithUncommittedChanges(t *testing.T) {
 	}
 }
 
+// TestPolecatSelfTerminateUnconditional verifies that polecat self-termination
+// is always triggered after gt done, not gated by config.
+// See sbx-gastown-6d7d bug #2: polecat stays at Claude prompt after completing work.
+func TestPolecatSelfTerminateUnconditional(t *testing.T) {
+	// Replace the self-terminate function with a recorder
+	called := false
+	origFn := polecatSelfTerminateFn
+	polecatSelfTerminateFn = func(townRoot, rigName, polecatName string) {
+		called = true
+	}
+	defer func() { polecatSelfTerminateFn = origFn }()
+
+	// Simulate the self-terminate decision: isPolecat=true should always trigger
+	// the function call, regardless of daemon config.
+	triggerPolecatSelfTerminate("", "test-rig", "test-polecat")
+
+	if !called {
+		t.Error("polecatSelfTerminateFn must be called unconditionally for polecats; " +
+			"it should not be gated by polecat_self_terminate config")
+	}
+}
+
 func testRunGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	fullArgs := append([]string{"-c", "protocol.file.allow=always"}, args...)

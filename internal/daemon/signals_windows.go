@@ -21,3 +21,7 @@ func isLifecycleSignal(sig os.Signal) bool {
 func isReloadRestartSignal(sig os.Signal) bool {
 	return false
 }
+
+func isNoopSignal(sig os.Signal) bool {
+	return false
+}
