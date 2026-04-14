@@ -11,6 +11,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -183,9 +184,27 @@ func (d *Daemon) spawnArchivistExtraction(rig, sourceBead string) {
 
 	d.logger.Printf("archivist: created extraction wisp %s for %s/%s", wispID, rig, sourceBead)
 
-	// Dispatch archivist via gt sling (non-blocking — let it run in background)
+	// Ensure the polecat tmux server exists. When the last polecat /exit's,
+	// the tmux server dies if there are no other sessions. The archivist
+	// dispatch needs a running server to create its session.
+	tmuxSocket := tmux.GetDefaultSocket()
+	if tmuxSocket != "" {
+		ensureCmd := exec.CommandContext(ctx, "tmux", "-L", tmuxSocket, "new-session", "-d", "-s", "init")
+		ensureCmd.Env = os.Environ()
+		if err := ensureCmd.Run(); err == nil {
+			// Kill the temp session — the server is now running
+			killCmd := exec.CommandContext(ctx, "tmux", "-L", tmuxSocket, "kill-session", "-t", "init")
+			killCmd.Env = os.Environ()
+			_ = killCmd.Run()
+		}
+	}
+
+	// Dispatch archivist via gt sling (non-blocking — let it run in background).
+	// Use --create to force a fresh polecat slot instead of reusing the work
+	// polecat's worktree. Reused worktrees have the polecat's CLAUDE.local.md
+	// which overrides the archivist formula.
 	slingCmd := exec.CommandContext(ctx, "gt", "sling", wispID, rig,
-		"--force", "--no-boot", "--formula", "mol-archivist-extract",
+		"--force", "--no-boot", "--create", "--formula", "mol-archivist-extract",
 		"--var", "source_bead="+sourceBead,
 		"--var", "rig="+rig)
 	slingCmd.Dir = d.config.TownRoot
