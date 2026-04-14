@@ -898,17 +898,21 @@ func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("sending health check nudge: %w", err)
 	}
 
-	// Get baseline time AFTER sending nudge to avoid false positives.
-	// If we get the time before the nudge and the bead doesn't exist (time.Time{}),
-	// any subsequent update would incorrectly appear as a response.
-	// By getting the baseline after the nudge, we ensure we're only detecting
-	// activity that happens in response to our health check.
+	// Get baseline times AFTER sending nudge to avoid false positives.
+	// By sampling after the nudge, we only detect activity caused by our check.
 	baselineTime, err := getAgentBeadUpdateTime(townRoot, beadID)
 	if err != nil {
 		// Bead might not exist yet - use current time as baseline
 		// This way only updates AFTER this point count as responses
 		baselineTime = time.Now()
 	}
+
+	// Also capture baseline tmux session activity time.
+	// This is the secondary response signal: if the session shows new output
+	// after our nudge, the agent is alive and processing — even if it hasn't
+	// updated its bead (e.g., witness agents that respond in prose rather than
+	// via a structured bead-update channel).
+	baselineActivity, activityErr := t.GetSessionActivity(sessionName)
 
 	fmt.Printf("%s Sent HEALTH_CHECK to %s, waiting %s...\n",
 		style.Bold.Render("→"), agent, healthCheckTimeout)
@@ -928,15 +932,23 @@ func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
 		case <-ctx.Done():
 			goto Done
 		case <-ticker.C:
+			// Primary signal: bead update (structured response channel)
 			newTime, err := getAgentBeadUpdateTime(townRoot, beadID)
-			if err != nil {
-				continue
-			}
-
-			// If bead was updated after our baseline, agent responded
-			if newTime.After(baselineTime) {
+			if err == nil && newTime.After(baselineTime) {
 				responded = true
 				goto Done
+			}
+
+			// Secondary signal: tmux session activity (prose/command response)
+			// Agents like the Witness respond to HEALTH_CHECK by running commands
+			// in their session, producing output, but may not update their bead.
+			// Session activity is a reliable liveness signal for these agents.
+			if activityErr == nil {
+				newActivity, err := t.GetSessionActivity(sessionName)
+				if err == nil && newActivity.After(baselineActivity) {
+					responded = true
+					goto Done
+				}
 			}
 		}
 	}

@@ -302,7 +302,9 @@ Your handoff state is tracked in a pinned bead: `witness Handoff`
 
 **Do NOT mail on HEALTH_CHECK nudges.** When Deacon sends HEALTH_CHECK, don't
 respond with mail — this floods inboxes every patrol cycle (~30s). The Deacon
-tracks your health via session status, not mail responses.
+detects responsiveness via tmux session activity: any output you produce
+(running a command, responding in prose) counts as a response. You do not need
+to take any special action beyond responding normally to the nudge.
 
 **Village mindset**: If you see Refinery struggling, ping it. If Deacon seems stuck, notify Mayor.
 
