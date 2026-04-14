@@ -166,6 +166,53 @@ func TestEventPoll_DetectsCloseEvents(t *testing.T) {
 	}
 }
 
+// TestEventPoll_EventIDString_Regression3622 is a regression test for gh-3622:
+// the convoy event poller scanned events.id (a CHAR(36) UUID column) into an
+// int64 destination, producing:
+//
+//	sql: Scan error on column index 0, name "id":
+//	converting driver.Value type []uint8 to a int64: invalid syntax
+//
+// The fix is in beads SDK v1.0.0: scanEvents scans event.ID into string.
+// This test verifies pollStoresSnapshot returns no error when the store
+// contains events with UUID IDs.
+func TestEventPoll_EventIDString_Regression3622(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows")
+	}
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	issue := &beadsdk.Issue{
+		ID:        "gt-reg3622",
+		Title:     "Regression 3622 — events.id type check",
+		Status:    beadsdk.StatusOpen,
+		Priority:  2,
+		IssueType: beadsdk.TypeTask,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	townRoot := t.TempDir()
+	var logged []string
+	logger := func(format string, args ...interface{}) {
+		logged = append(logged, fmt.Sprintf(format, args...))
+	}
+
+	m := NewConvoyManager(townRoot, logger, "gt", 10*time.Minute, map[string]beadsdk.Storage{"hq": store}, nil, nil)
+	m.seeded.Store(true)
+	hadError := m.pollStoresSnapshot(m.stores)
+
+	if hadError {
+		t.Errorf("pollStoresSnapshot returned error (regression gh-3622: events.id scanned as int64?): logs: %v", logged)
+	}
+}
+
 func TestEventPoll_SkipsNonCloseEvents(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on Windows")
