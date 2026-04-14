@@ -143,6 +143,17 @@ func (d *Daemon) checkpointWorktree(workDir, rigName, polecatName string) bool {
 		_, _ = runGitCmd(workDir, "reset", "HEAD", "--", dir)
 	}
 
+	// Unstage staged deletions — git add -A stages removals of tracked files,
+	// which can destroy infrastructure (e.g. .beads/metadata.json). A checkpoint
+	// should preserve additions/modifications, never commit deletions (gh-3615).
+	if delOut, err := runGitCmd(workDir, "diff", "--cached", "--name-only", "--diff-filter=D"); err == nil {
+		for _, path := range strings.Split(strings.TrimSpace(delOut), "\n") {
+			if path = strings.TrimSpace(path); path != "" {
+				_, _ = runGitCmd(workDir, "reset", "HEAD", "--", path)
+			}
+		}
+	}
+
 	// Check if anything is staged after exclusions
 	diffOut, err := runGitCmd(workDir, "diff", "--cached", "--quiet")
 	if err == nil && strings.TrimSpace(diffOut) == "" {
