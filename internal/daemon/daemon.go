@@ -530,6 +530,18 @@ func (d *Daemon) Run() (err error) {
 		d.logger.Printf("Polecat reaper ticker started (interval %v)", interval)
 	}
 
+	// Start foreman dispatcher ticker if configured.
+	// Polls for PR comment activity on open foreman beads and nudges/spawns foremen.
+	var foremanDispatcherTicker *time.Ticker
+	var foremanDispatcherChan <-chan time.Time
+	if d.isPatrolActive("foreman_dispatcher") {
+		interval := foremanDispatcherInterval(d.patrolConfig)
+		foremanDispatcherTicker = time.NewTicker(interval)
+		foremanDispatcherChan = foremanDispatcherTicker.C
+		defer foremanDispatcherTicker.Stop()
+		d.logger.Printf("Foreman dispatcher ticker started (interval %v)", interval)
+	}
+
 	// Start doctor dog ticker if configured.
 	// Health monitor: TCP check, latency, DB count, gc, zombie detection, backup/disk checks.
 	var doctorDogTicker *time.Ticker
@@ -679,6 +691,13 @@ func (d *Daemon) Run() (err error) {
 			// agent not running) and reaps them: kills tmux session, removes worktree.
 			if !d.isShutdownInProgress() {
 				d.reapCompletedPolecats()
+			}
+
+		case <-foremanDispatcherChan:
+			// Foreman dispatcher — polls for PR comment activity on open foreman beads
+			// and nudges existing foreman sessions or spawns new ones.
+			if !d.isShutdownInProgress() {
+				d.dispatchForemen()
 			}
 
 		case <-doctorDogChan:
@@ -1894,10 +1913,7 @@ func (d *Daemon) getPatrolRigs(patrol string) []string {
 func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 	cfg := wisp.NewConfig(d.config.TownRoot, rigName)
 
-	// Warn if wisp config is missing - parked/docked state may have been lost
-	if _, err := os.Stat(cfg.ConfigPath()); os.IsNotExist(err) {
-		d.logger.Printf("Warning: no wisp config for %s - parked state may have been lost", rigName)
-	}
+	// No wisp config is normal for dispatch-and-kill rigs — skip silently.
 
 	// Check wisp layer first (local/ephemeral overrides)
 	status := cfg.GetString("status")

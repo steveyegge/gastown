@@ -133,6 +133,8 @@ type PatrolsConfig struct {
 	RestartTracker         *RestartTrackerConfig          `json:"restart_tracker,omitempty"`
 	Orchestrator           *OrchestratorPatrolConfig      `json:"orchestrator,omitempty"`
 	PolecatReaper          *PolecatReaperConfig           `json:"polecat_reaper,omitempty"`
+	ForemanDispatcher      *ForemanDispatcherConfig       `json:"foreman_dispatcher,omitempty"`
+	Archivist              *PatrolConfig                  `json:"archivist,omitempty"`
 }
 
 // DoltRemotesConfig holds configuration for the dolt_remotes patrol.
@@ -321,6 +323,18 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 			return false
 		}
 		return config.Patrols.PolecatReaper.Enabled
+	}
+	if patrol == "foreman_dispatcher" {
+		if config == nil || config.Patrols == nil || config.Patrols.ForemanDispatcher == nil {
+			return false
+		}
+		return config.Patrols.ForemanDispatcher.Enabled
+	}
+	if patrol == "archivist" {
+		if config == nil || config.Patrols == nil || config.Patrols.Archivist == nil {
+			return false
+		}
+		return config.Patrols.Archivist.Enabled
 	}
 
 	if config == nil || config.Patrols == nil {

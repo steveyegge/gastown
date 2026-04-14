@@ -76,6 +76,11 @@ type SessionStartOptions struct {
 	// If set, GT_AGENT is written to the tmux session environment table so that
 	// IsAgentAlive and waitForPolecatReady read the correct process names.
 	Agent string
+
+	// ExtraEnv is additional environment variables to inject into the polecat session.
+	// Used for GCP token injection (CLOUDSDK_AUTH_ACCESS_TOKEN, etc.) and other
+	// per-dispatch env vars that the session manager doesn't know about.
+	ExtraEnv map[string]string
 }
 
 // SessionInfo contains information about a running polecat session.
@@ -372,6 +377,10 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	}
 	if polecatGitBranch != "" {
 		envVarsToInject["GT_BRANCH"] = polecatGitBranch
+	}
+	// Inject extra env vars (GCP tokens, ADC blocking, etc.)
+	for k, v := range opts.ExtraEnv {
+		envVarsToInject[k] = v
 	}
 	command = config.PrependEnv(command, envVarsToInject)
 

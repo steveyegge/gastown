@@ -33,8 +33,9 @@ type SpawnedPolecatInfo struct {
 	Branch      string // Git branch name (for cleanup on rollback)
 
 	// Internal fields for deferred session start
-	account string
-	agent   string
+	account  string
+	agent    string
+	extraEnv map[string]string // GCP tokens, ADC blocking env vars
 }
 
 // AgentID returns the agent identifier (e.g., "gastown/polecats/Toast")
@@ -368,6 +369,7 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	startOpts := polecat.SessionStartOptions{
 		RuntimeConfigDir: claudeConfigDir,
 		Agent:            s.agent,
+		ExtraEnv:         s.extraEnv,
 	}
 	if err := polecatSessMgr.Start(s.PolecatName, startOpts); err != nil {
 		return "", fmt.Errorf("starting session: %w", err)

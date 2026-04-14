@@ -1,6 +1,7 @@
 package authzproxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,10 +33,9 @@ func MintGCPTokenFromProfile(profile GCPProfile) (token string, expiry time.Time
 
 func mintDownscope(profile GCPProfile) (string, time.Time, error) {
 	// Get source ADC token
-	ctx := make(chan struct{})
-	defer close(ctx)
+	ctx := context.Background()
 
-	creds, err := google.FindDefaultCredentials(nil, profile.Scopes...)
+	creds, err := google.FindDefaultCredentials(ctx, profile.Scopes...)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("finding default credentials: %w", err)
 	}
@@ -118,7 +118,7 @@ func mintImpersonate(profile GCPProfile) (string, time.Time, error) {
 		return "", time.Time{}, fmt.Errorf("target_sa required for impersonate mode")
 	}
 
-	creds, err := google.FindDefaultCredentials(nil, "https://www.googleapis.com/auth/cloud-platform")
+	creds, err := google.FindDefaultCredentials(context.Background(), "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("finding default credentials: %w", err)
 	}

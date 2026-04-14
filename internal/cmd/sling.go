@@ -1013,6 +1013,19 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
+	// Mint GCP token and inject into polecat session env.
+	// This downscopes the ADC via STS token exchange and blocks raw ADC access
+	// so the polecat can only use the minted token with limited permissions.
+	if newPolecatInfo != nil && len(slingGCPs) > 0 {
+		gcpEnv, err := MintGCPToken(townRoot, slingGCPs)
+		if err != nil {
+			fmt.Printf("%s GCP token minting failed: %v\n", style.Warning.Render("⚠"), err)
+			// Non-fatal: polecat proceeds without GCP access
+		} else if gcpEnv != nil {
+			newPolecatInfo.extraEnv = gcpEnv
+		}
+	}
+
 	// Start polecat session now that attached_molecule is set.
 	// This ensures polecat sees the molecule when gt prime runs on session start.
 	freshlySpawned := newPolecatInfo != nil

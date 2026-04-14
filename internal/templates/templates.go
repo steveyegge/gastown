@@ -213,23 +213,31 @@ func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSessi
 }
 
 // PolecatLifecycleMarker is a unique string present in the polecat CLAUDE.md
-// template. Used to detect whether a CLAUDE.md file contains the Gas Town
-// overlay (vs. project-specific content). If an existing CLAUDE.md lacks this
-// marker, polecat lifecycle instructions are appended — the agent won't know
-// to call `gt done` otherwise.
+// template. Used to detect whether a CLAUDE.md file contains the Gas Town overlay.
 const PolecatLifecycleMarker = "IDLE POLECAT HERESY"
 
+// PolecatTemplateVersion is bumped when the polecat template changes in a way
+// that requires overwriting cached CLAUDE.local.md files. The version string
+// is embedded in the template and checked at provision time — if the cached
+// version doesn't match, the file is rewritten with the current template.
+const PolecatTemplateVersion = "v3" // v3: polecat persists findings + /exit, archivist closes bead
+
+// polecatVersionMarker returns the versioned marker string embedded in templates.
+func polecatVersionMarker() string {
+	return "POLECAT_TEMPLATE_VERSION=" + PolecatTemplateVersion
+}
+
 // CreatePolecatCLAUDEmd writes the polecat CLAUDE.md template to the worktree.
-// This is the primary mechanism for polecats to learn about `gt done` and other
+// This is the primary mechanism for polecats to learn about `bd close` and other
 // lifecycle commands — the file persists across compaction and session restarts.
 //
 // If the worktree already has a tracked CLAUDE.md (e.g., from the rig's repo),
-// polecat lifecycle instructions are written to CLAUDE.local.md instead. This
-// avoids creating uncommitted changes in the tracked CLAUDE.md, which the
-// gt done auto-save safety net would otherwise commit onto the polecat's branch,
-// polluting the PR diff with hundreds of lines of agent context.
+// polecat lifecycle instructions are written to CLAUDE.local.md instead.
 //
 // If no CLAUDE.md exists, the full template is written to CLAUDE.md.
+//
+// Versioned: if an existing file has the lifecycle marker but an older version,
+// it is overwritten with the current template.
 //
 // Returns (created bool, error).
 func CreatePolecatCLAUDEmd(worktreePath, rigName, polecatName string) (bool, error) {
@@ -240,27 +248,28 @@ func CreatePolecatCLAUDEmd(worktreePath, rigName, polecatName string) (bool, err
 	content := polecatCLAUDEmd
 	content = strings.ReplaceAll(content, "{{rig}}", rigName)
 	content = strings.ReplaceAll(content, "{{name}}", polecatName)
+	// Embed version marker so future provisions can detect stale templates
+	content += "\n<!-- " + polecatVersionMarker() + " -->\n"
 
-	// Check if lifecycle instructions are already present in either file.
+	versionTag := polecatVersionMarker()
+
+	// Check if lifecycle instructions are already present AND current version.
 	for _, path := range []string{claudePath, claudeLocalPath} {
 		if existing, err := os.ReadFile(path); err == nil {
 			if strings.Contains(string(existing), PolecatLifecycleMarker) {
-				return false, nil // Already has our instructions
+				if strings.Contains(string(existing), versionTag) {
+					return false, nil // Already has current version
+				}
+				// Stale version — fall through to overwrite
+				break
 			}
 		}
 	}
 
 	// If CLAUDE.md exists (tracked repo file), write to CLAUDE.local.md instead
-	// to avoid polluting the tracked file with polecat context. CLAUDE.local.md
-	// is gitignored in standard rig repos and is still loaded by Claude Code.
+	// to avoid polluting the tracked file with polecat context.
 	if _, err := os.Stat(claudePath); err == nil {
-		existingLocal, readErr := os.ReadFile(claudeLocalPath)
-		if readErr == nil {
-			// Append to existing CLAUDE.local.md
-			merged := string(existingLocal) + "\n---\n\n" + content
-			return true, os.WriteFile(claudeLocalPath, []byte(merged), 0644)
-		}
-		// Write new CLAUDE.local.md with just polecat context
+		// Overwrite CLAUDE.local.md entirely (don't append to stale content)
 		return true, os.WriteFile(claudeLocalPath, []byte(content), 0644)
 	}
 

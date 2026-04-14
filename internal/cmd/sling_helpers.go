@@ -18,7 +18,6 @@ import (
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/formula"
 	rigpkg "github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -593,34 +592,10 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	// Agent bead hook_bead slot is no longer maintained.
 }
 
-// wakeRigAgents wakes the witness for a rig after polecat dispatch.
-// This ensures the witness is ready to monitor. The refinery is nudged
-// separately when an MR is actually created (by nudgeRefinery).
-func wakeRigAgents(rigName string) {
-	// Boot the rig (idempotent - no-op if already running)
-	bootCmd := exec.Command("gt", "rig", "boot", rigName)
-	_ = bootCmd.Run() // Ignore errors - rig might already be running
-
-	// Verify daemon is running — polecat triggering depends on daemon
-	// processing deacon mail. Warn if not running (gt-9wv0).
-	townRoot, _ := workspace.FindFromCwd()
-	if townRoot != "" {
-		if running, _, _ := daemon.IsRunning(townRoot); !running {
-			fmt.Fprintf(os.Stderr, "Warning: daemon is not running. Polecat may not auto-start.\n")
-			fmt.Fprintf(os.Stderr, "  Start with: gt daemon start\n")
-		}
-	}
-
-	// Immediate delivery to witness: send directly to tmux pane.
-	// No cooperative queue — idle agents never call Drain(), so queued
-	// nudges would be stuck forever. Direct delivery is safe: if the
-	// agent is busy, text buffers in tmux and is processed at next prompt.
-	witnessSession := session.WitnessSessionName(session.PrefixFor(rigName))
-	t := tmux.NewTmux()
-	if err := t.NudgeSession(witnessSession, "Polecat dispatched - check for work"); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to nudge witness %s: %v\n", witnessSession, err)
-	}
-}
+// wakeRigAgents is a no-op. Rig agents (witness, refinery) are not used in
+// our dispatch-and-kill model. The daemon handles reaping completed polecats
+// directly. Kept as a stub to avoid changing all call sites.
+func wakeRigAgents(rigName string) {}
 
 // nudgeWitness wakes the witness after polecat completion (gt-a6gp).
 // Replaces POLECAT_DONE mail — nudges are free (no Dolt commit).

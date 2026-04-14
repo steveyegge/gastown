@@ -141,8 +141,51 @@ func ScanCompletedPolecatsCtx(ctx context.Context, townRoot string, cfg *ReapCon
 		// 1. Check if tmux session exists
 		alive, _ := t.HasSession(sessionName)
 		if !alive {
-			// No session — nothing to reap. Worktree-only cleanup is out of scope
-			// (that's polecat nuke territory).
+			// No session — polecat self-exited. Check for a bead to trigger
+			// archivist extraction and worktree cleanup.
+			beadID, beadStatus, beadErr := getPolecatBeadStatusCtx(ctx, townRoot, dir.Rig, dir.Polecat)
+			if beadErr == nil && beadID != "" {
+				// Polecat had a bead (open or closed). Mark as completed so the
+				// daemon can trigger the archivist for knowledge extraction.
+				reason := "no_session_bead_open"
+				if isClosedStatus(beadStatus) {
+					reason = "no_session_bead_closed"
+				}
+				result.Decisions = append(result.Decisions, &ReapDecision{
+					Rig: dir.Rig, Polecat: dir.Polecat,
+					Eligible: true,
+					BeadID: beadID, BeadStatus: beadStatus,
+					Reason: reason,
+				})
+				result.Completed++
+				reapResult := &ReapResult{
+					Rig:           dir.Rig,
+					Polecat:       dir.Polecat,
+					SessionName:   sessionName,
+					BeadID:        beadID,
+					BeadStatus:    beadStatus,
+					SessionKilled: false, // Session was already gone
+				}
+				// Clean up worktree if no partial work
+				worktreePath := polecatWorktreePath(townRoot, dir.Rig, dir.Polecat)
+				if worktreePath != "" {
+					checkReapWorktreeState(worktreePath, reapResult)
+				}
+				if !cfg.DryRun && !reapResult.PartialWork && worktreePath != "" {
+					polecatDirPath := filepath.Join(townRoot, dir.Rig, "polecats", dir.Polecat)
+					if err := removePolecatWorktree(worktreePath, polecatDirPath); err != nil {
+						reapResult.Error = fmt.Sprintf("removing worktree: %v", err)
+					} else {
+						reapResult.WorktreeRemoved = true
+					}
+					_ = events.LogFeed(events.TypeReap, "deacon", events.ReapPayload(
+						dir.Rig, dir.Polecat, beadID, false, reapResult.WorktreeRemoved,
+					))
+					result.Reaped++
+				}
+				result.Results = append(result.Results, reapResult)
+				continue
+			}
 			result.Decisions = append(result.Decisions, &ReapDecision{
 				Rig: dir.Rig, Polecat: dir.Polecat,
 				Reason: "no_session",
@@ -152,14 +195,6 @@ func ScanCompletedPolecatsCtx(ctx context.Context, townRoot string, cfg *ReapCon
 
 		// 2. Check if agent is still running (not just a shell)
 		agentAlive := t.IsAgentAlive(sessionName)
-		if agentAlive {
-			result.Decisions = append(result.Decisions, &ReapDecision{
-				Rig: dir.Rig, Polecat: dir.Polecat,
-				HasSession: true, AgentAlive: true,
-				Reason: "agent_alive",
-			})
-			continue // Agent actively working — don't reap
-		}
 
 		// 3. Check bead status — is the work done?
 		beadID, beadStatus, beadErr := getPolecatBeadStatusCtx(ctx, townRoot, dir.Rig, dir.Polecat)
@@ -180,6 +215,16 @@ func ScanCompletedPolecatsCtx(ctx context.Context, townRoot string, cfg *ReapCon
 			continue
 		}
 		if beadID != "" && !isClosedStatus(beadStatus) {
+			// Bead still open — if agent is alive, it's actively working
+			if agentAlive {
+				result.Decisions = append(result.Decisions, &ReapDecision{
+					Rig: dir.Rig, Polecat: dir.Polecat,
+					HasSession: true, AgentAlive: true,
+					BeadID: beadID, BeadStatus: beadStatus,
+					Reason: "agent_alive",
+				})
+				continue
+			}
 			result.Decisions = append(result.Decisions, &ReapDecision{
 				Rig: dir.Rig, Polecat: dir.Polecat,
 				HasSession: true, BeadID: beadID, BeadStatus: beadStatus,
@@ -188,14 +233,31 @@ func ScanCompletedPolecatsCtx(ctx context.Context, townRoot string, cfg *ReapCon
 			continue // Bead still open — work not done
 		}
 
-		// Polecat is completed: session exists, agent not running, bead closed or absent
+		// Bead is closed or absent. If agent is alive, only reap if idle at prompt.
+		// This handles the dispatch-and-kill case: polecat closes its bead but
+		// gt done fails to terminate the session (timeout, merge queue error, etc.).
+		if agentAlive && !t.IsIdle(sessionName) {
+			result.Decisions = append(result.Decisions, &ReapDecision{
+				Rig: dir.Rig, Polecat: dir.Polecat,
+				HasSession: true, AgentAlive: true,
+				BeadID: beadID, BeadStatus: beadStatus,
+				Reason: "agent_alive_bead_closed",
+			})
+			continue // Agent is doing something despite bead being closed — let it finish
+		}
+
+		// Polecat is completed: bead closed/absent, agent not running or idle at prompt
 		decisionReason := "no_bead"
 		if beadID != "" {
 			decisionReason = "bead_closed"
+			if agentAlive {
+				decisionReason = "bead_closed_agent_idle"
+			}
 		}
 		result.Decisions = append(result.Decisions, &ReapDecision{
 			Rig: dir.Rig, Polecat: dir.Polecat,
 			Eligible: true, HasSession: true,
+			AgentAlive: agentAlive,
 			BeadID: beadID, BeadStatus: beadStatus,
 			Reason: decisionReason,
 		})
@@ -347,7 +409,7 @@ func getPolecatBeadStatus(townRoot, rigName, polecatName string) (string, string
 func getPolecatBeadStatusCtx(ctx context.Context, townRoot, rigName, polecatName string) (string, string, error) {
 	// Query bd for the agent bead's hook_bead field
 	assignee := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
-	cmd := exec.CommandContext(ctx, "bd", "list", "--assignee="+assignee, "--json", "--flat", "--limit=1")
+	cmd := exec.CommandContext(ctx, "bd", "list", "--assignee="+assignee, "--all", "--json", "--flat", "--limit=1")
 	cmd.Dir = townRoot
 	// Set BEADS_DIR explicitly so bd finds the correct database regardless of
 	// the daemon's inherited environment. Matches pattern in plugin/recording.go.

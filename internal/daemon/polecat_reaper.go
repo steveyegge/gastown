@@ -1,10 +1,17 @@
 package daemon
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 const (
@@ -110,13 +117,90 @@ func (d *Daemon) reapCompletedPolecats() {
 		}
 	}
 
-	// Log details for reaped polecats and errors (including bead query failures).
+	// Log details for reaped/completed polecats and errors.
+	// Trigger archivist extraction for any polecat with a closed bead — whether
+	// the reaper killed the session or the polecat self-exited before the scan.
 	for _, r := range result.Results {
 		if r.Error != "" {
 			d.logger.Printf("polecat_reaper: %s/%s: error: %s", r.Rig, r.Polecat, r.Error)
-		} else if r.SessionKilled {
-			d.logger.Printf("polecat_reaper: %s/%s: reaped (session=%v worktree=%v bead=%s)",
+		} else {
+			d.logger.Printf("polecat_reaper: %s/%s: completed (session_killed=%v worktree=%v bead=%s)",
 				r.Rig, r.Polecat, r.SessionKilled, r.WorktreeRemoved, r.BeadID)
+
+			// Trigger archivist extraction if the polecat had a closed bead.
+			if r.BeadID != "" && d.isPatrolActive("archivist") {
+				d.spawnArchivistExtraction(r.Rig, r.BeadID)
+			}
 		}
 	}
+}
+
+// spawnArchivistExtraction creates an archivist wisp and dispatches an archivist
+// to extract knowledge from a completed polecat's bead. The wisp is ephemeral —
+// if the extraction is routine, the wisp_reaper cleans it up automatically.
+func (d *Daemon) spawnArchivistExtraction(rig, sourceBead string) {
+	ctx, cancel := context.WithTimeout(d.ctx, 30*time.Second)
+	defer cancel()
+
+	// Create archivist wisp via bd (ephemeral bead)
+	desc := fmt.Sprintf("source_bead: %s\nrig: %s\ntrigger_type: post-polecat\nrole: archivist\nformula: mol-archivist-extract", sourceBead, rig)
+	createCmd := exec.CommandContext(ctx, "bd", "create",
+		"--title", fmt.Sprintf("Archivist: extract from %s", sourceBead),
+		"--type", "task",
+		"--priority", "3",
+		"--labels", rig,
+		"--description", desc,
+		"--ephemeral",
+	)
+	createCmd.Dir = d.config.TownRoot
+	createCmd.Env = append(os.Environ(), "BEADS_DIR="+beads.ResolveBeadsDir(d.config.TownRoot))
+	util.SetDetachedProcessGroup(createCmd)
+
+	output, err := createCmd.Output()
+	if err != nil {
+		d.logger.Printf("archivist: failed to create wisp for %s: %v", sourceBead, err)
+		return
+	}
+
+	// Parse wisp ID from output (format: "✓ Created issue: <id> — <title>")
+	wispID := ""
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.Contains(line, "Created") {
+			parts := strings.Fields(line)
+			for i, p := range parts {
+				if p == "issue:" && i+1 < len(parts) {
+					wispID = strings.TrimRight(parts[i+1], " —")
+					break
+				}
+			}
+		}
+	}
+
+	if wispID == "" {
+		d.logger.Printf("archivist: created wisp but couldn't parse ID from output: %s", string(output))
+		return
+	}
+
+	d.logger.Printf("archivist: created extraction wisp %s for %s/%s", wispID, rig, sourceBead)
+
+	// Dispatch archivist via gt sling (non-blocking — let it run in background)
+	slingCmd := exec.CommandContext(ctx, "gt", "sling", wispID, rig,
+		"--force", "--no-boot", "--formula", "mol-archivist-extract",
+		"--var", "source_bead="+sourceBead,
+		"--var", "rig="+rig)
+	slingCmd.Dir = d.config.TownRoot
+	slingCmd.Env = append(os.Environ(), "BEADS_DIR="+beads.ResolveBeadsDir(d.config.TownRoot))
+	util.SetDetachedProcessGroup(slingCmd)
+
+	if err := slingCmd.Start(); err != nil {
+		d.logger.Printf("archivist: failed to dispatch for %s: %v", wispID, err)
+		return
+	}
+
+	// Don't wait for sling to complete — it spawns a tmux session
+	go func() {
+		_ = slingCmd.Wait()
+	}()
+
+	d.logger.Printf("archivist: dispatched extraction for %s → %s", sourceBead, rig)
 }
