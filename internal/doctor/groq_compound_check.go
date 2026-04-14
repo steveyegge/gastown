@@ -10,11 +10,6 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 )
 
-// groqJSONEnforcementProbe mirrors the enforcement suffix used in headless groq-compound
-// invocations to ensure the model returns valid JSON.
-const groqJSONEnforcementProbe = "\n\n---\nRESPONSE FORMAT: Respond ONLY with a single " +
-	"valid JSON object. No text, markdown, or code fences outside the JSON. " +
-	"If unable to comply, return: {\"error\": \"<reason>\"}"
 
 // GroqCompoundCheck probes the groq-compound agent for JSON output compliance.
 // It is skipped when groq-compound is not configured in any role.
@@ -64,7 +59,7 @@ func (c *GroqCompoundCheck) Run(ctx *CheckContext) *CheckResult {
 
 	// Build probe prompt with JSON enforcement appended.
 	// NonInteractiveConfig equivalent: {OutputFormat:"json", NoColor:true, MaxTurns:1}
-	probe := `Respond with exactly: {"status":"ok"}` + groqJSONEnforcementProbe
+	probe := `Respond with exactly: {"status":"ok"}` + config.GroqJSONEnforcement
 
 	out, err := c.invokeGroqCompound(probe)
 	if err != nil {

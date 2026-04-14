@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"testing"
 )
 
@@ -254,9 +253,9 @@ func TestCostTierAgents(t *testing.T) {
 		if groq.Env["ANTHROPIC_MODEL"] != "compound-beta" {
 			t.Errorf("groq-compound ANTHROPIC_MODEL = %q, want compound-beta", groq.Env["ANTHROPIC_MODEL"])
 		}
-		// Verify the preset reads GROQ_API_KEY from the environment (not a hardcoded value)
-		if groq.Env["ANTHROPIC_API_KEY"] != os.Getenv("GROQ_API_KEY") {
-			t.Errorf("groq-compound ANTHROPIC_API_KEY = %q, want value of GROQ_API_KEY env var", groq.Env["ANTHROPIC_API_KEY"])
+		// Verify the preset keeps the sentinel value — GROQ_API_KEY is resolved at spawn time.
+		if groq.Env["ANTHROPIC_API_KEY"] != "$GROQ_API_KEY" {
+			t.Errorf("groq-compound ANTHROPIC_API_KEY = %q, want sentinel $GROQ_API_KEY (resolved at spawn time)", groq.Env["ANTHROPIC_API_KEY"])
 		}
 	})
 }

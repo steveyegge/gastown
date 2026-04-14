@@ -71,18 +71,15 @@ type SwarmConfig struct {
 	QuorumRatio float64 `json:"quorum_ratio,omitempty"` // fraction for first_quorum, default 0.6
 }
 
-// NonInteractiveConfig holds flags for headless agent invocations (swarm, doctor probe).
-type NonInteractiveConfig struct {
-	OutputFormat string `json:"output_format,omitempty"` // e.g. "json"
-	NoColor      bool   `json:"no_color,omitempty"`
-	MaxTurns     int    `json:"max_turns,omitempty"`
+// SwarmDelegateRequest is the minimal JSON payload sent to nostown for swarm dispatch.
+// Using a dedicated struct avoids serialising unexported or json:"-" fields from
+// SlingParams and keeps the wire format stable across SlingParams refactors.
+type SwarmDelegateRequest struct {
+	BeadID      string       `json:"bead_id"`
+	TownRoot    string       `json:"town_root"`
+	RigName     string       `json:"rig_name"`
+	SwarmConfig *SwarmConfig `json:"swarm_config"`
 }
-
-// groqJSONEnforcement is appended to prompts for groq-compound non-interactive
-// invocations to enforce JSON-only output from the compound model.
-const groqJSONEnforcement = "\n\n---\nRESPONSE FORMAT: Respond ONLY with a single " +
-	"valid JSON object. No text, markdown, or code fences outside the JSON. " +
-	"If unable to comply, return: {\"error\": \"<reason>\"}"
 
 // executeSling performs the unified per-bead polecat/rig dispatch.
 // Batch sling and queue dispatch call this function. The single-sling path
@@ -422,12 +419,18 @@ func trySwarmDelegate(params SlingParams) (*SlingResult, error) {
 	if _, err := exec.LookPath("nostown"); err != nil {
 		return nil, nil
 	}
-	paramsJSON, err := json.Marshal(params)
+	req := SwarmDelegateRequest{
+		BeadID:      params.BeadID,
+		TownRoot:    params.TownRoot,
+		RigName:     params.RigName,
+		SwarmConfig: params.SwarmConfig,
+	}
+	reqJSON, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("swarm: marshaling params: %w", err)
 	}
 	cmd := exec.Command("nostown", "swarm", "--stdin-params")
-	cmd.Stdin = bytes.NewReader(paramsJSON)
+	cmd.Stdin = bytes.NewReader(reqJSON)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("swarm: nostown failed: %w", err)

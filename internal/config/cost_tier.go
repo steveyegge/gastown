@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -250,7 +249,7 @@ func claudeHaikuPreset() *RuntimeConfig {
 // OpenAI-compatible endpoint by overriding two Anthropic SDK env vars:
 //
 //	ANTHROPIC_BASE_URL  = https://api.groq.com/openai/v1
-//	ANTHROPIC_API_KEY   =   (resolved at spawn time from the shell env)
+//	ANTHROPIC_API_KEY   = $GROQ_API_KEY  (sentinel; expanded at agent spawn time)
 //
 // This gives you:
 //   - Groq compound-beta reasoning on patrol/utility roles including polecat (low cost, fast)
@@ -258,15 +257,26 @@ func claudeHaikuPreset() *RuntimeConfig {
 //   - Claude Opus on mayor and crew via the default claude preset
 //
 // Prerequisite: export GROQ_API_KEY=gsk_... in your shell before starting gt.
+// The key is resolved at spawn time — never stored in config files.
 func groqCompoundPreset() *RuntimeConfig {
 	// Derive from the canonical AgentGroqCompound builtin so Command, Args,
 	// Env, and all normalisation logic stay in one place (agents.go).
+	// $GROQ_API_KEY is kept as-is; the agent spawn code expands env sentinels
+	// at runtime, matching the behaviour of all other preset env vars.
 	rc := RuntimeConfigFromPreset(AgentGroqCompound)
-	// Resolve $GROQ_API_KEY at preset creation time so the settings file
-	// records the live key value rather than a shell-expansion sentinel.
-	if rc != nil && rc.Env != nil {
-		if v, ok := rc.Env["ANTHROPIC_API_KEY"]; ok && v == "$GROQ_API_KEY" {
-			rc.Env["ANTHROPIC_API_KEY"] = os.Getenv("GROQ_API_KEY")
+	if rc == nil {
+		// Defensive fallback: builtin registry not initialised (e.g. unit tests
+		// that don't call initRegistryLocked). Build the config directly so
+		// callers never receive a nil and panic on Env access.
+		return &RuntimeConfig{
+			Provider: string(AgentGroqCompound),
+			Command:  "claude",
+			Args:     []string{"--dangerously-skip-permissions"},
+			Env: map[string]string{
+				"ANTHROPIC_BASE_URL": "https://api.groq.com/openai/v1",
+				"ANTHROPIC_MODEL":    "compound-beta",
+				"ANTHROPIC_API_KEY":  "$GROQ_API_KEY",
+			},
 		}
 	}
 	return rc

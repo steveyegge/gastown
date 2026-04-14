@@ -178,7 +178,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 
 	runtimeConfig := config.ResolveRoleAgentConfig("refinery", townRoot, m.rig.Path)
 	if strings.HasPrefix(runtimeConfig.ResolvedAgent, "groq") {
-		fmt.Fprintf(os.Stderr, "warning: ignoring groq agent config for refinery; forcing claude\n")
+		log.Printf("warning: ignoring groq agent config for refinery; forcing claude")
 		runtimeConfig = config.RuntimeConfigFromPreset(config.AgentClaude)
 		runtimeConfig.ResolvedAgent = "claude"
 		if agentOverride == "" {
