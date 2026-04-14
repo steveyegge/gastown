@@ -39,7 +39,6 @@ var (
 // shadow the real town root above them.
 // Returns empty string if not found (reached filesystem root).
 func FindTownRoot(startDir string) string {
-	var found string
 	dir := startDir
 	candidate := ""
 	for {

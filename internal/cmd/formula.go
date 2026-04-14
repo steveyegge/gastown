@@ -463,7 +463,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 	}
 
 	// Step 1: Create convoy bead
-	convoyID := fmt.Sprintf("%s-cv-%s", beadPrefix, generateFormulaShortID())
+	convoyID := fmt.Sprintf("%s-cv-%s", rigPrefix, generateFormulaShortID())
 	convoyTitle := fmt.Sprintf("%s: %s", formulaName, f.Description)
 	if len(convoyTitle) > 80 {
 		convoyTitle = convoyTitle[:77] + "..."

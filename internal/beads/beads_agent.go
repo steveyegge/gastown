@@ -252,7 +252,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// when the bead's prefix routes to a different rig than our own database.
 	// Without this, agent beads for rig polecats (e.g., be-beads-polecat-rust)
 	// would be created in the wrong database, failing type validation.
-	target := b
+	target = b
 	if targetDir != b.getResolvedBeadsDir() {
 		target = NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
 	}
