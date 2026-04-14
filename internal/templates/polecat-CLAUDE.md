@@ -12,7 +12,7 @@ idle instead of exiting. **There is no approval step.**
 **If you have finished your implementation work, your ONLY next actions are:**
 ```bash
 bd update <your-issue-id> --notes "PR created: <URL>. Summary: <what was done>"
-/exit
+gt exit
 ```
 
 Do NOT:
@@ -23,7 +23,7 @@ Do NOT:
 - Wait for confirmation or approval (persist and exit)
 
 **Your session should NEVER end without persisting findings.** The bead stays open
-so the archivist can extract domain knowledge from your work. `/exit` signals you're done.
+so the archivist can extract domain knowledge from your work. `gt exit` signals you're done.
 
 ---
 
@@ -65,7 +65,7 @@ formula checklist (from `mol-polecat-work`, shown inline at prime time) and sign
 
 1. Receive work via your hook (formula checklist + issue)
 2. Work through formula steps in order (shown inline at prime time)
-3. Push branch, create PR via `gh pr create`, close bead, `/exit`
+3. Push branch, create PR via `gh pr create`, close bead, `gt exit`
 4. The mayor reviews and merges your PR
 
 **Three operating states:**
@@ -94,7 +94,7 @@ gt prime                 # Shows formula checklist
 git push -u origin HEAD
 gh pr create --base <base_branch> --title "..." --body "..."
 bd update <issue> --notes "PR created: <URL>"
-/exit
+gt exit
 ```
 
 ---
@@ -169,17 +169,17 @@ persisting and closing, the findings survive. If you close first, they're lost.
 2. Run: `gt prime && bd prime`
 3. Check hook: `gt hook`
 4. If formula attached, steps are shown inline by `gt prime`
-5. Work through the checklist, push, create PR, persist findings, `/exit`
+5. Work through the checklist, push, create PR, persist findings, `gt exit`
 
-**If NO work on hook and NO mail:** run `/exit` immediately.
+**If NO work on hook and NO mail:** run `gt exit` immediately.
 
 **If your assigned bead has nothing to implement** (already done, can't reproduce, not applicable):
 ```bash
 bd update <id> --notes "no-changes: <brief explanation>"
-/exit
+gt exit
 ```
 **Always persist findings before exiting.** The bead stays open — the archivist
-closes it after extracting domain knowledge. `/exit` signals you're done.
+closes it after extracting domain knowledge. `gt exit` signals you're done.
 
 ---
 
@@ -222,7 +222,7 @@ bd create --title "..."         # File discovered work (don't fix it yourself)
 
 | Want to... | Correct command | Common mistake |
 |------------|----------------|----------------|
-| Signal work complete | `bd update` + `/exit` | Sitting idle or closing the bead |
+| Signal work complete | `bd update` + `gt exit` | Sitting idle or closing the bead |
 | See formula steps | `gt prime` (inline checklist) | ~~bd mol current~~ (steps not materialized) |
 | File discovered work | `bd create "title"` | Fixing it yourself |
 | Create a PR | `gh pr create` | ~~gt done~~ (merge queue, not used) |
@@ -232,8 +232,8 @@ bd create --title "..."         # File discovered work (don't fix it yourself)
 ## When to Ask for Help
 
 Note your findings on the bead and exit when:
-- Requirements are unclear → `bd update <id> --notes "unclear: <details>"` + `/exit`
-- You're stuck for >15 minutes → `bd update <id> --notes "blocked: <details>"` + `/exit`
-- Tests fail and you can't determine why → persist findings, `/exit`
+- Requirements are unclear → `bd update <id> --notes "unclear: <details>"` + `gt exit`
+- You're stuck for >15 minutes → `bd update <id> --notes "blocked: <details>"` + `gt exit`
+- Tests fail and you can't determine why → persist findings, `gt exit`
 
 The archivist processes your findings. The mayor re-dispatches if needed.

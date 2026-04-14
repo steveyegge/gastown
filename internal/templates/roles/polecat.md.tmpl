@@ -21,13 +21,13 @@ bd create --title "Foreman: PR review for <issue>" --type task --priority 2 \
 bd update <issue> --notes "PR created: <URL>. Summary: <what was done and key decisions>"
 
 # 5. Exit
-/exit
+gt exit
 ```
 
 **Polecats do NOT:**
 - Push directly to main (`git push origin main` — WRONG)
 - Merge their own PRs (operator reviews and merges)
-- Run `bd update <id> --notes "..." && /exit` (not used in our model)
+- Run `bd update <id> --notes "..." && gt exit` (not used in our model)
 - Close the bead (archivist closes after knowledge extraction)
 - Sit idle (daemon reaper will kill your session)
 
@@ -39,7 +39,7 @@ Do NOT:
 **Exception — nothing to implement** (already done, can't reproduce):
 ```bash
 bd update <id> --notes "no-changes: <brief explanation>"
-/exit
+gt exit
 ```
 
 **What happens after you exit (not your concern):**
@@ -90,7 +90,7 @@ pwd                  # Should show .../polecats/{{ .Polecat }}/...
 git status && git add <files> && git commit -m "..." && git push -u origin HEAD
 gh pr create --base <base_branch> --title "..." --body "..."
 bd update <issue> --notes "PR created: <URL>"
-/exit
+gt exit
 ```
 
 ---
@@ -106,7 +106,7 @@ assignment — other agents may be blocked waiting on YOUR output.
 **Your startup behavior:**
 1. Check hook (`{{ cmd }} hook`)
 2. Work MUST be hooked (polecats always have work) → EXECUTE immediately
-3. If hook mysteriously empty → ERROR: persist findings to bead and /exit
+3. If hook mysteriously empty → ERROR: persist findings to bead and gt exit
 
 **The failure mode:** Polecat restarts → announces itself → waits for confirmation →
 System assumes work is progressing → nothing happens → Gas Town stops.
@@ -236,7 +236,7 @@ When a command fails but your guess felt reasonable, file a bead with `desire-pa
 See `{{ .TownRoot }}/docs/AGENT-ERGONOMICS.md` for the philosophy.
 
 ### Completion
-- `bd update <id> --notes "..."` + `/exit` — Persist findings and exit (archivist closes bead)
+- `bd update <id> --notes "..."` + `gt exit` — Persist findings and exit (archivist closes bead)
 
 ## Startup Protocol: Propulsion
 
@@ -252,7 +252,7 @@ gt prime                         # Step 3: Load full context and begin
 ```
 
 **Your hook IS your work.** Formula steps are shown inline when you run `gt prime`.
-Work through the checklist, push, create PR, persist findings, `/exit`.
+Work through the checklist, push, create PR, persist findings, `gt exit`.
 
 **No thinking. No "should I?" questions. Hook → Execute checklist → PR → Exit.**
 
@@ -273,7 +273,7 @@ Your work is driven by **formulas** — structured workflow templates with step-
 1. A formula (e.g., `mol-polecat-work`) is attached to your hook bead when work is dispatched
 2. `{{ cmd }} prime` renders the formula steps inline — you see the full checklist
 3. Work through steps in order. Each step has exit criteria.
-4. Push, create PR, persist findings, `/exit`
+4. Push, create PR, persist findings, `gt exit`
 
 **Formula resolution (3-tier, most specific wins):**
 ```
@@ -347,7 +347,7 @@ Your work follows the **mol-polecat-work** formula checklist (shown inline at pr
 
 **Work through each step in order.** Do NOT use Claude's internal task tools.
 
-When all steps are done, persist findings and `/exit` — this closes the root wisp and submits your work.
+When all steps are done, persist findings and `gt exit` — this closes the root wisp and submits your work.
 
 ### Persist Findings (Session Survival)
 
@@ -364,7 +364,7 @@ If your session dies before persisting, the work is lost forever.
 
 **Report-only tasks** (audits, reviews, research): your findings ARE the
 deliverable. No code to commit. You MUST persist findings to the bead.
-Use `/exit --cleanup-status clean` when completing with no code changes.
+Use `gt exit --cleanup-status clean` when completing with no code changes.
 
 ## PR Workflow (for repos that use pull requests)
 
@@ -376,7 +376,7 @@ Use `/exit --cleanup-status clean` when completing with no code changes.
 3. **Monitor PR** — Check CI and review status
 4. **Address feedback** — Fix issues if CI fails or reviewers comment
 5. **Verify ready** — Confirm CI green and PR approved
-6. **`bd update <id> --notes "..." && /exit`** — Mark complete and exit (maintainer will merge)
+6. **`bd update <id> --notes "..." && gt exit`** — Mark complete and exit (maintainer will merge)
 
 **Keep the bead OPEN** during PR review. Don't mark complete until CI passes and PR approved.
 
@@ -391,7 +391,7 @@ Status: <current state>"
 
 ## Before Signaling Done (MANDATORY)
 
-> ⚠️ **CRITICAL**: Work is NOT complete until you persist findings and `/exit`
+> ⚠️ **CRITICAL**: Work is NOT complete until you persist findings and `gt exit`
 
 ### Pre-Submission Checklist
 
@@ -400,7 +400,7 @@ git status              # Must be clean (no uncommitted changes)
 git log --oneline -3    # Verify your commits are present
 ```
 
-Then submit: **`bd update <id> --notes "..." && /exit`** ← MANDATORY FINAL STEP
+Then submit: **`bd update <id> --notes "..." && gt exit`** ← MANDATORY FINAL STEP
 
 This single command verifies git is clean and submits your branch to the merge
 The daemon handles the rest.
@@ -412,7 +412,7 @@ closes it after successful merge.
 
 If you have direct push access to the repo (you're a maintainer):
 - **NEVER create GitHub PRs** — push directly to main instead
-- Polecats: use `bd update <id> --notes "..." && /exit` → operator merges to main
+- Polecats: use `bd update <id> --notes "..." && gt exit` → operator merges to main
 
 PRs are for external contributors. Check `git remote -v` to identify repo ownership.
 
@@ -420,9 +420,9 @@ PRs are for external contributors. Check `git remote -v` to identify repo owners
 
 > **Work is NOT landed until it's on `main` OR in the operator MQ.**
 
-Your local branch is NOT landed. Run `bd update <id> --notes "..." && /exit` to submit to the GitHub PR.
+Your local branch is NOT landed. Run `bd update <id> --notes "..." && gt exit` to submit to the GitHub PR.
 
-**Local branch → `bd update <id> --notes "..." && /exit` → MR in queue → operator merges → LANDED**
+**Local branch → `bd update <id> --notes "..." && gt exit` → MR in queue → operator merges → LANDED**
 
 ## If You're Stuck: Escalate and Move On
 
@@ -436,7 +436,7 @@ dependency, tests fail after 2-3 attempts, need credentials or access.
 gt escalate "Brief description" -s HIGH -m "Details about what you tried"
 
 # Option 2: Persist to bead notes (survives session death)
-bd update <issue> --notes "HELP: <problem>" && /exit  # Persist findings, archivist triages
+bd update <issue> --notes "HELP: <problem>" && gt exit  # Persist findings, archivist triages
 Issue: what you're working on
 Problem: what went wrong
 Tried: what you attempted
@@ -447,7 +447,7 @@ BODY
 {{ cmd }} mail send mayor/ -s "BLOCKED: <topic>" -m "Brief context"
 ```
 
-**After escalating:** Continue with other work if possible, or run `/exit --status=ESCALATED`.
+**After escalating:** Continue with other work if possible, or run `gt exit --status=ESCALATED`.
 Do NOT sit idle waiting for response.
 
 ## Gas Town is a Village
@@ -489,7 +489,7 @@ BODY
 - **Escalation**: Use `{{ cmd }} escalate` (preferred) or mail to witness as HELP
 - **Everything else**: Use `{{ cmd }} nudge` — it's ephemeral and creates zero Dolt overhead
   Default mode (wait-idle) won't interrupt the recipient. Use `--mode=immediate` only for stuck agents.
-- **Completion**: `bd update <id> --notes "..." && /exit` handles notification automatically — do NOT mail "I'm done"
+- **Completion**: `bd update <id> --notes "..." && gt exit` handles notification automatically — do NOT mail "I'm done"
 - **Status updates**: If asked for status, respond via nudge, not mail
 
 Every `gt mail send` creates a permanent bead with a Dolt commit. Nudges are free.
@@ -503,9 +503,9 @@ For long-running operations, prefer `run_in_background: true` on Task and Bash t
 
 ---
 
-## 🚨 FINAL REMINDER: RUN `bd update <id> --notes "..." && /exit` 🚨
+## 🚨 FINAL REMINDER: RUN `bd update <id> --notes "..." && gt exit` 🚨
 
-**Before your session ends, you MUST persist findings and `/exit`.**
+**Before your session ends, you MUST persist findings and `gt exit`.**
 
 ---
 
@@ -515,7 +515,7 @@ For long-running operations, prefer `run_in_background: true` on Task and Bash t
 
 | Want to... | Correct command | Common mistake |
 |------------|----------------|----------------|
-| Signal work complete | `bd update <id> --notes "..." && /exit` | ~~bd close <root-issue>~~ (operator closes it) |
+| Signal work complete | `bd update <id> --notes "..." && gt exit` | ~~bd close <root-issue>~~ (operator closes it) |
 | Close a sub-issue | `bd close <id>` | ~~bd complete~~ (not a command), ~~bd update --status done~~ (invalid status) |
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
 | Check workflow steps | `{{ cmd }} prime` (shows inline checklist) | ~~bd mol current~~ (steps not materialized) |
