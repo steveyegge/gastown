@@ -292,6 +292,13 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			if addErr := g.Add("-A"); addErr != nil {
 				style.PrintWarning("auto-commit: git add failed: %v — uncommitted work may be at risk", addErr)
 			} else {
+				// Unstage staged deletions — git add -A stages removals of tracked files,
+				// which can destroy infrastructure (e.g. .beads/metadata.json). A safety-net
+				// auto-commit should preserve additions/modifications, never deletions (gh-3615).
+				if deletions, delErr := g.StagedDeletions(); delErr == nil && len(deletions) > 0 {
+					_ = g.ResetFiles(deletions...)
+				}
+
 				// Unstage Gas Town overlay files that git add -A picked up.
 				// These are runtime artifacts that must not be committed to repos.
 				_ = g.ResetFiles("CLAUDE.local.md")

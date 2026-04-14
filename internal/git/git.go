@@ -619,6 +619,21 @@ func (g *Git) ResetFiles(paths ...string) error {
 	return err
 }
 
+// StagedDeletions returns the list of files that are staged for deletion
+// (i.e., tracked files removed from the working tree and staged via git add -A).
+// Use this after git add -A to identify deletions that should be unstaged.
+func (g *Git) StagedDeletions() ([]string, error) {
+	out, err := g.run("diff", "--cached", "--name-only", "--diff-filter=D")
+	if err != nil {
+		return nil, err
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
 // ShowFile returns the contents of a file at a given ref (e.g., "origin/main:CLAUDE.md").
 // Returns empty string and no error if the file does not exist at that ref.
 func (g *Git) ShowFile(ref, path string) (string, error) {
