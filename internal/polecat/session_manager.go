@@ -357,6 +357,9 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Generate the GASTA run ID — the root identifier for all telemetry emitted
 	// by this polecat session and its subprocesses (bd, mail, …).
 	runID := uuid.New().String()
+	// Set BEADS_DIR to town-root beads so the polecat's bd commands resolve
+	// beads from the town database, not the per-rig database.
+	townBeadsDir := filepath.Join(townRoot, ".beads")
 	envVarsToInject := map[string]string{
 		"GT_RIG":          m.rig.Name,
 		"GT_POLECAT":      polecat,
@@ -365,6 +368,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		"GT_TOWN_ROOT":    townRoot,
 		"GT_RUN":          runID,
 		"POLECAT_SLOT":    fmt.Sprintf("%d", m.polecatSlot(polecat)),
+		"BEADS_DIR":       townBeadsDir,
 	}
 	if polecatGitBranch != "" {
 		envVarsToInject["GT_BRANCH"] = polecatGitBranch
