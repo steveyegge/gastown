@@ -1961,7 +1961,7 @@ func listDatabasesRemote(config *Config) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := buildDoltSQLCmd(ctx, config, "-r", "json", "-q", "SHOW DATABASES")
+	cmd := buildServerSQLCmd(ctx, config, "-r", "json", "-q", "SHOW DATABASES")
 
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
@@ -2089,7 +2089,7 @@ func verifyDatabasesWithRetry(townRoot string, maxAttempts int) (served, missing
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		cmd := buildDoltSQLCmd(ctx, config,
+		cmd := buildServerSQLCmd(ctx, config,
 			"-r", "json",
 			"-q", "SHOW DATABASES",
 		)
@@ -2818,7 +2818,7 @@ func databaseHasUserTables(townRoot, dbName string) (bool, error) {
 	defer cancel()
 
 	query := fmt.Sprintf("USE `%s`; SHOW TABLES", dbName)
-	cmd := buildDoltSQLCmd(ctx, config, "-r", "csv", "-q", query)
+	cmd := buildServerSQLCmd(ctx, config, "-r", "csv", "-q", query)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return false, err
@@ -3532,7 +3532,7 @@ func CheckReadOnly(townRoot string) (bool, error) {
 		"USE `%s`; CREATE TABLE IF NOT EXISTS `__gt_health_probe` (v INT PRIMARY KEY); REPLACE INTO `__gt_health_probe` VALUES (1); DROP TABLE IF EXISTS `__gt_health_probe`",
 		db,
 	)
-	cmd := buildDoltSQLCmd(ctx, config, "-q", query)
+	cmd := buildServerSQLCmd(ctx, config, "-q", query)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -4007,7 +4007,7 @@ func doltSQLScript(townRoot, script string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := buildDoltSQLCmd(ctx, config, "--file", tmpFile.Name())
+	cmd := buildServerSQLCmd(ctx, config, "--file", tmpFile.Name())
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w (output: %s)", err, strings.TrimSpace(string(output)))
