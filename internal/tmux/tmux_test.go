@@ -1821,6 +1821,14 @@ func TestMatchesPromptPrefix(t *testing.T) {
 
 		// Bare prompt character without any space
 		{"bare prompt no space", "❯", regularPrefix, true},
+
+		// Onboarding/theme wizard lines must NOT match (gh-3569 / hq-z4q).
+		// Without the digit guard, "❯ 1. Dark mode" would false-positive as a
+		// ready prompt, causing WaitForRuntimeReady to succeed while the agent
+		// is actually stuck waiting for keyboard input.
+		{"wizard option 1 dark mode", "❯ 1. Dark mode ✔", regularPrefix, false},
+		{"wizard option 2 light mode", "❯ 2. Light mode", regularPrefix, false},
+		{"wizard option 3 system", "❯ 3. System default", regularPrefix, false},
 	}
 
 	for _, tt := range tests {

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -1806,6 +1807,7 @@ func (t *Tmux) NudgePane(pane, message string) error {
 // sessions. Currently handles (in order):
 //  1. Workspace trust dialog (Claude "Quick safety check", Codex "Do you trust the contents of this directory?")
 //  2. Bypass permissions warning ("Bypass Permissions mode") — requires Down+Enter
+//  3. Onboarding/theme wizard ("Choose a theme:") — requires pressing "1" to select dark mode
 //
 // Call this after starting the agent and waiting for it to initialize (WaitForCommand),
 // but before sending any prompts. Idempotent: safe to call on sessions without dialogs.
@@ -1815,6 +1817,9 @@ func (t *Tmux) AcceptStartupDialogs(session string) error {
 	}
 	if err := t.AcceptBypassPermissionsWarning(session); err != nil {
 		return fmt.Errorf("bypass permissions warning: %w", err)
+	}
+	if err := t.AcceptOnboardingWizard(session); err != nil {
+		return fmt.Errorf("onboarding wizard: %w", err)
 	}
 	return nil
 }
@@ -1933,6 +1938,48 @@ func (t *Tmux) AcceptBypassPermissionsWarning(session string) error {
 	}
 
 	// Timeout — no dialog detected, safe to proceed
+	return nil
+}
+
+// AcceptOnboardingWizard dismisses the Claude Code first-run onboarding/theme
+// wizard. When hasCompletedOnboarding is not set in Claude settings, Claude
+// shows a theme selection prompt:
+//
+//	Welcome to Claude Code!
+//	Choose a theme:
+//	❯ 1. Dark mode ✔
+//	  2. Light mode
+//	  3. System default
+//
+// Sending "1" selects dark mode and dismisses the wizard. If the wizard is not
+// present the function exits early.
+func (t *Tmux) AcceptOnboardingWizard(session string) error {
+	deadline := time.Now().Add(constants.DialogPollTimeout)
+	for time.Now().Before(deadline) {
+		content, err := t.CapturePane(session, 30)
+		if err != nil {
+			time.Sleep(constants.DialogPollInterval)
+			continue
+		}
+
+		if strings.Contains(content, "Choose a theme") || strings.Contains(content, "Welcome to Claude Code") {
+			// Wizard present — press "1" to select dark mode
+			if _, err := t.run("send-keys", "-t", session, "1"); err != nil {
+				return err
+			}
+			time.Sleep(500 * time.Millisecond)
+			return nil
+		}
+
+		// Early exit: if agent prompt or shell prompt is visible, wizard will not appear
+		if containsPromptIndicator(content) {
+			return nil
+		}
+
+		time.Sleep(constants.DialogPollInterval)
+	}
+
+	// Timeout — no wizard detected, safe to proceed
 	return nil
 }
 
@@ -2821,7 +2868,23 @@ func matchesPromptPrefix(line, readyPromptPrefix string) bool {
 	trimmed = strings.ReplaceAll(trimmed, "\u00a0", " ")
 	normalizedPrefix := strings.ReplaceAll(readyPromptPrefix, "\u00a0", " ")
 	prefix := strings.TrimSpace(normalizedPrefix)
-	return strings.HasPrefix(trimmed, normalizedPrefix) || (prefix != "" && trimmed == prefix)
+	if strings.HasPrefix(trimmed, normalizedPrefix) {
+		// Exclude wizard/menu option lines where the character immediately
+		// after the prefix is a digit (e.g. "❯ 1. Dark mode" from the
+		// Claude Code onboarding theme wizard). The real idle prompt has
+		// nothing (or non-digit content) after the prefix.
+		rest := trimmed[len(normalizedPrefix):]
+		firstRune, _ := utf8.DecodeRuneInString(rest)
+		if firstRune == utf8.RuneError || !isASCIIDigit(firstRune) {
+			return true
+		}
+	}
+	return prefix != "" && trimmed == prefix
+}
+
+// isASCIIDigit reports whether r is an ASCII decimal digit (0–9).
+func isASCIIDigit(r rune) bool {
+	return r >= '0' && r <= '9'
 }
 
 func hasBusyIndicator(line string) bool {
