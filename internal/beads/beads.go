@@ -482,6 +482,34 @@ func (b *Beads) run(args ...string) (_ []byte, retErr error) {
 	return stripStdoutWarnings(stdout.Bytes()), nil
 }
 
+// runInRig executes a bd command targeted at a specific rig's beads store.
+// This is a workaround for bd's --repo flag, which does not follow
+// .beads/redirect files. Rigs that store metadata.json behind a redirect
+// (e.g. <rig>/.beads/redirect → mayor/rig/.beads) hit "no database selected"
+// errors when bd falls back to embedded-dolt mode. Setting the subprocess
+// cwd to the rig directory triggers cwd-based discovery, which does follow
+// the redirect; we also set BEADS_DIR to the resolved path for belt-and-braces.
+func (b *Beads) runInRig(rigName string, args ...string) ([]byte, error) {
+	townRoot := b.getTownRoot()
+	if townRoot == "" {
+		return nil, fmt.Errorf("runInRig: cannot resolve town root from workDir %q", b.workDir)
+	}
+	rigPath := filepath.Join(townRoot, rigName)
+	resolved := ResolveBeadsDir(rigPath)
+	if resolved == "" {
+		return nil, fmt.Errorf("runInRig: cannot resolve beads dir for rig %q at %s", rigName, rigPath)
+	}
+	// Clone the wrapper with rig-targeted workDir + beadsDir so run() sets
+	// cmd.Dir and BEADS_DIR to the rig's resolved beads directory.
+	rigBeads := &Beads{
+		workDir:    rigPath,
+		beadsDir:   resolved,
+		isolated:   b.isolated,
+		serverPort: b.serverPort,
+	}
+	return rigBeads.run(args...)
+}
+
 // runWithRouting executes a bd command without setting BEADS_DIR, allowing bd's
 // native prefix-based routing via routes.jsonl to resolve cross-prefix beads.
 // This is needed for slot operations that reference beads with different prefixes
@@ -1226,9 +1254,6 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	if opts.Ephemeral {
 		args = append(args, "--ephemeral")
 	}
-	if opts.Rig != "" {
-		args = append(args, "--rig="+opts.Rig)
-	}
 	// Default Actor from BD_ACTOR env var if not specified
 	// Uses getActor() to respect isolated mode (tests)
 	actor := opts.Actor
@@ -1239,7 +1264,20 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 		args = append(args, "--actor="+actor)
 	}
 
-	out, err := b.run(args...)
+	// When creating a bead in a specific rig, bd's --repo flag does NOT follow
+	// the .beads/redirect file, causing bd to fall back to embedded-dolt mode
+	// and fail with "no database selected" for rigs whose metadata.json lives
+	// behind a redirect (e.g. <rig>/.beads/redirect → mayor/rig/.beads). Instead
+	// of passing --repo, point the subprocess at the rig directory and set
+	// BEADS_DIR to the resolved beads dir — cwd-based discovery does follow the
+	// redirect, so bd finds the server-backed store and MR bead creation works.
+	var out []byte
+	var err error
+	if opts.Rig != "" {
+		out, err = b.runInRig(opts.Rig, args...)
+	} else {
+		out, err = b.run(args...)
+	}
 	if err != nil {
 		return nil, err
 	}
