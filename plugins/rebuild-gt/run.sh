@@ -66,6 +66,31 @@ if [ "$BRANCH" != "main" ]; then
   exit 0
 fi
 
+# --- Sync rig to origin/main -------------------------------------------------
+
+log "Syncing rig to origin/main..."
+if git -C "$RIG_ROOT" fetch origin main --quiet 2>/dev/null; then
+  LOCAL_HEAD=$(git -C "$RIG_ROOT" rev-parse HEAD 2>/dev/null || echo "")
+  REMOTE_HEAD=$(git -C "$RIG_ROOT" rev-parse origin/main 2>/dev/null || echo "")
+  if [ -n "$REMOTE_HEAD" ] && [ "$LOCAL_HEAD" != "$REMOTE_HEAD" ]; then
+    LOCAL_SHORT=$(git -C "$RIG_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    REMOTE_SHORT=$(git -C "$RIG_ROOT" rev-parse --short origin/main 2>/dev/null || echo "unknown")
+    log "Rig main ($LOCAL_SHORT) not at origin/main ($REMOTE_SHORT), resetting..."
+    if ! git -C "$RIG_ROOT" reset --hard origin/main 2>/dev/null; then
+      log "Failed to reset rig to origin/main, skipping rebuild."
+      bd create "Plugin: rebuild-gt [skipped]" -t chore --ephemeral \
+        -l type:plugin-run,plugin:rebuild-gt,rig:gastown,result:skipped \
+        -d "Skipped: could not sync rig main to origin/main" --silent 2>/dev/null || true
+      exit 0
+    fi
+    log "Rig reset to origin/main: $(git -C "$RIG_ROOT" rev-parse --short HEAD 2>/dev/null)"
+  else
+    log "Rig already at origin/main: $(git -C "$RIG_ROOT" rev-parse --short HEAD 2>/dev/null)"
+  fi
+else
+  log "Could not fetch origin — building from current rig HEAD: $(git -C "$RIG_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+fi
+
 # --- Build -------------------------------------------------------------------
 
 OLD_VER=$(gt version 2>/dev/null | head -1 || echo "unknown")
