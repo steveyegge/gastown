@@ -1622,21 +1622,31 @@ func runtimeLabelFromConfig(command string, args []string, fallback string) stri
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if (arg == "--model" || arg == "-m") && i+1 < len(args) && strings.TrimSpace(args[i+1]) != "" {
-			return cmd + "/" + strings.TrimSpace(args[i+1])
+			return cmd + "/" + stripModelSuffix(strings.TrimSpace(args[i+1]))
 		}
 		if strings.HasPrefix(arg, "--model=") {
 			if v := strings.TrimSpace(strings.TrimPrefix(arg, "--model=")); v != "" {
-				return cmd + "/" + v
+				return cmd + "/" + stripModelSuffix(v)
 			}
 		}
 		if strings.HasPrefix(arg, "-m=") {
 			if v := strings.TrimSpace(strings.TrimPrefix(arg, "-m=")); v != "" {
-				return cmd + "/" + v
+				return cmd + "/" + stripModelSuffix(v)
 			}
 		}
 	}
 
 	return cmd
+}
+
+// stripModelSuffix removes bracketed context-window hints (e.g. "[1m]")
+// from model names so the dashboard label stays human-readable.
+// "sonnet[1m]" → "sonnet", "opus" → "opus".
+func stripModelSuffix(model string) string {
+	if idx := strings.Index(model, "["); idx > 0 {
+		return model[:idx]
+	}
+	return model
 }
 
 // FetchIssues returns open issues (the backlog).

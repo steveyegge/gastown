@@ -144,6 +144,11 @@ func (b *Beads) CreateRigBead(name string, fields *RigFields) (*Issue, error) {
 	id := RigBeadIDWithPrefix(prefix, name)
 	description := FormatRigDescription(name, fields)
 
+	// Ensure target database has custom types configured (including "rig").
+	// This matches what CreateAgentBead does — without it, bd rejects
+	// --type=rig on databases that haven't registered custom types yet.
+	_ = EnsureCustomTypes(b.getResolvedBeadsDir())
+
 	args := []string{"create", "--json",
 		"--id=" + id,
 		"--title=" + name,

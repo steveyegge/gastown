@@ -448,9 +448,8 @@ func TestCreateAgentBead_UsesTownRootForCrossRigRoutes(t *testing.T) {
 	if !strings.Contains(logOutput, "create --json --id=pt-imported-polecat-shiny") {
 		t.Fatalf("mock bd log missing create call:\n%s", logOutput)
 	}
-	if !strings.Contains(logOutput, "slot set pt-imported-polecat-shiny hook pt-task-1") {
-		t.Fatalf("mock bd log missing slot set call:\n%s", logOutput)
-	}
+	// Note: hook_bead slot is no longer set — bd slot removed in v0.62 (hq-l6mm5).
+	// Work bead status=hooked and assignee=<agent> is now the authoritative source.
 }
 
 func TestCreateAgentBead_ParsesMockCreateOutput(t *testing.T) {
