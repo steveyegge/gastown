@@ -275,15 +275,15 @@ func (m *DoltServerManager) buildDoltSQLCmd(ctx context.Context, args ...string)
 	// password. For local checks, keep forcing the empty-password path so
 	// inherited shell credentials cannot make a healthy local server look broken.
 	if m.config.Password != "" {
-		cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+m.config.Password)
+					cmd.Env = append(environWithout("DOLT_CLI_PASSWORD"), "DOLT_CLI_PASSWORD="+m.config.Password)
 	} else if m.isRemote() {
 		if inherited, ok := os.LookupEnv("DOLT_CLI_PASSWORD"); ok {
-			cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+inherited)
+							cmd.Env = append(environWithout("DOLT_CLI_PASSWORD"), "DOLT_CLI_PASSWORD="+inherited)
 		} else {
-			cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD=")
+							cmd.Env = append(environWithout("DOLT_CLI_PASSWORD"), "DOLT_CLI_PASSWORD=")
 		}
 	} else {
-		cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD=")
+					cmd.Env = append(environWithout("DOLT_CLI_PASSWORD"), "DOLT_CLI_PASSWORD=")
 	}
 
 	return cmd
