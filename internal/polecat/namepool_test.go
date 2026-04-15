@@ -380,12 +380,16 @@ func TestNamePool_CustomNames(t *testing.T) {
 
 func TestListThemes(t *testing.T) {
 	themes := ListThemes()
-	if len(themes) != 3 {
-		t.Errorf("expected 3 themes, got %d", len(themes))
+	if len(themes) != 8 {
+		t.Errorf("expected 8 themes, got %d", len(themes))
 	}
 
 	// Check that all expected themes are present
-	expected := map[string]bool{"mad-max": true, "minerals": true, "wasteland": true}
+	expected := map[string]bool{
+		"mad-max": true, "minerals": true, "wasteland": true,
+		"echopraxia": true, "revelation-space": true, "house-of-suns": true,
+		"children-of-time": true, "sprawl": true,
+	}
 	for _, theme := range themes {
 		if !expected[theme] {
 			t.Errorf("unexpected theme: %s", theme)
@@ -775,9 +779,9 @@ func TestListAllThemes(t *testing.T) {
 
 	themes := ListAllThemes(tmpDir)
 
-	// Should have 3 built-in + 1 custom = 4
-	if len(themes) != 4 {
-		t.Fatalf("expected 4 themes, got %d: %v", len(themes), themes)
+	// Should have 8 built-in + 1 custom = 9
+	if len(themes) != 9 {
+		t.Fatalf("expected 9 themes, got %d: %v", len(themes), themes)
 	}
 
 	// Find custom theme

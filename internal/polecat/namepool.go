@@ -79,6 +79,37 @@ var BuiltinThemes = map[string][]string{
 		"overseer", "sentinel", "paladin", "scribe", "initiate",
 		"elder", "lancer", "knight", "squire", "proctor",
 	},
+	"echopraxia": {
+		"siri", "sarasti", "szpindel", "cruncher", "theseus",
+		"jukka", "rorschach", "bruks", "lianna", "valerie",
+		"bicameral", "portia", "sengupta", "firefall", "icarus",
+		"oasa", "crown-of-thorns", "moksha", "blindsight", "scramblers",
+	},
+	"revelation-space": {
+		"sylveste", "volyova", "khouri", "sajaki", "hegazi",
+		"clavain", "skade", "felka", "scorpio", "aura",
+		"nostalgia", "conjoiner", "inhibitor", "lighthugger", "ultranaut",
+		"triumvir", "demarchist", "resurgam", "yellowstone", "chasm-city",
+	},
+	"house-of-suns": {
+		"campion", "purslane", "hesperus", "galingale", "cadence",
+		"mezereon", "gentian", "charlock", "betony", "celandine",
+		"tansy", "yarrow", "palatial", "shattering", "reunion",
+		"vigilance", "thousandth", "turnover", "circuit", "abigail",
+	},
+	"children-of-time": {
+		"portia", "bianca", "fabian", "viola", "holsten",
+		"lain", "karst", "kern", "avrana", "meshner",
+		"gilgamesh", "arkship", "brin2", "nodan", "artificer",
+		"classicist", "dreamer", "neoavian", "salticid", "understing",
+	},
+	"sprawl": {
+		"mona", "angie", "molly", "turner", "kumiko",
+		"slick", "gentry", "cherry", "tick", "prior",
+		"virek", "bobby", "beauvoir", "lupus", "jael",
+		"finn", "armitage", "wintermute", "neuromancer", "riviera",
+		"maelcum", "tessier", "ashpool", "straylight", "zion",
+	},
 }
 
 // NamePool manages a bounded pool of reusable polecat names.

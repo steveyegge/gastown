@@ -540,12 +540,13 @@ func TestReconcilePoolWith(t *testing.T) {
 			defer func() { _ = os.RemoveAll(tmpDir) }()
 
 			// Create rig and manager (nil tmux for unit test)
-			// Use "myrig" which hashes to mad-max theme
+			// Explicitly set mad-max theme — test names are theme-specific
 			r := &rig.Rig{
 				Name: "myrig",
 				Path: tmpDir,
 			}
 			m := NewManager(r, nil, nil)
+			m.namePool.Theme = "mad-max"
 
 			// Call ReconcilePoolWith
 			m.ReconcilePoolWith(tt.namesWithDirs, tt.namesWithSessions)
@@ -603,12 +604,13 @@ func TestReconcilePoolWith_Allocation(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	// Use "myrig" which hashes to mad-max theme
+	// Explicitly set mad-max theme — test names are theme-specific
 	r := &rig.Rig{
 		Name: "myrig",
 		Path: tmpDir,
 	}
 	m := NewManager(r, nil, nil)
+	m.namePool.Theme = "mad-max"
 
 	// Mark first few pool names as in-use via directories
 	// (furiosa, nux, slit are first 3 in mad-max theme)
@@ -640,12 +642,13 @@ func TestReconcilePoolWith_OrphanDoesNotBlockAllocation(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	// Use "myrig" which hashes to mad-max theme
+	// Explicitly set mad-max theme — test names are theme-specific
 	r := &rig.Rig{
 		Name: "myrig",
 		Path: tmpDir,
 	}
 	m := NewManager(r, nil, nil)
+	m.namePool.Theme = "mad-max"
 
 	// furiosa has orphan session (no dir) - should NOT block allocation
 	m.ReconcilePoolWith([]string{}, []string{"furiosa"})
@@ -1301,12 +1304,13 @@ func TestPendingMarkerBlocksReallocation(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	// Use "myrig" which hashes to mad-max theme (furiosa is first name)
+	// Explicitly set mad-max theme — test names are theme-specific (furiosa is first name)
 	r := &rig.Rig{
 		Name: "myrig",
 		Path: tmpDir,
 	}
 	m := NewManager(r, nil, nil)
+	m.namePool.Theme = "mad-max"
 
 	// Simulate AllocateName: create polecats/ dir and write a .pending marker
 	// for "furiosa" (as if AllocateName ran but AddWithOptions hasn't yet).
