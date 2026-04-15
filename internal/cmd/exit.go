@@ -86,7 +86,7 @@ func runExit(cmd *cobra.Command, args []string) error {
 	if issueID == "" {
 		sender := detectSender()
 		if sender != "" {
-			bd := beads.New(cwd)
+			bd := beads.New(beads.ResolveBeadsDir(townRoot))
 			if hookIssue := findHookedBeadForAgent(bd, sender); hookIssue != "" {
 				issueID = hookIssue
 				fmt.Printf("%s Issue resolved from hooked bead: %s\n", style.Bold.Render("✓"), issueID)
