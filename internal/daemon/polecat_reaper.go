@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -142,6 +143,27 @@ func (d *Daemon) reapCompletedPolecats() {
 func (d *Daemon) spawnArchivistExtraction(rig, sourceBead string) {
 	ctx, cancel := context.WithTimeout(d.ctx, 30*time.Second)
 	defer cancel()
+
+	// Dedup: check if an open archivist wisp already exists for this bead.
+	// Query wisps table for open wisps whose description contains source_bead: <id>.
+	checkCmd := exec.CommandContext(ctx, d.bdPath, "sql",
+		fmt.Sprintf("SELECT COUNT(*) as cnt FROM wisps WHERE status='open' AND description LIKE '%%source_bead: %s%%'", sourceBead))
+	checkCmd.Dir = d.config.TownRoot
+	checkCmd.Env = append(os.Environ(), "BEADS_DIR="+beads.ResolveBeadsDir(d.config.TownRoot))
+	util.SetDetachedProcessGroup(checkCmd)
+	if checkOutput, err := checkCmd.Output(); err == nil {
+		// Parse count — output is like "cnt\n---\n0\n"
+		lines := strings.Split(strings.TrimSpace(string(checkOutput)), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && line != "cnt" && !strings.HasPrefix(line, "-") {
+				if count, err := strconv.Atoi(line); err == nil && count > 0 {
+					d.logger.Printf("archivist: skipping %s — %d open wisp(s) already exist", sourceBead, count)
+					return
+				}
+			}
+		}
+	}
 
 	// Create archivist wisp via bd (ephemeral bead)
 	desc := fmt.Sprintf("source_bead: %s\nrig: %s\ntrigger_type: post-polecat\nrole: archivist\nformula: mol-archivist-extract", sourceBead, rig)
