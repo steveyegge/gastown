@@ -2584,3 +2584,142 @@ func TestSlingRejectsDeferredBead(t *testing.T) {
 		})
 	}
 }
+
+// TestStoreFieldsInBeadConvoyFields verifies that MergeStrategy, ConvoyID, and
+// ConvoyOwned are persisted in the bead's attachment fields when passed through
+// beadFieldUpdates. This was the root cause of GH #3320: the fields existed in
+// the struct and the write path, but were never populated in the struct literal.
+func TestStoreFieldsInBeadConvoyFields(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "fields.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", logPath)
+
+	updates := beadFieldUpdates{
+		Dispatcher:    "test-mayor",
+		MergeStrategy: "local",
+		ConvoyID:      "hq-cv-test42",
+		ConvoyOwned:   true,
+	}
+
+	if err := storeFieldsInBead("gt-fake123", updates); err != nil {
+		t.Fatalf("storeFieldsInBead: %v", err)
+	}
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	desc := string(content)
+
+	for _, want := range []string{
+		"merge_strategy: local",
+		"convoy_id: hq-cv-test42",
+		"convoy_owned: true",
+		"dispatched_by: test-mayor",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("description missing %q\nGot:\n%s", want, desc)
+		}
+	}
+}
+
+// TestSlingMergeStrategyPersisted verifies that gt sling --merge=local stores
+// the merge_strategy in the bead's description via the full runSling path.
+// Regression test for GH #3320 where MergeStrategy was never wired into
+// the beadFieldUpdates struct literal.
+func TestSlingMergeStrategyPersisted(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace marker so workspace.FindFromCwd() succeeds.
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Create stub bd
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+	bdScript := `#!/bin/sh
+set -e
+echo "ARGS:$*" >> "${BD_LOG}"
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    echo '[{"title":"Test issue","status":"open","assignee":"","description":""}]'
+    ;;
+  update)
+    exit 0
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+echo ARGS:%*>>"%BD_LOG%"
+set "cmd=%1"
+if not "%cmd%"=="show" goto :notshow
+echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+exit /b 0
+:notshow
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	molLogPath := filepath.Join(townRoot, "mol.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", molLogPath)
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
+	t.Setenv("GT_TEST_SKIP_HOOK_VERIFY", "1")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Save and restore global flags
+	prevDryRun := slingDryRun
+	prevNoConvoy := slingNoConvoy
+	prevMerge := slingMerge
+	prevOwned := slingOwned
+	t.Cleanup(func() {
+		slingDryRun = prevDryRun
+		slingNoConvoy = prevNoConvoy
+		slingMerge = prevMerge
+		slingOwned = prevOwned
+	})
+
+	slingDryRun = false
+	slingNoConvoy = true // Skip convoy creation to avoid complex bd stubs
+	slingMerge = "local" // This is what we're testing (GH #3320)
+	slingOwned = true
+
+	if err := runSling(nil, []string{"gt-test456"}); err != nil {
+		t.Fatalf("runSling: %v", err)
+	}
+
+	molBytes, err := os.ReadFile(molLogPath)
+	if err != nil {
+		t.Fatalf("read molecule log: %v", err)
+	}
+	molContent := string(molBytes)
+
+	if !strings.Contains(molContent, "merge_strategy: local") {
+		t.Errorf("--merge=local not stored in bead description\nDescription:\n%s", molContent)
+	}
+	if !strings.Contains(molContent, "convoy_owned: true") {
+		t.Errorf("--owned not stored in bead description\nDescription:\n%s", molContent)
+	}
+}
