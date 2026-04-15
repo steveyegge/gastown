@@ -170,6 +170,17 @@ func runExit(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("%s Notes persisted to %s\n", style.Bold.Render("✓"), issueID)
 		}
+		// Close the bead — archivist extracts knowledge later via daemon trigger
+		closeCmd := exec.Command("bd", "close", issueID, "--reason",
+			fmt.Sprintf("Polecat exit: branch %s, rig %s", branch, rigName))
+		closeCmd.Dir = townRoot
+		closeCmd.Env = append(os.Environ(), "BEADS_DIR="+beads.ResolveBeadsDir(townRoot))
+		util.SetDetachedProcessGroup(closeCmd)
+		if err := closeCmd.Run(); err != nil {
+			style.PrintWarning("could not close %s: %v", issueID, err)
+		} else {
+			fmt.Printf("%s Bead %s closed\n", style.Bold.Render("✓"), issueID)
+		}
 	} else {
 		fmt.Printf("%s No issue ID detected — skipping bead update\n", style.Dim.Render("○"))
 	}
