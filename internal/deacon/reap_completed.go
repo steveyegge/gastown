@@ -461,7 +461,7 @@ func checkReapWorktreeState(worktreePath string, result *ReapResult) {
 		return
 	}
 
-	if !workStatus.CleanExcludingBeads() {
+	if !workStatus.CleanExcludingRuntime() {
 		result.PartialWork = true
 		result.WorktreeDirty = workStatus.HasUncommittedChanges
 		result.UnpushedCount = workStatus.UnpushedCommits
