@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/deacon"
+	rig2 "github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 )
@@ -225,10 +227,19 @@ func (d *Daemon) spawnArchivistExtraction(rig, sourceBead string) {
 	// Use --create to force a fresh polecat slot instead of reusing the work
 	// polecat's worktree. Reused worktrees have the polecat's CLAUDE.local.md
 	// which overrides the archivist formula.
-	slingCmd := exec.CommandContext(ctx, "gt", "sling", wispID, rig,
+	slingArgs := []string{"sling", wispID, rig,
 		"--force", "--no-boot", "--create", "--formula", "mol-archivist-extract",
-		"--var", "source_bead="+sourceBead,
-		"--var", "rig="+rig)
+		"--var", "source_bead=" + sourceBead,
+		"--var", "rig=" + rig}
+
+	// Resolve the rig's default branch — some rigs use develop instead of main.
+	// Without this, sling defaults to main which may not exist in the bare repo.
+	rigPath := filepath.Join(d.config.TownRoot, rig)
+	if rigCfg, err := rig2.LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
+		slingArgs = append(slingArgs, "--base-branch", rigCfg.DefaultBranch)
+	}
+
+	slingCmd := exec.CommandContext(ctx, "gt", slingArgs...)
 	slingCmd.Dir = d.config.TownRoot
 	slingCmd.Env = append(os.Environ(), "BEADS_DIR="+beads.ResolveBeadsDir(d.config.TownRoot))
 	util.SetDetachedProcessGroup(slingCmd)
