@@ -7,7 +7,7 @@ import "os"
 // to override an inherited value (e.g. DOLT_CLI_PASSWORD) with a specific
 // value — in Go's exec.Cmd both the inherited and the override would be
 // visible to the child process otherwise, with winner depending on the OS.
-func environWithout(key string) []string {
+func environWithout(key string) []string { //nolint:unparam
 	prefix := key + "="
 	env := os.Environ()
 	out := make([]string, 0, len(env))
