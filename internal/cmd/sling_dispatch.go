@@ -72,7 +72,7 @@ type SwarmConfig struct {
 }
 
 // SwarmDelegateRequest is the minimal JSON payload sent to nostown for swarm dispatch.
-// Using a dedicated struct avoids serialising unexported or json:"-" fields from
+// Using a dedicated struct avoids serializing unexported or json:"-" fields from
 // SlingParams and keeps the wire format stable across SlingParams refactors.
 type SwarmDelegateRequest struct {
 	BeadID      string       `json:"bead_id"`
