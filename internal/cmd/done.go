@@ -76,6 +76,15 @@ const (
 	ExitDeferred  = "DEFERRED"
 )
 
+func doneContaminationBaseRef(defaultBranch, explicitTarget string) string {
+	targetBranch := defaultBranch
+	if explicitTarget != "" {
+		targetBranch = strings.TrimPrefix(explicitTarget, "origin/")
+	}
+
+	return "origin/" + targetBranch
+}
+
 func init() {
 	doneCmd.Flags().StringVar(&doneIssue, "issue", "", "Source issue ID (default: parse from branch name)")
 	doneCmd.Flags().IntVarP(&donePriority, "priority", "p", -1, "Override priority (0-4, default: inherit from issue)")
@@ -555,19 +564,20 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 
 		// Branch contamination preflight: check if branch is significantly behind
-		// origin/main, which indicates the branch may contain stale merge-base
+		// the effective target branch, which indicates the branch may contain stale merge-base
 		// artifacts that will pollute the PR diff. (GH#2220)
-		contam, err := g.CheckBranchContamination(originDefault)
+		contaminationBase := doneContaminationBaseRef(defaultBranch, doneTarget)
+		contam, err := g.CheckBranchContamination(contaminationBase)
 		if err == nil && contam.Behind > 0 {
 			const warnThreshold = 50
 			const blockThreshold = 200
 			if contam.Behind >= blockThreshold {
 				return fmt.Errorf("branch contamination: %d commits behind %s (threshold: %d)\n"+
 					"The branch is severely stale and will include unrelated changes in the PR.\n"+
-					"Fix: git fetch origin && git rebase origin/%s",
-					contam.Behind, originDefault, blockThreshold, defaultBranch)
+					"Fix: git fetch origin && git rebase %s",
+					contam.Behind, contaminationBase, blockThreshold, contaminationBase)
 			} else if contam.Behind >= warnThreshold {
-				style.PrintWarning("branch is %d commits behind %s — consider rebasing to avoid PR contamination", contam.Behind, originDefault)
+				style.PrintWarning("branch is %d commits behind %s — consider rebasing to avoid PR contamination", contam.Behind, contaminationBase)
 			}
 		}
 
