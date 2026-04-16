@@ -236,7 +236,7 @@ func runEpicSlingByID(epicID string, opts epicScheduleOpts) error {
 	successfulRigs := make(map[string]bool)
 	for i, c := range candidates {
 		if slingMaxConcurrent > 0 && i >= slingMaxConcurrent {
-			fmt.Printf("  %s Reached --max-concurrent limit (%d)\n", style.Dim.Render("○"), slingMaxConcurrent)
+			fmt.Printf("  %s Reached --max-concurrent spawn batch size (%d), remaining will be scheduled next cycle\n", style.Dim.Render("○"), slingMaxConcurrent)
 			break
 		}
 
