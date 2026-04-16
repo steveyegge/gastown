@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -197,6 +199,69 @@ func TestCooldown_Expired(t *testing.T) {
 
 	if !c.canDispatch("backend") {
 		t.Error("expected canDispatch=true after cooldown expired")
+	}
+}
+
+func TestArchivistAgentCommand_Default(t *testing.T) {
+	got := archivistAgentCommand(nil)
+	if got != defaultArchivistAgentCommand {
+		t.Errorf("expected default %q, got %q", defaultArchivistAgentCommand, got)
+	}
+}
+
+func TestArchivistAgentCommand_NilPatrols(t *testing.T) {
+	config := &DaemonPatrolConfig{}
+	got := archivistAgentCommand(config)
+	if got != defaultArchivistAgentCommand {
+		t.Errorf("expected default %q, got %q", defaultArchivistAgentCommand, got)
+	}
+}
+
+func TestArchivistAgentCommand_Configured(t *testing.T) {
+	config := &DaemonPatrolConfig{
+		Patrols: &PatrolsConfig{
+			ArchivistDog: &ArchivistDogConfig{
+				Enabled:      true,
+				AgentCommand: "/usr/local/bin/my-agent",
+			},
+		},
+	}
+	got := archivistAgentCommand(config)
+	if got != "/usr/local/bin/my-agent" {
+		t.Errorf("expected configured command, got %q", got)
+	}
+}
+
+func TestArchivistAgentCommand_EmptyFallsBack(t *testing.T) {
+	config := &DaemonPatrolConfig{
+		Patrols: &PatrolsConfig{
+			ArchivistDog: &ArchivistDogConfig{
+				Enabled:      true,
+				AgentCommand: "",
+			},
+		},
+	}
+	got := archivistAgentCommand(config)
+	if got != defaultArchivistAgentCommand {
+		t.Errorf("expected default %q for empty config, got %q", defaultArchivistAgentCommand, got)
+	}
+}
+
+func TestArchivistPromptTemplate_Formatting(t *testing.T) {
+	prompt := fmt.Sprintf(archivistPromptTemplate,
+		"backend",
+		"rigs/backend/domain/notes",
+		"rigs/backend/domain",
+		"auth-patterns.md, api-design.md",
+	)
+	if !strings.Contains(prompt, `"backend"`) {
+		t.Error("prompt should contain rig name")
+	}
+	if !strings.Contains(prompt, "rigs/backend/domain/notes") {
+		t.Error("prompt should contain notes dir")
+	}
+	if !strings.Contains(prompt, "auth-patterns.md, api-design.md") {
+		t.Error("prompt should contain file list")
 	}
 }
 
