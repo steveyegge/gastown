@@ -72,7 +72,7 @@ When `await-signal` outputs `EFFORT: full`, run all steps thoroughly (normal mod
 
 The goal: idle cycles should burn ~10% of the tokens a full patrol uses."""
 formula = "mol-deacon-patrol"
-version = 14
+version = 15
 
 [vars]
 [vars.wisp_type]
@@ -1161,7 +1161,7 @@ The Deacon runs in a Claude session with finite context. Check if approaching th
 gt context --usage
 ```
 
-If context is high (>80%), prepare for handoff:
+If context is high (>65%), prepare for handoff:
 - Summarize current state
 - Note any pending work
 - Write handoff to molecule state
