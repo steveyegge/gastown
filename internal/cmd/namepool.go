@@ -174,8 +174,8 @@ func runNamepool(cmd *cobra.Command, args []string) error {
 		fmt.Printf("In use: %s\n", strings.Join(activeNames, ", "))
 	}
 
-	// Check if configured (already loaded above)
-	if settings.Namepool != nil {
+	// Check if configured (already loaded above). settings is nil when LoadRigSettings errored.
+	if settings != nil && settings.Namepool != nil {
 		fmt.Printf("(configured in settings/config.json)\n")
 	}
 
