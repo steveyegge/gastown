@@ -1623,23 +1623,28 @@ doneStateUpdate:
 	clearDoneCheckpoints(bd, agentBeadID)
 }
 
-// findHookedBeadForAgent queries for beads with status=hooked assigned to this agent.
-// This is the authoritative source for what work a polecat is doing, since the
-// work bead itself tracks status and assignee (hq-l6mm5).
-// Returns empty string if no hooked bead is found.
+// findHookedBeadForAgent queries for the active bead assigned to this agent.
+// Prefers status=in_progress (the polecat started the work) over status=hooked
+// (the polecat was assigned but hasn't started). Without the in_progress check,
+// a polecat whose bead transitioned to in_progress mid-session would cause gt
+// exit / gt done to either skip the bead update entirely or grab a stale hooked
+// bead from a prior dispatch (sbx-gastown-qu5r).
+// Returns empty string if no active bead is found.
 func findHookedBeadForAgent(bd *beads.Beads, agentID string) string {
 	if agentID == "" {
 		return ""
 	}
-	hookedBeads, err := bd.List(beads.ListOptions{
-		Status:   beads.StatusHooked,
-		Assignee: agentID,
-		Priority: -1,
-	})
-	if err != nil || len(hookedBeads) == 0 {
-		return ""
+	for _, status := range []string{string(beads.StatusInProgress), beads.StatusHooked} {
+		active, err := bd.List(beads.ListOptions{
+			Status:   status,
+			Assignee: agentID,
+			Priority: -1,
+		})
+		if err == nil && len(active) > 0 {
+			return active[0].ID
+		}
 	}
-	return hookedBeads[0].ID
+	return ""
 }
 
 // parseCleanupStatus converts a string flag value to a CleanupStatus.
