@@ -274,19 +274,35 @@ func (m *DoltServerManager) buildDoltSQLCmd(ctx context.Context, args ...string)
 	// For remote checks, preserve inherited credentials if config omits a
 	// password. For local checks, keep forcing the empty-password path so
 	// inherited shell credentials cannot make a healthy local server look broken.
+	// Strip any inherited DOLT_CLI_PASSWORD from os.Environ() first so the
+	// single canonical value we append wins unambiguously — duplicate keys in
+	// cmd.Env leak credentials into local checks (tests grep cmd.Env directly).
+	env := filterEnvKey(os.Environ(), "DOLT_CLI_PASSWORD")
 	if m.config.Password != "" {
-		cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+m.config.Password)
+		cmd.Env = append(env, "DOLT_CLI_PASSWORD="+m.config.Password)
 	} else if m.isRemote() {
 		if inherited, ok := os.LookupEnv("DOLT_CLI_PASSWORD"); ok {
-			cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+inherited)
+			cmd.Env = append(env, "DOLT_CLI_PASSWORD="+inherited)
 		} else {
-			cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD=")
+			cmd.Env = append(env, "DOLT_CLI_PASSWORD=")
 		}
 	} else {
-		cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD=")
+		cmd.Env = append(env, "DOLT_CLI_PASSWORD=")
 	}
 
 	return cmd
+}
+
+// filterEnvKey returns env with all entries matching "<key>=..." removed.
+func filterEnvKey(env []string, key string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // HealthCheckInterval returns the configured health check interval,

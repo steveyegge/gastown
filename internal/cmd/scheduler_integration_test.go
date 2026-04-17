@@ -140,6 +140,10 @@ func setupSchedulerIntegrationTown(t *testing.T) (hqPath, rigPath, gtBinary stri
 	routes := []beads.Route{
 		{Prefix: hqPrefix + "-", Path: "."},
 		{Prefix: rigPrefix + "-", Path: "testrig/mayor/rig"},
+		// Convoy beads use a literal "hq-cv-" prefix (see install.go — registered
+		// on real towns during `gt install`). Route them to HQ so tests that
+		// look up auto-convoys via `bd show` resolve correctly.
+		{Prefix: "hq-cv-", Path: "."},
 	}
 	if err := beads.WriteRoutes(townBeadsDir, routes); err != nil {
 		t.Fatalf("write routes: %v", err)
@@ -209,19 +213,23 @@ func createSlingContext(t *testing.T, hqPath string, fields *capacity.SlingConte
 	return ctxBead.ID
 }
 
-// findSlingContext finds an open sling context for a work bead in the HQ beads DB.
+// findSlingContext finds an open sling context for a work bead by scanning all
+// rig beads dirs under townRoot. Mirrors production's listAllSlingContexts since
+// sling contexts now live in the target rig's beads dir, not HQ (see dee628d3).
 // Returns nil if none found.
 func findSlingContext(t *testing.T, hqPath, workBeadID string) *capacity.SlingContextFields {
 	t.Helper()
-	townBeads := beads.NewWithBeadsDir(hqPath, filepath.Join(hqPath, ".beads"))
-	_, fields, err := townBeads.FindOpenSlingContext(workBeadID)
-	if err != nil {
-		t.Fatalf("FindOpenSlingContext(%s) failed: %v", workBeadID, err)
+	for _, ctx := range listAllSlingContexts(hqPath) {
+		fields := beads.ParseSlingContextFields(ctx.Description)
+		if fields != nil && fields.WorkBeadID == workBeadID {
+			return fields
+		}
 	}
-	return fields
+	return nil
 }
 
-// hasSlingContext checks if a work bead has an open sling context in HQ.
+// hasSlingContext checks if a work bead has an open sling context anywhere
+// under townRoot (HQ or any rig beads dir).
 func hasSlingContext(t *testing.T, hqPath, workBeadID string) bool {
 	t.Helper()
 	return findSlingContext(t, hqPath, workBeadID) != nil
@@ -294,12 +302,14 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 		t.Fatalf("convoy ID not stored in sling context")
 	}
 
-	// Verify: convoy is resolvable via bd show from hq
-	cmd := exec.Command("bd", "show", fields.Convoy, "--json", "--allow-stale")
+	// Verify: convoy is resolvable via bd show from hq.
+	// --allow-stale is a global flag: must come before the subcommand.
+	showArgs := beads.MaybePrependAllowStale([]string{"show", fields.Convoy, "--json"})
+	cmd := exec.Command("bd", showArgs...)
 	cmd.Dir = hqPath
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("bd show convoy %s failed: %v", fields.Convoy, err)
+		t.Fatalf("bd show convoy %s failed: %v\noutput: %s", fields.Convoy, err, out)
 	}
 	var convoys []struct {
 		ID        string `json:"id"`
@@ -456,14 +466,10 @@ func TestSchedulerSlingContextIdempotency(t *testing.T) {
 	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig")
 	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig")
 
-	// Verify: only one sling context exists
-	townBeads := beads.NewWithBeadsDir(hqPath, filepath.Join(hqPath, ".beads"))
-	contexts, err := townBeads.ListOpenSlingContexts()
-	if err != nil {
-		t.Fatalf("ListOpenSlingContexts failed: %v", err)
-	}
+	// Verify: only one sling context exists across all rig dirs
+	// (sling contexts live in the target rig's beads dir per dee628d3).
 	count := 0
-	for _, ctx := range contexts {
+	for _, ctx := range listAllSlingContexts(hqPath) {
 		fields := beads.ParseSlingContextFields(ctx.Description)
 		if fields != nil && fields.WorkBeadID == beadID {
 			count++
@@ -579,6 +585,8 @@ func setupMultiRigSchedulerTown(t *testing.T) (hqPath, rig1Path, rig2Path, gtBin
 		{Prefix: hqPrefix + "-", Path: "."},
 		{Prefix: rig1Prefix + "-", Path: "rig1/mayor/rig"},
 		{Prefix: rig2Prefix + "-", Path: "rig2/mayor/rig"},
+		// Convoy beads use a literal "hq-cv-" prefix (see install.go).
+		{Prefix: "hq-cv-", Path: "."},
 	}
 	if err := beads.WriteRoutes(townBeadsDir, routes); err != nil {
 		t.Fatalf("write routes: %v", err)
