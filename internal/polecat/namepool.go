@@ -41,6 +41,10 @@ var ReservedInfraAgentNames = map[string]bool{
 	"polecats": true,
 }
 
+// AllThemeName is the special theme name that draws from every built-in theme combined.
+// Use via: gt namepool set all
+const AllThemeName = "all"
+
 // Built-in themes with themed polecat names.
 var BuiltinThemes = map[string][]string{
 	"mad-max": {
@@ -418,7 +422,9 @@ func (p *NamePool) SetTheme(theme string) error {
 	defer p.mu.Unlock()
 
 	var newNames []string
-	if names, ok := BuiltinThemes[theme]; ok {
+	if theme == AllThemeName {
+		newNames = allBuiltinNames()
+	} else if names, ok := BuiltinThemes[theme]; ok {
 		newNames = names
 	} else if p.townRoot != "" {
 		resolved, err := ResolveThemeNames(p.townRoot, theme)
@@ -444,6 +450,12 @@ func (p *NamePool) SetTheme(theme string) error {
 	p.Theme = theme
 	p.InUse = newInUse
 	p.CustomNames = nil
+	// Grow the pool to accommodate the combined name set so we don't immediately
+	// fall through to overflow numbering after switching to a larger theme.
+	if len(newNames) > p.MaxSize {
+		p.MaxSize = len(newNames)
+		p.OverflowNext = p.MaxSize + 1
+	}
 	return nil
 }
 
@@ -514,10 +526,39 @@ func ThemeForRigAvoiding(rigName string, usedThemes []string) string {
 // GetThemeNames returns the names in a specific built-in theme.
 // For custom themes, use ResolveThemeNames instead.
 func GetThemeNames(theme string) ([]string, error) {
+	if theme == AllThemeName {
+		return allBuiltinNames(), nil
+	}
 	if names, ok := BuiltinThemes[theme]; ok {
 		return names, nil
 	}
 	return nil, fmt.Errorf("unknown theme: %s", theme)
+}
+
+// allBuiltinNames returns the union of all built-in theme names, deduplicated and sorted.
+// Reserved names are filtered.
+func allBuiltinNames() []string {
+	seen := make(map[string]bool)
+	var all []string
+	// Sort theme keys for deterministic ordering
+	keys := make([]string, 0, len(BuiltinThemes))
+	for k := range BuiltinThemes {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		for _, name := range BuiltinThemes[k] {
+			if seen[name] {
+				continue
+			}
+			if ReservedInfraAgentNames[name] {
+				continue
+			}
+			seen[name] = true
+			all = append(all, name)
+		}
+	}
+	return all
 }
 
 // ThemeInfo describes a theme (built-in or custom).
@@ -530,6 +571,12 @@ type ThemeInfo struct {
 // ListAllThemes returns a sorted list of all built-in and custom themes.
 func ListAllThemes(townRoot string) []ThemeInfo {
 	var themes []ThemeInfo
+
+	// Add the meta "all" theme (union of every built-in)
+	themes = append(themes, ThemeInfo{
+		Name:  AllThemeName,
+		Count: len(allBuiltinNames()),
+	})
 
 	// Add built-in themes
 	for name, names := range BuiltinThemes {
@@ -574,6 +621,9 @@ func ListAllThemes(townRoot string) []ThemeInfo {
 
 // IsBuiltinTheme returns true if the theme name matches a built-in theme.
 func IsBuiltinTheme(theme string) bool {
+	if theme == AllThemeName {
+		return true
+	}
 	_, ok := BuiltinThemes[theme]
 	return ok
 }
@@ -650,6 +700,9 @@ func ParseThemeFile(path string) ([]string, error) {
 // Checks built-in themes first, then looks for a custom theme file
 // at <townRoot>/settings/themes/<theme>.txt.
 func ResolveThemeNames(townRoot, theme string) ([]string, error) {
+	if theme == AllThemeName {
+		return allBuiltinNames(), nil
+	}
 	if names, ok := BuiltinThemes[theme]; ok {
 		return names, nil
 	}
