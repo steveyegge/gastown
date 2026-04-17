@@ -14,6 +14,8 @@ import (
 	"time"
 
 	beadsdk "github.com/steveyegge/beads"
+
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 // setupTestStore opens a real beads database for integration tests.
@@ -215,7 +217,7 @@ func TestManagerLifecycle_StartStop(t *testing.T) {
 	townRoot := t.TempDir()
 	bdScript := `#!/bin/sh
 echo '{"type":"status","issue_id":"gt-x","new_status":"closed"}'
-sleep 999
+` + shellcmd.POSIXSleep(999) + `
 `
 	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(bdScript), 0755); err != nil {
 		t.Fatalf("write mock bd: %v", err)
@@ -1244,7 +1246,7 @@ if [ "$1" = "convoy" ] && [ "$2" = "stranded" ]; then
 fi
 if [ "$1" = "sling" ]; then
   echo "$@" >> "` + slingLogPath + `"
-  sleep 10
+` + "  " + shellcmd.POSIXSleep(10) + `
   exit 0
 fi
 exit 0

@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 func TestNewProxy(t *testing.T) {
@@ -783,7 +785,7 @@ func setupProxyWithMockAgent(t *testing.T) (*Proxy, *MockAgent) {
 
 	// Mock p.cmd by starting a real process so that isProcessAlive() returns true.
 	// We use a command that doesn't do much and will be killed on shutdown.
-	p.cmd = exec.CommandContext(context.Background(), "sleep", "60")
+	p.cmd = exec.CommandContext(context.Background(), shellcmd.SleepCommand(), "60")
 	p.setupProcessGroup() // Ensure it's in its own group
 	if err := p.cmd.Start(); err != nil {
 		t.Fatalf("failed to start mock command: %v", err)

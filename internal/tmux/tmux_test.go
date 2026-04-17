@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 func hasTmux() bool {
@@ -308,7 +310,7 @@ func TestEnsureSessionFreshWithCommand_NoExisting(t *testing.T) {
 
 	// EnsureSessionFreshWithCommand should create a new session with the command
 	// as the initial pane process (no shell involved).
-	if err := tm.EnsureSessionFreshWithCommand(sessionName, "", "sleep 10"); err != nil {
+	if err := tm.EnsureSessionFreshWithCommand(sessionName, "", shellcmd.Sleep(10)); err != nil {
 		t.Fatalf("EnsureSessionFreshWithCommand: %v", err)
 	}
 
@@ -354,7 +356,7 @@ func TestEnsureSessionFreshWithCommand_KillsZombie(t *testing.T) {
 	}
 
 	// EnsureSessionFreshWithCommand should kill the zombie and create fresh session
-	if err := tm.EnsureSessionFreshWithCommand(sessionName, "", "sleep 10"); err != nil {
+	if err := tm.EnsureSessionFreshWithCommand(sessionName, "", shellcmd.Sleep(10)); err != nil {
 		t.Fatalf("EnsureSessionFreshWithCommand on zombie: %v", err)
 	}
 
@@ -485,7 +487,7 @@ func TestIsRuntimeRunning_AgentNameRequiresCursorSession(t *testing.T) {
 	tm := newTestTmux(t)
 	sessionName := "gt-test-runtime-agent-filter-" + t.Name()
 	_ = tm.KillSession(sessionName)
-	if err := tm.NewSessionWithCommand(sessionName, "", "sleep 60"); err != nil {
+	if err := tm.NewSessionWithCommand(sessionName, "", shellcmd.Sleep(60)); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
 	defer func() { _ = tm.KillSession(sessionName) }()
@@ -542,7 +544,7 @@ func TestIsRuntimeRunning_ShellWithNodeChild(t *testing.T) {
 		sessionName := "gt-test-runtime-direct"
 		_ = tm.KillSession(sessionName)
 
-		if err := tm.NewSessionWithCommand(sessionName, "", "sleep 10"); err != nil {
+		if err := tm.NewSessionWithCommand(sessionName, "", shellcmd.Sleep(10)); err != nil {
 			t.Fatalf("NewSessionWithCommand: %v", err)
 		}
 		defer func() { _ = tm.KillSession(sessionName) }()
@@ -560,7 +562,7 @@ func TestIsRuntimeRunning_ShellWithNodeChild(t *testing.T) {
 		sessionName := "gt-test-runtime-shell-child"
 		_ = tm.KillSession(sessionName)
 
-		if err := tm.NewSessionWithCommand(sessionName, "", "sh -c 'sleep 10'"); err != nil {
+		if err := tm.NewSessionWithCommand(sessionName, "", "sh -c '"+shellcmd.POSIXSleep(10)+"'"); err != nil {
 			t.Fatalf("NewSessionWithCommand: %v", err)
 		}
 		defer func() { _ = tm.KillSession(sessionName) }()
@@ -586,7 +588,7 @@ func TestGetPaneCommand_MultiPane(t *testing.T) {
 	_ = tm.KillSession(sessionName)
 
 	// Create session running sleep (simulates an agent process in pane 0)
-	if err := tm.NewSessionWithCommand(sessionName, "", "sleep 300"); err != nil {
+	if err := tm.NewSessionWithCommand(sessionName, "", shellcmd.Sleep(300)); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
 	defer func() { _ = tm.KillSession(sessionName) }()
@@ -708,7 +710,7 @@ func TestKillSessionWithProcesses(t *testing.T) {
 	_ = tm.KillSession(sessionName)
 
 	// Create session with a long-running process
-	cmd := `sleep 300`
+	cmd := shellcmd.Sleep(300)
 	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
@@ -756,7 +758,7 @@ func TestKillSessionWithProcessesExcluding(t *testing.T) {
 	_ = tm.KillSession(sessionName)
 
 	// Create session with a long-running process
-	cmd := `sleep 300`
+	cmd := shellcmd.Sleep(300)
 	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
@@ -795,7 +797,7 @@ func TestKillSessionWithProcessesExcluding_WithExcludePID(t *testing.T) {
 	_ = tm.KillSession(sessionName)
 
 	// Create session with a long-running process
-	cmd := `sleep 300`
+	cmd := shellcmd.Sleep(300)
 	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
@@ -891,7 +893,7 @@ func TestKillSessionWithProcesses_KillsProcessGroup(t *testing.T) {
 
 	// Create session that spawns a child process
 	// The child will stay in the same process group as the shell
-	cmd := `sleep 300 & sleep 300`
+	cmd := shellcmd.Sleep(300) + " & " + shellcmd.Sleep(300)
 	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
@@ -1004,18 +1006,18 @@ func TestCleanupOrphanedSessions(t *testing.T) {
 	// Use NewSessionWithCommand with sleep to avoid loading .zshrc, which spawns
 	// a node process on this system. A node child of the zsh shell would cause
 	// IsAgentAlive to return true, preventing cleanup (gt-it10f6p).
-	if err := tm.NewSessionWithCommand(gtSession, "", "sleep 9999"); err != nil {
+	if err := tm.NewSessionWithCommand(gtSession, "", shellcmd.Sleep(9999)); err != nil {
 		t.Fatalf("NewSessionWithCommand(gt): %v", err)
 	}
 	defer func() { _ = tm.KillSession(gtSession) }()
 
-	if err := tm.NewSessionWithCommand(hqSession, "", "sleep 9999"); err != nil {
+	if err := tm.NewSessionWithCommand(hqSession, "", shellcmd.Sleep(9999)); err != nil {
 		t.Fatalf("NewSessionWithCommand(hq): %v", err)
 	}
 	defer func() { _ = tm.KillSession(hqSession) }()
 
 	// Create a non-GT session (should NOT be cleaned up)
-	if err := tm.NewSessionWithCommand(nonGtSession, "", "sleep 9999"); err != nil {
+	if err := tm.NewSessionWithCommand(nonGtSession, "", shellcmd.Sleep(9999)); err != nil {
 		t.Fatalf("NewSessionWithCommand(other): %v", err)
 	}
 	defer func() { _ = tm.KillSession(nonGtSession) }()
@@ -1144,14 +1146,14 @@ func TestKillSessionWithProcesses_DoesNotKillUnrelatedProcesses(t *testing.T) {
 	_ = tm.KillSession(sessionName)
 
 	// Create session with a long-running process
-	if err := tm.NewSessionWithCommand(sessionName, "", "sleep 300"); err != nil {
+	if err := tm.NewSessionWithCommand(sessionName, "", shellcmd.Sleep(300)); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
 	defer func() { _ = tm.KillSession(sessionName) }()
 
 	// Start a separate background process (simulating an unrelated process)
 	// This process runs in its own process group (via setsid or just being separate)
-	sentinel := exec.Command("sleep", "300")
+	sentinel := exec.Command(shellcmd.SleepCommand(), "300")
 	if err := sentinel.Start(); err != nil {
 		t.Fatalf("starting sentinel process: %v", err)
 	}
@@ -1185,7 +1187,7 @@ func TestKillPaneProcessesExcluding(t *testing.T) {
 	_ = tm.KillSession(sessionName)
 
 	// Create session with a long-running process
-	cmd := `sleep 300`
+	cmd := shellcmd.Sleep(300)
 	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
@@ -1215,7 +1217,7 @@ func TestKillPaneProcessesExcluding_WithExcludePID(t *testing.T) {
 	_ = tm.KillSession(sessionName)
 
 	// Create session with a long-running process
-	cmd := `sleep 300`
+	cmd := shellcmd.Sleep(300)
 	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
@@ -1337,7 +1339,7 @@ func TestFindAgentPane_MultiPaneWithNode(t *testing.T) {
 	defer func() { _ = tm.KillSession(sessionName) }()
 
 	// Split and run sleep in the new pane (simulating an agent process)
-	_, err := tm.run("split-window", "-t", sessionName, "-d", "sleep", "10")
+	_, err := tm.run("split-window", "-t", sessionName, "-d", shellcmd.SleepCommand(), "10")
 	if err != nil {
 		t.Fatalf("split-window: %v", err)
 	}
@@ -1581,7 +1583,7 @@ func TestNewSessionWithCommandAndEnv(t *testing.T) {
 	}
 
 	// Create session with env vars and a command that prints GT_ROLE
-	cmd := `bash -c "echo GT_ROLE=$GT_ROLE; sleep 5"`
+	cmd := "bash -c \"echo GT_ROLE=$GT_ROLE; " + shellcmd.POSIXSleep(5) + "\""
 	if err := tm.NewSessionWithCommandAndEnv(sessionName, "", cmd, env); err != nil {
 		t.Fatalf("NewSessionWithCommandAndEnv: %v", err)
 	}
@@ -1622,7 +1624,7 @@ func TestNewSessionWithCommandAndEnvEmpty(t *testing.T) {
 	_ = tm.KillSession(sessionName)
 
 	// Empty env should work like NewSessionWithCommand
-	if err := tm.NewSessionWithCommandAndEnv(sessionName, "", "sleep 5", nil); err != nil {
+	if err := tm.NewSessionWithCommandAndEnv(sessionName, "", shellcmd.Sleep(5), nil); err != nil {
 		t.Fatalf("NewSessionWithCommandAndEnv with nil env: %v", err)
 	}
 	defer func() { _ = tm.KillSession(sessionName) }()
@@ -1846,7 +1848,7 @@ func TestWaitForIdle_Timeout(t *testing.T) {
 
 	// Create a session running a long sleep (no prompt visible)
 	sessionName := fmt.Sprintf("gt-test-idle-%d", time.Now().UnixNano())
-	if err := tm.NewSessionWithCommand(sessionName, os.TempDir(), "sleep 60"); err != nil {
+	if err := tm.NewSessionWithCommand(sessionName, os.TempDir(), shellcmd.Sleep(60)); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
 	defer func() { _ = tm.KillSession(sessionName) }()
@@ -2285,7 +2287,7 @@ func TestCheckSessionHealth_ActivityCheck(t *testing.T) {
 	tm := newTestTmux(t)
 	sessionName := fmt.Sprintf("gt-test-activity-%d", os.Getpid())
 	// Use 'sleep' as a stand-in for an agent process
-	if err := tm.NewSessionWithCommand(sessionName, "", "sleep 60"); err != nil {
+	if err := tm.NewSessionWithCommand(sessionName, "", shellcmd.Sleep(60)); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
 	defer tm.KillSession(sessionName)

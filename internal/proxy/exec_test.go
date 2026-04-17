@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 // logEntry captures a single structured log record for test assertions.
@@ -530,7 +533,7 @@ func TestExecConcurrencyLimit(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		body := `{"argv":["sh","-c","sleep 10"]}`
+		body := fmt.Sprintf(`{"argv":["sh","-c",%q]}`, shellcmd.POSIXSleep(10))
 		req := httptest.NewRequest("POST", "/v1/exec", strings.NewReader(body))
 		req = req.WithContext(ctx)
 

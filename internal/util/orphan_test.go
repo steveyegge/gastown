@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/shellcmd"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -152,7 +153,7 @@ func hasTmux() bool {
 func tmuxSocketSession(t *testing.T, socketName, sessionName string) int {
 	t.Helper()
 	err := exec.Command("tmux", "-L", socketName, "new-session", "-d",
-		"-s", sessionName, "-x", "80", "-y", "24", "sleep", "300").Run()
+		"-s", sessionName, "-x", "80", "-y", "24", shellcmd.SleepCommand(), "300").Run()
 	if err != nil {
 		t.Fatalf("create session %q on socket %q: %v", sessionName, socketName, err)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/activity"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 func TestCalculateWorkStatus(t *testing.T) {
@@ -506,7 +507,7 @@ func TestRunCmd_SuccessAndTimeout(t *testing.T) {
 
 	// Use "exec sleep" so sleep replaces the shell process — avoids orphan child
 	// holding stdout open. Use 200ms timeout (not 30ms) for stability under load.
-	_, err = runCmd(200*time.Millisecond, "sh", "-c", "exec sleep 10")
+	_, err = runCmd(200*time.Millisecond, "sh", "-c", "exec "+shellcmd.POSIXSleep(10))
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -531,7 +532,7 @@ case "$1" in
     exit 1
     ;;
   sleep)
-    exec sleep 10
+    exec ` + shellcmd.POSIXSleep(10) + `
     ;;
   *)
     echo "ok"

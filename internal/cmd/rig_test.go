@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/shellcmd"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -95,7 +96,7 @@ func TestFindRigSessions(t *testing.T) {
 
 	for _, name := range append(matching, nonMatching) {
 		_ = tm.KillSession(name) // clean up any leftovers
-		if err := tm.NewSessionWithCommand(name, "", "sleep 300"); err != nil {
+		if err := tm.NewSessionWithCommand(name, "", shellcmd.Sleep(300)); err != nil {
 			t.Fatalf("creating session %s: %v", name, err)
 		}
 	}

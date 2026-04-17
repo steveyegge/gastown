@@ -3,6 +3,8 @@ package tmux
 import (
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 // TestIsGTBindingCurrent_DetectsStalePattern verifies that isGTBindingCurrent
@@ -16,7 +18,7 @@ func TestIsGTBindingCurrent_DetectsStalePattern(t *testing.T) {
 	_ = tm.KillSession(session)
 	defer func() { _ = tm.KillSession(session) }()
 
-	if err := tm.NewSessionWithCommand(session, "", "sleep 30"); err != nil {
+	if err := tm.NewSessionWithCommand(session, "", shellcmd.Sleep(30)); err != nil {
 		t.Fatalf("session creation: %v", err)
 	}
 
@@ -57,7 +59,7 @@ func TestSetCycleBindings_RefreshesStalePattern(t *testing.T) {
 	_ = tm.KillSession(session)
 	defer func() { _ = tm.KillSession(session) }()
 
-	if err := tm.NewSessionWithCommand(session, "", "sleep 30"); err != nil {
+	if err := tm.NewSessionWithCommand(session, "", shellcmd.Sleep(30)); err != nil {
 		t.Fatalf("session creation: %v", err)
 	}
 

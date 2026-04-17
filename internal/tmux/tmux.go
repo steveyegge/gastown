@@ -19,6 +19,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/shellcmd"
 	"github.com/steveyegge/gastown/internal/telemetry"
 )
 
@@ -3904,7 +3905,7 @@ func (t *Tmux) SetAutoRespawnHook(session string) error {
 //     error display from tmux even if the session was killed entirely.
 func buildAutoRespawnHookCmd(tmuxCmd, session string) string {
 	// The shell pipeline:
-	//   sleep 3                              -- debounce rapid crashes
+	//   POSIX sleep (debounce)             -- debounce rapid crashes
 	//   list-panes ... #{pane_dead} | grep   -- guard: only proceed if pane is still dead
 	//   respawn-pane -k                      -- restart with original command
 	//   set-option remain-on-exit on         -- re-enable (respawn-pane resets it to off!)
@@ -3917,6 +3918,6 @@ func buildAutoRespawnHookCmd(tmuxCmd, session string) string {
 	// receives #{pane_dead} and passes it to the nested `tmux list-panes` call
 	// which evaluates it at query time -- giving us the CURRENT pane state.
 	return fmt.Sprintf(
-		`run-shell -b "sleep 3 && %s list-panes -t '%s' -F '##{pane_dead}' 2>/dev/null | grep -q 1 && %s respawn-pane -k -t '%s' && %s set-option -t '%s' remain-on-exit on || true"`,
+		`run-shell -b "`+shellcmd.POSIXSleep(3)+` && %s list-panes -t '%s' -F '##{pane_dead}' 2>/dev/null | grep -q 1 && %s respawn-pane -k -t '%s' && %s set-option -t '%s' remain-on-exit on || true"`,
 		tmuxCmd, session, tmuxCmd, session, tmuxCmd, session)
 }

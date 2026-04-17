@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/shellcmd"
 	"github.com/steveyegge/gastown/internal/testutil"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -1739,7 +1740,7 @@ func TestReuseIdlePolecat_KillsLiveSession(t *testing.T) {
 	// Create a live tmux session (simulates Claude sitting at ❯ after gt done)
 	sessMgr := NewSessionManager(tm, r)
 	sessionName := sessMgr.SessionName(polecatName)
-	if err := tm.NewSessionWithCommand(sessionName, townRoot, "sleep 300"); err != nil {
+	if err := tm.NewSessionWithCommand(sessionName, townRoot, shellcmd.Sleep(300)); err != nil {
 		t.Fatalf("create tmux session: %v", err)
 	}
 	t.Cleanup(func() { _ = tm.KillSessionWithProcesses(sessionName) })
@@ -1823,7 +1824,7 @@ func TestReuseIdlePolecat_KillsStaleSession(t *testing.T) {
 
 	sessMgr := NewSessionManager(tm, r)
 	sessionName := sessMgr.SessionName(polecatName)
-	if err := tm.NewSessionWithCommand(sessionName, townRoot, "sleep 300"); err != nil {
+	if err := tm.NewSessionWithCommand(sessionName, townRoot, shellcmd.Sleep(300)); err != nil {
 		t.Fatalf("create tmux session: %v", err)
 	}
 	t.Cleanup(func() { _ = tm.KillSessionWithProcesses(sessionName) })

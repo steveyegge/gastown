@@ -20,6 +20,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/shellcmd"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -660,7 +661,7 @@ func TestIntegrationMultiTownSocketIsolation(t *testing.T) {
 			tmB.KillServer()
 		})
 
-		if err := tmA.NewSessionWithCommand("ga-witness", ".", "sleep 300"); err != nil {
+		if err := tmA.NewSessionWithCommand("ga-witness", ".", shellcmd.Sleep(300)); err != nil {
 			t.Fatalf("create session on socketA: %v", err)
 		}
 

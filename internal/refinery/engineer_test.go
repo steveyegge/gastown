@@ -15,6 +15,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 func TestDefaultMergeQueueConfig(t *testing.T) {
@@ -562,7 +563,7 @@ func TestRunGate_Timeout(t *testing.T) {
 	e.workDir = t.TempDir()
 
 	result := e.runGate(context.Background(), "slow", &GateConfig{
-		Cmd:     "sleep 10",
+		Cmd:     shellcmd.Sleep(10),
 		Timeout: 100 * time.Millisecond,
 	})
 

@@ -14,6 +14,8 @@ import (
 	"time"
 
 	beadsdk "github.com/steveyegge/beads"
+
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 // TestConvoyManager_FullLifecycle starts a real ConvoyManager with a real beads
@@ -703,7 +705,7 @@ func TestConvoyManager_ShutdownKillsHangingSubprocess(t *testing.T) {
 	// Mock gt that hangs on stranded (simulates a stuck subprocess).
 	gtScript := `#!/bin/sh
 if [ "$1" = "convoy" ] && [ "$2" = "stranded" ]; then
-  sleep 999
+` + "  " + shellcmd.POSIXSleep(999) + `
   exit 0
 fi
 exit 0
@@ -724,7 +726,7 @@ exit 0
 		t.Fatalf("Start: %v", err)
 	}
 
-	// Let the stranded scan fire and start hanging on `sleep 999`.
+	// Let the stranded scan fire and start hanging on the mock stranded handler.
 	time.Sleep(500 * time.Millisecond)
 
 	// Stop must complete within bounded time despite the hanging subprocess.

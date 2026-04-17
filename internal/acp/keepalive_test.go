@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 func TestProxy_RunKeepAlive_Logic(t *testing.T) {
@@ -27,7 +29,7 @@ func TestProxy_RunKeepAlive_Logic(t *testing.T) {
 	// Start a dummy process so isProcessAlive() returns true
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	p.cmd = exec.CommandContext(ctx, "sleep", "100")
+	p.cmd = exec.CommandContext(ctx, shellcmd.SleepCommand(), "100")
 	p.setupProcessGroup()
 	if err := p.cmd.Start(); err != nil {
 		t.Fatalf("failed to start dummy process: %v", err)

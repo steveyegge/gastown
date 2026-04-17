@@ -21,6 +21,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 // pktLine encodes s as a single git pkt-line (4-hex-byte length prefix).
@@ -745,7 +747,7 @@ func TestHandleGitContextCancellation(t *testing.T) {
 		// Without exec, the shell forks sleep and sleep inherits the stdout
 		// pipe; cmd.Wait() then blocks until sleep exits even after the shell
 		// is killed, preventing prompt handler return on context cancellation.
-		require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\nexec sleep 10\n"), 0755))
+		require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\nexec "+shellcmd.POSIXSleep(10)+"\n"), 0755))
 	}
 	// Prepend scriptDir so exec.CommandContext resolves our stubs first.
 	// minimalEnv() propagates os.Getenv("PATH") to subprocesses, so the

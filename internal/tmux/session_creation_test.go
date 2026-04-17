@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 // Tests for the two-step session creation (new-session + respawn-pane) and
@@ -60,7 +62,7 @@ func TestNewSessionWithCommand_Success(t *testing.T) {
 	_ = tm.KillSession(session)
 	defer func() { _ = tm.KillSession(session) }()
 
-	err := tm.NewSessionWithCommand(session, "", `sh -c 'echo "SESSION_OK"; sleep 10'`)
+	err := tm.NewSessionWithCommand(session, "", "sh -c 'echo \"SESSION_OK\"; "+shellcmd.POSIXSleep(10)+"'")
 	if err != nil {
 		t.Fatalf("NewSessionWithCommand failed: %v", err)
 	}
@@ -80,7 +82,7 @@ func TestNewSessionWithCommand_ExecEnvSuccess(t *testing.T) {
 	_ = tm.KillSession(session)
 	defer func() { _ = tm.KillSession(session) }()
 
-	cmd := `exec env GT_RIG=testrig GT_POLECAT=testcat sleep 5`
+	cmd := `exec env GT_RIG=testrig GT_POLECAT=testcat ` + shellcmd.POSIXSleep(5)
 	err := tm.NewSessionWithCommand(session, t.TempDir(), cmd)
 	if err != nil {
 		t.Fatalf("NewSessionWithCommand failed: %v", err)
@@ -100,10 +102,10 @@ func TestNewSessionWithCommand_Duplicate(t *testing.T) {
 	_ = tm.KillSession(session)
 	defer func() { _ = tm.KillSession(session) }()
 
-	if err := tm.NewSessionWithCommand(session, "", "sleep 10"); err != nil {
+	if err := tm.NewSessionWithCommand(session, "", shellcmd.Sleep(10)); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	err := tm.NewSessionWithCommand(session, "", "sleep 10")
+	err := tm.NewSessionWithCommand(session, "", shellcmd.Sleep(10))
 	if err == nil {
 		t.Error("duplicate session creation should fail")
 	}
@@ -128,7 +130,7 @@ func TestNewSessionWithCommand_Concurrent(t *testing.T) {
 	errs := make(chan error, n)
 	for i := 0; i < n; i++ {
 		go func(idx int) {
-			errs <- tm.NewSessionWithCommand(base+string(rune('a'+idx)), "", "sleep 5")
+			errs <- tm.NewSessionWithCommand(base+string(rune('a'+idx)), "", shellcmd.Sleep(5))
 		}(i)
 	}
 

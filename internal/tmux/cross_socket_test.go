@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 var crossSocket = fmt.Sprintf("gt-test-cross-%d", os.Getpid())
@@ -27,12 +29,12 @@ func TestCrossSocketIsolation(t *testing.T) {
 	sessionA := fmt.Sprintf("gt-test-iso-a-%d", os.Getpid())
 	sessionB := fmt.Sprintf("gt-test-iso-b-%d", os.Getpid())
 
-	if err := defaultTm.NewSessionWithCommand(sessionA, ".", "sleep 300"); err != nil {
+	if err := defaultTm.NewSessionWithCommand(sessionA, ".", shellcmd.Sleep(300)); err != nil {
 		t.Fatalf("create session A on default socket: %v", err)
 	}
 	t.Cleanup(func() { _ = defaultTm.KillSession(sessionA) })
 
-	if err := crossTm.NewSessionWithCommand(sessionB, ".", "sleep 300"); err != nil {
+	if err := crossTm.NewSessionWithCommand(sessionB, ".", shellcmd.Sleep(300)); err != nil {
 		t.Fatalf("create session B on cross socket: %v", err)
 	}
 	t.Cleanup(func() { _ = crossTm.KillSession(sessionB) })
@@ -81,12 +83,12 @@ func TestCrossSocketKill(t *testing.T) {
 	defaultSession := fmt.Sprintf("gt-test-survive-%d", os.Getpid())
 	crossSession := fmt.Sprintf("gt-test-doomed-%d", os.Getpid())
 
-	if err := defaultTm.NewSessionWithCommand(defaultSession, ".", "sleep 300"); err != nil {
+	if err := defaultTm.NewSessionWithCommand(defaultSession, ".", shellcmd.Sleep(300)); err != nil {
 		t.Fatalf("create session on default socket: %v", err)
 	}
 	t.Cleanup(func() { _ = defaultTm.KillSession(defaultSession) })
 
-	if err := crossTm.NewSessionWithCommand(crossSession, ".", "sleep 300"); err != nil {
+	if err := crossTm.NewSessionWithCommand(crossSession, ".", shellcmd.Sleep(300)); err != nil {
 		t.Fatalf("create session on cross socket: %v", err)
 	}
 
@@ -117,14 +119,14 @@ func TestSessionsOnMultipleSockets(t *testing.T) {
 	}
 
 	for _, name := range defaultSessions {
-		if err := defaultTm.NewSessionWithCommand(name, ".", "sleep 300"); err != nil {
+		if err := defaultTm.NewSessionWithCommand(name, ".", shellcmd.Sleep(300)); err != nil {
 			t.Fatalf("create %q on default socket: %v", name, err)
 		}
 		t.Cleanup(func() { _ = defaultTm.KillSession(name) })
 	}
 
 	for _, name := range crossSessions {
-		if err := crossTm.NewSessionWithCommand(name, ".", "sleep 300"); err != nil {
+		if err := crossTm.NewSessionWithCommand(name, ".", shellcmd.Sleep(300)); err != nil {
 			t.Fatalf("create %q on cross socket: %v", name, err)
 		}
 		t.Cleanup(func() { _ = crossTm.KillSession(name) })

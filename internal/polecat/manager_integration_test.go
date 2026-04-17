@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/shellcmd"
 	"github.com/steveyegge/gastown/internal/testutil"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -47,7 +48,7 @@ func startLiveSession(t *testing.T, sessionName string) {
 	t.Helper()
 
 	tm := tmux.NewTmux()
-	if err := tm.NewSessionWithCommand(sessionName, "", "sleep 60"); err != nil {
+	if err := tm.NewSessionWithCommand(sessionName, "", shellcmd.Sleep(60)); err != nil {
 		t.Fatalf("start tmux session %s: %v", sessionName, err)
 	}
 	t.Cleanup(func() {

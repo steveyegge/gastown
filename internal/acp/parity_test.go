@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"runtime"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 type mockWriteCloser struct {
@@ -85,7 +87,7 @@ func TestWriteToAgent_Parity(t *testing.T) {
 			p := NewProxy()
 
 			// Mock process as alive
-			cmd := exec.CommandContext(context.Background(), "sleep", "1")
+			cmd := exec.CommandContext(context.Background(), shellcmd.SleepCommand(), "1")
 			p.cmd = cmd
 			p.setupProcessGroup()
 			if err := cmd.Start(); err != nil {

@@ -699,7 +699,7 @@ func runDogDone(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Session %s will terminate in 3s\n", sessionID)
 
 	// Kill the tmux session after a short delay using a goroutine.
-	// Previous approach used bash -c "sleep 3 && tmux kill-session" which
+	// Previous approach used bash -c with a delay before tmux kill-session, which
 	// fails silently on Windows. The goroutine is cross-platform and uses
 	// the tmux package which handles the socket name automatically.
 	go func() {

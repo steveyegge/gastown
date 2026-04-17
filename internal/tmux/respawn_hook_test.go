@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/shellcmd"
 )
 
 // requireTestSocket returns a per-test socket name and skips the test if
@@ -96,9 +98,9 @@ func TestAutoRespawnHook_RespawnWorks(t *testing.T) {
 		t.Logf("[+%6.2fs] %s", time.Since(t0).Seconds(), fmt.Sprintf(msg, args...))
 	}
 
-	testSession(t, socket, session, "sleep 2")
+	testSession(t, socket, session, shellcmd.Sleep(2))
 	defer func() { _ = exec.Command("tmux", "-L", socket, "kill-session", "-t", session).Run() }()
-	logT("session created with 'sleep 2'")
+	logT("session created with %q", shellcmd.Sleep(2))
 
 	// Log the initial pane state
 	logT("initial pane_dead=%v, pane_pid=%s", isPaneDead(socket, session), getPanePIDSafe(socket, session))
@@ -125,11 +127,11 @@ func TestAutoRespawnHook_RespawnWorks(t *testing.T) {
 		logT("tmux version: %s", strings.TrimSpace(string(verOut)))
 	}
 
-	// Wait for sleep 2 to exit
+	// Wait for short sleep command to exit
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if isPaneDead(socket, session) {
-			logT("pane died (sleep 2 exited)")
+			logT("pane died (%s exited)", shellcmd.Sleep(2))
 			break
 		}
 		time.Sleep(200 * time.Millisecond)
@@ -186,7 +188,7 @@ func TestAutoRespawnHook_SkipsAlreadyAlive(t *testing.T) {
 	socket := requireTestSocket(t)
 	session := "test-skip-alive"
 
-	testSession(t, socket, session, "sleep 300")
+	testSession(t, socket, session, shellcmd.Sleep(300))
 	defer func() { _ = exec.Command("tmux", "-L", socket, "kill-session", "-t", session).Run() }()
 
 	tmx := NewTmuxWithSocket(socket)
@@ -199,7 +201,7 @@ func TestAutoRespawnHook_SkipsAlreadyAlive(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Simulate daemon: immediately respawn before hook wakes
-	exec.Command("tmux", "-L", socket, "respawn-pane", "-k", "-t", session, "sleep 300").Run()
+	exec.Command("tmux", "-L", socket, "respawn-pane", "-k", "-t", session, shellcmd.Sleep(300)).Run()
 	time.Sleep(300 * time.Millisecond)
 
 	pid1 := getPanePID(t, socket, session)

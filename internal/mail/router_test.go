@@ -18,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/nudge"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/shellcmd"
 	"github.com/steveyegge/gastown/internal/testutil"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -1675,7 +1676,7 @@ func TestNotifyRecipient_BusyAgent(t *testing.T) {
 	sessionName := "gt-crew-busytest"
 
 	// Create a session running sleep — no prompt visible, simulating busy agent.
-	createNotifyTestSession(t, socket, sessionName, "sleep 300")
+	createNotifyTestSession(t, socket, sessionName, shellcmd.Sleep(300))
 
 	townRoot := t.TempDir()
 	r := &Router{
@@ -1726,7 +1727,7 @@ func TestNotifyRecipient_BusyAgent(t *testing.T) {
 func TestNotifyRecipient_BusyAgentEscalationUsesUrgentQueuedNudge(t *testing.T) {
 	socket := requireNotifyTestSocket(t)
 	sessionName := "gt-crew-busy-escalation"
-	createNotifyTestSession(t, socket, sessionName, "sleep 300")
+	createNotifyTestSession(t, socket, sessionName, shellcmd.Sleep(300))
 
 	townRoot := t.TempDir()
 	r := &Router{
