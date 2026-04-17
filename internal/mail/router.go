@@ -1839,6 +1839,17 @@ func AddressToSessionIDs(address string) []string {
 		return []string{session.MayorSessionName()}
 	}
 
+	// Dog address: "deacon/dogs/<name>" → hq-dog-<name>
+	// MUST be checked before the deacon prefix check below, because
+	// strings.HasPrefix("deacon/dogs/bravo", "deacon") is true and would
+	// incorrectly route plugin mails to the deacon session.
+	if strings.HasPrefix(address, constants.RoleDeacon+"/dogs/") {
+		dogName := strings.TrimPrefix(address, constants.RoleDeacon+"/dogs/")
+		if dogName != "" {
+			return []string{session.DogSessionName(dogName)}
+		}
+	}
+
 	// Deacon address: "deacon/" or "deacon"
 	if strings.HasPrefix(address, constants.RoleDeacon) {
 		return []string{session.DeaconSessionName()}
