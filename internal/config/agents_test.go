@@ -499,7 +499,7 @@ func TestResolveProcessNames(t *testing.T) {
 			RegisterAgentForTesting(string(tc.agent.Name), tc.agent)
 			t.Cleanup(ResetRegistryForTesting)
 
-			got := ResolveProcessNames(string(tc.agent.Name), tc.command)
+			got := ResolveProcessNames(string(tc.agent.Name), tc.command, tc.agent.Args...)
 			if len(got) != len(tc.want) {
 				t.Fatalf("ResolveProcessNames(%q, %q) = %v, want %v", tc.agent.Name, tc.command, got, tc.want)
 			}
@@ -510,6 +510,28 @@ func TestResolveProcessNames(t *testing.T) {
 			}
 		})
 	}
+
+	// Real-world scenario: Paul's town settings shadow the canonical claude
+	// preset with a wrapper. The registry still holds the built-in claude
+	// preset; Args live only on the caller's RuntimeConfig. Caller args must
+	// take precedence so wrapper-unwrap finds the real binary.
+	t.Run("caller args used when registry holds canonical preset", func(t *testing.T) {
+		ResetRegistryForTesting()
+		t.Cleanup(ResetRegistryForTesting)
+		// No RegisterAgentForTesting — registry has canonical built-in claude
+		// (Command="claude", ProcessNames=[node, claude], Args=[--dangerously-...]).
+		got := ResolveProcessNames("claude", "env",
+			"-u", "ANTHROPIC_API_KEY", "claude", "--dangerously-skip-permissions", "--effort", "high")
+		want := []string{"node", "claude"}
+		if len(got) != len(want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
 }
 
 func TestAgentPresetApprovalFlags(t *testing.T) {

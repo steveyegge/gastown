@@ -1018,7 +1018,7 @@ func updateSessionEnvForHandoff(t *tmux.Tmux, sessionName, agentOverride string)
 			}
 			rc, _, err := config.ResolveAgentConfigWithOverride(townRoot, rigPath, currentAgent)
 			if err == nil {
-				resolved := config.ResolveProcessNames(currentAgent, rc.Command)
+				resolved := config.ResolveProcessNames(currentAgent, rc.Command, rc.Args...)
 				processNames = strings.Join(resolved, ",")
 			}
 		}

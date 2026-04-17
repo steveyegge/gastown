@@ -466,8 +466,9 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	// Set GT_PROCESS_NAMES for accurate liveness detection. Custom agents may
 	// shadow built-in preset names (e.g., custom "codex" running "opencode"),
-	// so we resolve process names from both agent name and actual command.
-	processNames := config.ResolveProcessNames(runtimeConfig.ResolvedAgent, runtimeConfig.Command)
+	// or wrap the real binary (e.g., `env -u VAR claude ...`). Pass Args so
+	// wrapper-unwrap can find the real agent binary.
+	processNames := config.ResolveProcessNames(runtimeConfig.ResolvedAgent, runtimeConfig.Command, runtimeConfig.Args...)
 	debugSession("SetEnvironment GT_PROCESS_NAMES", m.tmux.SetEnvironment(sessionID, "GT_PROCESS_NAMES", strings.Join(processNames, ",")))
 
 	// Record agent's pane_id for ZFC-compliant liveness checks (gt-qmsx).
