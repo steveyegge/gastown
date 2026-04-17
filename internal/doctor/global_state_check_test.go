@@ -206,6 +206,10 @@ func TestExtractShellVars(t *testing.T) {
 BAZ="$HOME/stuff"
 COMPLEX=$(echo hi)
 export NESTED="${FOO}/sub"
+SINGLE='single-quoted'
+BACKTICK=` + "`echo hi`" + `
+="value"
+FOO2="digitvar"
 `
 	vars := extractShellVars(content, "/home/test")
 
@@ -216,6 +220,8 @@ export NESTED="${FOO}/sub"
 		{"FOO", "bar"},
 		{"BAZ", "/home/test/stuff"},
 		{"NESTED", "bar/sub"},
+		{"SINGLE", "single-quoted"},
+		{"FOO2", "digitvar"},
 	}
 	for _, tt := range tests {
 		got := vars[tt.name]
@@ -227,6 +233,16 @@ export NESTED="${FOO}/sub"
 	// COMPLEX should not be extracted (command substitution)
 	if _, ok := vars["COMPLEX"]; ok {
 		t.Error("expected COMPLEX to be skipped (command substitution)")
+	}
+
+	// BACKTICK should not be extracted (backtick command substitution)
+	if _, ok := vars["BACKTICK"]; ok {
+		t.Error("expected BACKTICK to be skipped (backtick command substitution)")
+	}
+
+	// Empty LHS should not produce a var
+	if _, ok := vars[""]; ok {
+		t.Error("expected empty var name to be skipped")
 	}
 }
 
@@ -246,9 +262,11 @@ func TestResolveSourcePaths(t *testing.T) {
 		{"source ~/foo.zsh", []string{"/home/test/foo.zsh"}},
 		{`[[ -f "$DIR/foo.zsh" ]] && source "$DIR/foo.zsh"`, []string{"/home/test/dotfiles/foo.zsh"}},
 		{`[[ ! -f /x.zsh ]] || source /x.zsh`, []string{"/x.zsh"}},
+		{`[[ -f /x.zsh ]] && . /x.zsh`, []string{"/x.zsh"}},
 		{"# source /commented/out.zsh", nil},
 		{"echo hello", nil},
 		{"source /path.zsh  # inline comment", []string{"/path.zsh"}},
+		{`source "$UNKNOWN/file[1].zsh"`, nil},
 	}
 
 	for _, tt := range tests {
@@ -273,6 +291,7 @@ func TestReplaceUnresolvedVars(t *testing.T) {
 		{"${HOME}/file", "*/file"},
 		{"/no/vars/here", "/no/vars/here"},
 		{"$A/$B/end", "*/*/end"},
+		{"${BROKEN/file", "${BROKEN/file"},
 	}
 	for _, tt := range tests {
 		got := replaceUnresolvedVars(tt.in)
