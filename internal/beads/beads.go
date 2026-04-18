@@ -298,7 +298,17 @@ type CreateOptions struct {
 	Parent      string
 	Actor       string // Who is creating this issue (populates created_by)
 	Ephemeral   bool   // Create as ephemeral (wisp) - not synced to git
-	Rig         string // Target rig database (e.g., "gastown"). When set, passes --rig to bd create.
+	// Rig names the target rig database (e.g., "gastown").
+	//
+	// Advisory only: bd has no --rig flag. Routing is determined by the
+	// Beads wrapper's workdir/BEADS_DIR (see run at L411). Callers construct
+	// beads.New(cwd) where cwd is inside the target rig, which sets
+	// BEADS_DIR=<rig>/.beads automatically.
+	//
+	// mq_submit and done validate the landing DB post-create via
+	// ValidateRigPrefix, so a wrong-rig outcome is surfaced as a warning
+	// rather than silently succeeding.
+	Rig string
 }
 
 // UpdateOptions specifies options for updating an issue.
@@ -1226,9 +1236,11 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	if opts.Ephemeral {
 		args = append(args, "--ephemeral")
 	}
-	if opts.Rig != "" {
-		args = append(args, "--rig="+opts.Rig)
-	}
+	// opts.Rig is advisory — see CreateOptions.Rig. Do not pass --rig to bd;
+	// bd has no such flag and rejects it. Routing is via the wrapper's
+	// workdir/BEADS_DIR; mq_submit and done verify the landing DB with
+	// ValidateRigPrefix after create.
+	_ = opts.Rig
 	// Default Actor from BD_ACTOR env var if not specified
 	// Uses getActor() to respect isolated mode (tests)
 	actor := opts.Actor
