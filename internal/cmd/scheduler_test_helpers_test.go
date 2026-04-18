@@ -7,9 +7,11 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -222,13 +224,31 @@ func addBeadDependency(t *testing.T, blocked, blocker, dir string) {
 // addBeadDependencyOfType adds a dependency with a specific type (e.g., "tracks",
 // "depends_on"). The from bead must exist in the local DB at dir; the to bead can
 // be in a different DB if routes.jsonl is present in dir's .beads/.
+//
+// bd v1.0.0 no longer resolves cross-rig IDs via routes for dep add. If the CLI
+// fails with "no issue found", falls back to inserting the dependency via bd sql
+// (which bypasses target-existence validation).
 func addBeadDependencyOfType(t *testing.T, from, to, depType, dir string) {
 	t.Helper()
 	cmd := exec.Command("bd", "dep", "add", from, to, "--type="+depType)
 	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("bd dep add %s %s --type=%s failed: %v\n%s", from, to, depType, err, out)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return
 	}
+	// bd v1.0.0 can't resolve cross-rig IDs — fall back to SQL insert.
+	if strings.Contains(string(out), "no issue found") {
+		sqlCmd := exec.Command("bd", "sql",
+			fmt.Sprintf("INSERT INTO dependencies (issue_id, depends_on_id, type, created_by) VALUES ('%s', '%s', '%s', 'test')",
+				from, to, depType))
+		sqlCmd.Dir = dir
+		if sqlOut, sqlErr := sqlCmd.CombinedOutput(); sqlErr != nil {
+			t.Fatalf("bd dep add %s %s --type=%s failed (CLI: %s) (SQL fallback: %v\n%s)",
+				from, to, depType, out, sqlErr, sqlOut)
+		}
+		return
+	}
+	t.Fatalf("bd dep add %s %s --type=%s failed: %v\n%s", from, to, depType, err, out)
 }
 
 // createTestBeadOfType creates a bead with the given title and issue type (e.g.,
