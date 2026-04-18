@@ -55,6 +55,18 @@ func initBeadsDBForServer(t *testing.T, dir, prefix string) {
 		t.Fatalf("bd init failed in %s: %v\n%s", dir, err, out)
 	}
 
+	// Write dolt-server.port file — bd v1.0.0 uses this as the primary
+	// source for Dolt server port discovery. The --server-port flag writes
+	// to metadata.json (deprecated), which bd v1.0.0 still reads but warns
+	// about. Cross-rig route resolution needs the port file in EACH rig's
+	// .beads/ so the target database can be reached via the shared server.
+	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
+		portPath := filepath.Join(dir, ".beads", "dolt-server.port")
+		if err := os.WriteFile(portPath, []byte(p+"\n"), 0644); err != nil {
+			t.Fatalf("write dolt-server.port in %s: %v", dir, err)
+		}
+	}
+
 	// Create empty issues.jsonl to prevent bd auto-export from corrupting
 	// routes.jsonl (same as initBeadsDBWithPrefix does).
 	issuesPath := filepath.Join(dir, ".beads", "issues.jsonl")
@@ -137,13 +149,15 @@ func setupSchedulerIntegrationTown(t *testing.T) (hqPath, rigPath, gtBinary stri
 	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
 		t.Fatalf("mkdir town .beads: %v", err)
 	}
+	// Use absolute paths in routes so cross-rig resolution works regardless
+	// of which .beads/ directory bd reads routes.jsonl from.
 	routes := []beads.Route{
-		{Prefix: hqPrefix + "-", Path: "."},
-		{Prefix: rigPrefix + "-", Path: "testrig/mayor/rig"},
+		{Prefix: hqPrefix + "-", Path: hqPath},
+		{Prefix: rigPrefix + "-", Path: rigPath},
 		// Convoy beads use a literal "hq-cv-" prefix (see install.go — registered
 		// on real towns during `gt install`). Route them to HQ so tests that
 		// look up auto-convoys via `bd show` resolve correctly.
-		{Prefix: "hq-cv-", Path: "."},
+		{Prefix: "hq-cv-", Path: hqPath},
 	}
 	if err := beads.WriteRoutes(townBeadsDir, routes); err != nil {
 		t.Fatalf("write routes: %v", err)
@@ -303,11 +317,10 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 	}
 
 	// Verify: convoy is resolvable via bd show from hq.
-	// --allow-stale is a global flag: must come before the subcommand.
-	showArgs := beads.MaybePrependAllowStale([]string{"show", fields.Convoy, "--json"})
-	cmd := exec.Command("bd", showArgs...)
+	// Use Output() (stdout only) so stderr warnings don't corrupt JSON.
+	cmd := exec.Command("bd", "--json", "show", fields.Convoy)
 	cmd.Dir = hqPath
-	out, err := cmd.CombinedOutput()
+	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("bd show convoy %s failed: %v\noutput: %s", fields.Convoy, err, out)
 	}
@@ -327,8 +340,7 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 
 	// Verify: convoy has a "tracks" dependency pointing to the rig bead.
 	// This is the core cross-rig link: convoy lives in HQ DB, bead in rig DB.
-	depArgs := beads.MaybePrependAllowStale([]string{"dep", "list", fields.Convoy, "--direction=down", "--type=tracks", "--json"})
-	depCmd := exec.Command("bd", depArgs...)
+	depCmd := exec.Command("bd", "--json", "dep", "list", fields.Convoy, "--direction=down", "--type=tracks")
 	depCmd.Dir = hqPath
 	depOut, err := depCmd.Output()
 	if err != nil {
@@ -437,8 +449,7 @@ func TestSchedulerSlingDryRun(t *testing.T) {
 	}
 
 	// Verify: no convoy created (HQ beads DB should have no convoy issues)
-	listArgs := beads.MaybePrependAllowStale([]string{"list", "--type=convoy", "--json"})
-	cmd := exec.Command("bd", listArgs...)
+	cmd := exec.Command("bd", "--json", "list", "--type=convoy", "--flat")
 	cmd.Dir = hqPath
 	out, err := cmd.Output()
 	if err != nil {
@@ -577,16 +588,19 @@ func setupMultiRigSchedulerTown(t *testing.T) (hqPath, rig1Path, rig2Path, gtBin
 	}
 
 	// --- town-level .beads/ with routes for all three DBs ---
+	// Use absolute paths in routes so cross-rig resolution works regardless
+	// of which .beads/ directory bd reads routes.jsonl from. bd v1.0.0
+	// resolves route paths relative to the .beads/ parent, not the town root.
 	townBeadsDir := filepath.Join(hqPath, ".beads")
 	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
 		t.Fatalf("mkdir town .beads: %v", err)
 	}
 	routes := []beads.Route{
-		{Prefix: hqPrefix + "-", Path: "."},
-		{Prefix: rig1Prefix + "-", Path: "rig1/mayor/rig"},
-		{Prefix: rig2Prefix + "-", Path: "rig2/mayor/rig"},
+		{Prefix: hqPrefix + "-", Path: hqPath},
+		{Prefix: rig1Prefix + "-", Path: rig1Path},
+		{Prefix: rig2Prefix + "-", Path: rig2Path},
 		// Convoy beads use a literal "hq-cv-" prefix (see install.go).
-		{Prefix: "hq-cv-", Path: "."},
+		{Prefix: "hq-cv-", Path: hqPath},
 	}
 	if err := beads.WriteRoutes(townBeadsDir, routes); err != nil {
 		t.Fatalf("write routes: %v", err)
@@ -599,7 +613,7 @@ func setupMultiRigSchedulerTown(t *testing.T) (hqPath, rig1Path, rig2Path, gtBin
 	}
 	initBeadsDBForServer(t, rig1Path, rig1Prefix)
 	// Write routes to rig1's .beads/ so bd can resolve cross-rig IDs (needed for
-	// cross-rig dep creation via external refs).
+	// cross-rig dep creation via external refs). Same absolute-path routes.
 	if err := beads.WriteRoutes(filepath.Join(rig1Path, ".beads"), routes); err != nil {
 		t.Fatalf("write rig1 routes: %v", err)
 	}
