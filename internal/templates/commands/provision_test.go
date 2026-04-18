@@ -31,6 +31,12 @@ func TestBuildCommand_Claude(t *testing.T) {
 	if !strings.Contains(content, "$ARGUMENTS") {
 		t.Error("missing $ARGUMENTS in body")
 	}
+	if strings.Contains(content, "Ready to hand off?") {
+		t.Error("Claude handoff command should not require an interactive confirmation prompt")
+	}
+	if !strings.Contains(content, "gt handoff -y") {
+		t.Error("Claude handoff command should use gt handoff -y")
+	}
 }
 
 func TestBuildCommand_OpenCode(t *testing.T) {
