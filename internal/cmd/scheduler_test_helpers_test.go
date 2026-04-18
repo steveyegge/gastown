@@ -6,6 +6,7 @@ package cmd
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -226,8 +227,8 @@ func addBeadDependency(t *testing.T, blocked, blocker, dir string) {
 // be in a different DB if routes.jsonl is present in dir's .beads/.
 //
 // bd v1.0.0 no longer resolves cross-rig IDs via routes for dep add. If the CLI
-// fails with "no issue found", falls back to inserting the dependency via bd sql
-// (which bypasses target-existence validation).
+// fails with "no issue found", falls back to inserting the dependency directly
+// via the Dolt server (bypasses target-existence validation).
 func addBeadDependencyOfType(t *testing.T, from, to, depType, dir string) {
 	t.Helper()
 	cmd := exec.Command("bd", "dep", "add", from, to, "--type="+depType)
@@ -236,15 +237,29 @@ func addBeadDependencyOfType(t *testing.T, from, to, depType, dir string) {
 	if err == nil {
 		return
 	}
-	// bd v1.0.0 can't resolve cross-rig IDs — fall back to SQL insert.
+	// bd v1.0.0 can't resolve cross-rig IDs — fall back to direct SQL
+	// on the Dolt server (same connection pattern as test cleanup code).
 	if strings.Contains(string(out), "no issue found") {
-		sqlCmd := exec.Command("bd", "sql",
-			fmt.Sprintf("INSERT INTO dependencies (issue_id, depends_on_id, type, created_by) VALUES ('%s', '%s', '%s', 'test')",
-				from, to, depType))
-		sqlCmd.Dir = dir
-		if sqlOut, sqlErr := sqlCmd.CombinedOutput(); sqlErr != nil {
-			t.Fatalf("bd dep add %s %s --type=%s failed (CLI: %s) (SQL fallback: %v\n%s)",
-				from, to, depType, out, sqlErr, sqlOut)
+		port := os.Getenv("GT_DOLT_PORT")
+		if port == "" {
+			port = "3307"
+		}
+		// Extract the database prefix from the 'from' bead ID (e.g., "r8" from "r8-kha").
+		prefix := from[:strings.Index(from, "-")]
+		dbName := "beads_" + prefix
+		dsn := fmt.Sprintf("root@tcp(127.0.0.1:%s)/%s", port, dbName)
+		db, dbErr := sql.Open("mysql", dsn)
+		if dbErr != nil {
+			t.Fatalf("bd dep add %s %s --type=%s: CLI failed (%s), SQL fallback connect failed: %v",
+				from, to, depType, strings.TrimSpace(string(out)), dbErr)
+		}
+		defer db.Close()
+		_, execErr := db.Exec(
+			"INSERT INTO dependencies (issue_id, depends_on_id, type, created_by) VALUES (?, ?, ?, 'test')",
+			from, to, depType)
+		if execErr != nil {
+			t.Fatalf("bd dep add %s %s --type=%s: CLI failed (%s), SQL insert failed: %v",
+				from, to, depType, strings.TrimSpace(string(out)), execErr)
 		}
 		return
 	}
