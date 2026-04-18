@@ -402,7 +402,7 @@ func (b *Beads) Init(prefix string) error {
 	}
 	args = append(args, "--quiet")
 	if b.serverPort > 0 {
-		args = append(args, "--server-port", fmt.Sprintf("%d", b.serverPort))
+		args = append(args, "--server", "--server-port", fmt.Sprintf("%d", b.serverPort))
 	}
 	_, err := b.run(args...)
 	return err
