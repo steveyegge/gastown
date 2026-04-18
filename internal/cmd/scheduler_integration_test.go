@@ -149,15 +149,13 @@ func setupSchedulerIntegrationTown(t *testing.T) (hqPath, rigPath, gtBinary stri
 	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
 		t.Fatalf("mkdir town .beads: %v", err)
 	}
-	// Use absolute paths in routes so cross-rig resolution works regardless
-	// of which .beads/ directory bd reads routes.jsonl from.
 	routes := []beads.Route{
-		{Prefix: hqPrefix + "-", Path: hqPath},
-		{Prefix: rigPrefix + "-", Path: rigPath},
+		{Prefix: hqPrefix + "-", Path: "."},
+		{Prefix: rigPrefix + "-", Path: "testrig/mayor/rig"},
 		// Convoy beads use a literal "hq-cv-" prefix (see install.go — registered
 		// on real towns during `gt install`). Route them to HQ so tests that
 		// look up auto-convoys via `bd show` resolve correctly.
-		{Prefix: "hq-cv-", Path: hqPath},
+		{Prefix: "hq-cv-", Path: "."},
 	}
 	if err := beads.WriteRoutes(townBeadsDir, routes); err != nil {
 		t.Fatalf("write routes: %v", err)
@@ -588,19 +586,16 @@ func setupMultiRigSchedulerTown(t *testing.T) (hqPath, rig1Path, rig2Path, gtBin
 	}
 
 	// --- town-level .beads/ with routes for all three DBs ---
-	// Use absolute paths in routes so cross-rig resolution works regardless
-	// of which .beads/ directory bd reads routes.jsonl from. bd v1.0.0
-	// resolves route paths relative to the .beads/ parent, not the town root.
 	townBeadsDir := filepath.Join(hqPath, ".beads")
 	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
 		t.Fatalf("mkdir town .beads: %v", err)
 	}
 	routes := []beads.Route{
-		{Prefix: hqPrefix + "-", Path: hqPath},
-		{Prefix: rig1Prefix + "-", Path: rig1Path},
-		{Prefix: rig2Prefix + "-", Path: rig2Path},
+		{Prefix: hqPrefix + "-", Path: "."},
+		{Prefix: rig1Prefix + "-", Path: "rig1/mayor/rig"},
+		{Prefix: rig2Prefix + "-", Path: "rig2/mayor/rig"},
 		// Convoy beads use a literal "hq-cv-" prefix (see install.go).
-		{Prefix: "hq-cv-", Path: hqPath},
+		{Prefix: "hq-cv-", Path: "."},
 	}
 	if err := beads.WriteRoutes(townBeadsDir, routes); err != nil {
 		t.Fatalf("write routes: %v", err)
@@ -613,7 +608,7 @@ func setupMultiRigSchedulerTown(t *testing.T) (hqPath, rig1Path, rig2Path, gtBin
 	}
 	initBeadsDBForServer(t, rig1Path, rig1Prefix)
 	// Write routes to rig1's .beads/ so bd can resolve cross-rig IDs (needed for
-	// cross-rig dep creation via external refs). Same absolute-path routes.
+	// cross-rig dep creation via external refs).
 	if err := beads.WriteRoutes(filepath.Join(rig1Path, ".beads"), routes); err != nil {
 		t.Fatalf("write rig1 routes: %v", err)
 	}
