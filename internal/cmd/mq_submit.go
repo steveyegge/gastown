@@ -232,10 +232,26 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// GH#3032: Resolve HEAD commit SHA for MR dedup.
-	commitSHA, shaErr := g.Rev("HEAD")
+	// GH#3032: Resolve source-branch commit SHA for MR dedup.
+	// Resolve from the branch arg, not HEAD: when mq submit is invoked from
+	// a worktree that is NOT checked out on the source branch (e.g. the
+	// refinery's main-tracking worktree manually submitting a polecat's
+	// pushed branch), HEAD is the wrong ref and yields the wrong SHA.
+	// Fall back to origin/<branch> when the branch isn't present locally,
+	// then finally to HEAD for the legacy "submit from the source branch"
+	// caller shape.
+	commitSHA, shaErr := g.Rev(branch)
 	if shaErr != nil {
-		style.PrintWarning("could not resolve HEAD SHA: %v (falling back to branch-only dedup)", shaErr)
+		if originSHA, originErr := g.Rev("origin/" + branch); originErr == nil {
+			commitSHA = originSHA
+			shaErr = nil
+		} else if headSHA, headErr := g.Rev("HEAD"); headErr == nil {
+			commitSHA = headSHA
+			shaErr = nil
+		}
+	}
+	if shaErr != nil {
+		style.PrintWarning("could not resolve SHA for branch %q: %v (falling back to branch-only dedup)", branch, shaErr)
 	}
 
 	// Build MR bead title and description
