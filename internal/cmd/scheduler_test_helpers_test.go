@@ -6,7 +6,7 @@ package cmd
 
 import (
 	"bytes"
-	"database/sql"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	beadsdk "github.com/steveyegge/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/scheduler/capacity"
 	"github.com/steveyegge/gastown/internal/testutil"
@@ -228,7 +229,7 @@ func addBeadDependency(t *testing.T, blocked, blocker, dir string) {
 //
 // bd v1.0.0 no longer resolves cross-rig IDs via routes for dep add. If the CLI
 // fails with "no issue found", falls back to inserting the dependency directly
-// via the Dolt server (bypasses target-existence validation).
+// via the beads Go SDK (which bypasses target-existence validation).
 func addBeadDependencyOfType(t *testing.T, from, to, depType, dir string) {
 	t.Helper()
 	cmd := exec.Command("bd", "dep", "add", from, to, "--type="+depType)
@@ -237,56 +238,34 @@ func addBeadDependencyOfType(t *testing.T, from, to, depType, dir string) {
 	if err == nil {
 		return
 	}
-	// bd v1.0.0 can't resolve cross-rig IDs — fall back to direct SQL
-	// on the Dolt server (same connection pattern as test cleanup code).
+	// bd v1.0.0 can't resolve cross-rig IDs — fall back to the beads Go SDK
+	// which writes directly to the embedded store without validating the target.
 	if strings.Contains(string(out), "no issue found") {
-		port := os.Getenv("GT_DOLT_PORT")
-		if port == "" {
-			port = "3307"
-		}
-		// Extract the database prefix from the 'from' bead ID (e.g., "r8" from "r8-kha").
-		prefix := from[:strings.Index(from, "-")]
-		dbName := "beads_" + prefix
-		dsn := fmt.Sprintf("root@tcp(127.0.0.1:%s)/%s", port, dbName)
-		db, dbErr := sql.Open("mysql", dsn)
-		if dbErr != nil {
-			t.Fatalf("bd dep add %s %s --type=%s: CLI failed (%s), SQL fallback connect failed: %v",
-				from, to, depType, strings.TrimSpace(string(out)), dbErr)
-		}
-		defer db.Close()
-		_, execErr := db.Exec(
-			"INSERT INTO dependencies (issue_id, depends_on_id, type, created_by) VALUES (?, ?, ?, 'test')",
-			from, to, depType)
-		if execErr != nil {
-			t.Fatalf("bd dep add %s %s --type=%s: CLI failed (%s), SQL insert failed: %v",
-				from, to, depType, strings.TrimSpace(string(out)), execErr)
-		}
+		ensureCrossRigDep(t, from, to, depType, dir)
 		return
 	}
 	t.Fatalf("bd dep add %s %s --type=%s failed: %v\n%s", from, to, depType, err, out)
 }
 
-// ensureCrossRigDep creates a cross-rig dependency via direct SQL on the Dolt
-// server. Used when bd v1.0.0 can't create cross-rig deps via CLI or store.
+// ensureCrossRigDep creates a cross-rig dependency via the beads Go SDK,
+// writing directly to the embedded store. Used when bd v1.0.0 can't create
+// cross-rig deps via the CLI (which validates target existence).
 func ensureCrossRigDep(t *testing.T, from, to, depType, dir string) {
 	t.Helper()
-	port := os.Getenv("GT_DOLT_PORT")
-	if port == "" {
-		port = "3307"
-	}
-	prefix := from[:strings.Index(from, "-")]
-	dbName := "beads_" + prefix
-	dsn := fmt.Sprintf("root@tcp(127.0.0.1:%s)/%s", port, dbName)
-	db, err := sql.Open("mysql", dsn)
+	ctx := context.Background()
+	beadsDir := filepath.Join(dir, ".beads")
+	store, err := beadsdk.OpenFromConfig(ctx, beadsDir)
 	if err != nil {
-		t.Fatalf("ensureCrossRigDep: connect to %s: %v", dbName, err)
+		t.Fatalf("ensureCrossRigDep: open store at %s: %v", beadsDir, err)
 	}
-	defer db.Close()
-	_, err = db.Exec(
-		"INSERT IGNORE INTO dependencies (issue_id, depends_on_id, type, created_by) VALUES (?, ?, ?, 'test')",
-		from, to, depType)
-	if err != nil {
-		t.Fatalf("ensureCrossRigDep: insert dep %s→%s: %v", from, to, err)
+	defer store.Close()
+	dep := &beadsdk.Dependency{
+		IssueID:     from,
+		DependsOnID: to,
+		Type:        beadsdk.DependencyType(depType),
+	}
+	if err := store.AddDependency(ctx, dep, "test"); err != nil {
+		t.Fatalf("ensureCrossRigDep: add dep %s→%s: %v", from, to, err)
 	}
 }
 

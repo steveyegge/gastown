@@ -55,18 +55,6 @@ func initBeadsDBForServer(t *testing.T, dir, prefix string) {
 		t.Fatalf("bd init failed in %s: %v\n%s", dir, err, out)
 	}
 
-	// Write dolt-server.port file — bd v1.0.0 uses this as the primary
-	// source for Dolt server port discovery. The --server-port flag writes
-	// to metadata.json (deprecated), which bd v1.0.0 still reads but warns
-	// about. Cross-rig route resolution needs the port file in EACH rig's
-	// .beads/ so the target database can be reached via the shared server.
-	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-		portPath := filepath.Join(dir, ".beads", "dolt-server.port")
-		if err := os.WriteFile(portPath, []byte(p+"\n"), 0644); err != nil {
-			t.Fatalf("write dolt-server.port in %s: %v", dir, err)
-		}
-	}
-
 	// Create empty issues.jsonl to prevent bd auto-export from corrupting
 	// routes.jsonl (same as initBeadsDBWithPrefix does).
 	issuesPath := filepath.Join(dir, ".beads", "issues.jsonl")
