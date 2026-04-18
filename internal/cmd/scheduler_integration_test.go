@@ -13,7 +13,6 @@
 package cmd
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -25,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	beadsdk "github.com/steveyegge/beads"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/scheduler/capacity"
@@ -237,25 +235,25 @@ func hasSlingContext(t *testing.T, hqPath, workBeadID string) bool {
 	return findSlingContext(t, hqPath, workBeadID) != nil
 }
 
-// ensureCrossRigDep creates a cross-rig dependency via the beads Go SDK,
-// writing directly to the embedded store. Used when bd v1.0.0 can't create
-// cross-rig deps via the CLI (which validates target existence).
+// ensureCrossRigDep creates a cross-rig dependency by pre-creating a stub issue
+// for the cross-rig target in the local DB, then running bd dep add normally.
+// bd v1.0.0 validates that both IDs exist locally — the stub satisfies this.
 func ensureCrossRigDep(t *testing.T, from, to, depType, dir string) {
 	t.Helper()
-	ctx := context.Background()
-	beadsDir := filepath.Join(dir, ".beads")
-	store, err := beadsdk.OpenFromConfig(ctx, beadsDir)
-	if err != nil {
-		t.Fatalf("ensureCrossRigDep: open store at %s: %v", beadsDir, err)
-	}
-	defer store.Close()
-	dep := &beadsdk.Dependency{
-		IssueID:     from,
-		DependsOnID: to,
-		Type:        beadsdk.DependencyType(depType),
-	}
-	if err := store.AddDependency(ctx, dep, "test"); err != nil {
-		t.Fatalf("ensureCrossRigDep: add dep %s→%s: %v", from, to, err)
+	// Pre-create a stub issue with the cross-rig ID in the local DB.
+	// This satisfies bd v1.0.0's existence validation for dep add.
+	stubCmd := exec.Command("bd", "create", "--id="+to, "--title=cross-rig stub",
+		"--type=task", "--description=stub for cross-rig dep")
+	stubCmd.Dir = dir
+	// Ignore errors — the stub might already exist if multiple deps target the same bead.
+	stubCmd.CombinedOutput() //nolint:errcheck
+
+	// Now bd dep add can find both beads in the local DB.
+	cmd := exec.Command("bd", "dep", "add", from, to, "--type="+depType)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("ensureCrossRigDep: bd dep add %s %s --type=%s failed: %v\n%s",
+			from, to, depType, err, out)
 	}
 }
 
