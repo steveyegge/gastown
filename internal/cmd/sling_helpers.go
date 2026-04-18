@@ -19,7 +19,6 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/daemon"
-	"github.com/steveyegge/gastown/internal/formula"
 	rigpkg "github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -952,7 +951,7 @@ func CookFormula(formulaName, workDir, townRoot string) error {
 // Returns the temp file path and a cleanup function, or the original name
 // if extraction fails. Used as a fallback when bd can't find the formula on disk.
 func resolveFormulaToTempFile(formulaName string) (resolved string, cleanup func()) {
-	content, err := formula.GetEmbeddedFormulaContent(formulaName)
+	content, err := loadFormulaContent(formulaName)
 	if err != nil {
 		return formulaName, nil
 	}

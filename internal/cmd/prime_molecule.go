@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -112,8 +113,22 @@ func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 // townRoot and rigName are used to load formula overlays (operator customizations).
 // extraVars is an optional list of "key=value" overrides that are substituted into
 // step descriptions before rendering, taking precedence over formula defaults.
-func showFormulaSteps(formulaName, label, townRoot, rigName string, extraVars ...[]string) {
+// loadFormulaContent tries embedded formulas first, then falls back to on-disk
+// search paths (project → town → user). Fixes #3322.
+func loadFormulaContent(formulaName string) ([]byte, error) {
 	content, err := formula.GetEmbeddedFormulaContent(formulaName)
+	if err == nil {
+		return content, nil
+	}
+	path, pathErr := findFormulaFile(formulaName)
+	if pathErr != nil {
+		return nil, fmt.Errorf("not found in embedded or on disk: %v", err)
+	}
+	return os.ReadFile(path)
+}
+
+func showFormulaSteps(formulaName, label, townRoot, rigName string, extraVars ...[]string) {
+	content, err := loadFormulaContent(formulaName)
 	if err != nil {
 		style.PrintWarning("could not load formula %s: %v", formulaName, err)
 		return
@@ -152,7 +167,7 @@ func showFormulaSteps(formulaName, label, townRoot, rigName string, extraVars ..
 // townRoot and rigName are used to load formula overlays (operator customizations).
 // extraVars is an optional list of "key=value" overrides substituted into step descriptions.
 func showFormulaStepsFull(formulaName, townRoot, rigName string, extraVars ...[]string) {
-	content, err := formula.GetEmbeddedFormulaContent(formulaName)
+	content, err := loadFormulaContent(formulaName)
 	if err != nil {
 		style.PrintWarning("could not load formula %s: %v", formulaName, err)
 		return

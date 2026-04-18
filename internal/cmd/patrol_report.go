@@ -145,7 +145,7 @@ func runPatrolReport(cmd *cobra.Command, args []string) error {
 // If stepsFlag is empty, returns a line indicating the audit was not reported.
 func buildStepAudit(formulaName string, stepsFlag string) string {
 	// Load the formula to get the canonical step list
-	content, err := formula.GetEmbeddedFormulaContent(formulaName)
+	content, err := loadFormulaContent(formulaName)
 	if err != nil {
 		if stepsFlag == "" {
 			return "Steps: NOT REPORTED (formula not found)"
