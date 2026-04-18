@@ -381,7 +381,6 @@ func TestNewManager_NamepoolFromRigConfig(t *testing.T) {
 		t.Errorf("expected first name from rig config (alpha), got %q", name)
 	}
 }
-
 // Note: State persistence tests removed - state is now derived from beads assignee field.
 // Integration tests should verify beads-based state management.
 
