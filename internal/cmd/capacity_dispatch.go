@@ -194,6 +194,9 @@ func dispatchScheduledWork(townRoot, actor string, batchOverride int, dryRun boo
 	if report.Dispatched > 0 || report.Failed > 0 {
 		fmt.Printf("\n%s Dispatched %d, failed %d (reason: %s)\n",
 			style.Bold.Render("✓"), report.Dispatched, report.Failed, report.Reason)
+	} else if report.Skipped > 0 {
+		fmt.Printf("\n%s Skipped %d bead(s) — zero capacity (working: %d)\n",
+			style.Dim.Render("○"), report.Skipped, countWorkingPolecats())
 	}
 
 	return report.Dispatched, nil

@@ -526,7 +526,9 @@ func countWorkingPolecats() int {
 		agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, identity.Rig, identity.Name)
 		issue, err := bd.Show(agentBeadID)
 		if err != nil || issue == nil {
-			count++ // Can't verify — count conservatively
+			// Agent bead missing or unreachable — skip instead of counting
+			// as working. Dolt-down case (all lookups fail → count=0) is
+			// safe because polecat_spawn.go gates on Dolt health.
 			continue
 		}
 
