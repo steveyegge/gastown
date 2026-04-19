@@ -764,6 +764,22 @@ func TestSanitizeAgentEnv_ClearsClaudeCode(t *testing.T) {
 	}
 }
 
+func TestAgentEnv_ExcludesAnthropicBaseURL(t *testing.T) {
+	// Not parallel — t.Setenv modifies process environment.
+
+	// Even when ANTHROPIC_BASE_URL is set in the process environment,
+	// AgentEnv must NOT forward it. Agents that need a custom base URL
+	// get it from their agent config's Env block (rc.Env), not inheritance.
+	// Passthrough caused cross-provider contamination: a MiniMax deacon's
+	// base URL leaked into Claude polecats, causing 401 auth failures.
+	t.Setenv("ANTHROPIC_BASE_URL", "https://api.minimax.io/anthropic")
+
+	env := AgentEnv(AgentEnvConfig{Role: "polecat", Rig: "testrig", AgentName: "ember"})
+	if val, ok := env["ANTHROPIC_BASE_URL"]; ok {
+		t.Errorf("AgentEnv should not forward ANTHROPIC_BASE_URL, got %q", val)
+	}
+}
+
 func TestAgentEnv_IncludesNodeOptionsClearing(t *testing.T) {
 	t.Parallel()
 	// Verify AgentEnv always includes NODE_OPTIONS="" regardless of role.

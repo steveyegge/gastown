@@ -161,6 +161,33 @@ func TestDispatchCycle_Run_NoBeads(t *testing.T) {
 	}
 }
 
+func TestDispatchCycle_Run_ZeroCapacity(t *testing.T) {
+	beads := []PendingBead{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+	cycle := &DispatchCycle{
+		AvailableCapacity: func() (int, error) { return 0, nil },
+		QueryPending:      func() ([]PendingBead, error) { return beads, nil },
+		Execute:           func(b PendingBead) error { t.Error("Execute should not be called at zero capacity"); return nil },
+		BatchSize:         10,
+	}
+
+	report, err := cycle.Run()
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if report.Dispatched != 0 {
+		t.Errorf("Dispatched = %d, want 0", report.Dispatched)
+	}
+	if report.Failed != 0 {
+		t.Errorf("Failed = %d, want 0", report.Failed)
+	}
+	if report.Skipped != 3 {
+		t.Errorf("Skipped = %d, want 3", report.Skipped)
+	}
+	if report.Reason != "capacity" {
+		t.Errorf("Reason = %q, want %q", report.Reason, "capacity")
+	}
+}
+
 func TestDispatchCycle_Run_OnSuccessError(t *testing.T) {
 	// When Execute succeeds but OnSuccess fails (even after retries),
 	// the item should NOT be counted as dispatched — it should be failed.

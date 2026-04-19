@@ -356,7 +356,10 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		// Anthropic API (direct)
 		"ANTHROPIC_API_KEY",
 		"ANTHROPIC_AUTH_TOKEN",
-		"ANTHROPIC_BASE_URL",
+		// ANTHROPIC_BASE_URL intentionally excluded — agents that need a custom
+		// base URL (MiniMax, Groq, etc.) get it from their agent config's Env
+		// block, not from the parent process. Passthrough caused cross-provider
+		// contamination: a MiniMax deacon's base URL leaked into Claude polecats.
 		"ANTHROPIC_CUSTOM_HEADERS",
 
 		// Model selection
