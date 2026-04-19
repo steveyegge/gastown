@@ -2423,6 +2423,17 @@ func TestDatabaseExists_NoDataDir(t *testing.T) {
 func TestFindBrokenWorkspaces_HealthyWorkspace(t *testing.T) {
 	townRoot := t.TempDir()
 
+	// Point the test at a port nothing listens on so IsRunning returns false
+	// and doesn't accidentally connect to a real Dolt server on the default port.
+	doltDataDir := filepath.Join(townRoot, ".dolt-data")
+	if err := os.MkdirAll(doltDataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(doltDataDir, "config.yaml"),
+		[]byte("listener:\n  port: 13307\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	// Create a healthy workspace: metadata says dolt, and database exists
 	beadsDir := filepath.Join(townRoot, ".beads")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
@@ -2563,6 +2574,16 @@ func TestFindBrokenWorkspaces_SqliteNotBroken(t *testing.T) {
 
 func TestFindBrokenWorkspaces_MultipleRigs(t *testing.T) {
 	townRoot := t.TempDir()
+
+	// Isolate from real Dolt server on default port
+	doltDataDir := filepath.Join(townRoot, ".dolt-data")
+	if err := os.MkdirAll(doltDataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(doltDataDir, "config.yaml"),
+		[]byte("listener:\n  port: 13307\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	// Set up rigs.json with two rigs
 	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
