@@ -1,4 +1,4 @@
-package util
+package atomicfile
 
 import (
 	"encoding/json"
@@ -9,22 +9,19 @@ import (
 	"testing"
 )
 
-func TestAtomicWriteJSON(t *testing.T) {
+func TestWriteJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.json")
 
-	// Test basic write
 	data := map[string]string{"key": "value"}
-	if err := AtomicWriteJSON(testFile, data); err != nil {
-		t.Fatalf("AtomicWriteJSON error: %v", err)
+	if err := WriteJSON(testFile, data); err != nil {
+		t.Fatalf("WriteJSON error: %v", err)
 	}
 
-	// Verify file exists
 	if _, err := os.Stat(testFile); os.IsNotExist(err) {
 		t.Fatal("File was not created")
 	}
 
-	// Verify no temp files left behind
 	entries, _ := os.ReadDir(tmpDir)
 	for _, e := range entries {
 		if e.Name() != "test.json" {
@@ -32,7 +29,6 @@ func TestAtomicWriteJSON(t *testing.T) {
 		}
 	}
 
-	// Read and verify content
 	content, err := os.ReadFile(testFile)
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
@@ -42,17 +38,15 @@ func TestAtomicWriteJSON(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteFile(t *testing.T) {
+func TestWriteFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
 
-	// Test basic write
 	data := []byte("hello world")
-	if err := AtomicWriteFile(testFile, data, 0644); err != nil {
-		t.Fatalf("AtomicWriteFile error: %v", err)
+	if err := WriteFile(testFile, data, 0644); err != nil {
+		t.Fatalf("WriteFile error: %v", err)
 	}
 
-	// Verify content
 	content, err := os.ReadFile(testFile)
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
@@ -61,7 +55,6 @@ func TestAtomicWriteFile(t *testing.T) {
 		t.Fatalf("Unexpected content: %s", content)
 	}
 
-	// Verify no temp files left behind
 	entries, _ := os.ReadDir(tmpDir)
 	for _, e := range entries {
 		if e.Name() != "test.txt" {
@@ -70,21 +63,18 @@ func TestAtomicWriteFile(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteOverwrite(t *testing.T) {
+func TestWriteOverwrite(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.json")
 
-	// Write initial content
-	if err := AtomicWriteJSON(testFile, "first"); err != nil {
+	if err := WriteJSON(testFile, "first"); err != nil {
 		t.Fatalf("First write error: %v", err)
 	}
 
-	// Overwrite with new content
-	if err := AtomicWriteJSON(testFile, "second"); err != nil {
+	if err := WriteJSON(testFile, "second"); err != nil {
 		t.Fatalf("Second write error: %v", err)
 	}
 
-	// Verify new content
 	content, err := os.ReadFile(testFile)
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
@@ -94,38 +84,33 @@ func TestAtomicWriteOverwrite(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteFilePermissions(t *testing.T) {
+func TestWriteFilePermissions(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
 
-	// Test with specific permissions
 	data := []byte("test data")
-	if err := AtomicWriteFile(testFile, data, 0600); err != nil {
-		t.Fatalf("AtomicWriteFile error: %v", err)
+	if err := WriteFile(testFile, data, 0600); err != nil {
+		t.Fatalf("WriteFile error: %v", err)
 	}
 
-	// Verify permissions (on Unix systems)
 	info, err := os.Stat(testFile)
 	if err != nil {
 		t.Fatalf("Stat error: %v", err)
 	}
-	// Check that owner read/write bits are set
 	perm := info.Mode().Perm()
 	if perm&0600 != 0600 {
 		t.Errorf("Expected owner read/write permissions, got %o", perm)
 	}
 }
 
-func TestAtomicWriteFileEmpty(t *testing.T) {
+func TestWriteFileEmpty(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "empty.txt")
 
-	// Test writing empty data
-	if err := AtomicWriteFile(testFile, []byte{}, 0644); err != nil {
-		t.Fatalf("AtomicWriteFile error: %v", err)
+	if err := WriteFile(testFile, []byte{}, 0644); err != nil {
+		t.Fatalf("WriteFile error: %v", err)
 	}
 
-	// Verify file exists and is empty
 	content, err := os.ReadFile(testFile)
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
@@ -135,7 +120,7 @@ func TestAtomicWriteFileEmpty(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteJSONTypes(t *testing.T) {
+func TestWriteJSONTypes(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	tests := []struct {
@@ -155,8 +140,8 @@ func TestAtomicWriteJSONTypes(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			testFile := filepath.Join(tmpDir, tc.name+".json")
-			if err := AtomicWriteJSON(testFile, tc.data); err != nil {
-				t.Fatalf("AtomicWriteJSON error: %v", err)
+			if err := WriteJSON(testFile, tc.data); err != nil {
+				t.Fatalf("WriteJSON error: %v", err)
 			}
 
 			content, err := os.ReadFile(testFile)
@@ -170,30 +155,27 @@ func TestAtomicWriteJSONTypes(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteJSONUnmarshallable(t *testing.T) {
+func TestWriteJSONUnmarshallable(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "unmarshallable.json")
 
-	// Channels cannot be marshalled to JSON
 	ch := make(chan int)
-	err := AtomicWriteJSON(testFile, ch)
+	err := WriteJSON(testFile, ch)
 	if err == nil {
 		t.Fatal("Expected error for unmarshallable type")
 	}
 
-	// Verify file was not created
 	if _, statErr := os.Stat(testFile); !os.IsNotExist(statErr) {
 		t.Fatal("File should not exist after marshal error")
 	}
 
-	// Verify no temp files left behind (marshal error happens before CreateTemp)
 	entries, _ := os.ReadDir(tmpDir)
 	for _, e := range entries {
 		t.Fatalf("Unexpected file after marshal error: %s", e.Name())
 	}
 }
 
-func TestAtomicWriteFileReadOnlyDir(t *testing.T) {
+func TestWriteFileReadOnlyDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based read-only directories are not reliable on Windows")
 	}
@@ -204,34 +186,30 @@ func TestAtomicWriteFileReadOnlyDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	roDir := filepath.Join(tmpDir, "readonly")
 
-	// Create read-only directory
 	if err := os.Mkdir(roDir, 0555); err != nil {
 		t.Fatalf("Failed to create readonly dir: %v", err)
 	}
-	defer os.Chmod(roDir, 0755) // Restore permissions for cleanup
+	defer os.Chmod(roDir, 0755)
 
 	testFile := filepath.Join(roDir, "test.txt")
-	err := AtomicWriteFile(testFile, []byte("test"), 0644)
+	err := WriteFile(testFile, []byte("test"), 0644)
 	if err == nil {
 		t.Fatal("Expected permission error")
 	}
 
-	// Verify no files were created
 	if _, statErr := os.Stat(testFile); !os.IsNotExist(statErr) {
 		t.Fatal("File should not exist after permission error")
 	}
 }
 
-func TestAtomicWriteFileConcurrent(t *testing.T) {
+func TestWriteFileConcurrent(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "concurrent.txt")
 
-	// Write initial content
-	if err := AtomicWriteFile(testFile, []byte("initial"), 0644); err != nil {
+	if err := WriteFile(testFile, []byte("initial"), 0644); err != nil {
 		t.Fatalf("Initial write error: %v", err)
 	}
 
-	// Concurrent writes
 	const numWriters = 10
 	var wg sync.WaitGroup
 	wg.Add(numWriters)
@@ -240,14 +218,12 @@ func TestAtomicWriteFileConcurrent(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			data := []byte(string(rune('A' + n)))
-			// Errors are possible due to race, but file should remain valid
-			_ = AtomicWriteFile(testFile, data, 0644)
+			_ = WriteFile(testFile, data, 0644)
 		}(i)
 	}
 
 	wg.Wait()
 
-	// Verify file is readable and contains valid content (one of the writes won)
 	content, err := os.ReadFile(testFile)
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
@@ -260,7 +236,6 @@ func TestAtomicWriteFileConcurrent(t *testing.T) {
 		t.Errorf("Expected single character, got %q", content)
 	}
 
-	// Verify no temp files left behind (only the target file should exist)
 	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
 		t.Fatalf("ReadDir error: %v", err)
@@ -272,7 +247,7 @@ func TestAtomicWriteFileConcurrent(t *testing.T) {
 	}
 }
 
-func TestAtomicWritePreservesOnFailure(t *testing.T) {
+func TestWritePreservesOnFailure(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based read-only directories are not reliable on Windows")
 	}
@@ -283,28 +258,23 @@ func TestAtomicWritePreservesOnFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "preserve.txt")
 
-	// Write initial content
 	initialContent := []byte("original content")
-	if err := AtomicWriteFile(testFile, initialContent, 0644); err != nil {
+	if err := WriteFile(testFile, initialContent, 0644); err != nil {
 		t.Fatalf("Initial write error: %v", err)
 	}
 
-	// Make directory read-only so CreateTemp fails, but original file persists
 	if err := os.Chmod(tmpDir, 0555); err != nil {
 		t.Fatalf("Failed to make dir read-only: %v", err)
 	}
-	defer os.Chmod(tmpDir, 0755) // Restore for cleanup
+	defer os.Chmod(tmpDir, 0755)
 
-	// Attempt write which should fail at CreateTemp
-	err := AtomicWriteFile(testFile, []byte("new content"), 0644)
+	err := WriteFile(testFile, []byte("new content"), 0644)
 	if err == nil {
 		t.Fatal("Expected error when directory is read-only")
 	}
 
-	// Restore permissions to read the file
 	os.Chmod(tmpDir, 0755)
 
-	// Verify original content is preserved
 	content, err := os.ReadFile(testFile)
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
@@ -314,7 +284,7 @@ func TestAtomicWritePreservesOnFailure(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteJSONStruct(t *testing.T) {
+func TestWriteJSONStruct(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "struct.json")
 
@@ -332,11 +302,10 @@ func TestAtomicWriteJSONStruct(t *testing.T) {
 		Tags:    []string{"a", "b"},
 	}
 
-	if err := AtomicWriteJSON(testFile, data); err != nil {
-		t.Fatalf("AtomicWriteJSON error: %v", err)
+	if err := WriteJSON(testFile, data); err != nil {
+		t.Fatalf("WriteJSON error: %v", err)
 	}
 
-	// Read back and verify
 	content, err := os.ReadFile(testFile)
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
@@ -353,22 +322,20 @@ func TestAtomicWriteJSONStruct(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteFileLargeData(t *testing.T) {
+func TestWriteFileLargeData(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "large.bin")
 
-	// Create 1MB of data
 	size := 1024 * 1024
 	data := make([]byte, size)
 	for i := range data {
 		data[i] = byte(i % 256)
 	}
 
-	if err := AtomicWriteFile(testFile, data, 0644); err != nil {
-		t.Fatalf("AtomicWriteFile error: %v", err)
+	if err := WriteFile(testFile, data, 0644); err != nil {
+		t.Fatalf("WriteFile error: %v", err)
 	}
 
-	// Verify content
 	content, err := os.ReadFile(testFile)
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
@@ -384,14 +351,131 @@ func TestAtomicWriteFileLargeData(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteFileConcurrentIntegrity(t *testing.T) {
-	// This test verifies the core fix: concurrent writers to the same path
-	// must each produce self-consistent content (no cross-writer corruption).
+func TestWriteJSONWithPerm(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX file permissions not meaningful on Windows")
+	}
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "perm.json")
+
+	if err := WriteJSONWithPerm(testFile, map[string]int{"n": 1}, 0600); err != nil {
+		t.Fatalf("WriteJSONWithPerm error: %v", err)
+	}
+
+	info, err := os.Stat(testFile)
+	if err != nil {
+		t.Fatalf("Stat error: %v", err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Errorf("Expected 0600, got %o", info.Mode().Perm())
+	}
+
+	var got map[string]int
+	content, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	if err := json.Unmarshal(content, &got); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if got["n"] != 1 {
+		t.Errorf("Expected {n:1}, got %v", got)
+	}
+}
+
+func TestEnsureDirAndWriteJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Target sits two directory levels below tmpDir — neither exists yet.
+	testFile := filepath.Join(tmpDir, "a", "b", "cfg.json")
+
+	if err := EnsureDirAndWriteJSON(testFile, map[string]string{"k": "v"}); err != nil {
+		t.Fatalf("EnsureDirAndWriteJSON error: %v", err)
+	}
+
+	content, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	if string(content) != "{\n  \"k\": \"v\"\n}" {
+		t.Errorf("Unexpected content: %s", content)
+	}
+}
+
+func TestEnsureDirAndWriteJSONWithPerm(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX file permissions not meaningful on Windows")
+	}
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "x", "y", "cfg.json")
+
+	if err := EnsureDirAndWriteJSONWithPerm(testFile, map[string]string{"k": "v"}, 0600); err != nil {
+		t.Fatalf("EnsureDirAndWriteJSONWithPerm error: %v", err)
+	}
+
+	info, err := os.Stat(testFile)
+	if err != nil {
+		t.Fatalf("Stat error: %v", err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Errorf("Expected 0600, got %o", info.Mode().Perm())
+	}
+}
+
+func TestWriteJSONWithPermUnmarshallable(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "unmarshallable.json")
+
+	if err := WriteJSONWithPerm(testFile, make(chan int), 0600); err == nil {
+		t.Fatal("Expected error for unmarshallable type")
+	}
+
+	if _, statErr := os.Stat(testFile); !os.IsNotExist(statErr) {
+		t.Fatal("File should not exist after marshal error")
+	}
+}
+
+func TestEnsureDirAndWriteJSONMkdirFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("blocking-file trick for MkdirAll isn't reliable on Windows")
+	}
+	tmpDir := t.TempDir()
+	// A regular file where a directory is expected in the target's ancestry:
+	// MkdirAll fails because "blocker" exists as a file.
+	blocker := filepath.Join(tmpDir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+		t.Fatalf("seed blocker: %v", err)
+	}
+	testFile := filepath.Join(blocker, "sub", "cfg.json")
+
+	if err := EnsureDirAndWriteJSON(testFile, map[string]string{"k": "v"}); err == nil {
+		t.Fatal("Expected MkdirAll error, got nil")
+	}
+}
+
+func TestEnsureDirAndWriteJSONWithPermMkdirFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("blocking-file trick for MkdirAll isn't reliable on Windows")
+	}
+	tmpDir := t.TempDir()
+	blocker := filepath.Join(tmpDir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+		t.Fatalf("seed blocker: %v", err)
+	}
+	testFile := filepath.Join(blocker, "sub", "cfg.json")
+
+	if err := EnsureDirAndWriteJSONWithPerm(testFile, map[string]string{"k": "v"}, 0600); err == nil {
+		t.Fatal("Expected MkdirAll error, got nil")
+	}
+}
+
+func TestWriteFileConcurrentIntegrity(t *testing.T) {
+	// Concurrent writers to the same path must each produce self-consistent
+	// content (no cross-writer byte mixing).
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "integrity.txt")
 
 	const numWriters = 20
-	const dataSize = 1024 // each writer writes 1KB of a repeated byte
+	const dataSize = 1024
 
 	var wg sync.WaitGroup
 	errs := make([]error, numWriters)
@@ -400,18 +484,16 @@ func TestAtomicWriteFileConcurrentIntegrity(t *testing.T) {
 	for i := 0; i < numWriters; i++ {
 		go func(n int) {
 			defer wg.Done()
-			// Each writer fills with a unique byte pattern
 			data := make([]byte, dataSize)
 			for j := range data {
 				data[j] = byte(n)
 			}
-			errs[n] = AtomicWriteFile(testFile, data, 0644)
+			errs[n] = WriteFile(testFile, data, 0644)
 		}(i)
 	}
 
 	wg.Wait()
 
-	// At least some writes should succeed
 	anySuccess := false
 	for _, err := range errs {
 		if err == nil {
@@ -423,8 +505,6 @@ func TestAtomicWriteFileConcurrentIntegrity(t *testing.T) {
 		t.Fatal("All concurrent writes failed")
 	}
 
-	// The final file content must be self-consistent:
-	// all bytes must be the same value (from a single writer, not mixed)
 	content, err := os.ReadFile(testFile)
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)

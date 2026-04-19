@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/steveyegge/gastown/internal/atomicfile"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/util"
@@ -87,7 +88,7 @@ func (m *Manager) Save(state *config.QuotaState) error {
 	defer unlock()
 
 	state.Version = config.CurrentQuotaVersion
-	return util.EnsureDirAndWriteJSON(m.statePath(), state)
+	return atomicfile.EnsureDirAndWriteJSON(m.statePath(), state)
 }
 
 // WithLock acquires the quota file lock, runs fn, then releases the lock.
@@ -107,7 +108,7 @@ func (m *Manager) WithLock(fn func() error) error {
 // of WithLock will corrupt state under concurrent access.
 func (m *Manager) SaveUnlocked(state *config.QuotaState) error {
 	state.Version = config.CurrentQuotaVersion
-	return util.EnsureDirAndWriteJSON(m.statePath(), state)
+	return atomicfile.EnsureDirAndWriteJSON(m.statePath(), state)
 }
 
 // MarkLimited marks an account as rate-limited with an optional reset time.
@@ -131,7 +132,7 @@ func (m *Manager) MarkLimited(handle string, resetsAt string) error {
 		LastUsed:  state.Accounts[handle].LastUsed,
 	}
 
-	return util.EnsureDirAndWriteJSON(m.statePath(), state)
+	return atomicfile.EnsureDirAndWriteJSON(m.statePath(), state)
 }
 
 // MarkAvailable marks an account as available (not rate-limited).
@@ -153,7 +154,7 @@ func (m *Manager) MarkAvailable(handle string) error {
 		LastUsed: existing.LastUsed,
 	}
 
-	return util.EnsureDirAndWriteJSON(m.statePath(), state)
+	return atomicfile.EnsureDirAndWriteJSON(m.statePath(), state)
 }
 
 // AvailableAccounts returns account handles that are not rate-limited,

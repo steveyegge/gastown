@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/steveyegge/gastown/internal/atomicfile"
 )
 
 // TownConfigExistsCheck verifies mayor/town.json exists.
@@ -175,7 +177,7 @@ func (c *RigsRegistryExistsCheck) Fix(ctx *CheckContext) error {
 		return fmt.Errorf("marshaling empty rigs.json: %w", err)
 	}
 
-	return os.WriteFile(rigsPath, data, 0644)
+	return atomicfile.WriteFile(rigsPath, data, 0644)
 }
 
 // RigsRegistryValidCheck verifies mayor/rigs.json is valid and rigs exist.
@@ -310,7 +312,7 @@ func (c *RigsRegistryValidCheck) Fix(ctx *CheckContext) error {
 		return fmt.Errorf("marshaling rigs.json: %w", err)
 	}
 
-	return os.WriteFile(rigsPath, newData, 0644)
+	return atomicfile.WriteFile(rigsPath, newData, 0644)
 }
 
 // MayorExistsCheck verifies the mayor/ directory structure.

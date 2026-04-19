@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofrs/flock"
 
+	"github.com/steveyegge/gastown/internal/atomicfile"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -519,7 +520,7 @@ func (m *Manager) getLocked(name string) (*CrewWorker, error) {
 // saveState persists crew worker state to disk using atomic write.
 func (m *Manager) saveState(crew *CrewWorker) error {
 	stateFile := m.stateFile(crew.Name)
-	if err := util.AtomicWriteJSON(stateFile, crew); err != nil {
+	if err := atomicfile.WriteJSON(stateFile, crew); err != nil {
 		return fmt.Errorf("writing state: %w", err)
 	}
 

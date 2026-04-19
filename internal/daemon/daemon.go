@@ -121,6 +121,14 @@ type Daemon struct {
 	// polecat health, idle reaping, branch pruning) with bounded concurrency and
 	// per-rig context timeouts so one slow rig cannot block all others.
 	rigPool *RigWorkerPool
+
+	// knownRigsCache memoizes the result of reading mayor/rigs.json for the
+	// duration of a single heartbeat tick. ~10 call sites per tick otherwise
+	// re-read and re-parse the same file. Invalidated at the start of each
+	// heartbeat so rigs.json changes between ticks are picked up.
+	// Only accessed from heartbeat loop goroutine - no sync needed.
+	knownRigsCache      []string
+	knownRigsCacheValid bool
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -751,6 +759,12 @@ func (d *Daemon) heartbeat(state *State) {
 
 	d.metrics.recordHeartbeat(d.ctx)
 	d.logger.Println("Heartbeat starting (recovery-focused)")
+
+	// Invalidate the per-tick rigs cache so this heartbeat re-reads from disk.
+	// Within a tick the cache coalesces the ~10 getKnownRigs() call sites into
+	// a single read; invalidating here ensures we pick up rigs.json changes
+	// between ticks.
+	d.invalidateKnownRigsCache()
 
 	// 0a. Reload prefix registry so new/changed rigs get correct session names.
 	// Without this, rigs added after daemon startup get the "gt" default prefix,
@@ -1938,7 +1952,28 @@ func (d *Daemon) openBeadsStores() (map[string]beadsdk.Storage, error) {
 }
 
 // getKnownRigs returns list of registered rig names.
+// Results are memoized per heartbeat tick to coalesce the ~10 per-tick callers
+// into a single mayor/rigs.json read. The cache is invalidated at the start of
+// each heartbeat.
 func (d *Daemon) getKnownRigs() []string {
+	if d.knownRigsCacheValid {
+		return d.knownRigsCache
+	}
+	rigs := d.readKnownRigsFromDisk()
+	d.knownRigsCache = rigs
+	d.knownRigsCacheValid = true
+	return rigs
+}
+
+// invalidateKnownRigsCache clears the per-tick cache so the next
+// getKnownRigs() call re-reads mayor/rigs.json from disk.
+func (d *Daemon) invalidateKnownRigsCache() {
+	d.knownRigsCache = nil
+	d.knownRigsCacheValid = false
+}
+
+// readKnownRigsFromDisk reads and parses mayor/rigs.json.
+func (d *Daemon) readKnownRigsFromDisk() []string {
 	rigsPath := filepath.Join(d.config.TownRoot, "mayor", "rigs.json")
 	data, err := os.ReadFile(rigsPath)
 	if err != nil {

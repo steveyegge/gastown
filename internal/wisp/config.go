@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/steveyegge/gastown/internal/atomicfile"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -84,9 +85,9 @@ func (c *Config) load() (*ConfigFile, error) {
 }
 
 // save writes the config file to disk atomically.
-// Uses the shared util.EnsureDirAndWriteJSON for consistent behavior.
+// Uses atomicfile.EnsureDirAndWriteJSON for consistent behavior.
 func (c *Config) save(cfg *ConfigFile) error {
-	if err := util.EnsureDirAndWriteJSON(c.filePath, cfg); err != nil {
+	if err := atomicfile.EnsureDirAndWriteJSON(c.filePath, cfg); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
 	return nil

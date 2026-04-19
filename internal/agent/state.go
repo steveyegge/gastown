@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/steveyegge/gastown/internal/util"
+	"github.com/steveyegge/gastown/internal/atomicfile"
 )
 
 // StateManager handles loading and saving agent state to disk.
@@ -58,5 +58,5 @@ func (m *StateManager[T]) Save(state *T) error {
 		return err
 	}
 
-	return util.AtomicWriteJSON(m.stateFilePath, state)
+	return atomicfile.WriteJSON(m.stateFilePath, state)
 }

@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/steveyegge/gastown/internal/util"
+	"github.com/steveyegge/gastown/internal/atomicfile"
 )
 
 // EnsureDir ensures the .beads directory exists in the given root.
@@ -23,9 +23,8 @@ func WispPath(root, filename string) string {
 }
 
 // writeJSON is a helper to write JSON files atomically.
-// Uses the shared util.AtomicWriteJSON for consistent atomic write behavior.
 func writeJSON(path string, v interface{}) error {
-	if err := util.AtomicWriteJSON(path, v); err != nil {
+	if err := atomicfile.WriteJSON(path, v); err != nil {
 		return fmt.Errorf("write json: %w", err)
 	}
 	return nil

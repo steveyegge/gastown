@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/atomicfile"
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
@@ -81,28 +82,43 @@ func SaveTownConfig(path string, config *TownConfig) error {
 }
 
 // LoadRigsConfig loads and validates a rigs registry file.
+// Retries once on read/parse errors to tolerate the brief window during which a
+// concurrent non-atomic writer could leave the file truncated. With
+// SaveRigsConfig now using atomic write-then-rename this is belt-and-suspenders
+// against older versions that may still be writing the file.
 func LoadRigsConfig(path string) (*RigsConfig, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally, not from user input
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
+	readAndParse := func() (*RigsConfig, error) {
+		data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally, not from user input
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
+			}
+			return nil, fmt.Errorf("reading config: %w", err)
 		}
-		return nil, fmt.Errorf("reading config: %w", err)
+
+		var config RigsConfig
+		if err := json.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("parsing config: %w", err)
+		}
+
+		if err := validateRigsConfig(&config); err != nil {
+			return nil, err
+		}
+
+		return &config, nil
 	}
 
-	var config RigsConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("parsing config: %w", err)
+	cfg, err := readAndParse()
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		cfg, err = readAndParse()
 	}
-
-	if err := validateRigsConfig(&config); err != nil {
-		return nil, err
-	}
-
-	return &config, nil
+	return cfg, err
 }
 
-// SaveRigsConfig saves a rigs registry to a file.
+// SaveRigsConfig saves a rigs registry to a file atomically.
+// Writes to a temp file in the same directory then renames into place; the
+// rename is atomic on POSIX, so concurrent readers never observe a zero-byte
+// or partially-written rigs.json.
 func SaveRigsConfig(path string, config *RigsConfig) error {
 	if err := validateRigsConfig(config); err != nil {
 		return err
@@ -117,7 +133,7 @@ func SaveRigsConfig(path string, config *RigsConfig) error {
 		return fmt.Errorf("encoding config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := atomicfile.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
 

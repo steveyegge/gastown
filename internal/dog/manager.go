@@ -15,7 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/util"
+	"github.com/steveyegge/gastown/internal/atomicfile"
 )
 
 // Common errors
@@ -639,7 +639,7 @@ func (m *Manager) loadState(name string) (*DogState, error) {
 // saveState saves a dog's state to .dog.json using atomic write (write-to-temp + rename).
 // This prevents concurrent loadState from seeing a truncated/empty file.
 func (m *Manager) saveState(name string, state *DogState) error {
-	return util.AtomicWriteJSON(m.stateFilePath(name), state)
+	return atomicfile.WriteJSON(m.stateFilePath(name), state)
 }
 
 // GetIdleDog returns an idle dog suitable for work assignment.

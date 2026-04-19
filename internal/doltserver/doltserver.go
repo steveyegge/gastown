@@ -50,7 +50,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/util"
+	"github.com/steveyegge/gastown/internal/atomicfile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -508,7 +508,7 @@ func SaveState(townRoot string, state *State) error {
 		return err
 	}
 
-	return util.AtomicWriteJSON(stateFile, state)
+	return atomicfile.WriteJSON(stateFile, state)
 }
 
 // countDoltDatabases counts the number of Dolt database directories in dataDir.
@@ -3092,7 +3092,7 @@ func EnsureMetadata(townRoot, rigName string, doltDatabase ...string) error {
 		return fmt.Errorf("marshaling metadata: %w", err)
 	}
 
-	if err := util.AtomicWriteFile(metadataPath, append(data, '\n'), 0600); err != nil {
+	if err := atomicfile.WriteFile(metadataPath, append(data, '\n'), 0600); err != nil {
 		return fmt.Errorf("writing metadata.json: %w", err)
 	}
 

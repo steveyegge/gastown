@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/steveyegge/gastown/internal/atomicfile"
 	"github.com/steveyegge/gastown/internal/lock"
-	"github.com/steveyegge/gastown/internal/util"
 )
 
 const (
@@ -260,7 +260,7 @@ func (p *NamePool) Save() error {
 		MaxSize:      p.MaxSize,
 	}
 
-	return util.AtomicWriteJSON(p.stateFile, state)
+	return atomicfile.WriteJSON(p.stateFile, state)
 }
 
 // Allocate returns a name from the pool.

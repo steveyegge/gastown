@@ -15,8 +15,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/atomicfile"
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Config holds daemon configuration.
@@ -95,7 +95,7 @@ func SaveState(townRoot string, state *State) error {
 		return err
 	}
 
-	return util.AtomicWriteJSON(stateFile, state)
+	return atomicfile.WriteJSON(stateFile, state)
 }
 
 // PatrolConfig holds configuration for a single patrol.
@@ -238,7 +238,7 @@ func SavePatrolConfig(townRoot string, config *DaemonPatrolConfig) error {
 		return err
 	}
 
-	return util.AtomicWriteJSON(configFile, config)
+	return atomicfile.WriteJSON(configFile, config)
 }
 
 // IsPatrolEnabled checks if a patrol is enabled in the config.
