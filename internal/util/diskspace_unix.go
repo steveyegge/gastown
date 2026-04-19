@@ -14,9 +14,10 @@ func GetDiskSpace(path string) (*DiskSpaceInfo, error) {
 		return nil, fmt.Errorf("statfs %s: %w", path, err)
 	}
 
-	total := stat.Blocks * uint64(stat.Bsize)
-	free := stat.Bavail * uint64(stat.Bsize) // Bavail = available to non-root
-	used := total - (stat.Bfree * uint64(stat.Bsize))
+	bsize := uint64(stat.Bsize)
+	total := stat.Blocks * bsize
+	free := uint64(stat.Bavail) * bsize // Bavail is int64 on some platforms (freebsd)
+	used := total - (stat.Bfree * bsize)
 
 	var usedPct float64
 	if total > 0 {
