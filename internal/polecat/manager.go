@@ -30,7 +30,6 @@ import (
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
-	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // Retry constants for Dolt operations (matching hook update pattern in sling.go).
@@ -139,6 +138,7 @@ type Manager struct {
 	beads    *beads.Beads
 	namePool *NamePool
 	tmux     *tmux.Tmux
+	townRoot string // Computed once at construction; used by agentBeadID for deterministic IDs
 }
 
 // NewManager creates a new polecat manager.
@@ -149,6 +149,12 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 	resolvedBeads := beads.ResolveBeadsDir(r.Path)
 	beadsPath := filepath.Dir(resolvedBeads) // Get the directory containing .beads
 
+	// Compute town root once for deterministic use across all Manager methods.
+	// Rig path is always filepath.Join(townRoot, rigName), so filepath.Dir is correct
+	// and avoids the non-determinism of workspace.Find which can fail or resolve
+	// differently depending on call-site context (gt-lph).
+	townRoot := filepath.Dir(r.Path)
+
 	// Try to load rig settings for namepool config
 	settingsPath := filepath.Join(r.Path, "settings", "config.json")
 	var pool *NamePool
@@ -158,10 +164,8 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 		// If style is set but not built-in and no explicit names, resolve custom theme
 		names := settings.Namepool.Names
 		if len(names) == 0 && settings.Namepool.Style != "" && !IsBuiltinTheme(settings.Namepool.Style) {
-			if townRoot, twErr := workspace.Find(r.Path); twErr == nil {
-				if resolved, rErr := ResolveThemeNames(townRoot, settings.Namepool.Style); rErr == nil {
-					names = resolved
-				}
+			if resolved, rErr := ResolveThemeNames(townRoot, settings.Namepool.Style); rErr == nil {
+				names = resolved
 			}
 		}
 		pool = NewNamePoolWithConfig(
@@ -177,9 +181,7 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 	}
 
 	// Set town root for custom theme resolution in getNames()
-	if townRoot, twErr := workspace.Find(r.Path); twErr == nil {
-		pool.SetTownRoot(townRoot)
-	}
+	pool.SetTownRoot(townRoot)
 
 	_ = pool.Load() // non-fatal: state file may not exist for new rigs
 
@@ -189,6 +191,7 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 		beads:    beads.NewWithBeadsDir(beadsPath, resolvedBeads),
 		namePool: pool,
 		tmux:     t,
+		townRoot: townRoot,
 	}
 }
 
@@ -268,14 +271,11 @@ func (m *Manager) CheckDoltHealth() error {
 	// If the persistent failure looks like read-only, attempt server recovery
 	// before giving up. This is the gt-level recovery path (gt-chx92).
 	if lastErr != nil && doltserver.IsReadOnlyError(lastErr.Error()) {
-		townRoot, err := workspace.Find(m.rig.Path)
-		if err == nil && townRoot != "" {
-			if recoverErr := doltserver.RecoverReadOnly(townRoot); recoverErr == nil {
-				// Recovery succeeded — verify health once more
-				_, err := m.beads.Show("__health_check_nonexistent__")
-				if err == nil || errors.Is(err, beads.ErrNotFound) || strings.Contains(err.Error(), "not found") {
-					return nil
-				}
+		if recoverErr := doltserver.RecoverReadOnly(m.townRoot); recoverErr == nil {
+			// Recovery succeeded — verify health once more
+			_, err := m.beads.Show("__health_check_nonexistent__")
+			if err == nil || errors.Is(err, beads.ErrNotFound) || strings.Contains(err.Error(), "not found") {
+				return nil
 			}
 		}
 	}
@@ -290,12 +290,13 @@ func (m *Manager) CheckDoltHealth() error {
 // Fails closed if the check errors — a server that can't report capacity is likely
 // already under stress (gt-lfc0d).
 func (m *Manager) CheckDoltServerCapacity() error {
-	townRoot, err := workspace.Find(m.rig.Path)
-	if err != nil || townRoot == "" {
-		return nil // Can't determine town root, skip check
-	}
-
-	hasCapacity, active, err := doltserver.HasConnectionCapacity(townRoot)
+	// NOTE: Prior to gt-lph, this method called workspace.Find to locate townRoot,
+	// which could fail and silently skip the capacity check (return nil). Now that
+	// m.townRoot is computed deterministically at Manager construction, errors from
+	// HasConnectionCapacity always propagate — this is intentional. A server that
+	// can't report capacity is likely under stress, and silently passing was a
+	// latent bug that allowed connection storms under load (gt-lfc0d).
+	hasCapacity, active, err := doltserver.HasConnectionCapacity(m.townRoot)
 	if err != nil {
 		// Fail closed: if we can't check capacity, the server may be overloaded.
 		// Proceeding optimistically caused read-only mode under load (gt-lfc0d).
@@ -378,14 +379,10 @@ func (m *Manager) assigneeID(name string) string {
 // agentBeadID returns the agent bead ID for a polecat.
 // Format: "<prefix>-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast", "bd-beads-polecat-obsidian")
 // The prefix is looked up from routes.jsonl to support rigs with custom prefixes.
+// Uses the town root computed at Manager construction for deterministic IDs
+// regardless of call site (gt-lph).
 func (m *Manager) agentBeadID(name string) string {
-	// Find town root to lookup prefix from routes.jsonl
-	townRoot, err := workspace.Find(m.rig.Path)
-	if err != nil || townRoot == "" {
-		// Fall back to default prefix
-		return beads.PolecatBeadID(m.rig.Name, name)
-	}
-	prefix := beads.GetPrefixForRig(townRoot, m.rig.Name)
+	prefix := beads.GetPrefixForRig(m.townRoot, m.rig.Name)
 	return beads.PolecatBeadIDWithPrefix(prefix, m.rig.Name, name)
 }
 

@@ -215,6 +215,66 @@ func TestAssigneeID(t *testing.T) {
 	}
 }
 
+// TestAgentBeadID_Deterministic verifies that agentBeadID returns the same string
+// on repeated calls regardless of process working directory. Regression test for
+// gt-lph: the old implementation called workspace.Find on each invocation, which
+// could resolve differently depending on cwd, causing non-deterministic IDs across
+// Manager instances for the same rig path.
+func TestAgentBeadID_Deterministic(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "myrig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("mkdir rig: %v", err)
+	}
+
+	r := &rig.Rig{
+		Name: "myrig",
+		Path: rigPath,
+	}
+
+	// Construct two Managers from the same rig path — they must produce
+	// identical agentBeadIDs regardless of construction context.
+	m1 := NewManager(r, git.NewGit(rigPath), nil)
+	m2 := NewManager(r, git.NewGit(rigPath), nil)
+
+	id1a := m1.agentBeadID("Toast")
+	id1b := m1.agentBeadID("Toast")
+	id2 := m2.agentBeadID("Toast")
+
+	// Same Manager, repeated calls — must be identical.
+	if id1a != id1b {
+		t.Errorf("agentBeadID not stable across calls: %q vs %q", id1a, id1b)
+	}
+
+	// Different Manager, same rig — must be identical.
+	if id1a != id2 {
+		t.Errorf("agentBeadID differs across Managers for same rig: %q vs %q", id1a, id2)
+	}
+
+	// Verify the ID is non-empty and contains expected components.
+	if id1a == "" {
+		t.Fatal("agentBeadID returned empty string")
+	}
+
+	// Change process working directory and construct a third Manager —
+	// the ID must still match (the old bug: workspace.Find resolved
+	// differently from different cwds).
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("Chdir to townRoot: %v", err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
+
+	m3 := NewManager(r, git.NewGit(rigPath), nil)
+	id3 := m3.agentBeadID("Toast")
+	if id1a != id3 {
+		t.Errorf("agentBeadID differs after cwd change: %q (original) vs %q (after chdir)", id1a, id3)
+	}
+}
+
 // Note: State persistence tests removed - state is now derived from beads assignee field.
 // Integration tests should verify beads-based state management.
 
