@@ -46,7 +46,8 @@ const (
 	// benefit since the caller already treats errors as warn-only.
 	// 3 retries (total backoff ~3.5s) is sufficient to ride out transient
 	// Dolt hiccups without punishing interactive workflows.
-	doltStateRetries = 3
+	// doltStateRetries is now managed via config.Operational.Polecat.DoltStateRetries
+	doltStateRetries = config.Get().Operational.Polecat.DoltStateRetries
 )
 
 // doltBackoff calculates exponential backoff with ±25% jitter for a given attempt (1-indexed).
