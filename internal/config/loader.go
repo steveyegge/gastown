@@ -1461,6 +1461,31 @@ func ResolveRoleEffort(role, townRoot, rigPath string) string {
 	return "" // Caller uses env var fallback, then "high" default
 }
 
+// ResolveEffortLock returns whether gt should write CLAUDE_CODE_EFFORT_LEVEL
+// into agent env. When true (default), the env var locks Claude Code's effort
+// tier for the session and the in-chat `/effort` command is refused. When false,
+// the env var is not set, allowing `/effort` to work.
+//
+// Resolution order (first non-nil wins):
+//  1. Rig-level EffortLock
+//  2. Town-level EffortLock
+//  3. Default true (preserves existing fleet semantics)
+func ResolveEffortLock(townRoot, rigPath string) bool {
+	// Rig override
+	if rigPath != "" {
+		if rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath)); err == nil && rigSettings != nil && rigSettings.EffortLock != nil {
+			return *rigSettings.EffortLock
+		}
+	}
+	// Town setting
+	if townRoot != "" {
+		if townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot)); err == nil && townSettings != nil && townSettings.EffortLock != nil {
+			return *townSettings.EffortLock
+		}
+	}
+	return true
+}
+
 // IsResolvedAgentClaude returns true if the RuntimeConfig represents a Claude agent.
 // Exported for use in witness/daemon code that needs to skip hardcoded
 // Claude start commands when a non-Claude agent is configured.

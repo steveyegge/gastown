@@ -213,7 +213,12 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	if effort == "" {
 		effort = "high"
 	}
-	env["CLAUDE_CODE_EFFORT_LEVEL"] = effort
+	// Setting CLAUDE_CODE_EFFORT_LEVEL in env locks the tier for the session —
+	// Claude Code's in-chat /effort command will refuse to override it. Operators
+	// who want /effort to work can set effort_lock: false in town/rig settings.
+	if ResolveEffortLock(cfg.TownRoot, rigPath) {
+		env["CLAUDE_CODE_EFFORT_LEVEL"] = effort
+	}
 	if shellEffort := os.Getenv("CLAUDE_CODE_EFFORT_LEVEL"); shellEffort != "" {
 		fmt.Fprintf(os.Stderr,
 			"notice: CLAUDE_CODE_EFFORT_LEVEL=%s env var is deprecated and ignored; "+
