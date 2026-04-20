@@ -264,10 +264,6 @@ func (s *GtEventsSource) tail(ctx context.Context) {
 	// regardless of the preload scanner's internal read-ahead buffer.
 	_, _ = s.file.Seek(0, 2)
 
-	// Poll for new lines using a fresh scanner each tick.
-	// bufio.Scanner sets an internal 'done' flag after EOF and won't retry,
-	// so we must create a new scanner each poll cycle while preserving the
-	// file offset (os.File tracks position across scanner instances).
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -276,6 +272,12 @@ func (s *GtEventsSource) tail(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// Fresh scanner each tick: bufio.Scanner sets an internal 'done'
+			// flag after EOF and won't retry, so reusing one across ticks
+			// would stop reading the file after the first EOF. The *os.File
+			// preserves its offset across scanner instances, so no manual
+			// bookkeeping is needed. Buffer size matches loadRecentEvents
+			// (1 MiB) to handle long JSONL lines without token-too-long errors.
 			scanner := bufio.NewScanner(s.file)
 			scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 			for scanner.Scan() {
