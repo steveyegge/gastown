@@ -1,0 +1,37 @@
+{
+  "agents": {
+    "gastown/refinery": {
+      "agent_id": "gastown/refinery",
+      "last_ping_time": "2026-03-30T12:52:03.481239Z",
+      "last_response_time": "0001-01-01T00:00:00Z",
+      "consecutive_failures": 1,
+      "last_force_kill_time": "0001-01-01T00:00:00Z",
+      "force_kill_count": 0
+    },
+    "gastown/witness": {
+      "agent_id": "gastown/witness",
+      "last_ping_time": "2026-03-30T16:07:35.253037Z",
+      "last_response_time": "0001-01-01T00:00:00Z",
+      "consecutive_failures": 2,
+      "last_force_kill_time": "0001-01-01T00:00:00Z",
+      "force_kill_count": 0
+    },
+    "whatsapp_automation/refinery": {
+      "agent_id": "whatsapp_automation/refinery",
+      "last_ping_time": "2026-03-30T12:53:08.477909Z",
+      "last_response_time": "0001-01-01T00:00:00Z",
+      "consecutive_failures": 1,
+      "last_force_kill_time": "0001-01-01T00:00:00Z",
+      "force_kill_count": 0
+    },
+    "whatsapp_automation/witness": {
+      "agent_id": "whatsapp_automation/witness",
+      "last_ping_time": "2026-03-30T16:08:07.852712Z",
+      "last_response_time": "0001-01-01T00:00:00Z",
+      "consecutive_failures": 2,
+      "last_force_kill_time": "0001-01-01T00:00:00Z",
+      "force_kill_count": 0
+    }
+  },
+  "last_updated": "2026-03-30T16:08:40.31869Z"
+}
