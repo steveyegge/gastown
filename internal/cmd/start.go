@@ -44,6 +44,7 @@ var (
 	startCrewAccount            string
 	startCrewAgentOverride      string
 	startCostTier               string
+	startEffort                 string
 	shutdownGraceful            bool
 	shutdownWait                int
 	shutdownAll                 bool
@@ -135,6 +136,7 @@ func init() {
 		"Also start Witnesses and Refineries for all rigs")
 	startCmd.Flags().StringVar(&startAgentOverride, "agent", "", "Agent alias to run Mayor/Deacon with (overrides town default)")
 	startCmd.Flags().StringVar(&startCostTier, "cost-tier", "", "Ephemeral cost tier for this session (standard/economy/budget)")
+	startCmd.Flags().StringVar(&startEffort, "effort", "", "Ephemeral effort level for this session (low/medium/high/max/xhigh/auto); overrides rig/town role_effort")
 
 	startCrewCmd.Flags().StringVar(&startCrewRig, "rig", "", "Rig to use")
 	startCrewCmd.Flags().StringVar(&startCrewAccount, "account", "", "Claude Code account handle to use")
@@ -189,6 +191,17 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 		os.Setenv("GT_COST_TIER", startCostTier)
 		fmt.Printf("Using ephemeral cost tier: %s\n", style.Bold.Render(startCostTier))
+	}
+
+	// Apply ephemeral effort override if specified. GT_EFFORT takes precedence
+	// over GT_COST_TIER's per-role effort map and over rig/town role_effort, so
+	// operators can push an entire session into xhigh/auto without editing config.
+	if startEffort != "" {
+		if !config.IsValidEffortLevel(startEffort) {
+			return fmt.Errorf("invalid effort level %q (valid: %s)", startEffort, strings.Join(config.ValidEffortLevels(), ", "))
+		}
+		os.Setenv("GT_EFFORT", startEffort)
+		fmt.Printf("Using ephemeral effort level: %s\n", style.Bold.Render(startEffort))
 	}
 
 	if err := config.EnsureDaemonPatrolConfig(townRoot); err != nil {

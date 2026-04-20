@@ -218,7 +218,8 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		fmt.Fprintf(os.Stderr,
 			"notice: CLAUDE_CODE_EFFORT_LEVEL=%s env var is deprecated and ignored; "+
 				"%s effort resolved to %q via config. "+
-				"Set per-role effort with role_effort in settings or gt config cost-tier.\n",
+				"For session-scoped overrides use `gt start --effort <level>` (or set GT_EFFORT); "+
+				"for persistent per-role config use role_effort in rig/town settings.\n",
 			shellEffort, cfg.Role, effort)
 	}
 
