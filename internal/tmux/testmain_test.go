@@ -18,6 +18,16 @@ func TestMain(m *testing.M) {
 	// user's personal server or the sentinel that indicates "no town context".
 	SetDefaultSocket(socket)
 
+	// Start a sentinel session to keep the server alive for the entire test run.
+	// Without this, tests that kill their last session inadvertently take down
+	// the server, leaving a stale socket that prevents subsequent new-session
+	// calls from restarting it (tmux sees the socket file but no listener).
+	// The sentinel uses a name no individual test touches, so it outlives all
+	// per-test sessions. TestMain kills the whole server at the end.
+	if _, err := exec.LookPath("tmux"); err == nil {
+		_ = exec.Command("tmux", "-u", "-L", socket, "new-session", "-d", "-s", "gt-test-sentinel").Run()
+	}
+
 	code := m.Run()
 
 	// Kill the test tmux server and restore the original socket state.
