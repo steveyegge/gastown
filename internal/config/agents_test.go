@@ -854,6 +854,21 @@ func TestLoadRigAgentRegistry(t *testing.T) {
 		if info.Command != "opencode" {
 			t.Errorf("expected opencode agent command to be 'opencode', got %s", info.Command)
 		}
+		if info.ConfigDir != ".opencode" {
+			t.Errorf("expected opencode ConfigDir to inherit '.opencode', got %q", info.ConfigDir)
+		}
+		if info.HooksDir != ".opencode/plugins" {
+			t.Errorf("expected opencode HooksDir to inherit '.opencode/plugins', got %q", info.HooksDir)
+		}
+		if info.HooksSettingsFile != "gastown.js" {
+			t.Errorf("expected opencode HooksSettingsFile to inherit 'gastown.js', got %q", info.HooksSettingsFile)
+		}
+		if len(info.ProcessNames) == 0 {
+			t.Errorf("expected opencode ProcessNames to remain populated after partial override")
+		}
+		if info.ReadyDelayMs != 8000 {
+			t.Errorf("expected opencode ReadyDelayMs to inherit 8000, got %d", info.ReadyDelayMs)
+		}
 	})
 
 	// Test 2: File not found should return nil (no error)

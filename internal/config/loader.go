@@ -1223,8 +1223,17 @@ func resolveAgentConfigWithOverrideInternal(townRoot, rigPath, agentOverride str
 	// If an override is requested, validate it exists
 	if agentOverride != "" {
 		var rc *RuntimeConfig
+		// For subcommand-style overrides (e.g. "opencode acp"), prefer the built-in
+		// preset when one exists. Town agent registry overrides often point at wrappers
+		// like gt-opencode, but ACP/subcommand invocations need the underlying runtime
+		// binary and built-in capability metadata.
+		if len(extraArgs) > 0 {
+			if preset, ok := builtinPresets[AgentPreset(agentName)]; ok {
+				rc = runtimeConfigFromAgentInfo(AgentPreset(agentName), preset)
+			}
+		}
 		// Check rig-level custom agents first
-		if rigSettings != nil && rigSettings.Agents != nil {
+		if rc == nil && rigSettings != nil && rigSettings.Agents != nil {
 			if custom, ok := rigSettings.Agents[agentName]; ok && custom != nil {
 				rc = fillRuntimeDefaults(custom)
 			}

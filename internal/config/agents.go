@@ -9,6 +9,11 @@ import (
 	"sync"
 )
 
+type rawAgentRegistry struct {
+	Version int                        `json:"version"`
+	Agents  map[string]json.RawMessage `json:"agents"`
+}
+
 // AgentPreset identifies a supported LLM agent runtime.
 // These presets provide sensible defaults that can be overridden in config.
 type AgentPreset string
@@ -478,18 +483,56 @@ func loadAgentRegistryFromPathLocked(path string) error {
 		return err
 	}
 
-	var userRegistry AgentRegistry
+	var userRegistry rawAgentRegistry
 	if err := json.Unmarshal(data, &userRegistry); err != nil {
 		return err
 	}
 
-	for name, preset := range userRegistry.Agents {
-		preset.Name = AgentPreset(name)
-		globalRegistry.Agents[name] = preset
+	for name, rawPreset := range userRegistry.Agents {
+		merged := cloneAgentPresetInfo(globalRegistry.Agents[name])
+		if merged == nil {
+			merged = &AgentPresetInfo{}
+		}
+		if err := json.Unmarshal(rawPreset, merged); err != nil {
+			return err
+		}
+		merged.Name = AgentPreset(name)
+		globalRegistry.Agents[name] = merged
 	}
 
 	loadedPaths[path] = true
 	return nil
+}
+
+func cloneAgentPresetInfo(src *AgentPresetInfo) *AgentPresetInfo {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	if src.Args != nil {
+		clone.Args = append([]string(nil), src.Args...)
+	}
+	if src.Env != nil {
+		clone.Env = make(map[string]string, len(src.Env))
+		for k, v := range src.Env {
+			clone.Env[k] = v
+		}
+	}
+	if src.ProcessNames != nil {
+		clone.ProcessNames = append([]string(nil), src.ProcessNames...)
+	}
+	if src.NonInteractive != nil {
+		nonInteractive := *src.NonInteractive
+		clone.NonInteractive = &nonInteractive
+	}
+	if src.ACP != nil {
+		acp := *src.ACP
+		if src.ACP.Args != nil {
+			acp.Args = append([]string(nil), src.ACP.Args...)
+		}
+		clone.ACP = &acp
+	}
+	return &clone
 }
 
 // LoadAgentRegistry loads agent definitions from a JSON file and merges with built-ins.
@@ -567,6 +610,10 @@ func DefaultAgentPreset() AgentPreset {
 // can be accessed separately for extended functionality.
 func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	info := GetAgentPreset(preset)
+	return runtimeConfigFromAgentInfo(preset, info)
+}
+
+func runtimeConfigFromAgentInfo(preset AgentPreset, info *AgentPresetInfo) *RuntimeConfig {
 	if info == nil {
 		// Fall back to Claude defaults
 		return DefaultRuntimeConfig()
@@ -584,12 +631,10 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	rc := &RuntimeConfig{
 		Provider: string(info.Name),
 		Command:  info.Command,
-		Args:     append([]string(nil), info.Args...), // Copy to avoid mutation
+		Args:     append([]string(nil), info.Args...),
 		Env:      envCopy,
 	}
 
-	// Resolve command path for claude preset (handles alias installations)
-	// Uses resolveClaudePath() from types.go which finds ~/.claude/local/claude
 	if preset == AgentClaude && rc.Command == "claude" {
 		rc.Command = resolveClaudePath()
 	}
