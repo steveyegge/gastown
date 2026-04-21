@@ -1,13 +1,13 @@
 {
   "name": "bravo",
   "state": "working",
-  "last_active": "2026-04-21T11:17:04.443332-03:00",
-  "work": "plugin:stuck-agent-dog",
-  "work_started_at": "2026-04-21T11:16:57.472802-03:00",
+  "last_active": "2026-04-21T11:49:32.056876-03:00",
+  "work": "plugin:github-sheriff",
+  "work_started_at": "2026-04-21T11:49:25.240492-03:00",
   "worktrees": {
     "gastown": "/Users/athos/gt/deacon/dogs/bravo/gastown",
     "whatsapp_automation": "/Users/athos/gt/deacon/dogs/bravo/whatsapp_automation"
   },
   "created_at": "2026-04-13T00:49:00-03:00",
-  "updated_at": "2026-04-21T11:17:04.443332-03:00"
+  "updated_at": "2026-04-21T11:49:32.056876-03:00"
 }
