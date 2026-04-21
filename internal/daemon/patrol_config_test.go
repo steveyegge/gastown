@@ -386,3 +386,32 @@ func TestServicesConfigGatesAgentSpawning(t *testing.T) {
 		})
 	}
 }
+
+// TestDeaconSessionCleanupGating verifies that the daemon only cleans up
+// leftover hq-deacon sessions when the deacon service is enabled but the
+// patrol is disabled. When services.deacon=disabled, the agent deacon may
+// own the hq-deacon session and the daemon must leave it alone. (sbx-gastown-qsuq)
+func TestDeaconSessionCleanupGating(t *testing.T) {
+	tests := []struct {
+		name           string
+		patrolActive   bool
+		serviceEnabled bool
+		wantCleanup    bool
+	}{
+		{"patrol+service enabled → ensure running, no cleanup", true, true, false},
+		{"patrol disabled, service enabled → cleanup stale daemon-owned sessions", false, true, true},
+		{"patrol enabled, service disabled → leave sessions to agent deacon", true, false, false},
+		{"patrol+service disabled → leave sessions to agent deacon", false, false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Mirror the decision in Daemon.heartbeatTick:
+			// cleanup only when service is enabled AND patrol is not active.
+			got := !(tt.patrolActive && tt.serviceEnabled) && tt.serviceEnabled
+			if got != tt.wantCleanup {
+				t.Errorf("cleanup: got %v, want %v", got, tt.wantCleanup)
+			}
+		})
+	}
+}

@@ -835,15 +835,15 @@ func (d *Daemon) heartbeat(state *State) {
 	// Check services config - can be disabled in settings/config.json
 	if d.isPatrolActive("deacon") && svcCfg.IsDeaconEnabled() {
 		d.ensureDeaconRunning()
+	} else if !svcCfg.IsDeaconEnabled() {
+		// Service disabled means the daemon is not managing a deacon.
+		// It does NOT mean nothing else can own the hq-deacon session —
+		// the agent deacon reuses that name. Leave sessions alone. (sbx-gastown-qsuq)
+		d.logger.Printf("Deacon disabled in services config, skipping")
 	} else {
-		if !svcCfg.IsDeaconEnabled() {
-			d.logger.Printf("Deacon disabled in services config, skipping")
-		} else {
-			d.logger.Printf("Deacon patrol disabled in config, skipping")
-		}
+		d.logger.Printf("Deacon patrol disabled in config, skipping")
 		// Kill leftover deacon/boot sessions from before patrol was disabled.
-		// Without this, a stale deacon keeps running its own patrol loop,
-		// spawning witnesses and refineries despite daemon config. (hq-2mstj)
+		// Service is enabled here, so hq-deacon is the daemon's territory. (hq-2mstj)
 		d.killDeaconSessions()
 	}
 
