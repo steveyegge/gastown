@@ -140,8 +140,12 @@ except Exception:
     print('unknown')
 " 2>/dev/null || echo "unknown")
 
-      # State-based threshold: 2h for idle (intentional sleep), 20m for working/unknown
-      STUCK_THRESHOLD=1200
+      # State-based threshold: 2h for idle (intentional sleep), 1h for working/unknown.
+      # The working threshold was 20m but the deacon patrol formula doesn't reliably
+      # write state=idle before await-signal (depends on deacon Claude agent behavior),
+      # so stateless heartbeats during legitimate patrol sleep kept triggering false
+      # positives every ~25m. 1h is still tight enough to catch a genuinely stuck deacon.
+      STUCK_THRESHOLD=3600
       if [ "$HEARTBEAT_STATE" = "idle" ]; then
         STUCK_THRESHOLD=7200
       fi
