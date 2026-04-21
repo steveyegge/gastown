@@ -158,8 +158,13 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot determine source issue from branch '%s'; use --issue to specify", branch)
 	}
 
-	// Initialize beads for looking up source issue
+	// Initialize beads for looking up source issue (routes via polecat cwd)
 	bd := beads.New(cwd)
+
+	// MR beads must be created in the rig-root beads dir (which `gt mq list` and
+	// the refinery read from). The polecat cwd may differ due to worktree layout.
+	// Using the rig root ensures MRs land where the refinery can find them.
+	mrBd := beads.New(filepath.Join(townRoot, rigName))
 
 	// Determine target branch
 	// Priority: explicit --epic > formula_vars base_branch > integration branch auto-detect > rig default.
@@ -253,9 +258,9 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 	var mrIssue *beads.Issue
 	var existingMR *beads.Issue
 	if commitSHA != "" {
-		existingMR, err = bd.FindMRForBranchAndSHA(branch, commitSHA)
+		existingMR, err = mrBd.FindMRForBranchAndSHA(branch, commitSHA)
 	} else {
-		existingMR, err = bd.FindMRForBranch(branch)
+		existingMR, err = mrBd.FindMRForBranch(branch)
 	}
 	if err != nil {
 		style.PrintWarning("could not check for existing MR: %v", err)
@@ -266,14 +271,13 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		mrIssue = existingMR
 		fmt.Printf("%s MR already exists (idempotent)\n", style.Bold.Render("✓"))
 	} else {
-		// Create MR bead (ephemeral wisp - will be cleaned up after merge)
-		mrIssue, err = bd.Create(beads.CreateOptions{
+		// Create MR bead in the rig's own database via mrBd
+		mrIssue, err = mrBd.Create(beads.CreateOptions{
 			Title:       title,
 			Labels:      []string{"gt:merge-request"},
 			Priority:    priority,
 			Description: description,
 			Ephemeral:   true,
-			Rig:         rigName, // Ensure MR bead is created in the rig's database (gt-7y7)
 		})
 		if err != nil {
 			return fmt.Errorf("creating merge request bead: %w", err)
@@ -299,13 +303,13 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		// When a new polecat reattempts an issue, the old MR (different branch)
 		// is orphaned. Close it so the queue and GitHub PRs stay clean.
 		if issueID != "" {
-			if oldMRs, err := bd.FindOpenMRsForIssue(issueID); err == nil {
+			if oldMRs, err := mrBd.FindOpenMRsForIssue(issueID); err == nil {
 				for _, old := range oldMRs {
 					if old.ID == mrIssue.ID {
 						continue // skip the one we just created
 					}
 					reason := fmt.Sprintf("superseded by %s", mrIssue.ID)
-					if err := bd.CloseWithReason(reason, old.ID); err != nil {
+					if err := mrBd.CloseWithReason(reason, old.ID); err != nil {
 						style.PrintWarning("could not supersede old MR %s: %v", old.ID, err)
 						continue
 					}
