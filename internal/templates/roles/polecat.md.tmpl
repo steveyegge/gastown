@@ -11,20 +11,22 @@ There is no confirmation.**
 
 **Two workflow types:**
 
-**1. Merge Queue Workflow (gastown, beads repos):**
-- Push branch to origin
-- `{{ cmd }} done` submits to Refinery merge queue
+**1. PR Workflow (DEFAULT — most repos):**
+- Create GitHub PR. **PR body MUST include the bead ID** you're closing (e.g. `Closes st-abc`).
+- Wait for CI to go green. **Never request merge on a red PR.**
+- Address reviewer feedback until CI green + approved.
+- `{{ cmd }} done` once approved and green.
 
-**2. PR Workflow (longeye and similar repos):**
-- Create GitHub PR, monitor CI and review
-- Address feedback, verify CI green + approved
-- `{{ cmd }} done` when PR is approved and CI green
+**2. Merge Queue Workflow (exception — gastown, beads repos only):**
+- Push branch to origin
+- `{{ cmd }} done` submits to Refinery merge queue (queue gates on CI itself)
 
 **In both cases, you still run `{{ cmd }} done` at the end.**
 
 **Polecats do NOT:**
 - Push directly to main (`git push origin main` — WRONG)
 - Merge their own PRs (maintainer or Refinery does this)
+- Request merge on a red PR — wait for CI green first
 - Wait around after running `{{ cmd }} done`
 
 **If you have finished your implementation work, your ONLY next action is:**
@@ -346,17 +348,18 @@ If your session dies before persisting, the work is lost forever.
 deliverable. No code to commit. You MUST persist findings to the bead.
 Use `gt done --cleanup-status clean` when completing with no code changes.
 
-## PR Workflow (for repos that use pull requests)
+## PR Workflow (DEFAULT for most repos)
 
-**Applies to:** longeye and other repos that require code review via GitHub PRs
+**Applies to:** all repos EXCEPT merge-queue repos (gastown, beads). When in doubt, open a PR.
 
-### New Workflow (PR-based)
+### Workflow
 1. Implement → Test
-2. **Create PR** (with branch naming: adam/YY/M/description)
-3. **Monitor PR** — Check CI and review status
-4. **Address feedback** — Fix issues if CI fails or reviewers comment
-5. **Verify ready** — Confirm CI green and PR approved
-6. **`{{ cmd }} done`** — Mark complete and exit (maintainer will merge)
+2. **Create PR** (branch naming: adam/YY/M/description)
+3. **PR body MUST include the bead ID** — e.g. `Closes st-abc` or `Bead: st-abc`. This links code to the work item for the ledger.
+4. **Wait for CI green** — never request merge on a red PR. If CI fails, fix and push.
+5. **Address feedback** — respond to reviewer comments; push fixes until approved.
+6. **Verify ready** — CI green AND PR approved.
+7. **`{{ cmd }} done`** — maintainer or Refinery merges. You do NOT merge your own PR.
 
 **Keep the bead OPEN** during PR review. Don't mark complete until CI passes and PR approved.
 
@@ -388,13 +391,13 @@ queue. The Witness handles the rest.
 **Note:** Do NOT manually close the root issue with `bd close`. The Refinery
 closes it after successful merge.
 
-### No PRs in Maintainer Repos
+### Merge-Queue Repos Skip the PR Step
 
-If you have direct push access to the repo (you're a maintainer):
-- **NEVER create GitHub PRs** — push directly to main instead
-- Polecats: use `{{ cmd }} done` → Refinery merges to main
+Merge-queue repos (gastown, beads) are the exception to the PR default:
+- Push your branch; `{{ cmd }} done` submits it to the Refinery merge queue.
+- The queue gates on CI itself — no PR needed.
 
-PRs are for external contributors. Check `git remote -v` to identify repo ownership.
+For every other repo, **open a PR**. Direct pushes to `main` are never correct for a polecat, even if you technically have write access. Check `git remote -v` if you're unsure which repo you're in, but when in doubt: PR.
 
 ### The Landing Rule
 
