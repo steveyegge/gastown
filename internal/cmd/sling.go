@@ -135,6 +135,9 @@ var (
 	slingFormula       string // --formula: override formula for dispatch (default: mol-polecat-work)
 	slingCrew          string // --crew: target a crew member in the specified rig
 	slingReviewOnly    bool   // --review-only: mark work as review-only (no merge/commit/push)
+
+	// Bead hygiene flags (hq-0ae A2).
+	slingAllowMultiScope bool // --allow-multi-scope: bypass the multi-scope bead guard
 )
 
 func init() {
@@ -163,6 +166,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingFormula, "formula", "", "Formula to apply (default: mol-polecat-work for polecat targets)")
 	slingCmd.Flags().StringVar(&slingCrew, "crew", "", "Target a crew member in the specified rig (e.g., --crew mel with target gastown → gastown/crew/mel)")
 	slingCmd.Flags().BoolVar(&slingReviewOnly, "review-only", false, "Mark work as review-only: assignee evaluates and reports back, must NOT merge/commit/push")
+	slingCmd.Flags().BoolVar(&slingAllowMultiScope, "allow-multi-scope", false, "Bypass the multi-scope bead guard (allows slinging a bead that defines both Part A: and Part B: scopes)")
 
 	slingCmd.AddCommand(slingRespawnResetCmd)
 	rootCmd.AddCommand(slingCmd)
@@ -590,6 +594,15 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	// Use --force to override when intentionally re-activating deferred work.
 	if isDeferredBead(info) && !slingForce {
 		return fmt.Errorf("refusing to sling deferred bead %s: %q\nDeferred work should not consume polecat slots. Use --force to override", beadID, info.Title)
+	}
+
+	// Guard against slinging multi-scope beads (hq-0ae A2).
+	// A bead that declares both "Part A:" and "Part B:" is a split waiting to
+	// happen — the hq-3rl Part A failure mode is for the agent to ship one
+	// part and silently drop the other. Refuse unless the dispatcher has
+	// explicitly opted in with --allow-multi-scope.
+	if multi, reason := isMultiScopeBead(info); multi && !slingAllowMultiScope {
+		return fmt.Errorf("refusing to sling multi-scope bead %s: %q\n  %s\n  Use --allow-multi-scope to override, or split into separate beads before dispatch", beadID, info.Title, reason)
 	}
 
 	originalStatus := info.Status
