@@ -80,9 +80,14 @@ func DeliveryAckLabelSequenceIdempotent(recipientIdentity string, at time.Time, 
 // AcknowledgeDeliveryBead writes phase-2 delivery ack labels for a bead.
 // It reads existing labels for idempotent retry (reusing prior timestamps),
 // then writes the ack label sequence. Uses runBdCommand with timeouts.
-// Resolves the correct beadsDir based on the bead ID prefix (GH#2423).
+//
+// If beadID routes to a different rig than beadsDir, BEADS_DIR is stripped
+// ("") so bd performs its own prefix-based routing via routes.jsonl. Pinning
+// BEADS_DIR at a rig's .beads bypasses routing and fails the lookup for
+// beads whose prefix maps to a different database on the shared Dolt
+// server (au-ofe, au-b9d).
 func AcknowledgeDeliveryBead(workDir, beadsDir, beadID, recipientIdentity string) error {
-	beadsDir = beads.ResolveBeadsDirForID(beadsDir, beadID)
+	beadsDir = routedBeadsDirForID(beadsDir, beadID)
 	existingLabels, readErr := readBeadLabelsShared(workDir, beadsDir, beadID)
 	if readErr != nil {
 		// Log but proceed with empty labels — fresh timestamp is acceptable
@@ -104,6 +109,18 @@ func AcknowledgeDeliveryBead(workDir, beadsDir, beadID, recipientIdentity string
 		return err
 	}
 	return nil
+}
+
+// routedBeadsDirForID returns the BEADS_DIR value to pass into runBdCommand
+// so that beadID resolves correctly. Same-rig ids keep currentBeadsDir;
+// cross-rig ids return "" so bd's own prefix routing (via routes.jsonl in
+// the town's .beads) dispatches to the correct database. See au-ofe, au-b9d.
+func routedBeadsDirForID(currentBeadsDir, beadID string) string {
+	target := beads.ResolveBeadsDirForID(currentBeadsDir, beadID)
+	if target == "" || target == currentBeadsDir {
+		return currentBeadsDir
+	}
+	return ""
 }
 
 // readBeadLabelsShared reads the labels for a bead, returning an error on failure
