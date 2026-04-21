@@ -30,11 +30,28 @@ type DogHealthResult struct {
 type HealthChecker struct {
 	mgr     *Manager
 	checker sessionChecker
+
+	// Escalator is an optional hook invoked when a dog is auto-cleared
+	// from a dead-session state while it still had work claimed. It is
+	// the glue for hq-0ae A3: surfacing abandoned work to the Mayor so
+	// the bead can be re-dispatched rather than silently stalling. The
+	// message is a human-readable summary; errors are best-effort.
+	Escalator func(msg string) error
 }
 
 // NewHealthChecker creates a HealthChecker.
 func NewHealthChecker(mgr *Manager, checker sessionChecker) *HealthChecker {
 	return &HealthChecker{mgr: mgr, checker: checker}
+}
+
+// fireDogDeathEscalation sends a best-effort notice when a dog session died
+// with a claim still open. Safe to call with a nil Escalator.
+func (hc *HealthChecker) fireDogDeathEscalation(dogName, bead, reason string) {
+	if hc.Escalator == nil || bead == "" {
+		return
+	}
+	msg := fmt.Sprintf("DOG_DEAD: %s on %s (%s) — bead abandoned, re-dispatch needed", dogName, bead, reason)
+	_ = hc.Escalator(msg)
 }
 
 // dogSessionName returns the tmux session name for a dog.
@@ -67,9 +84,11 @@ func (hc *HealthChecker) Check(d *Dog, maxInactivity time.Duration, autoClear bo
 			result.NeedsAttention = true
 			result.Recommendation = "zombie: session dead but state=working"
 			if autoClear {
+				abandonedBead := d.Work
 				if err := hc.mgr.ClearWork(d.Name); err == nil {
 					result.AutoCleared = true
 					result.Recommendation = "zombie auto-cleared (session dead)"
+					hc.fireDogDeathEscalation(d.Name, abandonedBead, "session dead")
 				}
 			}
 
@@ -79,9 +98,11 @@ func (hc *HealthChecker) Check(d *Dog, maxInactivity time.Duration, autoClear bo
 			result.Recommendation = "zombie: agent dead in session"
 			if autoClear {
 				_ = hc.checker.KillSession(session)
+				abandonedBead := d.Work
 				if err := hc.mgr.ClearWork(d.Name); err == nil {
 					result.AutoCleared = true
 					result.Recommendation = "zombie auto-cleared (agent dead, session killed)"
+					hc.fireDogDeathEscalation(d.Name, abandonedBead, "agent dead")
 				}
 			}
 

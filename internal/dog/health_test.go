@@ -277,6 +277,139 @@ func TestHealth_AutoClear_AgentDead(t *testing.T) {
 }
 
 // =============================================================================
+// Dog-death escalation (hq-0ae A3)
+// =============================================================================
+
+func TestHealth_Escalate_SessionDeadWithClaim(t *testing.T) {
+	m, _ := testManager(t)
+	now := time.Now()
+	setupDogWithState(t, m, "alpha", &DogState{
+		Name: "alpha", State: StateWorking, Work: "hq-7777",
+		WorkStartedAt: now.Add(-30 * time.Minute), LastActive: now,
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	mc := newMockChecker()
+	mc.healthResults["hq-dog-alpha"] = tmux.SessionDead
+	hc := NewHealthChecker(m, mc)
+
+	var captured []string
+	hc.Escalator = func(msg string) error {
+		captured = append(captured, msg)
+		return nil
+	}
+
+	d, _ := m.Get("alpha")
+	_ = hc.Check(d, 30*time.Minute, true)
+
+	if len(captured) != 1 {
+		t.Fatalf("want 1 escalation, got %d", len(captured))
+	}
+	if !contains(captured[0], "DOG_DEAD") || !contains(captured[0], "alpha") || !contains(captured[0], "hq-7777") {
+		t.Errorf("escalation message missing expected fields: %q", captured[0])
+	}
+}
+
+func TestHealth_Escalate_AgentDeadWithClaim(t *testing.T) {
+	m, _ := testManager(t)
+	now := time.Now()
+	setupDogWithState(t, m, "alpha", &DogState{
+		Name: "alpha", State: StateWorking, Work: "hq-8888",
+		WorkStartedAt: now.Add(-30 * time.Minute), LastActive: now,
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	mc := newMockChecker()
+	mc.healthResults["hq-dog-alpha"] = tmux.AgentDead
+	hc := NewHealthChecker(m, mc)
+
+	var captured []string
+	hc.Escalator = func(msg string) error {
+		captured = append(captured, msg)
+		return nil
+	}
+
+	d, _ := m.Get("alpha")
+	_ = hc.Check(d, 30*time.Minute, true)
+
+	if len(captured) != 1 {
+		t.Fatalf("want 1 escalation, got %d", len(captured))
+	}
+	if !contains(captured[0], "hq-8888") {
+		t.Errorf("escalation message missing bead ID: %q", captured[0])
+	}
+}
+
+func TestHealth_Escalate_NoFireWhenNoClaim(t *testing.T) {
+	m, _ := testManager(t)
+	now := time.Now()
+	// Dog is "working" but Work is empty — this is degenerate but possible.
+	setupDogWithState(t, m, "alpha", &DogState{
+		Name: "alpha", State: StateWorking, Work: "",
+		WorkStartedAt: now.Add(-30 * time.Minute), LastActive: now,
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	mc := newMockChecker()
+	mc.healthResults["hq-dog-alpha"] = tmux.SessionDead
+	hc := NewHealthChecker(m, mc)
+
+	var captured []string
+	hc.Escalator = func(msg string) error {
+		captured = append(captured, msg)
+		return nil
+	}
+
+	d, _ := m.Get("alpha")
+	_ = hc.Check(d, 30*time.Minute, true)
+
+	if len(captured) != 0 {
+		t.Errorf("expected no escalation when dog had no claim; got %v", captured)
+	}
+}
+
+func TestHealth_Escalate_NoFireWhenEscalatorNil(t *testing.T) {
+	// Backwards-compat: existing callers that don't wire Escalator must still
+	// get working auto-clear behavior.
+	m, _ := testManager(t)
+	now := time.Now()
+	setupDogWithState(t, m, "alpha", &DogState{
+		Name: "alpha", State: StateWorking, Work: "hq-9999",
+		WorkStartedAt: now.Add(-30 * time.Minute), LastActive: now,
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	mc := newMockChecker()
+	mc.healthResults["hq-dog-alpha"] = tmux.SessionDead
+	hc := NewHealthChecker(m, mc)
+	// Escalator intentionally nil.
+
+	d, _ := m.Get("alpha")
+	r := hc.Check(d, 30*time.Minute, true)
+
+	if !r.AutoCleared {
+		t.Error("auto-clear must still work when Escalator is nil")
+	}
+}
+
+// contains is a small helper that avoids importing strings in this test file.
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || indexOf(s, sub) >= 0)
+}
+
+func indexOf(s, sub string) int {
+	if len(sub) == 0 {
+		return 0
+	}
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
+// =============================================================================
 // Orphan sessions
 // =============================================================================
 

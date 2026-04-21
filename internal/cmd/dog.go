@@ -955,6 +955,8 @@ func runDogHealthCheck(cmd *cobra.Command, args []string) error {
 
 	tm := tmux.NewTmux()
 	hc := dog.NewHealthChecker(mgr, tm)
+	// Wire the dog-death escalator (hq-0ae A3) so abandoned beads surface to Mayor.
+	hc.Escalator = dogEscalateBestEffort
 
 	var results []dog.DogHealthResult
 
