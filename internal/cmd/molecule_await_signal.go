@@ -243,23 +243,9 @@ func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
 		} else {
 			result.IdleCycles = newIdleCycles
 		}
-		// Update last_activity so watchers know agent is still alive
-		if err := updateAgentHeartbeat(awaitSignalAgentBead, beadsDir); err != nil {
-			if !awaitSignalQuiet {
-				fmt.Printf("%s Failed to update agent heartbeat: %v\n",
-					style.Dim.Render("⚠"), err)
-			}
-		}
 		// Clear the backoff window — timeout completed normally
 		_ = clearAgentBackoffUntil(awaitSignalAgentBead, beadsDir)
 	} else if result.Reason == "signal" && awaitSignalAgentBead != "" {
-		// On signal, update last_activity to prove agent is alive
-		if err := updateAgentHeartbeat(awaitSignalAgentBead, beadsDir); err != nil {
-			if !awaitSignalQuiet {
-				fmt.Printf("%s Failed to update agent heartbeat: %v\n",
-					style.Dim.Render("⚠"), err)
-			}
-		}
 		// Report current idle cycles (caller should reset)
 		result.IdleCycles = idleCycles
 		// Clear the backoff window — woken by real activity
@@ -425,39 +411,6 @@ func parseIntSimple(s string) (int, error) {
 		n = n*10 + int(s[i]-'0')
 	}
 	return n, nil
-}
-
-// updateAgentHeartbeat records a heartbeat timestamp on an agent bead via a
-// heartbeat:EPOCH label. This proves the agent is alive during long idle periods.
-//
-// bd agent heartbeat was never shipped (steveyegge/beads#2828). We use the same
-// read-modify-write label pattern as setAgentIdleCycles instead.
-func updateAgentHeartbeat(agentBead, beadsDir string) error {
-	allLabels, err := getAllAgentLabels(agentBead, beadsDir)
-	if err != nil {
-		return err
-	}
-
-	var newLabels []string
-	for _, label := range allLabels {
-		if len(label) > 10 && label[:10] == "heartbeat:" {
-			continue // Replace existing heartbeat label
-		}
-		newLabels = append(newLabels, label)
-	}
-	newLabels = append(newLabels, fmt.Sprintf("heartbeat:%d", time.Now().Unix()))
-
-	args := []string{"update", agentBead}
-	for _, label := range newLabels {
-		args = append(args, "--set-labels="+label)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), bdCallTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
-	return cmd.Run()
 }
 
 // setAgentIdleCycles sets the idle:N label on an agent bead.
