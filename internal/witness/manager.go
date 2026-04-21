@@ -149,15 +149,17 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 
 	// Note: No PID check per ZFC - tmux session is the source of truth
 
-	// Working directory
-	witnessDir := m.witnessDir()
-
 	// Ensure runtime settings exist in the shared witness parent directory.
 	// Settings are passed to Claude Code via --settings flag.
 	// ResolveRoleAgentConfig is internally serialized (resolveConfigMu in
 	// package config) to prevent concurrent rig starts from corrupting the
 	// global agent registry.
+	// Working directory
+	witnessDir := m.witnessDir()
 	townRoot := m.townRoot()
+	if err := beads.SetupRedirect(townRoot, witnessDir); err != nil {
+		return fmt.Errorf("ensuring witness beads redirect: %w", err)
+	}
 
 	// Resolve CLAUDE_CONFIG_DIR from accounts.json so witness sessions
 	// use the correct account. Mirrors the daemon restart path (lifecycle.go).

@@ -948,6 +948,36 @@ func TestCompactResumeReminder_NonPolecatNoGtDone(t *testing.T) {
 	}
 }
 
+func TestEnsureBeadsRedirect_WitnessCreatesRedirect(t *testing.T) {
+	townRoot := t.TempDir()
+	rigRoot := filepath.Join(townRoot, "testrig")
+	witnessDir := filepath.Join(rigRoot, "witness")
+	mayorBeadsDir := filepath.Join(rigRoot, "mayor", "rig", ".beads")
+	if err := os.MkdirAll(witnessDir, 0755); err != nil {
+		t.Fatalf("mkdir witness dir: %v", err)
+	}
+	if err := os.MkdirAll(mayorBeadsDir, 0755); err != nil {
+		t.Fatalf("mkdir mayor beads dir: %v", err)
+	}
+
+	ctx := RoleContext{
+		Role:     RoleWitness,
+		WorkDir:  witnessDir,
+		TownRoot: townRoot,
+	}
+
+	ensureBeadsRedirect(ctx)
+
+	redirectPath := filepath.Join(witnessDir, ".beads", "redirect")
+	content, err := os.ReadFile(redirectPath)
+	if err != nil {
+		t.Fatalf("read redirect: %v", err)
+	}
+	if got, want := string(content), "../mayor/rig/.beads\n"; got != want {
+		t.Fatalf("redirect content = %q, want %q", got, want)
+	}
+}
+
 // TestOutputRalphLoopDirective_NoSlashCommand verifies that ralph mode emits
 // inline iterative work instructions instead of referencing a nonexistent
 // /ralph-loop slash command. This is the regression test for the ralph-loop
