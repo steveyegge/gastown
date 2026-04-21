@@ -939,6 +939,27 @@ func _verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 		return false, fmt.Errorf("getting polecat HEAD: %w", err)
 	}
 
+	// Guard against false positive for freshly-spawned polecats (dc-q6ntn).
+	// A polecat with no commits has HEAD == base branch HEAD, and the base
+	// branch commit IS on main by definition. Without this check, we'd
+	// report "work done" before the polecat has written any code, causing
+	// the witness to close the bead prematurely and nuke the polecat.
+	//
+	// Only treat "HEAD on main" as work-done if the polecat has at least
+	// one commit that diverges from the default branch.
+	for _, remote := range []string{"origin"} {
+		baseHead, err := g.Rev(remote + "/" + defaultBranch)
+		if err == nil && baseHead == commitSHA {
+			// Polecat's HEAD is identical to remote default branch — no
+			// commits made yet. Work is NOT done.
+			return false, nil
+		}
+	}
+	if baseHead, err := g.Rev(defaultBranch); err == nil && baseHead == commitSHA {
+		// Same check against local default branch.
+		return false, nil
+	}
+
 	// Get all configured remotes and check each one for the commit
 	// This handles multi-remote setups where code may be on a remote other than "origin"
 	remotes, err := g.Remotes()
