@@ -92,9 +92,5 @@ CLAUDE.local.md
 # Beads / Dolt files (added by bd init)
 .beads-credential-key
 
-# Gas Town (added by gt)
-.runtime/
-CLAUDE.local.md
-
 # Fork research notes (private — not for public upstream)
 docs/fork-info/
