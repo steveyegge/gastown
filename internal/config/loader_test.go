@@ -1205,7 +1205,8 @@ func TestBuildCrewStartupCommand(t *testing.T) {
 }
 
 func TestResolveAgentConfigWithOverride(t *testing.T) {
-	t.Parallel()
+	ResetRegistryForTesting()
+	t.Cleanup(ResetRegistryForTesting)
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
 
