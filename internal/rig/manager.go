@@ -800,9 +800,11 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 			fmt.Printf("  %s Could not scaffold polecat settings: %v\n", "!", err)
 		}
 	}
-	if err := commands.ProvisionFor(polecatsPath, defaultAgentName); err != nil {
-		// Non-fatal: commands are convenience, not critical
-		fmt.Printf("  %s Could not scaffold polecat commands: %v\n", "!", err)
+	if commands.IsKnownAgent(defaultAgentName) {
+		if err := commands.ProvisionFor(polecatsPath, defaultAgentName); err != nil {
+			// Non-fatal: commands are convenience, not critical
+			fmt.Printf("  %s Could not scaffold polecat commands: %v\n", "!", err)
+		}
 	}
 
 	// Register route in town-level routes.jsonl BEFORE creating agent beads.
