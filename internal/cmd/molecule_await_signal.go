@@ -236,10 +236,17 @@ func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
 	// The deacon heartbeat is only updated at the start of each patrol cycle, so
 	// a 15-minute await-signal sleep can push the heartbeat past the 20-minute
 	// stale threshold, causing dogs to escalate HIGH to the mayor repeatedly.
+	//
+	// Write with state=idle because await-signal is an intentional patrol sleep.
+	// Otherwise stuck-agent-dog applies the 20m "working" threshold on a state-less
+	// heartbeat instead of the 2h idle threshold — causing the same false-positive
+	// loop this flag is meant to prevent when the refresh interval drifts.
 	var heartbeatFn func()
 	if awaitSignalDeaconHeartbeat {
+		// Set state=idle immediately on entry, then keep refreshing every 2min.
+		_ = deacon.TouchWithState(townRoot, "idle", "entering await-signal")
 		heartbeatFn = func() {
-			_ = deacon.Touch(townRoot)
+			_ = deacon.TouchWithState(townRoot, "idle", "await-signal refresh")
 		}
 	}
 
