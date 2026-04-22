@@ -356,6 +356,60 @@ func TestClaudeSettingsCheck_MissingStopHook(t *testing.T) {
 	}
 }
 
+func TestClaudeSettingsCheck_PolecatStopHookAccepted(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+
+	polecatSettings := filepath.Join(tmpDir, rigName, "polecats", ".claude", "settings.json")
+	settings := map[string]any{
+		"enabledPlugins": []string{"plugin1"},
+		"hooks": map[string]any{
+			"SessionStart": []any{
+				map[string]any{
+					"matcher": "**",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "gt prime --hook",
+						},
+					},
+				},
+			},
+			"Stop": []any{
+				map[string]any{
+					"matcher": "**",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "gt tap polecat-stop-check",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := os.MkdirAll(filepath.Dir(polecatSettings), 0755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(polecatSettings, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Fatalf("expected StatusOK for polecat stop hook, got %v (%v)", result.Status, result.Details)
+	}
+}
+
 func TestClaudeSettingsCheck_WrongLocationWitness(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"

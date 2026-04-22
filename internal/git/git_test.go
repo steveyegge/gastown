@@ -298,6 +298,72 @@ func TestCheckoutNewBranch(t *testing.T) {
 	}
 }
 
+func TestCheckoutResetBranch(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	baseBranch, err := g.CurrentBranch()
+	if err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+	baseRef, err := g.run("rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	baseRef = strings.TrimSpace(baseRef)
+
+	// Create an idle branch from the current base ref.
+	if err := g.CheckoutResetBranch("idle/tester", baseRef); err != nil {
+		t.Fatalf("CheckoutResetBranch(create): %v", err)
+	}
+
+	branch, _ := g.CurrentBranch()
+	if branch != "idle/tester" {
+		t.Errorf("branch = %q, want idle/tester", branch)
+	}
+
+	// Move the base branch forward and verify checkout -B resets the existing
+	// idle branch to the new start point instead of failing like checkout -b.
+	if err := g.Checkout(baseBranch); err != nil {
+		t.Fatalf("Checkout(%s): %v", baseBranch, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "NEXT.md"), []byte("next\n"), 0644); err != nil {
+		t.Fatalf("write NEXT.md: %v", err)
+	}
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	cmd = exec.Command("git", "commit", "-m", "next")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	newBaseRef, err := g.run("rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD after commit: %v", err)
+	}
+	newBaseRef = strings.TrimSpace(newBaseRef)
+
+	if err := g.CheckoutResetBranch("idle/tester", newBaseRef); err != nil {
+		t.Fatalf("CheckoutResetBranch(reset): %v", err)
+	}
+
+	branch, _ = g.CurrentBranch()
+	if branch != "idle/tester" {
+		t.Errorf("branch after reset = %q, want idle/tester", branch)
+	}
+
+	head, err := g.run("rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse idle/tester HEAD: %v", err)
+	}
+	if strings.TrimSpace(head) != newBaseRef {
+		t.Errorf("idle/tester HEAD = %q, want %q", strings.TrimSpace(head), newBaseRef)
+	}
+}
+
 func TestNotARepo(t *testing.T) {
 	dir := t.TempDir() // Empty dir, not a git repo
 	g := NewGit(dir)

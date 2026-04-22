@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
@@ -269,6 +270,9 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 	opts := polecat.SessionStartOptions{
 		Issue: sessionIssue,
 	}
+	if opts.Issue == "" {
+		opts.Issue = recoverSessionIssue(rigName, polecatName, r)
+	}
 
 	fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
 	if err := polecatMgr.Start(polecatName, opts); err != nil {
@@ -283,7 +287,7 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
 		agent := fmt.Sprintf("%s/%s", rigName, polecatName)
 		logger := townlog.NewLogger(townRoot)
-		_ = logger.Log(townlog.EventWake, agent, sessionIssue)
+		_ = logger.Log(townlog.EventWake, agent, opts.Issue)
 	}
 
 	return nil
@@ -510,10 +514,11 @@ func runSessionRestart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	polecatMgr, _, err := getSessionManager(rigName)
+	polecatMgr, r, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}
+	restartIssue := recoverSessionIssue(rigName, polecatName, r)
 
 	// Check if running
 	running, err := polecatMgr.IsRunning(polecatName)
@@ -546,7 +551,7 @@ func runSessionRestart(cmd *cobra.Command, args []string) error {
 
 	// Start fresh session
 	fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
-	opts := polecat.SessionStartOptions{}
+	opts := polecat.SessionStartOptions{Issue: restartIssue}
 	if err := polecatMgr.Start(polecatName, opts); err != nil {
 		return fmt.Errorf("starting session: %w", err)
 	}
@@ -555,6 +560,65 @@ func runSessionRestart(cmd *cobra.Command, args []string) error {
 		style.Bold.Render("✓"),
 		style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
 	return nil
+}
+
+func selectSessionIssue(explicitIssue, polecatIssue, polecatBranch, agentHook string) string {
+	if explicitIssue != "" {
+		return explicitIssue
+	}
+	if polecatIssue != "" {
+		return polecatIssue
+	}
+	if issue := sessionBranchIssue(polecatBranch); issue != "" {
+		return issue
+	}
+	return agentHook
+}
+
+func sessionBranchIssue(branch string) string {
+	if !strings.HasPrefix(branch, "polecat/") {
+		return ""
+	}
+	return parseBranchName(branch).Issue
+}
+
+// Fork note: restarts need to recover the active issue from the polecat state,
+// branch metadata, or the agent bead hook. Without this, restarted Codex
+// sessions wake up detached from their work bead and the next lifecycle step
+// loses the task context.
+func recoverSessionIssue(rigName, polecatName string, r *rig.Rig) string {
+	var (
+		polecatIssue  string
+		polecatBranch string
+		polecatState  polecat.State
+		agentHook     string
+	)
+
+	if polecatMgr, _, err := getPolecatManager(rigName); err == nil {
+		if info, infoErr := polecatMgr.Get(polecatName); infoErr == nil && info != nil {
+			polecatIssue = info.Issue
+			polecatBranch = info.Branch
+			polecatState = info.State
+		}
+	}
+
+	if r != nil {
+		bd := beads.New(r.Path)
+		agentBeadID := polecatBeadIDForRig(r, rigName, polecatName)
+		if issue, fields, err := bd.GetAgentBead(agentBeadID); err == nil {
+			if fields != nil && fields.HookBead != "" {
+				agentHook = fields.HookBead
+			} else if issue != nil && issue.HookBead != "" {
+				agentHook = issue.HookBead
+			}
+		}
+	}
+
+	if polecatState == polecat.StateIdle {
+		agentHook = ""
+	}
+
+	return selectSessionIssue("", polecatIssue, polecatBranch, agentHook)
 }
 
 func runSessionStatus(cmd *cobra.Command, args []string) error {

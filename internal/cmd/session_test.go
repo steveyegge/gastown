@@ -78,3 +78,55 @@ func TestSessionInfoJSONOutputNotRunning(t *testing.T) {
 		t.Errorf("running = %v, want false", parsed["running"])
 	}
 }
+
+func TestSelectSessionIssue(t *testing.T) {
+	tests := []struct {
+		name          string
+		explicit      string
+		polecatIssue  string
+		polecatBranch string
+		agentHook     string
+		want          string
+	}{
+		{
+			name:          "explicit issue wins",
+			explicit:      "tg-explicit",
+			polecatIssue:  "tg-live",
+			polecatBranch: "polecat/furiosa/tg-branch@mk123",
+			agentHook:     "tg-hook",
+			want:          "tg-explicit",
+		},
+		{
+			name:          "active polecat issue wins over branch and hook",
+			polecatIssue:  "tg-live",
+			polecatBranch: "polecat/furiosa/tg-branch@mk123",
+			agentHook:     "tg-hook",
+			want:          "tg-live",
+		},
+		{
+			name:          "issue branch wins over stale hook",
+			polecatBranch: "polecat/furiosa/tg-branch@mk123",
+			agentHook:     "tg-stale",
+			want:          "tg-branch",
+		},
+		{
+			name:          "agent hook rescues base branch restart",
+			polecatBranch: "codex/gamejam-webgpu-rig",
+			agentHook:     "gj-er8.11",
+			want:          "gj-er8.11",
+		},
+		{
+			name: "empty when no source exists",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := selectSessionIssue(tt.explicit, tt.polecatIssue, tt.polecatBranch, tt.agentHook)
+			if got != tt.want {
+				t.Errorf("selectSessionIssue() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

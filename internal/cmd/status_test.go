@@ -59,7 +59,7 @@ func TestDiscoverRigAgents_UsesRigPrefix(t *testing.T) {
 		"bd-hook": {ID: "bd-hook", Title: "Pinned"},
 	}
 
-	agents := discoverRigAgents(map[string]bool{}, r, nil, allAgentBeads, allHookBeads, nil, true)
+	agents := discoverRigAgents(map[string]bool{}, r, nil, allAgentBeads, allHookBeads, nil, nil, true)
 	if len(agents) != 1 {
 		t.Fatalf("discoverRigAgents() returned %d agents, want 1", len(agents))
 	}
@@ -72,6 +72,87 @@ func TestDiscoverRigAgents_UsesRigPrefix(t *testing.T) {
 	}
 	if agents[0].WorkTitle != "Pinned" {
 		t.Fatalf("agent WorkTitle = %q, want %q", agents[0].WorkTitle, "Pinned")
+	}
+}
+
+func TestDiscoverRigAgents_UsesHookedAssignmentsWhenAgentSlotIsEmpty(t *testing.T) {
+	townRoot := t.TempDir()
+	writeTestRoutes(t, townRoot, []beads.Route{
+		{Prefix: "tg-", Path: "thgames_client/mayor/rig"},
+	})
+
+	r := &rig.Rig{
+		Name: "thgames_client",
+		Path: filepath.Join(townRoot, "thgames_client"),
+		Polecats: []string{
+			"jasper",
+		},
+	}
+
+	allAgentBeads := map[string]*beads.Issue{
+		"tg-thgames_client-jasper": {
+			ID:         "tg-thgames_client-jasper",
+			AgentState: "working",
+			HookBead:   "",
+		},
+	}
+	allHookedByAssignee := map[string]*beads.Issue{
+		"thgames_client/polecats/jasper": {
+			ID:       "tg-wft.7",
+			Title:    "Checkpoint: validate Vulkan/editor after RHI boundary extraction",
+			Assignee: "thgames_client/polecats/jasper",
+		},
+	}
+
+	agents := discoverRigAgents(map[string]bool{}, r, nil, allAgentBeads, nil, allHookedByAssignee, nil, true)
+	if len(agents) != 1 {
+		t.Fatalf("discoverRigAgents() returned %d agents, want 1", len(agents))
+	}
+
+	if agents[0].Address != "thgames_client/polecats/jasper" {
+		t.Fatalf("agent Address = %q, want canonical polecat address", agents[0].Address)
+	}
+	if !agents[0].HasWork {
+		t.Fatal("agent HasWork = false, want true from direct hooked assignment")
+	}
+	if agents[0].HookBead != "tg-wft.7" {
+		t.Fatalf("agent HookBead = %q, want %q", agents[0].HookBead, "tg-wft.7")
+	}
+	if agents[0].WorkTitle != "Checkpoint: validate Vulkan/editor after RHI boundary extraction" {
+		t.Fatalf("agent WorkTitle = %q, want hooked assignment title", agents[0].WorkTitle)
+	}
+}
+
+func TestDiscoverRigHooks_UsesCanonicalPolecatAssignments(t *testing.T) {
+	r := &rig.Rig{
+		Name: "thgames_client",
+		Polecats: []string{
+			"jasper",
+		},
+		HasWitness:  true,
+		HasRefinery: true,
+	}
+
+	allHookedByAssignee := map[string]*beads.Issue{
+		"thgames_client/polecats/jasper": {
+			ID:       "tg-wft.7",
+			Title:    "Checkpoint",
+			Assignee: "thgames_client/polecats/jasper",
+		},
+	}
+
+	hooks := discoverRigHooks(r, nil, allHookedByAssignee)
+	if len(hooks) != 3 {
+		t.Fatalf("discoverRigHooks() returned %d hooks, want 3", len(hooks))
+	}
+	if hooks[0].Agent != "thgames_client/polecats/jasper" {
+		t.Fatalf("hook Agent = %q, want canonical polecat address", hooks[0].Agent)
+	}
+	if !hooks[0].HasWork {
+		t.Fatal("polecat hook HasWork = false, want true")
+	}
+	if hooks[0].Molecule != "tg-wft.7" {
+		t.Fatalf("hook Molecule = %q, want %q", hooks[0].Molecule, "tg-wft.7")
 	}
 }
 
@@ -117,7 +198,7 @@ func TestDiscoverRigAgents_ZombieSessionNotRunning(t *testing.T) {
 		"gt-gastown-witness": false, // zombie: tmux exists, agent dead
 	}
 
-	agents := discoverRigAgents(allSessions, r, nil, nil, nil, nil, true)
+	agents := discoverRigAgents(allSessions, r, nil, nil, nil, nil, nil, true)
 	for _, a := range agents {
 		if a.Role == "witness" {
 			if a.Running {
@@ -145,7 +226,7 @@ func TestDiscoverRigAgents_MissingSessionNotRunning(t *testing.T) {
 	// Empty sessions map - no tmux sessions exist at all
 	allSessions := map[string]bool{}
 
-	agents := discoverRigAgents(allSessions, r, nil, nil, nil, nil, true)
+	agents := discoverRigAgents(allSessions, r, nil, nil, nil, nil, nil, true)
 	for _, a := range agents {
 		if a.Role == "witness" {
 			if a.Running {

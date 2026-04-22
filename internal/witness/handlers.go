@@ -1524,14 +1524,57 @@ func handleZombieRestart(bd *BdCli, workDir, rigName, polecatName, hookBead, cle
 // nukes them before they finish starting up. See GH#2036.
 const SpawnGracePeriod = 5 * time.Minute
 
+// StallDismissRetryWindow is the window in which a second stall after blind
+// dismissal is treated as a mid-work stall and receives a nudge instead of
+// another blind key sequence.
+const StallDismissRetryWindow = 5 * time.Minute
+
 // StalledResult represents a single stalled polecat detection.
 type StalledResult struct {
 	PolecatName   string // e.g., "alpha"
-	StallType     string // "startup-stall", "unknown-prompt"
-	Action        string // "auto-dismissed", "escalated"
+	StallType     string // "startup-stall", "mid-work-stall"
+	Action        string // "auto-dismissed", "nudged", "escalated"
 	AgentState    string // Agent state from beads (e.g., "idle", "working")
 	HasHookedWork bool   // Whether this polecat has hooked work assigned
 	Error         error
+}
+
+// stallDismissDir returns the directory for stall dismiss marker files.
+func stallDismissDir(townRoot string) string {
+	return filepath.Join(townRoot, ".runtime", "stall-dismissed")
+}
+
+// stallDismissFile returns the path to a stall dismiss marker for a session.
+func stallDismissFile(townRoot, sessionName string) string {
+	return filepath.Join(stallDismissDir(townRoot), sessionName)
+}
+
+// writeStallDismissMarker records that a blind dismiss was attempted for this
+// session. The next witness pass uses this marker to distinguish "first stuck
+// at a prompt" from "still stuck after dismissal was attempted."
+func writeStallDismissMarker(townRoot, sessionName string) {
+	dir := stallDismissDir(townRoot)
+	_ = os.MkdirAll(dir, 0755)
+	_ = os.WriteFile(stallDismissFile(townRoot, sessionName), []byte(time.Now().UTC().Format(time.RFC3339)), 0644)
+}
+
+// readStallDismissMarker returns the time of the last blind dismiss attempt,
+// or zero time if no marker exists or it can't be read.
+func readStallDismissMarker(townRoot, sessionName string) time.Time {
+	data, err := os.ReadFile(stallDismissFile(townRoot, sessionName))
+	if err != nil {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(string(data)))
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// clearStallDismissMarker removes the dismiss marker (polecat is no longer stalled).
+func clearStallDismissMarker(townRoot, sessionName string) {
+	_ = os.Remove(stallDismissFile(townRoot, sessionName))
 }
 
 // DetectStalledPolecatsResult holds aggregate results.
@@ -1542,7 +1585,7 @@ type DetectStalledPolecatsResult struct {
 }
 
 // DetectStalledPolecats checks live polecat sessions for agents stuck at
-// startup (e.g., on interactive prompts that block automated sessions).
+// startup or later in their work loop.
 // Unlike zombie detection which looks for dead sessions/agents, this targets
 // alive-but-stuck agents that will never make progress without intervention.
 //
@@ -1551,10 +1594,10 @@ type DetectStalledPolecatsResult struct {
 //   - It is older than StartupStallThreshold (90s)
 //   - Its last tmux activity is older than StartupActivityGrace (60s)
 //
-// When a startup stall is detected, DismissStartupDialogsBlind is called to
-// send blind key sequences that dismiss known blocking dialogs (workspace trust,
-// bypass permissions) without screen-scraping pane content. This avoids coupling
-// to third-party TUI strings that can change with any Claude Code update.
+// On the first stall, DismissStartupDialogsBlind sends blind key sequences for
+// known blocking dialogs without screen-scraping pane content. If the same
+// session stalls again within StallDismissRetryWindow, witness treats it as a
+// mid-work stall and sends a nudge instead of repeatedly injecting keys.
 func DetectStalledPolecats(workDir, rigName string) *DetectStalledPolecatsResult {
 	result := &DetectStalledPolecatsResult{}
 
@@ -1608,6 +1651,7 @@ func DetectStalledPolecats(workDir, rigName string) *DetectStalledPolecatsResult
 		// This replaces tmux activity scraping for v2 agents.
 		if hb := polecat.ReadSessionHeartbeat(townRoot, sessionName); hb != nil && hb.IsV2() {
 			if time.Since(hb.Timestamp) < polecat.SessionHeartbeatStaleThreshold {
+				clearStallDismissMarker(townRoot, sessionName)
 				continue // Fresh v2 heartbeat — agent is alive, not stalled
 			}
 		}
@@ -1633,21 +1677,44 @@ func DetectStalledPolecats(workDir, rigName string) *DetectStalledPolecatsResult
 		}
 		activityAge := now.Sub(activity)
 		if activityAge < activityGrace {
-			continue // Recent activity — agent is making progress
+			// Agent is making progress — clear any stale dismiss marker.
+			clearStallDismissMarker(townRoot, sessionName)
+			continue
 		}
 
-		// Session is old enough and has no recent activity: startup stall.
-		// Send blind key sequences to dismiss any startup dialogs without
-		// screen-scraping pane content (avoids coupling to third-party TUI strings).
+		// Session is old enough and has no recent activity — stalled.
+		// Two-stage recovery:
+		//   Stage 1: Blind dismiss (keystroke sequences for startup dialogs).
+		//   Stage 2: If blind dismiss was already tried recently (marker exists),
+		//            this is a mid-work stall — nudge the session instead.
 		stalled := StalledResult{
 			PolecatName: polecatName,
-			StallType:   "startup-stall",
 		}
-		if err := t.DismissStartupDialogsBlind(sessionName); err != nil {
-			stalled.Action = "escalated"
-			stalled.Error = fmt.Errorf("blind dismiss failed: %w", err)
+
+		lastDismiss := readStallDismissMarker(townRoot, sessionName)
+		if !lastDismiss.IsZero() && now.Sub(lastDismiss) < StallDismissRetryWindow {
+			// Stage 2: blind dismiss was already tried — escalate to nudge.
+			stalled.StallType = "mid-work-stall"
+			nudgeMsg := "You appear stalled — no output for several minutes. Check your hook with 'gt hook' and continue working on your assigned task."
+			if err := t.NudgeSession(sessionName, nudgeMsg); err != nil {
+				stalled.Action = "escalated"
+				stalled.Error = fmt.Errorf("nudge failed: %w", err)
+			} else {
+				stalled.Action = "nudged"
+			}
+			// Clear marker so next cycle tries blind dismiss again if still stuck
+			// (avoids infinite nudge spam — alternates between dismiss and nudge).
+			clearStallDismissMarker(townRoot, sessionName)
 		} else {
-			stalled.Action = "auto-dismissed"
+			// Stage 1: first detection — try blind dismiss for startup dialogs.
+			stalled.StallType = "startup-stall"
+			if err := t.DismissStartupDialogsBlind(sessionName); err != nil {
+				stalled.Action = "escalated"
+				stalled.Error = fmt.Errorf("blind dismiss failed: %w", err)
+			} else {
+				stalled.Action = "auto-dismissed"
+				writeStallDismissMarker(townRoot, sessionName)
+			}
 		}
 		result.Stalled = append(result.Stalled, stalled)
 	}
@@ -1666,7 +1733,7 @@ type CompletionDiscovery struct {
 	MRID           string
 	Branch         string
 	MRFailed       bool
-	PushFailed     bool   // True when branch push to origin failed (gas-556)
+	PushFailed     bool // True when branch push to origin failed (gas-556)
 	CompletionTime string
 	Action         string // What was done: "merge-ready-sent", "acknowledged-idle", "phase-complete"
 	WispCreated    string // ID of cleanup wisp if created
@@ -1844,12 +1911,12 @@ func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *Po
 // Used to avoid redundant subprocess invocations during zombie detection, where the same
 // agent bead was previously queried 3-5 times per polecat per patrol cycle. (gt-2gra)
 type agentBeadSnapshot struct {
-	AgentState  string
-	HookBead    string
-	Labels      []string
-	UpdatedAt   string
-	ActiveMR    string
-	Fields      *beads.AgentFields // parsed from description
+	AgentState string
+	HookBead   string
+	Labels     []string
+	UpdatedAt  string
+	ActiveMR   string
+	Fields     *beads.AgentFields // parsed from description
 }
 
 // fetchAgentBeadSnapshot fetches all agent bead data in a single bd show call.
@@ -2032,13 +2099,13 @@ func getBeadStatus(bd *BdCli, workDir, beadID string) (string, bool) {
 
 // resetAbandonedBead resets a dead polecat's hooked bead so it can be re-dispatched.
 // If the bead is in "hooked" or "in_progress" status, it:
-// 0. Checks if the polecat's work is already on main — if so, closes
-//    the bead instead of resetting (prevents re-dispatch of completed work)
-// 1. Records the respawn in the witness spawn-count ledger
-// 2. Resets status to open
-// 3. Clears assignee
-// 4. Sends mail to deacon for re-dispatch (includes respawn count; SPAWN_STORM
-//    prefix and Urgent priority when count exceeds max bead respawns config)
+//  0. Checks if the polecat's work is already on main — if so, closes
+//     the bead instead of resetting (prevents re-dispatch of completed work)
+//  1. Records the respawn in the witness spawn-count ledger
+//  2. Resets status to open
+//  3. Clears assignee
+//  4. Sends mail to deacon for re-dispatch (includes respawn count; SPAWN_STORM
+//     prefix and Urgent priority when count exceeds max bead respawns config)
 //
 // Returns true if the bead was recovered.
 func resetAbandonedBead(bd *BdCli, workDir, rigName, hookBead, polecatName string, router *mail.Router) bool {

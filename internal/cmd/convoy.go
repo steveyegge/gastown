@@ -2480,6 +2480,28 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 		result[issue.ID] = issue.toIssueDetails()
 	}
 
+	// Fallback: some bd builds either lack routes.jsonl support or fail to
+	// resolve every cross-database ID in a batch. For each unresolved bead,
+	// derive the owning rig from its prefix and run bd from that rig directory.
+	if townRoot != "" && len(result) < len(issueIDs) {
+		for _, id := range issueIDs {
+			if _, ok := result[id]; ok {
+				continue // already resolved
+			}
+			prefix := beads.ExtractPrefix(id)
+			if prefix == "" {
+				continue
+			}
+			rigPath := beads.GetRigPathForPrefix(townRoot, prefix)
+			if rigPath == "" || rigPath == townRoot {
+				continue // town-level or unknown prefix
+			}
+			if details := getIssueDetailsFromDir(rigPath, id); details != nil {
+				result[id] = details
+			}
+		}
+	}
+
 	return result
 }
 
@@ -2500,9 +2522,45 @@ func getIssueDetails(issueID string) *issueDetails {
 	showCmd.Stdout = &stdout
 
 	if err := showCmd.Run(); err != nil {
+		// Fallback: bypass bd route dispatch and run from the prefix-owned rig.
+		if townRoot != "" {
+			prefix := beads.ExtractPrefix(issueID)
+			if prefix != "" {
+				rigPath := beads.GetRigPathForPrefix(townRoot, prefix)
+				if rigPath != "" && rigPath != townRoot {
+					return getIssueDetailsFromDir(rigPath, issueID)
+				}
+			}
+		}
 		return nil
 	}
 	// Handle bd exit 0 bug: empty stdout means not found
+	if stdout.Len() == 0 {
+		return nil
+	}
+
+	var issues []issueDetailsJSON
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil || len(issues) == 0 {
+		return nil
+	}
+
+	return issues[0].toIssueDetails()
+}
+
+// getIssueDetailsFromDir fetches issue details by running bd show from a
+// specific directory. Stripping BEADS_DIR lets the working directory select
+// the bead database, which is the fallback when cross-database route dispatch
+// is not available in the bd binary.
+func getIssueDetailsFromDir(dir, issueID string) *issueDetails {
+	showCmd := exec.Command("bd", "show", issueID, "--json")
+	showCmd.Dir = dir
+	showCmd.Env = stripEnvKey(os.Environ(), "BEADS_DIR")
+	var stdout bytes.Buffer
+	showCmd.Stdout = &stdout
+
+	if err := showCmd.Run(); err != nil {
+		return nil
+	}
 	if stdout.Len() == 0 {
 		return nil
 	}

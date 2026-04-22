@@ -336,42 +336,29 @@ func TestPolecatStartInjectsFallbackEnvVars(t *testing.T) {
 	}
 }
 
-func TestEnsureCanonicalSessionBranch_UsesOriginDefaultBranch(t *testing.T) {
+func TestPlanFreshBranch_BaseBranchCreatesIssueBranch(t *testing.T) {
 	workDir, repoGit := setupSessionBranchTestRepo(t)
 
-	baseSHA, err := repoGit.Rev("origin/main")
+	baseSHA, err := repoGit.Rev("main")
 	if err != nil {
-		t.Fatalf("resolve origin/main: %v", err)
-	}
-	if err := repoGit.CheckoutNewBranch("polecat/toast-old", "main"); err != nil {
-		t.Fatalf("checkout stale polecat branch: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workDir, "stale.txt"), []byte("stale\n"), 0644); err != nil {
-		t.Fatalf("write stale.txt: %v", err)
-	}
-	if err := repoGit.Add("stale.txt"); err != nil {
-		t.Fatalf("git add stale.txt: %v", err)
-	}
-	if err := repoGit.Commit("stale local polecat commit"); err != nil {
-		t.Fatalf("git commit stale.txt: %v", err)
-	}
-	staleSHA, err := repoGit.Rev("HEAD")
-	if err != nil {
-		t.Fatalf("resolve stale HEAD: %v", err)
+		t.Fatalf("resolve main: %v", err)
 	}
 
 	sm := NewSessionManager(tmux.NewTmux(), &rig.Rig{Name: "gastown", Path: workDir})
-	branch := sm.ensureCanonicalSessionBranch(repoGit, "toast", SessionStartOptions{Issue: "gt-9qb"})
+	plan := sm.planFreshBranch(repoGit, "main")
+	if !plan.Create {
+		t.Fatalf("plan.Create = false, want true for base branch")
+	}
+
+	branch := sm.freshBranchName("toast", "gt-9qb")
 	if !strings.Contains(branch, "/gt-9qb@") {
 		t.Fatalf("fresh session branch = %q, want issue-scoped branch", branch)
 	}
-
-	staleAncestor, err := repoGit.IsAncestor(staleSHA, branch)
-	if err != nil {
-		t.Fatalf("check stale ancestry: %v", err)
+	if err := repoGit.CheckoutNewBranch(branch, plan.StartPoint); err != nil {
+		t.Fatalf("checkout fresh branch: %v", err)
 	}
-	if staleAncestor {
-		t.Fatalf("fresh session branch %q unexpectedly includes stale local commit %s", branch, staleSHA)
+	if err := setBranchMergeBase(workDir, branch, plan.MergeBase); err != nil {
+		t.Fatalf("set merge base: %v", err)
 	}
 
 	baseAncestor, err := repoGit.IsAncestor(baseSHA, branch)
@@ -379,11 +366,18 @@ func TestEnsureCanonicalSessionBranch_UsesOriginDefaultBranch(t *testing.T) {
 		t.Fatalf("check canonical ancestry: %v", err)
 	}
 	if !baseAncestor {
-		t.Fatalf("fresh session branch %q should descend from origin/main commit %s", branch, baseSHA)
+		t.Fatalf("fresh session branch %q should descend from main commit %s", branch, baseSHA)
+	}
+	mergeBase, err := repoGit.ConfigGet("branch." + branch + ".gh-merge-base")
+	if err != nil {
+		t.Fatalf("get merge base config: %v", err)
+	}
+	if mergeBase != "main" {
+		t.Fatalf("merge base = %q, want main", mergeBase)
 	}
 }
 
-func TestEnsureCanonicalSessionBranch_KeepsCurrentIssueBranch(t *testing.T) {
+func TestPlanFreshBranch_KeepsCurrentIssueBranch(t *testing.T) {
 	workDir, repoGit := setupSessionBranchTestRepo(t)
 
 	currentBranch := "polecat/toast/gt-9qb@seed"
@@ -392,9 +386,9 @@ func TestEnsureCanonicalSessionBranch_KeepsCurrentIssueBranch(t *testing.T) {
 	}
 
 	sm := NewSessionManager(tmux.NewTmux(), &rig.Rig{Name: "gastown", Path: workDir})
-	branch := sm.ensureCanonicalSessionBranch(repoGit, "toast", SessionStartOptions{Issue: "gt-9qb"})
-	if branch != currentBranch {
-		t.Fatalf("ensureCanonicalSessionBranch changed active issue branch: got %q want %q", branch, currentBranch)
+	plan := sm.planFreshBranch(repoGit, currentBranch)
+	if plan.Create {
+		t.Fatalf("planFreshBranch wants fresh branch for active issue branch %q: %#v", currentBranch, plan)
 	}
 }
 
@@ -529,6 +523,101 @@ func TestAgentEnvOmitsGTAgent_FallbackRequired(t *testing.T) {
 			if hasGTAgent != tc.wantGTAgent {
 				t.Errorf("AgentEnv(Agent=%q): GT_AGENT present=%v, want %v",
 					tc.agent, hasGTAgent, tc.wantGTAgent)
+			}
+		})
+	}
+}
+
+func TestChooseFreshBranchPlan(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		currentBranch  string
+		configuredBase string
+		rigDefault     string
+		remoteDefault  string
+		existingRefs   map[string]bool
+		wantCreate     bool
+		wantStartPoint string
+		wantMergeBase  string
+	}{
+		{
+			name:           "issue branch is preserved",
+			currentBranch:  "polecat/furiosa/gj-er8.11@mk123",
+			configuredBase: "codex/gamejam-webgpu-rig",
+			rigDefault:     "main",
+			remoteDefault:  "main",
+			wantCreate:     false,
+		},
+		{
+			name:           "configured integration branch creates fresh issue branch",
+			currentBranch:  "codex/gamejam-webgpu-rig",
+			configuredBase: "codex/gamejam-webgpu-rig",
+			rigDefault:     "main",
+			remoteDefault:  "main",
+			existingRefs: map[string]bool{
+				"codex/gamejam-webgpu-rig": true,
+			},
+			wantCreate:     true,
+			wantStartPoint: "codex/gamejam-webgpu-rig",
+			wantMergeBase:  "codex/gamejam-webgpu-rig",
+		},
+		{
+			name:           "main falls back to configured base when ref exists remotely",
+			currentBranch:  "main",
+			configuredBase: "codex/gamejam-webgpu-rig",
+			rigDefault:     "main",
+			remoteDefault:  "main",
+			existingRefs: map[string]bool{
+				"origin/codex/gamejam-webgpu-rig": true,
+			},
+			wantCreate:     true,
+			wantStartPoint: "origin/codex/gamejam-webgpu-rig",
+			wantMergeBase:  "codex/gamejam-webgpu-rig",
+		},
+		{
+			name:           "main still records configured merge base when ref is missing",
+			currentBranch:  "main",
+			configuredBase: "codex/gamejam-webgpu-rig",
+			rigDefault:     "main",
+			remoteDefault:  "main",
+			wantCreate:     true,
+			wantStartPoint: "main",
+			wantMergeBase:  "codex/gamejam-webgpu-rig",
+		},
+		{
+			name:          "plain default branch keeps itself as merge base",
+			currentBranch: "main",
+			rigDefault:    "main",
+			remoteDefault: "main",
+			existingRefs: map[string]bool{
+				"main": true,
+			},
+			wantCreate:     true,
+			wantStartPoint: "main",
+			wantMergeBase:  "main",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := chooseFreshBranchPlan(
+				tt.currentBranch,
+				tt.configuredBase,
+				tt.rigDefault,
+				tt.remoteDefault,
+				func(ref string) bool { return tt.existingRefs[ref] },
+			)
+
+			if plan.Create != tt.wantCreate {
+				t.Fatalf("Create = %v, want %v", plan.Create, tt.wantCreate)
+			}
+			if plan.StartPoint != tt.wantStartPoint {
+				t.Errorf("StartPoint = %q, want %q", plan.StartPoint, tt.wantStartPoint)
+			}
+			if plan.MergeBase != tt.wantMergeBase {
+				t.Errorf("MergeBase = %q, want %q", plan.MergeBase, tt.wantMergeBase)
 			}
 		})
 	}

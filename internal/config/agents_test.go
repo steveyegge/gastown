@@ -1243,6 +1243,9 @@ func TestCodexRuntimeConfigHasPromptDetection(t *testing.T) {
 	if rc.Tmux.ReadyPromptPrefix != "› " {
 		t.Errorf("RuntimeConfigFromPreset(codex).Tmux.ReadyPromptPrefix = %q, want %q", rc.Tmux.ReadyPromptPrefix, "› ")
 	}
+	if rc.PromptMode != "arg" {
+		t.Errorf("RuntimeConfigFromPreset(codex).PromptMode = %q, want %q", rc.PromptMode, "arg")
+	}
 }
 
 func TestPiProviderDefaults(t *testing.T) {

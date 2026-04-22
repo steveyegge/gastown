@@ -274,7 +274,7 @@ func TestFindHookedBeadForAgent(t *testing.T) {
 			setupBeads: func(t *testing.T, bd *beads.Beads) {
 				// Create a task and set it to hooked with assignee
 				_, err := bd.CreateWithID("test-456", beads.CreateOptions{
-					Title: "Task to be hooked",
+					Title:  "Task to be hooked",
 					Labels: []string{"gt:task"},
 				})
 				if err != nil {
@@ -537,9 +537,9 @@ func TestSessionKillGateGuardLogic(t *testing.T) {
 func TestMRVerificationSetsMRFailed(t *testing.T) {
 	tests := []struct {
 		name         string
-		createErr    error  // error from bd.Create
-		showErr      error  // error from bd.Show (verification)
-		showReturns  bool   // whether Show returns a non-nil issue
+		createErr    error // error from bd.Create
+		showErr      error // error from bd.Show (verification)
+		showReturns  bool  // whether Show returns a non-nil issue
 		wantMRFailed bool
 	}{
 		{
@@ -1024,7 +1024,7 @@ func TestReadDoneCheckpoints(t *testing.T) {
 			},
 		},
 		{
-			name:   "mixed with done-intent and other labels",
+			name: "mixed with done-intent and other labels",
 			labels: []string{
 				"gt:agent",
 				"done-intent:COMPLETED:1738972800",
@@ -1170,12 +1170,12 @@ func TestCheckpointNilMapSafe(t *testing.T) {
 // convoy merge=direct was not propagated because cross-rig dep resolution failed.
 func TestConvoyInfoFallbackChain(t *testing.T) {
 	tests := []struct {
-		name            string
-		attachmentInfo  *ConvoyInfo // Result from getConvoyInfoFromIssue
-		depInfo         *ConvoyInfo // Result from getConvoyInfoForIssue
-		wantConvoyID    string
-		wantMerge       string
-		wantNil         bool
+		name           string
+		attachmentInfo *ConvoyInfo // Result from getConvoyInfoFromIssue
+		depInfo        *ConvoyInfo // Result from getConvoyInfoForIssue
+		wantConvoyID   string
+		wantMerge      string
+		wantNil        bool
 	}{
 		{
 			name:           "attachment fields provide convoy info",
@@ -1241,9 +1241,9 @@ func TestConvoyInfoFallbackChain(t *testing.T) {
 // closing and caused infinite dispatch loops.
 func TestHookedBeadCloseNotRestrictedToHookedStatus(t *testing.T) {
 	tests := []struct {
-		name       string
-		status     string
-		wantClose  bool
+		name      string
+		status    string
+		wantClose bool
 	}{
 		{"status hooked → close", "hooked", true},
 		{"status in_progress → close", "in_progress", true},
@@ -1523,6 +1523,71 @@ func TestSyncGuardWithUncommittedChanges(t *testing.T) {
 	}
 }
 
+func TestCleanupPersistentPolecatBranchUsesIdleBranch(t *testing.T) {
+	repoDir := t.TempDir()
+	testRunGit(t, repoDir, "init")
+	testRunGit(t, repoDir, "config", "user.email", "test@test.com")
+	testRunGit(t, repoDir, "config", "user.name", "Test")
+
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testRunGit(t, repoDir, "add", ".")
+	testRunGit(t, repoDir, "commit", "-m", "initial")
+
+	defaultBranch := testCurrentBranch(t, repoDir)
+	featureDir := filepath.Join(t.TempDir(), "jasper")
+	oldBranch := "polecat/jasper-task"
+	testRunGit(t, repoDir, "worktree", "add", "-b", oldBranch, featureDir, defaultBranch)
+
+	g := gitpkg.NewGit(featureDir)
+	idleBranch, _, err := cleanupPersistentPolecatBranch(g, "jasper", defaultBranch, oldBranch)
+	if err != nil {
+		t.Fatalf("cleanupPersistentPolecatBranch: %v", err)
+	}
+
+	if got := testCurrentBranch(t, featureDir); got != idleBranch {
+		t.Fatalf("current branch = %q, want %q", got, idleBranch)
+	}
+	if testBranchExists(t, repoDir, oldBranch) {
+		t.Fatalf("expected old branch %q to be deleted", oldBranch)
+	}
+}
+
+func TestCleanupPersistentPolecatBranchLeavesOldBranchOnIdleCheckoutFailure(t *testing.T) {
+	repoDir := t.TempDir()
+	testRunGit(t, repoDir, "init")
+	testRunGit(t, repoDir, "config", "user.email", "test@test.com")
+	testRunGit(t, repoDir, "config", "user.name", "Test")
+
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testRunGit(t, repoDir, "add", ".")
+	testRunGit(t, repoDir, "commit", "-m", "initial")
+
+	defaultBranch := testCurrentBranch(t, repoDir)
+	idleDir := filepath.Join(t.TempDir(), "idle")
+	idleBranch := idlePolecatBranchName("jasper")
+	testRunGit(t, repoDir, "worktree", "add", "-b", idleBranch, idleDir, defaultBranch)
+
+	featureDir := filepath.Join(t.TempDir(), "feature")
+	oldBranch := "polecat/jasper-task"
+	testRunGit(t, repoDir, "worktree", "add", "-b", oldBranch, featureDir, defaultBranch)
+
+	g := gitpkg.NewGit(featureDir)
+	if _, _, err := cleanupPersistentPolecatBranch(g, "jasper", defaultBranch, oldBranch); err == nil {
+		t.Fatal("expected cleanupPersistentPolecatBranch to fail when idle branch is occupied elsewhere")
+	}
+
+	if got := testCurrentBranch(t, featureDir); got != oldBranch {
+		t.Fatalf("current branch after failure = %q, want %q", got, oldBranch)
+	}
+	if !testBranchExists(t, repoDir, oldBranch) {
+		t.Fatalf("expected old branch %q to remain after failed idle checkout", oldBranch)
+	}
+}
+
 func testRunGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	fullArgs := append([]string{"-c", "protocol.file.allow=always"}, args...)
@@ -1534,3 +1599,28 @@ func testRunGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+func testCurrentBranch(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "branch", "--show-current")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git branch --show-current in %s: %v\n%s", dir, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func testBranchExists(t *testing.T, dir, branch string) bool {
+	t.Helper()
+	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	cmd.Dir = dir
+	err := cmd.Run()
+	if err == nil {
+		return true
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		return false
+	}
+	t.Fatalf("git show-ref --verify refs/heads/%s in %s: %v", branch, dir, err)
+	return false
+}

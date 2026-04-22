@@ -1113,6 +1113,13 @@ func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
 			wantContains: []string{"copilot", "--yolo", "-i", `"test prompt"`},
 			isClaudeCmd:  false,
 		},
+		{
+			name:         "codex uses positional prompt in interactive mode",
+			rc:           &RuntimeConfig{Command: "codex", Args: []string{"--dangerously-bypass-approvals-and-sandbox"}, PromptMode: "arg"},
+			prompt:       "start working",
+			wantContains: []string{"codex", "--dangerously-bypass-approvals-and-sandbox", `"start working"`},
+			isClaudeCmd:  false,
+		},
 	}
 
 	for _, tt := range tests {

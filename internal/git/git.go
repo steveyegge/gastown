@@ -496,6 +496,16 @@ func (g *Git) CheckoutNewBranch(branch, startPoint string) error {
 	return err
 }
 
+// CheckoutResetBranch force-resets a branch to startPoint and checks it out.
+// Why: persistent polecats live in shared-worktree repos, so "checkout main"
+// can fail when refinery or another worktree already owns the default branch.
+// Reparking onto a unique idle/<polecat> branch needs checkout -B semantics:
+// reuse the same idle branch every time while forcing it to the desired base ref.
+func (g *Git) CheckoutResetBranch(branch, startPoint string) error {
+	_, err := g.run("checkout", "-B", branch, startPoint)
+	return err
+}
+
 // Fetch fetches from the remote.
 func (g *Git) Fetch(remote string) error {
 	_, err := g.run("fetch", remote)

@@ -1262,23 +1262,16 @@ notifyWitness:
 			// Remember the old branch so we can delete it after switching
 			oldBranch := branch
 
-			fmt.Printf("%s Syncing worktree to %s...\n", style.Bold.Render("→"), defaultBranch)
-			if err := g.Checkout(defaultBranch); err != nil {
-				style.PrintWarning("could not checkout %s: %v (worktree stays on feature branch)", defaultBranch, err)
-			} else if err := g.Pull("origin", defaultBranch); err != nil {
-				style.PrintWarning("could not pull %s: %v (worktree on %s but may be stale)", defaultBranch, defaultBranch, err)
+			// Why: persistent polecats share a bare repo with refinery/mayor worktrees,
+			// so the default branch is usually occupied elsewhere. Parking every idle
+			// polecat on main makes checkout fail and leaves the completed task branch
+			// checked out, which is exactly how Jasper got stranded on its old branch.
+			idleBranch := idlePolecatBranchName(polecatName)
+			fmt.Printf("%s Syncing worktree to %s (mirrors %s)...\n", style.Bold.Render("→"), idleBranch, defaultBranch)
+			if syncedBranch, baseRef, err := cleanupPersistentPolecatBranch(g, polecatName, defaultBranch, oldBranch); err != nil {
+				style.PrintWarning("could not sync worktree to %s: %v (worktree stays on %s)", idleBranch, err, oldBranch)
 			} else {
-				fmt.Printf("%s Worktree synced to %s\n", style.Bold.Render("✓"), defaultBranch)
-			}
-
-			// Delete the old polecat branch (non-fatal: cleanup only).
-			// This prevents stale branch accumulation from persistent polecats.
-			if oldBranch != "" && oldBranch != defaultBranch && oldBranch != "master" {
-				if err := g.DeleteBranch(oldBranch, true); err != nil {
-					style.PrintWarning("could not delete old branch %s: %v", oldBranch, err)
-				} else {
-					fmt.Printf("%s Deleted old branch %s\n", style.Bold.Render("✓"), oldBranch)
-				}
+				fmt.Printf("%s Worktree synced to %s from %s\n", style.Bold.Render("✓"), syncedBranch, baseRef)
 			}
 		}
 
@@ -1310,6 +1303,77 @@ notifyWitness:
 	}
 
 	return nil
+}
+
+// idlePolecatBranchName returns the non-conflicting parking branch for an idle polecat.
+// Why: shared-worktree rigs cannot put every polecat back onto the same default branch.
+func idlePolecatBranchName(polecatName string) string {
+	polecatName = strings.TrimSpace(polecatName)
+	if polecatName == "" {
+		return "idle/polecat"
+	}
+	return fmt.Sprintf("idle/%s", polecatName)
+}
+
+// syncPolecatWorktreeToIdleBranch moves a completed polecat worktree onto its
+// reusable idle branch and aligns that branch to the latest known default-branch ref.
+// Why: this keeps the sandbox reusable without fighting other worktrees that already
+// own main, while still preparing reuse from the same clean base as normal dispatch.
+func syncPolecatWorktreeToIdleBranch(g *git.Git, polecatName, defaultBranch string) (idleBranch string, baseRef string, err error) {
+	idleBranch = idlePolecatBranchName(polecatName)
+	baseRef = defaultBranch
+
+	remoteRef := fmt.Sprintf("origin/%s", defaultBranch)
+	fetchErr := g.FetchBranch("origin", defaultBranch)
+
+	// Why: worktree fetches can refresh FETCH_HEAD without updating origin/<branch>.
+	// Prefer the freshest remote-tracking ref, fall back to FETCH_HEAD when that's
+	// all we got, and only then fall back to the local default branch.
+	switch {
+	case refExistsOrFalse(g, remoteRef):
+		baseRef = remoteRef
+	case fetchErr == nil && refExistsOrFalse(g, "FETCH_HEAD"):
+		baseRef = "FETCH_HEAD"
+	case refExistsOrFalse(g, defaultBranch):
+		baseRef = defaultBranch
+	default:
+		return "", "", fmt.Errorf("no usable base ref for idle sync (%s, FETCH_HEAD, or %s)", remoteRef, defaultBranch)
+	}
+
+	if err := g.CheckoutResetBranch(idleBranch, baseRef); err != nil {
+		return "", baseRef, fmt.Errorf("checking out idle branch %s from %s: %w", idleBranch, baseRef, err)
+	}
+	if err := g.ResetHard(baseRef); err != nil {
+		return idleBranch, baseRef, fmt.Errorf("resetting %s to %s: %w", idleBranch, baseRef, err)
+	}
+	if err := g.CleanForce(); err != nil {
+		return idleBranch, baseRef, fmt.Errorf("cleaning %s after reset: %w", idleBranch, err)
+	}
+
+	return idleBranch, baseRef, nil
+}
+
+// cleanupPersistentPolecatBranch performs the DONE→IDLE branch cleanup for a persistent polecat.
+// Why: branch deletion must be gated on a successful move to the idle branch; otherwise
+// git rejects the delete because the completed task branch is still the active worktree branch.
+func cleanupPersistentPolecatBranch(g *git.Git, polecatName, defaultBranch, oldBranch string) (idleBranch string, baseRef string, err error) {
+	idleBranch, baseRef, err = syncPolecatWorktreeToIdleBranch(g, polecatName, defaultBranch)
+	if err != nil {
+		return idleBranch, baseRef, err
+	}
+
+	if oldBranch != "" && oldBranch != idleBranch && oldBranch != defaultBranch && oldBranch != "master" {
+		if err := g.DeleteBranch(oldBranch, true); err != nil {
+			return idleBranch, baseRef, fmt.Errorf("deleting old branch %s: %w", oldBranch, err)
+		}
+	}
+
+	return idleBranch, baseRef, nil
+}
+
+func refExistsOrFalse(g *git.Git, ref string) bool {
+	exists, err := g.RefExists(ref)
+	return err == nil && exists
 }
 
 // pushSubmoduleChanges detects submodules modified between origin/defaultBranch

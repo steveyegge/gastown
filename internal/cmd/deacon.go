@@ -518,6 +518,13 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 
 	// Ensure runtime settings exist (autonomous role needs mail in SessionStart)
 	runtimeConfig := config.ResolveRoleAgentConfig("deacon", townRoot, deaconDir)
+	if agentOverride != "" {
+		overrideConfig, _, err := config.ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
+		if err != nil {
+			return fmt.Errorf("resolving deacon runtime config: %w", err)
+		}
+		runtimeConfig = overrideConfig
+	}
 	if err := runtime.EnsureSettingsForRole(deaconDir, deaconDir, "deacon", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
@@ -570,17 +577,23 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 
 	// Wait for Claude to start
 	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		_ = t.KillSessionWithProcesses(sessionName)
 		return fmt.Errorf("waiting for deacon to start: %w", err)
 	}
 
 	// Accept startup dialogs (workspace trust + bypass permissions) if they appear.
 	_ = t.AcceptStartupDialogs(sessionName)
 
-	time.Sleep(constants.ShutdownNotifyDelay)
+	if err := t.WaitForRuntimeReady(sessionName, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
+		_ = t.KillSessionWithProcesses(sessionName)
+		return fmt.Errorf("waiting for deacon runtime to become ready: %w", err)
+	}
 
-	deaconTownRoot, _ := workspace.FindFromCwdOrError()
-	runtimeCfg := config.ResolveRoleAgentConfig("deacon", deaconTownRoot, "")
-	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeCfg)
+	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeConfig)
+	_ = runtime.DeliverStartupPromptFallback(t, sessionName, initialPrompt, runtimeConfig, constants.ClaudeStartTimeout)
+	_ = runtime.VerifyStartupPromptFallbackDelivery(t, townRoot, sessionName, initialPrompt, runtimeConfig)
+
+	time.Sleep(constants.ShutdownNotifyDelay)
 
 	return nil
 }

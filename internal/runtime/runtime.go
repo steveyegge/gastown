@@ -12,7 +12,6 @@ import (
 	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/hookutil"
 	"github.com/steveyegge/gastown/internal/templates/commands"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // EnsureSettingsForRole provisions all agent-specific configuration for a role.
@@ -61,6 +60,16 @@ type startupPromptSession interface {
 	WaitForRuntimeReady(sessionID string, rc *config.RuntimeConfig, timeout time.Duration) error
 }
 
+type startupFallbackSession interface {
+	NudgeSession(sessionID, message string) error
+}
+
+type startupPromptVerifySession interface {
+	startupFallbackSession
+	HasSession(name string) (bool, error)
+	IsIdle(session string) bool
+}
+
 // SessionIDFromEnv returns the runtime session ID, if present.
 // It checks GT_SESSION_ID_ENV first, then resolves from the current agent's preset,
 // and falls back to CLAUDE_SESSION_ID for backwards compatibility.
@@ -104,13 +113,51 @@ func StartupFallbackCommands(role string, rc *config.RuntimeConfig) []string {
 }
 
 // RunStartupFallback sends the startup fallback commands via tmux.
-func RunStartupFallback(t *tmux.Tmux, sessionID, role string, rc *config.RuntimeConfig) error {
+func RunStartupFallback(t startupFallbackSession, sessionID, role string, rc *config.RuntimeConfig) error {
 	commands := StartupFallbackCommands(role, rc)
 	for _, cmd := range commands {
 		if err := t.NudgeSession(sessionID, cmd); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+// VerifyStartupPromptFallbackDelivery retries the startup prompt when a prompt-less
+// runtime remains idle after bootstrap. This covers the case where the runtime
+// reached its shell prompt, received the fallback nudges, but still dropped back
+// to the generic input prompt instead of entering the GT loop.
+func VerifyStartupPromptFallbackDelivery(
+	t startupPromptVerifySession,
+	townRoot, sessionID, prompt string,
+	rc *config.RuntimeConfig,
+) error {
+	fallback := GetStartupPromptFallback(rc)
+	if !fallback.Send || rc == nil || rc.Tmux == nil || rc.Tmux.ReadyPromptPrefix == "" {
+		return nil
+	}
+
+	sessionCfg := config.LoadOperationalConfig(townRoot).GetSessionConfig()
+	verifyDelay := sessionCfg.StartupNudgeVerifyDelayD()
+	maxRetries := sessionCfg.StartupNudgeMaxRetriesV()
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		time.Sleep(verifyDelay)
+
+		running, err := t.HasSession(sessionID)
+		if err != nil || !running {
+			return nil
+		}
+
+		if !t.IsIdle(sessionID) {
+			return nil
+		}
+
+		if err := t.NudgeSession(sessionID, prompt); err != nil {
+			return fmt.Errorf("retrying startup prompt fallback attempt %d/%d: %w", attempt, maxRetries, err)
+		}
+	}
+
 	return nil
 }
 

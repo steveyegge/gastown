@@ -15,6 +15,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.10.2
+	// Keep gastown aligned with the workspace bd_version so daemon startup
+	// doesn't reject the town for embedding an older Beads release.
 	github.com/steveyegge/beads v1.0.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.41.0

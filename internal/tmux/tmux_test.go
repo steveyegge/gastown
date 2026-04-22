@@ -1381,6 +1381,35 @@ func TestFindAgentPane_MultiPaneWithNode(t *testing.T) {
 	}
 }
 
+func TestResolvePaneTarget_QualifiesPaneID(t *testing.T) {
+	tm := newTestTmux(t)
+	sessionName := "gt-test-resolve-pane-" + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
+
+	_ = tm.KillSession(sessionName)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	paneID, err := tm.GetPaneID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneID: %v", err)
+	}
+
+	target := tm.ResolvePaneTarget(sessionName, paneID)
+	if !strings.HasPrefix(target, sessionName+":") {
+		t.Fatalf("ResolvePaneTarget(%q, %q) = %q, want session-qualified pane target", sessionName, paneID, target)
+	}
+
+	out, err := tm.run("display-message", "-t", target, "-p", "#{pane_id}")
+	if err != nil {
+		t.Fatalf("display-message with resolved target: %v", err)
+	}
+	if strings.TrimSpace(out) != paneID {
+		t.Fatalf("resolved target %q points to pane %q, want %q", target, strings.TrimSpace(out), paneID)
+	}
+}
+
 func TestNudgeLockTimeout(t *testing.T) {
 	// Test that acquireNudgeLock returns false after timeout when lock is held.
 	session := "test-nudge-timeout-session"

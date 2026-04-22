@@ -82,6 +82,8 @@ result
 
 # Gas Town (added by gt)
 __pycache__/
+.runtime/
+CLAUDE.local.md
 
 # Dolt database files (added by bd init)
 .dolt/
@@ -89,10 +91,6 @@ __pycache__/
 
 # Beads / Dolt files (added by bd init)
 .beads-credential-key
-
-# Gas Town (added by gt)
-.runtime/
-CLAUDE.local.md
 
 # Fork research notes (private — not for public upstream)
 docs/fork-info/
