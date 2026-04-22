@@ -218,13 +218,12 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// Don't bail out — try the bd create calls anyway (GH#1769).
 	_ = EnsureCustomTypes(targetDir)
 
-	// For routed cross-rig bead IDs, run bd from the town root so bd's own
-	// prefix router resolves the target once. Running from a rig worktree with
-	// a routed BEADS_DIR can double-stack the path for imported rigs.
+	// For routed cross-rig bead IDs, create in the database selected by the
+	// prefix router. The target must be chosen before buildArgs so the actor
+	// and create subprocess both use the same routed Beads instance.
 	target := b
-	townRoot := b.getTownRoot()
-	if townRoot != "" && ExtractPrefix(id) != "" {
-		target = NewWithBeadsDir(townRoot, filepath.Join(townRoot, ".beads"))
+	if targetDir != b.getResolvedBeadsDir() {
+		target = NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
 	}
 
 	description := FormatAgentDescription(title, fields)
@@ -246,14 +245,6 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 			a = append(a, "--actor="+actor)
 		}
 		return a
-	}
-
-	// Create agent bead in the target database. Use a routed Beads instance
-	// when the bead's prefix routes to a different rig than our own database.
-	// Without this, agent beads for rig polecats (e.g., be-beads-polecat-rust)
-	// would be created in the wrong database, failing type validation.
-	if targetDir != b.getResolvedBeadsDir() {
-		target = NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
 	}
 
 	out, err := target.run(buildArgs()...)
