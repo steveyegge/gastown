@@ -179,6 +179,13 @@ func (m *Manager) Start(agentOverride string) error {
 	// Accept startup dialogs (workspace trust + bypass permissions) if they appear.
 	_ = t.AcceptStartupDialogs(sessionID)
 
+	// Non-hook runtimes (e.g., Codex) don't execute SessionStart hooks and may
+	// ignore CLI startup prompts (prompt_mode=none). Mirror the legacy deacon
+	// startup path by nudging startup fallback commands after session launch.
+	if realTmux, ok := t.(*tmux.Tmux); ok {
+		_ = runtime.RunStartupFallback(realTmux, sessionID, "deacon", runtimeConfig)
+	}
+
 	time.Sleep(constants.ShutdownNotifyDelay)
 
 	return nil

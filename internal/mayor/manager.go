@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/acp"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -159,7 +160,7 @@ func (m *Manager) StartTMUX(agentOverride string) error {
 
 	// Use unified session lifecycle for config → settings → command → create → env → theme → wait.
 	theme := tmux.ResolveSessionTheme(m.townRoot, "", "mayor", "")
-	_, err = session.StartSession(t, session.SessionConfig{
+	startResult, err := session.StartSession(t, session.SessionConfig{
 		SessionID:        sessionID,
 		WorkDir:          mayorDir,
 		Role:             "mayor",
@@ -180,6 +181,9 @@ func (m *Manager) StartTMUX(agentOverride string) error {
 	})
 	if err != nil {
 		return err
+	}
+	if startResult != nil {
+		_ = runtime.RunStartupFallback(t, sessionID, "mayor", startResult.RuntimeConfig)
 	}
 
 	time.Sleep(session.ShutdownDelay())
