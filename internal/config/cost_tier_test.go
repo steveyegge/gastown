@@ -671,6 +671,8 @@ func TestIsValidEffortLevel(t *testing.T) {
 		{"medium", true},
 		{"high", true},
 		{"max", true},
+		{"xhigh", true},
+		{"auto", true},
 		{"", false},
 		{"extreme", false},
 		{"High", false}, // case-sensitive

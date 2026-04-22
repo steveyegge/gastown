@@ -93,7 +93,7 @@ type TownSettings struct {
 
 	// RoleEffort maps role names to effort levels for per-role effort configuration.
 	// Keys are role names: "mayor", "deacon", "witness", "refinery", "polecat", "crew", "boot", "dog".
-	// Values are effort levels: "low", "medium", "high", "max".
+	// Values are effort levels: "low", "medium", "high", "max", "xhigh", "auto".
 	// Allows cost/speed optimization by using lower effort for simpler roles.
 	// Managed by cost-tier presets alongside RoleAgents.
 	RoleEffort map[string]string `json:"role_effort,omitempty"`
@@ -680,8 +680,8 @@ type RigSettings struct {
 
 	// RoleEffort maps role names to effort levels, overriding TownSettings.RoleEffort for this rig.
 	// Keys are role names: "witness", "refinery", "polecat", "crew".
-	// Values are effort levels: "low", "medium", "high", "max".
-	// Example: {"crew": "max", "witness": "low"}
+	// Values are effort levels: "low", "medium", "high", "max", "xhigh", "auto".
+	// Example: {"crew": "xhigh", "witness": "low"}
 	RoleEffort map[string]string `json:"role_effort,omitempty"`
 }
 

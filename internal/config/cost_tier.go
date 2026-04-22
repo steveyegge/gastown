@@ -176,14 +176,20 @@ func CostTierRoleEffort(tier CostTier) map[string]string {
 }
 
 // ValidEffortLevels returns all valid effort level values.
+//
+// "xhigh" and "auto" were added to track Claude Code 2.x's expanded effort
+// axis — xhigh enables extended reasoning budgets on 4.x-class models, and
+// auto lets Claude Code pick adaptively. Gastown only validates the string;
+// whether the running Claude Code binary honors each level is a separate
+// concern (older binaries will ignore unknown levels silently).
 func ValidEffortLevels() []string {
-	return []string{"low", "medium", "high", "max"}
+	return []string{"low", "medium", "high", "max", "xhigh", "auto"}
 }
 
 // IsValidEffortLevel checks if a string is a valid effort level.
 func IsValidEffortLevel(level string) bool {
 	switch level {
-	case "low", "medium", "high", "max":
+	case "low", "medium", "high", "max", "xhigh", "auto":
 		return true
 	default:
 		return false

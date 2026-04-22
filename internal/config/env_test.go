@@ -1329,4 +1329,42 @@ func TestAgentEnv_EffortLevel(t *testing.T) {
 			t.Error("CLAUDE_CODE_EFFORT_LEVEL should always be set")
 		}
 	})
+
+	t.Run("GT_EFFORT overrides default for every role", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE_EFFORT_LEVEL", "")
+		t.Setenv("GT_EFFORT", "xhigh")
+		for _, role := range []string{"crew", "mayor", "witness", "polecat"} {
+			env := AgentEnv(AgentEnvConfig{
+				Role:     role,
+				TownRoot: "/tmp/nonexistent-town",
+			})
+			if got := env["CLAUDE_CODE_EFFORT_LEVEL"]; got != "xhigh" {
+				t.Errorf("role %s: CLAUDE_CODE_EFFORT_LEVEL = %q, want %q", role, got, "xhigh")
+			}
+		}
+	})
+
+	t.Run("GT_EFFORT=auto is accepted", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE_EFFORT_LEVEL", "")
+		t.Setenv("GT_EFFORT", "auto")
+		env := AgentEnv(AgentEnvConfig{
+			Role:     "crew",
+			TownRoot: "/tmp/nonexistent-town",
+		})
+		if got := env["CLAUDE_CODE_EFFORT_LEVEL"]; got != "auto" {
+			t.Errorf("CLAUDE_CODE_EFFORT_LEVEL = %q, want %q", got, "auto")
+		}
+	})
+
+	t.Run("invalid GT_EFFORT falls through to default", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE_EFFORT_LEVEL", "")
+		t.Setenv("GT_EFFORT", "extreme")
+		env := AgentEnv(AgentEnvConfig{
+			Role:     "crew",
+			TownRoot: "/tmp/nonexistent-town",
+		})
+		if got := env["CLAUDE_CODE_EFFORT_LEVEL"]; got != "high" {
+			t.Errorf("CLAUDE_CODE_EFFORT_LEVEL = %q, want %q (invalid GT_EFFORT should be skipped)", got, "high")
+		}
+	})
 }

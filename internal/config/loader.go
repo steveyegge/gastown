@@ -1417,12 +1417,25 @@ func ResolveWorkerAgentConfig(workerName, townRoot, rigPath string) *RuntimeConf
 
 // ResolveRoleEffort resolves the effort level for a role.
 // Resolution order:
-//  1. Rig's RoleEffort[role]
-//  2. Town's RoleEffort[role]
-//  3. Returns "" (caller falls back to env var / default "high")
+//  1. GT_EFFORT env var (session-scoped, set by `gt start --effort`)
+//  2. GT_COST_TIER env var's per-role effort map (session-scoped)
+//  3. Rig's RoleEffort[role]
+//  4. Town's RoleEffort[role]
+//  5. Returns "" (caller falls back to default "high")
 //
 // Invalid effort levels are warned about and skipped.
 func ResolveRoleEffort(role, townRoot, rigPath string) string {
+	// Tier 0: session-ephemeral effort override applied to every role.
+	// Set by `gt start --effort <level>`; takes precedence over tier/rig/town
+	// so operators can push a whole session into xhigh/auto without editing
+	// config. Invalid values are warned and skipped (callers fall through).
+	if effort := os.Getenv("GT_EFFORT"); effort != "" {
+		if IsValidEffortLevel(effort) {
+			return effort
+		}
+		fmt.Fprintf(os.Stderr, "warning: GT_EFFORT=%q is not a valid effort level, ignoring\n", effort)
+	}
+
 	// Tier 1: ephemeral cost tier override (mirrors agent resolution)
 	if tierName := os.Getenv("GT_COST_TIER"); tierName != "" && IsValidTier(tierName) {
 		if roleEffort := CostTierRoleEffort(CostTier(tierName)); roleEffort != nil {
