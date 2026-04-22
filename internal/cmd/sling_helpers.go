@@ -362,9 +362,18 @@ func storeFieldsInBead(beadID string, updates beadFieldUpdates) error {
 		return nil
 	}
 
+	// WithAutoCommit ensures the description (containing attached_molecule,
+	// attached_vars, dispatcher, etc.) is immediately visible to new Dolt
+	// connections — specifically the freshly-spawned polecat whose `gt prime`
+	// reads these fields. Without the explicit commit, the polecat can see
+	// the bead as hooked but without its molecule attachment, producing a
+	// degraded work hand-off. runSling globally sets BD_DOLT_AUTO_COMMIT=off
+	// for manifest-contention avoidance (gt-u6n6a); this call opts back in
+	// because visibility is load-bearing here. See hq-8xl.
 	if err := BdCmd("update", beadID, "--description="+newDesc).
 		Dir(resolveBeadDir(beadID)).
 		StripBeadsDir().
+		WithAutoCommit().
 		Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
 	}
@@ -995,6 +1004,15 @@ func isHookedAgentDead(assignee string) bool {
 // and post-hook verification. This ensures the hook sticks even under Dolt concurrency.
 // Fails fast on configuration/initialization errors (gt-2ra).
 // See: https://github.com/steveyegge/gastown/issues/148
+//
+// The hook write uses .WithAutoCommit() to force an explicit Dolt commit on the
+// status=hooked + assignee write. runSling globally sets BD_DOLT_AUTO_COMMIT=off
+// (gt-u6n6a) to avoid manifest contention under batch load, but the hook write
+// is the one bd write that MUST be immediately visible to new connections —
+// specifically, the freshly-spawned polecat whose `gt prime --hook` queries
+// status=hooked+assignee on a new Dolt session. Without the explicit commit,
+// that query races the write and the polecat exits DEFERRED with an empty hook.
+// See hq-8xl (GH#2389 regressed by PR #2517/dc1d11db).
 func hookBeadWithRetry(beadID, targetAgent, hookDir string) error {
 	const maxRetries = 10
 	const baseBackoff = 500 * time.Millisecond
@@ -1005,6 +1023,7 @@ func hookBeadWithRetry(beadID, targetAgent, hookDir string) error {
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		err := BdCmd("update", beadID, "--status=hooked", "--assignee="+targetAgent).
 			Dir(hookDir).
+			WithAutoCommit().
 			Run()
 		if err != nil {
 			lastErr = err

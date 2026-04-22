@@ -1734,9 +1734,15 @@ exit /b 0
 		if line == "" {
 			continue
 		}
-		// Commands using .WithAutoCommit() (e.g., "update --status=hooked")
-		// legitimately override to "on" for sequential consistency.
+		// Commands using .WithAutoCommit() legitimately override to "on" for
+		// cross-connection visibility to the freshly-spawned polecat:
+		//   - update --status=hooked : sets hook state (hookBeadWithRetry)
+		//   - update --description=  : sets attachment fields (storeFieldsInBead)
+		// See hq-8xl for the regression history.
 		if strings.Contains(line, "update") && strings.Contains(line, "--status=hooked") {
+			continue
+		}
+		if strings.Contains(line, "update") && strings.Contains(line, "--description=") {
 			continue
 		}
 		if !strings.Contains(line, "ENV:BD_DOLT_AUTO_COMMIT=off|") {
