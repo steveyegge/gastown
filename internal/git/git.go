@@ -1471,6 +1471,15 @@ func (g *Git) IsAncestor(ancestor, descendant string) (bool, error) {
 	return true, nil
 }
 
+// Cherry runs `git cherry <upstream> <head>` to list commits on head that are
+// not yet on upstream, comparing by patch-id. Each output line is prefixed with
+// "+ " (patch not on upstream) or "- " (patch already applied upstream, e.g.
+// via squash merge). Used to detect already-merged work that plain ancestor
+// checks miss. See aa-apw.
+func (g *Git) Cherry(upstream, head string) (string, error) {
+	return g.run("cherry", upstream, head)
+}
+
 // WorktreeAdd creates a new worktree at the given path with a new branch.
 // The new branch is created from the current HEAD.
 // Skips LFS smudge filter during checkout (see WorktreeAddFromRef).

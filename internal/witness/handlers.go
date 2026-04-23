@@ -970,6 +970,90 @@ func _verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 	return false, nil
 }
 
+// verifyBranchAlreadyMerged checks whether the polecat's current branch work has
+// already landed on the default branch — including via SQUASH merge, which
+// rewrites commit SHAs and therefore escapes a plain ancestor check.
+//
+// Flow (aa-apw):
+//  1. Fast path: ancestor check via verifyCommitOnMain (catches fast-forward /
+//     regular merges).
+//  2. Patch-id path: `git cherry <remote>/<default> <HEAD>` lines starting with
+//     "-" mean the patch-id is already applied upstream. If every commit the
+//     polecat branch adds on top of origin/main is marked "-", the work is
+//     equivalent to something already merged (e.g., squash-merged). Empty
+//     output is also equivalent — branch has no commits beyond base.
+//
+// Returns:
+//   - true, nil: work on this branch is already on default branch (skip restart,
+//     safe to archive)
+//   - false, nil: work has NOT fully landed — continue with restart
+//   - false, error: couldn't verify — caller should treat as unsafe and restart
+//
+// Package-level var so tests can override.
+var verifyBranchAlreadyMerged = _verifyBranchAlreadyMerged
+
+func _verifyBranchAlreadyMerged(workDir, rigName, polecatName string) (bool, error) {
+	// Fast path: reuse existing ancestor check.
+	if onMain, err := verifyCommitOnMain(workDir, rigName, polecatName); err == nil && onMain {
+		return true, nil
+	}
+
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		return false, fmt.Errorf("finding town root: %v", err)
+	}
+
+	defaultBranch := "main"
+	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, rigName)); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+
+	polecatPath := filepath.Join(townRoot, rigName, "polecats", polecatName, rigName)
+	if _, err := os.Stat(polecatPath); os.IsNotExist(err) {
+		polecatPath = filepath.Join(townRoot, rigName, "polecats", polecatName)
+	}
+
+	g := git.NewGit(polecatPath)
+
+	remotes, err := g.Remotes()
+	if err != nil || len(remotes) == 0 {
+		remotes = []string{"origin"}
+	}
+
+	// git cherry marks each commit that HEAD introduces on top of <upstream>:
+	//   "+ <sha>" — patch-id not present upstream
+	//   "- <sha>" — patch-id already upstream (e.g., squash-merged)
+	// If no "+" lines remain, the work is fully landed.
+	for _, remote := range remotes {
+		upstream := remote + "/" + defaultBranch
+		out, err := g.Cherry(upstream, "HEAD")
+		if err != nil {
+			continue // try next remote
+		}
+		if !cherryHasUnmergedCommits(out) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// cherryHasUnmergedCommits returns true if `git cherry` output contains at least
+// one commit marked with "+" (not yet upstream). Empty output means no commits
+// beyond base — already merged.
+func cherryHasUnmergedCommits(out string) bool {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "+") {
+			return true
+		}
+	}
+	return false
+}
+
 // ZombieClassification categorizes why a polecat was classified as a zombie.
 // These are distinct from AgentState — they describe the zombie detection
 // reason, not the agent's lifecycle state. See gt-tsut.
@@ -1431,6 +1515,20 @@ func isZombieState(agentState beads.AgentState, hookBead string) bool {
 func handleZombieRestart(bd *BdCli, workDir, rigName, polecatName, hookBead, cleanupStatus string, zombie *ZombieResult) {
 	zombie.CleanupStatus = cleanupStatus
 	skipRestart := false
+
+	// aa-apw: If this polecat's branch work is already merged into the default
+	// branch (including via squash merge, which rewrites SHAs and fools a plain
+	// ancestor check), do NOT restart. Restarting would let the polecat push its
+	// pre-squash HEAD and create a duplicate MR for work already in main.
+	// Instead archive the polecat — its work is done.
+	if merged, err := verifyBranchAlreadyMerged(workDir, rigName, polecatName); err == nil && merged {
+		zombie.Action = "archived-work-already-merged (aa-apw)"
+		if nukeErr := NukePolecat(bd, workDir, rigName, polecatName); nukeErr != nil {
+			zombie.Error = fmt.Errorf("archive: %w", nukeErr)
+			zombie.Action = fmt.Sprintf("archive-failed-work-already-merged: %v", nukeErr)
+		}
+		return
+	}
 
 	// Persistence interlock (gt-qnp): check if Mayor ACP session is active before cleanup.
 	townRoot := workDirToTownRoot(workDir)

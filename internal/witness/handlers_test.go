@@ -1913,3 +1913,87 @@ func TestNotifyRefineryMergeReady_EmitsChannelEvent(t *testing.T) {
 		t.Errorf("payload.rig = %v, want dashboard", payload["rig"])
 	}
 }
+
+// TestCherryHasUnmergedCommits covers the git-cherry output parser used by
+// verifyBranchAlreadyMerged (aa-apw).
+func TestCherryHasUnmergedCommits(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"empty output — branch has no commits beyond base", "", false},
+		{"whitespace only", "  \n\n", false},
+		{"all squash-applied (-)", "- abc123\n- def456\n", false},
+		{"one unmerged (+)", "+ abc123\n", true},
+		{"mixed", "- abc123\n+ def456\n", true},
+		{"unmerged only", "+ a\n+ b\n+ c\n", true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := cherryHasUnmergedCommits(tc.in); got != tc.want {
+				t.Errorf("cherryHasUnmergedCommits(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHandleZombieRestart_SkipsWhenBranchAlreadyMerged verifies the aa-apw fix:
+// when a stopped polecat's branch work is already merged to origin/main (e.g.,
+// via squash-merge), the witness must NOT restart the session — restarting
+// would let the polecat re-push its pre-squash HEAD and create a duplicate MR.
+// Instead the polecat is archived.
+//
+// Not parallel: overrides the package-level verifyBranchAlreadyMerged var.
+func TestHandleZombieRestart_SkipsWhenBranchAlreadyMerged(t *testing.T) {
+	oldVerify := verifyBranchAlreadyMerged
+	verifyBranchAlreadyMerged = func(workDir, rigName, polecatName string) (bool, error) {
+		return true, nil
+	}
+	t.Cleanup(func() { verifyBranchAlreadyMerged = oldVerify })
+
+	bd, _ := mockBd(
+		func(args []string) (string, error) { return "[]", nil },
+		func(args []string) error { return nil },
+	)
+
+	z := &ZombieResult{PolecatName: "scavenger", HookBead: "ma-poc.4"}
+	handleZombieRestart(bd, t.TempDir(), "testrig", "scavenger", "ma-poc.4", "has_unpushed", z)
+
+	// Action must reflect the archive decision; must NOT be a "restarted*" action.
+	if !strings.Contains(z.Action, "work-already-merged") {
+		t.Errorf("action = %q, want it to mention work-already-merged (aa-apw)", z.Action)
+	}
+	if strings.HasPrefix(z.Action, "restarted") || strings.HasPrefix(z.Action, "restart-") {
+		t.Errorf("action = %q, polecat must not be restarted when work is already merged", z.Action)
+	}
+}
+
+// TestHandleZombieRestart_RestartsWhenBranchNotMerged verifies the pre-aa-apw
+// behavior is preserved when work is NOT merged: handleZombieRestart proceeds
+// to its normal cleanup/restart flow.
+//
+// Not parallel: overrides the package-level verifyBranchAlreadyMerged var.
+func TestHandleZombieRestart_RestartsWhenBranchNotMerged(t *testing.T) {
+	oldVerify := verifyBranchAlreadyMerged
+	verifyBranchAlreadyMerged = func(workDir, rigName, polecatName string) (bool, error) {
+		return false, nil
+	}
+	t.Cleanup(func() { verifyBranchAlreadyMerged = oldVerify })
+
+	bd, _ := mockBd(
+		func(args []string) (string, error) { return "[]", nil },
+		func(args []string) error { return nil },
+	)
+
+	z := &ZombieResult{PolecatName: "scavenger", HookBead: "ma-poc.4"}
+	handleZombieRestart(bd, t.TempDir(), "testrig", "scavenger", "ma-poc.4", "clean", z)
+
+	// Should NOT take the archive path.
+	if strings.Contains(z.Action, "work-already-merged") {
+		t.Errorf("action = %q, should not archive when work is not merged", z.Action)
+	}
+}
