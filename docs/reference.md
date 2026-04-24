@@ -71,6 +71,8 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
     "lint_command": "",
     "test_command": "",
     "build_command": "",
+    "ci_command": "",
+    "merge_strategy": "local",
     "on_conflict": "assign_back",
     "delete_merged_branches": true,
     "retry_flaky_tests": 1,
@@ -135,6 +137,8 @@ Town-level role defaults live in `mayor/config.json` under:
 | `lint_command` | `string` | `""` | Lint command (e.g., `eslint .`) |
 | `test_command` | `string` | `""` | Test command to run. Empty = skip. |
 | `build_command` | `string` | `""` | Build command (e.g., `go build ./...`) |
+| `ci_command` | `string` | `""` | Local CI gate command. Only active when `merge_strategy=local`. After each local merge, runs this command in the worktree root; exit 0 keeps the merge, non-zero reverts it and marks the MR stuck with stderr in the failure report. Example: `"go test ./..."` or `".gastown/verify.sh"`. |
+| `merge_strategy` | `string` | `"direct"` | How the Refinery lands work: `direct` (git push), `pr` (GitHub PR merge via `gh pr merge`), `local` (local merge + optional `ci_command` gate). |
 | `on_conflict` | `string` | `"assign_back"` | Conflict strategy: `assign_back` or `auto_rebase` |
 | `delete_merged_branches` | `bool` | `true` | Delete source branches after merging |
 | `retry_flaky_tests` | `int` | `1` | Number of times to retry flaky tests |
@@ -146,6 +150,41 @@ Town-level role defaults live in `mayor/config.json` under:
 | `integration_branch_auto_land` | `*bool` | `false` | Refinery patrol auto-lands when all children closed |
 
 See [Integration Branches](concepts/integration-branches.md) for integration branch details.
+
+#### merge_strategy and ci_command
+
+`merge_strategy` controls how the Refinery lands approved work:
+
+| `merge_strategy` | Behavior |
+|------------------|----------|
+| `direct` (default) | Git push directly to the base branch |
+| `pr` | Creates a GitHub PR and uses `gh pr merge`; GitHub CI gates the merge |
+| `local` | Merges locally in the Refinery worktree; optionally runs `ci_command` as a gate |
+
+**Local CI gate** (`merge_strategy=local` + `ci_command`):
+
+| `merge_strategy` | `ci_command` | Result |
+|------------------|--------------|--------|
+| `pr` | any | `ci_command` ignored — GitHub CI gates the merge |
+| `local` | unset | Local merge, no gate (unchanged behavior) |
+| `local` | set | Local merge + `ci_command` runs after each merge; non-zero exit reverts the merge and marks the MR stuck |
+
+Configure via `gt rig settings`:
+
+```bash
+gt rig settings set my-project merge_queue.merge_strategy local
+gt rig settings set my-project merge_queue.ci_command "go test ./..."
+```
+
+For complex verification logic, commit a script and point `ci_command` at it:
+
+```bash
+# Commit .gastown/verify.sh with your verification logic
+gt rig settings set my-project merge_queue.ci_command ".gastown/verify.sh"
+```
+
+The script runs in the worktree root. Exit 0 keeps the merge; any non-zero exit reverts
+it and includes the command's stderr in the MR failure report.
 
 ### Runtime (`.runtime/` - gitignored)
 
