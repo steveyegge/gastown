@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/witness"
 )
 
@@ -45,6 +47,7 @@ func (h *DefaultWitnessHandler) SetOutput(w io.Writer) {
 // 1. Logs the success
 // 2. Notifies the polecat of successful merge
 // 3. Initiates polecat cleanup (nuke worktree)
+// 4. Nudges Mayor for convoy progression
 func (h *DefaultWitnessHandler) HandleMerged(payload *MergedPayload) error {
 	_, _ = fmt.Fprintf(h.Output, "[Witness] MERGED received for polecat %s\n", payload.Polecat)
 	_, _ = fmt.Fprintf(h.Output, "  Branch: %s\n", payload.Branch)
@@ -73,6 +76,11 @@ func (h *DefaultWitnessHandler) HandleMerged(payload *MergedPayload) error {
 	} else {
 		fmt.Fprintf(h.Output, "[Witness] ✓ Polecat %s work merged, cleanup can proceed\n", payload.Polecat)
 	}
+
+	// Nudge Mayor about successful merge so convoy dependencies unblock.
+	// Mirrors the Refinery's own nudge (HandleMRInfoSuccess) — sending from
+	// both paths ensures Mayor is notified even if the Refinery nudge fails.
+	h.nudgeMayorMerged(payload)
 
 	return nil
 }
@@ -256,6 +264,19 @@ Then run 'gt done' to resubmit for merge.`,
 	msg.Type = mail.TypeTask
 
 	return h.Router.Send(msg)
+}
+
+// nudgeMayorMerged sends a best-effort nudge to Mayor after a successful merge.
+// Mayor uses this to unblock convoy dependencies immediately instead of waiting
+// for its next patrol cycle.
+func (h *DefaultWitnessHandler) nudgeMayorMerged(payload *MergedPayload) {
+	nudgeMsg := fmt.Sprintf("MERGED: polecat=%s issue=%s branch=%s", payload.Polecat, payload.Issue, payload.Branch)
+	nudgeCmd := exec.Command("gt", "nudge", "mayor/", nudgeMsg)
+	util.SetDetachedProcessGroup(nudgeCmd)
+	nudgeCmd.Dir = h.WorkDir
+	if err := nudgeCmd.Run(); err != nil {
+		_, _ = fmt.Fprintf(h.Output, "[Witness] Warning: failed to nudge mayor about merge: %v\n", err)
+	}
 }
 
 // Ensure DefaultWitnessHandler implements WitnessHandler.

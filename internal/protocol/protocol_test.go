@@ -645,6 +645,34 @@ func TestDefaultWitnessHandler(t *testing.T) {
 	}
 }
 
+func TestDefaultWitnessHandler_HandleMerged_NotifiesMayor(t *testing.T) {
+	tmpDir := t.TempDir()
+	handler := NewWitnessHandler("gastown", tmpDir)
+
+	var buf bytes.Buffer
+	handler.SetOutput(&buf)
+
+	payload := &MergedPayload{
+		Branch:       "polecat/nux/gt-abc",
+		Issue:        "gt-abc",
+		Polecat:      "nux",
+		Rig:          "gastown",
+		TargetBranch: "main",
+		MergeCommit:  "abc123",
+	}
+	// HandleMerged should attempt to nudge Mayor.
+	// In test environments, 'gt nudge' is not available and will fail, producing
+	// a warning in the output. Either success or a warning proves the attempt.
+	if err := handler.HandleMerged(payload); err != nil {
+		t.Errorf("HandleMerged error: %v", err)
+	}
+	output := buf.String()
+	mayorNotified := strings.Contains(output, "mayor") || strings.Contains(output, "nudge")
+	if !mayorNotified {
+		t.Errorf("HandleMerged output does not reference mayor nudge attempt:\n%s", output)
+	}
+}
+
 // Mock handlers for testing
 
 type mockWitnessHandler struct {
