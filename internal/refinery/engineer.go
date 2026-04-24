@@ -180,6 +180,9 @@ type MergeQueueConfig struct {
 	// MergeStrategy="pr". Valid values: "github" (default), "bitbucket".
 	VCSProvider string `json:"vcs_provider,omitempty"`
 
+	// CICommand is the shell command run as a local CI gate after each local merge.
+	CICommand string
+
 	// RequireReview controls whether the refinery requires at least one approving
 	// review before merging a PR. Only meaningful when MergeStrategy="pr".
 	// Nil defaults to false (no review required).
@@ -365,6 +368,7 @@ func (e *Engineer) LoadConfig() error {
 		MergeStrategy        *string                    `json:"merge_strategy"`
 		VCSProvider          *string                    `json:"vcs_provider"`
 		RequireReview        *bool                      `json:"require_review"`
+		CICommand            *string                    `json:"ci_command"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -451,6 +455,9 @@ func (e *Engineer) LoadConfig() error {
 	}
 	if mqRaw.RequireReview != nil {
 		e.config.RequireReview = mqRaw.RequireReview
+	}
+	if mqRaw.CICommand != nil {
+		e.config.CICommand = *mqRaw.CICommand
 	}
 
 	// Initialize the PR provider when merge_strategy=pr.

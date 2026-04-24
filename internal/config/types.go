@@ -1306,6 +1306,10 @@ type MergeQueueConfig struct {
 	// BuildCommand is the command to run for building (used by formulas).
 	BuildCommand string `json:"build_command,omitempty"`
 
+	// CICommand is the shell command run locally after each local merge as a CI gate.
+	// Active only when merge_strategy=local. Exit 0 keeps the merge; non-zero reverts it.
+	CICommand string `json:"ci_command,omitempty"`
+
 	// SetupCommand is the command to run for project setup (e.g., pnpm install).
 	SetupCommand string `json:"setup_command,omitempty"`
 
