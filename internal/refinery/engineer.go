@@ -508,6 +508,7 @@ type ProcessResult struct {
 	Error          string
 	Conflict       bool
 	TestsFailed    bool
+	CIFailed       bool // ci_command exited non-zero; merge was reverted
 	SlotTimeout    bool // Merge slot contention timeout (distinct from build/test failure)
 	BranchNotFound bool // Source branch no longer exists (e.g. cleaned up after cherry-pick)
 	NoMerge        bool // Source issue has no_merge flag — intentionally blocked, not a failure
@@ -688,6 +689,33 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 			}
 			return postResult
 		}
+	}
+
+	// ci_command gate: run after merge, revert on non-zero exit.
+	// Only active when CICommand is set (no-op when unset, preserving existing behavior).
+	if e.config.CICommand != "" {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Running ci_command: %s\n", e.config.CICommand)
+		ciCmd := exec.Command("sh", "-c", e.config.CICommand)
+		ciCmd.Dir = e.git.WorkDir()
+		var ciStderr bytes.Buffer
+		ciCmd.Stderr = &ciStderr
+		if err := ciCmd.Run(); err != nil {
+			stderrOut := strings.TrimSpace(ciStderr.String())
+			_, _ = fmt.Fprintf(e.output, "[Engineer] ci_command failed: %v\nStderr: %s\n", err, stderrOut)
+			if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to revert merge after ci_command failure: %v\n", resetErr)
+			}
+			errMsg := fmt.Sprintf("ci_command failed: %s", stderrOut)
+			if stderrOut == "" {
+				errMsg = fmt.Sprintf("ci_command exited non-zero: %v", err)
+			}
+			return ProcessResult{
+				Success:  false,
+				CIFailed: true,
+				Error:    errMsg,
+			}
+		}
+		_, _ = fmt.Fprintln(e.output, "[Engineer] ci_command passed")
 	}
 
 	// Step 6: Get the merge commit SHA
