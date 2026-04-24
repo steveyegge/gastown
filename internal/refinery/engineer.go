@@ -1356,6 +1356,12 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 		return
 	}
 
+	// ci_command ran post-merge and failed; the merge was reverted. The polecat
+	// needs to fix whatever the ci_command tests and resubmit.
+	if result.CIFailed {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] MR %s: ci_command failed — notifying polecat and mayor\n", mr.ID)
+	}
+
 	// Nudge polecat directly about the merge failure.
 	// Previously sent MERGE_FAILED mail to witness (which relayed to polecat),
 	// but that created permanent Dolt commits for routine protocol signals.
@@ -1365,6 +1371,8 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 		failureType = "conflict"
 	} else if result.TestsFailed {
 		failureType = "tests"
+	} else if result.CIFailed {
+		failureType = "ci"
 	}
 	polecatName := strings.TrimPrefix(mr.Worker, "polecats/")
 	nudgeTarget := fmt.Sprintf("%s/%s", e.rig.Name, polecatName)

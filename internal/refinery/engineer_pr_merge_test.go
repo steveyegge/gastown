@@ -194,6 +194,46 @@ func TestHandleMRInfoFailure_NeedsApproval_StaysInQueue(t *testing.T) {
 	}
 }
 
+func TestHandleMRInfoFailure_CIFailed_NotifiesPolicatAndMayor(t *testing.T) {
+	// When CIFailed is true, HandleMRInfoFailure should log the CI failure
+	// and proceed to notify both the polecat and mayor with type=ci.
+	// The nudge commands will fail in test environments (gt not available),
+	// but the log message confirms the CI failure path was taken.
+	workDir := t.TempDir()
+	r := &rig.Rig{Name: "test-rig", Path: workDir}
+	e := NewEngineer(r)
+	var buf bytes.Buffer
+	e.output = &buf
+	e.workDir = workDir
+
+	mr := &MRInfo{
+		ID:          "gt-test",
+		Branch:      "polecat/rust/gt-test",
+		Target:      "feature/local-ci-command",
+		SourceIssue: "gt-src",
+		Worker:      "polecats/rust",
+	}
+	result := ProcessResult{
+		Success:  false,
+		CIFailed: true,
+		Error:    "ci_command exited non-zero: exit status 1",
+	}
+
+	e.HandleMRInfoFailure(mr, result)
+
+	output := buf.String()
+	if !strings.Contains(output, "ci_command failed") {
+		t.Errorf("expected ci_command failed message in output, got: %s", output)
+	}
+	// Should NOT hit early-exit paths
+	if strings.Contains(output, "awaiting human approval") {
+		t.Error("CIFailed should not trigger NeedsApproval path")
+	}
+	if strings.Contains(output, "no_merge flag") {
+		t.Error("CIFailed should not trigger NoMerge path")
+	}
+}
+
 func TestDoMergePR_RequireReview_NoApproval(t *testing.T) {
 	// When require_review is true and the PR is not approved,
 	// doMergePR should return NeedsApproval=true.
