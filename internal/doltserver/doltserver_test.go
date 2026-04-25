@@ -3554,6 +3554,29 @@ func TestDefaultConfig_InvalidPortIgnored(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_AutoGCDefault(t *testing.T) {
+	config := DefaultConfig(t.TempDir())
+	if !config.AutoGC {
+		t.Error("AutoGC should default to true")
+	}
+}
+
+func TestDefaultConfig_AutoGCEnvVar(t *testing.T) {
+	t.Setenv("GT_DOLT_AUTO_GC", "false")
+	config := DefaultConfig(t.TempDir())
+	if config.AutoGC {
+		t.Error("AutoGC should be false when GT_DOLT_AUTO_GC=false")
+	}
+}
+
+func TestDefaultConfig_AutoGCInvalidIgnored(t *testing.T) {
+	t.Setenv("GT_DOLT_AUTO_GC", "not-a-bool")
+	config := DefaultConfig(t.TempDir())
+	if !config.AutoGC {
+		t.Error("AutoGC should remain true when GT_DOLT_AUTO_GC is invalid")
+	}
+}
+
 func TestBuildDoltSQLCmd_Local(t *testing.T) {
 	config := &Config{
 		Host:    "",
@@ -3928,6 +3951,7 @@ func TestWriteServerConfig_Defaults(t *testing.T) {
 		ReadTimeoutMs:  DefaultReadTimeoutMs,
 		WriteTimeoutMs: DefaultWriteTimeoutMs,
 		LogLevel:       "warning",
+		AutoGC:         true,
 	}
 
 	if err := writeServerConfig(config, configPath); err != nil {
@@ -3948,6 +3972,7 @@ func TestWriteServerConfig_Defaults(t *testing.T) {
 		"data_dir: \"" + dir + "\"",
 		"log_level: warning",
 		"auto_gc_behavior:",
+		"enable: true",
 	}
 	for _, want := range checks {
 		if !strings.Contains(content, want) {
@@ -4015,6 +4040,26 @@ func TestWriteServerConfig_ZeroTimeoutsOmitted(t *testing.T) {
 	}
 	if strings.Contains(content, "write_timeout_millis") {
 		t.Error("zero WriteTimeoutMs should not write write_timeout_millis")
+	}
+}
+
+func TestWriteServerConfig_AutoGCDisabled(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+
+	config := &Config{
+		Port:    3307,
+		DataDir: dir,
+		AutoGC:  false,
+	}
+	if err := writeServerConfig(config, configPath); err != nil {
+		t.Fatal(err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	content := string(data)
+	if !strings.Contains(content, "enable: false") {
+		t.Errorf("AutoGC=false should produce 'enable: false' in config\nfull content:\n%s", content)
 	}
 }
 
