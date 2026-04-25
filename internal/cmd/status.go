@@ -1545,7 +1545,15 @@ func discoverRigHooks(r *rig.Rig, crews []string, townHookedByAssignee map[strin
 	// BeadsPath() returns r.Path which follows the redirect to the rig's
 	// actual beads database (mayor/rig/.beads when tracked, or local).
 	rigHookedByAssignee := loadHookedByAssignee(beads.New(r.BeadsPath()))
+	return resolveRigHooks(r, crews, rigHookedByAssignee, townHookedByAssignee)
+}
 
+// resolveRigHooks builds the per-agent AgentHookInfo list from already-loaded
+// rig and town hooked-work maps. Pure (no I/O) so it can be unit-tested.
+//
+// Precedence: a rig-local hook for an agent shadows a town-level hook for the
+// same agent address. Agents not in either map produce HasWork=false.
+func resolveRigHooks(r *rig.Rig, crews []string, rigHookedByAssignee, townHookedByAssignee map[string]*beads.Issue) []AgentHookInfo {
 	pickHook := func(addr string) *beads.Issue {
 		if issue, ok := rigHookedByAssignee[addr]; ok {
 			return issue
@@ -1589,25 +1597,32 @@ func discoverRigHooks(r *rig.Rig, crews []string, townHookedByAssignee map[strin
 // Hooked beads (work slung but not yet claimed) take precedence over
 // in_progress beads when an assignee has both.
 func loadHookedByAssignee(b *beads.Beads) map[string]*beads.Issue {
+	hooked, _ := b.List(beads.ListOptions{Status: beads.StatusHooked, Priority: -1})
+	inProgress, _ := b.List(beads.ListOptions{Status: "in_progress", Priority: -1})
+	return mergeHookedByAssignee(hooked, inProgress)
+}
+
+// mergeHookedByAssignee builds the assignee→issue index from the two issue
+// lists loadHookedByAssignee fetches. Hooked beads win over in_progress beads
+// when an assignee has both (work just slung is the most current intent);
+// within either list, the first occurrence wins. Issues with empty assignee
+// are skipped — they belong to nobody and shouldn't surface in gt status.
+func mergeHookedByAssignee(hooked, inProgress []*beads.Issue) map[string]*beads.Issue {
 	result := make(map[string]*beads.Issue)
-	if hooked, err := b.List(beads.ListOptions{Status: beads.StatusHooked, Priority: -1}); err == nil {
-		for _, issue := range hooked {
-			if issue.Assignee == "" {
-				continue
-			}
-			if _, exists := result[issue.Assignee]; !exists {
-				result[issue.Assignee] = issue
-			}
+	for _, issue := range hooked {
+		if issue == nil || issue.Assignee == "" {
+			continue
+		}
+		if _, exists := result[issue.Assignee]; !exists {
+			result[issue.Assignee] = issue
 		}
 	}
-	if inProgress, err := b.List(beads.ListOptions{Status: "in_progress", Priority: -1}); err == nil {
-		for _, issue := range inProgress {
-			if issue.Assignee == "" {
-				continue
-			}
-			if _, exists := result[issue.Assignee]; !exists {
-				result[issue.Assignee] = issue
-			}
+	for _, issue := range inProgress {
+		if issue == nil || issue.Assignee == "" {
+			continue
+		}
+		if _, exists := result[issue.Assignee]; !exists {
+			result[issue.Assignee] = issue
 		}
 	}
 	return result
