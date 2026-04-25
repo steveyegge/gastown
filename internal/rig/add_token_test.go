@@ -94,3 +94,62 @@ func TestRemoveRigPathIfOwned_NoExpectedToken(t *testing.T) {
 		t.Fatalf("expected rig path to be removed, stat err=%v", err)
 	}
 }
+
+// TestRemoveRigPathIfOwned_PathMissing covers the os.ReadDir error path
+// inside removeRigPathIfOwned (rigPath does not exist).
+func TestRemoveRigPathIfOwned_PathMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+
+	// Should not panic; should not create the path.
+	removeRigPathIfOwned(missing, "stale-token")
+
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatalf("expected missing path to remain missing, stat err=%v", err)
+	}
+}
+
+// TestStampAddOwnershipToken_RoundTrip covers the success path: a fresh
+// token is written and round-trips via readAddOwnershipToken.
+func TestStampAddOwnershipToken_RoundTrip(t *testing.T) {
+	rigPath := t.TempDir()
+
+	token, err := stampAddOwnershipToken(rigPath)
+	if err != nil {
+		t.Fatalf("stamp: %v", err)
+	}
+	if token == "" {
+		t.Fatal("token is empty")
+	}
+
+	got := readAddOwnershipToken(rigPath)
+	if got != token {
+		t.Errorf("readAddOwnershipToken = %q, want %q", got, token)
+	}
+}
+
+// TestStampAddOwnershipToken_WriteFailureCleansUp covers the error path
+// where the underlying os.WriteFile call fails (the rigPath's parent does
+// not exist). The helper must surface the error rather than silently
+// returning an empty token.
+func TestStampAddOwnershipToken_WriteFailureCleansUp(t *testing.T) {
+	parent := t.TempDir()
+	bogus := filepath.Join(parent, "missing-parent", "rig")
+
+	token, err := stampAddOwnershipToken(bogus)
+	if err == nil {
+		t.Fatalf("expected error for unwritable rigPath, got token=%q", token)
+	}
+	if token != "" {
+		t.Errorf("token should be empty on error, got %q", token)
+	}
+}
+
+// TestClearAddOwnershipToken_OnAbsentFile covers the error-return path of
+// clearAddOwnershipToken (called best-effort on success in AddRig).
+func TestClearAddOwnershipToken_OnAbsentFile(t *testing.T) {
+	rigPath := t.TempDir()
+
+	if err := clearAddOwnershipToken(rigPath); err == nil {
+		t.Fatal("expected error removing nonexistent token file")
+	}
+}

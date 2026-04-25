@@ -382,14 +382,9 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// from a long-running clone whose parent shell has lost track of it)
 	// cannot delete a later, successful re-add of the same rig name.
 	// See gh#3683.
-	addToken, err := newAddOwnershipToken()
+	addToken, err := stampAddOwnershipToken(rigPath)
 	if err != nil {
-		_ = os.RemoveAll(rigPath)
-		return nil, fmt.Errorf("generating ownership token: %w", err)
-	}
-	if err := writeAddOwnershipToken(rigPath, addToken); err != nil {
-		_ = os.RemoveAll(rigPath)
-		return nil, fmt.Errorf("writing ownership token: %w", err)
+		return nil, err
 	}
 
 	// Track cleanup on failure (best-effort cleanup, ownership-checked).
@@ -912,8 +907,28 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 
 // addOwnershipTokenFile is the per-rig sentinel that proves a `gt rig add`
 // invocation owns the directory. Used to make rollback safe under
-// concurrent/stale invocations — see gh#3683.
+// concurrent/stale invocations — see gh#3683. Despite the name it holds
+// no secret material; it's a random hex marker for ownership.
+//
+//nolint:gosec // G101: filename, not a credential
 const addOwnershipTokenFile = ".gt-add-token"
+
+// stampAddOwnershipToken generates a fresh ownership token and writes it into
+// rigPath. On any failure the (possibly half-stamped) directory is cleaned up
+// so the caller doesn't leak partial state. Returns the token on success so
+// the caller can pass it to removeRigPathIfOwned.
+func stampAddOwnershipToken(rigPath string) (string, error) {
+	token, err := newAddOwnershipToken()
+	if err != nil {
+		_ = os.RemoveAll(rigPath)
+		return "", fmt.Errorf("generating ownership token: %w", err)
+	}
+	if err := writeAddOwnershipToken(rigPath, token); err != nil {
+		_ = os.RemoveAll(rigPath)
+		return "", fmt.Errorf("writing ownership token: %w", err)
+	}
+	return token, nil
+}
 
 // newAddOwnershipToken generates a 16-byte random token, hex-encoded.
 func newAddOwnershipToken() (string, error) {
