@@ -2,6 +2,8 @@ package rig
 
 import (
 	"cmp"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -376,8 +378,22 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("creating rig directory: %w", err)
 	}
 
-	// Track cleanup on failure (best-effort cleanup)
-	cleanup := func() { _ = os.RemoveAll(rigPath) }
+	// Stamp the directory with an ownership token so a stale rollback (e.g.
+	// from a long-running clone whose parent shell has lost track of it)
+	// cannot delete a later, successful re-add of the same rig name.
+	// See gh#3683.
+	addToken, err := newAddOwnershipToken()
+	if err != nil {
+		_ = os.RemoveAll(rigPath)
+		return nil, fmt.Errorf("generating ownership token: %w", err)
+	}
+	if err := writeAddOwnershipToken(rigPath, addToken); err != nil {
+		_ = os.RemoveAll(rigPath)
+		return nil, fmt.Errorf("writing ownership token: %w", err)
+	}
+
+	// Track cleanup on failure (best-effort cleanup, ownership-checked).
+	cleanup := func() { removeRigPathIfOwned(rigPath, addToken) }
 	success := false
 	defer func() {
 		if !success {
@@ -887,7 +903,75 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	}
 
 	success = true
+	// Best-effort: clear the ownership token now that the add has completed
+	// successfully. It's fine if this fails — the token's only purpose is
+	// gating rollback inside this AddRig call.
+	_ = clearAddOwnershipToken(rigPath)
 	return m.loadRig(opts.Name, m.config.Rigs[opts.Name])
+}
+
+// addOwnershipTokenFile is the per-rig sentinel that proves a `gt rig add`
+// invocation owns the directory. Used to make rollback safe under
+// concurrent/stale invocations — see gh#3683.
+const addOwnershipTokenFile = ".gt-add-token"
+
+// newAddOwnershipToken generates a 16-byte random token, hex-encoded.
+func newAddOwnershipToken() (string, error) {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf[:]), nil
+}
+
+func writeAddOwnershipToken(rigPath, token string) error {
+	return os.WriteFile(filepath.Join(rigPath, addOwnershipTokenFile), []byte(token), 0644)
+}
+
+func readAddOwnershipToken(rigPath string) string {
+	data, err := os.ReadFile(filepath.Join(rigPath, addOwnershipTokenFile))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func clearAddOwnershipToken(rigPath string) error {
+	return os.Remove(filepath.Join(rigPath, addOwnershipTokenFile))
+}
+
+// removeRigPathIfOwned cleans up a rig directory, but only if the on-disk
+// ownership token matches `expectedToken`. If the token is missing the
+// directory is removed only when empty; otherwise we log a warning and
+// leave the directory intact so an unrelated successful add isn't deleted.
+func removeRigPathIfOwned(rigPath, expectedToken string) {
+	if expectedToken == "" {
+		// Caller never issued a token (early failure before we wrote one).
+		// Safe to remove since nothing meaningful could have been created.
+		_ = os.RemoveAll(rigPath)
+		return
+	}
+	onDisk := readAddOwnershipToken(rigPath)
+	if onDisk == expectedToken {
+		_ = os.RemoveAll(rigPath)
+		return
+	}
+	if onDisk == "" {
+		// Token file is gone. The directory may have been wiped and
+		// re-populated by another add (which then cleared its own token on
+		// success), or the path may be empty. Only remove when empty.
+		if entries, err := os.ReadDir(rigPath); err == nil && len(entries) == 0 {
+			_ = os.RemoveAll(rigPath)
+			return
+		}
+		fmt.Fprintf(os.Stderr,
+			"  ⚠ Skipping rollback of %s: ownership token missing and directory is non-empty (gh#3683 protection)\n",
+			rigPath)
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"  ⚠ Skipping rollback of %s: another rig add now owns this path (gh#3683 protection)\n",
+		rigPath)
 }
 
 // verifyRigIdentity checks that metadata.json points to the correct Dolt database
