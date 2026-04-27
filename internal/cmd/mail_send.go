@@ -102,6 +102,13 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 	// Set CC recipients
 	msg.CC = mailCC
 
+	// Approval Routing doctrine enforcement (ka-06j.8, 2026-04-27).
+	// Block ratify-class mail with mayor/ in cc; educational error directs
+	// the sender to re-send without mayor cc or add a waiver line in body.
+	if err := validateRatifyCC(mailSubject, mailCC, mailBody); err != nil {
+		return err
+	}
+
 	// Suppress router-side notification when --no-notify is passed.
 	// Otherwise the router handles idle-aware notification per-recipient,
 	// which also works correctly for fan-out (groups, lists, channels).
