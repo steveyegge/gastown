@@ -165,17 +165,31 @@ var costRegex = regexp.MustCompile(`\$(\d+\.\d{2})`)
 
 // TranscriptMessage represents a message from a Claude Code transcript file.
 type TranscriptMessage struct {
-	Type      string                 `json:"type"`
-	SessionID string                 `json:"sessionId"`
-	CWD       string                 `json:"cwd"`
-	Message   *TranscriptMessageBody `json:"message,omitempty"`
+	Type              string                 `json:"type"`
+	SessionID         string                 `json:"sessionId"`
+	CWD               string                 `json:"cwd"`
+	Timestamp         string                 `json:"timestamp,omitempty"`
+	RequestID         string                 `json:"requestId,omitempty"`
+	APIErrorStatus    int                    `json:"apiErrorStatus,omitempty"`
+	IsAPIErrorMessage bool                   `json:"isApiErrorMessage,omitempty"`
+	Message           *TranscriptMessageBody `json:"message,omitempty"`
 }
 
 // TranscriptMessageBody contains the message content and usage info.
 type TranscriptMessageBody struct {
-	Model string          `json:"model"`
-	Role  string          `json:"role"`
-	Usage *TranscriptUsage `json:"usage,omitempty"`
+	Model      string                  `json:"model"`
+	Role       string                  `json:"role"`
+	StopReason string                  `json:"stop_reason,omitempty"`
+	Content    []TranscriptContentItem `json:"content,omitempty"`
+	Usage      *TranscriptUsage        `json:"usage,omitempty"`
+}
+
+// TranscriptContentItem represents one block in an assistant message
+// (type: thinking | tool_use | text). For ka-4nl Phase 0 we read the type
+// only — thinking-block text is server-redacted (signature retained, text
+// empty), so this struct deliberately doesn't try to capture that field.
+type TranscriptContentItem struct {
+	Type string `json:"type"`
 }
 
 // TranscriptUsage contains token usage information.
