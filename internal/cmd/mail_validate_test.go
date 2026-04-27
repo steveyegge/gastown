@@ -305,3 +305,102 @@ func TestBodyHasApprovalRoutingWaiver(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateRecipientAddressFormat covers ka-n85 syntactic pre-flight.
+// Test cases organized as: (1) trigger-evidence cases from the originating
+// incident, (2) the eight valid address shapes the resolver supports,
+// (3) the malformation classes the validator catches.
+func TestValidateRecipientAddressFormat(t *testing.T) {
+	tests := []struct {
+		name      string
+		addr      string
+		wantError bool
+		errSubstr string
+	}{
+		// (1) Trigger evidence — the exact addresses Munger's broadcast hit.
+		{"trigger karuna/fe_crew (underscore)", "karuna/fe_crew", true, "underscore"},
+		{"trigger karuna/ad (syntactically valid; resolver catches semantic miss)", "karuna/ad", false, ""},
+
+		// (2) The eight valid shapes. Pre-flight is permissive on shape so
+		// resolver-known patterns pass through without false positives.
+		{"bare role mayor", "mayor", false, ""},
+		{"bare role with trailing slash", "mayor/", false, ""},
+		{"rig role 2-segment witness", "karuna/witness", false, ""},
+		{"rig role 2-segment refinery", "karuna/refinery", false, ""},
+		{"rig crew 3-segment", "karuna/crew/munger", false, ""},
+		{"rig polecats 3-segment", "gastown/polecats/toast", false, ""},
+		{"channel: prefix", "channel:announce", false, ""},
+		{"queue: prefix", "queue:work", false, ""},
+		{"@town pattern", "@town", false, ""},
+		{"@rig wildcard", "@rig/karuna", false, ""},
+		{"hq-* town-scope id", "hq-mayor", false, ""},
+		{"hyphen-rich crew name", "occultfusion/crew/atlas", false, ""},
+
+		// (3) Malformations the validator must catch.
+		{"underscore in name", "karuna/crew/fe_crew", true, "underscore"},
+		{"uppercase in name", "Karuna/crew/Munger", true, "uppercase"},
+		{"whitespace in name", "karuna/ crew/munger", true, "whitespace"},
+		{"empty segment middle", "karuna//munger", true, "empty segment"},
+		// Trailing slash on multi-segment is tolerated as normalization
+		// (matches resolver's TrimSuffix behavior); the validator is not
+		// the place to reject an address the resolver would normalize.
+		{"trailing-slash on multi-segment is normalization, not error", "karuna/crew/munger/", false, ""},
+		{"4 segments too deep", "karuna/crew/sub/munger", true, "segments"},
+		{"just a slash", "/", true, "just a slash"},
+		{"prefix-only", "channel:", true, "no body"},
+
+		// Edge: empty input is caller's responsibility, not ours. We return
+		// nil so this function isn't the source of "address required" errors.
+		{"empty input no-op", "", false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRecipientAddressFormat(tt.addr)
+			if tt.wantError {
+				if err == nil {
+					t.Fatalf("validateRecipientAddressFormat(%q) returned nil, want error containing %q", tt.addr, tt.errSubstr)
+				}
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Errorf("validateRecipientAddressFormat(%q) error = %q, want substring %q", tt.addr, err.Error(), tt.errSubstr)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("validateRecipientAddressFormat(%q) unexpected error: %v", tt.addr, err)
+				}
+			}
+		})
+	}
+}
+
+// TestValidateRecipientAddressesAggregatesErrors verifies the multi-error
+// path: one bad `to` and one bad cc each surface in the combined error,
+// and the caller can fix both in a single round-trip rather than
+// discovering them one at a time.
+func TestValidateRecipientAddressesAggregatesErrors(t *testing.T) {
+	err := validateRecipientAddresses("karuna/fe_crew", []string{"karuna/crew/munger", "Bad UPPER"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "to:") {
+		t.Errorf("error should label the `to` failure; got: %s", msg)
+	}
+	if !strings.Contains(msg, "cc:") {
+		t.Errorf("error should label the `cc` failure; got: %s", msg)
+	}
+	if !strings.Contains(msg, "underscore") {
+		t.Errorf("error should mention underscore (the `to` failure); got: %s", msg)
+	}
+	if !strings.Contains(msg, "uppercase") {
+		t.Errorf("error should mention uppercase (the `cc` failure); got: %s", msg)
+	}
+}
+
+// TestValidateRecipientAddressesAllValid is the no-op happy path: every
+// address passes pre-flight, validateRecipientAddresses returns nil.
+func TestValidateRecipientAddressesAllValid(t *testing.T) {
+	if err := validateRecipientAddresses("karuna/crew/munger", []string{"mayor/", "occultfusion/witness"}); err != nil {
+		t.Errorf("all-valid input should return nil, got: %v", err)
+	}
+}
