@@ -11,6 +11,13 @@ RIGS_JSON_PATH="${TOWN_ROOT}/mayor/rigs.json"
 
 log() { echo "[stuck-agent-dog] $*"; }
 
+hook_bead_for_agent() {
+  local agent="$1"
+  local output
+  output=$(gt hook show "$agent" 2>/dev/null || true)
+  printf '%s\n' "$output" | awk '/\[hooked\]/{print $2; exit}'
+}
+
 # --- Enumerate agents ---------------------------------------------------------
 
 log "=== Checking agent health ==="
@@ -45,8 +52,7 @@ while IFS='|' read -r RIG PREFIX; do
 
     if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
       # Session dead — check hook
-      HOOK_BEAD=$(gt hook "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
-        | grep -oE 'Hooked: [^ ]+' | head -1 | sed 's/Hooked: //')
+      HOOK_BEAD=$(hook_bead_for_agent "$RIG/polecats/$PCAT_NAME")
 
       if [ -n "$HOOK_BEAD" ]; then
         # Check agent_state
@@ -67,8 +73,7 @@ while IFS='|' read -r RIG PREFIX; do
         PROC_COMM=$(ps -o comm= -p "$PANE_PID" 2>/dev/null)
         if [ -z "$PROC_COMM" ]; then
           # Zombie: process dead, session alive
-          HOOK_BEAD=$(gt hook "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
-            | grep -oE 'Hooked: [^ ]+' | head -1 | sed 's/Hooked: //')
+          HOOK_BEAD=$(hook_bead_for_agent "$RIG/polecats/$PCAT_NAME")
           if [ -n "$HOOK_BEAD" ]; then
             STUCK+=("$SESSION_NAME|$RIG|$PCAT_NAME|$HOOK_BEAD|agent_dead")
             log "  ZOMBIE: $SESSION_NAME (pid=$PANE_PID dead, hook=$HOOK_BEAD)"
