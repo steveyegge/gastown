@@ -120,15 +120,15 @@ type DNDInfo struct {
 
 // AgentRuntime represents the runtime state of an agent.
 type AgentRuntime struct {
-	Name         string `json:"name"`                    // Display name (e.g., "mayor", "witness")
-	Address      string `json:"address"`                 // Full address (e.g., "greenplace/witness")
-	Session      string `json:"session"`                 // tmux session name
-	Role         string `json:"role"`                    // Role type
-	Running      bool   `json:"running"`                 // Is tmux session running?
-	ACP          bool   `json:"acp"`                     // Is ACP session active?
-	HasWork      bool   `json:"has_work"`                // Has pinned work?
-	WorkTitle    string `json:"work_title,omitempty"`    // Title of pinned work
-	HookBead     string `json:"hook_bead,omitempty"`     // Pinned bead ID from agent bead
+	Name              string `json:"name"`                         // Display name (e.g., "mayor", "witness")
+	Address           string `json:"address"`                      // Full address (e.g., "greenplace/witness")
+	Session           string `json:"session"`                      // tmux session name
+	Role              string `json:"role"`                         // Role type
+	Running           bool   `json:"running"`                      // Is tmux session running?
+	ACP               bool   `json:"acp"`                          // Is ACP session active?
+	HasWork           bool   `json:"has_work"`                     // Has pinned work?
+	WorkTitle         string `json:"work_title,omitempty"`         // Title of pinned work
+	HookBead          string `json:"hook_bead,omitempty"`          // Pinned bead ID from agent bead
 	State             string `json:"state,omitempty"`              // Agent state from agent bead
 	NotificationLevel string `json:"notification_level,omitempty"` // Notification level (verbose, normal, muted)
 	UnreadMail        int    `json:"unread_mail"`                  // Number of unread messages
@@ -890,17 +890,6 @@ func gatherStatus() (TownStatus, error) {
 			// independent bd/beads calls.
 			var rigWg sync.WaitGroup
 
-			// Discover hooks for all agents in this rig
-			// In --fast mode, skip expensive handoff bead lookups. Hook info comes from
-			// preloaded agent beads via discoverRigAgents instead.
-			if !statusFast {
-				rigWg.Add(1)
-				go func() {
-					defer rigWg.Done()
-					rs.Hooks = discoverRigHooks(r, rs.Crews)
-				}()
-			}
-
 			// Get MQ summary if rig has a refinery
 			// Skip in --fast mode to avoid expensive bd queries
 			if !statusFast {
@@ -920,6 +909,13 @@ func gatherStatus() (TownStatus, error) {
 			}()
 
 			rigWg.Wait()
+
+			// Hook data is already preloaded from agent beads above. Avoid a
+			// second rig-level handoff scan here; status rendering only needs
+			// the active hook ID/title per agent.
+			if !statusFast {
+				rs.Hooks = hooksFromAgentRuntime(rs.Agents)
+			}
 
 			activeHooks := 0
 			for _, hook := range rs.Hooks {
@@ -966,6 +962,23 @@ func gatherStatus() (TownStatus, error) {
 	status.Summary.RigCount = len(rigs)
 
 	return status, nil
+}
+
+func hooksFromAgentRuntime(agents []AgentRuntime) []AgentHookInfo {
+	hooks := make([]AgentHookInfo, 0, len(agents))
+	for _, agent := range agents {
+		hook := AgentHookInfo{
+			Agent: agent.Address,
+			Role:  agent.Role,
+		}
+		if agent.HookBead != "" || agent.WorkTitle != "" {
+			hook.HasWork = true
+			hook.Molecule = agent.HookBead
+			hook.Title = agent.WorkTitle
+		}
+		hooks = append(hooks, hook)
+	}
+	return hooks
 }
 
 func outputStatusJSON(status TownStatus) error {
