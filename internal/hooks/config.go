@@ -220,7 +220,7 @@ func DefaultOverrides() map[string]*HooksConfig {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: hookChain(pathSetup, "gt tap polecat-stop-check"),
+							Command: fmt.Sprintf("%s && gt tap polecat-stop-check; gt costs record &", pathSetup),
 						},
 					},
 				},

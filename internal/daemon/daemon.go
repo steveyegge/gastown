@@ -25,6 +25,7 @@ import (
 	"github.com/steveyegge/gastown/internal/boot"
 	agentconfig "github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/doltserver"
@@ -829,6 +830,14 @@ func (d *Daemon) heartbeat(state *State) {
 		d.logger.Printf("Refinery patrol disabled in config, skipping")
 		// Kill leftover refinery sessions from before patrol was disabled. (hq-2mstj)
 		d.killRefinerySessions()
+	}
+
+	// 5.5. Ensure crew sessions are running for rigs with crew.startup configured.
+	// Opt-in via daemon.json: patrols.crew.enabled = true.
+	// Uses rig settings (settings/config.json crew.startup) to determine which
+	// crew members to auto-start. Replaces standalone launchd crew launchers.
+	if IsPatrolEnabled(d.patrolConfig, constants.RoleCrew) {
+		d.ensureCrewRunning()
 	}
 
 	// 6. Ensure Mayor is running (restart if dead)
@@ -1729,6 +1738,71 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	d.metrics.recordRestart(d.ctx, "refinery")
 	telemetry.RecordDaemonRestart(d.ctx, "refinery-"+rigName)
 	d.logger.Printf("Refinery session for %s started successfully", rigName)
+}
+
+// ensureCrewRunning ensures crew sessions are running for rigs with crew.startup configured.
+// Reads each rig's settings/config.json for the crew.startup preference and starts
+// dead sessions. This replaces standalone launchd crew launcher services.
+func (d *Daemon) ensureCrewRunning() {
+	rigs := d.getPatrolRigs(constants.RoleCrew)
+	for _, rigName := range rigs {
+		d.ensureCrewRunningForRig(rigName)
+	}
+}
+
+// ensureCrewRunningForRig ensures crew sessions for a specific rig are running.
+func (d *Daemon) ensureCrewRunningForRig(rigName string) {
+	if operational, reason := d.isRigOperational(rigName); !operational {
+		d.logger.Printf("Skipping crew auto-start for %s: %s", rigName, reason)
+		return
+	}
+
+	rigPath := filepath.Join(d.config.TownRoot, rigName)
+
+	// Load rig settings to check crew.startup preference
+	settingsPath := filepath.Join(rigPath, "settings", "config.json")
+	settings, err := agentconfig.LoadRigSettings(settingsPath)
+	if err != nil || settings.Crew == nil || settings.Crew.Startup == "" {
+		return // No crew startup configured for this rig
+	}
+
+	r := &rig.Rig{
+		Name: rigName,
+		Path: rigPath,
+	}
+	g := gitpkg.NewGit(rigPath)
+	crewMgr := crew.NewManager(r, g)
+
+	workers, err := crewMgr.List()
+	if err != nil || len(workers) == 0 {
+		return
+	}
+
+	// Extract available names
+	available := make([]string, len(workers))
+	for i, w := range workers {
+		available[i] = w.Name
+	}
+
+	// Determine which crew to start
+	toStart := crew.ParseStartupPreference(settings.Crew.Startup, available)
+	if len(toStart) == 0 {
+		return
+	}
+
+	for _, name := range toStart {
+		if err := crewMgr.Start(name, crew.StartOptions{}); err != nil {
+			if errors.Is(err, crew.ErrSessionRunning) {
+				// Already running — expected case on heartbeat
+				continue
+			}
+			d.logger.Printf("Error starting crew %s/%s: %v", rigName, name, err)
+			continue
+		}
+		d.metrics.recordRestart(d.ctx, "crew")
+		telemetry.RecordDaemonRestart(d.ctx, "crew-"+rigName+"-"+name)
+		d.logger.Printf("Crew session %s/%s started successfully", rigName, name)
+	}
 }
 
 // ensureMayorRunning ensures the Mayor is running.

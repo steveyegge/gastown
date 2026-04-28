@@ -919,6 +919,20 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			}
 		}
 
+		// GH#hq-3r2lb: Guard against creating MR for an already-closed bead.
+		// When an idle polecat is recycled via gt sling --force, its old session
+		// may still be alive and run gt done for the previous (already merged) bead,
+		// generating a spurious duplicate MR that the Refinery correctly rejects.
+		// Only check when sourceIssueForNoMerge is available (bd.Show succeeded earlier).
+		if sourceIssueForNoMerge != nil &&
+			(sourceIssueForNoMerge.Status == "closed" || sourceIssueForNoMerge.Status == "tombstone") {
+			mrFailed = true
+			errMsg := fmt.Sprintf("source bead %s is already %s — skipping MR creation", issueID, sourceIssueForNoMerge.Status)
+			doneErrors = append(doneErrors, errMsg)
+			style.PrintWarning("%s\nThis may indicate a stale session from a recycled polecat.", errMsg)
+			goto notifyWitness
+		}
+
 		// Determine target branch for the MR.
 		// Priority: explicit --target flag > formula_vars base_branch > integration branch auto-detect > rig default.
 		target := defaultBranch
@@ -1063,7 +1077,6 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				Priority:    priority,
 				Description: description,
 				Ephemeral:   true,
-				Rig:         rigName, // Ensure MR bead is created in the rig's database (gt-7y7)
 			})
 			if err != nil {
 				// Non-fatal: record the error and skip to notifyWitness.

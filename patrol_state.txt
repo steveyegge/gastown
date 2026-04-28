@@ -1,0 +1,36 @@
+Patrol 198 Status
+================
+Timestamp: 2026-03-28T10:30:00Z
+Status: COMPLETE
+Steps Executed: 25/26 (costs-digest disabled per formula)
+
+Health Summary:
+- Heartbeat: ✓ refreshed (2x)
+- Dolt server: ✓ operational (port 3307, PID 21606)
+- Rig health: ✓ operational (3 rigs)
+- Dog pool: ✓ 3 workers available
+- Zombie detection: ✓ 0 detected
+- Orphaned processes: 108 claude processes active (expected)
+- Test pollution: ✓ clean
+- Active gates: 1 (monitored)
+- Ready issues: 24
+- Blocked issues: 0
+- Inbox messages: 3 (to be processed)
+
+Infrastructure:
+- No abandoned work detected
+- No stuck dogs detected  
+- No cleanup needs detected
+- Wisps compacted: 0 expired
+- Notifications fired: 0
+
+Version Status:
+- gt: v0.10.0-8-g57e0db03 (dev)
+- bd: 0.62.0
+- Workaround: Manual patrol execution due to --allow-stale flag incompatibility
+- Recommendation: Rebuild gt or update bd for full automation
+
+Next Steps:
+- Exit patrol (respawn from daemon)
+- Process 3 inbox messages
+- Monitor for escalations

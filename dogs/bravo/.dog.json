@@ -1,0 +1,12 @@
+{
+  "name": "bravo",
+  "state": "idle",
+  "last_active": "2026-04-21T14:01:50.802996-03:00",
+  "work_started_at": "0001-01-01T00:00:00Z",
+  "worktrees": {
+    "gastown": "/Users/athos/gt/deacon/dogs/bravo/gastown",
+    "whatsapp_automation": "/Users/athos/gt/deacon/dogs/bravo/whatsapp_automation"
+  },
+  "created_at": "2026-04-13T00:49:00-03:00",
+  "updated_at": "2026-04-21T14:01:50.802996-03:00"
+}

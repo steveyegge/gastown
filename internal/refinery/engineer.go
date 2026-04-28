@@ -1489,7 +1489,6 @@ The Refinery will automatically retry the merge after you force-push.`,
 		Priority:    mr.Priority,
 		Description: description,
 		Actor:       e.rig.Name + "/refinery",
-		Rig:         e.rig.Name, // Ensure task lands in the rig's database (gt-7y7)
 	})
 	if err != nil {
 		releaseSlotOnError()

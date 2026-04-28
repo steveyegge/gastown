@@ -267,6 +267,26 @@ func (d *Daemon) dispatchPlugins(mgr *dog.Manager, sm *dog.SessionManager, rigsC
 			return
 		}
 
+		// Pre-flight: kill any orphaned session from a previous job.
+		// When a dog calls `gt dog done`, its state is set to idle and the
+		// tmux session is scheduled to be killed after 3 seconds. If that
+		// scheduled kill fails (e.g., tmux returns an error or Claude survives
+		// the kill), the dog ends up idle but with a live session. Every
+		// subsequent dispatch cycle would then: assign work → send mail →
+		// call sm.Start() → fail ("session already running") → roll back work
+		// assignment but NOT the mail. After N cycles, the dog's inbox has N
+		// duplicate plugin mails with no session to process them.
+		//
+		// Killing the orphaned session here, before assigning work or sending
+		// mail, breaks the accumulation loop.
+		if running, checkErr := sm.IsRunning(idleDog.Name); checkErr == nil && running {
+			d.logger.Printf("Handler: dog %s is idle but has a live session (orphaned) — killing before dispatch", idleDog.Name)
+			if stopErr := sm.Stop(idleDog.Name, true); stopErr != nil {
+				d.logger.Printf("Handler: failed to kill orphaned session for dog %s, deferring dispatch: %v", idleDog.Name, stopErr)
+				continue
+			}
+		}
+
 		// Assign work and start session.
 		workDesc := fmt.Sprintf("plugin:%s", p.Name)
 		if err := mgr.AssignWork(idleDog.Name, workDesc); err != nil {

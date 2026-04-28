@@ -116,10 +116,11 @@ for DB in "${PROD_DBS[@]}"; do
 done
 
 # Prune old exports (keep last 24 snapshots per DB)
+# Portable: use ls + tail instead of mapfile (bash 4+ only)
 for DB in "${PROD_DBS[@]}"; do
-  SNAPSHOTS=$(ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null | tail -n +25)
-  if [[ -n "$SNAPSHOTS" ]]; then
-    echo "$SNAPSHOTS" | xargs rm -f
+  SNAP_COUNT=$(ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null | wc -l | tr -d ' ')
+  if (( SNAP_COUNT > 24 )); then
+    ls -t "$JSONL_EXPORT_DIR/${DB}-2"*.jsonl 2>/dev/null | tail -n +"$((24 + 1))" | xargs rm -f
     log "Pruned old $DB snapshots"
   fi
 done

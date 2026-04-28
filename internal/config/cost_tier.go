@@ -176,14 +176,15 @@ func CostTierRoleEffort(tier CostTier) map[string]string {
 }
 
 // ValidEffortLevels returns all valid effort level values.
+// "xhigh" enables extended thinking on Opus 4.7; on other models it falls back to "high".
 func ValidEffortLevels() []string {
-	return []string{"low", "medium", "high", "max"}
+	return []string{"low", "medium", "high", "xhigh", "max"}
 }
 
 // IsValidEffortLevel checks if a string is a valid effort level.
 func IsValidEffortLevel(level string) bool {
 	switch level {
-	case "low", "medium", "high", "max":
+	case "low", "medium", "high", "xhigh", "max":
 		return true
 	default:
 		return false

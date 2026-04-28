@@ -271,5 +271,16 @@ func resolveTarget(target string, opts ResolveTargetOptions) (*ResolvedTarget, e
 	result.Agent = agentID
 	result.Pane = pane
 	result.WorkDir = workDir
+
+	// Detect effective self-sling: agent names itself by role (e.g., "deacon" from
+	// within the deacon session) rather than using "." or empty target.
+	// Without this, sling nudges the agent's own pane while a Bash tool is running,
+	// causing Claude Code to show "Interrupted" for the in-flight tool. (hq-cbgti)
+	if currentSession := os.Getenv("GT_SESSION"); currentSession != "" {
+		if resolvedSession, sErr := resolveRoleToSession(target); sErr == nil && resolvedSession == currentSession {
+			result.IsSelfSling = true
+		}
+	}
+
 	return result, nil
 }

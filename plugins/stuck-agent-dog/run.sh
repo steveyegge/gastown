@@ -45,8 +45,8 @@ while IFS='|' read -r RIG PREFIX; do
 
     if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
       # Session dead — check hook
-      HOOK_BEAD=$(gt hook "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
-        | grep -oE 'Hooked: [^ ]+' | head -1 | sed 's/Hooked: //')
+      HOOK_BEAD=$(gt hook show "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
+        | awk '{print $2}' | grep -v '(empty)' | head -1 || true)
 
       if [ -n "$HOOK_BEAD" ]; then
         # Check agent_state
@@ -67,8 +67,8 @@ while IFS='|' read -r RIG PREFIX; do
         PROC_COMM=$(ps -o comm= -p "$PANE_PID" 2>/dev/null)
         if [ -z "$PROC_COMM" ]; then
           # Zombie: process dead, session alive
-          HOOK_BEAD=$(gt hook "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
-            | grep -oE 'Hooked: [^ ]+' | head -1 | sed 's/Hooked: //')
+          HOOK_BEAD=$(gt hook show "$RIG/polecats/$PCAT_NAME" 2>/dev/null \
+            | awk '{print $2}' | grep -v '(empty)' | head -1 || true)
           if [ -n "$HOOK_BEAD" ]; then
             STUCK+=("$SESSION_NAME|$RIG|$PCAT_NAME|$HOOK_BEAD|agent_dead")
             log "  ZOMBIE: $SESSION_NAME (pid=$PANE_PID dead, hook=$HOOK_BEAD)"
@@ -114,8 +114,67 @@ else
     HEARTBEAT_AGE=$(( NOW - HEARTBEAT_TIME ))
 
     if [ "$HEARTBEAT_AGE" -gt 1200 ]; then
-      log "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, >20m threshold)"
-      DEACON_ISSUE="stuck_heartbeat_${HEARTBEAT_AGE}s"
+      # Heartbeat is stale (>20m). Use two signals to avoid false positives:
+      #
+      # Signal 1 — heartbeat state field (gt deacon heartbeat --state=idle):
+      #   state=idle means the Deacon wrote an explicit idle marker before entering
+      #   await-signal. A stale idle heartbeat is expected during patrol sleep.
+      #   Apply a 2h threshold instead of 20m for idle state.
+      #
+      # Signal 2 — bead.updated_at (from main's fix):
+      #   await-signal updates the bead's updated_at on each timeout/signal even
+      #   when heartbeat.json is not refreshed. If the bead was recently updated
+      #   AND the process is alive, the Deacon is idle between cycles, not stuck.
+      #   Used as a final arbiter when the state-based threshold is exceeded.
+      #
+      # Only escalate if ALL evidence points to stuck: both heartbeat AND bead
+      # are stale (or the process is dead).
+
+      HEARTBEAT_STATE=$(python3 -c "
+import json, sys
+try:
+    with open('$HEARTBEAT_FILE') as f:
+        d = json.load(f)
+    print(d.get('state', 'working'))
+except Exception:
+    print('unknown')
+" 2>/dev/null || echo "unknown")
+
+      # State-based threshold: 2h for idle (intentional sleep), 1h for working/unknown.
+      # The working threshold was 20m but the deacon patrol formula doesn't reliably
+      # write state=idle before await-signal (depends on deacon Claude agent behavior),
+      # so stateless heartbeats during legitimate patrol sleep kept triggering false
+      # positives every ~25m. 1h is still tight enough to catch a genuinely stuck deacon.
+      STUCK_THRESHOLD=3600
+      if [ "$HEARTBEAT_STATE" = "idle" ]; then
+        STUCK_THRESHOLD=7200
+      fi
+
+      if [ "$HEARTBEAT_AGE" -gt "$STUCK_THRESHOLD" ]; then
+        # Exceeded state-based threshold — check bead activity as final arbiter
+        BEAD_UPDATED_AT=$(bd show hq-deacon --json 2>/dev/null \
+          | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('updated_at',''))" 2>/dev/null || echo "")
+        BEAD_AGE=99999
+        if [ -n "$BEAD_UPDATED_AT" ]; then
+          BEAD_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$BEAD_UPDATED_AT" +%s 2>/dev/null \
+            || date -d "$BEAD_UPDATED_AT" +%s 2>/dev/null || echo 0)
+          if [ "$BEAD_EPOCH" -gt 0 ]; then
+            BEAD_AGE=$(( NOW - BEAD_EPOCH ))
+          fi
+        fi
+
+        if [ -z "$DEACON_COMM" ] || [ "$BEAD_AGE" -gt 1200 ]; then
+          # Process dead OR both heartbeat and bead are stale → genuinely stuck
+          log "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, state=$HEARTBEAT_STATE, bead_age=${BEAD_AGE}s)"
+          DEACON_ISSUE="stuck_heartbeat_${HEARTBEAT_AGE}s"
+        else
+          # Process alive and bead fresh → idle between cycles, not stuck
+          log "  OK (idle): Deacon heartbeat stale (${HEARTBEAT_AGE}s, state=$HEARTBEAT_STATE) but bead updated ${BEAD_AGE}s ago — legitimately idle"
+        fi
+      else
+        # Within state-based threshold (e.g., state=idle, <2h)
+        log "  OK (${HEARTBEAT_STATE}): Deacon heartbeat ${HEARTBEAT_AGE}s old, within ${STUCK_THRESHOLD}s threshold"
+      fi
     else
       log "  OK: Deacon heartbeat ${HEARTBEAT_AGE}s old"
     fi

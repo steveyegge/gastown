@@ -5,6 +5,17 @@ import (
 	"time"
 )
 
+// newTestSession creates a tmux session using bash --norc --noprofile to avoid
+// loading .zshrc, which can take 4-6s on this system and defeats early-exit timing tests.
+// bash shows a prompt immediately (bash-3.2$ ends with "$"), so containsPromptIndicator
+// can detect it on the first poll and exit well within timing thresholds.
+func newTestSession(t *testing.T, tm *Tmux, name string) {
+	t.Helper()
+	if err := tm.NewSessionWithCommand(name, "", "bash --norc --noprofile"); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+}
+
 // TestAcceptWorkspaceTrustDialog_NoDialog verifies that when no trust dialog
 // is present (agent prompt visible), the function returns quickly without error.
 func TestAcceptWorkspaceTrustDialog_NoDialog(t *testing.T) {
@@ -12,9 +23,7 @@ func TestAcceptWorkspaceTrustDialog_NoDialog(t *testing.T) {
 	sessionName := "gt-test-trust-nodlg-" + t.Name()
 
 	_ = tm.KillSession(sessionName)
-	if err := tm.NewSession(sessionName, ""); err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	newTestSession(t, tm, sessionName)
 	defer func() { _ = tm.KillSession(sessionName) }()
 
 	// Session starts with a shell prompt containing ">", "$", or "%"
@@ -40,9 +49,7 @@ func TestAcceptWorkspaceTrustDialog_DetectsDialog(t *testing.T) {
 	sessionName := "gt-test-trust-dlg-" + t.Name()
 
 	_ = tm.KillSession(sessionName)
-	if err := tm.NewSession(sessionName, ""); err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	newTestSession(t, tm, sessionName)
 	defer func() { _ = tm.KillSession(sessionName) }()
 
 	// Simulate the trust dialog by echoing its text into the pane
@@ -68,9 +75,7 @@ func TestAcceptWorkspaceTrustDialog_DetectsCodexDialog(t *testing.T) {
 	sessionName := "gt-test-trust-codex-" + t.Name()
 
 	_ = tm.KillSession(sessionName)
-	if err := tm.NewSession(sessionName, ""); err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	newTestSession(t, tm, sessionName)
 	defer func() { _ = tm.KillSession(sessionName) }()
 
 	if err := tm.SendKeys(sessionName, "echo '> You are in /tmp/demo'; echo 'Do you trust the contents of this directory?'"); err != nil {
@@ -90,9 +95,7 @@ func TestAcceptBypassPermissionsWarning_NoDialog(t *testing.T) {
 	sessionName := "gt-test-bypass-nodlg-" + t.Name()
 
 	_ = tm.KillSession(sessionName)
-	if err := tm.NewSession(sessionName, ""); err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	newTestSession(t, tm, sessionName)
 	defer func() { _ = tm.KillSession(sessionName) }()
 
 	start := time.Now()
@@ -115,9 +118,7 @@ func TestAcceptBypassPermissionsWarning_DetectsDialog(t *testing.T) {
 	sessionName := "gt-test-bypass-dlg-" + t.Name()
 
 	_ = tm.KillSession(sessionName)
-	if err := tm.NewSession(sessionName, ""); err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	newTestSession(t, tm, sessionName)
 	defer func() { _ = tm.KillSession(sessionName) }()
 
 	// Simulate the bypass permissions dialog
@@ -139,9 +140,7 @@ func TestAcceptStartupDialogs_NoDialogs(t *testing.T) {
 	sessionName := "gt-test-startup-nodlg-" + t.Name()
 
 	_ = tm.KillSession(sessionName)
-	if err := tm.NewSession(sessionName, ""); err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	newTestSession(t, tm, sessionName)
 	defer func() { _ = tm.KillSession(sessionName) }()
 
 	start := time.Now()
@@ -230,9 +229,7 @@ func TestDismissStartupDialogsBlind_SendsKeys(t *testing.T) {
 	sessionName := "gt-test-blind-dismiss-" + t.Name()
 
 	_ = tm.KillSession(sessionName)
-	if err := tm.NewSession(sessionName, ""); err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	newTestSession(t, tm, sessionName)
 	defer func() { _ = tm.KillSession(sessionName) }()
 
 	// Should complete quickly — no polling, no CapturePane

@@ -186,7 +186,18 @@ if ! tmux has-session -t "$DEACON_SESSION" 2>/dev/null; then
   echo "  CRASHED: Deacon session is dead"
   DEACON_ISSUE="crashed"
 else
-  # Check deacon heartbeat file
+  # Check deacon heartbeat file.
+  # heartbeat.json is the canonical file written by `gt deacon heartbeat` on every
+  # patrol cycle (start + pre-await-signal checkpoint). .deacon-heartbeat is also kept
+  # in sync by WriteHeartbeat() for backward compatibility. Prefer heartbeat.json here
+  # as it is always written by the Go implementation.
+  #
+  # Threshold: 1200s (20m). The daemon nudges at 5-20m staleness.
+  # stuck-agent-dog fires at 20m, but ALSO checks the deacon bead's updated_at to
+  # distinguish legitimate idle (awaiting signal) from genuine stuck behavior.
+  # The deacon bead is updated by await-signal on each timeout/signal event. If the
+  # bead was updated recently but the heartbeat file is stale, the deacon is idle
+  # (legitimately waiting) — do NOT escalate. Only escalate if BOTH are stale.
   HEARTBEAT_FILE="$TOWN_ROOT/deacon/heartbeat.json"
   if [ -f "$HEARTBEAT_FILE" ]; then
     HEARTBEAT_TIME=$(jq -r '(.timestamp // empty) | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601? // empty' "$HEARTBEAT_FILE" 2>/dev/null)
@@ -194,11 +205,24 @@ else
       NOW=$(date +%s)
       HEARTBEAT_AGE=$(( NOW - HEARTBEAT_TIME ))
 
-      if [ "$HEARTBEAT_AGE" -gt 900 ]; then
-        echo "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old, >15m threshold)"
+    if [ "$HEARTBEAT_AGE" -gt 1200 ]; then
+      # Check deacon bead last_activity as second signal before escalating.
+      BEAD_UPDATED_AT=$(bd show hq-deacon --json 2>/dev/null \
+        | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('updated_at',''))" 2>/dev/null || echo "")
+      BEAD_AGE=99999
+      if [ -n "$BEAD_UPDATED_AT" ]; then
+        BEAD_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$BEAD_UPDATED_AT" +%s 2>/dev/null \
+          || date -d "$BEAD_UPDATED_AT" +%s 2>/dev/null || echo 0)
+        if [ "$BEAD_EPOCH" -gt 0 ]; then
+          BEAD_AGE=$(( NOW - BEAD_EPOCH ))
+        fi
+      fi
+
+      if [ "$BEAD_AGE" -gt 1200 ]; then
+        echo "  STUCK: Deacon heartbeat stale (${HEARTBEAT_AGE}s old) and bead also stale (${BEAD_AGE}s old)"
         DEACON_ISSUE="stuck_heartbeat_${HEARTBEAT_AGE}s"
       else
-        echo "  OK: Deacon heartbeat ${HEARTBEAT_AGE}s old"
+        echo "  OK (idle): heartbeat stale (${HEARTBEAT_AGE}s) but bead updated ${BEAD_AGE}s ago — deacon idle between cycles"
       fi
     else
       echo "  WARN: Could not parse heartbeat timestamp from $HEARTBEAT_FILE"

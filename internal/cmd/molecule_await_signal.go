@@ -14,18 +14,20 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var (
-	awaitSignalTimeout     string
-	awaitSignalBackoffBase string
-	awaitSignalBackoffMult int
-	awaitSignalBackoffMax  string
-	awaitSignalQuiet       bool
-	awaitSignalAgentBead   string
+	awaitSignalTimeout          string
+	awaitSignalBackoffBase      string
+	awaitSignalBackoffMult      int
+	awaitSignalBackoffMax       string
+	awaitSignalQuiet            bool
+	awaitSignalAgentBead        string
+	awaitSignalDeaconHeartbeat  bool
 )
 
 var moleculeAwaitSignalCmd = &cobra.Command{
@@ -109,6 +111,8 @@ func init() {
 		"Suppress output (for scripting)")
 	moleculeAwaitSignalCmd.Flags().BoolVar(&moleculeJSON, "json", false,
 		"Output as JSON")
+	moleculeAwaitSignalCmd.Flags().BoolVar(&awaitSignalDeaconHeartbeat, "deacon-heartbeat", false,
+		"Touch the deacon heartbeat file every 2 minutes while waiting (prevents false-positive stuck alerts)")
 
 	moleculeStepCmd.AddCommand(moleculeAwaitSignalCmd)
 
@@ -127,6 +131,8 @@ func init() {
 		"Suppress output (for scripting)")
 	moleculeAwaitSignalShortcutCmd.Flags().BoolVar(&moleculeJSON, "json", false,
 		"Output as JSON")
+	moleculeAwaitSignalShortcutCmd.Flags().BoolVar(&awaitSignalDeaconHeartbeat, "deacon-heartbeat", false,
+		"Touch the deacon heartbeat file every 2 minutes while waiting (prevents false-positive stuck alerts)")
 
 	// alias: gt mol await-signal (in addition to gt mol step await-signal)
 	moleculeCmd.AddCommand(moleculeAwaitSignalShortcutCmd)
@@ -225,7 +231,26 @@ func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	result, err := waitForActivitySignal(ctx, townRoot)
+	// If --deacon-heartbeat is set, touch the deacon heartbeat every 2 minutes
+	// while waiting to prevent false-positive stuck alerts from dogs (hq-aonwx).
+	// The deacon heartbeat is only updated at the start of each patrol cycle, so
+	// a 15-minute await-signal sleep can push the heartbeat past the 20-minute
+	// stale threshold, causing dogs to escalate HIGH to the mayor repeatedly.
+	//
+	// Write with state=idle because await-signal is an intentional patrol sleep.
+	// Otherwise stuck-agent-dog applies the 20m "working" threshold on a state-less
+	// heartbeat instead of the 2h idle threshold — causing the same false-positive
+	// loop this flag is meant to prevent when the refresh interval drifts.
+	var heartbeatFn func()
+	if awaitSignalDeaconHeartbeat {
+		// Set state=idle immediately on entry, then keep refreshing every 2min.
+		_ = deacon.TouchWithState(townRoot, "idle", "entering await-signal")
+		heartbeatFn = func() {
+			_ = deacon.TouchWithState(townRoot, "idle", "await-signal refresh")
+		}
+	}
+
+	result, err := waitForActivitySignal(ctx, townRoot, heartbeatFn)
 	if err != nil {
 		return fmt.Errorf("feed subscription failed: %w", err)
 	}
@@ -360,17 +385,27 @@ func calculateEffectiveTimeout(idleCycles int) (time.Duration, error) {
 	return time.ParseDuration(awaitSignalTimeout)
 }
 
+// deaconHeartbeatRefreshInterval is how often waitForActivitySignal touches
+// the deacon heartbeat file when --deacon-heartbeat is set.
+// Must be less than deacon.HeartbeatStaleThreshold (5 min) to keep the
+// heartbeat fresh even if await-signal sleeps for backoff-max (15 min).
+const deaconHeartbeatRefreshInterval = 2 * time.Minute
+
 // waitForActivitySignal tails the events file for new activity.
 // townRoot is the Gas Town workspace root; the events file is at
 // <townRoot>/.events.jsonl. Returns immediately when a new event line is
 // appended, or when context is canceled.
-func waitForActivitySignal(ctx context.Context, townRoot string) (*AwaitSignalResult, error) {
-	return waitForEventsFile(ctx, filepath.Join(townRoot, events.EventsFile))
+// heartbeatFn, if non-nil, is called every deaconHeartbeatRefreshInterval to
+// keep liveness signals fresh during long waits (used by --deacon-heartbeat).
+func waitForActivitySignal(ctx context.Context, townRoot string, heartbeatFn func()) (*AwaitSignalResult, error) {
+	return waitForEventsFile(ctx, filepath.Join(townRoot, events.EventsFile), heartbeatFn)
 }
 
 // waitForEventsFile tails the events file for new lines.
 // This replaces the former bd activity --follow subprocess approach.
-func waitForEventsFile(ctx context.Context, eventsPath string) (*AwaitSignalResult, error) {
+// heartbeatFn, if non-nil, is called every deaconHeartbeatRefreshInterval
+// while waiting (used to keep the deacon heartbeat fresh during long backoffs).
+func waitForEventsFile(ctx context.Context, eventsPath string, heartbeatFn func()) (*AwaitSignalResult, error) {
 
 	f, err := os.OpenFile(eventsPath, os.O_RDONLY|os.O_CREATE, 0644)
 	if err != nil {
@@ -390,12 +425,22 @@ func waitForEventsFile(ctx context.Context, eventsPath string) (*AwaitSignalResu
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
+	// Optional heartbeat refresh ticker — nil when heartbeatFn is not set.
+	var heartbeatTicker <-chan time.Time
+	if heartbeatFn != nil {
+		ht := time.NewTicker(deaconHeartbeatRefreshInterval)
+		defer ht.Stop()
+		heartbeatTicker = ht.C
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return &AwaitSignalResult{
 				Reason: "timeout",
 			}, nil
+		case <-heartbeatTicker:
+			heartbeatFn()
 		case <-ticker.C:
 			line, err := reader.ReadString('\n')
 			if err == nil && line != "" {

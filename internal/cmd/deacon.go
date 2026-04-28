@@ -104,6 +104,7 @@ Stops the current session (if running) and starts a fresh one.`,
 }
 
 var deaconAgentOverride string
+var deaconHeartbeatState string
 
 var deaconHeartbeatCmd = &cobra.Command{
 	Use:   "heartbeat [action]",
@@ -113,9 +114,13 @@ var deaconHeartbeatCmd = &cobra.Command{
 The heartbeat signals to the daemon that the Deacon is alive and working.
 Call this at the start of each wake cycle to prevent daemon pokes.
 
+Use --state=idle before entering await-signal (patrol sleep) so the
+stuck-agent-dog does not fire false positives during intentional idle periods.
+
 Examples:
-  gt deacon heartbeat                    # Touch heartbeat with timestamp
-  gt deacon heartbeat "checking mayor"   # Touch with action description`,
+  gt deacon heartbeat                           # Touch heartbeat with timestamp
+  gt deacon heartbeat "checking mayor"          # Touch with action description
+  gt deacon heartbeat --state=idle "patrol sleep"  # Mark idle before await-signal`,
 	RunE: runDeaconHeartbeat,
 }
 
@@ -412,6 +417,9 @@ func init() {
 	deaconCmd.AddCommand(deaconRedispatchStateCmd)
 	deaconCmd.AddCommand(deaconFeedStrandedCmd)
 	deaconCmd.AddCommand(deaconFeedStrandedStateCmd)
+
+	// Flags for heartbeat
+	deaconHeartbeatCmd.Flags().StringVar(&deaconHeartbeatState, "state", "", "Heartbeat state: working (default) or idle (entering patrol sleep)")
 
 	// Flags for status
 	deaconStatusCmd.Flags().BoolVar(&deaconStatusJSON, "json", false, "Output as JSON")
@@ -828,7 +836,22 @@ func runDeaconHeartbeat(cmd *cobra.Command, args []string) error {
 		action = strings.Join(args, " ")
 	}
 
-	if action != "" {
+	if deaconHeartbeatState != "" {
+		switch deaconHeartbeatState {
+		case "working", "idle":
+			// valid states
+		default:
+			return fmt.Errorf("invalid state %q (must be working or idle)", deaconHeartbeatState)
+		}
+		if err := deacon.TouchWithState(townRoot, deaconHeartbeatState, action); err != nil {
+			return fmt.Errorf("updating heartbeat: %w", err)
+		}
+		if action != "" {
+			fmt.Printf("%s Heartbeat updated: state=%s %s\n", style.Bold.Render("✓"), deaconHeartbeatState, action)
+		} else {
+			fmt.Printf("%s Heartbeat updated: state=%s\n", style.Bold.Render("✓"), deaconHeartbeatState)
+		}
+	} else if action != "" {
 		if err := deacon.TouchWithAction(townRoot, action, 0, 0); err != nil {
 			return fmt.Errorf("updating heartbeat: %w", err)
 		}

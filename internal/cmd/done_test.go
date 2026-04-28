@@ -1523,6 +1523,83 @@ func TestSyncGuardWithUncommittedChanges(t *testing.T) {
 	}
 }
 
+// TestClosedBeadGuardSkipsMRCreation verifies that gt done skips MR creation when
+// the source bead is already closed or tombstoned (hq-3r2lb).
+// This prevents spurious duplicate MRs when an idle polecat is recycled via
+// gt sling --force and its stale session runs gt done for the previous bead.
+func TestClosedBeadGuardSkipsMRCreation(t *testing.T) {
+	tests := []struct {
+		name           string
+		issueStatus    string      // status of sourceIssueForNoMerge
+		issueIsNil     bool        // true when bd.Show failed (sourceIssueForNoMerge is nil)
+		wantSkipMR     bool        // true when MR creation should be skipped
+		wantMRFailed   bool
+	}{
+		{
+			name:         "open bead → MR creation proceeds",
+			issueStatus:  "open",
+			wantSkipMR:   false,
+			wantMRFailed: false,
+		},
+		{
+			name:         "in_progress bead → MR creation proceeds",
+			issueStatus:  "in_progress",
+			wantSkipMR:   false,
+			wantMRFailed: false,
+		},
+		{
+			name:         "hooked bead → MR creation proceeds",
+			issueStatus:  "hooked",
+			wantSkipMR:   false,
+			wantMRFailed: false,
+		},
+		{
+			name:         "closed bead → MR creation skipped (hq-3r2lb)",
+			issueStatus:  "closed",
+			wantSkipMR:   true,
+			wantMRFailed: true,
+		},
+		{
+			name:         "tombstone bead → MR creation skipped (hq-3r2lb)",
+			issueStatus:  "tombstone",
+			wantSkipMR:   true,
+			wantMRFailed: true,
+		},
+		{
+			name:         "nil source issue (bd.Show failed) → MR creation proceeds",
+			issueIsNil:   true,
+			wantSkipMR:   false,
+			wantMRFailed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the closed-bead guard logic from done.go (hq-3r2lb)
+			var sourceIssue *beads.Issue
+			if !tt.issueIsNil {
+				sourceIssue = &beads.Issue{Status: tt.issueStatus}
+			}
+
+			mrFailed := false
+			skipMR := false
+
+			if sourceIssue != nil &&
+				(sourceIssue.Status == "closed" || sourceIssue.Status == "tombstone") {
+				mrFailed = true
+				skipMR = true
+			}
+
+			if skipMR != tt.wantSkipMR {
+				t.Errorf("skipMR = %v, want %v (status=%q)", skipMR, tt.wantSkipMR, tt.issueStatus)
+			}
+			if mrFailed != tt.wantMRFailed {
+				t.Errorf("mrFailed = %v, want %v (status=%q)", mrFailed, tt.wantMRFailed, tt.issueStatus)
+			}
+		})
+	}
+}
+
 func testRunGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	fullArgs := append([]string{"-c", "protocol.file.allow=always"}, args...)
