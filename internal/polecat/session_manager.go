@@ -475,6 +475,15 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	if polecatGitBranch != "" {
 		envVarsToInject["GT_BRANCH"] = polecatGitBranch
 	}
+	// Forward D-Bus session + XDG runtime so Claude Code (and other agents) can
+	// reach the system keyring via libsecret for OAuth tokens (hq-6cm). Without
+	// these, polecats spawn without keyring access and hit "Not logged in"
+	// despite having onboarding state seeded.
+	for _, key := range []string{"DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"} {
+		if v := os.Getenv(key); v != "" {
+			envVarsToInject[key] = v
+		}
+	}
 	command = config.PrependEnv(command, envVarsToInject)
 
 	// Create session with command directly to avoid send-keys race condition.
@@ -519,6 +528,13 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	debugSession("SetEnvironment GT_TOWN_ROOT", m.tmux.SetEnvironment(sessionID, "GT_TOWN_ROOT", townRoot))
 	// Set GT_RUN in the session environment so respawned processes also inherit it.
 	debugSession("SetEnvironment GT_RUN", m.tmux.SetEnvironment(sessionID, "GT_RUN", runID))
+
+	// Forward D-Bus + XDG runtime for keyring access (hq-6cm).
+	for _, key := range []string{"DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"} {
+		if v := os.Getenv(key); v != "" {
+			debugSession("SetEnvironment "+key, m.tmux.SetEnvironment(sessionID, key, v))
+		}
+	}
 
 	// Disable Dolt auto-commit in tmux session environment (gt-5cc2p).
 	// This ensures respawned processes also inherit the setting.
