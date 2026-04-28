@@ -317,11 +317,15 @@ func TestValidateRecipientAddressFormat(t *testing.T) {
 		wantError bool
 		errSubstr string
 	}{
-		// (1) Trigger evidence — the exact addresses Munger's broadcast hit.
-		{"trigger karuna/fe_crew (underscore)", "karuna/fe_crew", true, "underscore"},
+		// (1) Trigger evidence — the addresses Munger's broadcast hit.
+		// karuna/fe_crew & karuna/ad are syntactically VALID; resolver catches
+		// the semantic typo (`fe_crew` doesn't resolve to a registered crew).
+		// 2026-04-28 hotfix: underscore is canonical for some crews
+		// (`karuna/backend_auth`); validator must NOT reject underscore.
+		{"trigger karuna/fe_crew (syntactically valid; resolver catches typo)", "karuna/fe_crew", false, ""},
 		{"trigger karuna/ad (syntactically valid; resolver catches semantic miss)", "karuna/ad", false, ""},
 
-		// (2) The eight valid shapes. Pre-flight is permissive on shape so
+		// (2) Valid address shapes. Pre-flight is permissive on shape so
 		// resolver-known patterns pass through without false positives.
 		{"bare role mayor", "mayor", false, ""},
 		{"bare role with trailing slash", "mayor/", false, ""},
@@ -335,9 +339,13 @@ func TestValidateRecipientAddressFormat(t *testing.T) {
 		{"@rig wildcard", "@rig/karuna", false, ""},
 		{"hq-* town-scope id", "hq-mayor", false, ""},
 		{"hyphen-rich crew name", "occultfusion/crew/atlas", false, ""},
+		// 2026-04-28 hotfix regression guards: underscore in canonical crew
+		// names. Block-impact evidence: BE_auth (karuna/backend_auth) was
+		// rejected by the over-strict v1 validator, blocking all comms.
+		{"underscore in canonical 2-segment crew (backend_auth)", "karuna/backend_auth", false, ""},
+		{"underscore in canonical 3-segment crew (crew/backend_auth)", "karuna/crew/backend_auth", false, ""},
 
 		// (3) Malformations the validator must catch.
-		{"underscore in name", "karuna/crew/fe_crew", true, "underscore"},
 		{"uppercase in name", "Karuna/crew/Munger", true, "uppercase"},
 		{"whitespace in name", "karuna/ crew/munger", true, "whitespace"},
 		{"empty segment middle", "karuna//munger", true, "empty segment"},
@@ -378,7 +386,7 @@ func TestValidateRecipientAddressFormat(t *testing.T) {
 // and the caller can fix both in a single round-trip rather than
 // discovering them one at a time.
 func TestValidateRecipientAddressesAggregatesErrors(t *testing.T) {
-	err := validateRecipientAddresses("karuna/fe_crew", []string{"karuna/crew/munger", "Bad UPPER"})
+	err := validateRecipientAddresses("karuna/ crew", []string{"karuna/crew/munger", "Bad UPPER"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -389,8 +397,8 @@ func TestValidateRecipientAddressesAggregatesErrors(t *testing.T) {
 	if !strings.Contains(msg, "cc:") {
 		t.Errorf("error should label the `cc` failure; got: %s", msg)
 	}
-	if !strings.Contains(msg, "underscore") {
-		t.Errorf("error should mention underscore (the `to` failure); got: %s", msg)
+	if !strings.Contains(msg, "whitespace") {
+		t.Errorf("error should mention whitespace (the `to` failure); got: %s", msg)
 	}
 	if !strings.Contains(msg, "uppercase") {
 		t.Errorf("error should mention uppercase (the `cc` failure); got: %s", msg)
@@ -400,7 +408,7 @@ func TestValidateRecipientAddressesAggregatesErrors(t *testing.T) {
 // TestValidateRecipientAddressesAllValid is the no-op happy path: every
 // address passes pre-flight, validateRecipientAddresses returns nil.
 func TestValidateRecipientAddressesAllValid(t *testing.T) {
-	if err := validateRecipientAddresses("karuna/crew/munger", []string{"mayor/", "occultfusion/witness"}); err != nil {
+	if err := validateRecipientAddresses("karuna/crew/munger", []string{"mayor/", "occultfusion/witness", "karuna/backend_auth"}); err != nil {
 		t.Errorf("all-valid input should return nil, got: %v", err)
 	}
 }

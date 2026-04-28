@@ -106,11 +106,10 @@ func bodyHasApprovalRoutingWaiver(body string) bool {
 // silent fails on `karuna/fe_crew` + `karuna/ad` were the trigger evidence).
 //
 // Scope is SYNTACTIC ONLY:
-//   - allowed chars: lowercase a-z, digits 0-9, hyphen `-`, slash `/`, colon
-//     `:` (for channel:/queue:/group: prefixes), dot `.` (for hq-* and
-//     occasional rig names), and `@` (for `@town` etc.)
-//   - no underscores (gas town convention is hyphens — `fe_crew` was the
-//     specific malformation in the trigger evidence)
+//   - allowed chars: lowercase a-z, digits 0-9, hyphen `-`, underscore `_`
+//     (canonical for some crews — e.g., `karuna/backend_auth`), slash `/`,
+//     colon `:` (for channel:/queue:/group: prefixes), dot `.` (for hq-*
+//     and occasional rig names), and `@` (for `@town` etc.)
 //   - no whitespace
 //   - segment count after prefix-strip: 1-3
 //   - each segment non-empty (no `karuna//ad` or trailing slash with
@@ -120,8 +119,13 @@ func bodyHasApprovalRoutingWaiver(body string) bool {
 // rig directory exists but no crew named `ad` is registered) are NOT caught
 // here — those are the Resolver's job. validateRecipientAddressFormat is
 // the first line of defense; the Resolver is the second. The two layers
-// together prevent both the typo case (caught here) and the
-// stale-mental-model case (caught by Resolver).
+// together prevent both the typo case (caught by Resolver) and the
+// shape-malformation case (caught here).
+//
+// 2026-04-28 hotfix: original implementation excluded underscore as a
+// "common typo" hint, but Munger's ratified spec allows underscore (and
+// `karuna/backend_auth` is a canonical crew). Validator stays purely
+// syntactic; Resolver handles canonical-name vs typo discrimination.
 //
 // Returns nil for empty input — empty `to` is caught upstream by mail_send.go's
 // "address required" check and shouldn't reach this function.
@@ -156,9 +160,8 @@ func validateRecipientAddressFormat(addr string) error {
 	if !addressCharsRegex.MatchString(trimmed) {
 		return fmt.Errorf(
 			"address %q contains invalid characters\n\n"+
-				"  expected: lowercase a-z, 0-9, hyphen `-`, slash `/`, dot `.`\n"+
+				"  expected: lowercase a-z, 0-9, hyphen `-`, underscore `_`, slash `/`, dot `.`\n"+
 				"  common mistakes:\n"+
-				"    - underscore in name (gas town uses hyphens: `fe_crew` → `fe-crew` or `karuna/crew/frontend`)\n"+
 				"    - uppercase (addresses are lowercase: `Mayor` → `mayor`)\n"+
 				"    - whitespace (no spaces in addresses)\n\n"+
 				"  reference: ~/gt/CLAUDE.md \"Mail addressing\" + `gt mail send --help`",
@@ -190,7 +193,7 @@ func validateRecipientAddressFormat(addr string) error {
 // addressCharsRegex matches the allowed character set for a normalized
 // gas town address (after prefix and `@` stripping). See
 // validateRecipientAddressFormat docstring for rationale.
-var addressCharsRegex = regexp.MustCompile(`^[a-z0-9./-]+$`)
+var addressCharsRegex = regexp.MustCompile(`^[a-z0-9._/-]+$`)
 
 // validateRecipientAddresses runs validateRecipientAddressFormat against the
 // `to` field and every entry in `cc`, aggregating ALL failures into a single
