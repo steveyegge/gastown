@@ -239,6 +239,12 @@ func (d *Daemon) dispatchPlugins(mgr *dog.Manager, sm *dog.SessionManager, rigsC
 	router := mail.NewRouterWithTownRoot(d.config.TownRoot, d.config.TownRoot)
 
 	for _, p := range plugins {
+		// Never auto-dispatch manual-gate plugins — they require an explicit trigger.
+		if p.Gate != nil && p.Gate.Type == plugin.GateManual {
+			d.logger.Printf("Handler: skipping plugin %s (gate=manual, requires explicit trigger)", p.Name)
+			continue
+		}
+
 		// Only dispatch plugins with cooldown gates.
 		if p.Gate == nil || p.Gate.Type != plugin.GateCooldown {
 			continue
