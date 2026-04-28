@@ -745,18 +745,125 @@ func GetProcessNames(agentName string) []string {
 	return info.ProcessNames
 }
 
+// wrapperCommands lists process wrappers that exec into another binary listed
+// in their arguments (e.g., `env -u VAR claude ...`). When the agent's Command
+// is one of these, ResolveProcessNames must look past the wrapper to find the
+// real agent binary in Args, otherwise liveness detection greps for a process
+// named after the wrapper that no longer exists post-exec.
+var wrapperCommands = map[string]bool{
+	"env":    true,
+	"nohup":  true,
+	"setsid": true,
+	"exec":   true,
+	"sudo":   true,
+	"doas":   true,
+	"stdbuf": true,
+	"time":   true,
+}
+
+// wrapperFlagsTakeValue returns the set of short flags that consume the
+// next argument as a value, for the given wrapper. Used by extractWrappedBinary
+// to skip "-flag value" pairs when scanning args for the real binary.
+func wrapperFlagsTakeValue(wrapper string) map[string]bool {
+	switch wrapper {
+	case "env":
+		// env: -u VAR (unset), -C DIR (chdir), -S STRING (split-string)
+		return map[string]bool{"-u": true, "-C": true, "-S": true}
+	case "sudo":
+		// sudo: most options take a value; list the common ones
+		return map[string]bool{
+			"-u": true, "-g": true, "-h": true, "-p": true,
+			"-U": true, "-A": true, "-c": true, "-r": true,
+			"-t": true, "-T": true, "-D": true, "-R": true,
+		}
+	case "stdbuf":
+		// stdbuf: -i, -o, -e all take a value (mode)
+		return map[string]bool{"-i": true, "-o": true, "-e": true}
+	}
+	return nil
+}
+
+// lookupProcessNamesByBinary returns the ProcessNames of the preset whose
+// Command (or its basename) matches realBin. Searches the runtime registry
+// first, then the canonical builtinPresets so shadowed builtins still resolve.
+// Caller must hold registryMu.
+func lookupProcessNamesByBinary(realBin string) []string {
+	for _, preset := range globalRegistry.Agents {
+		if len(preset.ProcessNames) == 0 {
+			continue
+		}
+		if preset.Command == realBin || filepath.Base(preset.Command) == realBin {
+			return preset.ProcessNames
+		}
+	}
+	for _, preset := range builtinPresets {
+		if len(preset.ProcessNames) == 0 {
+			continue
+		}
+		if preset.Command == realBin || filepath.Base(preset.Command) == realBin {
+			return preset.ProcessNames
+		}
+	}
+	return nil
+}
+
+// extractWrappedBinary scans wrapper args for the first non-flag token that
+// looks like a binary, and returns its basename. Returns "" if no real binary
+// is found (e.g., args malformed or wrapper unsupported).
+//
+// Walks args left-to-right: skips short flags (and their values for known
+// value-taking flags), long flags (--foo=bar or --foo), env-style VAR=value
+// assignments (env only), and treats `--` as an end-of-options separator.
+func extractWrappedBinary(wrapper string, args []string) string {
+	flagsTakeValue := wrapperFlagsTakeValue(wrapper)
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			if i+1 < len(args) {
+				return filepath.Base(args[i+1])
+			}
+			return ""
+		}
+		if strings.HasPrefix(a, "-") && a != "-" {
+			// Long option `--foo=bar` carries its own value
+			if strings.HasPrefix(a, "--") && strings.Contains(a, "=") {
+				continue
+			}
+			// Long option `--foo` and unknown short options: assume no value
+			if flagsTakeValue[a] && i+1 < len(args) {
+				i++ // skip the flag's value
+			}
+			continue
+		}
+		// env permits VAR=value assignments interspersed with flags
+		if wrapper == "env" && strings.Contains(a, "=") {
+			continue
+		}
+		return filepath.Base(a)
+	}
+	return ""
+}
+
 // ResolveProcessNames determines the correct process names for liveness detection
 // given an agent name and the actual command binary. This handles custom agents
 // that shadow built-in preset names (e.g., a custom "codex" agent that runs
-// "opencode" instead of the built-in "codex" binary).
+// "opencode" instead of the built-in "codex" binary), and custom agents wrapped
+// in process launchers like `env -u VAR <real-binary>`.
+//
+// args (variadic, optional) is the actual command-line argument slice for the
+// agent invocation. When command is a wrapper (env, sudo, nohup, ...), the
+// real binary is found in args, not on the registered preset's Args (which
+// may belong to the canonical built-in preset, not the user's wrapper).
 //
 // Resolution order:
 //  1. If agentName matches a built-in preset AND the preset's Command matches
 //     the actual command → use the preset's ProcessNames (no mismatch).
-//  2. Otherwise, find a built-in preset whose Command matches the actual command
+//  2. If command is a known wrapper, scan args (or the registered preset's Args
+//     as a fallback) for the real binary and resolve to its preset's ProcessNames.
+//  3. Otherwise, find a built-in preset whose Command matches the actual command
 //     and use its ProcessNames (custom agent using a known launcher).
-//  3. Fallback: [command] (fully custom binary).
-func ResolveProcessNames(agentName, command string) []string {
+//  4. Fallback: [command] (fully custom binary).
+func ResolveProcessNames(agentName, command string, args ...string) []string {
 	registryMu.Lock()
 	initRegistryLocked()
 	defer registryMu.Unlock()
@@ -774,13 +881,36 @@ func ResolveProcessNames(agentName, command string) []string {
 	// Check if agentName matches a built-in/registered preset with matching command.
 	// Compare against both the raw command and basename to handle registry entries
 	// that store absolute-path commands (e.g., "/opt/bin/my-tool").
-	if info, ok := globalRegistry.Agents[agentName]; ok && len(info.ProcessNames) > 0 {
-		if info.Command == command ||
-			info.Command == cmdBase ||
-			filepath.Base(info.Command) == cmdBase ||
-			(info.Command == unwrappedCmdBase && strings.HasPrefix(cmdBase, "gt-")) ||
-			cmdBase == "" {
+	info, infoOK := globalRegistry.Agents[agentName]
+	if infoOK {
+		if len(info.ProcessNames) > 0 &&
+			(info.Command == command ||
+				info.Command == cmdBase ||
+				filepath.Base(info.Command) == cmdBase ||
+				(info.Command == unwrappedCmdBase && strings.HasPrefix(cmdBase, "gt-")) ||
+				cmdBase == "") {
 			return info.ProcessNames
+		}
+	}
+
+	// Wrapper case: command is `env`/`sudo`/etc. — find the real binary in
+	// args (caller-supplied) or the registered preset's Args, and resolve to
+	// THAT binary's preset ProcessNames. Caller args take precedence because
+	// the registered preset may be the canonical built-in (not the wrapper).
+	if wrapperCommands[cmdBase] {
+		argSources := [][]string{args}
+		if infoOK && len(info.Args) > 0 {
+			argSources = append(argSources, info.Args)
+		}
+		for _, src := range argSources {
+			realBin := extractWrappedBinary(cmdBase, src)
+			if realBin == "" {
+				continue
+			}
+			if names := lookupProcessNamesByBinary(realBin); len(names) > 0 {
+				return names
+			}
+			return []string{realBin}
 		}
 	}
 

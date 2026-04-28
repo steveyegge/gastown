@@ -422,6 +422,116 @@ func TestResolveProcessNames(t *testing.T) {
 			}
 		}
 	})
+
+	// Regression: custom agents wrapped in `env -u VAR <real-binary>` (or
+	// nohup/sudo/etc.) used to fall through to GT_PROCESS_NAMES=<wrapper>,
+	// which IsAgentAlive could never match — wrapper has exec'd into the real
+	// binary by then. ResolveProcessNames must look past the wrapper.
+	wrapperCases := []struct {
+		name    string
+		agent   AgentPresetInfo
+		want    []string
+		command string // command passed to ResolveProcessNames
+	}{
+		{
+			name: "env -u VAR claude unwraps to claude preset",
+			agent: AgentPresetInfo{
+				Name:    "claude",
+				Command: "env",
+				Args:    []string{"-u", "ANTHROPIC_API_KEY", "claude", "--dangerously-skip-permissions", "--effort", "high"},
+			},
+			command: "env",
+			want:    []string{"node", "claude"},
+		},
+		{
+			name: "env VAR=val claude unwraps past assignments",
+			agent: AgentPresetInfo{
+				Name:    "claude",
+				Command: "env",
+				Args:    []string{"FOO=bar", "BAZ=qux", "claude"},
+			},
+			command: "env",
+			want:    []string{"node", "claude"},
+		},
+		{
+			name: "env -- claude (separator) unwraps to claude",
+			agent: AgentPresetInfo{
+				Name:    "claude",
+				Command: "env",
+				Args:    []string{"-i", "--", "claude", "--foo"},
+			},
+			command: "env",
+			want:    []string{"node", "claude"},
+		},
+		{
+			name: "nohup opencode unwraps to opencode preset",
+			agent: AgentPresetInfo{
+				Name:    "opencode",
+				Command: "nohup",
+				Args:    []string{"opencode", "--quiet"},
+			},
+			command: "nohup",
+			want:    []string{"opencode", "node", "bun"},
+		},
+		{
+			name: "sudo -u runner codex unwraps to codex preset",
+			agent: AgentPresetInfo{
+				Name:    "codex",
+				Command: "sudo",
+				Args:    []string{"-u", "runner", "codex", "--dangerously-bypass-approvals-and-sandbox"},
+			},
+			command: "sudo",
+			want:    []string{"codex"},
+		},
+		{
+			name: "env wrapping unknown binary returns binary basename",
+			agent: AgentPresetInfo{
+				Name:    "my-agent",
+				Command: "env",
+				Args:    []string{"-u", "FOO", "/opt/my-tool", "--flag"},
+			},
+			command: "env",
+			want:    []string{"my-tool"},
+		},
+	}
+	for _, tc := range wrapperCases {
+		t.Run(tc.name, func(t *testing.T) {
+			RegisterAgentForTesting(string(tc.agent.Name), tc.agent)
+			t.Cleanup(ResetRegistryForTesting)
+
+			got := ResolveProcessNames(string(tc.agent.Name), tc.command, tc.agent.Args...)
+			if len(got) != len(tc.want) {
+				t.Fatalf("ResolveProcessNames(%q, %q) = %v, want %v", tc.agent.Name, tc.command, got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("got[%d] = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+
+	// Real-world scenario: Paul's town settings shadow the canonical claude
+	// preset with a wrapper. The registry still holds the built-in claude
+	// preset; Args live only on the caller's RuntimeConfig. Caller args must
+	// take precedence so wrapper-unwrap finds the real binary.
+	t.Run("caller args used when registry holds canonical preset", func(t *testing.T) {
+		ResetRegistryForTesting()
+		t.Cleanup(ResetRegistryForTesting)
+		// No RegisterAgentForTesting — registry has canonical built-in claude
+		// (Command="claude", ProcessNames=[node, claude], Args=[--dangerously-...]).
+		got := ResolveProcessNames("claude", "env",
+			"-u", "ANTHROPIC_API_KEY", "claude", "--dangerously-skip-permissions", "--effort", "high")
+		want := []string{"node", "claude"}
+		if len(got) != len(want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
 }
 
 func TestAgentPresetApprovalFlags(t *testing.T) {
