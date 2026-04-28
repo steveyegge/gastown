@@ -1,11 +1,15 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -20,6 +24,19 @@ import (
 var (
 	statusLineSession string
 )
+
+const statusLineLookupCacheTTL = 5 * time.Second
+
+type statusLineHookCacheEntry struct {
+	Value    string `json:"value"`
+	StoredAt int64  `json:"stored_at"`
+}
+
+type statusLineMailCacheEntry struct {
+	Unread   int    `json:"unread"`
+	Subject  string `json:"subject"`
+	StoredAt int64  `json:"stored_at"`
+}
 
 var statusLineCmd = &cobra.Command{
 	Use:   "status-line",
@@ -665,12 +682,18 @@ func isSessionWorking(t *tmux.Tmux, session string) bool {
 // getMailPreviewWithRoot returns unread count and a truncated subject of the first unread message,
 // using an explicit town root.
 func getMailPreviewWithRoot(identity string, maxLen int, townRoot string) (int, string) {
+	cacheKey := fmt.Sprintf("mail\x00%s\x00%d\x00%s", identity, maxLen, townRoot)
+	if entry, ok := readStatusLineCache[statusLineMailCacheEntry](townRoot, cacheKey); ok {
+		return entry.Unread, entry.Subject
+	}
+
 	// Use NewMailboxFromAddress to normalize identity (e.g., gastown/crew/gus -> gastown/gus)
 	mailbox := mail.NewMailboxFromAddress(identity, townRoot)
 
 	// Get unread messages
 	messages, err := mailbox.ListUnread()
 	if err != nil || len(messages) == 0 {
+		writeStatusLineCache(townRoot, cacheKey, statusLineMailCacheEntry{StoredAt: time.Now().UnixNano()})
 		return 0, ""
 	}
 
@@ -680,6 +703,11 @@ func getMailPreviewWithRoot(identity string, maxLen int, townRoot string) (int, 
 		subject = subject[:maxLen-1] + "…"
 	}
 
+	writeStatusLineCache(townRoot, cacheKey, statusLineMailCacheEntry{
+		Unread:   len(messages),
+		Subject:  subject,
+		StoredAt: time.Now().UnixNano(),
+	})
 	return len(messages), subject
 }
 
@@ -697,6 +725,12 @@ func getHookedWork(identity string, maxLen int, beadsDir string) string {
 		}
 	}
 
+	cacheRoot := statusLineCacheRoot(beadsDir)
+	cacheKey := fmt.Sprintf("hook\x00%s\x00%d\x00%s", identity, maxLen, beadsDir)
+	if entry, ok := readStatusLineCache[statusLineHookCacheEntry](cacheRoot, cacheKey); ok {
+		return entry.Value
+	}
+
 	b := beads.New(beadsDir)
 
 	// Query for hooked beads assigned to this agent
@@ -706,6 +740,7 @@ func getHookedWork(identity string, maxLen int, beadsDir string) string {
 		Priority: -1,
 	})
 	if err != nil || len(hookedBeads) == 0 {
+		writeStatusLineCache(cacheRoot, cacheKey, statusLineHookCacheEntry{StoredAt: time.Now().UnixNano()})
 		return ""
 	}
 
@@ -715,7 +750,72 @@ func getHookedWork(identity string, maxLen int, beadsDir string) string {
 	if len(display) > maxLen {
 		display = display[:maxLen-1] + "…"
 	}
+	writeStatusLineCache(cacheRoot, cacheKey, statusLineHookCacheEntry{
+		Value:    display,
+		StoredAt: time.Now().UnixNano(),
+	})
 	return display
+}
+
+func statusLineCacheRoot(path string) string {
+	if townRoot, err := workspace.Find(path); err == nil && townRoot != "" {
+		return townRoot
+	}
+	return path
+}
+
+func statusLineCachePath(root, key string) string {
+	sum := sha256.Sum256([]byte(key))
+	name := hex.EncodeToString(sum[:]) + ".json"
+	return filepath.Join(root, ".runtime", "status-line-cache", name)
+}
+
+func readStatusLineCache[T interface {
+	statusLineHookCacheEntry | statusLineMailCacheEntry
+}](root, key string) (T, bool) {
+	var zero T
+	if root == "" {
+		return zero, false
+	}
+
+	data, err := os.ReadFile(statusLineCachePath(root, key))
+	if err != nil {
+		return zero, false
+	}
+
+	var entry T
+	if err := json.Unmarshal(data, &entry); err != nil {
+		return zero, false
+	}
+
+	var storedAt int64
+	switch v := any(entry).(type) {
+	case statusLineHookCacheEntry:
+		storedAt = v.StoredAt
+	case statusLineMailCacheEntry:
+		storedAt = v.StoredAt
+	default:
+		return zero, false
+	}
+	if storedAt == 0 || time.Since(time.Unix(0, storedAt)) > statusLineLookupCacheTTL {
+		return zero, false
+	}
+	return entry, true
+}
+
+func writeStatusLineCache(root, key string, entry any) {
+	if root == "" {
+		return
+	}
+	path := statusLineCachePath(root, key)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, data, 0644)
 }
 
 // getCurrentWork returns a truncated title of the first in_progress issue assigned to identity.

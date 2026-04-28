@@ -61,9 +61,15 @@ type APIHandler struct {
 	cmdSem chan struct{}
 	// csrfToken is validated on POST requests to prevent cross-site request forgery.
 	csrfToken string
+	// Dashboard hash cache avoids every SSE client spawning status/hooks/mail
+	// commands every poll interval.
+	dashboardHashMu   sync.Mutex
+	dashboardHash     string
+	dashboardHashTime time.Time
 }
 
 const optionsCacheTTL = 30 * time.Second
+const dashboardHashCacheTTL = 5 * time.Second
 
 // maxConcurrentCommands limits how many gt subprocesses can run at once.
 // handleOptions alone spawns 7; allow headroom for other concurrent handlers.
@@ -2121,6 +2127,18 @@ func (h *APIHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
 // computeDashboardHash generates a lightweight hash of key dashboard state.
 // It runs quick commands in parallel and hashes their output to detect changes.
 func (h *APIHandler) computeDashboardHash(ctx context.Context) string {
+	h.dashboardHashMu.Lock()
+	if h.dashboardHash != "" && time.Since(h.dashboardHashTime) < dashboardHashCacheTTL {
+		hash := h.dashboardHash
+		h.dashboardHashMu.Unlock()
+		return hash
+	}
+	defer h.dashboardHashMu.Unlock()
+
+	if h.dashboardHash != "" && time.Since(h.dashboardHashTime) < dashboardHashCacheTTL {
+		return h.dashboardHash
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -2167,7 +2185,10 @@ func (h *APIHandler) computeDashboardHash(ctx context.Context) string {
 	}
 
 	h256 := sha256.Sum256([]byte(strings.Join(parts, "|")))
-	return fmt.Sprintf("%x", h256[:8])
+	hash := fmt.Sprintf("%x", h256[:8])
+	h.dashboardHash = hash
+	h.dashboardHashTime = time.Now()
+	return hash
 }
 
 // handleRigAdd creates a new rig, optionally with a local bare repo.
