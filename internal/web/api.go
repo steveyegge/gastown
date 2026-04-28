@@ -69,6 +69,49 @@ const optionsCacheTTL = 30 * time.Second
 // handleOptions alone spawns 7; allow headroom for other concurrent handlers.
 const maxConcurrentCommands = 12
 
+const dashboardHashPollInterval = 15 * time.Second
+
+type dashboardHashPoller struct {
+	once sync.Once
+	mu   sync.RWMutex
+	hash string
+}
+
+var sharedDashboardHashPoller = &dashboardHashPoller{}
+
+func (p *dashboardHashPoller) start(h *APIHandler) {
+	p.once.Do(func() {
+		go func() {
+			ticker := time.NewTicker(dashboardHashPollInterval)
+			defer ticker.Stop()
+
+			for {
+				hash := h.computeDashboardHash(context.Background())
+				if hash != "" {
+					p.setHash(hash)
+				}
+				<-ticker.C
+			}
+		}()
+	})
+}
+
+func (p *dashboardHashPoller) current() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.hash
+}
+
+func (p *dashboardHashPoller) setHash(hash string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if hash == p.hash {
+		return false
+	}
+	p.hash = hash
+	return true
+}
+
 // NewAPIHandler creates a new API handler with the given run timeouts and CSRF token.
 func NewAPIHandler(defaultRunTimeout, maxRunTimeout time.Duration, csrfToken string) *APIHandler {
 	if csrfToken == "" {
@@ -2071,9 +2114,8 @@ func parseCommandArgs(command string) []string {
 }
 
 // handleSSE streams Server-Sent Events to the dashboard client.
-// It polls key dashboard state every 2 seconds and sends an event when
-// changes are detected, allowing the client to trigger a re-render.
-// Falls through gracefully if the client disconnects.
+// A shared poller computes dashboard changes once per server process so each
+// browser tab does not spawn its own status/hooks/mail command loop.
 func (h *APIHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -2087,13 +2129,19 @@ func (h *APIHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	ctx := r.Context()
+	sharedDashboardHashPoller.start(h)
 
 	// Send initial connection event
 	fmt.Fprintf(w, "event: connected\ndata: ok\n\n")
 	flusher.Flush()
 
-	var lastHash string
-	ticker := time.NewTicker(2 * time.Second)
+	lastHash := sharedDashboardHashPoller.current()
+	if lastHash != "" {
+		fmt.Fprintf(w, "event: dashboard-update\ndata: %s\n\n", lastHash)
+		flusher.Flush()
+	}
+
+	ticker := time.NewTicker(dashboardHashPollInterval)
 	defer ticker.Stop()
 
 	// Send keepalive comment every 15 seconds to prevent connection timeouts
@@ -2108,7 +2156,7 @@ func (h *APIHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, ": keepalive\n\n")
 			flusher.Flush()
 		case <-ticker.C:
-			hash := h.computeDashboardHash(ctx)
+			hash := sharedDashboardHashPoller.current()
 			if hash != "" && hash != lastHash {
 				lastHash = hash
 				fmt.Fprintf(w, "event: dashboard-update\ndata: %s\n\n", hash)
