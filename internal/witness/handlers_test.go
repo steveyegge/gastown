@@ -1405,6 +1405,100 @@ func TestHandlePolecatDone_CompletedWithMRID(t *testing.T) {
 	}
 }
 
+func TestHandlePolecatDoneFromBead_PushFailedCreatesCleanupWisp(t *testing.T) {
+	t.Parallel()
+	bd, mock := mockBd(
+		func(args []string) (string, error) {
+			joined := strings.Join(args, " ")
+			switch args[0] {
+			case "list":
+				if strings.Contains(joined, "cleanup,polecat:nux") {
+					return "[]", nil
+				}
+			case "create":
+				return `{"id":"gt-wisp-push"}`, nil
+			case "show":
+				return `[{"labels":["cleanup","polecat:nux","state:pending"]}]`, nil
+			}
+			return "{}", nil
+		},
+		func(args []string) error { return nil },
+	)
+
+	fields := &beads.AgentFields{
+		ExitType:   "COMPLETED",
+		HookBead:   "gt-123",
+		Branch:     "polecat/nux/gt-123@abcd",
+		PushFailed: true,
+	}
+
+	result := HandlePolecatDoneFromBead(bd, t.TempDir(), "testrig", "nux", fields, nil)
+	if !result.Handled {
+		t.Fatalf("Handled = false, want true")
+	}
+	if result.WispCreated != "gt-wisp-push" {
+		t.Fatalf("WispCreated = %q, want %q", result.WispCreated, "gt-wisp-push")
+	}
+	if !strings.Contains(result.Action, "push-failed-recovery-needed") {
+		t.Fatalf("Action = %q, want push-failed-recovery-needed", result.Action)
+	}
+
+	got := strings.Join(mock.calls, "\n")
+	if !strings.Contains(got, "create --ephemeral --json --title cleanup:nux") {
+		t.Fatalf("expected cleanup wisp creation, got:\n%s", got)
+	}
+	if !strings.Contains(got, "update gt-wisp-push --set-labels=cleanup --set-labels=polecat:nux --set-labels=state:push-failed") {
+		t.Fatalf("expected push-failed cleanup state update, got:\n%s", got)
+	}
+}
+
+func TestProcessDiscoveredCompletion_PushFailedCreatesCleanupWisp(t *testing.T) {
+	t.Parallel()
+	bd, mock := mockBd(
+		func(args []string) (string, error) {
+			joined := strings.Join(args, " ")
+			switch args[0] {
+			case "list":
+				if strings.Contains(joined, "cleanup,polecat:ace") {
+					return "[]", nil
+				}
+			case "create":
+				return `{"id":"gt-wisp-discovery"}`, nil
+			case "show":
+				return `[{"labels":["cleanup","polecat:ace","state:pending"]}]`, nil
+			}
+			return "{}", nil
+		},
+		func(args []string) error { return nil },
+	)
+
+	payload := &PolecatDonePayload{
+		PolecatName: "ace",
+		Exit:        string(ExitTypeCompleted),
+		IssueID:     "gt-999",
+		Branch:      "polecat/ace/gt-999@hash",
+		PushFailed:  true,
+	}
+	discovery := &CompletionDiscovery{}
+
+	processDiscoveredCompletion(bd, t.TempDir(), "testrig", payload, discovery)
+
+	if discovery.WispCreated != "gt-wisp-discovery" {
+		t.Fatalf("WispCreated = %q, want %q", discovery.WispCreated, "gt-wisp-discovery")
+	}
+	if !strings.Contains(discovery.Action, "push-failed-recovery-needed") {
+		t.Fatalf("Action = %q, want push-failed-recovery-needed", discovery.Action)
+	}
+
+	got := strings.Join(mock.calls, "\n")
+	if !strings.Contains(got, "create --ephemeral --json --title cleanup:ace") {
+		t.Fatalf("expected cleanup wisp creation, got:\n%s", got)
+	}
+	if !strings.Contains(got, "update gt-wisp-discovery --set-labels=cleanup --set-labels=polecat:ace --set-labels=state:push-failed") {
+		t.Fatalf("expected push-failed cleanup state update, got:\n%s", got)
+	}
+}
+
 func TestFindMRBeadForBranch_NoBdAvailable(t *testing.T) {
 	t.Parallel()
 	// When bd is not available, should return empty string
@@ -1704,7 +1798,6 @@ func TestClearCompletionMetadata_NoBd(t *testing.T) {
 		t.Error("expected error when bd unavailable")
 	}
 }
-
 
 // --- Heartbeat v2 tests (gt-3vr5) ---
 

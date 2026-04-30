@@ -208,20 +208,7 @@ func HandlePolecatDoneFromBead(bd *BdCli, workDir, rigName, polecatName string, 
 
 	// Push failed: branch never reached origin (gas-556). Report recovery needed.
 	if payload.PushFailed {
-		result.Handled = true
-		result.Action = fmt.Sprintf("push-failed-recovery-needed for %s (branch=%s issue=%s) — branch not on origin, worktree may be at risk",
-			polecatName, payload.Branch, payload.IssueID)
-		townRoot, _ := workspace.Find(workDir)
-		if townRoot != "" {
-			mayorMsg := fmt.Sprintf("PUSH_FAILED: polecat=%s branch=%s issue=%s — branch not on origin, possible work loss",
-				polecatName, payload.Branch, payload.IssueID)
-			mayorSession := session.MayorSessionName()
-			t := tmux.NewTmux()
-			if running, err := t.HasSession(mayorSession); err == nil && running {
-				_ = t.NudgeSession(mayorSession, mayorMsg)
-			}
-		}
-		return result
+		return handlePolecatDonePushFailed(bd, workDir, rigName, payload, result)
 	}
 
 	hasPendingMR := payload.MRID != ""
@@ -281,6 +268,33 @@ func handlePolecatDonePendingMR(bd *BdCli, workDir, rigName string, payload *Pol
 	return result
 }
 
+func handlePolecatDonePushFailed(bd *BdCli, workDir, rigName string, payload *PolecatDonePayload, result *HandlerResult) *HandlerResult {
+	wispID, err := ensureCleanupWispState(bd, workDir, payload.PolecatName, payload.IssueID, payload.Branch, "push-failed")
+	if err != nil {
+		result.Error = fmt.Errorf("tracking push-failed cleanup: %w", err)
+		return result
+	}
+
+	result.Handled = true
+	result.WispCreated = wispID
+	result.Action = fmt.Sprintf("push-failed-recovery-needed for %s (branch=%s issue=%s, wisp=%s) — branch not on origin, worktree may be at risk",
+		payload.PolecatName, payload.Branch, payload.IssueID, wispID)
+
+	townRoot, _ := workspace.Find(workDir)
+	if townRoot != "" {
+		mayorMsg := fmt.Sprintf("PUSH_FAILED: polecat=%s branch=%s issue=%s — branch not on origin, possible work loss",
+			payload.PolecatName, payload.Branch, payload.IssueID)
+		mayorSession := session.MayorSessionName()
+		t := tmux.NewTmux()
+		if running, err := t.HasSession(mayorSession); err == nil && running {
+			_ = t.NudgeSession(mayorSession, mayorMsg)
+		}
+	}
+
+	notifyMayorSlotOpen(workDir, rigName, payload.PolecatName, payload.Exit)
+	return result
+}
+
 // notifyRefineryMergeReady emits a MERGE_READY channel event and nudges the
 // Refinery to check the merge queue. The channel event unblocks the refinery's
 // await-event loop instantly; the tmux nudge is a belt-and-suspenders fallback
@@ -300,6 +314,21 @@ func notifyRefineryMergeReady(workDir, rigName string, result *HandlerResult) {
 			result.Error = fmt.Errorf("nudging refinery: %w (non-fatal)", nudgeErr)
 		}
 	}
+}
+
+func ensureCleanupWispState(bd *BdCli, workDir, polecatName, issueID, branch, state string) (string, error) {
+	wispID := findAnyCleanupWisp(bd, workDir, polecatName)
+	if wispID == "" {
+		created, err := createCleanupWisp(bd, workDir, polecatName, issueID, branch)
+		if err != nil {
+			return "", err
+		}
+		wispID = created
+	}
+	if err := UpdateCleanupWispState(bd, workDir, wispID, state); err != nil {
+		return "", err
+	}
+	return wispID, nil
 }
 
 // handlePolecatDoneNoMR handles a POLECAT_DONE with no pending MR.
@@ -1764,7 +1793,7 @@ type CompletionDiscovery struct {
 	MRID           string
 	Branch         string
 	MRFailed       bool
-	PushFailed     bool   // True when branch push to origin failed (gas-556)
+	PushFailed     bool // True when branch push to origin failed (gas-556)
 	CompletionTime string
 	Action         string // What was done: "merge-ready-sent", "acknowledged-idle", "phase-complete"
 	WispCreated    string // ID of cleanup wisp if created
@@ -1877,8 +1906,14 @@ func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *Po
 	// The polecat's worktree may be in /tmp and lost on reboot. Escalate so the
 	// witness agent can investigate and trigger recovery (gas-556).
 	if payload.PushFailed {
-		discovery.Action = fmt.Sprintf("push-failed-recovery-needed (branch=%s issue=%s) — branch not on origin, worktree may be at risk",
-			payload.Branch, payload.IssueID)
+		wispID, err := ensureCleanupWispState(bd, workDir, payload.PolecatName, payload.IssueID, payload.Branch, "push-failed")
+		if err != nil {
+			discovery.Error = fmt.Errorf("tracking push-failed cleanup: %w", err)
+			return
+		}
+		discovery.WispCreated = wispID
+		discovery.Action = fmt.Sprintf("push-failed-recovery-needed (branch=%s issue=%s, wisp=%s) — branch not on origin, worktree may be at risk",
+			payload.Branch, payload.IssueID, wispID)
 		// Notify mayor so a new polecat can be dispatched if work is lost.
 		townRoot, _ := workspace.Find(workDir)
 		if townRoot != "" {
@@ -1890,6 +1925,7 @@ func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *Po
 				_ = t.NudgeSession(mayorSession, mayorMsg)
 			}
 		}
+		notifyMayorSlotOpen(workDir, rigName, payload.PolecatName, payload.Exit)
 		return
 	}
 
@@ -1942,12 +1978,12 @@ func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *Po
 // Used to avoid redundant subprocess invocations during zombie detection, where the same
 // agent bead was previously queried 3-5 times per polecat per patrol cycle. (gt-2gra)
 type agentBeadSnapshot struct {
-	AgentState  string
-	HookBead    string
-	Labels      []string
-	UpdatedAt   string
-	ActiveMR    string
-	Fields      *beads.AgentFields // parsed from description
+	AgentState string
+	HookBead   string
+	Labels     []string
+	UpdatedAt  string
+	ActiveMR   string
+	Fields     *beads.AgentFields // parsed from description
 }
 
 // fetchAgentBeadSnapshot fetches all agent bead data in a single bd show call.
@@ -2130,13 +2166,13 @@ func getBeadStatus(bd *BdCli, workDir, beadID string) (string, bool) {
 
 // resetAbandonedBead resets a dead polecat's hooked bead so it can be re-dispatched.
 // If the bead is in "hooked" or "in_progress" status, it:
-// 0. Checks if the polecat's work is already on main — if so, closes
-//    the bead instead of resetting (prevents re-dispatch of completed work)
-// 1. Records the respawn in the witness spawn-count ledger
-// 2. Resets status to open
-// 3. Clears assignee
-// 4. Sends mail to deacon for re-dispatch (includes respawn count; SPAWN_STORM
-//    prefix and Urgent priority when count exceeds max bead respawns config)
+//  0. Checks if the polecat's work is already on main — if so, closes
+//     the bead instead of resetting (prevents re-dispatch of completed work)
+//  1. Records the respawn in the witness spawn-count ledger
+//  2. Resets status to open
+//  3. Clears assignee
+//  4. Sends mail to deacon for re-dispatch (includes respawn count; SPAWN_STORM
+//     prefix and Urgent priority when count exceeds max bead respawns config)
 //
 // Returns true if the bead was recovered.
 func resetAbandonedBead(bd *BdCli, workDir, rigName, hookBead, polecatName string, router *mail.Router) bool {
