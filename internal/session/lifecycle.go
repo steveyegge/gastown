@@ -188,26 +188,11 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (_ *StartResult, retErr error
 		})
 	}
 
-	// Prepend GT_RUN (GASTA run ID) and any extra env vars into the command so
-	// that they are inherited by the initial shell before tmux SetEnvironment runs.
-	extraWithRun := make(map[string]string, len(cfg.ExtraEnv)+1)
-	for k, v := range cfg.ExtraEnv {
-		extraWithRun[k] = v
-	}
-	extraWithRun["GT_RUN"] = runID
-	command = config.PrependEnv(command, extraWithRun)
-
-	// 4. Create tmux session with command.
-	if err := t.NewSessionWithCommand(cfg.SessionID, cfg.WorkDir, command); err != nil {
-		return nil, fmt.Errorf("creating session: %w", err)
-	}
-
-	// 5. Set remain-on-exit immediately if requested (before anything else can fail).
-	if cfg.RemainOnExit {
-		_ = t.SetRemainOnExit(cfg.SessionID, true)
-	}
-
-	// 6. Set environment variables.
+	// 4. Compute environment variables BEFORE creating the session so they
+	// can be passed via tmux -e flags. Setting env via SetEnvironment after
+	// session creation only affects newly spawned panes — the running pane
+	// (and any subprocess the agent spawns, e.g. bd) keeps its original
+	// environment (gt-neycp).
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:             cfg.Role,
 		Rig:              cfg.RigName,
@@ -218,13 +203,20 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (_ *StartResult, retErr error
 		SessionName:      cfg.SessionID,
 	})
 	envVars = MergeRuntimeLivenessEnv(envVars, runtimeConfig)
-	for _, k := range mapKeysSorted(envVars) {
-		_ = t.SetEnvironment(cfg.SessionID, k, envVars[k])
+	envVars["GT_RUN"] = runID
+	for k, v := range cfg.ExtraEnv {
+		envVars[k] = v
 	}
-	// Set GT_RUN in the session environment so respawned processes also inherit it.
-	_ = t.SetEnvironment(cfg.SessionID, "GT_RUN", runID)
-	for _, k := range mapKeysSorted(cfg.ExtraEnv) {
-		_ = t.SetEnvironment(cfg.SessionID, k, cfg.ExtraEnv[k])
+
+	// 5. Create tmux session with command and env vars via -e flags so the
+	// initial shell — and the agent's subprocesses — inherit them from the start.
+	if err := t.NewSessionWithCommandAndEnv(cfg.SessionID, cfg.WorkDir, command, envVars); err != nil {
+		return nil, fmt.Errorf("creating session: %w", err)
+	}
+
+	// 6. Set remain-on-exit immediately if requested (before anything else can fail).
+	if cfg.RemainOnExit {
+		_ = t.SetRemainOnExit(cfg.SessionID, true)
 	}
 
 	// 7. Apply theme.

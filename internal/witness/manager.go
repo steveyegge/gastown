@@ -185,26 +185,11 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		roleConfig = nil
 	}
 
-	// Build startup command first
-	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
-	command, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, sessionID, agentOverride, roleConfig, runtimeConfigDir)
-	if err != nil {
-		return err
-	}
-
-	// Generate the GASTA run ID for this witness session.
-	runID := uuid.New().String()
-
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, witnessDir, command); err != nil {
-		return fmt.Errorf("creating tmux session: %w", err)
-	}
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
+	// Compute environment BEFORE creating the session so it can be passed to
+	// tmux via -e flags. This ensures the initial shell — and any subprocesses
+	// Claude spawns (notably bd) — inherit BEADS_DOLT_PORT and friends.
+	// Setting env after session creation via SetEnvironment only affects newly
+	// spawned panes, not the subprocess tree of the already-running pane (gt-neycp).
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:             "witness",
 		Rig:              m.rig.Name,
@@ -214,25 +199,43 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		SessionName:      sessionID,
 	})
 	envVars = session.MergeRuntimeLivenessEnv(envVars, runtimeConfig)
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
-	}
-	_ = t.SetEnvironment(sessionID, "GT_RUN", runID)
-	// Apply role config env vars if present (non-fatal).
-	// Skip keys already set by AgentEnv to prevent TOML env overriding
-	// the canonical qualified GT_ROLE (e.g., "gastown/witness" not "witness").
+
+	// Generate the GASTA run ID for this witness session.
+	runID := uuid.New().String()
+	envVars["GT_RUN"] = runID
+
+	// Apply role config env vars (non-fatal). Skip keys already set by AgentEnv
+	// to prevent TOML env overriding the canonical qualified GT_ROLE.
 	// See: https://github.com/steveyegge/gastown/issues/2492
-	for key, value := range roleConfigEnvVars(roleConfig, townRoot, m.rig.Name) {
+	roleEnv := roleConfigEnvVars(roleConfig, townRoot, m.rig.Name)
+	for key, value := range roleEnv {
 		if _, alreadySet := envVars[key]; alreadySet {
 			continue
 		}
-		_ = t.SetEnvironment(sessionID, key, value)
+		envVars[key] = value
 	}
-	// Apply CLI env overrides (highest priority, non-fatal).
+
+	// Apply CLI env overrides last (highest priority).
 	for _, override := range envOverrides {
 		if key, value, ok := strings.Cut(override, "="); ok {
-			_ = t.SetEnvironment(sessionID, key, value)
+			envVars[key] = value
 		}
+	}
+
+	// Build startup command. The command also embeds env vars via 'exec env'
+	// for WaitForCommand detection — belt-and-suspenders alongside -e flags.
+	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically.
+	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
+	command, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, sessionID, agentOverride, roleConfig, runtimeConfigDir)
+	if err != nil {
+		return err
+	}
+
+	// Create session with command and env vars via -e flags so the initial
+	// shell (and Claude's subprocesses) inherit them from the start.
+	// See: https://github.com/anthropics/gastown/issues/280 (race condition fix)
+	if err := t.NewSessionWithCommandAndEnv(sessionID, witnessDir, command, envVars); err != nil {
+		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
 	// Apply Gas Town theming (non-fatal: theming failure doesn't affect operation)

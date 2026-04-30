@@ -26,6 +26,7 @@ type tmuxOps interface {
 	IsAgentAlive(session string) bool
 	KillSessionWithProcesses(name string) error
 	NewSessionWithCommand(name, workDir, command string) error
+	NewSessionWithCommandAndEnv(name, workDir, command string, env map[string]string) error
 	SetRemainOnExit(pane string, on bool) error
 	SetEnvironment(session, key, value string) error
 	GetPaneID(session string) (string, error)
@@ -121,19 +122,9 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("building startup command: %w", err)
 	}
 
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, deaconDir, startupCmd); err != nil {
-		return fmt.Errorf("creating tmux session: %w", err)
-	}
-
-	// PATCH-010: Set remain-on-exit IMMEDIATELY after session creation.
-	// This ensures the pane stays if Claude exits before hooks are fully set.
-	// The pane will show "[Exited]" status but remain available for respawn.
-	_ = t.SetRemainOnExit(sessionID, true)
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
+	// Compute env vars BEFORE session creation so they reach Claude's
+	// subprocesses (e.g., bd) via tmux -e flags. SetEnvironment after creation
+	// only affects newly spawned panes, not the running pane's tree (gt-neycp).
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:        "deacon",
 		TownRoot:    m.townRoot,
@@ -141,9 +132,18 @@ func (m *Manager) Start(agentOverride string) error {
 		SessionName: sessionID,
 	})
 	envVars = session.MergeRuntimeLivenessEnv(envVars, runtimeConfig)
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
+
+	// Create session with command and env vars via -e flags so the initial
+	// shell (and subprocesses Claude spawns) inherit them from the start.
+	// See: https://github.com/anthropics/gastown/issues/280 (race condition fix)
+	if err := t.NewSessionWithCommandAndEnv(sessionID, deaconDir, startupCmd, envVars); err != nil {
+		return fmt.Errorf("creating tmux session: %w", err)
 	}
+
+	// PATCH-010: Set remain-on-exit IMMEDIATELY after session creation.
+	// This ensures the pane stays if Claude exits before hooks are fully set.
+	// The pane will show "[Exited]" status but remain available for respawn.
+	_ = t.SetRemainOnExit(sessionID, true)
 
 	// Record agent's pane_id for ZFC-compliant liveness checks (gt-qmsx).
 	if paneID, err := t.GetPaneID(sessionID); err == nil {
