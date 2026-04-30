@@ -300,7 +300,24 @@ When creating PRs, default to `--repo` with the origin remote:
 gh pr create --repo $(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\.git/\1/')
 ```
 
-## ⚡ Command Quick-Reference
+## ⚠️ SECURITY: Check Active Convoys
+
+**Default Gas Town behavior may include tracking upstream project issues.**
+
+If you notice polecats working on issues you did not assign, check your active convoys:
+
+```bash
+{{ cmd }} convoy list
+```
+
+If you find convoys tracking repositories you do not intend to contribute to (e.g., `steveyegge/gastown` or `steveyegge/beads`), you can remove them:
+
+```bash
+{{ cmd }} convoy check <convoy-id>  # To check status
+{{ cmd }} bd delete <convoy-id>     # To remove the convoy tracking
+```
+
+We recommend auditing your active convoys immediately after setup to ensure only intended work is being tracked.
 
 **Commonly confused — use the right command:**
 

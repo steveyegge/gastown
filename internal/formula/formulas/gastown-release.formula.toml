@@ -32,9 +32,9 @@ formula = "gastown-release"
 type = "workflow"
 version = 1
 
-[vars.version]
-description = "The semantic version to release (e.g., 0.3.0)"
-required = true
+[vars.push]
+description = "Enable automatic git push (true/false)"
+default = "false"
 
 [[steps]]
 id = "preflight-workspaces"
@@ -288,24 +288,20 @@ The version may have been previously (partially) released.
 
 [[steps]]
 id = "push-release"
-title = "Push commit and tag"
+title = "Push commit and tag (OPT-IN)"
 needs = ["create-tag"]
 description = """
 Push the release commit and tag to origin.
+**WARNING:** This step is opt-in. Set `push=true` to enable.
 
 ```bash
-git push origin main
-git push origin v{{version}}
+if [ "{{push}}" = "true" ]; then
+    git push origin main
+    git push origin v{{version}}
+else
+    echo "Skipping push as requested. Set push=true to enable."
+fi
 ```
-
-This triggers GitHub Actions to build release artifacts.
-
-Monitor: https://github.com/steveyegge/gastown/actions
-
-## On push rejection:
-Someone pushed while we were releasing.
-- **Crew**: Pull, rebase, re-tag, try again. Ask user if conflicts.
-- **Polecat**: Escalate - release coordination conflict requires human decision
 """
 
 [[steps]]

@@ -27,9 +27,9 @@ type = "workflow"
 version = 1
 pour = true
 
-[vars.version]
-description = "The semantic version to release (e.g., 0.37.0)"
-required = true
+[vars.push]
+description = "Enable automatic git push (true/false)"
+default = "false"
 
 [[steps]]
 id = "preflight-git"
@@ -188,31 +188,21 @@ Verify: `git tag -l | tail -5`
 """
 
 [[steps]]
-id = "push-main"
-title = "Push to main"
+id = "push-release"
+title = "Push release (OPT-IN)"
 needs = ["create-tag"]
 description = """
-Push the release commit to origin.
+Push the release commit and tag to origin.
+**WARNING:** This step is opt-in. Set `push=true` to enable.
 
 ```bash
-git push origin main
+if [ "{{push}}" = "true" ]; then
+    git push origin main
+    git push origin v{{version}}
+else
+    echo "Skipping push as requested. Set push=true to enable."
+fi
 ```
-
-If rejected, someone else pushed. Pull, rebase, try again.
-"""
-
-[[steps]]
-id = "push-tag"
-title = "Push release tag"
-needs = ["push-main"]
-description = """
-Push the version tag to trigger CI release.
-
-```bash
-git push origin v{{version}}
-```
-
-This triggers GitHub Actions to build artifacts and publish.
 """
 
 [[steps]]
