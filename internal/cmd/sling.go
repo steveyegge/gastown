@@ -818,12 +818,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	if formulaName != "" {
 		existingMolecules := collectExistingMolecules(info)
 		if len(existingMolecules) > 0 {
-			// Auto-burn when bead is unassigned (molecules are definitionally stale),
-			// or when the assigned agent's session is dead. `force` already includes
-			// dead-agent auto-force from the status check above.
-			stale := force ||
-				(info.Assignee == "" && (info.Status == "open" || info.Status == "in_progress")) ||
-				(info.Assignee != "" && isHookedAgentDeadFn(info.Assignee))
+			stale := force || isOrphanMolecule(info)
 			if slingDryRun {
 				fmt.Printf("  Would burn %d stale molecule(s): %s\n",
 					len(existingMolecules), strings.Join(existingMolecules, ", "))
