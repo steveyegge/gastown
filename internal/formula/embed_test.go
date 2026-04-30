@@ -864,6 +864,98 @@ func TestCheckFormulaHealth_MixedScenarios(t *testing.T) {
 	}
 }
 
+// TestResolveFormulaContent verifies resolution order: rig > town > embedded.
+func TestResolveFormulaContent(t *testing.T) {
+	t.Run("returns embedded formula when no disk overrides exist", func(t *testing.T) {
+		content, err := ResolveFormulaContent("mol-polecat-work", "", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(content) == 0 {
+			t.Error("expected non-empty content")
+		}
+	})
+
+	t.Run("town-level formula shadows embedded", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		formulasDir := filepath.Join(tmpDir, ".beads", "formulas")
+		if err := os.MkdirAll(formulasDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		townContent := []byte("formula = \"mol-polecat-work\"\nversion = 99\n")
+		if err := os.WriteFile(filepath.Join(formulasDir, "mol-polecat-work.formula.toml"), townContent, 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		content, err := ResolveFormulaContent("mol-polecat-work", tmpDir, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(content) != string(townContent) {
+			t.Error("expected town-level content to shadow embedded")
+		}
+	})
+
+	t.Run("rig-level formula shadows town and embedded", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Write town-level formula
+		townFormulasDir := filepath.Join(tmpDir, ".beads", "formulas")
+		if err := os.MkdirAll(townFormulasDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		townContent := []byte("formula = \"mol-polecat-work\"\nversion = 99\n")
+		if err := os.WriteFile(filepath.Join(townFormulasDir, "mol-polecat-work.formula.toml"), townContent, 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Write rig-level formula (takes priority)
+		rigFormulasDir := filepath.Join(tmpDir, "myrig", ".beads", "formulas")
+		if err := os.MkdirAll(rigFormulasDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		rigContent := []byte("formula = \"mol-polecat-work\"\nversion = 100\n")
+		if err := os.WriteFile(filepath.Join(rigFormulasDir, "mol-polecat-work.formula.toml"), rigContent, 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		content, err := ResolveFormulaContent("mol-polecat-work", tmpDir, "myrig")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(content) != string(rigContent) {
+			t.Error("expected rig-level content to shadow town and embedded")
+		}
+	})
+
+	t.Run("falls back to town when rig has no override", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		townFormulasDir := filepath.Join(tmpDir, ".beads", "formulas")
+		if err := os.MkdirAll(townFormulasDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		townContent := []byte("formula = \"mol-custom-test\"\nversion = 1\n")
+		if err := os.WriteFile(filepath.Join(townFormulasDir, "mol-custom-test.formula.toml"), townContent, 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		content, err := ResolveFormulaContent("mol-custom-test", tmpDir, "myrig")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(content) != string(townContent) {
+			t.Error("expected town-level content when rig has no override")
+		}
+	})
+
+	t.Run("returns error when not found anywhere", func(t *testing.T) {
+		_, err := ResolveFormulaContent("mol-does-not-exist", "", "")
+		if err == nil {
+			t.Error("expected error for non-existent formula")
+		}
+	})
+}
+
 // TestGetEmbeddedFormulaContent verifies extraction of individual embedded formulas.
 func TestGetEmbeddedFormulaContent(t *testing.T) {
 	// Known embedded formula should succeed

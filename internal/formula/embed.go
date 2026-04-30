@@ -44,6 +44,40 @@ type HealthReport struct {
 	Error     int // file could not be read (e.g. permission denied)
 }
 
+// ResolveFormulaContent resolves formula content using the three-tier precedence
+// defined in docs/design/formula-resolution.md: rig > town > embedded.
+//
+// Tier 1 (rig): townRoot/rigName/.beads/formulas/<name>.formula.toml
+// Tier 2 (town): townRoot/.beads/formulas/<name>.formula.toml
+// Tier 3 (embedded): compiled into the binary
+//
+// Either townRoot or rigName may be empty; those tiers are skipped.
+func ResolveFormulaContent(name, townRoot, rigName string) ([]byte, error) {
+	filename := name
+	if !hasFormulaSuffix(filename) {
+		filename = filename + ".formula.toml"
+	}
+
+	// Tier 1: rig-level (most specific)
+	if townRoot != "" && rigName != "" {
+		path := filepath.Join(townRoot, rigName, ".beads", "formulas", filename)
+		if content, err := os.ReadFile(path); err == nil {
+			return content, nil
+		}
+	}
+
+	// Tier 2: town-level
+	if townRoot != "" {
+		path := filepath.Join(townRoot, ".beads", "formulas", filename)
+		if content, err := os.ReadFile(path); err == nil {
+			return content, nil
+		}
+	}
+
+	// Tier 3: embedded (system fallback)
+	return GetEmbeddedFormulaContent(name)
+}
+
 // GetEmbeddedFormulaContent returns the raw content of an embedded formula by name.
 // The name can be with or without the .formula.toml suffix.
 // Returns the content bytes, or an error if the formula is not found.

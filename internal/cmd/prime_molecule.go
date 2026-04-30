@@ -113,7 +113,7 @@ func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 // extraVars is an optional list of "key=value" overrides that are substituted into
 // step descriptions before rendering, taking precedence over formula defaults.
 func showFormulaSteps(formulaName, label, townRoot, rigName string, extraVars ...[]string) {
-	content, err := formula.GetEmbeddedFormulaContent(formulaName)
+	content, err := formula.ResolveFormulaContent(formulaName, townRoot, rigName)
 	if err != nil {
 		style.PrintWarning("could not load formula %s: %v", formulaName, err)
 		return
@@ -152,7 +152,7 @@ func showFormulaSteps(formulaName, label, townRoot, rigName string, extraVars ..
 // townRoot and rigName are used to load formula overlays (operator customizations).
 // extraVars is an optional list of "key=value" overrides substituted into step descriptions.
 func showFormulaStepsFull(formulaName, townRoot, rigName string, extraVars ...[]string) {
-	content, err := formula.GetEmbeddedFormulaContent(formulaName)
+	content, err := formula.ResolveFormulaContent(formulaName, townRoot, rigName)
 	if err != nil {
 		style.PrintWarning("could not load formula %s: %v", formulaName, err)
 		return
