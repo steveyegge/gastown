@@ -1130,7 +1130,7 @@ func getAgentBeadID(ctx RoleContext) string {
 // Uses the shared SetupRedirect helper which handles both tracked and local beads.
 func ensureBeadsRedirect(ctx RoleContext) {
 	// Only applies to worktree-based roles that use shared beads
-	if ctx.Role != RoleCrew && ctx.Role != RolePolecat && ctx.Role != RoleRefinery {
+	if ctx.Role != RoleCrew && ctx.Role != RolePolecat && ctx.Role != RoleRefinery && ctx.Role != RoleWitness {
 		return
 	}
 

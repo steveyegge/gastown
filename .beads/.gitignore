@@ -1,5 +1,6 @@
 # Dolt database (managed by Dolt, not git)
 dolt/
+embeddeddolt/
 
 # Runtime files
 bd.sock
