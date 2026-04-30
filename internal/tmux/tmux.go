@@ -561,6 +561,35 @@ func (t *Tmux) EnsureSessionFreshWithCommand(name, workDir, command string) erro
 	return t.NewSessionWithCommand(name, workDir, command)
 }
 
+// EnsureSessionFreshWithCommandAndEnv is like EnsureSessionFreshWithCommand but
+// also seeds the session's environment via tmux -e flags. The -e flags set
+// session-level env BEFORE the shell starts, so the initial pane (and any
+// subprocesses the agent spawns, e.g. bd) inherit it. SetEnvironment after
+// creation only affects newly spawned panes — not the running pane's
+// subprocess tree (gt-neycp).
+//
+// If an existing session has a healthy agent, returns ErrSessionRunning.
+func (t *Tmux) EnsureSessionFreshWithCommandAndEnv(name, workDir, command string, env map[string]string) error {
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
+
+	running, err := t.HasSession(name)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if running {
+		if t.IsAgentRunning(name) {
+			return ErrSessionRunning
+		}
+		if err := t.KillSessionWithProcesses(name); err != nil {
+			return fmt.Errorf("killing zombie session: %w", err)
+		}
+	}
+
+	return t.NewSessionWithCommandAndEnv(name, workDir, command, env)
+}
+
 // KillSession terminates a tmux session. Idempotent: returns nil if the
 // session is already gone or there is no tmux server.
 func (t *Tmux) KillSession(name string) (retErr error) {
