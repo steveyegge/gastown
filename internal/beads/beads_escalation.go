@@ -259,9 +259,11 @@ func (b *Beads) CloseEscalation(id, closedBy, reason string) error {
 		return err
 	}
 
-	// Close the issue
-	_, err = b.run("close", id, "--reason="+reason)
-	return err
+	// Close the issue. Route on id so cross-rig escalations (au-ofe) resolve
+	// to the correct database. Delegating to CloseWithReason keeps the close
+	// path consistent with Close/ForceCloseWithReason (session tagging, store
+	// handling, and runBDForIDs routing).
+	return b.CloseWithReason(reason, id)
 }
 
 // GetEscalationBead retrieves an escalation bead by ID.

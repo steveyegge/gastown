@@ -58,8 +58,22 @@ func FindTownRoot(startDir string) string {
 // It extracts the prefix from the bead ID and looks up the corresponding route.
 // Returns the resolved beads directory path, following any redirects.
 //
-// If townRoot is empty or prefix is not found, falls back to the provided fallbackDir.
+// If townRoot is empty or prefix is not found, falls back to the provided fallbackDir
+// and logs a warning to stderr. Callers that expect a silent fallback (e.g., best-effort
+// mail lookups where the ID may not be routable) should use ResolveRoutingTargetQuiet.
 func ResolveRoutingTarget(townRoot, beadID, fallbackDir string) string {
+	return resolveRoutingTarget(townRoot, beadID, fallbackDir, true)
+}
+
+// ResolveRoutingTargetQuiet is like ResolveRoutingTarget but silently returns
+// fallbackDir if the bead's prefix has no route or the rig beads dir can't be
+// resolved. Useful for best-effort callers (mail Get fallback, etc.) where a
+// missing route is an expected outcome, not a warning condition.
+func ResolveRoutingTargetQuiet(townRoot, beadID, fallbackDir string) string {
+	return resolveRoutingTarget(townRoot, beadID, fallbackDir, false)
+}
+
+func resolveRoutingTarget(townRoot, beadID, fallbackDir string, warn bool) string {
 	if townRoot == "" {
 		return fallbackDir
 	}
@@ -73,14 +87,18 @@ func ResolveRoutingTarget(townRoot, beadID, fallbackDir string) string {
 	// Look up rig path for this prefix
 	rigPath := GetRigPathForPrefix(townRoot, prefix)
 	if rigPath == "" {
-		fmt.Fprintf(os.Stderr, "Warning: no route found for prefix %q (bead %s), falling back to %s\n", prefix, beadID, fallbackDir)
+		if warn {
+			fmt.Fprintf(os.Stderr, "Warning: no route found for prefix %q (bead %s), falling back to %s\n", prefix, beadID, fallbackDir)
+		}
 		return fallbackDir
 	}
 
 	// Resolve redirects and get final beads directory
 	beadsDir := ResolveBeadsDir(rigPath)
 	if beadsDir == "" {
-		fmt.Fprintf(os.Stderr, "Warning: could not resolve beads dir for rig %s (bead %s), falling back to %s\n", rigPath, beadID, fallbackDir)
+		if warn {
+			fmt.Fprintf(os.Stderr, "Warning: could not resolve beads dir for rig %s (bead %s), falling back to %s\n", rigPath, beadID, fallbackDir)
+		}
 		return fallbackDir
 	}
 

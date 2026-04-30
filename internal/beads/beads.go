@@ -518,6 +518,42 @@ func (b *Beads) runWithRouting(args ...string) (_ []byte, retErr error) { //noli
 	return stripStdoutWarnings(stdout.Bytes()), nil
 }
 
+// routesCrossRig reports whether id's prefix routes to a different beads dir
+// than b's own (per routes.jsonl). Returns false if no routing is needed or
+// the route can't be resolved (in which case the caller should use b.run).
+func (b *Beads) routesCrossRig(id string) bool {
+	own := b.getResolvedBeadsDir()
+	target := ResolveRoutingTargetQuiet(b.getTownRoot(), id, own)
+	return target != "" && target != own
+}
+
+// runBDForID executes a bd command that operates on a single bead id, choosing
+// between run (explicit BEADS_DIR for same-rig) and runWithRouting (strips
+// BEADS_DIR so bd does its own prefix routing for cross-rig ids). Pinning
+// BEADS_DIR at a rig's .beads bypasses routes.jsonl and breaks lookups for
+// beads that live in a different database on the shared Dolt server, so we
+// only strip BEADS_DIR when a cross-rig route is detected. See au-ofe, au-b9d.
+func (b *Beads) runBDForID(id string, args ...string) ([]byte, error) {
+	if b.routesCrossRig(id) {
+		return b.runWithRouting(args...)
+	}
+	return b.run(args...)
+}
+
+// runBDForIDs is the multi-id variant of runBDForID. If any id routes to a
+// different rig than b's own, BEADS_DIR is stripped so bd handles routing
+// itself (bd supports mixed-prefix args: `bd close au-foo hq-bar` will route
+// each id to its own database). Same-rig-only invocations use run() so
+// BEADS_DIR stays pinned for consistency with other same-rig ops.
+func (b *Beads) runBDForIDs(ids []string, args ...string) ([]byte, error) {
+	for _, id := range ids {
+		if b.routesCrossRig(id) {
+			return b.runWithRouting(args...)
+		}
+	}
+	return b.run(args...)
+}
+
 // Run executes a bd command and returns stdout.
 // This is a public wrapper around the internal run method for cases where
 // callers need to run arbitrary bd commands.
@@ -1078,19 +1114,17 @@ func (b *Beads) ReadyWithType(issueType string) ([]*Issue, error) {
 
 // Show returns detailed information about an issue.
 func (b *Beads) Show(id string) (*Issue, error) {
-	// Route cross-rig queries via routes.jsonl so that rig-level bead IDs
-	// (e.g., "gt-abc123") resolve to the correct rig database.
-	targetDir := ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
-	if targetDir != b.getResolvedBeadsDir() {
-		target := NewWithBeadsDir(filepath.Dir(targetDir), targetDir)
-		return target.Show(id)
-	}
-
 	if b.store != nil {
 		return b.storeShow(id)
 	}
 
-	out, err := b.run("show", id, "--json")
+	// Route cross-rig queries by stripping BEADS_DIR so bd's own prefix-based
+	// routing (via the town's routes.jsonl) resolves the bead. Pinning
+	// BEADS_DIR at a rig's .beads bypasses that routing and fails lookups for
+	// beads whose prefix maps to a different database on the shared Dolt
+	// server. See au-ofe / au-b9d. runBDForID picks run vs runWithRouting
+	// based on whether the ID routes to b's own beadsDir.
+	out, err := b.runBDForID(id, "show", id, "--json")
 	if err != nil {
 		return nil, err
 	}
@@ -1427,6 +1461,11 @@ func normalizeBugTitle(title string) string {
 }
 
 // Update updates an existing issue.
+//
+// When id routes to a different rig than b's own beadsDir, BEADS_DIR is
+// stripped so bd performs its own routes.jsonl-driven lookup. Without this,
+// the bd subprocess would be pinned to b's beadsDir and fail to find the
+// bead (au-ofe).
 func (b *Beads) Update(id string, opts UpdateOptions) error {
 	if b.store != nil {
 		return b.storeUpdate(id, opts)
@@ -1463,13 +1502,16 @@ func (b *Beads) Update(id string, opts UpdateOptions) error {
 		}
 	}
 
-	_, err := b.run(args...)
+	_, err := b.runBDForID(id, args...)
 	return err
 }
 
 // Close closes one or more issues.
 // If a runtime session ID is set in the environment, it is passed to bd close
 // for work attribution tracking (see decision 009-session-events-architecture.md).
+//
+// If any id routes to a different rig than b's own beadsDir, BEADS_DIR is
+// stripped so bd routes each id itself (au-ofe).
 func (b *Beads) Close(ids ...string) error {
 	if len(ids) == 0 {
 		return nil
@@ -1486,13 +1528,16 @@ func (b *Beads) Close(ids ...string) error {
 		args = append(args, "--session="+sessionID)
 	}
 
-	_, err := b.run(args...)
+	_, err := b.runBDForIDs(ids, args...)
 	return err
 }
 
 // CloseWithReason closes one or more issues with a reason.
 // If a runtime session ID is set in the environment, it is passed to bd close
 // for work attribution tracking (see decision 009-session-events-architecture.md).
+//
+// If any id routes to a different rig than b's own beadsDir, BEADS_DIR is
+// stripped so bd routes each id itself (au-ofe).
 func (b *Beads) CloseWithReason(reason string, ids ...string) error {
 	if len(ids) == 0 {
 		return nil
@@ -1510,13 +1555,16 @@ func (b *Beads) CloseWithReason(reason string, ids ...string) error {
 		args = append(args, "--session="+sessionID)
 	}
 
-	_, err := b.run(args...)
+	_, err := b.runBDForIDs(ids, args...)
 	return err
 }
 
 // ForceCloseWithReason closes one or more issues with --force, bypassing
 // dependency checks. Used by gt done where the polecat is about to be nuked
 // and open molecule wisps should not block issue closure.
+//
+// If any id routes to a different rig than b's own beadsDir, BEADS_DIR is
+// stripped so bd routes each id itself (au-ofe).
 func (b *Beads) ForceCloseWithReason(reason string, ids ...string) error {
 	if len(ids) == 0 {
 		return nil
@@ -1539,7 +1587,7 @@ func (b *Beads) ForceCloseWithReason(reason string, ids ...string) error {
 		args = append(args, "--session="+sessionID)
 	}
 
-	_, err := b.run(args...)
+	_, err := b.runBDForIDs(ids, args...)
 	return err
 }
 
@@ -1573,7 +1621,7 @@ func (b *Beads) ReleaseWithReason(id, reason string) error {
 		args = append(args, "--notes=Released: "+reason)
 	}
 
-	_, err := b.run(args...)
+	_, err := b.runBDForID(id, args...)
 	return err
 }
 

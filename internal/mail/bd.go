@@ -52,7 +52,12 @@ func (e *bdError) ContainsError(substr string) bool {
 // runBdCommand executes a bd command with a context timeout and proper environment setup.
 // ctx controls the deadline/timeout for the subprocess.
 // workDir is the directory to run the command in.
-// beadsDir is the BEADS_DIR environment variable value.
+// beadsDir is the BEADS_DIR environment variable value. If beadsDir is empty,
+// BEADS_DIR is stripped from the environment so bd performs its own
+// prefix-based routing via routes.jsonl (see au-ofe). Pass the town-level
+// .beads (or empty) when operating on cross-rig bead IDs; pinning BEADS_DIR
+// at a rig's .beads bypasses routing and breaks lookups for beads whose
+// prefix maps to a different database on the shared Dolt server.
 // extraEnv contains additional environment variables to set (e.g., "BD_IDENTITY=...").
 // Returns stdout bytes on success, or a *bdError on failure.
 func runBdCommand(ctx context.Context, args []string, workDir, beadsDir string, extraEnv ...string) (_ []byte, retErr error) {
@@ -61,7 +66,9 @@ func runBdCommand(ctx context.Context, args []string, workDir, beadsDir string, 
 	// Remove stale dolt-server.pid before spawning bd. A stale PID file causes
 	// bd to connect to port 3307 which may be occupied by a different Dolt server
 	// serving different databases, resulting in hangs until the read timeout kills it.
-	beads.CleanStaleDoltServerPID(beadsDir)
+	if beadsDir != "" {
+		beads.CleanStaleDoltServerPID(beadsDir)
+	}
 
 	// bd v0.59+ requires --flat for list --json to produce JSON output.
 	// Without it, bd returns human-readable tree format that fails JSON parsing.
@@ -73,9 +80,19 @@ func runBdCommand(ctx context.Context, args []string, workDir, beadsDir string, 
 	cmd.Dir = workDir
 	util.SetDetachedProcessGroup(cmd)
 
-	env := append(cmd.Environ(), "BEADS_DIR="+beadsDir)
-	if dbEnv := beads.DatabaseEnv(beadsDir); dbEnv != "" {
-		env = append(env, dbEnv)
+	env := cmd.Environ()
+	if beadsDir == "" {
+		// Strip any inherited BEADS_DIR so bd does native routing via its
+		// cwd walk-up (which finds the town's routes.jsonl).
+		env = filterEnvKey(env, "BEADS_DIR")
+	} else {
+		// Also strip first so glibc getenv() doesn't pick up an inherited
+		// entry that shadows the one we append.
+		env = filterEnvKey(env, "BEADS_DIR")
+		env = append(env, "BEADS_DIR="+beadsDir)
+		if dbEnv := beads.DatabaseEnv(beadsDir); dbEnv != "" {
+			env = append(env, dbEnv)
+		}
 	}
 	env = append(env, extraEnv...)
 	env = append(env, telemetry.OTELEnvForSubprocess()...)
@@ -123,6 +140,20 @@ func firstArg(args []string) string {
 		return args[0]
 	}
 	return ""
+}
+
+// filterEnvKey removes all entries matching the given key= from the env slice.
+// Used to strip an inherited BEADS_DIR before appending the desired value, so
+// glibc getenv() doesn't return a shadowed older entry.
+func filterEnvKey(env []string, key string) []string {
+	prefix := key + "="
+	result := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			result = append(result, e)
+		}
+	}
+	return result
 }
 
 // bdReadCtx returns a context with the standard bd read timeout.

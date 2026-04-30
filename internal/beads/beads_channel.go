@@ -446,7 +446,7 @@ func (b *Beads) EnforceChannelRetention(name string) error {
 	// Delete marked messages (best-effort)
 	for id := range toDeleteIDs {
 		// Use close instead of delete for audit trail
-		_, _ = b.run("close", id, "--reason=channel retention pruning")
+		_, _ = b.runBDForID(id, "close", id, "--reason=channel retention pruning")
 	}
 
 	return nil
@@ -519,7 +519,7 @@ func (b *Beads) PruneAllChannels() (int, error) {
 
 		// Delete marked messages
 		for id := range toDeleteIDs {
-			if _, err := b.run("close", id, "--reason=patrol retention pruning"); err == nil {
+			if _, err := b.runBDForID(id, "close", id, "--reason=patrol retention pruning"); err == nil {
 				pruned++
 			}
 		}

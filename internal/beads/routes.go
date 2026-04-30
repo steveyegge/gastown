@@ -337,31 +337,36 @@ func GetRigNameForPrefix(townRoot, prefix string) string {
 // (typically the town-level .beads). If the bead ID's prefix maps to a different
 // rig via routes.jsonl, the resolved rig's beads directory is returned.
 // Returns currentBeadsDir if no routing is needed or prefix can't be resolved.
+//
+// This delegates to ResolveRoutingTarget for cross-rig resolution so that all
+// ID→beadsDir lookup paths (bd show, mail read/archive, escalate ack/close,
+// bead Update/Close) behave identically. See beads au-ofe and au-b9d: previously
+// this function only consulted routes.jsonl in currentBeadsDir, which missed
+// rigs whose routes live in the town's beads dir (or other workspaces) and did
+// not follow redirects, so writes against cross-rig bead IDs failed with
+// "issue not found".
 func ResolveBeadsDirForID(currentBeadsDir, beadID string) string {
-	prefix := ExtractPrefix(beadID)
-	if prefix == "" {
-		return currentBeadsDir
+	// Derive town root from currentBeadsDir. ResolveRoutingTarget will look up
+	// the prefix in the town's routes.jsonl and follow any redirects.
+	//
+	// currentBeadsDir is typically ".../<townRoot>/.beads", in which case the
+	// town root is its parent directory. FindTownRoot walks up looking for
+	// mayor/town.json so it still works when currentBeadsDir points at a rig
+	// worktree's .beads (e.g., a polecat's .beads that redirects into town).
+	townRoot := ""
+	if filepath.Base(currentBeadsDir) == ".beads" {
+		townRoot = FindTownRoot(filepath.Dir(currentBeadsDir))
+	} else {
+		townRoot = FindTownRoot(currentBeadsDir)
 	}
-
-	routes, err := LoadRoutes(currentBeadsDir)
-	if err != nil || routes == nil {
-		return currentBeadsDir
+	if townRoot == "" {
+		// Best-effort fallback: assume currentBeadsDir's parent is the town root.
+		townRoot = filepath.Dir(currentBeadsDir)
 	}
-
-	for _, r := range routes {
-		if r.Prefix == prefix {
-			if r.Path == "." {
-				return currentBeadsDir // Town-level — already correct
-			}
-			// Rig-level bead — resolve to rig's beads directory.
-			// Derive town root from currentBeadsDir (parent of .beads).
-			townRoot := filepath.Dir(currentBeadsDir)
-			rigDir := filepath.Join(townRoot, r.Path)
-			return ResolveBeadsDir(rigDir)
-		}
-	}
-
-	return currentBeadsDir
+	// Use the quiet variant: callers like mail.Get probe IDs whose prefixes may
+	// legitimately not have a route (dangling refs, legacy JSONL beads). The
+	// stderr spam was confusing and made the inbox unusable (au-b9d).
+	return ResolveRoutingTargetQuiet(townRoot, beadID, currentBeadsDir)
 }
 
 // ValidateRigPrefix checks that a newly created bead landed in the expected rig's

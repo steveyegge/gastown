@@ -69,7 +69,7 @@ func (b *Beads) AddDelegation(d *Delegation) error {
 		if marshalErr != nil {
 			return fmt.Errorf("marshaling delegation: %w", marshalErr)
 		}
-		_, err = b.run("update", d.Child, "--set-metadata=delegated_from="+string(delegationJSON))
+		_, err = b.runBDForID(d.Child, "update", d.Child, "--set-metadata=delegated_from="+string(delegationJSON))
 	}
 	if err != nil {
 		return fmt.Errorf("setting delegation metadata: %w", err)
@@ -91,7 +91,7 @@ func (b *Beads) RemoveDelegation(parent, child string) error {
 		err = b.storeDelegationClear(child)
 	} else {
 		// CLI path: use --unset-metadata flag (bd update in v0.62+).
-		_, err = b.run("update", child, "--unset-metadata=delegated_from")
+		_, err = b.runBDForID(child, "update", child, "--unset-metadata=delegated_from")
 	}
 	if err != nil {
 		return fmt.Errorf("clearing delegation metadata: %w", err)

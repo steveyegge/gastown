@@ -92,6 +92,23 @@ func (m *Mailbox) Identity() string {
 	return m.identity
 }
 
+// routedBeadsDir returns the BEADS_DIR value that runBdCommand should use to
+// resolve id. For same-rig ids it returns m.beadsDir (so bd talks to the
+// configured database directly). For cross-rig ids it returns "", which tells
+// runBdCommand to strip BEADS_DIR so bd performs its own prefix-based routing
+// via routes.jsonl. Pinning BEADS_DIR at the rig's .beads bypasses that
+// routing and fails lookups for beads whose prefix maps to a different
+// database on the shared Dolt server (au-ofe, au-b9d).
+func (m *Mailbox) routedBeadsDir(id string) string {
+	target := beads.ResolveBeadsDirForID(m.beadsDir, id)
+	if target == "" || target == m.beadsDir {
+		return m.beadsDir
+	}
+	// Cross-rig: strip BEADS_DIR. bd will walk up from m.workDir and
+	// consult the town's routes.jsonl to dispatch to the right database.
+	return ""
+}
+
 // Path returns the JSONL path for legacy mailboxes.
 func (m *Mailbox) Path() string {
 	return m.path
@@ -466,13 +483,14 @@ func (m *Mailbox) Get(id string) (*Message, error) {
 }
 
 func (m *Mailbox) getBeads(id string) (*Message, error) {
-	// Resolve correct beadsDir based on bead ID prefix (GH#2423)
-	primary := beads.ResolveBeadsDirForID(m.beadsDir, id)
+	// Pick the correct BEADS_DIR for this id: m.beadsDir for same-rig,
+	// "" (strip BEADS_DIR, let bd route) for cross-rig (au-ofe, au-b9d).
+	primary := m.routedBeadsDir(id)
 	msg, err := m.getFromDir(id, primary)
 	if errors.Is(err, ErrMessageNotFound) && primary != m.beadsDir {
-		// Cross-rig bead IDs (e.g. ne-*) may live in the home DB when created
-		// via the mail router (which always uses town beads). Fall back to
-		// m.beadsDir before giving up. See ne-bgr.
+		// Cross-rig ids normally resolve via bd's routing when primary is "".
+		// If that still fails (e.g., a legacy bead whose prefix isn't in
+		// routes.jsonl), fall back to m.beadsDir directly. See ne-bgr.
 		return m.getFromDir(id, m.beadsDir)
 	}
 	return msg, err
@@ -534,13 +552,13 @@ func (m *Mailbox) MarkRead(id string) error {
 }
 
 func (m *Mailbox) markReadBeads(id string) error {
-	// Resolve correct beadsDir based on bead ID prefix (GH#2423)
-	primary := beads.ResolveBeadsDirForID(m.beadsDir, id)
+	// Pick BEADS_DIR for id: m.beadsDir for same-rig, "" (let bd route) for
+	// cross-rig. See au-ofe/au-b9d for why pinning the rig's BEADS_DIR fails.
+	primary := m.routedBeadsDir(id)
 	err := m.closeInDir(id, primary)
 	if errors.Is(err, ErrMessageNotFound) && primary != m.beadsDir {
-		// Cross-rig bead IDs (e.g. ne-*) may live in the home DB when created
-		// via the mail router (which always uses town beads). Fall back to
-		// m.beadsDir before giving up. See ne-bgr.
+		// Fallback for legacy/unknown prefixes that bd routing can't resolve.
+		// See ne-bgr.
 		return m.closeInDir(id, m.beadsDir)
 	}
 	return err
@@ -620,7 +638,8 @@ func (m *Mailbox) markReadOnlyBeads(id string) error {
 
 	// Add "read" label to mark as read without closing
 	args := []string{"label", "add", id, "read"}
-	primary := beads.ResolveBeadsDirForID(m.beadsDir, id)
+	// Route via bd for cross-rig ids (au-ofe); see routedBeadsDir.
+	primary := m.routedBeadsDir(id)
 
 	ctx, cancel := bdWriteCtx()
 	defer cancel()
@@ -665,7 +684,8 @@ func (m *Mailbox) markUnreadOnlyBeads(id string) error {
 
 	// Remove "read" label to mark as unread
 	args := []string{"label", "remove", id, "read"}
-	primary := beads.ResolveBeadsDirForID(m.beadsDir, id)
+	// Route via bd for cross-rig ids (au-ofe); see routedBeadsDir.
+	primary := m.routedBeadsDir(id)
 
 	ctx, cancel := bdWriteCtx()
 	defer cancel()
@@ -714,7 +734,8 @@ func (m *Mailbox) markUnreadBeads(id string) error {
 	}
 
 	args := []string{"reopen", id}
-	primary := beads.ResolveBeadsDirForID(m.beadsDir, id)
+	// Route via bd for cross-rig ids (au-ofe); see routedBeadsDir.
+	primary := m.routedBeadsDir(id)
 
 	ctx, cancel := bdWriteCtx()
 	defer cancel()
