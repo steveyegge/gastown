@@ -2771,11 +2771,19 @@ func (d *Daemon) reapIdlePolecat(rigName, polecatName string, timeout time.Durat
 		agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
 		info, err := d.getAgentBeadInfo(agentBeadID)
 		if err != nil {
-			// Agent bead lookup failed — polecat has no provable work.
-			// If heartbeat is stale enough (2x timeout), reap anyway to prevent
-			// indefinite API burn when bead infrastructure is degraded.
-			// But first check if the agent is actually running (GH#3342).
-			if staleDuration >= timeout*2 && !d.tmux.IsAgentRunning(sessionName) {
+			// Agent bead lookup failed — use the authoritative work bead assignee
+			// to determine whether the polecat has real work before reaping.
+			// Bead infrastructure failures (Dolt issues, version mismatches) cause
+			// spurious lookup errors while the polecat is actively working (GH#3342).
+			assignee := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+			if d.hasAssignedOpenWork(rigName, assignee) {
+				return
+			}
+			// No assigned work and agent not running — safe to reap.
+			// Use 3x threshold (not 2x) to avoid killing polecats during transient
+			// infrastructure degradation when the agent process is alive but not
+			// detectable (e.g. long thinking sessions, slow process inspection).
+			if staleDuration >= timeout*3 || !d.tmux.IsAgentRunning(sessionName) && staleDuration >= timeout*2 {
 				d.killIdlePolecat(rigName, polecatName, sessionName, staleDuration, timeout, "working-bead-lookup-failed")
 			}
 			return

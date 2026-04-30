@@ -408,6 +408,118 @@ func writeFakeTmuxIdleSession(t *testing.T, dir string) {
 	writeFakeTmuxWithAgent(t, dir, "bash")
 }
 
+// writeFakeBDLookupFail creates a "bd" script that fails on "show" (simulating a
+// bead infrastructure error) but returns configurable output for "list" queries.
+// When hasWork is true, "list" returns an open work bead assigned to "myr/polecats/mycat".
+func writeFakeBDLookupFail(t *testing.T, dir string, hasWork bool) string {
+	t.Helper()
+	listOut := `[]`
+	if hasWork {
+		listOut = `[{"id":"wh-test-1","status":"open","assignee":"myr/polecats/mycat"}]`
+	}
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"list\" ]; then echo '" + listOut + "'; exit 0; fi\n" +
+		"# show fails — simulate bead infrastructure degradation\n" +
+		"exit 1\n"
+	path := filepath.Join(dir, "bd")
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatalf("writing fake bd: %v", err)
+	}
+	return path
+}
+
+// TestReapIdlePolecat_SkipsWhenBeadLookupFailsButHasWork verifies that reapIdlePolecat
+// does NOT kill a polecat when the agent bead lookup fails but hasAssignedOpenWork
+// confirms the polecat has an open work bead assigned. This is the regression test
+// for the working-bead-lookup-failed kill bug (GH#3342 followup).
+func TestReapIdlePolecat_SkipsWhenBeadLookupFailsButHasWork(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+	old := session.DefaultRegistry()
+	reg := session.NewPrefixRegistry()
+	reg.Register("myr", "myr")
+	session.SetDefaultRegistry(reg)
+	defer session.SetDefaultRegistry(old)
+
+	binDir := t.TempDir()
+	writeFakeTmuxIdleSession(t, binDir)
+	bdPath := writeFakeBDLookupFail(t, binDir, true /* hasWork */)
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	townRoot := t.TempDir()
+	var logBuf strings.Builder
+	d := &Daemon{
+		config: &Config{TownRoot: townRoot},
+		logger: log.New(&logBuf, "", 0),
+		tmux:   tmux.NewTmuxWithSocket(""),
+		bdPath: bdPath,
+	}
+
+	hbPath := filepath.Join(townRoot, ".runtime", "heartbeats", "myr-mycat.json")
+	_ = os.MkdirAll(filepath.Dir(hbPath), 0755)
+	staleHB := polecat.SessionHeartbeat{
+		Timestamp: time.Now().UTC().Add(-60 * time.Minute),
+		State:     polecat.HeartbeatWorking,
+	}
+	data, _ := json.Marshal(staleHB)
+	_ = os.WriteFile(hbPath, data, 0644)
+
+	d.reapIdlePolecat("myr", "mycat", 15*time.Minute)
+
+	if strings.Contains(logBuf.String(), "Reaping idle polecat") {
+		t.Errorf("must NOT reap polecat with open assigned work when agent bead lookup fails, got: %q", logBuf.String())
+	}
+}
+
+// TestReapIdlePolecat_ReapsWhenBeadLookupFailsAndNoWork verifies that reapIdlePolecat
+// DOES kill a polecat when the agent bead lookup fails, no work is assigned, and the
+// agent process is not running. Ensures the hasAssignedOpenWork guard doesn't over-protect.
+func TestReapIdlePolecat_ReapsWhenBeadLookupFailsAndNoWork(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell script mocks for tmux and bd")
+	}
+	old := session.DefaultRegistry()
+	reg := session.NewPrefixRegistry()
+	reg.Register("myr", "myr")
+	session.SetDefaultRegistry(reg)
+	defer session.SetDefaultRegistry(old)
+
+	binDir := t.TempDir()
+	writeFakeTmuxIdleSession(t, binDir)
+	bdPath := writeFakeBDLookupFail(t, binDir, false /* no work */)
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	townRoot := t.TempDir()
+	var logBuf strings.Builder
+	d := &Daemon{
+		config: &Config{TownRoot: townRoot},
+		logger: log.New(&logBuf, "", 0),
+		tmux:   tmux.NewTmuxWithSocket(""),
+		bdPath: bdPath,
+	}
+
+	hbPath := filepath.Join(townRoot, ".runtime", "heartbeats", "myr-mycat.json")
+	_ = os.MkdirAll(filepath.Dir(hbPath), 0755)
+	staleHB := polecat.SessionHeartbeat{
+		Timestamp: time.Now().UTC().Add(-45 * time.Minute), // 3x the 15m timeout
+		State:     polecat.HeartbeatWorking,
+	}
+	data, _ := json.Marshal(staleHB)
+	_ = os.WriteFile(hbPath, data, 0644)
+
+	d.reapIdlePolecat("myr", "mycat", 15*time.Minute)
+
+	if !strings.Contains(logBuf.String(), "Reaping idle polecat") {
+		t.Errorf("expected idle polecat with no work and failed bead lookup to be reaped, got: %q", logBuf.String())
+	}
+	if !strings.Contains(logBuf.String(), "working-bead-lookup-failed") {
+		t.Errorf("expected working-bead-lookup-failed reason, got: %q", logBuf.String())
+	}
+}
+
 // TestReapIdlePolecat_SkipsActiveAgent verifies that reapIdlePolecat does NOT kill
 // a polecat whose hook_bead is missing but whose agent process is still running.
 // This is the regression test for GH#3342: a failed gt sling rollback can clear
