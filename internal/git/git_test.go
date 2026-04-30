@@ -1,6 +1,7 @@
 package git
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1660,6 +1661,102 @@ func TestStashCount_NoFalsePositiveFromCommitMessage(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("StashCount on 'fix' branch = %d, want 0 (stash belongs to 'develop', commit msg has 'on fix:')", count)
+	}
+}
+
+// TestStashListForBranch verifies StashListForBranch returns entries scoped
+// to the current branch with parsed Ref/Message fields.
+func TestStashListForBranch(t *testing.T) {
+	t.Parallel()
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// Empty repo — no stashes
+	entries, err := g.StashListForBranch()
+	if err != nil {
+		t.Fatalf("StashListForBranch (empty): %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("StashListForBranch (empty) = %d entries, want 0", len(entries))
+	}
+
+	// Create two stashes on main
+	for i, content := range []string{"first", "second"} {
+		if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("git", "add", ".")
+		cmd.Dir = dir
+		_ = cmd.Run()
+		cmd = exec.Command("git", "stash", "push", "-m", fmt.Sprintf("stash-%d", i))
+		cmd.Dir = dir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("git stash %d: %v", i, err)
+		}
+	}
+
+	entries, err = g.StashListForBranch()
+	if err != nil {
+		t.Fatalf("StashListForBranch: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("StashListForBranch = %d entries, want 2", len(entries))
+	}
+	// Newest first: stash@{0} is "second", stash@{1} is "first"
+	if entries[0].Ref != "stash@{0}" || entries[1].Ref != "stash@{1}" {
+		t.Errorf("Ref ordering = [%s, %s], want [stash@{0}, stash@{1}]",
+			entries[0].Ref, entries[1].Ref)
+	}
+	if entries[0].Message == "" || entries[1].Message == "" {
+		t.Errorf("Empty messages: [%s, %s]", entries[0].Message, entries[1].Message)
+	}
+}
+
+// TestStashPop verifies StashPop applies and drops a stash, leaving the
+// working tree dirty (so the gt-pvx auto-commit path catches it).
+func TestStashPop(t *testing.T) {
+	t.Parallel()
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// Create a stash
+	if err := os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("dirty"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = dir
+	_ = cmd.Run()
+	cmd = exec.Command("git", "stash", "push", "-m", "popme")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git stash: %v", err)
+	}
+
+	// Confirm one stash exists
+	count, _ := g.StashCount()
+	if count != 1 {
+		t.Fatalf("StashCount before pop = %d, want 1", count)
+	}
+
+	// Pop it
+	if err := g.StashPop("stash@{0}"); err != nil {
+		t.Fatalf("StashPop: %v", err)
+	}
+
+	// Stash should be gone
+	count, _ = g.StashCount()
+	if count != 0 {
+		t.Errorf("StashCount after pop = %d, want 0", count)
+	}
+
+	// Working tree should now have the file (dirty)
+	if _, err := os.Stat(filepath.Join(dir, "dirty.txt")); err != nil {
+		t.Errorf("dirty.txt should exist after pop: %v", err)
+	}
+
+	// Empty ref should error
+	if err := g.StashPop(""); err == nil {
+		t.Error("StashPop(\"\") should error")
 	}
 }
 

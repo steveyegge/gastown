@@ -1842,6 +1842,67 @@ func (g *Git) StashCount() (int, error) {
 	return count, nil
 }
 
+// StashEntry represents one entry from `git stash list`, scoped to the current branch.
+type StashEntry struct {
+	Ref     string // e.g. "stash@{2}"
+	Message string // e.g. "WIP on main: <hash> <subject>"
+}
+
+// StashListForBranch returns all stash entries belonging to the current branch,
+// ordered as `git stash list` returns them (newest first, i.e. stash@{0} first).
+// Filtering matches StashCount: only entries with ": WIP on <branch>:" or
+// ": On <branch>:" prefixes are returned, since stashes are global to the repo
+// but conceptually belong to the worktree where they were created.
+func (g *Git) StashListForBranch() ([]StashEntry, error) {
+	out, err := g.run("stash", "list")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+
+	branch, branchErr := g.CurrentBranch()
+	filterByBranch := branchErr == nil && branch != "" && branch != "HEAD"
+	wipPrefix := ": WIP on " + branch + ":"
+	onPrefix := ": On " + branch + ":"
+
+	var entries []StashEntry
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		if filterByBranch {
+			if !strings.Contains(line, wipPrefix) && !strings.Contains(line, onPrefix) {
+				continue
+			}
+		}
+		// Lines have the form "stash@{N}: <message>"
+		colonIdx := strings.Index(line, ":")
+		if colonIdx <= 0 {
+			continue
+		}
+		entries = append(entries, StashEntry{
+			Ref:     line[:colonIdx],
+			Message: strings.TrimSpace(line[colonIdx+1:]),
+		})
+	}
+	return entries, nil
+}
+
+// StashPop applies the given stash ref to the working tree and drops it on success.
+// Returns an error if the pop has conflicts (working tree is left as-is for manual
+// resolution). Callers should treat conflict errors as "stop, escalate to user".
+func (g *Git) StashPop(ref string) error {
+	if ref == "" {
+		return fmt.Errorf("stash ref required")
+	}
+	if _, err := g.run("stash", "pop", ref); err != nil {
+		return fmt.Errorf("git stash pop %s: %w", ref, err)
+	}
+	return nil
+}
+
 // UnpushedCommits returns the number of commits that are not pushed to the remote.
 // It checks if the current branch has an upstream and counts commits ahead.
 // Returns 0 if there is no upstream configured.

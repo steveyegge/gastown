@@ -280,6 +280,62 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
+	// SAFETY NET (gt-pvx, stash recovery): If we detected stashes belonging to
+	// this branch, auto-pop them so the existing uncommitted-work auto-commit
+	// path (below) catches the contents and saves them as a normal commit.
+	//
+	// Background: agents have been observed running `git stash` to clear the
+	// working tree before rebase/checkout, then dying before `git stash pop`.
+	// The stash entries become orphaned in .git/refs/stash, surviving for
+	// indefinite periods and silently leaking work. By popping them on the way
+	// out of `gt done`, the recovery flow turns "lost" stashes into a
+	// committed safety-net snapshot.
+	//
+	// Pop happens oldest-first so the most recent state ends up on top of the
+	// working tree (matches what a user would do manually). If any pop has
+	// conflicts, we stop and let the agent/user resolve — surfacing the
+	// conflict is better than silently dropping the stash.
+	if cwdAvailable && doneCleanupStatus == "stash" {
+		entries, err := g.StashListForBranch()
+		if err != nil {
+			style.PrintWarning("auto-pop: could not list stashes: %v — orphaned stashes may remain", err)
+		} else if len(entries) > 0 {
+			fmt.Printf("\n%s %d stash(es) detected on this branch — auto-popping (gt-pvx safety net)\n",
+				style.Bold.Render("⚠"), len(entries))
+			// Pop oldest first: iterate in reverse so newest lands on top.
+			popFailed := false
+			for i := len(entries) - 1; i >= 0; i-- {
+				e := entries[i]
+				fmt.Printf("  popping %s — %s\n", e.Ref, e.Message)
+				if popErr := g.StashPop(e.Ref); popErr != nil {
+					style.PrintWarning("auto-pop %s failed (likely conflict): %v", e.Ref, popErr)
+					style.PrintWarning("stopping pop chain — resolve conflict manually then re-run gt done")
+					popFailed = true
+					break
+				}
+				// After each pop, stash refs shift; re-fetch the list before next pop.
+				entries, err = g.StashListForBranch()
+				if err != nil || len(entries) == 0 {
+					break
+				}
+			}
+			if !popFailed {
+				// Re-evaluate cleanup status: pops likely produced uncommitted changes
+				// that the next block will auto-commit. Worst case, status was already
+				// uncommitted and the next block runs anyway.
+				if workStatus, wsErr := g.CheckUncommittedWork(); wsErr == nil && workStatus.HasUncommittedChanges {
+					doneCleanupStatus = "uncommitted"
+					fmt.Printf("%s Stash content moved to working tree — will auto-commit below.\n",
+						style.Bold.Render("✓"))
+				} else {
+					// Pops succeeded but produced nothing dirty (e.g. stashes were
+					// already merged). Recompute status normally.
+					doneCleanupStatus = ""
+				}
+			}
+		}
+	}
+
 	// SAFETY NET: Auto-commit uncommitted work before ANY exit path (gt-pvx).
 	// Polecats have been observed running gt done without committing their
 	// implementation work (1000s of lines lost). This happened because:
