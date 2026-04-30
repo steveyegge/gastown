@@ -259,6 +259,11 @@ type Config struct {
 	// Default is "warning" to suppress connection open/close noise. Override with
 	// GT_DOLT_LOGLEVEL=info (or debug) for diagnostics.
 	LogLevel string
+
+	// AutoGC enables Dolt's automatic garbage collection.
+	// Default is true. Override with GT_DOLT_AUTO_GC=false to disable
+	// (recommended for high-throughput batch commit workloads where GC thrashes CPU).
+	AutoGC bool
 }
 
 // DefaultConfig returns the default Dolt server configuration.
@@ -290,6 +295,7 @@ func DefaultConfig(townRoot string) *Config {
 		WriteTimeoutMs: DefaultWriteTimeoutMs,
 		WaitTimeoutSec: DefaultWaitTimeoutSec,
 		LogLevel:       "warning",
+		AutoGC:         true,
 	}
 
 	// Optional override for the idle-session timeout. Negative values disable
@@ -323,6 +329,11 @@ func DefaultConfig(townRoot string) *Config {
 	}
 	if pw := os.Getenv("GT_DOLT_PASSWORD"); pw != "" {
 		config.Password = pw
+	}
+	if agc := os.Getenv("GT_DOLT_AUTO_GC"); agc != "" {
+		if v, err := strconv.ParseBool(agc); err == nil {
+			config.AutoGC = v
+		}
 	}
 	if ll := os.Getenv("GT_DOLT_LOGLEVEL"); ll != "" {
 		config.LogLevel = ll
@@ -1335,7 +1346,7 @@ func writeServerConfig(config *Config, configPath string) error {
 	content := fmt.Sprintf(`# Dolt SQL server configuration — managed by Gas Town (gt dolt start)
 # Do not edit manually; changes are overwritten on each server start.
 # To customize, set Gas Town environment variables:
-#   GT_DOLT_PORT, GT_DOLT_HOST, GT_DOLT_USER, GT_DOLT_PASSWORD, GT_DOLT_LOGLEVEL
+#   GT_DOLT_PORT, GT_DOLT_HOST, GT_DOLT_USER, GT_DOLT_PASSWORD, GT_DOLT_LOGLEVEL, GT_DOLT_AUTO_GC
 
 log_level: %s
 
@@ -1347,7 +1358,7 @@ data_dir: "%s"
 behavior:
   dolt_transaction_commit: false
   auto_gc_behavior:
-    enable: true
+    enable: %v
     archive_level: 1
 `,
 		config.LogLevel,
@@ -1357,6 +1368,7 @@ behavior:
 		readTimeoutLine,
 		writeTimeoutLine,
 		filepath.ToSlash(config.DataDir),
+		config.AutoGC,
 	)
 
 	return os.WriteFile(configPath, []byte(content), 0600)
