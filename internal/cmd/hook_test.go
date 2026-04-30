@@ -96,6 +96,32 @@ func TestHookPolecatEnvCheck(t *testing.T) {
 	}
 }
 
+// TestHookRejectsNonBeadArg pins down GH#3701: when cobra fails to match a
+// subcommand and falls through to the bead-id positional, args that don't
+// look like bead IDs should produce a clear error pointing at --help rather
+// than the misleading "bead 'set' not found" emitted by bd show.
+func TestHookRejectsNonBeadArg(t *testing.T) {
+	// Ensure we don't trip the polecat guard.
+	t.Setenv("GT_ROLE", "")
+	t.Setenv("GT_POLECAT", "")
+
+	tests := []string{"set", "list", "delete", "nonexistentword12345"}
+	for _, arg := range tests {
+		t.Run(arg, func(t *testing.T) {
+			err := runHook(nil, []string{arg})
+			if err == nil {
+				t.Fatalf("runHook(%q) returned nil, want error", arg)
+			}
+			if !strings.Contains(err.Error(), "is not a bead ID") {
+				t.Errorf("runHook(%q) error = %q, want substring %q", arg, err.Error(), "is not a bead ID")
+			}
+			if !strings.Contains(err.Error(), "--help") {
+				t.Errorf("runHook(%q) error = %q, want it to point at --help", arg, err.Error())
+			}
+		})
+	}
+}
+
 func TestNormalizeHookShowTarget(t *testing.T) {
 	tests := []struct {
 		name   string
