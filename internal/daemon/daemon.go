@@ -2663,12 +2663,30 @@ func (d *Daemon) isBeadClosed(beadID string) bool {
 // field (updateAgentHookBead is a no-op). Without this fallback, the idle reaper
 // kills working polecats whose agent bead hook_bead is stale.
 func (d *Daemon) hasAssignedOpenWork(rigName, assignee string) bool {
+	// Target the rig's database via --repo. bd's multi-rig routing engine was
+	// removed in steveyegge/beads@d7629204; --rig was retired as part of that
+	// refactor, and bd list now rejects it as an unknown flag. Resolve the rig
+	// name to its directory and pass --repo=<dir> instead, mirroring the fix
+	// applied to bd create in PR #3680 (a2b3b7ca).
+	//
+	// If the rig isn't in routes.jsonl (e.g., town-level lookup or a
+	// misconfigured rig), GetRigDirForName returns an empty string and we
+	// query bd with no explicit repo — bd falls back to its default routing
+	// from the process cwd (d.config.TownRoot), which is the safe pre-routing
+	// behavior.
+	rigDir := beads.GetRigDirForName(d.config.TownRoot, rigName)
 	for _, status := range []string{"hooked", "in_progress", "open"} {
-		cmd := exec.Command(d.bdPath, "list", "--rig="+rigName, "--assignee="+assignee, "--status="+status, "--json") //nolint:gosec // G204: args are constructed internally
+		args := []string{"list", "--assignee=" + assignee, "--status=" + status, "--json"}
+		if rigDir != "" {
+			args = append(args, "--repo="+rigDir)
+		}
+		cmd := exec.Command(d.bdPath, args...) //nolint:gosec // G204: args are constructed internally
 		cmd.Dir = d.config.TownRoot
 		cmd.Env = os.Environ()
 		output, err := cmd.Output()
 		if err != nil {
+			// Best-effort: bd errors are non-fatal here. The caller (idle
+			// reaper) falls through to its primary hook_bead check.
 			continue
 		}
 		var issues []json.RawMessage
