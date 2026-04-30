@@ -93,6 +93,42 @@ type beadInfo struct {
 	IssueType    string           `json:"issue_type,omitempty"`
 }
 
+// isMultiScopeBead reports whether a bead description defines more than one
+// distinct work scope (e.g., "Part A: ..." and "Part B: ..."). When an agent
+// is slung a multi-scope bead, the failure mode observed in hq-3rl is for
+// the agent to complete one part, claim the whole bead, and silently drop
+// the rest. The guard requires the dispatcher to split the bead first, or
+// explicitly opt out with --allow-multi-scope.
+//
+// The heuristic deliberately matches only the structural "Part X:" /
+// "Part X (...)" pattern that declares scope, not narrative text like
+// "Part A landed in PR #157". Returns the first matched reason on true.
+func isMultiScopeBead(info *beadInfo) (bool, string) {
+	if info == nil || info.Description == "" {
+		return false, ""
+	}
+	desc := strings.ToLower(info.Description)
+	hasScopeMarker := func(label string) bool {
+		// Match "part a:", "part a (", "part a —", "part a -"
+		for _, sep := range []string{":", " (", " —", " -"} {
+			if strings.Contains(desc, label+sep) {
+				return true
+			}
+		}
+		return false
+	}
+	partA := hasScopeMarker("part a")
+	partB := hasScopeMarker("part b")
+	if partA && partB {
+		return true, "description declares both Part A and Part B scopes; split into separate beads before dispatch"
+	}
+	// Also catch the three-part pattern.
+	if partB && hasScopeMarker("part c") {
+		return true, "description declares multiple Part scopes; split into separate beads before dispatch"
+	}
+	return false, ""
+}
+
 // isDeferredBead checks whether a bead should be rejected from slinging because
 // it has been deferred. Returns true if the bead has status "deferred" or if its
 // description contains deferral keywords like "deferred to post-launch".

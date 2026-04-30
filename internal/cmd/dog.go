@@ -40,6 +40,10 @@ var (
 	dogHealthJSON          bool
 	dogHealthAutoClear     bool
 	dogHealthMaxInactivity time.Duration
+
+	// Done flags (push-verify ritual, hq-0ae).
+	dogDoneSkipVerify bool
+	dogDoneNoPush     bool
 )
 
 var dogCmd = &cobra.Command{
@@ -278,6 +282,10 @@ func init() {
 	dogDispatchCmd.Flags().BoolVar(&dogDispatchJSON, "json", false, "Output as JSON")
 	dogDispatchCmd.Flags().BoolVarP(&dogDispatchDryRun, "dry-run", "n", false, "Show what would be done without doing it")
 	_ = dogDispatchCmd.MarkFlagRequired("plugin")
+
+	// Done flags (push-verify ritual, hq-0ae)
+	dogDoneCmd.Flags().BoolVar(&dogDoneSkipVerify, "skip-verify", false, "Skip the push-verify ritual (use for docs-only or no-code tasks)")
+	dogDoneCmd.Flags().BoolVar(&dogDoneNoPush, "no-push", false, "Do not auto-push unpushed commits; fail instead")
 
 	// Health-check flags
 	dogHealthCheckCmd.Flags().BoolVar(&dogHealthJSON, "json", false, "Output as JSON")
@@ -679,6 +687,23 @@ func runDogDone(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Push-verify ritual (hq-0ae). Before the dog returns to idle, confirm any
+	// commits in its worktrees are on task-specific branches and visible on
+	// origin. Skipped for docs-only / no-code work via --skip-verify.
+	if !dogDoneSkipVerify {
+		reports, verr := verifyDogWork(d, !dogDoneNoPush)
+		printVerifyReports(reports)
+		if verr != nil {
+			// Do NOT clear work or kill session — leave the dog visible so the
+			// operator can intervene. Fire a best-effort escalation.
+			escMsg := fmt.Sprintf("dog %s verify-done failed: %v", name, verr)
+			if escErr := dogEscalateBestEffort(escMsg); escErr != nil {
+				style.PrintWarning("escalation failed (%v); escalate manually: gt escalate --severity medium %q", escErr, escMsg)
+			}
+			return fmt.Errorf("verify-done failed for dog %s: %w\n  Re-run with --skip-verify once you've confirmed the work is safe to close", name, verr)
+		}
+	}
+
 	if err := mgr.ClearWork(name); err != nil {
 		return fmt.Errorf("clearing work for dog %s: %w", name, err)
 	}
@@ -930,6 +955,8 @@ func runDogHealthCheck(cmd *cobra.Command, args []string) error {
 
 	tm := tmux.NewTmux()
 	hc := dog.NewHealthChecker(mgr, tm)
+	// Wire the dog-death escalator (hq-0ae A3) so abandoned beads surface to Mayor.
+	hc.Escalator = dogEscalateBestEffort
 
 	var results []dog.DogHealthResult
 
@@ -1267,5 +1294,195 @@ func ifStr(cond bool, ifTrue, ifFalse string) string {
 		return ifTrue
 	}
 	return ifFalse
+}
+
+// verifyReport describes the verify-done outcome for one worktree.
+type verifyReport struct {
+	Rig       string // rig name (key from d.Worktrees)
+	Worktree  string // worktree path
+	Skipped   string // non-empty if the worktree was skipped (e.g. not a repo, not present)
+	Branch    string
+	Commit    string
+	Pushed    bool
+	Failure   string // non-empty if this worktree failed verification
+}
+
+// protectedBranches is the set of branch names a dog must NEVER land a commit
+// on directly. Work on these branches indicates the dog committed to the wrong
+// branch (the hq-3rl Part A failure mode).
+var protectedBranches = map[string]bool{
+	"main":    true,
+	"master":  true,
+	"develop": true,
+	"release": true,
+	"":        true, // detached HEAD
+}
+
+// verifyDogWork runs the push-verify ritual across all of a dog's worktrees.
+// Returns per-worktree reports and an overall error if any worktree had a
+// failure or refused to auto-push. Worktrees with no commits ahead of origin
+// are treated as clean no-ops and reported as Pushed=true (nothing to push).
+func verifyDogWork(d *dog.Dog, autoPush bool) ([]verifyReport, error) {
+	reports := make([]verifyReport, 0, len(d.Worktrees))
+	var firstErr error
+
+	for rig, path := range d.Worktrees {
+		r := verifyReport{Rig: rig, Worktree: path}
+
+		if _, statErr := os.Stat(path); statErr != nil {
+			r.Skipped = fmt.Sprintf("worktree not present on disk (%v)", statErr)
+			reports = append(reports, r)
+			continue
+		}
+		if _, statErr := os.Stat(filepath.Join(path, ".git")); statErr != nil {
+			r.Skipped = "not a git worktree (no .git)"
+			reports = append(reports, r)
+			continue
+		}
+
+		branch, err := gitOutput(path, "rev-parse", "--abbrev-ref", "HEAD")
+		if err != nil {
+			r.Failure = fmt.Sprintf("reading current branch: %v", err)
+			reports = append(reports, r)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %s", rig, r.Failure)
+			}
+			continue
+		}
+		branch = strings.TrimSpace(branch)
+		r.Branch = branch
+		if branch == "HEAD" {
+			branch = ""
+			r.Branch = ""
+		}
+
+		if protectedBranches[branch] {
+			r.Failure = fmt.Sprintf("commits landed on protected branch %q — dogs must commit to a task-specific branch", branch)
+			reports = append(reports, r)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %s", rig, r.Failure)
+			}
+			continue
+		}
+
+		dirty, err := gitOutput(path, "status", "--porcelain")
+		if err != nil {
+			r.Failure = fmt.Sprintf("checking working tree status: %v", err)
+			reports = append(reports, r)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %s", rig, r.Failure)
+			}
+			continue
+		}
+		if strings.TrimSpace(dirty) != "" {
+			r.Failure = "working tree has uncommitted changes — commit or stash before done"
+			reports = append(reports, r)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %s", rig, r.Failure)
+			}
+			continue
+		}
+
+		head, err := gitOutput(path, "rev-parse", "HEAD")
+		if err != nil {
+			r.Failure = fmt.Sprintf("resolving HEAD: %v", err)
+			reports = append(reports, r)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %s", rig, r.Failure)
+			}
+			continue
+		}
+		r.Commit = strings.TrimSpace(head)
+
+		// Check if HEAD is already on origin/<branch>. We ignore errors from
+		// ls-remote (missing branch, network hiccup) and fall through to the
+		// push branch — push will surface a clearer error.
+		remoteSha, _ := gitOutput(path, "ls-remote", "--heads", "origin", branch)
+		remoteSha = strings.TrimSpace(strings.SplitN(remoteSha, "\t", 2)[0])
+
+		if remoteSha != "" && remoteSha == r.Commit {
+			r.Pushed = true
+			reports = append(reports, r)
+			continue
+		}
+
+		if !autoPush {
+			r.Failure = fmt.Sprintf("HEAD %s not on origin/%s and --no-push set", shortSha(r.Commit), branch)
+			reports = append(reports, r)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %s", rig, r.Failure)
+			}
+			continue
+		}
+
+		pushCmd := exec.Command("git", "-C", path, "push", "-u", "origin", branch)
+		out, err := pushCmd.CombinedOutput()
+		if err != nil {
+			r.Failure = fmt.Sprintf("auto-push failed: %v\n%s", err, strings.TrimSpace(string(out)))
+			reports = append(reports, r)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %s", rig, r.Failure)
+			}
+			continue
+		}
+
+		// Re-confirm the push landed.
+		confirmSha, _ := gitOutput(path, "ls-remote", "--heads", "origin", branch)
+		confirmSha = strings.TrimSpace(strings.SplitN(confirmSha, "\t", 2)[0])
+		if confirmSha != r.Commit {
+			r.Failure = fmt.Sprintf("pushed but origin/%s resolves to %s, expected %s", branch, shortSha(confirmSha), shortSha(r.Commit))
+			reports = append(reports, r)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %s", rig, r.Failure)
+			}
+			continue
+		}
+
+		r.Pushed = true
+		reports = append(reports, r)
+	}
+
+	return reports, firstErr
+}
+
+// printVerifyReports prints a summary of verify-done results to stdout.
+func printVerifyReports(reports []verifyReport) {
+	if len(reports) == 0 {
+		fmt.Println("verify-done: no worktrees to check")
+		return
+	}
+	fmt.Println("verify-done:")
+	for _, r := range reports {
+		switch {
+		case r.Skipped != "":
+			fmt.Printf("  %s: skipped (%s)\n", r.Rig, r.Skipped)
+		case r.Failure != "":
+			fmt.Printf("  %s: ✗ %s\n", r.Rig, r.Failure)
+		default:
+			fmt.Printf("  %s: ✓ %s @ %s (pushed)\n", r.Rig, r.Branch, shortSha(r.Commit))
+		}
+	}
+}
+
+// gitOutput runs `git -C <dir> <args...>` and returns stdout. stderr is
+// captured into the error on failure.
+func gitOutput(dir string, args ...string) (string, error) {
+	full := append([]string{"-C", dir}, args...)
+	cmd := exec.Command("git", full...)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
+}
+
+// shortSha returns the first 8 chars of a SHA, or the full string if shorter.
+func shortSha(sha string) string {
+	if len(sha) <= 8 {
+		return sha
+	}
+	return sha[:8]
 }
 
