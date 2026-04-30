@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/scheduler/capacity"
 	"github.com/steveyegge/gastown/internal/testutil"
@@ -145,7 +146,8 @@ func createTestBead(t *testing.T, dir, title string) string {
 // Runs bd show --json from dir and inspects the labels array.
 func beadHasLabel(t *testing.T, beadID, label, dir string) bool {
 	t.Helper()
-	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
+	args := beads.MaybePrependAllowStale([]string{"show", beadID, "--json"})
+	cmd := exec.Command("bd", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -171,10 +173,14 @@ func beadHasLabel(t *testing.T, beadID, label, dir string) bool {
 // getBeadDescription returns the description of a bead via bd show --json.
 func getBeadDescription(t *testing.T, beadID, dir string) string {
 	t.Helper()
-	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
+	args := beads.MaybePrependAllowStale([]string{"show", beadID, "--json"})
+	cmd := exec.Command("bd", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			t.Fatalf("bd show %s failed: %v\nstderr: %s", beadID, err, exitErr.Stderr)
+		}
 		t.Fatalf("bd show %s failed: %v", beadID, err)
 	}
 	var issues []struct {

@@ -78,10 +78,10 @@ func createTrackedBeadsRepoWithIssues(t *testing.T, path, prefix string, numIssu
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
-	// Run bd init (pass --server-port if GT_DOLT_PORT is set for ephemeral test servers)
+	// Run bd init (pass --server for bd v1.0.0+ which defaults to embedded mode)
 	bdInitArgs := []string{"init", "--prefix", prefix}
 	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-		bdInitArgs = append(bdInitArgs, "--server-port", p)
+		bdInitArgs = append(bdInitArgs, "--server", "--server-port", p)
 	}
 	cmd := exec.Command("bd", bdInitArgs...)
 	cmd.Dir = path
@@ -469,10 +469,10 @@ func createTrackedBeadsRepoWithNoIssues(t *testing.T, path, prefix string) {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
-	// Run bd init (creates database but no issues; pass --server-port for ephemeral test servers)
+	// Run bd init (creates database but no issues; pass --server for bd v1.0.0+)
 	bdInitArgs2 := []string{"init", "--prefix", prefix}
 	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-		bdInitArgs2 = append(bdInitArgs2, "--server-port", p)
+		bdInitArgs2 = append(bdInitArgs2, "--server", "--server-port", p)
 	}
 	cmd := exec.Command("bd", bdInitArgs2...)
 	cmd.Dir = path

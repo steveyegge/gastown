@@ -44,8 +44,10 @@ func initBeadsDBForServer(t *testing.T, dir, prefix string) {
 	args := []string{"init", "--prefix", prefix}
 	// Forward GT_DOLT_PORT so bd connects to the ephemeral test server
 	// instead of defaulting to port 3307.
+	// bd v1.0.0+ defaults to embedded mode; --server is required to use an
+	// external server (v0.57.0 defaulted to server mode and ignored --server).
 	if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-		args = append(args, "--server-port", p)
+		args = append(args, "--server", "--server-port", p)
 	}
 	cmd := exec.Command("bd", args...)
 	cmd.Dir = dir
@@ -288,7 +290,8 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 	beadID := createTestBead(t, rigPath, "Auto convoy test")
 
 	// Schedule via gt sling deferred dispatch (max_polecats > 0)
-	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig")
+	slingOut := slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig")
+	t.Logf("gt sling output: %s", slingOut)
 
 	// Verify: bead should have a sling context
 	fields := findSlingContext(t, hqPath, beadID)
@@ -302,27 +305,57 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 		t.Fatalf("convoy ID not stored in sling context")
 	}
 
-	// Verify convoy via SQL query instead of bd show.
-	// bd show uses SearchIssues which queries columns that may not exist in
-	// older bd versions (e.g., "crystallizes" was dropped in bd v0.63.3 but
-	// CI pins v0.57.0 which still queries it). Direct SQL avoids this.
-	port := os.Getenv("GT_DOLT_PORT")
-	if port == "" {
-		port = "3307"
-	}
-	dsn := fmt.Sprintf("root:@tcp(127.0.0.1:%s)/h%d", port, schedulerTestCounter.Load())
-	db, err := sql.Open("mysql", dsn)
+	// Verify: convoy is resolvable via bd show from hq.
+	showArgs := beads.MaybePrependAllowStale([]string{"show", fields.Convoy, "--json"})
+	cmd := exec.Command("bd", showArgs...)
+	cmd.Dir = hqPath
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("connecting to verify convoy: %v", err)
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			t.Fatalf("bd show convoy %s failed: %v\nstderr: %s\nstdout: %s", fields.Convoy, err, exitErr.Stderr, out)
+		}
+		t.Fatalf("bd show convoy %s failed: %v\noutput: %s", fields.Convoy, err, out)
 	}
-	defer db.Close()
-	var convoyType string
-	err = db.QueryRow("SELECT issue_type FROM issues WHERE id = ?", fields.Convoy).Scan(&convoyType)
+	var convoys []struct {
+		ID        string `json:"id"`
+		IssueType string `json:"issue_type"`
+	}
+	if err := json.Unmarshal(out, &convoys); err != nil {
+		t.Fatalf("parse convoy show: %v\nraw output: %s", err, out)
+	}
+	if len(convoys) == 0 {
+		t.Fatalf("convoy %s not found via bd show", fields.Convoy)
+	}
+	if convoys[0].IssueType != "convoy" {
+		t.Errorf("convoy issue_type = %q, want %q", convoys[0].IssueType, "convoy")
+	}
+
+	// Verify: convoy has a "tracks" dependency pointing to the rig bead.
+	depArgs := beads.MaybePrependAllowStale([]string{
+		"dep", "list", fields.Convoy, fields.Convoy,
+		"--direction=down", "--type=tracks", "--json",
+	})
+	depCmd := exec.Command("bd", depArgs...)
+	depCmd.Dir = hqPath
+	depOut, err := depCmd.Output()
 	if err != nil {
-		t.Fatalf("convoy %s not found in database: %v", fields.Convoy, err)
+		t.Fatalf("convoy %s dep list failed: %v", fields.Convoy, err)
 	}
-	if convoyType != "convoy" {
-		t.Errorf("convoy issue_type = %q, want %q", convoyType, "convoy")
+	var deps []struct {
+		DependsOnID string `json:"depends_on_id"`
+	}
+	if err := json.Unmarshal(depOut, &deps); err != nil {
+		t.Fatalf("parse dep list: %v\nraw: %s", err, depOut)
+	}
+	foundTracked := false
+	for _, dep := range deps {
+		if strings.Contains(dep.DependsOnID, beadID) {
+			foundTracked = true
+			break
+		}
+	}
+	if !foundTracked {
+		t.Errorf("convoy %s should track bead %s via tracks dep, got deps: %s", fields.Convoy, beadID, depOut)
 	}
 }
 
@@ -707,8 +740,11 @@ func TestSchedulerMultiRigEpicAutoResolve(t *testing.T) {
 	// Link children to epic via depends_on (epic → child).
 	// child1 is local to rig1 — resolves directly.
 	addBeadDependencyOfType(t, epicID, child1, "depends_on", rig1Path)
-	// child2 is in rig2 — resolved via routes.jsonl as an external ref.
-	addBeadDependencyOfType(t, epicID, child2, "depends_on", rig1Path)
+	// child2 is in rig2 — use external ref format so bd doesn't try to resolve
+	// the target in the local store. bd v1.0.0+ validates targets exist locally.
+	child2Prefix := strings.TrimSuffix(beads.ExtractPrefix(child2), "-")
+	child2ExtRef := fmt.Sprintf("external:%s:%s", child2Prefix, child2)
+	addBeadDependencyOfType(t, epicID, child2ExtRef, "depends_on", rig1Path)
 
 	// Dry-run: verify auto-rig-resolution routes each child correctly.
 	// Uses --dry-run to avoid needing formula infrastructure (mol-polecat-work).
@@ -812,7 +848,9 @@ func TestSchedulerEpicDetection(t *testing.T) {
 	child1 := createTestBead(t, rig1Path, "Rig1 child")
 	child2 := createTestBead(t, rig2Path, "Rig2 child")
 	addBeadDependencyOfType(t, epicID, child1, "depends_on", rig1Path)
-	addBeadDependencyOfType(t, epicID, child2, "depends_on", rig1Path)
+	child2Prefix := strings.TrimSuffix(beads.ExtractPrefix(child2), "-")
+	child2ExtRef := fmt.Sprintf("external:%s:%s", child2Prefix, child2)
+	addBeadDependencyOfType(t, epicID, child2ExtRef, "depends_on", rig1Path)
 
 	// gt sling <epic-id> deferred dispatch (max_polecats > 0) --dry-run should auto-detect epic and list children.
 	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", epicID, "--dry-run")
@@ -863,8 +901,12 @@ func TestSchedulerMultiRigConvoyAutoResolve(t *testing.T) {
 
 	// Add tracks deps from convoy (HQ) to beads in each rig.
 	// bead1 and bead2 are in different DBs — stored as external refs in HQ.
-	addBeadDependencyOfType(t, convoyID, bead1, "tracks", hqPath)
-	addBeadDependencyOfType(t, convoyID, bead2, "tracks", hqPath)
+	bead1Prefix := strings.TrimSuffix(beads.ExtractPrefix(bead1), "-")
+	bead1ExtRef := fmt.Sprintf("external:%s:%s", bead1Prefix, bead1)
+	addBeadDependencyOfType(t, convoyID, bead1ExtRef, "tracks", hqPath)
+	bead2Prefix := strings.TrimSuffix(beads.ExtractPrefix(bead2), "-")
+	bead2ExtRef := fmt.Sprintf("external:%s:%s", bead2Prefix, bead2)
+	addBeadDependencyOfType(t, convoyID, bead2ExtRef, "tracks", hqPath)
 
 	// Wait for bd's issues.jsonl timestamp to settle (same race as
 	// TestSchedulerDirectConvoyDispatch — 1-second granularity stale check).
@@ -1087,7 +1129,9 @@ func TestSchedulerDirectEpicDispatch(t *testing.T) {
 	child1 := createTestBead(t, rig1Path, "Rig1 direct child")
 	child2 := createTestBead(t, rig2Path, "Rig2 direct child")
 	addBeadDependencyOfType(t, epicID, child1, "depends_on", rig1Path)
-	addBeadDependencyOfType(t, epicID, child2, "depends_on", rig1Path)
+	child2Prefix := strings.TrimSuffix(beads.ExtractPrefix(child2), "-")
+	child2ExtRef := fmt.Sprintf("external:%s:%s", child2Prefix, child2)
+	addBeadDependencyOfType(t, epicID, child2ExtRef, "depends_on", rig1Path)
 
 	// gt sling <epic-id> --dry-run in direct mode should show direct dispatch, not scheduling
 	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", epicID, "--dry-run")
@@ -1175,8 +1219,12 @@ func TestSchedulerDirectConvoyDispatch(t *testing.T) {
 	convoyID := createTestBeadOfType(t, hqPath, "Direct dispatch convoy", "convoy")
 	bead1 := createTestBead(t, rig1Path, "Rig1 direct tracked")
 	bead2 := createTestBead(t, rig2Path, "Rig2 direct tracked")
-	addBeadDependencyOfType(t, convoyID, bead1, "tracks", hqPath)
-	addBeadDependencyOfType(t, convoyID, bead2, "tracks", hqPath)
+	bead1Prefix := strings.TrimSuffix(beads.ExtractPrefix(bead1), "-")
+	bead1ExtRef := fmt.Sprintf("external:%s:%s", bead1Prefix, bead1)
+	addBeadDependencyOfType(t, convoyID, bead1ExtRef, "tracks", hqPath)
+	bead2Prefix := strings.TrimSuffix(beads.ExtractPrefix(bead2), "-")
+	bead2ExtRef := fmt.Sprintf("external:%s:%s", bead2Prefix, bead2)
+	addBeadDependencyOfType(t, convoyID, bead2ExtRef, "tracks", hqPath)
 
 	// Wait for bd's issues.jsonl timestamp to settle. bd checks that the Dolt
 	// import timestamp >= jsonl mtime (1-second granularity). Without this,

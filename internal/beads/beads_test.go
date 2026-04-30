@@ -2895,6 +2895,14 @@ func TestNewIsolatedWithPort(t *testing.T) {
 	}
 }
 
+func TestInitPassesServerFlag(t *testing.T) {
+	b := NewIsolatedWithPort(t.TempDir(), 19999)
+	err := b.Init("covertest")
+	if err == nil {
+		t.Fatal("expected error (no bd/dolt server), got nil")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // stripEnvPrefixes tests (refactored from runWithRouting inline logic)
 // ---------------------------------------------------------------------------
