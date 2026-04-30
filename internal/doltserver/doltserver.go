@@ -2515,7 +2515,9 @@ func MigrateRigFromBeads(townRoot, rigName, sourcePath string) error {
 	return nil
 }
 
-// DatabaseExists checks whether a rig database exists in the centralized .dolt-data/ directory.
+// DatabaseExists checks whether a rig database exists on the host filesystem
+// (.dolt-data/<name>/.dolt). This is a conservative filesystem-only check;
+// for containerised Dolt use WLCommons.DatabaseExists instead.
 func DatabaseExists(townRoot, rigName string) bool {
 	config := DefaultConfig(townRoot)
 	doltDir := filepath.Join(config.DataDir, rigName, ".dolt")

@@ -8,9 +8,18 @@ import (
 // wlCommonsConformance is a shared test suite that validates any WLCommonsStore
 // implementation against the expected behavioral contract. It runs against the
 // fake (always) and can run against the real Dolt server with build tags.
-func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsStore) {
+//
+// Pass parallel=false when the store shares a real Dolt working set across
+// subtests. Concurrent DOLT_COMMIT calls can race (one session's DOLT_ADD
+// picks up another's staged changes), causing spurious failures. Sequential
+// execution eliminates the race without requiring per-subtest DB isolation.
+func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsStore, parallel ...bool) {
+	runParallel := len(parallel) == 0 || parallel[0]
+
 	t.Run("InsertAndQuery", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		item := &WantedItem{
@@ -43,7 +52,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("ClaimOpenItem", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		if err := store.InsertWanted(&WantedItem{ID: "w-conf02", Title: "Claimable"}); err != nil {
@@ -66,7 +77,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("ClaimNonOpenItem", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		if err := store.InsertWanted(&WantedItem{ID: "w-conf03", Title: "Already claimed"}); err != nil {
@@ -94,7 +107,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("SubmitCompletionLifecycle", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		if err := store.InsertWanted(&WantedItem{ID: "w-conf04", Title: "Completable"}); err != nil {
@@ -118,7 +133,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("QueryNotFound", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		_, err := store.QueryWanted("w-nonexistent")
@@ -128,7 +145,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("InsertEmptyIDFails", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		err := store.InsertWanted(&WantedItem{ID: "", Title: "No ID"})
@@ -138,7 +157,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("InsertEmptyTitleFails", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		err := store.InsertWanted(&WantedItem{ID: "w-nope", Title: ""})
@@ -148,7 +169,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("EnsureDBIdempotent", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		if err := store.EnsureDB(); err != nil {
@@ -160,7 +183,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("DatabaseExistsAfterEnsure", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		if err := store.EnsureDB(); err != nil {
@@ -172,7 +197,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("DefaultStatusIsOpen", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		if err := store.InsertWanted(&WantedItem{ID: "w-conf05", Title: "Default status"}); err != nil {
@@ -188,7 +215,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("InsertWithExplicitStatus", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		if err := store.InsertWanted(&WantedItem{ID: "w-conf06", Title: "Explicit status", Status: "withdrawn"}); err != nil {
@@ -204,7 +233,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("SubmitCompletionOnOpenItem", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		if err := store.InsertWanted(&WantedItem{ID: "w-conf08", Title: "Open item"}); err != nil {
@@ -228,7 +259,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("SubmitCompletionByWrongRig", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		if err := store.InsertWanted(&WantedItem{ID: "w-conf09", Title: "Wrong rig item"}); err != nil {
@@ -255,7 +288,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("SubmitCompletionAlreadyDone", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		if err := store.InsertWanted(&WantedItem{ID: "w-conf11", Title: "Already done"}); err != nil {
@@ -285,7 +320,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("DatabaseExistsWrongName", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		if err := store.EnsureDB(); err != nil {
@@ -297,7 +334,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("InsertDuplicateIDFails", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		if err := store.InsertWanted(&WantedItem{ID: "w-conf10", Title: "First insert"}); err != nil {
@@ -311,7 +350,9 @@ func wlCommonsConformance(t *testing.T, newStore func(t *testing.T) WLCommonsSto
 	})
 
 	t.Run("ClaimSetsClaimedBy", func(t *testing.T) {
-		t.Parallel()
+		if runParallel {
+			t.Parallel()
+		}
 		store := newStore(t)
 
 		if err := store.InsertWanted(&WantedItem{ID: "w-conf07", Title: "Check claimer"}); err != nil {

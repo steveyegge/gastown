@@ -33,16 +33,17 @@ func startIsolatedDoltContainer(t *testing.T) string {
 func TestRealWLCommonsStore_Conformance(t *testing.T) {
 	townRoot := startIsolatedDoltContainer(t)
 
-	// Pre-create the database before parallel subtests to avoid
-	// concurrent CREATE DATABASE races.
-	store := NewWLCommons(townRoot)
-	if err := store.EnsureDB(); err != nil {
-		t.Fatalf("EnsureDB() error: %v", err)
-	}
-
+	// Run subtests sequentially (parallel=false) to prevent concurrent
+	// DOLT_COMMIT calls from racing on the shared wl_commons working set.
+	// Each subtest's newStore call ensures the DB exists (idempotent).
 	wlCommonsConformance(t, func(t *testing.T) WLCommonsStore {
-		return NewWLCommons(townRoot)
-	})
+		t.Helper()
+		store := NewWLCommons(townRoot)
+		if err := store.EnsureDB(); err != nil {
+			t.Fatalf("EnsureDB() error: %v", err)
+		}
+		return store
+	}, false)
 }
 
 // TestIsNothingToCommit_RealDolt verifies that isNothingToCommit correctly detects

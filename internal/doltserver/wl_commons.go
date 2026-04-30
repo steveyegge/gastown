@@ -68,7 +68,24 @@ func (w *WLCommons) DBName() string {
 }
 
 func (w *WLCommons) EnsureDB() error           { return EnsureWLCommons(w.townRoot) }
-func (w *WLCommons) DatabaseExists(db string) bool { return DatabaseExists(w.townRoot, db) }
+// DatabaseExists checks whether db exists. Tries the host filesystem first;
+// falls back to a live SHOW DATABASES query so containerised Dolt is handled.
+func (w *WLCommons) DatabaseExists(db string) bool {
+	if DatabaseExists(w.townRoot, db) {
+		return true
+	}
+	// Filesystem miss — ask the server directly (data may live inside a container).
+	output, err := doltSQLQuery(w.townRoot, fmt.Sprintf("SHOW DATABASES LIKE '%s'", EscapeSQL(db)))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSpace(line) == db {
+			return true
+		}
+	}
+	return false
+}
 func (w *WLCommons) InsertWanted(item *WantedItem) error { return InsertWanted(w.townRoot, item) }
 func (w *WLCommons) ClaimWanted(wantedID, rigHandle string) error {
 	return ClaimWanted(w.townRoot, wantedID, rigHandle)
@@ -158,6 +175,13 @@ func EnsureWLCommons(townRoot string) error {
 
 	_, created, err := InitRig(townRoot, WLCommonsDB)
 	if err != nil {
+		// In containerized Dolt the database lives inside the container, so the
+		// host-filesystem guard above misses it and InitRig issues CREATE DATABASE
+		// against a server that already has the DB. Treat this as a successful
+		// no-op: the schema was initialized by the first EnsureDB call.
+		if strings.Contains(err.Error(), "database exists") {
+			return nil
+		}
 		return fmt.Errorf("creating wl-commons database: %w", err)
 	}
 
