@@ -99,6 +99,13 @@ const (
 	convoyStatusClosed         = "closed"
 	convoyStatusStagedReady    = "staged_ready"
 	convoyStatusStagedWarnings = "staged_warnings"
+
+	// trackedStatusUnknown is the sentinel for a tracked dependency whose
+	// status could not be resolved — typically a cross-rig bead whose rig DB
+	// is missing, parked, or unroutable from the convoy owner's cwd. Distinct
+	// from "open" so auto-close does not mistake it for pending work and
+	// `gt convoy status` can label it clearly. (gt-bs6 / GH#2786)
+	trackedStatusUnknown = "unknown"
 )
 
 func normalizeConvoyStatus(status string) string {
@@ -893,15 +900,33 @@ func closeConvoyIfComplete(townBeads, convoyID, title string, tracked []trackedI
 
 	allClosed := true
 	openCount := 0
+	unknownCount := 0
 	for _, t := range tracked {
-		if t.Status != "closed" && t.Status != "tombstone" {
+		switch t.Status {
+		case "closed", "tombstone":
+			// counted as complete
+		case trackedStatusUnknown:
+			// Cross-rig DB unreachable — can't verify completion. Leave convoy
+			// open, treat as Info (not a convoy-level failure). (gt-bs6)
+			allClosed = false
+			unknownCount++
+		default:
 			allClosed = false
 			openCount++
 		}
 	}
 
 	if !allClosed {
-		fmt.Printf("%s Convoy %s has %d open issue(s) remaining\n", style.Dim.Render("○"), convoyID, openCount)
+		switch {
+		case unknownCount > 0 && openCount > 0:
+			fmt.Printf("%s Convoy %s has %d open, %d unknown (cross-rig unreachable) issue(s) remaining\n",
+				style.Dim.Render("○"), convoyID, openCount, unknownCount)
+		case unknownCount > 0:
+			fmt.Printf("%s Convoy %s has %d tracked issue(s) with unknown status (cross-rig unreachable)\n",
+				style.Dim.Render("○"), convoyID, unknownCount)
+		default:
+			fmt.Printf("%s Convoy %s has %d open issue(s) remaining\n", style.Dim.Render("○"), convoyID, openCount)
+		}
 		return false, nil
 	}
 
@@ -1859,13 +1884,15 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 	if len(tracked) > 0 {
 		fmt.Printf("\n  %s\n", style.Bold.Render("Tracked Issues:"))
 		for _, t := range tracked {
-			// Status symbol: ✓ closed, ▶ in_progress/hooked, ○ other
+			// Status symbol: ✓ closed, ▶ in_progress/hooked, ? unknown (cross-rig unreachable), ○ other
 			status := "○"
 			switch t.Status {
 			case "closed":
 				status = "✓"
 			case "in_progress", "hooked":
 				status = "▶"
+			case trackedStatusUnknown:
+				status = "?"
 			}
 
 			// Show assignee in brackets (extract short name from path like gastown/polecats/goose -> goose)
@@ -2227,7 +2254,10 @@ func getTrackedIssues(townBeads, convoyID string) ([]trackedIssueInfo, error) {
 	// Fetch fresh issue details via bd show (uses prefix routing for cross-rig).
 	freshDetails := getIssueDetailsBatch(trackedIDs)
 
-	// Build tracked dependency structs from fresh details
+	// Build tracked dependency structs from fresh details. When fresh details
+	// are missing (cross-rig DB unreachable, missing, parked, or unroutable
+	// from town root), mark the dep with trackedStatusUnknown so callers can
+	// distinguish it from a legitimately open bead. (gt-bs6)
 	var deps []trackedDependency
 	for _, id := range trackedIDs {
 		dep := trackedDependency{
@@ -2236,6 +2266,8 @@ func getTrackedIssues(townBeads, convoyID string) ([]trackedIssueInfo, error) {
 		}
 		if details, ok := freshDetails[id]; ok {
 			applyFreshIssueDetails(&dep, details)
+		} else {
+			dep.Status = trackedStatusUnknown
 		}
 		deps = append(deps, dep)
 	}

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -112,5 +113,89 @@ esac
 	}
 	if statusByID["ghostty-123"] != "open" || statusByID["ghostty-456"] != "closed" {
 		t.Fatalf("unexpected tracked statuses: %#v", statusByID)
+	}
+}
+
+// TestGetTrackedIssues_UnknownStatusForUnreachableCrossRig verifies the (gt-bs6)
+// contract: when the tracked bead lives in a cross-rig DB that cannot be
+// resolved from the convoy owner's cwd (routes.jsonl missing, rig parked, or
+// rig beads DB unreachable), the returned tracked entry carries status
+// trackedStatusUnknown instead of an empty string. Empty status was
+// indistinguishable from a legitimately open bead and silenced the real
+// failure mode noted in #2786.
+func TestGetTrackedIssues_UnknownStatusForUnreachableCrossRig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows - shell stubs")
+	}
+
+	townRoot, townBeads, _ := makeExternalTrackingTownWorkspace(t)
+	chdirExternalTrackingTest(t, townRoot)
+
+	// bd sql returns a single cross-rig tracks edge. `bd show` fails for the
+	// target bead (simulating an unreachable / unrouted rig DB). The function
+	// must still return the tracked dep, with Status = trackedStatusUnknown.
+	scriptBody := `
+case "$*" in
+  "--allow-stale version")
+    exit 0
+    ;;
+  *sql*dependencies*)
+    echo '[{"depends_on_id":"ws-foo"}]'
+    ;;
+  "show ws-foo --json")
+    echo "no issue found matching \"ws-foo\"" >&2
+    exit 1
+    ;;
+  *)
+    echo "unexpected bd args: $*" >&2
+    exit 1
+    ;;
+esac
+`
+	writeExternalTrackingBdStub(t, scriptBody)
+
+	tracked, err := getTrackedIssues(townBeads, "hq-cv-unreach")
+	if err != nil {
+		t.Fatalf("getTrackedIssues: %v", err)
+	}
+	if len(tracked) != 1 {
+		t.Fatalf("expected 1 tracked issue, got %d: %#v", len(tracked), tracked)
+	}
+	if tracked[0].ID != "ws-foo" {
+		t.Fatalf("tracked[0].ID = %q, want %q", tracked[0].ID, "ws-foo")
+	}
+	if tracked[0].Status != trackedStatusUnknown {
+		t.Fatalf("tracked[0].Status = %q, want %q", tracked[0].Status, trackedStatusUnknown)
+	}
+}
+
+// TestCloseConvoyIfComplete_UnknownBlocksAutoClose verifies (gt-bs6) that an
+// unknown-status tracked bead prevents convoy auto-close. The rig DB being
+// temporarily unreachable must not be mistaken for a completed bead.
+func TestCloseConvoyIfComplete_UnknownBlocksAutoClose(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows - shell stubs")
+	}
+
+	// No bd stub — closeConvoyIfComplete does not shell out when the convoy
+	// isn't closable, which is exactly the scenario under test.
+	townBeads := t.TempDir()
+	tracked := []trackedIssueInfo{
+		{ID: "ws-foo", Status: trackedStatusUnknown},
+		{ID: "ws-bar", Status: "closed"},
+	}
+
+	out, err := captureConvoyStdoutErr(t, func() error {
+		ready, err := closeConvoyIfComplete(townBeads, "hq-cv-unreach", "Mixed", tracked, false)
+		if ready {
+			t.Fatalf("closeConvoyIfComplete reported ready with unknown tracked status")
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatalf("closeConvoyIfComplete: %v", err)
+	}
+	if !strings.Contains(out, "unknown") {
+		t.Fatalf("diagnostic missing 'unknown' label: %q", out)
 	}
 }
