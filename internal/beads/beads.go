@@ -1234,10 +1234,26 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	if opts.Ephemeral {
 		args = append(args, "--ephemeral")
 	}
+	// When Rig is set, route to the rig's .beads dir via BEADS_DIR rather than
+	// passing --repo=<rigDir>. Using --repo causes bd to open the target database
+	// as a second connection while BEADS_DIR already holds one, triggering a
+	// pthread_cond_wait deadlock when both paths resolve to the same database
+	// (e.g., a polecat running gt done on its own rig's issue). (hq-1uf2)
+	bdForCreate := b
 	if opts.Rig != "" {
 		if townRoot := b.getTownRoot(); townRoot != "" {
 			if rigDir := GetRigDirForName(townRoot, opts.Rig); rigDir != "" {
-				args = append(args, "--repo="+rigDir)
+				rigBeadsDir := filepath.Join(rigDir, ".beads")
+				if _, statErr := os.Stat(rigBeadsDir); statErr == nil {
+					bdForCreate = &Beads{
+						workDir:    b.workDir,
+						beadsDir:   rigBeadsDir,
+						serverPort: b.serverPort,
+						isolated:   b.isolated,
+					}
+				}
+				// If .beads dir doesn't exist, fall through using b (no --repo flag).
+				// bd will auto-route from BEADS_DIR, which is better than hanging.
 			}
 		}
 	}
@@ -1251,7 +1267,7 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 		args = append(args, "--actor="+actor)
 	}
 
-	out, err := b.run(args...)
+	out, err := bdForCreate.run(args...)
 	if err != nil {
 		return nil, err
 	}
