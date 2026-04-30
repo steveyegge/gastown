@@ -91,6 +91,7 @@ directory.
 | Tests fail after merge | Reopen source issue, notify witness (MERGE_FAILED), close MR, delete branch |
 | Push fails | Retry with backoff, or abort and investigate |
 | Pre-existing test failure | File bead for tracking (NEVER fix it yourself) |
+| ci_command fails after merge | Merge was auto-reverted; MR stays in queue; Mayor notified; wait for polecat to fix and resubmit |
 | Uncertain merge order | Choose based on priority, dependencies, timing |
 
 **Target Resolution Rule (single source):**
@@ -181,6 +182,7 @@ Step emojis:
 | run-tests | 🧪 | Quality checks and test suite |
 | handle-failures | 🚦 | Verification gate |
 | merge-push | 🚀 | Merging to target and pushing |
+| ci-gate | ✅ | Local CI command check, auto-run by go merge layer (when configured) |
 | loop-check | 🔄 | Checking for more branches |
 | generate-summary | 📝 | Summarizing patrol cycle |
 | check-integration-branches | 🏗️ | Integration branch readiness |
@@ -224,6 +226,9 @@ Tests FAILED:
 ├── Branch caused it? → Abort, reopen source issue, notify witness (MERGE_FAILED), close MR, delete branch
 └── Pre-existing? → File bead (bd create --type=bug --priority=1 --title="..."), then proceed
 
+CI FAILED (ci_command non-zero exit, merge_strategy=local):
+└── Merge was auto-reverted by go layer; MR stays in queue; Mayor already notified → no action needed, proceed to loop-check
+
 GATE: Cannot proceed to merge without fix OR bead filed
 ```
 **FORBIDDEN**: Note failure and merge without tracking.
@@ -237,6 +242,11 @@ git push origin <merge-target>
 git branch -d temp
 git branch -d polecat/<worker>
 ```
+After merging, if rig config has `ci_command` set (`merge_strategy=local` only):
+- `gt` runs `ci_command` in the worktree root automatically
+- Exit 0: merge stands, proceed normally
+- Non-zero: merge is reverted automatically; MR stays in queue; Mayor is notified with stderr
+You do NOT run `ci_command` manually — the Go merge layer handles it.
 
 **loop-check**: More branches? Return to process-branch.
 

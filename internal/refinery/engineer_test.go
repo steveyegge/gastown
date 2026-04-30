@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
@@ -1061,5 +1063,195 @@ func TestIsClaimStale(t *testing.T) {
 				t.Errorf("isClaimStale(%q) = %v, want %v", tt.updatedAt, got, tt.want)
 			}
 		})
+	}
+}
+
+// setupDoMergeRepo creates a local git repo with a bare remote ("origin") and a
+// feature branch ready for merging. Returns the local repo path and the default
+// branch name (main or master depending on git config).
+func setupDoMergeRepo(t *testing.T) (localDir, mainBranch string) {
+	t.Helper()
+	tmp := t.TempDir()
+
+	remoteDir := filepath.Join(tmp, "remote.git")
+	if err := exec.Command("git", "init", "--bare", remoteDir).Run(); err != nil {
+		t.Fatalf("git init --bare: %v", err)
+	}
+
+	localDir = filepath.Join(tmp, "local")
+	if err := os.MkdirAll(localDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+
+	run("git", "init")
+	run("git", "config", "user.email", "test@test.com")
+	run("git", "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(localDir, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	run("git", "add", ".")
+	run("git", "commit", "-m", "initial")
+	run("git", "remote", "add", "origin", remoteDir)
+
+	cmd := exec.Command("git", "branch", "--show-current")
+	cmd.Dir = localDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("branch --show-current: %v", err)
+	}
+	mainBranch = strings.TrimSpace(string(out))
+
+	run("git", "push", "-u", "origin", mainBranch)
+
+	// Create feature branch with a change
+	run("git", "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(localDir, "feature.txt"), []byte("feature\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	run("git", "add", ".")
+	run("git", "commit", "-m", "feat: add feature")
+	run("git", "checkout", mainBranch)
+
+	return localDir, mainBranch
+}
+
+func TestEngineer_LoadConfig_CICommand(t *testing.T) {
+	t.Run("ci_command set", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		config := map[string]interface{}{
+			"type":    "rig",
+			"version": 1,
+			"name":    "test-rig",
+			"merge_queue": map[string]interface{}{
+				"ci_command": "go test ./...",
+			},
+		}
+		data, _ := json.MarshalIndent(config, "", "  ")
+		if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		e := NewEngineer(&rig.Rig{Name: "test-rig", Path: tmpDir})
+		if err := e.LoadConfig(); err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if e.config.CICommand != "go test ./..." {
+			t.Errorf("expected CICommand %q, got %q", "go test ./...", e.config.CICommand)
+		}
+	})
+
+	t.Run("ci_command absent leaves field empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		config := map[string]interface{}{
+			"type":        "rig",
+			"version":     1,
+			"name":        "test-rig",
+			"merge_queue": map[string]interface{}{},
+		}
+		data, _ := json.MarshalIndent(config, "", "  ")
+		if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		e := NewEngineer(&rig.Rig{Name: "test-rig", Path: tmpDir})
+		if err := e.LoadConfig(); err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if e.config.CICommand != "" {
+			t.Errorf("expected empty CICommand, got %q", e.config.CICommand)
+		}
+	})
+}
+
+func TestDoMerge_CICommand_Unset(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("integration test uses sh; skipping on Windows")
+	}
+	localDir, mainBranch := setupDoMergeRepo(t)
+
+	r := &rig.Rig{Name: "test-rig", Path: t.TempDir()}
+	e := NewEngineer(r)
+	e.git = git.NewGit(localDir)
+	e.output = io.Discard
+	e.config.AutoPush = false
+	e.config.CICommand = ""
+
+	result := e.doMerge(context.Background(), "feature", mainBranch, "")
+
+	if !result.Success {
+		t.Errorf("expected Success=true when CICommand unset, got error: %s", result.Error)
+	}
+	if result.CIFailed {
+		t.Error("expected CIFailed=false when CICommand unset")
+	}
+}
+
+func TestDoMerge_CICommand_Success(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("integration test uses sh; skipping on Windows")
+	}
+	localDir, mainBranch := setupDoMergeRepo(t)
+
+	r := &rig.Rig{Name: "test-rig", Path: t.TempDir()}
+	e := NewEngineer(r)
+	e.git = git.NewGit(localDir)
+	e.output = io.Discard
+	e.config.AutoPush = false
+	e.config.CICommand = "true"
+
+	result := e.doMerge(context.Background(), "feature", mainBranch, "")
+
+	if !result.Success {
+		t.Errorf("expected Success=true when ci_command exits 0, got error: %s", result.Error)
+	}
+	if result.CIFailed {
+		t.Error("expected CIFailed=false when ci_command exits 0")
+	}
+}
+
+func TestDoMerge_CICommand_Failure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("integration test uses sh; skipping on Windows")
+	}
+	localDir, mainBranch := setupDoMergeRepo(t)
+
+	r := &rig.Rig{Name: "test-rig", Path: t.TempDir()}
+	e := NewEngineer(r)
+	e.git = git.NewGit(localDir)
+	e.output = io.Discard
+	e.config.AutoPush = false
+	e.config.CICommand = "false"
+
+	result := e.doMerge(context.Background(), "feature", mainBranch, "")
+
+	if result.Success {
+		t.Error("expected Success=false when ci_command exits 1")
+	}
+	if !result.CIFailed {
+		t.Error("expected CIFailed=true when ci_command exits 1")
+	}
+	if !strings.Contains(result.Error, "ci_command") {
+		t.Errorf("expected error to mention 'ci_command', got: %s", result.Error)
+	}
+
+	// Verify the merge was reverted: HEAD on mainBranch should equal origin/mainBranch
+	g := git.NewGit(localDir)
+	headSHA, err := g.Rev("HEAD")
+	if err != nil {
+		t.Fatalf("Rev HEAD: %v", err)
+	}
+	originSHA, err := g.Rev("origin/" + mainBranch)
+	if err != nil {
+		t.Fatalf("Rev origin/%s: %v", mainBranch, err)
+	}
+	if headSHA != originSHA {
+		t.Errorf("expected merge to be reverted: HEAD=%s, origin/%s=%s", headSHA, mainBranch, originSHA)
 	}
 }

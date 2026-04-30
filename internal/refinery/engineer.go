@@ -180,6 +180,9 @@ type MergeQueueConfig struct {
 	// MergeStrategy="pr". Valid values: "github" (default), "bitbucket".
 	VCSProvider string `json:"vcs_provider,omitempty"`
 
+	// CICommand is the shell command run as a local CI gate after each local merge.
+	CICommand string
+
 	// RequireReview controls whether the refinery requires at least one approving
 	// review before merging a PR. Only meaningful when MergeStrategy="pr".
 	// Nil defaults to false (no review required).
@@ -365,6 +368,7 @@ func (e *Engineer) LoadConfig() error {
 		MergeStrategy        *string                    `json:"merge_strategy"`
 		VCSProvider          *string                    `json:"vcs_provider"`
 		RequireReview        *bool                      `json:"require_review"`
+		CICommand            *string                    `json:"ci_command"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -452,6 +456,9 @@ func (e *Engineer) LoadConfig() error {
 	if mqRaw.RequireReview != nil {
 		e.config.RequireReview = mqRaw.RequireReview
 	}
+	if mqRaw.CICommand != nil {
+		e.config.CICommand = *mqRaw.CICommand
+	}
 
 	// Initialize the PR provider when merge_strategy=pr.
 	if e.config.MergeStrategy == "pr" {
@@ -501,6 +508,7 @@ type ProcessResult struct {
 	Error          string
 	Conflict       bool
 	TestsFailed    bool
+	CIFailed       bool // ci_command exited non-zero; merge was reverted
 	SlotTimeout    bool // Merge slot contention timeout (distinct from build/test failure)
 	BranchNotFound bool // Source branch no longer exists (e.g. cleaned up after cherry-pick)
 	NoMerge        bool // Source issue has no_merge flag — intentionally blocked, not a failure
@@ -681,6 +689,33 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 			}
 			return postResult
 		}
+	}
+
+	// ci_command gate: run after merge, revert on non-zero exit.
+	// Only active when CICommand is set (no-op when unset, preserving existing behavior).
+	if e.config.CICommand != "" {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Running ci_command: %s\n", e.config.CICommand)
+		ciCmd := exec.Command("sh", "-c", e.config.CICommand)
+		ciCmd.Dir = e.git.WorkDir()
+		var ciStderr bytes.Buffer
+		ciCmd.Stderr = &ciStderr
+		if err := ciCmd.Run(); err != nil {
+			stderrOut := strings.TrimSpace(ciStderr.String())
+			_, _ = fmt.Fprintf(e.output, "[Engineer] ci_command failed: %v\nStderr: %s\n", err, stderrOut)
+			if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to revert merge after ci_command failure: %v\n", resetErr)
+			}
+			errMsg := fmt.Sprintf("ci_command failed: %s", stderrOut)
+			if stderrOut == "" {
+				errMsg = fmt.Sprintf("ci_command exited non-zero: %v", err)
+			}
+			return ProcessResult{
+				Success:  false,
+				CIFailed: true,
+				Error:    errMsg,
+			}
+		}
+		_, _ = fmt.Fprintln(e.output, "[Engineer] ci_command passed")
 	}
 
 	// Step 6: Get the merge commit SHA
@@ -1321,6 +1356,12 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 		return
 	}
 
+	// ci_command ran post-merge and failed; the merge was reverted. The polecat
+	// needs to fix whatever the ci_command tests and resubmit.
+	if result.CIFailed {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] MR %s: ci_command failed — notifying polecat and mayor\n", mr.ID)
+	}
+
 	// Nudge polecat directly about the merge failure.
 	// Previously sent MERGE_FAILED mail to witness (which relayed to polecat),
 	// but that created permanent Dolt commits for routine protocol signals.
@@ -1330,6 +1371,8 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 		failureType = "conflict"
 	} else if result.TestsFailed {
 		failureType = "tests"
+	} else if result.CIFailed {
+		failureType = "ci"
 	}
 	polecatName := strings.TrimPrefix(mr.Worker, "polecats/")
 	nudgeTarget := fmt.Sprintf("%s/%s", e.rig.Name, polecatName)
