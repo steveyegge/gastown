@@ -760,6 +760,14 @@ func gatherStatus() (TownStatus, error) {
 
 	beadsWg.Wait()
 
+	// Pre-fetch town-level hooked work once. Used by per-rig hook discovery
+	// to surface town beads (e.g. hq-* slung from Mayor) on rig-level agents.
+	// Skipped in --fast mode since hook display is already skipped there.
+	var townHookedByAssignee map[string]*beads.Issue
+	if !statusFast {
+		townHookedByAssignee = loadHookedByAssignee(beads.New(filepath.Join(townRoot, ".beads")))
+	}
+
 	// Create mail router for inbox lookups
 	mailRouter := mail.NewRouter(townRoot)
 
@@ -891,13 +899,13 @@ func gatherStatus() (TownStatus, error) {
 			var rigWg sync.WaitGroup
 
 			// Discover hooks for all agents in this rig
-			// In --fast mode, skip expensive handoff bead lookups. Hook info comes from
+			// In --fast mode, skip expensive bd queries. Hook info comes from
 			// preloaded agent beads via discoverRigAgents instead.
 			if !statusFast {
 				rigWg.Add(1)
 				go func() {
 					defer rigWg.Done()
-					rs.Hooks = discoverRigHooks(r, rs.Crews)
+					rs.Hooks = discoverRigHooks(r, rs.Crews, townHookedByAssignee)
 				}()
 			}
 
@@ -1523,70 +1531,101 @@ func capitalizeFirst(s string) string {
 	return string(s[0]-32) + s[1:]
 }
 
-// discoverRigHooks finds all hook attachments for agents in a rig.
-// It fetches all pinned handoff beads in a single bd call, then resolves
-// each agent's hook in-memory. This replaces the previous N+1 pattern where
-// each agent triggered a separate bd subprocess.
-func discoverRigHooks(r *rig.Rig, crews []string) []AgentHookInfo {
+// discoverRigHooks finds all hook assignments for agents in a rig.
+// It queries the rig's beads database for status=hooked and status=in_progress
+// beads, grouped by assignee. Town-level hooks (e.g. hq-* beads slung to a
+// rig agent) are also matched via townHookedByAssignee.
+//
+// This is the authoritative source for hook display, matching what
+// `gt hook show` and `gt mol status` use. Reading the agent bead's
+// hook_bead column directly returns stale data because that field is
+// no longer maintained (see GH#2371).
+func discoverRigHooks(r *rig.Rig, crews []string, townHookedByAssignee map[string]*beads.Issue) []AgentHookInfo {
+	// Query rig beads for hooked + in_progress work, grouped by assignee.
+	// BeadsPath() returns r.Path which follows the redirect to the rig's
+	// actual beads database (mayor/rig/.beads when tracked, or local).
+	rigHookedByAssignee := loadHookedByAssignee(beads.New(r.BeadsPath()))
+	return resolveRigHooks(r, crews, rigHookedByAssignee, townHookedByAssignee)
+}
+
+// resolveRigHooks builds the per-agent AgentHookInfo list from already-loaded
+// rig and town hooked-work maps. Pure (no I/O) so it can be unit-tested.
+//
+// Precedence: a rig-local hook for an agent shadows a town-level hook for the
+// same agent address. Agents not in either map produce HasWork=false.
+func resolveRigHooks(r *rig.Rig, crews []string, rigHookedByAssignee, townHookedByAssignee map[string]*beads.Issue) []AgentHookInfo {
+	pickHook := func(addr string) *beads.Issue {
+		if issue, ok := rigHookedByAssignee[addr]; ok {
+			return issue
+		}
+		if townHookedByAssignee != nil {
+			if issue, ok := townHookedByAssignee[addr]; ok {
+				return issue
+			}
+		}
+		return nil
+	}
+
 	var hooks []AgentHookInfo
-
-	// Create beads instance for the rig
-	b := beads.New(r.Path)
-
-	// Batch-fetch all handoff beads in one bd call
-	allHandoffs, err := b.FindAllHandoffBeads()
-	if err != nil {
-		// On error, return empty hooks for all agents rather than failing
-		allHandoffs = make(map[string]*beads.Issue)
+	addHook := func(address, roleType string) {
+		hook := AgentHookInfo{Agent: address, Role: roleType}
+		if issue := pickHook(address); issue != nil {
+			hook.HasWork = true
+			hook.Molecule = issue.ID
+			hook.Title = issue.Title
+		}
+		hooks = append(hooks, hook)
 	}
 
-	// Check polecats
 	for _, name := range r.Polecats {
-		hooks = append(hooks, resolveHookFromMap(allHandoffs, name, r.Name+"/"+name, constants.RolePolecat))
+		addHook(r.Name+"/"+name, constants.RolePolecat)
 	}
-
-	// Check crew workers
 	for _, name := range crews {
-		hooks = append(hooks, resolveHookFromMap(allHandoffs, name, r.Name+"/crew/"+name, constants.RoleCrew))
+		addHook(r.Name+"/crew/"+name, constants.RoleCrew)
 	}
-
-	// Check witness
 	if r.HasWitness {
-		hooks = append(hooks, resolveHookFromMap(allHandoffs, constants.RoleWitness, r.Name+"/witness", constants.RoleWitness))
+		addHook(r.Name+"/witness", constants.RoleWitness)
 	}
-
-	// Check refinery
 	if r.HasRefinery {
-		hooks = append(hooks, resolveHookFromMap(allHandoffs, constants.RoleRefinery, r.Name+"/refinery", constants.RoleRefinery))
+		addHook(r.Name+"/refinery", constants.RoleRefinery)
 	}
-
 	return hooks
 }
 
-// resolveHookFromMap builds an AgentHookInfo from a pre-fetched map of handoff beads.
-// This is the in-memory equivalent of getAgentHook, avoiding per-agent bd subprocess calls.
-func resolveHookFromMap(allHandoffs map[string]*beads.Issue, role, agentAddress, roleType string) AgentHookInfo {
-	hook := AgentHookInfo{
-		Agent: agentAddress,
-		Role:  roleType,
-	}
+// loadHookedByAssignee queries a beads database for hooked and in_progress
+// work, returning a map of assignee address to the bead they're working on.
+// Hooked beads (work slung but not yet claimed) take precedence over
+// in_progress beads when an assignee has both.
+func loadHookedByAssignee(b *beads.Beads) map[string]*beads.Issue {
+	hooked, _ := b.List(beads.ListOptions{Status: beads.StatusHooked, Priority: -1})
+	inProgress, _ := b.List(beads.ListOptions{Status: "in_progress", Priority: -1})
+	return mergeHookedByAssignee(hooked, inProgress)
+}
 
-	handoff, ok := allHandoffs[role]
-	if !ok || handoff == nil {
-		return hook
+// mergeHookedByAssignee builds the assignee→issue index from the two issue
+// lists loadHookedByAssignee fetches. Hooked beads win over in_progress beads
+// when an assignee has both (work just slung is the most current intent);
+// within either list, the first occurrence wins. Issues with empty assignee
+// are skipped — they belong to nobody and shouldn't surface in gt status.
+func mergeHookedByAssignee(hooked, inProgress []*beads.Issue) map[string]*beads.Issue {
+	result := make(map[string]*beads.Issue)
+	for _, issue := range hooked {
+		if issue == nil || issue.Assignee == "" {
+			continue
+		}
+		if _, exists := result[issue.Assignee]; !exists {
+			result[issue.Assignee] = issue
+		}
 	}
-
-	attachment := beads.ParseAttachmentFields(handoff)
-	if attachment != nil && attachment.AttachedMolecule != "" {
-		hook.HasWork = true
-		hook.Molecule = attachment.AttachedMolecule
-		hook.Title = handoff.Title
-	} else if handoff.Description != "" {
-		hook.HasWork = true
-		hook.Title = handoff.Title
+	for _, issue := range inProgress {
+		if issue == nil || issue.Assignee == "" {
+			continue
+		}
+		if _, exists := result[issue.Assignee]; !exists {
+			result[issue.Assignee] = issue
+		}
 	}
-
-	return hook
+	return result
 }
 
 // discoverGlobalAgents checks runtime state for town-level agents (Mayor, Deacon).
