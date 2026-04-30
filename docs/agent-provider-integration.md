@@ -346,7 +346,7 @@ config.RegisterHookInstaller("kiro", func(settingsDir, workDir, role, hooksDir, 
 If your agent uses a plugin system (like OpenCode's JS plugins), Gas Town can
 install a plugin file instead of a settings.json.
 
-Reference: `internal/opencode/plugin/gastown.js`
+Reference: `internal/hooks/templates/opencode/gastown.js`
 
 ```javascript
 export const GasTown = async ({ $, directory }) => {

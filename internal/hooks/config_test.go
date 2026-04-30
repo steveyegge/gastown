@@ -1020,6 +1020,36 @@ func TestDiscoverWorktrees_EmptyDir(t *testing.T) {
 	}
 }
 
+func TestDiscoverWorktrees_PrefersNestedGitWorktreeRoots(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	worktree := filepath.Join(tmpDir, "fury", "gastown")
+	if err := os.MkdirAll(filepath.Join(worktree, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "dust"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	dirs := DiscoverWorktrees(tmpDir)
+
+	if len(dirs) != 2 {
+		t.Fatalf("expected 2 worktrees, got %d: %v", len(dirs), dirs)
+	}
+
+	got := make(map[string]bool)
+	for _, dir := range dirs {
+		got[dir] = true
+	}
+
+	if !got[worktree] {
+		t.Fatalf("expected nested worktree root %q, got %v", worktree, dirs)
+	}
+	if !got[filepath.Join(tmpDir, "dust")] {
+		t.Fatalf("expected direct worktree fallback %q, got %v", filepath.Join(tmpDir, "dust"), dirs)
+	}
+}
+
 func TestDiscoverWorktrees_InvalidDir(t *testing.T) {
 	dirs := DiscoverWorktrees("/nonexistent/path/that/does/not/exist")
 	if dirs != nil {

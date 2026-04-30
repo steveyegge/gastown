@@ -489,7 +489,6 @@ func DiscoverTargets(townRoot string) ([]Target, error) {
 	return targets, nil
 }
 
-
 // RoleLocation represents a discovered role directory in the workspace,
 // independent of any specific agent. Used by callers that need to resolve
 // agent configuration for each location (e.g., syncing non-Claude agents).
@@ -552,6 +551,11 @@ func DiscoverRoleLocations(townRoot string) ([]RoleLocation, error) {
 // DiscoverWorktrees returns subdirectories within a role parent directory that
 // are individual worktrees (e.g., crew/alice, crew/bob, polecats/toast).
 // Skips hidden directories and non-directories.
+//
+// Some roles, especially polecats, keep the git worktree one level below the
+// agent slot directory (for example, polecats/fury/gastown). When an immediate
+// child contains nested git worktree roots, prefer those nested directories so
+// hooks are synced into the real repo root instead of the slot parent.
 func DiscoverWorktrees(roleDir string) []string {
 	entries, err := os.ReadDir(roleDir)
 	if err != nil {
@@ -563,9 +567,43 @@ func DiscoverWorktrees(roleDir string) []string {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		dirs = append(dirs, filepath.Join(roleDir, entry.Name()))
+
+		path := filepath.Join(roleDir, entry.Name())
+		nested := nestedWorktreeRoots(path)
+		if len(nested) > 0 {
+			dirs = append(dirs, nested...)
+			continue
+		}
+
+		dirs = append(dirs, path)
 	}
 	return dirs
+}
+
+func nestedWorktreeRoots(parent string) []string {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return nil
+	}
+
+	var dirs []string
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		path := filepath.Join(parent, entry.Name())
+		if isGitWorktreeRoot(path) {
+			dirs = append(dirs, path)
+		}
+	}
+
+	return dirs
+}
+
+func isGitWorktreeRoot(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
 }
 
 // isRig checks if a directory looks like a rig (has crew/, witness/, or polecats/ subdirectory).

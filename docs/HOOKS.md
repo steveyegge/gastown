@@ -9,7 +9,7 @@ Gas Town manages context injection for all supported agents. The mechanism varie
 | Agent | Hook mechanism | Managed file |
 |-------|---------------|-------------|
 | Claude Code, Gemini | `settings.json` lifecycle hooks | `<role>/.claude/settings.json` |
-| OpenCode | JS plugin | `workDir/.opencode/gastown.js` |
+| OpenCode | JS plugin | `workDir/.opencode/plugins/gastown.js` |
 | GitHub Copilot | JSON lifecycle hooks | `workDir/.github/hooks/gastown.json` |
 | Codex, others | Startup nudge fallback | *(no file — nudge only)* |
 
