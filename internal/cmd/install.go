@@ -1,20 +1,22 @@
 package cmd
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deps"
@@ -146,41 +148,34 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		if err := deps.EnsureBeads(true); err != nil {
 			return fmt.Errorf("beads dependency check failed: %w", err)
 		}
-	}
+		if err := ensureInstallDoltReady(); err != nil {
+			return err
+		}
 
-	// Preflight: ensure dolt identity before any workspace mutations.
-	// This prevents a partial install that can't be retried without --force.
-	if !installNoBeads {
-		if _, err := exec.LookPath("dolt"); err == nil {
-			if err := doltserver.EnsureDoltIdentity(); err != nil {
-				return fmt.Errorf("dolt identity setup failed (required for beads): %w\n\nTo fix, run:\n  dolt config --global --add user.name \"Your Name\"\n  dolt config --global --add user.email \"you@example.com\"", err)
-			}
+		// Preflight: ensure dolt identity before any workspace mutations.
+		// This prevents a partial install that can't be retried without --force.
+		if err := doltserver.EnsureDoltIdentity(); err != nil {
+			return fmt.Errorf("dolt identity setup failed (required for beads): %w\n\nTo fix, run:\n  dolt config --global --add user.name \"Your Name\"\n  dolt config --global --add user.email \"you@example.com\"", err)
+		}
 
-			// Preflight: check Dolt port availability before creating any files.
-			// A port conflict would leave a partial install that needs --force to retry.
-			port := doltserver.DefaultPort
-			if installDoltPort != 0 {
-				port = installDoltPort
-				os.Setenv("GT_DOLT_PORT", strconv.Itoa(port))
-			} else if p := os.Getenv("GT_DOLT_PORT"); p != "" {
-				if envPort, err := strconv.Atoi(p); err == nil {
-					port = envPort
-				}
+		// Preflight: check Dolt port availability before creating any files.
+		// A port conflict would leave a partial install that needs --force to retry.
+		port := doltserver.DefaultPort
+		if installDoltPort != 0 {
+			port = installDoltPort
+			os.Setenv("GT_DOLT_PORT", strconv.Itoa(port))
+		} else if p := os.Getenv("GT_DOLT_PORT"); p != "" {
+			if envPort, err := strconv.Atoi(p); err == nil {
+				port = envPort
 			}
-			if err := doltserver.CheckPortAvailable(port); err != nil {
-				// Port is in use — but if a Dolt server is already running
-				// on it, we can reuse it instead of starting a new one.
-				dsn := fmt.Sprintf("root:@tcp(127.0.0.1:%d)/", port)
-				if db, connErr := sql.Open("mysql", dsn); connErr == nil {
-					if pingErr := db.Ping(); pingErr == nil {
-						db.Close()
-						// Usable Dolt server on this port — skip the check.
-						fmt.Printf("   %s Using existing Dolt server on port %d\n",
-							style.Dim.Render("ℹ"), port)
-						goto portOK
-					}
-					db.Close()
-				}
+		}
+		if err := doltserver.CheckPortAvailable(port); err != nil {
+			// Port is in use — but if a Dolt server is already running
+			// for this same town, we can reuse it instead of starting a new one.
+			if canReuseInstallDoltServer(absPath, port) {
+				fmt.Printf("   %s Using existing Dolt server on port %d\n",
+					style.Dim.Render("ℹ"), port)
+			} else {
 				pid, dataDir := doltserver.PortHolder(port)
 				msg := fmt.Sprintf("Dolt port %d is already in use", port)
 				if pid > 0 && dataDir != "" {
@@ -197,7 +192,6 @@ func runInstall(cmd *cobra.Command, args []string) error {
 				}
 				return fmt.Errorf("%s", msg)
 			}
-		portOK:
 		}
 	}
 
@@ -357,27 +351,23 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		// Set up Dolt: identity → init-rig hq → server start.
 		// This ordering works because InitRig falls through to `dolt init`
 		// when the server isn't running yet.
-		if _, err := exec.LookPath("dolt"); err == nil {
-			// Identity was verified in preflight above.
-			// Create HQ database before starting server.
-			if _, _, err := doltserver.InitRig(absPath, "hq"); err != nil {
-				fmt.Printf("   %s Could not init HQ database: %v\n", style.Dim.Render("⚠"), err)
-			}
+		// Identity was verified in preflight above.
+		// Create HQ database before starting server.
+		if _, _, err := doltserver.InitRig(absPath, "hq"); err != nil {
+			return fmt.Errorf("initializing HQ Dolt database: %w", err)
+		}
 
-			// Start the Dolt server — bd commands need a running server.
-			// The server stays running after install (it's lightweight infrastructure,
-			// like a database). Stop it with 'gt dolt stop' when not needed.
-			if err := doltserver.Start(absPath); err != nil {
-				if !strings.Contains(err.Error(), "already running") {
-					fmt.Printf("   %s Could not start Dolt server: %v\n", style.Dim.Render("⚠"), err)
-				}
+		// Start the Dolt server — bd commands need a running server.
+		// The server stays running after install (it's lightweight infrastructure,
+		// like a database). Stop it with 'gt dolt stop' when not needed.
+		if err := doltserver.Start(absPath); err != nil {
+			if !strings.Contains(err.Error(), "already running") {
+				return fmt.Errorf("starting Dolt server for beads: %w", err)
 			}
-		} else {
-			fmt.Printf("   %s dolt not found in PATH — Dolt backend may not fully initialize\n", style.Dim.Render("⚠"))
 		}
 
 		if err := initTownBeads(absPath); err != nil {
-			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
+			return fmt.Errorf("initializing town beads: %w", err)
 		} else {
 			fmt.Printf("   ✓ Initialized .beads/ (town-level beads with hq- prefix)\n")
 		}
@@ -495,9 +485,90 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	step++
 	fmt.Printf("  %d. Enter the Mayor's office: %s\n", step, style.Dim.Render("gt mayor attach"))
 	fmt.Println()
-	fmt.Printf("Note: Dolt server is running (stop with %s)\n", style.Dim.Render("gt dolt stop"))
+	if !installNoBeads {
+		fmt.Printf("Note: Dolt server is running (stop with %s)\n", style.Dim.Render("gt dolt stop"))
+	}
 
 	return nil
+}
+
+func ensureInstallDoltReady() error {
+	status, version, detail := deps.CheckDolt()
+	return formatInstallDoltError(status, version, detail, goruntime.GOOS)
+}
+
+const installDoltServerProbeTimeout = 2 * time.Second
+
+func canReuseInstallDoltServer(townRoot string, port int) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), installDoltServerProbeTimeout)
+	defer cancel()
+
+	probeTimeout := installDoltServerProbeTimeout.String()
+	dsn := fmt.Sprintf("root:@tcp(127.0.0.1:%d)/?timeout=%s&readTimeout=%s&writeTimeout=%s",
+		port, probeTimeout, probeTimeout, probeTimeout)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	if err := db.PingContext(ctx); err != nil {
+		return false
+	}
+
+	// Only reuse a server that already belongs to this town. A random
+	// MySQL-compatible service or another town's Dolt server on the same port
+	// must remain a preflight failure; otherwise install can mutate the target
+	// and then fail during bd init.
+	databases, err := doltserver.ListDatabases(townRoot)
+	if err != nil || len(databases) == 0 {
+		return false
+	}
+	legitimate, err := doltserver.VerifyServerDataDir(townRoot)
+	return err == nil && legitimate
+}
+
+func formatInstallDoltError(status deps.DoltStatus, version, detail, goos string) error {
+	switch status {
+	case deps.DoltOK:
+		return nil
+	case deps.DoltNotFound:
+		return fmt.Errorf("dolt is required for gt install with beads enabled but was not found in PATH.\n\nInstall Dolt:\n  %s\n\nTo create an HQ without beads, rerun with --no-beads.\nMore install options: %s", doltInstallHint(goos), deps.DoltInstallURL)
+	case deps.DoltTooOld:
+		return fmt.Errorf("dolt %s is too old for gt install with beads enabled (minimum: %s).\n\nUpgrade Dolt:\n  %s\n\nTo create an HQ without beads, rerun with --no-beads.", version, deps.MinDoltVersion, doltUpgradeHint(goos))
+	case deps.DoltExecFailed:
+		if detail == "" {
+			detail = "no diagnostic output"
+		}
+		return fmt.Errorf("'dolt version' failed, so gt install cannot verify the Dolt dependency required for beads.\n\nDetail: %s\n\nReinstall Dolt:\n  %s\n\nTo create an HQ without beads, rerun with --no-beads.", detail, doltReinstallHint(goos))
+	case deps.DoltUnknown:
+		if detail == "" {
+			detail = "no version output"
+		}
+		return fmt.Errorf("dolt version could not be parsed, so gt install cannot verify the Dolt dependency required for beads.\n\nDetail: %s\n\nReinstall Dolt:\n  %s\n\nTo create an HQ without beads, rerun with --no-beads.", detail, doltReinstallHint(goos))
+	default:
+		return fmt.Errorf("dolt dependency check failed with unknown status %d.\n\nTo create an HQ without beads, rerun with --no-beads.", status)
+	}
+}
+
+func doltInstallHint(goos string) string {
+	if goos == "darwin" {
+		return "brew install dolt"
+	}
+	return "Install Dolt from " + deps.DoltInstallURL
+}
+
+func doltUpgradeHint(goos string) string {
+	if goos == "darwin" {
+		return "brew upgrade dolt"
+	}
+	return "Upgrade Dolt using your package manager or reinstall from " + deps.DoltInstallURL
+}
+
+func doltReinstallHint(goos string) string {
+	if goos == "darwin" {
+		return "brew reinstall dolt"
+	}
+	return "Reinstall Dolt from " + deps.DoltInstallURL
 }
 
 // createTownRootAgentMDs creates a minimal, non-role-specific CLAUDE.md at the

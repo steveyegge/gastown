@@ -124,8 +124,8 @@ Federated work coordination network linking Gas Towns through DoltHub. Rigs post
 
 - **Go 1.25+** - [go.dev/dl](https://go.dev/dl/)
 - **Git 2.25+** - for worktree support
-- **Dolt 1.82.4+** - [github.com/dolthub/dolt](https://github.com/dolthub/dolt)
-- **beads (bd) 0.55.4+** - [github.com/steveyegge/beads](https://github.com/steveyegge/beads)
+- **Dolt 1.82.4+** - `brew install dolt` on macOS, or see [github.com/dolthub/dolt](https://github.com/dolthub/dolt)
+- **beads (bd) 0.55.4+** - installed by `brew install gastown`, or see [github.com/steveyegge/beads](https://github.com/steveyegge/beads)
 - **sqlite3** - for convoy database queries (usually pre-installed on macOS/Linux)
 - **tmux 3.0+** - recommended for full experience
 - **Claude Code CLI** (default runtime) - [claude.ai/code](https://claude.ai/code)
@@ -141,7 +141,8 @@ $ npm install -g @gastown/gt                              # npm
 $ go install github.com/steveyegge/gastown/cmd/gt@latest  # From source (Linux only)
 
 # macOS: go install produces unsigned binaries that macOS will SIGKILL.
-# Use brew install (above) or clone and build with make:
+# Use brew install (above) or install Dolt and clone/build with make:
+$ brew install dolt
 $ git clone https://github.com/steveyegge/gastown.git && cd gastown
 $ make build && mv gt $HOME/go/bin/
 

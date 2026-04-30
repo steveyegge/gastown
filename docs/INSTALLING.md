@@ -10,8 +10,8 @@ Complete setup guide for Gas Town multi-agent orchestrator.
 |------|---------|-------|---------|
 | **Go** | 1.24+ | `go version` | See [golang.org](https://go.dev/doc/install) |
 | **Git** | 2.20+ | `git --version` | See below |
-| **Dolt** | >= 1.82.4 | `dolt version` | See [dolthub/dolt](https://github.com/dolthub/dolt?tab=readme-ov-file#installation) |
-| **Beads** | >= 0.55.4 | `bd version` | `go install github.com/steveyegge/beads/cmd/bd@latest` |
+| **Dolt** | >= 1.82.4 | `dolt version` | macOS: `brew install dolt`; other platforms: see [dolthub/dolt](https://github.com/dolthub/dolt?tab=readme-ov-file#installation) |
+| **Beads** | >= 0.55.4 | `bd version` | Installed by `brew install gastown`, or from source with `go install github.com/steveyegge/beads/cmd/bd@latest` |
 
 ### Optional (for Full Stack Mode)
 
@@ -32,8 +32,7 @@ Complete setup guide for Gas Town multi-agent orchestrator.
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
 # Required
-brew install go git
-# Install Dolt: see https://github.com/dolthub/dolt?tab=readme-ov-file#installation
+brew install go git dolt
 
 # Optional (for full stack mode)
 brew install tmux
@@ -90,17 +89,24 @@ brew install gastown
 # Verify installation
 gt version
 bd version
+dolt version
 ```
 
 Homebrew installs the runtime dependencies declared by the core formula. The
 `gastownhall/gastown` tap is reserved for emergency updates. If you build from
-source instead, install `gt` and `bd` with Go and ensure `$GOPATH/bin` (usually
-`~/go/bin`) is in your PATH:
+source instead, install `dolt` first, install `bd` with Go, and ensure
+`$GOPATH/bin` (usually `~/go/bin`) is in your PATH. On macOS, do not install
+`gt` with `go install`: unsigned binaries may be killed by the OS. Clone the
+repository and use `make` instead.
 
 ```bash
-go install github.com/steveyegge/gastown/cmd/gt@latest
+brew install dolt
 go install github.com/steveyegge/beads/cmd/bd@latest
 export PATH="$PATH:$HOME/go/bin"
+git clone https://github.com/steveyegge/gastown.git
+cd gastown
+make build
+mv gt "$HOME/go/bin/"
 ```
 
 ### Step 2: Create Your Workspace
