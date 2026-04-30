@@ -361,7 +361,7 @@ func promoteWisp(bd *beads.Beads, w *compactIssue, reason string, result *compac
 	}
 
 	// Add comment noting the promotion
-	_, _ = bd.Run("comment", w.ID, fmt.Sprintf("Promoted from Level 0: %s", reason))
+	_, _ = bd.Run("comments", "add", w.ID, fmt.Sprintf("Promoted from Level 0: %s", reason))
 
 	result.Promoted = append(result.Promoted, action)
 

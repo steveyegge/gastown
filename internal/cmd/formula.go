@@ -706,7 +706,7 @@ func executeConvoyFormula(f *formula.Formula, formulaName, targetRig string) err
 			fmt.Printf("%s Failed to sling leg %s: %v\n",
 				style.Dim.Render("Warning:"), leg.ID, err)
 			// Add comment to bead about failure
-			commentArgs := []string{"comment", legBeadID, fmt.Sprintf("Failed to sling: %v", err)}
+			commentArgs := []string{"comments", "add", legBeadID, fmt.Sprintf("Failed to sling: %v", err)}
 			commentCmd := exec.Command("bd", commentArgs...)
 			commentCmd.Dir = townBeads
 			_ = commentCmd.Run()
@@ -920,7 +920,7 @@ func executeWorkflowFormula(f *formula.Formula, formulaName, targetRig string) e
 		if err := slingCmd.Run(); err != nil {
 			fmt.Printf("%s Failed to sling step %s: %v\n",
 				style.Dim.Render("Warning:"), step.ID, err)
-			_ = BdCmd("comment", stepBeadID, fmt.Sprintf("Failed to sling: %v", err)).
+			_ = BdCmd("comments", "add", stepBeadID, fmt.Sprintf("Failed to sling: %v", err)).
 				Dir(townBeads).
 				Run()
 			continue
