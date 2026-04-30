@@ -260,12 +260,10 @@ func (s *GtEventsSource) tail(ctx context.Context) {
 	// Load recent events (last 200 lines) for initial display
 	s.loadRecentEvents()
 
-	// Seek to true EOF so the tail scanner starts cleanly,
+	// Seek to true EOF so the tail starts cleanly,
 	// regardless of the preload scanner's internal read-ahead buffer.
 	_, _ = s.file.Seek(0, 2)
 
-	// Now tail for new events
-	scanner := bufio.NewScanner(s.file)
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -274,11 +272,21 @@ func (s *GtEventsSource) tail(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// Fresh scanner each tick: bufio.Scanner sets an internal 'done'
+			// flag after EOF and won't retry, so reusing one across ticks
+			// would stop reading the file after the first EOF. The *os.File
+			// preserves its offset across scanner instances, so no manual
+			// bookkeeping is needed. Buffer size matches loadRecentEvents
+			// (1 MiB) to handle long JSONL lines without token-too-long errors.
+			scanner := bufio.NewScanner(s.file)
+			scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 			for scanner.Scan() {
 				line := scanner.Text()
 				if event := parseGtEventLine(line); event != nil {
 					select {
 					case s.events <- *event:
+					case <-ctx.Done():
+						return
 					default:
 					}
 				}
