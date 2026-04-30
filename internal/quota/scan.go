@@ -19,7 +19,8 @@ type ScanResult struct {
 	ConfigDir     string    `json:"config_dir,omitempty"`     // CLAUDE_CONFIG_DIR (even if account unknown)
 	RateLimited   bool      `json:"rate_limited"`             // whether hard rate-limit was detected
 	NearLimit     bool      `json:"near_limit"`               // whether approaching-limit signal was detected
-	MatchedLine   string    `json:"matched_line,omitempty"`   // the line that matched (hard or warning)
+	LoginRequired bool      `json:"login_required"`           // whether /login (re-auth) is required
+	MatchedLine   string    `json:"matched_line,omitempty"`   // the line that matched (hard, warning, or login)
 	ResetsAt      string    `json:"resets_at,omitempty"`      // parsed reset time if available
 }
 
@@ -36,6 +37,7 @@ type Scanner struct {
 	tmux            TmuxClient
 	patterns        []*regexp.Regexp // hard rate-limit patterns
 	warningPatterns []*regexp.Regexp // near-limit warning patterns
+	loginPatterns   []*regexp.Regexp // login-required patterns (re-auth needed)
 	accounts        *config.AccountsConfig
 }
 
@@ -78,6 +80,28 @@ func (s *Scanner) WithWarningPatterns(patterns []string) error {
 		compiled = append(compiled, re)
 	}
 	s.warningPatterns = compiled
+	return nil
+}
+
+// WithLoginPatterns enables login-required detection via pane content patterns.
+// When a session is blocked on /login (re-auth required), it's distinct from
+// rate-limit: rotation cannot help, only an interactive /login can. Watchers
+// can use this signal to fire user-facing alerts.
+// If patterns is nil, DefaultLoginRequiredPatterns are used.
+func (s *Scanner) WithLoginPatterns(patterns []string) error {
+	if patterns == nil {
+		patterns = constants.DefaultLoginRequiredPatterns
+	}
+
+	compiled := make([]*regexp.Regexp, 0, len(patterns))
+	for _, p := range patterns {
+		re, err := regexp.Compile("(?i)" + p)
+		if err != nil {
+			return fmt.Errorf("compiling login pattern %q: %w", p, err)
+		}
+		compiled = append(compiled, re)
+	}
+	s.loginPatterns = compiled
 	return nil
 }
 
@@ -178,6 +202,26 @@ func (s *Scanner) scanSession(session string) ScanResult {
 			for _, re := range s.warningPatterns {
 				if re.MatchString(line) {
 					result.NearLimit = true
+					result.MatchedLine = line
+					return result
+				}
+			}
+		}
+	}
+
+	// No quota signal detected — check login-required patterns. This is an
+	// orthogonal signal: rotation cannot resolve a /login prompt, only an
+	// interactive re-auth can. Surface separately so watchers can route to
+	// user-facing alerts (Telegram/email) rather than rotate.
+	if len(s.loginPatterns) > 0 {
+		for _, line := range bottomLines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			for _, re := range s.loginPatterns {
+				if re.MatchString(line) {
+					result.LoginRequired = true
 					result.MatchedLine = line
 					return result
 				}

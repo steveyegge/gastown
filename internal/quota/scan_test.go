@@ -625,3 +625,193 @@ func TestWithWarningPatterns_InvalidPattern(t *testing.T) {
 		t.Error("expected error for invalid warning pattern")
 	}
 }
+
+func TestScanAll_DetectsLoginRequired(t *testing.T) {
+	setupTestRegistry(t)
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-fox", "gt-crew-owl", "gt-crew-deer"},
+		paneContent: map[string]string{
+			"gt-crew-fox":  "Working normally...\nPlease run /login to re-authenticate",
+			"gt-crew-owl":  "Working normally...\nAuthentication required",
+			"gt-crew-deer": "Working normally...",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-fox":  {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/work"},
+			"gt-crew-owl":  {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/personal"},
+			"gt-crew-deer": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/work"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scanner.WithLoginPatterns(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := scanner.ScanAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resultMap := make(map[string]ScanResult)
+	for _, r := range results {
+		resultMap[r.Session] = r
+	}
+
+	fox := resultMap["gt-crew-fox"]
+	if !fox.LoginRequired {
+		t.Error("expected gt-crew-fox to be login-required")
+	}
+	if fox.RateLimited || fox.NearLimit {
+		t.Error("expected gt-crew-fox to have no quota signals")
+	}
+	if fox.MatchedLine == "" {
+		t.Error("expected matched line for login detection")
+	}
+
+	owl := resultMap["gt-crew-owl"]
+	if !owl.LoginRequired {
+		t.Error("expected gt-crew-owl to be login-required (Authentication required)")
+	}
+
+	deer := resultMap["gt-crew-deer"]
+	if deer.LoginRequired {
+		t.Error("expected gt-crew-deer to NOT be login-required")
+	}
+}
+
+func TestScanAll_HardLimitTakesPrecedenceOverLogin(t *testing.T) {
+	// A session showing both rate-limit AND login-required text should be
+	// classified as RateLimited (hard signal wins). Login is the fallback
+	// when no quota signal is present.
+	setupTestRegistry(t)
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "You've hit your weekly limit\nAlso: Please run /login",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/work"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scanner.WithLoginPatterns(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := scanner.ScanAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	bear := results[0]
+	if !bear.RateLimited {
+		t.Error("expected RateLimited true (hard limit wins precedence)")
+	}
+	if bear.LoginRequired {
+		t.Error("expected LoginRequired false when RateLimited fires first")
+	}
+}
+
+func TestScanAll_LoginNotEnabled_NoFalsePositive(t *testing.T) {
+	// When WithLoginPatterns is not called, login text in pane should NOT
+	// flip LoginRequired. Validates the opt-in surface.
+	setupTestRegistry(t)
+
+	tmux := &mockTmux{
+		sessions: []string{"gt-crew-bear"},
+		paneContent: map[string]string{
+			"gt-crew-bear": "Working...\nPlease run /login to re-authenticate",
+		},
+		envVars: map[string]map[string]string{
+			"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/home/user/.claude-accounts/work"},
+		},
+	}
+
+	scanner, err := NewScanner(tmux, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Note: WithLoginPatterns NOT called.
+
+	results, err := scanner.ScanAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].LoginRequired {
+		t.Error("expected LoginRequired false when login patterns not enabled")
+	}
+}
+
+func TestWithLoginPatterns_InvalidPattern(t *testing.T) {
+	scanner, err := NewScanner(&mockTmux{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = scanner.WithLoginPatterns([]string{"[invalid"})
+	if err == nil {
+		t.Error("expected error for invalid login pattern")
+	}
+}
+
+func TestScanAll_LoginPatternVariations(t *testing.T) {
+	// Verify each DefaultLoginRequiredPatterns entry triggers detection.
+	setupTestRegistry(t)
+
+	cases := []struct {
+		name string
+		line string
+	}{
+		{"slash-login-prompt", "Please run /login"},
+		{"auth-required", "Authentication required"},
+		{"please-log-in", "Please log in to Claude"},
+		{"run-login-reauth", "Run /login to re-authenticate"},
+		{"session-expired", "Your session has expired. Please log in again."},
+		{"401-with-auth", "401 Unauthorized: please re-authenticate via login"},
+		{"invalid-credentials", "Invalid credentials"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmux := &mockTmux{
+				sessions: []string{"gt-crew-bear"},
+				paneContent: map[string]string{
+					"gt-crew-bear": "Working...\n" + tc.line,
+				},
+				envVars: map[string]map[string]string{
+					"gt-crew-bear": {"CLAUDE_CONFIG_DIR": "/x"},
+				},
+			}
+			scanner, err := NewScanner(tmux, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := scanner.WithLoginPatterns(nil); err != nil {
+				t.Fatal(err)
+			}
+			results, err := scanner.ScanAll()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(results) != 1 || !results[0].LoginRequired {
+				t.Errorf("pattern %q failed to trigger LoginRequired (line=%q)", tc.name, tc.line)
+			}
+		})
+	}
+}

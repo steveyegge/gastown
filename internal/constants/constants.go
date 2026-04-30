@@ -442,3 +442,19 @@ var DefaultNearLimitPatterns = []string{
 	`\d+\s*(messages?|requests?)\s*(left|remaining)`,               // "10 messages remaining"
 }
 
+// DefaultLoginRequiredPatterns are patterns that indicate a session needs
+// re-authentication (interactive /login). Distinct from rate-limit signals:
+// here the session is blocked on auth, not quota. Surfacing this as a separate
+// signal lets watchers fire user-facing alerts (e.g., Telegram/email) rather
+// than attempting silent rotation, since /login requires interactive input.
+// Matched with (?i) for case-insensitive matching.
+var DefaultLoginRequiredPatterns = []string{
+	`Please (run|use) ['"]?/login['"]?`,             // explicit /login prompt from Claude Code
+	`Authentication required`,                        // generic auth-required message
+	`Please log in to (Claude|continue)`,            // login prompt variants
+	`Run ['"]?/login['"]? to (re-?authenticate|sign in)`, // /login command instruction
+	`Your session has expired\.\s+Please log in`,    // session-expired prompt
+	`401 Unauthorized.*\b(login|auth(entication)?)\b`, // 401 with login/auth context
+	`Invalid (API key|credentials)`,                  // explicit credential rejection
+}
+
