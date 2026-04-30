@@ -2051,6 +2051,96 @@ func TestPushRemoteBranchExists_NoPushURL(t *testing.T) {
 	}
 }
 
+func TestVerifyPushedCommit(t *testing.T) {
+	localDir, _, _ := initTestRepoWithRemote(t)
+	g := NewGit(localDir)
+
+	if err := g.CreateBranch("polecat/verified-push"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	if err := g.Checkout("polecat/verified-push"); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "verified.txt"), []byte("v1\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := g.Add("verified.txt"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := g.Commit("verified push v1"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	v1, err := g.Rev("HEAD")
+	if err != nil {
+		t.Fatalf("Rev v1: %v", err)
+	}
+	if err := g.Push("origin", "polecat/verified-push", false); err != nil {
+		t.Fatalf("Push v1: %v", err)
+	}
+	if err := g.VerifyPushedCommit("origin", "polecat/verified-push", v1); err != nil {
+		t.Fatalf("VerifyPushedCommit v1: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(localDir, "verified.txt"), []byte("v2\n"), 0644); err != nil {
+		t.Fatalf("write v2: %v", err)
+	}
+	if err := g.Add("verified.txt"); err != nil {
+		t.Fatalf("Add v2: %v", err)
+	}
+	if err := g.Commit("verified push v2"); err != nil {
+		t.Fatalf("Commit v2: %v", err)
+	}
+	v2, err := g.Rev("HEAD")
+	if err != nil {
+		t.Fatalf("Rev v2: %v", err)
+	}
+	if err := g.VerifyPushedCommit("origin", "polecat/verified-push", v2); err == nil {
+		t.Fatal("VerifyPushedCommit should fail when remote branch is stale")
+	}
+	if err := g.VerifyPushedCommit("origin", "polecat/missing", v2); err == nil {
+		t.Fatal("VerifyPushedCommit should fail when remote branch is missing")
+	}
+}
+
+func TestVerifyPushedCommitSplitURL(t *testing.T) {
+	localDir, _, _, _ := initTestRepoWithSplitRemote(t)
+	g := NewGit(localDir)
+
+	if err := g.CreateBranch("polecat/verified-split"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	if err := g.Checkout("polecat/verified-split"); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "split.txt"), []byte("split\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := g.Add("split.txt"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := g.Commit("verified split push"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	sha, err := g.Rev("HEAD")
+	if err != nil {
+		t.Fatalf("Rev: %v", err)
+	}
+	if err := g.Push("origin", "polecat/verified-split", false); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	fetchTip, err := g.RemoteBranchTip("origin", "polecat/verified-split")
+	if err != nil {
+		t.Fatalf("RemoteBranchTip: %v", err)
+	}
+	if fetchTip != "" {
+		t.Fatalf("fetch remote should not have split push branch, got %s", fetchTip)
+	}
+	if err := g.VerifyPushedCommit("origin", "polecat/verified-split", sha); err != nil {
+		t.Fatalf("VerifyPushedCommit should query push URL: %v", err)
+	}
+}
+
 // TestBranchPushedToRemote_SplitURL verifies that BranchPushedToRemote correctly
 // reports a branch as pushed when it exists on the push target (fork), even though
 // it's absent from the fetch URL (upstream). This is the GH#3224 fix.

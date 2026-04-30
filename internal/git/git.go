@@ -1370,6 +1370,16 @@ func (g *Git) RemoteBranchExists(remote, branch string) (bool, error) {
 	return out != "", nil
 }
 
+// RemoteBranchTip returns the SHA at refs/heads/<branch> on the remote.
+// An empty SHA with nil error means the branch is missing.
+func (g *Git) RemoteBranchTip(remote, branch string) (string, error) {
+	out, err := g.run("ls-remote", "--heads", remote, branch)
+	if err != nil {
+		return "", err
+	}
+	return parseLSRemoteTip(out, branch), nil
+}
+
 // PushRemoteBranchExists checks if a branch exists on the push target of a remote.
 // With a fork-based or local-bare-repo workflow (pushurl configured), pushes go to
 // the push URL but ls-remote resolves the fetch URL. This method queries the push
@@ -1386,6 +1396,66 @@ func (g *Git) PushRemoteBranchExists(remote, branch string) (bool, error) {
 		return false, err
 	}
 	return out != "", nil
+}
+
+// PushRemoteBranchTip returns the SHA at refs/heads/<branch> on the push target.
+// This mirrors PushRemoteBranchExists: when remote.<name>.pushurl differs from
+// the fetch URL, verification must query the push URL because that is where the
+// preceding git push wrote.
+func (g *Git) PushRemoteBranchTip(remote, branch string) (string, error) {
+	fetchURL, fetchErr := g.RemoteURL(remote)
+	pushURL, pushErr := g.GetPushURL(remote)
+	if fetchErr != nil || pushErr != nil || pushURL == fetchURL {
+		return g.RemoteBranchTip(remote, branch)
+	}
+	return g.RemoteBranchTip(pushURL, branch)
+}
+
+// VerifyPushedCommit verifies that the push target branch tip is exactly commit.
+// gt/refinery callers invoke this immediately after a push, before closing beads
+// or creating downstream merge artifacts. Exact-tip verification catches the
+// dangerous case where git push exits 0 but leaves the remote branch stale.
+func (g *Git) VerifyPushedCommit(remote, branch, commit string) error {
+	commit = strings.TrimSpace(commit)
+	if commit == "" {
+		return fmt.Errorf("verified_push_failed: empty commit for %s/%s", remote, branch)
+	}
+	tip, err := g.PushRemoteBranchTip(remote, branch)
+	if err != nil {
+		return fmt.Errorf("verified_push_failed: unable to read %s/%s: %w", remote, branch, err)
+	}
+	if tip == "" {
+		return fmt.Errorf("verified_push_failed: branch %s/%s missing after push (expected %s)", remote, branch, shortSHA(commit))
+	}
+	if tip != commit {
+		return fmt.Errorf("verified_push_failed: commit %s not on %s/%s (remote tip %s)", shortSHA(commit), remote, branch, shortSHA(tip))
+	}
+	return nil
+}
+
+func parseLSRemoteTip(out, branch string) string {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		if parts[1] == "refs/heads/"+branch {
+			return parts[0]
+		}
+	}
+	return ""
+}
+
+func shortSHA(sha string) string {
+	sha = strings.TrimSpace(sha)
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
 }
 
 // RemoteTrackingBranchExists checks if a remote-tracking branch ref exists locally

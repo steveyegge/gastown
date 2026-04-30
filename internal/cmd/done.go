@@ -53,6 +53,7 @@ Examples:
   gt done --target feat/my-branch      # Explicit MR target branch
   gt done --pre-verified --target feat/contract-review  # Pre-verified with explicit target
   gt done --issue gt-abc               # Explicit issue ID
+  gt done --skip-verify                # Audit-only escape hatch for non-code closes
   gt done --status ESCALATED           # Signal blocker, skip MR
   gt done --status DEFERRED            # Pause work, skip MR`,
 	RunE:         runDone,
@@ -67,6 +68,7 @@ var (
 	doneResume        bool
 	donePreVerified   bool
 	doneTarget        string
+	doneSkipVerify    bool
 )
 
 // Valid exit types for gt done
@@ -93,6 +95,7 @@ func init() {
 	doneCmd.Flags().BoolVar(&doneResume, "resume", false, "Resume from last checkpoint (auto-detected, for Witness recovery)")
 	doneCmd.Flags().BoolVar(&donePreVerified, "pre-verified", false, "Mark MR as pre-verified (polecat ran gates after rebasing onto target)")
 	doneCmd.Flags().StringVar(&doneTarget, "target", "", "Explicit MR target branch (overrides formula_vars and auto-detection)")
+	doneCmd.Flags().BoolVar(&doneSkipVerify, "skip-verify", false, "Skip verified-push checks for audit/test-only completion (recorded on bead)")
 
 	rootCmd.AddCommand(doneCmd)
 }
@@ -538,6 +541,21 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 
 				if !skipClose {
 					closeReason := "Completed with no code changes (already fixed or pushed directly to main)"
+					noMRCommitSHA, _ := g.Rev("HEAD")
+					if doneSkipVerify {
+						noteVerifiedPushSkipped(cwd, issueID, defaultBranch, noMRCommitSHA, "--skip-verify on no-MR close")
+						if noMRCommitSHA != "" {
+							closeReason = fmt.Sprintf("%s\nskip_verify: true\ntarget_branch: %s\ncommit_sha: %s", closeReason, defaultBranch, noMRCommitSHA)
+						}
+					} else if !isNoMergeTask {
+						if verifyErr := g.VerifyPushedCommit("origin", defaultBranch, noMRCommitSHA); verifyErr != nil {
+							noteVerifiedPushFailure(cwd, issueID, defaultBranch, noMRCommitSHA, verifyErr)
+							return fmt.Errorf("cannot close no-MR code bead: %w", verifyErr)
+						}
+						if noMRCommitSHA != "" {
+							closeReason = fmt.Sprintf("%s\ntarget_branch: %s\ncommit_sha: %s", closeReason, defaultBranch, noMRCommitSHA)
+						}
+					}
 					// G15 fix: Force-close bypasses molecule dependency checks.
 					// The polecat is about to be nuked — open wisps should not block closure.
 					// Retry with backoff handles transient dolt lock contention (A2).
@@ -631,6 +649,17 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				style.PrintWarning("%s", errMsg)
 				goto notifyWitness
 			}
+			directCommitSHA, _ := g.Rev("HEAD")
+			if doneSkipVerify {
+				noteVerifiedPushSkipped(cwd, issueID, defaultBranch, directCommitSHA, "--skip-verify on direct merge")
+			} else if verifyErr := g.VerifyPushedCommit("origin", defaultBranch, directCommitSHA); verifyErr != nil {
+				pushFailed = true
+				errMsg := verifyErr.Error()
+				doneErrors = append(doneErrors, errMsg)
+				noteVerifiedPushFailure(cwd, issueID, defaultBranch, directCommitSHA, verifyErr)
+				style.PrintWarning("%s\nDirect merge pushed but remote verification failed. Source bead will remain in progress.", errMsg)
+				goto notifyWitness
+			}
 			fmt.Printf("%s Branch pushed directly to %s\n", style.Bold.Render("✓"), defaultBranch)
 
 			// Close the base issue — no MR/refinery will close it
@@ -662,6 +691,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		// Pre-declare push variables for checkpoint goto (gt-aufru)
 		var refspec string
 		var pushErr error
+		var pushedCommitSHA string
 
 		// Resume: skip push if already completed in a previous run (gt-aufru).
 		// Validate checkpoint branch matches current branch (ge-sbo: stale checkpoint
@@ -693,6 +723,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		// bypassing the MR/refinery flow (G20 root cause).
 		fmt.Printf("Pushing branch to remote...\n")
 		refspec = branch + ":" + branch
+		pushedCommitSHA, _ = g.Rev("HEAD")
 		pushErr = g.Push("origin", refspec, false)
 		if pushErr != nil {
 			// Primary push failed — try fallback from the bare repo (GH #1348).
@@ -734,31 +765,21 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			goto notifyWitness
 		}
 
-		// Verify the branch actually exists on the push target (GH #1348).
-		// Push can return exit 0 without actually pushing (e.g., stale refs,
-		// worktree/bare-repo state mismatch). Verify before creating MR bead.
-		// Use PushRemoteBranchExists: with a split fetch/push URL (common for
-		// polecats), ls-remote resolves the fetch URL (GitHub) not the push
-		// target (local bare repo).
-		if exists, verifyErr := g.PushRemoteBranchExists("origin", branch); verifyErr != nil {
-			style.PrintWarning("could not verify push: %v (proceeding optimistically)", verifyErr)
-		} else if !exists {
-			// Push "succeeded" but branch not on push target — try bare repo
-			// verification (worktree git may not see the pushed ref).
-			// The branch is a local ref in the bare repo, not a remote ref.
-			rigPath := filepath.Join(townRoot, rigName)
-			bareRepoPath := filepath.Join(rigPath, ".repo.git")
-			if _, statErr := os.Stat(bareRepoPath); statErr == nil {
-				bareGit := git.NewGitWithDir(bareRepoPath, "")
-				exists, verifyErr = bareGit.BranchExists(branch)
-			}
-			if verifyErr != nil || !exists {
-				pushFailed = true
-				errMsg := fmt.Sprintf("push appeared to succeed but branch '%s' not found on push target", branch)
-				doneErrors = append(doneErrors, errMsg)
-				style.PrintWarning("%s\nThis may indicate a stale git context. Witness will be notified.", errMsg)
-				goto notifyWitness
-			}
+		// Verify the pushed branch tip is the exact local commit before creating
+		// any MR bead. Branch-exists checks are insufficient: a stale remote
+		// branch can exist while the new commit never reached origin.
+		if pushedCommitSHA == "" {
+			pushedCommitSHA, _ = g.Rev("HEAD")
+		}
+		if doneSkipVerify {
+			noteVerifiedPushSkipped(cwd, issueID, branch, pushedCommitSHA, "--skip-verify on branch push")
+		} else if verifyErr := verifyPushedCommitWithBareFallback(g, townRoot, rigName, branch, pushedCommitSHA); verifyErr != nil {
+			pushFailed = true
+			errMsg := verifyErr.Error()
+			doneErrors = append(doneErrors, errMsg)
+			noteVerifiedPushFailure(cwd, issueID, branch, pushedCommitSHA, verifyErr)
+			style.PrintWarning("%s\nCommits exist locally but verified push failed. Witness will be notified.", errMsg)
+			goto notifyWitness
 		}
 		fmt.Printf("%s Branch pushed to origin\n", style.Bold.Render("✓"))
 
@@ -903,6 +924,17 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				// Direct push failed — fall through to normal MR creation
 				style.PrintWarning("late direct push to %s failed: %v — falling through to MR", defaultBranch, directPushErr)
 			} else {
+				lateDirectCommitSHA, _ := g.Rev("HEAD")
+				if doneSkipVerify {
+					noteVerifiedPushSkipped(cwd, issueID, defaultBranch, lateDirectCommitSHA, "--skip-verify on late direct merge")
+				} else if verifyErr := g.VerifyPushedCommit("origin", defaultBranch, lateDirectCommitSHA); verifyErr != nil {
+					pushFailed = true
+					errMsg := verifyErr.Error()
+					doneErrors = append(doneErrors, errMsg)
+					noteVerifiedPushFailure(cwd, issueID, defaultBranch, lateDirectCommitSHA, verifyErr)
+					style.PrintWarning("%s\nLate direct merge pushed but remote verification failed. Source bead will remain in progress.", errMsg)
+					goto notifyWitness
+				}
 				fmt.Printf("%s Branch pushed directly to %s\n", style.Bold.Render("✓"), defaultBranch)
 
 				// Close the issue directly — refinery won't process it.
@@ -1040,6 +1072,9 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 				branch, target, issueID, rigName)
 			if commitSHA != "" {
 				description += fmt.Sprintf("\ncommit_sha: %s", commitSHA)
+			}
+			if doneSkipVerify {
+				description += "\nskip_verify: true"
 			}
 			if worker != "" {
 				description += fmt.Sprintf("\nworker: %s", worker)
@@ -1349,6 +1384,43 @@ func pushSubmoduleChanges(g *git.Git, defaultBranch string) {
 			fmt.Printf("%s Submodule %s pushed\n", style.Bold.Render("✓"), sc.Path)
 		}
 	}
+}
+
+func noteVerifiedPushFailure(cwd, issueID, branch, commit string, verifyErr error) {
+	if issueID == "" || cwd == "" {
+		return
+	}
+	bd := beads.New(cwd)
+	inProgress := "in_progress"
+	_ = bd.Update(issueID, beads.UpdateOptions{Status: &inProgress})
+	msg := fmt.Sprintf("verified_push_failed: commit %s not verified on origin/%s: %v", commit, branch, verifyErr)
+	_, _ = bd.Run("comments", "add", issueID, msg)
+}
+
+func noteVerifiedPushSkipped(cwd, issueID, branch, commit, reason string) {
+	if issueID == "" || cwd == "" {
+		return
+	}
+	msg := fmt.Sprintf("verified_push_skipped: commit %s branch origin/%s reason=%s", commit, branch, reason)
+	_, _ = beads.New(cwd).Run("comments", "add", issueID, msg)
+}
+
+func verifyPushedCommitWithBareFallback(g *git.Git, townRoot, rigName, branch, commit string) error {
+	verifyErr := g.VerifyPushedCommit("origin", branch, commit)
+	if verifyErr == nil {
+		return nil
+	}
+
+	bareRepoPath := filepath.Join(townRoot, rigName, ".repo.git")
+	if _, statErr := os.Stat(bareRepoPath); statErr != nil {
+		return verifyErr
+	}
+	bareGit := git.NewGitWithDir(bareRepoPath, "")
+	tip, tipErr := bareGit.Rev("refs/heads/" + branch)
+	if tipErr == nil && strings.TrimSpace(tip) == strings.TrimSpace(commit) {
+		return nil
+	}
+	return verifyErr
 }
 
 // setDoneIntentLabel writes a done-intent:<type>:<unix-ts> label on the agent bead

@@ -739,6 +739,15 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 				Error:   fmt.Sprintf("failed to push to origin: %v", err),
 			}
 		}
+		if err := e.git.VerifyPushedCommit("origin", target, mergeCommit); err != nil {
+			if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to reset %s after verified-push failure: %v\n", target, resetErr)
+			}
+			return ProcessResult{
+				Success: false,
+				Error:   err.Error(),
+			}
+		}
 	} else {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Auto-push disabled, skipping push to origin/%s\n", target)
 	}
@@ -828,6 +837,12 @@ func (e *Engineer) doMergePR(ctx context.Context, branch, target string) Process
 	if mergeCommit == "" {
 		if sha, err := e.git.Rev("HEAD"); err == nil {
 			mergeCommit = sha
+		}
+	}
+	if err := e.git.VerifyPushedCommit("origin", target, mergeCommit); err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   err.Error(),
 		}
 	}
 
@@ -1208,6 +1223,9 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 	// normal close. This matches how gt done handles closures.
 	if mr.SourceIssue != "" {
 		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
+		if result.MergeCommit != "" {
+			closeReason = fmt.Sprintf("%s\ntarget_branch: %s\ncommit_sha: %s", closeReason, mr.Target, result.MergeCommit)
+		}
 		if err := e.beads.ForceCloseWithReason(closeReason, mr.SourceIssue); err != nil {
 			// Check if already closed (by polecat's gt done) — that's fine
 			if issue, showErr := e.beads.Show(mr.SourceIssue); showErr == nil && beads.IssueStatus(issue.Status).IsTerminal() {

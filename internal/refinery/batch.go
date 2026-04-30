@@ -395,6 +395,13 @@ func (e *Engineer) fastForwardBatch(ctx context.Context, stacked []*MRInfo, targ
 		result.Error = fmt.Errorf("push to origin: %w", pushErr)
 		return result
 	}
+	if verifyErr := e.git.VerifyPushedCommit("origin", target, tipSHA); verifyErr != nil {
+		if resetErr := e.git.ResetHard("origin/" + target); resetErr != nil {
+			_, _ = fmt.Fprintf(e.output, "[Batch] Warning: failed to reset %s after verified-push failure: %v\n", target, resetErr)
+		}
+		result.Error = verifyErr
+		return result
+	}
 
 	ids := make([]string, len(stacked))
 	for i, mr := range stacked {

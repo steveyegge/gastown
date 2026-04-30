@@ -30,6 +30,9 @@ type MergeRequest struct {
 	// TargetBranch is where this should merge (usually integration or main).
 	TargetBranch string `json:"target_branch"`
 
+	// MergeCommit is the SHA that was pushed to the target branch after merge.
+	MergeCommit string `json:"merge_commit,omitempty"`
+
 	// CreatedAt is when the MR was queued.
 	CreatedAt time.Time `json:"created_at"`
 

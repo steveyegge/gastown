@@ -463,6 +463,7 @@ func (m *Manager) issueToMR(issue *beads.Issue) *MergeRequest {
 		Worker:       fields.Worker,
 		IssueID:      fields.SourceIssue,
 		TargetBranch: target,
+		MergeCommit:  fields.MergeCommit,
 		Status:       MROpen,
 		CreatedAt:    parseTime(issue.CreatedAt),
 	}
@@ -631,6 +632,9 @@ func (m *Manager) PostMerge(idOrBranch string) (*PostMergeResult, error) {
 	// matching how gt done handles closures for the no-MR path.
 	if mr.IssueID != "" {
 		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
+		if mr.MergeCommit != "" {
+			closeReason = fmt.Sprintf("%s\ntarget_branch: %s\ncommit_sha: %s", closeReason, mr.TargetBranch, mr.MergeCommit)
+		}
 		if err := b.ForceCloseWithReason(closeReason, mr.IssueID); err != nil {
 			// Check if already closed (by polecat's gt done) — that's fine
 			if issue, showErr := b.Show(mr.IssueID); showErr == nil && beads.IssueStatus(issue.Status).IsTerminal() {
