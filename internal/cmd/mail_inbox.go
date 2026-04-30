@@ -342,31 +342,45 @@ func runMailArchive(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Archive all specified messages
+	// Archive all specified messages.
+	//
+	// Archive is a mail cleanup operation, not a bead operation. If the
+	// underlying bead has been garbage collected (by `bd mol wisp gc` or
+	// `bd compact`), the mail entry is effectively already gone — we
+	// treat ErrMessageNotFound as success so orphaned inbox references
+	// can be cleared without manual surgery. See aa-6hv.
 	archived := 0
-	var errors []string
+	gcd := 0
+	var errMsgs []string
 	for _, msgID := range args {
-		if err := mailbox.Delete(msgID); err != nil {
-			errors = append(errors, fmt.Sprintf("%s: %v", msgID, err))
-		} else {
+		err := mailbox.Delete(msgID)
+		switch {
+		case err == nil:
 			archived++
+		case errors.Is(err, mail.ErrMessageNotFound):
+			gcd++
+			fmt.Printf("  %s %s: underlying bead already gone (GC'd), entry cleared\n",
+				style.Dim.Render("note"), msgID)
+		default:
+			errMsgs = append(errMsgs, fmt.Sprintf("%s: %v", msgID, err))
 		}
 	}
 
 	// Report results
-	if len(errors) > 0 {
+	if len(errMsgs) > 0 {
 		fmt.Printf("%s Archived %d/%d messages\n",
-			style.Bold.Render("⚠"), archived, len(args))
-		for _, e := range errors {
+			style.Bold.Render("⚠"), archived+gcd, len(args))
+		for _, e := range errMsgs {
 			fmt.Printf("  Error: %s\n", e)
 		}
-		return fmt.Errorf("failed to archive %d messages", len(errors))
+		return fmt.Errorf("failed to archive %d messages", len(errMsgs))
 	}
 
-	if len(args) == 1 {
+	total := archived + gcd
+	if total == 1 {
 		fmt.Printf("%s Message archived\n", style.Bold.Render("✓"))
 	} else {
-		fmt.Printf("%s Archived %d messages\n", style.Bold.Render("✓"), archived)
+		fmt.Printf("%s Archived %d messages\n", style.Bold.Render("✓"), total)
 	}
 	return nil
 }
@@ -415,28 +429,40 @@ func runMailArchiveStale(mailbox *mail.Mailbox, address string) error {
 		return nil
 	}
 
+	// GC'd beads (see aa-6hv): if the underlying bead was removed by
+	// `bd mol wisp gc` or `bd compact`, the close call returns
+	// ErrMessageNotFound. That's a success for archive: the mail entry
+	// is already effectively gone.
 	archived := 0
-	var errors []string
+	gcd := 0
+	var errMsgs []string
 	for _, stale := range staleMessages {
-		if err := mailbox.Delete(stale.Message.ID); err != nil {
-			errors = append(errors, fmt.Sprintf("%s: %v", stale.Message.ID, err))
-		} else {
+		err := mailbox.Delete(stale.Message.ID)
+		switch {
+		case err == nil:
 			archived++
+		case errors.Is(err, mail.ErrMessageNotFound):
+			gcd++
+			fmt.Printf("  %s %s: underlying bead already gone (GC'd), entry cleared\n",
+				style.Dim.Render("note"), stale.Message.ID)
+		default:
+			errMsgs = append(errMsgs, fmt.Sprintf("%s: %v", stale.Message.ID, err))
 		}
 	}
 
-	if len(errors) > 0 {
-		fmt.Printf("%s Archived %d/%d stale messages\n", style.Bold.Render("⚠"), archived, len(staleMessages))
-		for _, e := range errors {
+	if len(errMsgs) > 0 {
+		fmt.Printf("%s Archived %d/%d stale messages\n", style.Bold.Render("⚠"), archived+gcd, len(staleMessages))
+		for _, e := range errMsgs {
 			fmt.Printf("  Error: %s\n", e)
 		}
-		return fmt.Errorf("failed to archive %d stale messages", len(errors))
+		return fmt.Errorf("failed to archive %d stale messages", len(errMsgs))
 	}
 
-	if archived == 1 {
+	total := archived + gcd
+	if total == 1 {
 		fmt.Printf("%s Stale message archived\n", style.Bold.Render("✓"))
 	} else {
-		fmt.Printf("%s Archived %d stale messages\n", style.Bold.Render("✓"), archived)
+		fmt.Printf("%s Archived %d stale messages\n", style.Bold.Render("✓"), total)
 	}
 	return nil
 }
