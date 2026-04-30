@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -637,11 +638,48 @@ func (d *Daemon) compactorGetRootCommit(db *sql.DB, dbName string) (string, erro
 }
 
 // compactorGetRowCounts returns a map of table -> row count for all user tables.
+//
+// WHY THIS MATTERS — THE N+1 PROBLEM:
+// The original implementation issued one query to list tables and then one
+// SELECT COUNT(*) per table inside a serial loop. With 40+ user tables that
+// meant 41 sequential round-trips to the Dolt server. Each round-trip carries
+// full TCP and Dolt query-planner overhead; those serial waits compound into
+// meaningful latency on every compaction cycle.
+//
+// HOW IT IS SOLVED — PARALLEL QUERIES:
+// We still fire one exact COUNT(*) per table (see below for why), but now all
+// COUNT queries are dispatched concurrently via one goroutine per table. Each
+// goroutine writes its result into the shared map under a sync.Mutex. Total
+// wall-clock time drops from Σ(query_i) to max(query_i) — roughly a 40×
+// improvement for 40 tables, with no change to correctness.
+//
+// WHY information_schema.table_rows CANNOT REPLACE COUNT(*):
+// The callers of this function use the returned counts as a data-loss safety
+// gate after compaction:
+//
+//   if postCount < preCount {
+//       return fmt.Errorf("integrity check: table %q lost rows", table)
+//   }
+//
+// information_schema.table_rows stores approximate statistics, not authoritative
+// row counts. A stale or off-by-one estimate would either:
+//   (a) produce a false "data loss" alarm that aborts a valid compaction, or
+//   (b) mask real data loss and let a corrupted compaction proceed silently.
+// Both outcomes are worse than the original serial queries, so COUNT(*) is
+// preserved and parallelism is the only change.
+//
+// WHY PARALLEL IS SAFE:
+// All goroutines share the same *sql.DB connection pool. The pool opens
+// additional connections as needed up to its configured maximum; the queries
+// are read-only SELECT COUNT(*) scans with no cross-query dependencies or
+// write contention. The shared `counts` map is protected by a sync.Mutex,
+// so concurrent writes cannot race. Any per-table error is captured in an
+// error channel and returned after all goroutines finish.
 func (d *Daemon) compactorGetRowCounts(db *sql.DB, dbName string) (map[string]int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), compactorQueryTimeout)
 	defer cancel()
 
-	// Get list of user tables (excluding dolt system tables).
+	// Step 1: list user tables with a single query (excluding dolt system tables).
 	query := fmt.Sprintf("SELECT table_name FROM information_schema.tables WHERE table_schema = '%s' AND table_name NOT LIKE 'dolt_%%'", dbName)
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
@@ -657,15 +695,39 @@ func (d *Daemon) compactorGetRowCounts(db *sql.DB, dbName string) (map[string]in
 		}
 		tables = append(tables, name)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list tables: %w", err)
+	}
 
+	// Step 2: COUNT(*) each table in parallel.
+	// All goroutines share the same *sql.DB pool; connections are managed
+	// automatically. The mutex protects the shared counts map.
 	counts := make(map[string]int, len(tables))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	errc := make(chan error, len(tables))
+
 	for _, table := range tables {
-		var count int
-		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.`%s`", dbName, table)
-		if err := db.QueryRowContext(ctx, countQuery).Scan(&count); err != nil {
-			return nil, fmt.Errorf("count %s: %w", table, err)
-		}
-		counts[table] = count
+		wg.Add(1)
+		go func(t string) {
+			defer wg.Done()
+			var count int
+			q := fmt.Sprintf("SELECT COUNT(*) FROM `%s`.`%s`", dbName, t)
+			if err := db.QueryRowContext(ctx, q).Scan(&count); err != nil {
+				errc <- fmt.Errorf("count %s: %w", t, err)
+				return
+			}
+			mu.Lock()
+			counts[t] = count
+			mu.Unlock()
+		}(table)
+	}
+
+	wg.Wait()
+	close(errc)
+
+	if err := <-errc; err != nil {
+		return nil, err
 	}
 
 	return counts, nil
